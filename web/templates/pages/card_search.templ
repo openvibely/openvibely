@@ -1,0 +1,20 @@
+package pages
+
+// CardSearchInput renders a search input for filtering cards on a page.
+// pageKey is used for sessionStorage persistence (e.g. "personality", "channels").
+// placeholder is the input placeholder text.
+templ CardSearchInput(pageKey string, placeholder string) {
+	<div class="mb-4 max-w-xs">
+		<div class="card bg-base-100 shadow-sm border border-base-300">
+			<input
+				type="text"
+				data-card-search={ pageKey }
+				class="w-full bg-transparent px-4 py-2 text-sm border-0 focus:outline-none focus:ring-0"
+				placeholder={ placeholder }
+			/>
+		</div>
+	</div>
+	<div data-search-no-results class="text-center py-8" style="display:none">
+		<p class="opacity-50">No results match your search.</p>
+	</div>
+}

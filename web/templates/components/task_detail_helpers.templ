@@ -1,0 +1,538 @@
+package components
+
+import (
+	"fmt"
+	"time"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+func GetScheduleEditTime(s models.Schedule) string {
+	if s.NextRun != nil {
+		return s.NextRun.Local().Format("2006-01-02T15:04")
+	}
+	return s.RunAt.Local().Format("2006-01-02T15:04")
+}
+
+func ScheduleRepeatLabel(s models.Schedule) string {
+	unit := ""
+	switch s.RepeatType {
+	case models.RepeatSeconds:
+		if s.RepeatInterval == 1 {
+			unit = "second"
+		} else {
+			unit = "seconds"
+		}
+	case models.RepeatMinutes:
+		if s.RepeatInterval == 1 {
+			unit = "minute"
+		} else {
+			unit = "minutes"
+		}
+	case models.RepeatHours:
+		if s.RepeatInterval == 1 {
+			unit = "hour"
+		} else {
+			unit = "hours"
+		}
+	default:
+		return string(s.RepeatType)
+	}
+	if s.RepeatInterval == 1 {
+		return fmt.Sprintf("every %s", unit)
+	}
+	return fmt.Sprintf("every %d %s", s.RepeatInterval, unit)
+}
+
+func formatDuration(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+
+	totalSeconds := ms / 1000
+	if totalSeconds < 60 {
+		return fmt.Sprintf("%ds", totalSeconds)
+	}
+
+	minutes := totalSeconds / 60
+	seconds := totalSeconds % 60
+	if minutes < 60 {
+		if seconds > 0 {
+			return fmt.Sprintf("%dm %ds", minutes, seconds)
+		}
+		return fmt.Sprintf("%dm", minutes)
+	}
+
+	hours := minutes / 60
+	minutes = minutes % 60
+	if minutes > 0 && seconds > 0 {
+		return fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
+	} else if minutes > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	} else if seconds > 0 {
+		return fmt.Sprintf("%dh %ds", hours, seconds)
+	}
+	return fmt.Sprintf("%dh", hours)
+}
+
+func FormatElapsedTime(startedAt time.Time) string {
+	elapsed := time.Since(startedAt)
+	ms := elapsed.Milliseconds()
+	return formatDuration(ms)
+}
+
+func parseChainConfigForDisplay(task *models.Task) models.ChainConfiguration {
+	config, err := task.ParseChainConfig()
+	if err != nil {
+		return models.ChainConfiguration{Enabled: false}
+	}
+	return *config
+}
+
+// TaskChainConfigPage renders the task chaining configuration form for the task detail page
+templ TaskChainConfigPage(task *models.Task, agents []models.LLMConfig) {
+	<form
+		method="post"
+		hx-put={ fmt.Sprintf("/tasks/%s/chain", task.ID) }
+		hx-target="#task-detail-content"
+		hx-swap="outerHTML"
+	>
+		<div class="form-control mb-4">
+			<label class="label cursor-pointer justify-start gap-2">
+				<input
+					type="checkbox"
+					name="chain_enabled"
+					id={ fmt.Sprintf("chain-enabled-page-%s", task.ID) }
+					class="checkbox"
+					value="true"
+					if chainConfig := parseChainConfigForDisplay(task); chainConfig.Enabled {
+						checked
+					}
+					onchange="document.getElementById('chain-config-fields-page').classList.toggle('hidden', !this.checked)"
+				/>
+				<span class="label-text">Enable task chaining</span>
+			</label>
+		</div>
+
+		<div
+			id="chain-config-fields-page"
+			if chainConfig := parseChainConfigForDisplay(task); !chainConfig.Enabled {
+				class="hidden"
+			}
+		>
+			<div class="form-control mb-4">
+				<label class="label">
+					<span class="label-text">Trigger</span>
+				</label>
+				<select name="chain_trigger" class="select select-bordered">
+					<option value="on_completion" if chainConfig := parseChainConfigForDisplay(task); chainConfig.Trigger == "on_completion" || chainConfig.Trigger == "" { selected }>On Task Completion</option>
+					<option value="on_planning_complete" if chainConfig := parseChainConfigForDisplay(task); chainConfig.Trigger == "on_planning_complete" { selected }>On Planning Complete (Opus → Sonnet)</option>
+				</select>
+				<label class="label">
+					<span class="label-text-alt">When should the child task be created?</span>
+				</label>
+			</div>
+
+			<div class="form-control mb-4">
+				<label class="label">
+					<span class="label-text">Child Task Category</span>
+				</label>
+				<select name="chain_child_category" class="select select-bordered">
+					<option value="" if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildCategory == "" { selected }>Same as parent</option>
+					<option value="active" if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildCategory == "active" { selected }>Active (run immediately)</option>
+					<option value="backlog" if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildCategory == "backlog" { selected }>Backlog</option>
+				</select>
+				<label class="label">
+					<span class="label-text-alt">Which category should the child task be placed in?</span>
+				</label>
+			</div>
+
+			<div class="form-control mb-4">
+				<label class="label">
+					<span class="label-text">Child Task Model</span>
+				</label>
+				<select name="chain_child_agent_id" class="select select-bordered">
+					<option value="" if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildAgentID == "" { selected }>Use default model</option>
+					for _, agent := range agents {
+						<option
+							value={ agent.ID }
+							if chainConfig := parseChainConfigForDisplay(task); chainConfig.ChildAgentID == agent.ID {
+								selected
+							}
+						>
+							{ agent.Name }
+							if agent.IsDefault {
+								(Default)
+							}
+						</option>
+					}
+				</select>
+				<label class="label">
+					<span class="label-text-alt">Which model should execute the child task?</span>
+				</label>
+			</div>
+
+			<div class="form-control mb-4">
+				<label class="label">
+					<span class="label-text">Child Task Model Override</span>
+				</label>
+				<input
+					type="text"
+					name="chain_child_model"
+					value={ parseChainConfigForDisplay(task).ChildModel }
+					class="input input-bordered"
+					placeholder="e.g., sonnet, opus, haiku (leave empty to use model's default)"
+				/>
+				<label class="label">
+					<span class="label-text-alt">Optional: Override the model for the child task</span>
+				</label>
+			</div>
+		</div>
+
+		<div class="flex gap-2">
+			<button type="submit" class="btn btn-primary btn-sm">
+				Save Chaining Configuration
+			</button>
+		</div>
+	</form>
+}
+
+// TaskLatestDuration returns the duration of the most recent completed/failed execution.
+func TaskLatestDuration(executions []models.Execution) string {
+	for i := len(executions) - 1; i >= 0; i-- {
+		if executions[i].DurationMs > 0 {
+			return formatDuration(executions[i].DurationMs)
+		}
+	}
+	return ""
+}
+
+// TaskThreadStatusIndicator renders a success/failure status indicator at the bottom of thread messages.
+// Shows only when the task is completed or failed, providing clear visual feedback.
+templ TaskThreadStatusIndicator(task *models.Task, executions []models.Execution) {
+	if task.Status == models.StatusCompleted {
+		<div class="flex items-center justify-center gap-2 py-2">
+			<div class="flex items-center gap-2 text-success text-sm opacity-70">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+				</svg>
+				<span>Task completed</span>
+				if dur := TaskLatestDuration(executions); dur != "" {
+					<span class="opacity-60">({ dur })</span>
+				}
+			</div>
+		</div>
+	} else if task.Status == models.StatusFailed {
+		<div class="flex items-center justify-center gap-2 py-2">
+			<div class="flex items-center gap-2 text-error text-sm opacity-70">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+				</svg>
+				<span>Task failed</span>
+				if dur := TaskLatestDuration(executions); dur != "" {
+					<span class="opacity-60">({ dur })</span>
+				}
+			</div>
+		</div>
+	}
+}
+
+// TaskThreadView renders the unified thread interface for a task.
+// Uses shared chat components for message bubbles and input form.
+// Accepts agents list to show model selector matching /chat page behavior.
+// chatAttachments map is optional - when nil, no attachment indicators are shown on messages.
+templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, chatAttachments map[string][]models.ChatAttachment) {
+	<div
+		id="task-thread-view"
+		class="flex flex-col flex-1 min-h-0"
+		if task.Status == models.StatusRunning || task.Status == models.StatusPending {
+			hx-get={ fmt.Sprintf("/tasks/%s/thread", task.ID) }
+			hx-trigger="every 3s"
+			hx-target="#task-thread-view"
+			hx-swap="morph:outerHTML"
+		}
+	>
+		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
+		<div id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0">
+			if len(executions) == 0 {
+				@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
+			} else {
+				@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view")
+				@TaskThreadStatusIndicator(task, executions)
+			}
+		</div>
+		<!-- Message Input Form (shared component with model selector) -->
+		@ChatInputForm(ChatInputFormConfig{
+			FormID:            "task-thread-form",
+			InputID:           "task-message-input",
+			PostEndpoint:      fmt.Sprintf("/tasks/%s/thread", task.ID),
+			TargetID:          "task-thread-messages",
+			Agents:            agents,
+			ShowModelSelector: true,
+			TaskID:            task.ID,
+			IsRunning:         task.Status == models.StatusRunning,
+		})
+		<!-- Shared auto-scroll and marker cleaning utilities -->
+		@ChatAutoScrollScript()
+		@_initThreadStreamingScript()
+		<script>
+			// Apply cleaning and scroll on load
+			(function() {
+				var chatMessages = document.getElementById('task-thread-messages');
+				if (chatMessages) {
+					if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+					// On initial page load, _taskThreadUserScrolledUp is undefined → scroll to bottom
+					// After streaming refresh where user was scrolled up, it's true → don't scroll
+					if (!window._taskThreadUserScrolledUp) {
+						if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
+					}
+					// Reset flag so next fresh page load scrolls normally
+					delete window._taskThreadUserScrolledUp;
+
+					// Set up page-level scroll tracker for task thread
+					if (window.ChatScrollTracker) {
+						if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
+						window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
+					}
+				}
+				// Render streaming content markers and initialize SSE for any running executions.
+				// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.
+				var resumeContainers = document.querySelectorAll('[data-streaming-resume="true"]');
+				resumeContainers.forEach(function(c) {
+					var raw = c.getAttribute('data-raw-content') || '';
+					if (raw.trim() && window.renderStreamingContent) {
+						window.renderStreamingContent(c, raw);
+					}
+				});
+				if (window._initThreadStreaming) window._initThreadStreaming();
+			})();
+
+			// Intelligent auto-scroll: only scroll when user hasn't manually scrolled up
+			if (!window._taskThreadScrollHandlerAttached) {
+				window._taskThreadScrollHandlerAttached = true;
+
+				// Rule 1: Reset tracker when user sends a message (beforeRequest fires before swap)
+				// Also cancel polling requests when SSE streaming is active to prevent morph from killing the EventSource
+				document.body.addEventListener('htmx:beforeRequest', function(event) {
+					var triggerEl = event.detail.elt;
+					if (triggerEl && (triggerEl.id === 'task-thread-form' || triggerEl.closest('#task-thread-form'))) {
+						var tracker = window._taskThreadPageTracker;
+						if (tracker) tracker.resetOnUserSend();
+					}
+					// Block polling requests to task-thread-view while SSE streaming
+					// is active or sidebar navigation is in progress
+					if (triggerEl && triggerEl.id === 'task-thread-view') {
+						if (window._taskThreadStreamingActive || window._sidebarNavigating) {
+							event.preventDefault();
+						}
+					}
+				});
+
+				// Before swaps, capture scroll state and preserve textarea input
+				document.body.addEventListener('htmx:beforeSwap', function(event) {
+					var target = event.detail.target;
+					if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view')) {
+						// Save textarea value before swap to prevent clearing during morph polling
+						var textarea = document.getElementById('task-message-input');
+						if (textarea && textarea.value.trim() !== '') {
+							window._taskThreadSavedInput = textarea.value;
+						}
+						var tracker = window._taskThreadPageTracker;
+						if (tracker && tracker.userScrolledUp) {
+							window._taskThreadUserScrolledUp = true;
+						} else {
+							window._taskThreadUserScrolledUp = false;
+						}
+					}
+					// Clean up thread state when navigating away via sidebar
+					// (sidebar replaces main-content, removing the thread view)
+					if (target && target.id === 'main-content') {
+						window._taskThreadStreamingActive = false;
+						window._taskThreadSavedInput = '';
+						window._taskThreadUserScrolledUp = false;
+						if (window._taskThreadPageTracker) {
+							window._taskThreadPageTracker.destroy();
+							window._taskThreadPageTracker = null;
+						}
+						// Close thread EventSource connections
+						if (window._threadEventSources) {
+							window._threadEventSources.forEach(function(es) {
+								try { es.close(); } catch(e) {}
+							});
+							window._threadEventSources = [];
+						}
+					}
+				});
+
+				document.body.addEventListener('htmx:afterSwap', function(event) {
+					var target = event.detail.target;
+					if (target && target.id === 'task-thread-messages') {
+						// Skip expensive DOM work if navigating away via sidebar
+						if (window._sidebarNavigating) return;
+						if (window.cleanAssistantMessages) window.cleanAssistantMessages(target);
+						// Auto-scroll unless user manually scrolled up
+						if (!window._taskThreadUserScrolledUp) {
+							requestAnimationFrame(function() {
+								if (target && window.chatAutoScroll) {
+									window.chatAutoScroll.scrollToBottom(target, true);
+								}
+							});
+						}
+						// Re-attach tracker if the DOM element changed
+						if (target !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {
+							if (window.ChatScrollTracker) {
+								if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
+								window._taskThreadPageTracker = new window.ChatScrollTracker(target);
+							}
+						}
+					}
+					// Handle polling updates to task-thread-view (e.g., task completion status)
+					else if (target && target.id === 'task-thread-view') {
+						// Skip expensive DOM work if navigating away via sidebar
+						if (window._sidebarNavigating) return;
+						var chatMessages = document.getElementById('task-thread-messages');
+						if (chatMessages) {
+							if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+							// Auto-scroll unless user manually scrolled up
+							if (!window._taskThreadUserScrolledUp) {
+								requestAnimationFrame(function() {
+									if (chatMessages && window.chatAutoScroll) {
+										window.chatAutoScroll.scrollToBottom(chatMessages, true);
+									}
+								});
+							}
+							// Re-attach tracker if the DOM element changed
+							if (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {
+								if (window.ChatScrollTracker) {
+									if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
+									window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
+								}
+							}
+						}
+						if (window.cleanAssistantMessages) window.cleanAssistantMessages(document.getElementById('task-thread-messages'));
+						if (window._initThreadStreaming) window._initThreadStreaming();
+					}
+					// Also handle full page refreshes on task-detail-content
+					else if (target && target.id === 'task-detail-content') {
+						var chatMessages = document.getElementById('task-thread-messages');
+						if (chatMessages) {
+							if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+						}
+					}
+					// Restore textarea value after morph polling or full page refresh
+					if (window._taskThreadSavedInput) {
+						var textarea = document.getElementById('task-message-input');
+						if (textarea) {
+							textarea.value = window._taskThreadSavedInput;
+						}
+						window._taskThreadSavedInput = '';
+					}
+				});
+			}
+		</script>
+	</div>
+}
+
+// TaskThreadFollowupResponse renders user message + streaming assistant for a task thread follow-up.
+// Delegates to the shared ChatFollowupResponse component with thread settings.
+templ TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment) {
+	@ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments)
+}
+
+// TaskExecutionHistory renders just the execution history section for polling updates
+templ TaskExecutionHistory(task *models.Task, executions []models.Execution) {
+	<div
+		id="task-execution-history"
+		class="mt-6"
+		if task.Status == models.StatusRunning || task.Status == models.StatusPending {
+			hx-get={ fmt.Sprintf("/tasks/%s/executions", task.ID) }
+			hx-trigger="every 3s"
+			hx-target="#task-execution-history"
+			hx-swap="morph:outerHTML"
+		}
+	>
+		<div class="flex items-center justify-between mb-3">
+			<h4 class="text-lg font-bold">Execution History</h4>
+			<div class="flex items-center gap-2">
+				if task.Status == models.StatusRunning {
+					<button
+						class="btn btn-sm btn-error"
+						hx-post={ fmt.Sprintf("/tasks/%s/cancel", task.ID) }
+						hx-target="#task-execution-history"
+						hx-swap="morph:outerHTML"
+						hx-confirm="Cancel this running task?"
+					>
+						Cancel Task
+					</button>
+					<span class="loading loading-spinner loading-sm"></span>
+				}
+			</div>
+		</div>
+		if len(executions) == 0 {
+			<p class="opacity-50">No executions yet</p>
+		} else {
+			for i, exec := range executions {
+				<div class="card bg-base-100 shadow-sm border border-base-300 mb-2">
+					<div class="card-body p-4">
+						<div class="flex items-center justify-between mb-2">
+							<div class="flex flex-col text-sm opacity-60">
+								<span>Started: { exec.StartedAt.Local().Format("2006-01-02 3:04:05 PM") }</span>
+								if exec.CompletedAt != nil {
+									<span>Finished: { exec.CompletedAt.Local().Format("2006-01-02 3:04:05 PM") }</span>
+								}
+							</div>
+							if exec.Status == models.ExecRunning && i == 0 && task.Status == models.StatusRunning {
+								<div class="text-sm opacity-60">
+									<span class="badge badge-warning">Elapsed: { FormatElapsedTime(exec.StartedAt) }</span>
+								</div>
+							} else if exec.DurationMs > 0 || exec.TokensUsed > 0 {
+								<div class="text-sm opacity-60">
+									{ fmt.Sprintf("%d tokens, %s", exec.TokensUsed, formatDuration(exec.DurationMs)) }
+								</div>
+							}
+						</div>
+						if exec.Status == models.ExecRunning && exec.Output == "" {
+							<div class="flex items-center gap-2 p-3 bg-base-200 rounded-lg">
+								<span class="loading loading-spinner loading-sm"></span>
+								<span class="text-sm opacity-60">Model is working on this task...</span>
+							</div>
+						}
+						if exec.Output != "" {
+							<div class="mb-2">
+								<div class="flex items-center justify-between mb-1">
+									<span class="text-xs opacity-60">Model Output:</span>
+									<button
+										class="btn btn-xs btn-ghost"
+										onclick={ templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-output-%s', this)", exec.ID)} }
+										title="Copy to clipboard"
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+										</svg>
+									</button>
+								</div>
+								<pre id={ fmt.Sprintf("exec-output-%s", exec.ID) } class="p-3 bg-base-200 rounded-lg text-sm whitespace-pre-wrap max-h-96 overflow-y-auto mt-1">{ exec.Output }</pre>
+							</div>
+						}
+						if exec.ErrorMessage != "" {
+							<div class="mb-2">
+								<div class="flex items-center justify-between mb-1">
+									<span class="text-xs opacity-60 text-error">Error:</span>
+									<button
+										class="btn btn-xs btn-ghost text-error"
+										onclick={ templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-error-%s', this)", exec.ID)} }
+										title="Copy to clipboard"
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+										</svg>
+									</button>
+								</div>
+								<pre id={ fmt.Sprintf("exec-error-%s", exec.ID) } class="p-3 bg-error/10 rounded-lg text-sm text-error whitespace-pre-wrap mt-1">{ exec.ErrorMessage }</pre>
+							</div>
+						}
+					</div>
+				</div>
+			}
+		}
+	</div>
+}

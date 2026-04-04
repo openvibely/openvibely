@@ -1,0 +1,79 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ ExecutionDetail(projects []models.Project, exec *models.Execution, task *models.Task) {
+	@layout.Base("Execution", projects, "") {
+		<div class="max-w-4xl">
+			<div class="flex items-center gap-2 mb-4">
+				if task != nil {
+					<a href={ templ.SafeURL(fmt.Sprintf("/tasks/%s", task.ID)) } class="btn btn-ghost btn-sm">
+						Back to Task
+					</a>
+				}
+				<h2 class="text-2xl font-bold">Execution Detail</h2>
+			</div>
+
+			<div class="card bg-base-100 shadow-sm border border-base-300">
+				<div class="card-body">
+					<div class="grid grid-cols-2 gap-4 mb-4">
+						<div>
+							<span class="text-sm opacity-60">Status:</span>
+							<span class={ "ml-2 badge", execBadge(exec.Status) }>{ string(exec.Status) }</span>
+						</div>
+						<div>
+							<span class="text-sm opacity-60">Started:</span>
+							<span class="ml-2">{ exec.StartedAt.Local().Format("2006-01-02 15:04:05") }</span>
+						</div>
+						<div>
+							<span class="text-sm opacity-60">Tokens Used:</span>
+							<span class="ml-2">{ fmt.Sprintf("%d", exec.TokensUsed) }</span>
+						</div>
+						<div>
+							<span class="text-sm opacity-60">Duration:</span>
+							<span class="ml-2">{ fmt.Sprintf("%dms", exec.DurationMs) }</span>
+						</div>
+					</div>
+
+					if exec.PromptSent != "" {
+						<div class="mb-4">
+							<h4 class="font-bold text-sm mb-2">Prompt Sent</h4>
+							<pre class="p-3 bg-base-200 rounded-lg text-sm whitespace-pre-wrap">{ exec.PromptSent }</pre>
+						</div>
+					}
+
+					if exec.Output != "" {
+						<div class="mb-4">
+							<h4 class="font-bold text-sm mb-2">Output</h4>
+							<pre class="p-3 bg-base-200 rounded-lg text-sm whitespace-pre-wrap">{ exec.Output }</pre>
+						</div>
+					}
+
+					if exec.ErrorMessage != "" {
+						<div>
+							<h4 class="font-bold text-sm mb-2 text-error">Error</h4>
+							<pre class="p-3 bg-error/10 rounded-lg text-sm text-error whitespace-pre-wrap">{ exec.ErrorMessage }</pre>
+						</div>
+					}
+				</div>
+			</div>
+		</div>
+	}
+}
+
+func execBadge(status models.ExecutionStatus) string {
+	switch status {
+	case models.ExecRunning:
+		return "badge-warning"
+	case models.ExecCompleted:
+		return "badge-success"
+	case models.ExecFailed:
+		return "badge-error"
+	default:
+		return "badge-ghost"
+	}
+}

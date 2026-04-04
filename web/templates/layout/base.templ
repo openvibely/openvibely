@@ -1,0 +1,2198 @@
+package layout
+
+import "github.com/openvibely/openvibely/internal/models"
+
+templ Base(title string, projects []models.Project, currentProjectID string) {
+	<!DOCTYPE html>
+	<html lang="en" data-theme="dark">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<title>{ title } - OpenVibely</title>
+			<!-- Theme init: must run before any CSS to prevent flash -->
+			<script>
+				(function() {
+					var saved = localStorage.getItem('theme');
+					if (saved === 'light' || saved === 'dark') {
+						document.documentElement.setAttribute('data-theme', saved);
+					} else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+						document.documentElement.setAttribute('data-theme', 'light');
+					}
+					// else: keep the default "dark" from HTML attribute
+				})();
+			</script>
+			<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css"/>
+			<script src="https://cdn.tailwindcss.com"></script>
+			<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+			<script src="https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js"></script>
+			<!-- Markdown rendering for chat/thread messages -->
+			<script src="https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js"></script>
+			<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github-dark.min.css"/>
+			<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+			<style>
+				/* Disable DaisyUI button-pop animation on initial render.
+				   Without this, HTMX swaps cause all newly-inserted .btn elements
+				   to play the pop animation simultaneously. The :active click
+				   animation uses 0s duration separately, so click feedback is preserved. */
+				:root {
+					--animation-btn: 0;
+				}
+				/* Canonical "Default" badge styling used across major settings pages. */
+				.ov-badge-default {
+					background-color: hsl(var(--p));
+					color: hsl(var(--pc));
+					border-color: hsl(var(--p));
+				}
+				.ov-badge-default:hover,
+				.ov-badge-default:focus-visible {
+					background-color: hsl(var(--p));
+					color: hsl(var(--pc));
+					border-color: hsl(var(--p));
+				}
+				/* Theme toggle is intentionally immediate (no global transition choreography). */
+				/* Prevent layout shift when modal opens by reserving scrollbar space */
+				html {
+					scrollbar-gutter: stable;
+					overflow: hidden;
+				}
+				body {
+					overflow: hidden;
+					height: 100vh;
+					width: 100vw;
+				}
+				.dragging {
+					opacity: 0.5;
+				}
+				.drag-over {
+					border-color: hsl(var(--p)) !important;
+					background-color: hsl(var(--p) / 0.1);
+				}
+				.kanban-column {
+					/* Fixed width to prevent flex resizing when modal opens */
+					/* 3 columns with gap-4 (1rem each) = 2 gaps = 2rem total */
+					width: calc((100% - 2rem) / 3);
+					flex-shrink: 0;
+					flex-grow: 0;
+				}
+				.task-selected {
+					outline: 3px solid hsl(var(--p));
+					outline-offset: 2px;
+					background: linear-gradient(135deg, hsl(var(--p) / 0.25), hsl(var(--p) / 0.15)) !important;
+					box-shadow: 0 0 0 3px hsl(var(--p) / 0.3), 0 4px 12px rgba(0,0,0,0.4);
+					position: relative;
+					border-color: hsl(var(--p)) !important;
+				}
+				.task-selected::before {
+					content: '✓';
+					position: absolute;
+					top: 8px;
+					right: 8px;
+					background: hsl(var(--p));
+					color: white;
+					width: 28px;
+					height: 28px;
+					border-radius: 50%;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					font-weight: bold;
+					font-size: 16px;
+					z-index: 10;
+					box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+				}
+				.task-selected .btn-circle {
+					display: none;
+				}
+				/* Modal layering */
+				dialog.modal {
+					z-index: 1200;
+				}
+				dialog.modal::backdrop {
+					z-index: 1190;
+				}
+				dialog.modal .modal-backdrop {
+					z-index: 1195;
+				}
+				dialog.modal > .modal-box {
+					position: relative;
+					z-index: 1201;
+				}
+				/* Toast notifications */
+				#toast-container {
+					position: fixed;
+					top: 16px;
+					right: 16px;
+					z-index: 1300;
+					display: flex;
+					flex-direction: column;
+					gap: 8px;
+					pointer-events: none;
+					max-width: 380px;
+					width: 100%;
+				}
+				dialog.modal #toast-container {
+					z-index: 1302;
+				}
+				@media (max-width: 640px) {
+					#toast-container {
+						top: 8px;
+						right: 8px;
+						left: 8px;
+						max-width: none;
+					}
+				}
+				.toast-notification {
+					pointer-events: auto;
+					animation: toast-slide-in 0.3s ease-out;
+					cursor: pointer;
+					transition: opacity 0.2s, transform 0.2s;
+					width: 100%;
+					max-width: 100%;
+					box-sizing: border-box;
+				}
+				.toast-notification:hover {
+					transform: scale(1.02);
+				}
+				.toast-notification.toast-dismiss {
+					animation: toast-slide-out 0.3s ease-in forwards;
+					transition: none;
+					pointer-events: none;
+				}
+				@keyframes toast-slide-in {
+					from {
+						transform: translateX(100%);
+						opacity: 0;
+					}
+					to {
+						transform: translateX(0);
+						opacity: 1;
+					}
+				}
+				@keyframes toast-slide-out {
+					from {
+						transform: translateX(0);
+						opacity: 1;
+					}
+					to {
+						transform: translateX(100%);
+						opacity: 0;
+					}
+				}
+			/* Speech-to-text recording indicator */
+			.stt-recording {
+				opacity: 1 !important;
+				background: hsl(var(--er) / 0.15) !important;
+				animation: stt-pulse 1.5s ease-in-out infinite;
+			}
+			@keyframes stt-pulse {
+				0%, 100% { box-shadow: 0 0 0 0 hsl(var(--er) / 0.4); }
+				50% { box-shadow: 0 0 0 6px hsl(var(--er) / 0); }
+			}
+			.stt-recording .stt-stop-icon {
+				color: hsl(var(--er));
+			}
+			/* Shared chat streaming loader: bouncing dots + phased indigo/purple sweep */
+			.ov-loading-dots {
+				--ov-loading-dot-size: 0.36rem;
+				--ov-loading-dot-gap: 0.22rem;
+				--ov-loading-dot-bounce: 0.24rem;
+				--ov-loading-dot-color: oklch(var(--p));
+				--ov-loading-dot-color-soft: oklch(var(--p) / 0.45);
+				display: inline-flex;
+				align-items: flex-end;
+				gap: var(--ov-loading-dot-gap);
+				line-height: 1;
+			}
+			.ov-loading-dots-sm {
+				--ov-loading-dot-size: 0.36rem;
+				--ov-loading-dot-bounce: 0.24rem;
+			}
+			.ov-loading-dots-xs {
+				--ov-loading-dot-size: 0.28rem;
+				--ov-loading-dot-bounce: 0.16rem;
+			}
+			.ov-loading-dot {
+				width: var(--ov-loading-dot-size);
+				height: var(--ov-loading-dot-size);
+				border-radius: 9999px;
+				background: var(--ov-loading-dot-color);
+				opacity: 0.9;
+				animation: ov-loading-dot-bounce 1s ease-in-out infinite, ov-loading-dot-color 1.6s linear infinite;
+			}
+			.ov-loading-dot:nth-child(2) {
+				animation-delay: 0.12s, -0.2s;
+			}
+			.ov-loading-dot:nth-child(3) {
+				animation-delay: 0.24s, -0.4s;
+			}
+			@keyframes ov-loading-dot-bounce {
+				0%, 80%, 100% {
+					transform: translateY(0) scale(0.9);
+					opacity: 0.45;
+				}
+				40% {
+					transform: translateY(calc(-1 * var(--ov-loading-dot-bounce))) scale(1);
+					opacity: 1;
+				}
+			}
+			@keyframes ov-loading-dot-color {
+				0%, 100% {
+					background: var(--ov-loading-dot-color);
+				}
+				50% {
+					background: var(--ov-loading-dot-color-soft);
+				}
+			}
+			#selection-counter {
+					position: fixed;
+					bottom: 24px;
+					right: 24px;
+					background: hsl(var(--p));
+					color: white;
+					padding: 12px 20px;
+					border-radius: 12px;
+					font-weight: bold;
+					box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+					z-index: 50;
+					display: none;
+					align-items: center;
+					gap: 12px;
+				}
+				#selection-counter.visible {
+					display: flex;
+				}
+				/* Ensure dropdown menus appear above other cards */
+				.card:has(.dropdown:focus-within),
+				.card:has(.dropdown:hover),
+				.card:has(.dropdown > :focus) {
+					z-index: 50;
+					position: relative;
+				}
+				/* Ensure modals don't cause horizontal overflow */
+				.modal-box {
+					max-width: min(56rem, calc(100vw - 2rem));
+				}
+				/* Prevent dropdown menus from causing scrollbars */
+				.dropdown-content {
+					max-height: calc(100vh - 4rem);
+					overflow-y: auto;
+				}
+				/* Chat bubble redesign - distinct card-style per message */
+				.chat-bubble-user-msg,
+				.chat-bubble-assistant-msg {
+					color: hsl(var(--bc));
+					position: relative;
+					margin-left: 16px;
+				}
+				/* Left pointer arrow for all chat bubbles */
+				.chat-bubble-user-msg::before,
+				.chat-bubble-assistant-msg::before {
+					content: '';
+					position: absolute;
+					top: 14px;
+					left: -9px;
+					width: 0;
+					height: 0;
+					border-top: 8px solid transparent;
+					border-bottom: 8px solid transparent;
+					border-right: 9px solid var(--chat-user-border, hsl(var(--bc) / 0.15));
+				}
+				.chat-bubble-user-msg::after,
+				.chat-bubble-assistant-msg::after {
+					content: '';
+					position: absolute;
+					top: 15px;
+					left: -7px;
+					width: 0;
+					height: 0;
+					border-top: 7px solid transparent;
+					border-bottom: 7px solid transparent;
+					border-right: 8px solid var(--chat-user-bg, hsl(var(--b1)));
+				}
+				/* Code block styling in chat messages */
+				.chat-bubble-user-msg code,
+				.chat-bubble-assistant-msg code {
+					background-color: hsl(var(--b2));
+					color: hsl(var(--bc));
+					padding: 0.15rem 0.4rem;
+					border-radius: 0.375rem;
+					font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+					font-size: 0.875em;
+					border: 1px solid hsl(var(--bc) / 0.1);
+				}
+				.chat-bubble-user-msg pre,
+				.chat-bubble-assistant-msg pre {
+					background-color: hsl(var(--b2));
+					border: 1px solid hsl(var(--bc) / 0.1);
+					border-radius: 0.5rem;
+					padding: 1rem;
+					margin: 0.75rem 0;
+					overflow-x: auto;
+					font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+					font-size: 0.875rem;
+					line-height: 1.5;
+				}
+				.chat-bubble-user-msg pre code,
+				.chat-bubble-assistant-msg pre code {
+					background: none;
+					border: none;
+					padding: 0;
+					font-size: inherit;
+				}
+				/* Chat input container - matches chat bubble styling */
+				.chat-input-container {
+					background-color: hsl(var(--b1));
+					border: none;
+					margin-left: 16px;
+					margin-right: 6px;
+				}
+				/* Thin scrollbar for chat messages to minimize width impact on alignment */
+			#chat-messages,
+			#task-thread-messages {
+				scrollbar-width: thin;
+				scrollbar-color: hsl(var(--bc) / 0.2) transparent;
+				scrollbar-gutter: stable;
+			}
+			#chat-messages::-webkit-scrollbar,
+			#task-thread-messages::-webkit-scrollbar {
+				width: 6px;
+			}
+			#chat-messages::-webkit-scrollbar-track,
+			#task-thread-messages::-webkit-scrollbar-track {
+				background: transparent;
+			}
+			#chat-messages::-webkit-scrollbar-thumb,
+			#task-thread-messages::-webkit-scrollbar-thumb {
+				background-color: hsl(var(--bc) / 0.2);
+				border-radius: 3px;
+			}
+			/* Remove outlines/borders from chat selectors */
+				.chat-model-select,
+					.chat-mode-select {
+					border: none !important;
+					outline: none !important;
+					box-shadow: none !important;
+				}
+				.chat-model-select:focus,
+					.chat-mode-select:focus {
+					border: none !important;
+					outline: none !important;
+					box-shadow: none !important;
+				}
+				/* Collapsible sidebar */
+				.sidebar-aside {
+					transition: width 0.2s ease;
+					overflow: hidden;
+				}
+				.sidebar-aside.sidebar-collapsed {
+					width: 3.5rem !important;
+				}
+				.sidebar-aside .sidebar-text {
+					transition: opacity 0.15s ease;
+					white-space: nowrap;
+					overflow: hidden;
+				}
+				.sidebar-aside.sidebar-collapsed .sidebar-text {
+					opacity: 0;
+					pointer-events: none;
+					width: 0;
+					display: none;
+				}
+				.sidebar-aside.sidebar-collapsed .sidebar-hide-collapsed {
+					display: none !important;
+				}
+				.sidebar-aside .sidebar-toggle-icon {
+					transition: transform 0.2s ease;
+				}
+				.sidebar-aside.sidebar-collapsed .sidebar-toggle-icon {
+					transform: rotate(180deg);
+				}
+				/* Collapsed sidebar: flex column, perfectly centered icons */
+				.sidebar-aside.sidebar-collapsed .sidebar-inner {
+					padding: 0.375rem 0 !important;
+					display: flex !important;
+					flex-direction: column !important;
+					align-items: center !important;
+				}
+				.sidebar-aside.sidebar-collapsed .sidebar-header {
+					display: flex !important;
+					flex-direction: column !important;
+					justify-content: center !important;
+					align-items: center !important;
+					margin: 0 0 0.25rem 0 !important;
+					padding: 0 !important;
+					width: 2.5rem !important;
+					gap: 2px !important;
+				}
+				.sidebar-aside.sidebar-collapsed .sidebar-header .btn {
+					width: 2.5rem !important;
+					height: 2.5rem !important;
+					min-height: 2.5rem !important;
+					padding: 0 !important;
+					margin: 0 !important;
+					display: flex !important;
+					align-items: center !important;
+					justify-content: center !important;
+				}
+				.sidebar-aside.sidebar-collapsed .menu {
+					padding: 0 !important;
+					margin: 0 !important;
+					gap: 2px !important;
+					width: 2.5rem !important;
+				}
+				.sidebar-aside.sidebar-collapsed .menu li:not(.sidebar-hide-collapsed):not(.sidebar-divider) {
+					display: flex !important;
+					justify-content: center !important;
+					align-items: center !important;
+					padding: 0 !important;
+					margin: 0 !important;
+					width: 2.5rem !important;
+				}
+				.sidebar-aside.sidebar-collapsed .menu :where(li ul) {
+					padding: 0 !important;
+					margin: 0 !important;
+				}
+				.sidebar-aside.sidebar-collapsed .menu a,
+				.sidebar-aside.sidebar-collapsed .menu summary {
+					display: flex !important;
+					align-items: center !important;
+					justify-content: center !important;
+					padding: 0 !important;
+					margin: 0 auto !important;
+					gap: 0 !important;
+					width: 2.5rem !important;
+					height: 2.5rem !important;
+					min-height: 2.5rem !important;
+					border-radius: 0.5rem;
+				}
+				.sidebar-aside.sidebar-collapsed .sidebar-divider {
+					display: none;
+				}
+				/* Tooltip for collapsed sidebar items */
+				.sidebar-aside.sidebar-collapsed [data-tip] {
+					position: relative;
+				}
+				.sidebar-aside.sidebar-collapsed [data-tip]::after {
+					content: attr(data-tip);
+					position: absolute;
+					left: calc(100% + 4px);
+					top: 50%;
+					transform: translateY(-50%);
+					padding: 4px 10px;
+					background: hsl(var(--n));
+					color: hsl(var(--nc));
+					border-radius: 6px;
+					font-size: 0.75rem;
+					white-space: nowrap;
+					opacity: 0;
+					pointer-events: none;
+					transition: opacity 0.15s ease;
+					z-index: 100;
+					box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+				}
+				.sidebar-aside.sidebar-collapsed [data-tip]:hover::after {
+					opacity: 1;
+				}
+				/* Theme toggle in collapsed sidebar */
+				.sidebar-aside.sidebar-collapsed .theme-toggle-collapsed-btn {
+					display: flex;
+				}
+				/* Diff viewer styles */
+				.diff-table td {
+					padding-top: 1px;
+					padding-bottom: 1px;
+					vertical-align: top;
+					line-height: 1.5;
+				}
+				.diff-hunk-header td {
+					font-style: italic;
+				}
+				.diff-line-num {
+					min-width: 40px;
+					user-select: none;
+					-webkit-user-select: none;
+				}
+
+				/* ==============================
+				   Light mode: VS Code Light Modern (2026) inspired mapping
+				   ============================== */
+				[data-theme="light"] {
+					/* DaisyUI base variables (oklch); keep consistent structure for utilities. */
+					--b1: 1 0 0;
+					--b2: 0.975 0 0;
+					--b3: 0.93 0.001 286.029;
+					--bc: 0.27 0.004 286;
+					--p: 0.49 0.17 277;
+					--pc: 0.98 0.01 277;
+					--s: 0.79 0.05 277;
+					--sc: 0.3 0.01 277;
+					--a: 0.78 0.03 200;
+					--ac: 0.3 0.02 200;
+					--n: 0.92 0.002 286;
+					--nc: 0.27 0.004 286;
+					--in: 0.78 0.09 250;
+					--su: 0.7 0.12 145;
+					--wa: 0.79 0.08 84;
+					--er: 0.68 0.15 26;
+
+					/* Light 2026 semantic aliases — indigo/purple accent palette. */
+					--ov-l-bg: #FFFFFF;
+					--ov-l-surface: #F8F8F8;
+					--ov-l-surface-hover: #F2F2F2;
+					--ov-l-surface-active: #E8E8E8;
+					--ov-l-border: #E5E5E5;
+					--ov-l-border-strong: #CECECE;
+					--ov-l-border-contrast: #CCCCCC;
+					--ov-l-text: #3B3B3B;
+					--ov-l-text-strong: #1F1F1F;
+					--ov-l-text-muted: #616161;
+					--ov-l-text-dim: #767676;
+					--ov-l-accent: #5B47CD;
+					--ov-l-accent-hover: #4F3CB8;
+					--ov-l-accent-soft: #DDD6FE;
+					--ov-l-accent-soft-strong: #C4B5FD7A;
+					--ov-l-success: #2EA043;
+					--ov-l-warning: #895503;
+					--ov-l-error: #F85149;
+					--ov-l-code-bg: #0000001F;
+				}
+
+				/* --- App shell surfaces --- */
+				[data-theme="light"] body,
+				[data-theme="light"] .drawer-content {
+					background-color: var(--ov-l-surface);
+				}
+				[data-theme="light"] #main-content {
+					background-color: var(--ov-l-surface);
+				}
+				[data-theme="light"] .navbar.bg-base-100 {
+					background-color: var(--ov-l-surface);
+					border-bottom: 1px solid var(--ov-l-border);
+				}
+
+				/* --- Sidebar --- */
+				[data-theme="light"] .sidebar-aside {
+					background-color: var(--ov-l-surface);
+					border-color: var(--ov-l-border);
+				}
+				[data-theme="light"] .menu-title span {
+					opacity: 1 !important;
+					color: var(--ov-l-text);
+					font-weight: 600;
+				}
+				[data-theme="light"] .menu a,
+				[data-theme="light"] .menu summary {
+					color: var(--ov-l-text-strong);
+					font-weight: 500;
+				}
+				[data-theme="light"] .menu a:hover,
+				[data-theme="light"] .menu summary:hover {
+					background-color: var(--ov-l-surface-hover);
+				}
+				[data-theme="light"] .menu a svg,
+				[data-theme="light"] .menu summary svg {
+					color: var(--ov-l-text-muted);
+				}
+				[data-theme="light"] .sidebar-divider hr {
+					opacity: 0.7 !important;
+					border-color: var(--ov-l-border-contrast);
+				}
+
+				/* --- Cards (task cards, etc.) --- */
+				[data-theme="light"] .card {
+					background-color: var(--ov-l-bg);
+					border-color: var(--ov-l-border);
+					box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
+				}
+				[data-theme="light"] .card .font-medium,
+				[data-theme="light"] .card a.font-medium {
+					color: var(--ov-l-text-strong);
+				}
+				[data-theme="light"] .card .text-sm.opacity-60,
+				[data-theme="light"] .card p.opacity-60 {
+					opacity: 1 !important;
+					color: var(--ov-l-text-muted);
+				}
+
+				/* --- Kanban columns --- */
+				[data-theme="light"] .kanban-column {
+					background-color: var(--ov-l-surface-active);
+					border: 1px solid var(--ov-l-border);
+				}
+				[data-theme="light"] .kanban-column h3 {
+					color: var(--ov-l-text-strong);
+				}
+
+				/* --- Badges --- */
+				[data-theme="light"] .badge-outline {
+					border-color: var(--ov-l-border-contrast);
+					color: var(--ov-l-text);
+					border-width: 1.5px;
+				}
+				[data-theme="light"] .badge-ghost {
+					background-color: var(--ov-l-surface-active);
+					color: var(--ov-l-text);
+				}
+				[data-theme="light"] .badge-info {
+					background-color: var(--ov-l-accent-soft-strong);
+					color: #4338CA;
+					border-color: var(--ov-l-accent-soft);
+				}
+				[data-theme="light"] .badge-warning {
+					background-color: #BB800966;
+					color: var(--ov-l-warning);
+					border-color: var(--ov-l-border-contrast);
+				}
+				[data-theme="light"] .badge-success {
+					background-color: var(--ov-l-surface-active);
+					color: var(--ov-l-success);
+					border-color: var(--ov-l-border-contrast);
+				}
+				[data-theme="light"] .badge-error {
+					background-color: #F8514922;
+					color: #C72E0F;
+					border-color: #F8514970;
+				}
+				[data-theme="light"] .badge-primary {
+					background-color: var(--ov-l-accent-soft);
+					color: var(--ov-l-accent);
+					border-color: #A78BFA;
+				}
+				[data-theme="light"] .badge-secondary {
+					background-color: var(--ov-l-surface-active);
+					color: var(--ov-l-text);
+					border-color: var(--ov-l-border-contrast);
+				}
+				[data-theme="light"] .badge-accent {
+					background-color: var(--ov-l-surface-hover);
+					color: var(--ov-l-accent);
+					border-color: var(--ov-l-accent-soft);
+				}
+
+				/* --- Buttons --- */
+				[data-theme="light"] .btn-primary {
+					background-color: var(--ov-l-accent);
+					border-color: var(--ov-l-accent);
+					color: #FFFFFF;
+				}
+				[data-theme="light"] .btn-primary:hover {
+					background-color: var(--ov-l-accent-hover);
+					border-color: var(--ov-l-accent-hover);
+				}
+				[data-theme="light"] .btn-secondary {
+					background-color: var(--ov-l-surface-active);
+					border-color: var(--ov-l-border-contrast);
+					color: var(--ov-l-text);
+				}
+				[data-theme="light"] .btn-secondary:hover {
+					background-color: var(--ov-l-border-contrast);
+				}
+				[data-theme="light"] .btn-ghost {
+					color: var(--ov-l-text);
+				}
+				[data-theme="light"] .btn-ghost:hover {
+					background-color: var(--ov-l-surface-hover);
+				}
+				/* Close/delete X buttons on cards */
+				[data-theme="light"] .card .btn-circle.btn-ghost {
+					color: var(--ov-l-text-dim);
+					background-color: #0000000D;
+				}
+				[data-theme="light"] .card .btn-circle.btn-ghost:hover {
+					color: #C72E0F;
+					background-color: #F8514922;
+				}
+				/* Kebab menu button */
+				[data-theme="light"] .card .dropdown .btn-ghost {
+					color: var(--ov-l-text);
+				}
+				[data-theme="light"] .card .dropdown .btn-ghost:hover {
+					background-color: var(--ov-l-surface-hover);
+				}
+
+				/* --- Form elements --- */
+				[data-theme="light"] .select-bordered {
+					border-color: var(--ov-l-border-strong);
+					color: var(--ov-l-text-strong);
+					background-color: var(--ov-l-bg);
+				}
+				[data-theme="light"] .label-text {
+					color: var(--ov-l-text);
+				}
+				[data-theme="light"] .input-bordered,
+				[data-theme="light"] .textarea-bordered {
+					border-color: var(--ov-l-border-strong);
+					color: var(--ov-l-text-strong);
+					background-color: var(--ov-l-bg);
+				}
+
+				/* --- General opacity overrides for light mode --- */
+				[data-theme="light"] .opacity-30 {
+					opacity: 0.55 !important;
+				}
+				[data-theme="light"] .opacity-50 {
+					opacity: 0.75 !important;
+				}
+				[data-theme="light"] .opacity-60 {
+					opacity: 0.88 !important;
+				}
+
+				/* --- Drop zones --- */
+				[data-theme="light"] .category-drop-zone {
+					border-color: transparent;
+				}
+
+				/* --- Dropdown menus --- */
+				[data-theme="light"] .dropdown-content {
+					background-color: var(--ov-l-bg);
+					border-color: var(--ov-l-border-strong);
+					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+				}
+
+				/* --- Tab and page headers --- */
+				[data-theme="light"] h1,
+				[data-theme="light"] h2,
+				[data-theme="light"] h3,
+				[data-theme="light"] h4 {
+					color: var(--ov-l-text-strong);
+				}
+
+				/* --- Text color in general --- */
+				[data-theme="light"] .text-base-content {
+					color: var(--ov-l-text-strong);
+				}
+
+				/* --- Table rows --- */
+				[data-theme="light"] .table th {
+					color: var(--ov-l-text);
+					background-color: var(--ov-l-surface);
+				}
+				[data-theme="light"] .table td {
+					color: var(--ov-l-text);
+				}
+
+				/* --- Chat bubbles --- */
+				[data-theme="light"] .chat-bubble-user-msg,
+				[data-theme="light"] .chat-bubble-assistant-msg {
+					--chat-user-bg: var(--ov-l-bg);
+					--chat-user-border: var(--ov-l-border);
+					--chat-assistant-bg: var(--ov-l-bg);
+					--chat-assistant-border: var(--ov-l-border);
+					background-color: var(--ov-l-bg);
+					color: var(--ov-l-text-strong);
+					border: 1px solid var(--ov-l-border);
+					box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03);
+				}
+				[data-theme="light"] .chat-bubble-user-msg code,
+				[data-theme="light"] .chat-bubble-assistant-msg code {
+					background-color: var(--ov-l-surface);
+					color: var(--ov-l-text-strong);
+					border-color: var(--ov-l-border);
+				}
+				[data-theme="light"] .chat-bubble-user-msg pre,
+				[data-theme="light"] .chat-bubble-assistant-msg pre {
+					background-color: var(--ov-l-surface);
+					border-color: var(--ov-l-border);
+				}
+				/* Light mode chat input */
+				[data-theme="light"] .chat-input-container {
+					background-color: var(--ov-l-bg);
+					border: 1px solid var(--ov-l-border);
+					box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
+				}
+				/* Light mode tool call cards — keep subtle surfaces with readable foreground */
+				[data-theme="light"] .stream-tool-summary {
+					color: var(--ov-l-text-strong);
+				}
+				[data-theme="light"] .stream-tool-summary .tool-name-text {
+					color: var(--ov-l-text-strong);
+				}
+				[data-theme="light"] .stream-tool-summary .tool-name-secondary {
+					color: var(--ov-l-text-muted);
+				}
+				[data-theme="light"] .stream-tool-summary .tool-spinner {
+					color: var(--ov-l-text-muted);
+					opacity: 0.72;
+				}
+				[data-theme="light"] .stream-tool-body {
+					border-color: transparent;
+					background: transparent;
+				}
+				[data-theme="light"] .stream-tool-body-row {
+					border-top-color: transparent;
+				}
+				[data-theme="light"] .stream-tool-body-label {
+					color: var(--ov-l-text-muted);
+					opacity: 1;
+				}
+				[data-theme="light"] .stream-tool-body-content {
+					background: transparent;
+					border: none;
+				}
+				[data-theme="light"] .stream-tool-body-content pre {
+					background: var(--ov-l-surface);
+					border: 1px solid var(--ov-l-border);
+					border-radius: 5px;
+				}
+				[data-theme="light"] .stream-tool-body-content,
+				[data-theme="light"] .stream-tool-body-content pre {
+					color: var(--ov-l-text-strong);
+				}
+				[data-theme="light"] .tool-status-done {
+					color: var(--ov-l-success);
+				}
+				[data-theme="light"] .tool-status-error {
+					color: var(--ov-l-error);
+				}
+
+				/* --- Chat bubbles (dark mode) --- */
+				[data-theme="dark"] .chat-bubble-user-msg,
+				[data-theme="dark"] .chat-bubble-assistant-msg {
+					--chat-user-bg: #2b3039;
+					--chat-user-border: transparent;
+					--chat-assistant-bg: #2b3039;
+					--chat-assistant-border: transparent;
+					background-color: #2b3039;
+					border: none;
+					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+				}
+				[data-theme="dark"] .chat-bubble-user-msg code,
+				[data-theme="dark"] .chat-bubble-assistant-msg code {
+					background-color: rgba(0, 0, 0, 0.25);
+					border-color: rgba(255, 255, 255, 0.1);
+				}
+				[data-theme="dark"] .chat-bubble-user-msg pre,
+				[data-theme="dark"] .chat-bubble-assistant-msg pre {
+					background-color: rgba(0, 0, 0, 0.2);
+					border-color: rgba(255, 255, 255, 0.1);
+				}
+				/* Dark mode chat input */
+				[data-theme="dark"] .chat-input-container {
+					background-color: #2b3039;
+					border: none;
+					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+				}
+
+				/* --- Outline buttons (New Project, etc.) --- */
+				[data-theme="light"] .btn-outline {
+					border-color: var(--ov-l-border-strong);
+					color: var(--ov-l-text);
+				}
+				[data-theme="light"] .btn-outline:hover {
+					border-color: var(--ov-l-accent);
+					background-color: var(--ov-l-accent);
+					color: #ffffff;
+				}
+
+				/* --- Alert and stat cards --- */
+				[data-theme="light"] .stat {
+					border-color: var(--ov-l-border);
+				}
+				[data-theme="light"] .stat-title {
+					color: var(--ov-l-text-muted);
+				}
+				[data-theme="light"] .stat-value {
+					color: var(--ov-l-text-strong);
+				}
+
+				/* --- Selection counter shadow fix --- */
+				[data-theme="light"] #selection-counter {
+					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+				}
+
+				/* --- Modal dialogs --- */
+				[data-theme="light"] .modal-box {
+					background-color: var(--ov-l-bg);
+					color: var(--ov-l-text-strong);
+				}
+
+				/* --- Toast notifications --- */
+				[data-theme="light"] .toast-notification {
+					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+				}
+
+				/* --- Markdown prose styling for chat messages --- */
+				.chat-markdown {
+					line-height: 1.6;
+					font-size: 0.875rem;
+					word-wrap: break-word;
+					overflow-wrap: break-word;
+					white-space: normal;
+				}
+				.chat-markdown > *:first-child { margin-top: 0; }
+				.chat-markdown > *:last-child { margin-bottom: 0; }
+				.chat-markdown p { margin: 0.4em 0; }
+				.chat-markdown h1, .chat-markdown h2, .chat-markdown h3,
+				.chat-markdown h4, .chat-markdown h5, .chat-markdown h6 {
+					font-weight: 600;
+					margin: 0.8em 0 0.3em;
+					line-height: 1.3;
+				}
+				.chat-markdown h1 { font-size: 1.25em; }
+				.chat-markdown h2 { font-size: 1.15em; }
+				.chat-markdown h3 { font-size: 1.05em; }
+				.chat-markdown ul, .chat-markdown ol {
+					margin: 0.4em 0;
+					padding-left: 1.5em;
+				}
+				.chat-markdown ul { list-style-type: disc; }
+				.chat-markdown ol { list-style-type: decimal; }
+				.chat-markdown li { margin: 0.15em 0; }
+				.chat-markdown li > ul { list-style-type: circle; }
+				.chat-markdown li > ol { list-style-type: lower-alpha; }
+				.chat-markdown li > ul, .chat-markdown li > ol { margin: 0.1em 0; }
+				.chat-markdown code {
+					font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+					font-size: 0.85em;
+					background: hsl(var(--b2, var(--b1)) / 0.8);
+					padding: 0.15em 0.35em;
+					border-radius: 0.25rem;
+				}
+				.chat-markdown pre {
+					margin: 0.5em 0;
+					padding: 0.75em 1em;
+					border-radius: 0.5rem;
+					overflow-x: auto;
+					background: hsl(var(--b2, var(--b1)) / 0.6);
+					border: 1px solid hsl(var(--bc) / 0.08);
+					position: relative;
+				}
+				.chat-markdown pre code {
+					background: none;
+					padding: 0;
+					font-size: 0.8em;
+					line-height: 1.5;
+				}
+				.chat-markdown pre .code-copy-btn {
+					position: absolute;
+					top: 0.4em;
+					right: 0.4em;
+					padding: 0.25em 0.4em;
+					border: none;
+					border-radius: 0.3rem;
+					background: hsl(var(--bc) / 0.08);
+					color: hsl(var(--bc) / 0.5);
+					cursor: pointer;
+					font-size: 0.75em;
+					line-height: 1;
+					opacity: 0;
+					transition: opacity 0.15s, background 0.15s, color 0.15s;
+					display: flex;
+					align-items: center;
+					gap: 0.3em;
+					z-index: 1;
+				}
+				.chat-markdown pre:hover .code-copy-btn {
+					opacity: 1;
+				}
+				.chat-markdown pre .code-copy-btn:hover {
+					background: hsl(var(--bc) / 0.15);
+					color: hsl(var(--bc) / 0.8);
+				}
+				.chat-markdown pre .code-copy-btn.copied {
+					opacity: 1;
+					color: hsl(var(--su, 158 64% 52%));
+				}
+				.chat-markdown blockquote {
+					margin: 0.5em 0;
+					padding: 0.25em 0.75em;
+					border-left: 3px solid hsl(var(--bc) / 0.15);
+					color: hsl(var(--bc) / 0.7);
+				}
+				.chat-markdown hr {
+					margin: 0.75em 0;
+					border: none;
+					border-top: 1px solid hsl(var(--bc) / 0.1);
+				}
+				.chat-markdown a {
+					color: hsl(var(--p));
+					text-decoration: underline;
+					text-underline-offset: 2px;
+				}
+				.chat-markdown strong { font-weight: 600; }
+				.chat-markdown table {
+					border-collapse: collapse;
+					margin: 0.5em 0;
+					font-size: 0.85em;
+					width: 100%;
+				}
+				.chat-markdown th, .chat-markdown td {
+					border: 1px solid hsl(var(--bc) / 0.1);
+					padding: 0.35em 0.6em;
+					text-align: left;
+				}
+				.chat-markdown th {
+					background: hsl(var(--b2, var(--b1)) / 0.5);
+					font-weight: 600;
+				}
+
+				/* --- Thinking (copied from Claude Code VSCode: thinkingV2 variant) --- */
+				.stream-thinking { margin: 0.25rem 0; }
+				.stream-thinking summary {
+					cursor: pointer;
+					color: hsl(var(--bc) / 0.5);
+					opacity: 0.8;
+					user-select: none;
+					list-style: none;
+					display: inline-flex;
+					align-items: center;
+					gap: 4px;
+					font-style: normal;
+					font-size: 0.8125rem;
+				}
+				.stream-thinking summary::-webkit-details-marker { display: none; }
+				.stream-thinking .thinking-toggle {
+					width: 16px; height: 16px;
+					margin-left: 0;
+					transition: transform 0.15s;
+				}
+				.stream-thinking[open] summary,
+				.stream-thinking summary:hover { opacity: 1; }
+				.stream-thinking[open] .thinking-toggle { transform: rotate(90deg); }
+				.stream-thinking .stream-thinking-body {
+					color: hsl(var(--bc) / 0.5);
+					margin-top: 4px;
+					font-weight: 400;
+					font-size: 0.8125rem;
+					line-height: 1.5;
+				}
+				/* --- Tool use (copied from Claude Code VSCode: root/toolSummary/toolBody) --- */
+				.stream-tool { position: relative; margin: 2px 0; }
+				.stream-tool-summary {
+					display: flex;
+					align-items: center;
+					gap: 4px;
+					max-width: 100%;
+					font-size: 0.8125rem;
+					overflow: hidden;
+					white-space: nowrap;
+					text-overflow: ellipsis;
+				}
+				.stream-tool-summary .tool-name-text {
+					margin-right: 4px;
+					font-weight: 700;
+				}
+				.stream-tool-summary .tool-name-secondary {
+					font-family: ui-monospace, SFMono-Regular, monospace;
+					color: hsl(var(--bc) / 0.4);
+					word-break: break-all;
+					overflow-wrap: anywhere;
+					flex: 1;
+					min-width: 0;
+					padding-top: 1px;
+					font-size: 0.85em;
+				}
+				.stream-tool-summary .tool-spinner {
+					width: 12px; height: 12px;
+					opacity: 0.4;
+					flex-shrink: 0;
+					vertical-align: middle;
+					margin-right: 4px;
+				}
+				.stream-tool-body {
+					border: 0.5px solid hsl(var(--bc) / 0.1);
+					background: hsl(var(--b2, var(--b1)) / 0.4);
+					border-radius: 5px;
+					align-items: start;
+					max-width: 100%;
+					margin: 4px 0;
+					font-size: 0.85em;
+				}
+				.stream-tool-body-grid {
+					display: grid;
+					grid-template-columns: max-content 1fr;
+				}
+				.stream-tool-body-row {
+					grid-column: 1 / -1;
+					display: grid;
+					grid-template-columns: subgrid;
+					border-top: 0.5px solid hsl(var(--bc) / 0.1);
+					padding: 4px;
+				}
+				.stream-tool-body-row:first-child { border-top: none; }
+				.stream-tool-body-label {
+					grid-column: 1;
+					color: hsl(var(--bc) / 0.5);
+					text-align: left;
+					opacity: 0.5;
+					font-family: ui-monospace, SFMono-Regular, monospace;
+					padding: 4px 8px 4px 4px;
+					font-size: 0.85em;
+				}
+				.stream-tool-body-content {
+					grid-column: 2;
+					margin: 0;
+					padding: 4px;
+					overflow-x: auto;
+					overflow-y: auto;
+					max-height: none;
+					width: 100%;
+					min-width: 0;
+					scrollbar-width: thin;
+					scrollbar-color: hsl(var(--bc) / 0.3) transparent;
+				}
+				.stream-tool-body-content::-webkit-scrollbar {
+					width: 6px;
+					height: 6px;
+				}
+				.stream-tool-body-content::-webkit-scrollbar-track {
+					background: transparent;
+				}
+				.stream-tool-body-content::-webkit-scrollbar-thumb {
+					background-color: hsl(var(--bc) / 0.3);
+					border-radius: 3px;
+				}
+				.stream-tool-body-content::-webkit-scrollbar-thumb:hover {
+					background-color: hsl(var(--bc) / 0.4);
+				}
+				.stream-tool-body-content pre {
+					font-family: ui-monospace, SFMono-Regular, monospace;
+					margin: 0;
+					font-size: 0.85em;
+					white-space: pre;
+					overflow-wrap: normal;
+					word-break: normal;
+					max-width: none;
+					width: max-content;
+					min-width: 100%;
+				}
+				/* Tool status icons (check / error) */
+				.tool-status-icon {
+					width: 14px; height: 14px;
+					flex-shrink: 0;
+					vertical-align: middle;
+					margin-right: 2px;
+				}
+				.tool-status-done { color: hsl(var(--su, 150 60% 40%) / 0.7); }
+				.tool-status-error { color: hsl(var(--er, 0 60% 50%) / 0.7); }
+			</style>
+			<script>
+// Configure marked for chat rendering
+				if (window.marked) {
+					marked.setOptions({
+						breaks: true,
+						gfm: true,
+						highlight: function(code, lang) {
+							if (window.hljs && lang && hljs.getLanguage(lang)) {
+								try { return hljs.highlight(code, { language: lang }).value; } catch(e) {}
+							}
+							if (window.hljs) {
+								try { return hljs.highlightAuto(code).value; } catch(e) {}
+							}
+							return code;
+						}
+					});
+				}
+				// Render markdown to HTML safely for chat messages
+				window.renderChatMarkdown = function(text) {
+					if (!text || !window.marked) return text;
+					try {
+						// marked.parse returns HTML string
+						var html = marked.parse(text);
+						// Basic XSS sanitization: strip script tags, event handlers
+						html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
+						html = html.replace(/\bon\w+\s*=\s*"[^"]*"/gi, '');
+						html = html.replace(/\bon\w+\s*=\s*'[^']*'/gi, '');
+						return html;
+					} catch(e) {
+						return text;
+					}
+				};
+				// Add copy buttons to all <pre> blocks inside a container element
+				window.addCodeCopyButtons = function(container) {
+					if (!container) return;
+					var pres = container.querySelectorAll('pre');
+					pres.forEach(function(pre) {
+						if (pre.querySelector('.code-copy-btn')) return;
+						var btn = document.createElement('button');
+						btn.className = 'code-copy-btn';
+						btn.type = 'button';
+						btn.setAttribute('aria-label', 'Copy code');
+						btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copy</span>';
+						btn.addEventListener('click', function(e) {
+							e.preventDefault();
+							e.stopPropagation();
+							var code = pre.querySelector('code');
+							var text = (code || pre).textContent;
+							navigator.clipboard.writeText(text).then(function() {
+								btn.classList.add('copied');
+								btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg><span>Copied!</span>';
+								setTimeout(function() {
+									btn.classList.remove('copied');
+									btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copy</span>';
+								}, 2000);
+							});
+						});
+						pre.appendChild(btn);
+					});
+				};
+// Theme toggle function
+				window.toggleTheme = function() {
+					var html = document.documentElement;
+					var current = html.getAttribute('data-theme');
+					var next = (current === 'dark') ? 'light' : 'dark';
+
+					html.setAttribute('data-theme', next);
+					localStorage.setItem('theme', next);
+
+					// Update toggle icon
+					var icons = document.querySelectorAll('.theme-toggle-icon');
+					icons.forEach(function(icon) {
+						icon.setAttribute('data-theme-current', next);
+					});
+				};
+
+				// Listen for system theme changes (when no manual preference is saved)
+				if (window.matchMedia) {
+					window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+						if (!localStorage.getItem('theme')) {
+							document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+						}
+					});
+				}
+
+				// Scrollbar gutter and CSS overflow-y: scroll handle layout shifts in modern browsers
+				// No JavaScript workaround needed
+
+				let draggedElement = null;
+				let selectedTasks = new Set();
+				let draggedTaskIds = [];
+				window.isDragging = false;
+				let autoScrollInterval = null;
+				let currentScrollZone = null;
+
+				function updateSelectionCounter() {
+					const counter = document.getElementById('selection-counter');
+					if (!counter) return;
+
+					if (selectedTasks.size > 0) {
+						counter.querySelector('#selection-count').textContent = selectedTasks.size;
+						counter.classList.add('visible');
+					} else {
+						counter.classList.remove('visible');
+					}
+				}
+
+			// ── Tab Visibility Manager ──
+			// Centralized manager to pause/resume SSE connections and HTMX polling
+			// when a tab is hidden/visible. Prevents resource exhaustion with multiple tabs.
+			window._tabVisibility = (function() {
+				let sseConnections = {}; // name → { url, onmessage, onerror, onopen, instance }
+				let hidden = false;
+
+				function createSSE(name, entry) {
+					if (entry.instance) {
+						entry.instance.close();
+						entry.instance = null;
+					}
+					const es = new EventSource(entry.url);
+					es.onopen = entry.onopen || function() {};
+					es.onmessage = entry.onmessage || function() {};
+					es.onerror = entry.onerror || function() {};
+					if (entry.listeners) {
+						for (const evtName in entry.listeners) {
+							es.addEventListener(evtName, entry.listeners[evtName]);
+						}
+					}
+					entry.instance = es;
+					return es;
+				}
+
+				function pauseAll() {
+					hidden = true;
+					// Close all managed SSE connections
+					for (const name in sseConnections) {
+						const entry = sseConnections[name];
+						if (entry.instance) {
+							console.log('[visibility] Closing SSE:', name);
+							entry.instance.close();
+							entry.instance = null;
+						}
+					}
+					// Pause all HTMX polling elements
+					document.querySelectorAll('[hx-trigger*="every"]').forEach(function(el) {
+						el.setAttribute('data-hx-trigger-paused', el.getAttribute('hx-trigger'));
+						el.setAttribute('hx-trigger', 'none');
+						htmx.process(el);
+					});
+				}
+
+				function resumeAll() {
+					hidden = false;
+					// Reconnect all managed SSE connections
+					for (const name in sseConnections) {
+						const entry = sseConnections[name];
+						if (!entry.instance) {
+							console.log('[visibility] Reconnecting SSE:', name);
+							createSSE(name, entry);
+						}
+					}
+					// Resume HTMX polling elements
+					document.querySelectorAll('[data-hx-trigger-paused]').forEach(function(el) {
+						el.setAttribute('hx-trigger', el.getAttribute('data-hx-trigger-paused'));
+						el.removeAttribute('data-hx-trigger-paused');
+						htmx.process(el);
+					});
+				}
+
+				document.addEventListener('visibilitychange', function() {
+					if (document.hidden) {
+						pauseAll();
+					} else {
+						resumeAll();
+					}
+				});
+
+				return {
+					// Register a managed SSE connection. Auto-pauses when tab hidden.
+					registerSSE: function(name, url, handlers) {
+						// Close previous connection with this name if it exists
+						if (sseConnections[name] && sseConnections[name].instance) {
+							sseConnections[name].instance.close();
+						}
+						var entry = {
+							url: url,
+							onopen: handlers.onopen,
+							onmessage: handlers.onmessage,
+							onerror: handlers.onerror,
+							listeners: handlers.listeners,
+							instance: null
+						};
+						sseConnections[name] = entry;
+						if (!hidden) {
+							createSSE(name, entry);
+						}
+						return {
+							close: function() {
+								if (entry.instance) {
+									entry.instance.close();
+									entry.instance = null;
+								}
+								delete sseConnections[name];
+							}
+						};
+					},
+					// Unregister and close an SSE connection
+					unregisterSSE: function(name) {
+						var entry = sseConnections[name];
+						if (entry) {
+							if (entry.instance) {
+								entry.instance.close();
+							}
+							delete sseConnections[name];
+						}
+					},
+					// Dispatch a custom event from an SSE message (for shared connections)
+					dispatchSSEEvent: function(eventName, data) {
+						window.dispatchEvent(new CustomEvent(eventName, { detail: data }));
+					},
+					isHidden: function() { return hidden; }
+				};
+			})();
+
+			// Track which element was focused before mousedown to properly detect dropdown toggle
+			let focusedBeforeClick = null;
+
+			document.addEventListener('mousedown', function(e) {
+				// Record what was focused before this interaction starts
+				focusedBeforeClick = document.activeElement;
+			}, true);
+
+			function handleDropdownToggle(event) {
+				event.stopPropagation(); // Prevent event from bubbling to parent handlers
+				const label = event.currentTarget;
+
+				// Check if this dropdown was already open before the click
+				if (focusedBeforeClick === label) {
+					// Dropdown was already open, close it
+					event.preventDefault();
+					label.blur();
+				}
+				// Otherwise, let the default focus behavior open the dropdown
+			}
+
+				function handleTaskSelect(event) {
+					// Ignore clicks on links or their children (let HTMX handle them)
+					if (event.target.tagName === 'A' || event.target.closest('a')) {
+						return;
+					}
+
+					// Ignore clicks on buttons, dropdowns, or other interactive elements
+					if (event.target.tagName === 'BUTTON' || event.target.closest('button') || event.target.closest('.dropdown')) {
+						return;
+					}
+
+					const card = event.currentTarget;
+					const taskID = card.getAttribute('data-task-id');
+
+					// Cmd/Ctrl+Click for multi-selection
+					if (event.metaKey || event.ctrlKey) {
+						event.preventDefault();
+						event.stopPropagation();
+
+						if (selectedTasks.has(taskID)) {
+							selectedTasks.delete(taskID);
+							card.classList.remove('task-selected');
+						} else {
+							selectedTasks.add(taskID);
+							card.classList.add('task-selected');
+						}
+
+						updateSelectionCounter();
+						return;
+					}
+
+					// Normal click on card body → navigate to task detail page
+					if (taskID) {
+						htmx.ajax('GET', '/tasks/' + taskID, {
+							target: '#main-content',
+							swap: 'innerHTML'
+						});
+						history.pushState({}, '', '/tasks/' + taskID);
+					}
+				}
+
+				function clearSelection() {
+					selectedTasks.forEach(id => {
+						const el = document.getElementById('task-' + id);
+						if (el) el.classList.remove('task-selected');
+					});
+					selectedTasks.clear();
+					draggedTaskIds = [];
+					updateSelectionCounter();
+				}
+
+				function handleDragStart(event) {
+					window.isDragging = true;
+					draggedElement = event.currentTarget;
+					const taskID = draggedElement.getAttribute('data-task-id');
+					const cat = draggedElement.getAttribute('data-task-category');
+					console.log('[drag] START task=' + taskID + ' category=' + cat);
+
+					if (selectedTasks.has(taskID) && selectedTasks.size > 1) {
+						// Dragging a selected task — include all selected
+						draggedTaskIds = Array.from(selectedTasks);
+					} else {
+						// Single drag — clear any selection
+						clearSelection();
+						draggedTaskIds = [taskID];
+					}
+
+					// Add dragging class to all dragged cards
+					draggedTaskIds.forEach(id => {
+						const el = document.getElementById('task-' + id);
+						if (el) el.classList.add('dragging');
+					});
+
+					event.dataTransfer.effectAllowed = 'move';
+					event.dataTransfer.setData('text/plain', draggedTaskIds.join(','));
+				}
+
+				function handleDragEnd(event) {
+					window.isDragging = false;
+					stopAutoScroll();
+					// Remove dragging class from all cards - use both the ID list AND
+					// a DOM query as fallback, because handleCategoryDrop/handleActiveDrop
+					// call clearSelection() (which empties draggedTaskIds) before dragend fires.
+					draggedTaskIds.forEach(id => {
+						const el = document.getElementById('task-' + id);
+						if (el) el.classList.remove('dragging');
+					});
+					document.querySelectorAll('.dragging').forEach(el => {
+						el.classList.remove('dragging');
+					});
+					document.querySelectorAll('.category-drop-zone, .task-drop-zone').forEach(zone => {
+						zone.classList.remove('drag-over');
+					});
+				}
+
+				function stopAutoScroll() {
+					if (autoScrollInterval) {
+						clearInterval(autoScrollInterval);
+						autoScrollInterval = null;
+					}
+					currentScrollZone = null;
+				}
+
+				function startAutoScroll(scrollZone, direction, speed) {
+					// Don't restart if already scrolling the same zone in the same direction
+					if (autoScrollInterval && currentScrollZone === scrollZone) {
+						return;
+					}
+
+					stopAutoScroll();
+					currentScrollZone = scrollZone;
+
+					autoScrollInterval = setInterval(() => {
+						if (!scrollZone) {
+							stopAutoScroll();
+							return;
+						}
+
+						// Scroll the zone
+						scrollZone.scrollTop += direction * speed;
+
+						// Stop if we've reached the edge
+						if (direction < 0 && scrollZone.scrollTop <= 0) {
+							stopAutoScroll();
+						} else if (direction > 0 && scrollZone.scrollTop + scrollZone.clientHeight >= scrollZone.scrollHeight) {
+							stopAutoScroll();
+						}
+					}, 16); // ~60fps
+				}
+
+				function handleAutoScroll(event, dropZone) {
+					// Only auto-scroll if the zone is scrollable
+					if (dropZone.scrollHeight <= dropZone.clientHeight) {
+						stopAutoScroll();
+						return;
+					}
+
+					const rect = dropZone.getBoundingClientRect();
+					const mouseY = event.clientY;
+					const scrollThreshold = 80; // pixels from edge to trigger scroll
+					const scrollSpeed = 8; // pixels per frame
+
+					const distanceFromTop = mouseY - rect.top;
+					const distanceFromBottom = rect.bottom - mouseY;
+
+					if (distanceFromTop < scrollThreshold && distanceFromTop >= 0) {
+						// Near top edge - scroll up
+						startAutoScroll(dropZone, -1, scrollSpeed);
+					} else if (distanceFromBottom < scrollThreshold && distanceFromBottom >= 0) {
+						// Near bottom edge - scroll down
+						startAutoScroll(dropZone, 1, scrollSpeed);
+					} else {
+						// Not near any edge
+						stopAutoScroll();
+					}
+				}
+
+				function handleDragOver(event) {
+					event.preventDefault();
+					event.dataTransfer.dropEffect = 'move';
+
+					// Auto-scroll when dragging near edges of scrollable dropzones
+					const dropZone = event.currentTarget;
+					if (dropZone && (dropZone.classList.contains('category-drop-zone') || dropZone.classList.contains('task-drop-zone'))) {
+						handleAutoScroll(event, dropZone);
+					}
+
+					return false;
+				}
+
+				function handleDragEnter(event) {
+					event.currentTarget.classList.add('drag-over');
+				}
+
+				function handleDragLeave(event) {
+					const dropZone = event.currentTarget;
+					if (event.target === dropZone) {
+						dropZone.classList.remove('drag-over');
+						// Stop auto-scrolling when leaving the zone
+						if (currentScrollZone === dropZone) {
+							stopAutoScroll();
+						}
+					}
+				}
+
+				// Drop handler for non-Active category columns (category change + reordering)
+				function handleCategoryDrop(event) {
+					event.stopPropagation();
+					event.preventDefault();
+					stopAutoScroll();
+					const dropZone = event.currentTarget;
+					dropZone.classList.remove('drag-over');
+
+					if (draggedTaskIds.length === 0) return;
+
+					const targetCategory = dropZone.getAttribute('data-category');
+					console.log('[drag] CATEGORY DROP target=' + targetCategory + ' tasks=' + draggedTaskIds.join(','));
+					const projectID = dropZone.getAttribute('data-project-id');
+
+					// Only single task reordering is supported for now
+					if (draggedTaskIds.length === 1) {
+						const taskID = draggedTaskIds[0];
+						const currentCategory = draggedElement.getAttribute('data-task-category');
+
+						// Calculate drop position based on mouse Y position
+						const dropPosition = getDropPosition(event, dropZone);
+						console.log('[drag] DROP POSITION=' + dropPosition);
+
+						// If same category, just reorder
+						if (currentCategory === targetCategory) {
+							if (dropPosition !== null) {
+								htmx.ajax('PATCH', `/tasks/${taskID}/reorder`, {
+									target: '#kanban-board',
+									swap: 'outerHTML',
+									values: { position: dropPosition }
+								});
+							}
+						} else {
+							// Different category - change category (which will auto-assign new position)
+							htmx.ajax('PATCH', `/tasks/${taskID}/category`, {
+								target: '#kanban-board',
+								swap: 'outerHTML',
+								values: { category: targetCategory }
+							}).catch(function(err) {
+								console.error('[drag] Category change failed:', err);
+								// Show error message to user
+								if (err.xhr && err.xhr.status === 400) {
+									alert(err.xhr.responseText || 'Cannot move task to this category');
+								}
+							});
+						}
+					} else {
+						// Multi-select batch category change
+						htmx.ajax('PATCH', `/tasks/batch-category`, {
+							target: '#kanban-board',
+							swap: 'outerHTML',
+							values: { task_ids: draggedTaskIds.join(','), category: targetCategory, project_id: projectID }
+						}).catch(function(err) {
+							console.error('[drag] Batch category change failed:', err);
+							// Show error message to user
+							if (err.xhr && err.xhr.status === 400) {
+								alert(err.xhr.responseText || 'Cannot move tasks to this category');
+							}
+						});
+					}
+
+					clearSelection();
+				}
+
+				// Get drop position within a drop zone based on mouse Y coordinate
+				function getDropPosition(event, dropZone) {
+					const allCards = Array.from(dropZone.querySelectorAll('[data-task-id]'));
+					// Filter out dragged elements to get accurate drop position
+					const taskCards = allCards.filter(card => !draggedTaskIds.includes(card.getAttribute('data-task-id')));
+
+					if (taskCards.length === 0) {
+						return 0; // Empty zone, position 0
+					}
+
+					// Check if we're dragging the last card in the original list
+					const lastCardInZone = allCards[allCards.length - 1];
+					const draggingLastCard = lastCardInZone && draggedTaskIds.includes(lastCardInZone.getAttribute('data-task-id'));
+
+					const mouseY = event.clientY;
+
+					for (let i = 0; i < taskCards.length; i++) {
+						const card = taskCards[i];
+						const rect = card.getBoundingClientRect();
+
+						// When dragging the last card, use 100% threshold for all cards
+						// Otherwise, use 100% for non-last cards and 50% for the last card
+						const isLastCard = i === taskCards.length - 1;
+						const threshold = (draggingLastCard || !isLastCard) ? 1.0 : 0.5;
+						const insertBeforeThreshold = rect.top + rect.height * threshold;
+
+						// If mouse is above the threshold of this card, insert before it
+						// Return the card's display_order (not the index in filtered array)
+						if (mouseY < insertBeforeThreshold) {
+							return parseInt(card.getAttribute('data-display-order'));
+						}
+					}
+
+					// If we get here, mouse is below all cards, append to end
+					// Return the last card's display_order + 1 to insert after it
+					const lastCard = taskCards[taskCards.length - 1];
+					return parseInt(lastCard.getAttribute('data-display-order')) + 1;
+				}
+
+				// Drop handler for Active column sub-groups (handles cross-column + status changes + reordering)
+				function handleActiveDrop(event) {
+					event.stopPropagation();
+					event.preventDefault();
+					stopAutoScroll();
+					const dropZone = event.currentTarget;
+					dropZone.classList.remove('drag-over');
+
+					if (draggedTaskIds.length === 0) return;
+
+					const targetStatus = dropZone.getAttribute('data-status');
+					console.log('[drag] ACTIVE DROP targetStatus=' + targetStatus + ' tasks=' + draggedTaskIds.join(','));
+					const projectID = dropZone.getAttribute('data-project-id');
+
+					if (draggedTaskIds.length === 1) {
+						const taskID = draggedTaskIds[0];
+						const currentCategory = draggedElement.getAttribute('data-task-category');
+						const currentStatus = draggedElement.getAttribute('data-task-status');
+
+						// Calculate drop position
+						const dropPosition = getDropPosition(event, dropZone);
+						console.log('[drag] DROP POSITION=' + dropPosition);
+
+						if (currentCategory !== 'active') {
+							// Moving from different category to active
+							htmx.ajax('PATCH', `/tasks/${taskID}/category`, {
+								target: '#kanban-board',
+								swap: 'outerHTML',
+								values: { category: 'active' }
+							}).catch(function(err) {
+								console.error('[drag] Category change to active failed:', err);
+								if (err.xhr && err.xhr.status === 400) {
+									alert(err.xhr.responseText || 'Cannot move task to Active category');
+								}
+							});
+						} else if (currentStatus !== targetStatus) {
+							// Same category, different status
+							htmx.ajax('PATCH', `/tasks/${taskID}/status`, {
+								target: '#kanban-board',
+								swap: 'outerHTML',
+								values: { status: targetStatus }
+							});
+						} else if (dropPosition !== null) {
+							// Same category, same status - just reorder
+							htmx.ajax('PATCH', `/tasks/${taskID}/reorder`, {
+								target: '#kanban-board',
+								swap: 'outerHTML',
+								values: { position: dropPosition }
+							});
+						}
+					} else {
+						// Multi-select drop into Active — batch category change
+						htmx.ajax('PATCH', `/tasks/batch-category`, {
+							target: '#kanban-board',
+							swap: 'outerHTML',
+							values: { task_ids: draggedTaskIds.join(','), category: 'active', project_id: projectID }
+						}).catch(function(err) {
+							console.error('[drag] Batch category change to active failed:', err);
+							if (err.xhr && err.xhr.status === 400) {
+								alert(err.xhr.responseText || 'Cannot move tasks to Active category');
+							}
+						});
+					}
+
+					clearSelection();
+				}
+
+				// Scroll position restoration for drop zones
+				let savedScrollPositions = new Map();
+
+				// Save scroll positions before kanban board swap
+				document.addEventListener('htmx:beforeSwap', function(event) {
+					if (event.detail.target && event.detail.target.id === 'kanban-board') {
+						savedScrollPositions.clear();
+						// Save scroll positions of all scrollable drop zones
+						const dropZones = document.querySelectorAll('.category-drop-zone, .task-drop-zone');
+						dropZones.forEach(function(zone, index) {
+							if (zone.scrollTop > 0) {
+								// Use category/status as key if available, otherwise use index
+								const category = zone.getAttribute('data-category');
+								const status = zone.getAttribute('data-status');
+								const key = category || (status ? 'active-' + status : 'zone-' + index);
+								savedScrollPositions.set(key, zone.scrollTop);
+								console.log('[scroll] SAVE ' + key + ' = ' + zone.scrollTop);
+							}
+						});
+					}
+				});
+
+				// Clear selection when kanban board is replaced via HTMX
+				// Use document.addEventListener instead of document.body.addEventListener
+				// because this script runs in <head> where document.body may not exist yet.
+				document.addEventListener('htmx:afterSwap', function(event) {
+					if (event.detail.target && event.detail.target.id === 'kanban-board') {
+						clearSelection();
+
+						// Restore scroll positions after board is re-rendered
+						if (savedScrollPositions.size > 0) {
+							// Use setTimeout to ensure DOM is fully updated
+							setTimeout(function() {
+								const dropZones = document.querySelectorAll('.category-drop-zone, .task-drop-zone');
+								dropZones.forEach(function(zone, index) {
+									const category = zone.getAttribute('data-category');
+									const status = zone.getAttribute('data-status');
+									const key = category || (status ? 'active-' + status : 'zone-' + index);
+									const savedPosition = savedScrollPositions.get(key);
+									if (savedPosition !== undefined) {
+										zone.scrollTop = savedPosition;
+										console.log('[scroll] RESTORE ' + key + ' = ' + savedPosition);
+									}
+								});
+								savedScrollPositions.clear();
+							}, 0);
+						}
+					}
+				});
+			</script>
+		</head>
+		<body class="h-screen bg-base-200 overflow-hidden" hx-ext="morph">
+			<div class="drawer lg:drawer-open h-full">
+				<input id="sidebar-toggle" type="checkbox" class="drawer-toggle"/>
+				<div class="drawer-content flex flex-col h-full overflow-hidden">
+					<!-- Navbar -->
+					<div class="navbar bg-base-100 shadow-sm lg:hidden flex-shrink-0">
+						<div class="flex-none">
+							<label for="sidebar-toggle" class="btn btn-square btn-ghost">
+								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-6 h-6 stroke-current">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+								</svg>
+							</label>
+						</div>
+						<div class="flex-1">
+							<span class="text-xl font-bold">OpenVibely</span>
+						</div>
+					</div>
+					<!-- Main Content -->
+					<main id="main-content" class="p-6 flex-1 overflow-y-auto overflow-x-hidden">
+						{ children... }
+					</main>
+				</div>
+				<!-- Sidebar -->
+				<div class="drawer-side">
+					<label for="sidebar-toggle" aria-label="close sidebar" class="drawer-overlay"></label>
+					@Sidebar(projects, currentProjectID)
+				</div>
+				<!-- Apply sidebar collapsed state immediately to prevent flash -->
+				<script>
+					(function() {
+						if (localStorage.getItem('sidebar-collapsed') === 'true') {
+							var s = document.getElementById('sidebar');
+							if (s) s.classList.add('sidebar-collapsed');
+						}
+					})();
+				</script>
+			</div>
+			<!-- Toast Notification Container -->
+			<div id="toast-container"></div>
+			<script>
+				function getTopMostOpenModal() {
+					const openModals = Array.from(document.querySelectorAll('dialog.modal[open]'));
+					if (openModals.length === 0) return null;
+					return openModals[openModals.length - 1];
+				}
+
+				function ensureToastContainer(host) {
+					if (!host) return null;
+					let container = document.getElementById('toast-container');
+					if (!container) {
+						container = document.createElement('div');
+						container.id = 'toast-container';
+					}
+					if (container.parentElement !== host) {
+						host.appendChild(container);
+					}
+					return container;
+				}
+
+				function getToastContainer() {
+					const modal = getTopMostOpenModal();
+					if (modal) {
+						return ensureToastContainer(modal);
+					}
+					const body = document.body;
+					if (!body) {
+						return document.getElementById('toast-container');
+					}
+					return ensureToastContainer(body);
+				}
+
+				function findVisibleTaskToast(taskId) {
+					if (!taskId) return null;
+					return document.querySelector('.toast-notification[data-task-id="' + taskId + '"]:not(.toast-dismiss)');
+				}
+
+				function syncToastContainerHost() {
+					const modal = getTopMostOpenModal();
+					const host = modal || document.body;
+					if (host) {
+						ensureToastContainer(host);
+					}
+				}
+				window.syncToastContainerHost = syncToastContainerHost;
+
+				if (!window._toastDialogPatchApplied && window.HTMLDialogElement && HTMLDialogElement.prototype && typeof HTMLDialogElement.prototype.showModal === 'function') {
+					const originalShowModal = HTMLDialogElement.prototype.showModal;
+					HTMLDialogElement.prototype.showModal = function() {
+						const result = originalShowModal.apply(this, arguments);
+						setTimeout(syncToastContainerHost, 0);
+						return result;
+					};
+					window._toastDialogPatchApplied = true;
+				}
+
+				document.addEventListener('close', function(event) {
+					if (event && event.target && event.target.matches && event.target.matches('dialog.modal')) {
+						setTimeout(syncToastContainerHost, 0);
+					}
+				}, true);
+
+				document.addEventListener('cancel', function(event) {
+					if (event && event.target && event.target.matches && event.target.matches('dialog.modal')) {
+						setTimeout(syncToastContainerHost, 0);
+					}
+				}, true);
+
+				syncToastContainerHost();
+
+				// Global toast notification system
+				function escapeToastHtml(value) {
+					return String(value || '')
+						.replace(/&/g, '&amp;')
+						.replace(/</g, '&lt;')
+						.replace(/>/g, '&gt;')
+						.replace(/"/g, '&quot;')
+						.replace(/'/g, '&#39;');
+				}
+
+				function shouldSuppressDuplicateToast(message, status, taskId) {
+					var now = Date.now();
+					if (!window._recentToasts) {
+						window._recentToasts = new Map();
+					}
+					var dedupKey = String(message || '') + '|' + String(status || 'info') + '|' + String(taskId || '');
+					var lastShownAt = window._recentToasts.get(dedupKey);
+					if (lastShownAt && now - lastShownAt < 1000) {
+						return true;
+					}
+					window._recentToasts.set(dedupKey, now);
+					window._recentToasts.forEach(function(timestamp, key) {
+						if (now - timestamp > 5000) {
+							window._recentToasts.delete(key);
+						}
+					});
+					return false;
+				}
+
+				function closeOpenModalsForToastNavigation() {
+					var openModals = Array.from(document.querySelectorAll('dialog.modal[open]'));
+					if (openModals.length === 0) return;
+					openModals.forEach(function(modal) {
+						try {
+							modal.close();
+						} catch (err) {}
+					});
+					setTimeout(syncToastContainerHost, 0);
+				}
+
+				window.showToast = function(title, status, taskId, options) {
+					const container = getToastContainer();
+					if (!container) return;
+					options = options || {};
+
+					// Deduplicate: skip if a toast for this task is already visible
+					if (taskId && findVisibleTaskToast(taskId)) {
+						return;
+					}
+
+					// Determine style based on status
+					let alertClass, icon, statusLabel;
+					switch (status) {
+						case 'completed':
+							alertClass = 'alert-success';
+							statusLabel = 'Completed';
+							icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+							break;
+						case 'failed':
+							alertClass = 'alert-error';
+							statusLabel = 'Failed';
+							icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+							break;
+						case 'cancelled':
+							alertClass = 'alert-warning';
+							statusLabel = 'Cancelled';
+							icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>';
+							break;
+						default:
+							alertClass = 'alert-info';
+							statusLabel = status;
+							icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+							break;
+					}
+
+					// Use full title - CSS will handle wrapping
+					const displayTitle = title;
+					if (shouldSuppressDuplicateToast(displayTitle, status, taskId)) {
+						return;
+					}
+
+					const toast = document.createElement('div');
+					toast.className = 'toast-notification alert ' + alertClass + ' shadow-lg';
+					toast.setAttribute('role', 'alert');
+					if (taskId) {
+						toast.setAttribute('data-task-id', taskId);
+					}
+					toast.innerHTML = icon +
+						'<div class="toast-message-container flex flex-col gap-0 min-w-0 flex-1 overflow-hidden">' +
+							'<span class="font-semibold text-xs uppercase tracking-wider opacity-80">' + escapeToastHtml(statusLabel) + '</span>' +
+							'<span class="text-sm break-words">' + escapeToastHtml(displayTitle) + '</span>' +
+						'</div>' +
+						'<button class="btn btn-ghost btn-xs btn-circle shrink-0" onclick="event.stopPropagation(); dismissToast(this.parentElement)">' +
+							'<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>' +
+						'</button>';
+
+					var linkURL = String(options.linkURL || '').trim();
+					var linkText = String(options.linkText || '').trim();
+					if (linkURL !== '') {
+						if (linkText === '') {
+							linkText = 'Open';
+						}
+						var containerEl = toast.querySelector('.toast-message-container');
+						if (containerEl) {
+							var link = document.createElement('a');
+							link.href = linkURL;
+							link.className = 'link link-primary text-xs mt-1 self-start';
+							link.textContent = linkText;
+							link.addEventListener('click', function(event) {
+								event.preventDefault();
+								event.stopPropagation();
+								closeOpenModalsForToastNavigation();
+								htmx.ajax('GET', linkURL, {
+									target: '#main-content',
+									swap: 'innerHTML'
+								}).catch(function(err) {
+									console.error('[toast] Failed to load link URL:', err);
+								});
+								history.pushState({}, '', linkURL);
+								dismissToast(toast);
+							});
+							containerEl.appendChild(link);
+						}
+					}
+
+					// Click to navigate to task detail page (if taskId provided)
+					if (taskId) {
+						toast.addEventListener('click', function() {
+							closeOpenModalsForToastNavigation();
+							htmx.ajax('GET', '/tasks/' + taskId, {
+								target: '#main-content',
+								swap: 'innerHTML'
+							}).catch(function(err) {
+								console.error('[toast] Failed to load task detail:', err);
+							});
+							history.pushState({}, '', '/tasks/' + taskId);
+							dismissToast(toast);
+						});
+					}
+
+					container.appendChild(toast);
+
+					// Auto-dismiss after 5 seconds
+					const autoDismiss = setTimeout(function() {
+						dismissToast(toast);
+					}, 5000);
+					toast._autoDismiss = autoDismiss;
+
+					// Limit to 5 visible toasts
+					const toasts = container.querySelectorAll('.toast-notification:not(.toast-dismiss)');
+					if (toasts.length > 5) {
+						dismissToast(toasts[0]);
+					}
+				};
+
+				// Bridge HTMX-triggered toast events into the global toast renderer.
+				// Handlers can emit: {"openvibelyToast":{"message":"...", "status":"failed"}}
+				if (!window._openvibelyToastBridgeRegistered) {
+					window._openvibelyToastBridgeRegistered = true;
+					document.body.addEventListener('openvibelyToast', function(event) {
+						var detail = event && event.detail ? event.detail : {};
+						var message = typeof detail === 'string' ? detail : (detail.message || '');
+						if (!message || !window.showToast) return;
+
+						var status = detail.status || detail.type || 'info';
+						if (status === 'success') status = 'completed';
+						if (status === 'error') status = 'failed';
+						if (status === 'warning') status = 'cancelled';
+
+						var taskId = detail.taskId || detail.task_id || '';
+						var linkURL = detail.linkURL || detail.link_url || '';
+						var linkText = detail.linkText || detail.link_text || '';
+						window.showToast(message, status, taskId, { linkURL: linkURL, linkText: linkText });
+					});
+				}
+
+				window.dismissToast = function(toast) {
+					if (!toast || toast.classList.contains('toast-dismiss')) return;
+					if (toast._autoDismiss) clearTimeout(toast._autoDismiss);
+					toast.classList.add('toast-dismiss');
+					toast.addEventListener('animationend', function() {
+						toast.remove();
+					}, { once: true });
+					// Fallback: force-remove if animationend doesn't fire
+					// (prefers-reduced-motion, browser quirks, transition/animation conflicts)
+					setTimeout(function() {
+						if (toast.parentNode) toast.remove();
+					}, 400);
+				};
+			</script>
+
+			<!-- Card Search Helper -->
+			<script>
+				(function() {
+					// Shared card search/filter helper.
+					// Usage: add <input data-card-search="<page-key>" placeholder="...">
+					//        and   data-search-card + data-search-text="..." on each card.
+					// The helper filters cards, shows/hides a no-results message, and
+					// persists the search term in sessionStorage per page key.
+
+					function initCardSearch(input) {
+						var pageKey = input.getAttribute('data-card-search');
+						if (!pageKey) return;
+						var storageKey = 'ov_card_search_' + pageKey;
+						var container = input.closest('[data-search-container]');
+						if (!container) return;
+
+						function applyFilter() {
+							var term = (input.value || '').toLowerCase().trim();
+							try { sessionStorage.setItem(storageKey, input.value || ''); } catch(e) {}
+
+							var cards = container.querySelectorAll('[data-search-card]');
+							var visibleCount = 0;
+							for (var i = 0; i < cards.length; i++) {
+								var text = (cards[i].getAttribute('data-search-text') || '').toLowerCase();
+								var match = !term || text.indexOf(term) !== -1;
+								cards[i].style.display = match ? '' : 'none';
+								if (match) visibleCount++;
+							}
+
+							// Show/hide no-results message
+							var noResults = container.querySelector('[data-search-no-results]');
+							if (noResults) {
+								noResults.style.display = (term && visibleCount === 0) ? '' : 'none';
+							}
+						}
+
+						if (!input.dataset.cardSearchInit) {
+							// Restore persisted term once per input instance.
+							var saved = '';
+							try { saved = sessionStorage.getItem(storageKey) || ''; } catch(e) {}
+							if (saved) {
+								input.value = saved;
+							}
+							input.addEventListener('input', applyFilter);
+							input.dataset.cardSearchInit = 'true';
+						}
+
+						// Apply on init/re-init (for restored term or HTMX re-swap)
+						applyFilter();
+					}
+
+					function initAllCardSearches(root) {
+						var inputs = (root || document).querySelectorAll('input[data-card-search]');
+						for (var i = 0; i < inputs.length; i++) {
+							initCardSearch(inputs[i]);
+						}
+					}
+
+					// Init on page load
+					setTimeout(function() { initAllCardSearches(); }, 0);
+
+					// Re-init after HTMX swaps (handles partial container refreshes)
+					document.body.addEventListener('htmx:afterSettle', function(evt) {
+						if (evt.detail && evt.detail.elt) {
+							initAllCardSearches(evt.detail.elt);
+						}
+					});
+				})();
+			</script>
+
+			<!-- Selection Counter -->
+			<div id="selection-counter">
+				<span id="selection-count">0</span>
+				<span>tasks selected</span>
+				<button onclick="clearSelection()" class="btn btn-sm btn-ghost">Clear</button>
+			</div>
+		</body>
+	</html>
+}

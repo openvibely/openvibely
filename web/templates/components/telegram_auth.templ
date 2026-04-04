@@ -1,0 +1,71 @@
+package components
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+// TelegramAuthorizedUsersList renders the list of authorized Telegram users with add/remove controls.
+templ TelegramAuthorizedUsersList(users []models.TelegramAuthorizedUser, projectID string) {
+	<div id="telegram-authorized-users">
+		if len(users) == 0 {
+			<p class="text-sm opacity-50 italic mb-3">No authorized users configured. All Telegram users can interact with this project.</p>
+		} else {
+			<div class="space-y-2 mb-3">
+				for _, user := range users {
+					<div class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2">
+						<div class="flex items-center gap-2">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+							</svg>
+							<span class="text-sm font-medium">{ user.DisplayName }</span>
+							if user.TelegramUsername != "" {
+								<span class="text-xs opacity-50">{ fmt.Sprintf("@%s", user.TelegramUsername) }</span>
+							}
+							if user.TelegramUserID != 0 {
+								<span class="text-xs opacity-50">{ fmt.Sprintf("ID: %d", user.TelegramUserID) }</span>
+							}
+						</div>
+						<button
+							type="button"
+							class="btn btn-ghost btn-xs text-error"
+							hx-delete={ fmt.Sprintf("/channels/telegram/authorized-users/%s?project_id=%s", user.ID, projectID) }
+							hx-target="#telegram-authorized-users"
+							hx-swap="outerHTML"
+							hx-confirm="Remove this authorized user?"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+							</svg>
+						</button>
+					</div>
+				}
+			</div>
+		}
+		<div class="flex gap-2" id="telegram-authorized-users-add-controls">
+			<input type="hidden" name="project_id" value={ projectID }/>
+			<input
+				type="text"
+				name="user_id_or_username"
+				placeholder="Telegram user ID or username"
+				class="input input-bordered input-sm flex-1"
+			/>
+			<input
+				type="text"
+				name="display_name"
+				placeholder="Display name (optional)"
+				class="input input-bordered input-sm w-40"
+			/>
+			<button
+				type="button"
+				class="btn btn-primary btn-sm"
+				hx-post="/channels/telegram/authorized-users"
+				hx-target="#telegram-authorized-users"
+				hx-swap="outerHTML"
+				hx-include="#telegram-authorized-users-add-controls"
+			>
+				Add
+			</button>
+		</div>
+	</div>
+}

@@ -1,0 +1,24 @@
+# macOS filesystem metadata
+.DS_Store
+
+# Runtime-generated artifacts (attachments, managed repos, local app state)
+uploads/
+repos/
+.openvibely/
+.worktrees/
+logs/
+
+# Local SQLite runtime files
+openvibely.db
+openvibely.db-shm
+openvibely.db-wal
+
+# Local build/test binaries
+bin/
+/server
+*.test
+
+# Local environment overrides
+.env
+.env.local
+.env.*.local

@@ -1,0 +1,355 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+// Templates is the full page view
+templ Templates(projects []models.Project, currentProject *models.Project, data *models.TemplateDashboardData) {
+	@layout.Base("Task Templates", projects, getProjectID(currentProject, projects)) {
+		if currentProject == nil {
+			<div class="p-8 text-center">
+				<p class="text-base-content/70">No projects found. Create a project first.</p>
+			</div>
+		} else {
+			@TemplatesContent(currentProject, data)
+		}
+	}
+}
+
+// TemplatesContent is the HTMX-swappable content
+templ TemplatesContent(currentProject *models.Project, data *models.TemplateDashboardData) {
+	<div class="p-6">
+		<!-- Header -->
+		<div class="flex justify-between items-center mb-6">
+			<div>
+				<h1 class="text-3xl font-bold">Task Templates</h1>
+				<p class="text-base-content/70 mt-1">Reusable task configurations for common workflows</p>
+			</div>
+			<button class="btn btn-primary" onclick="document.getElementById('create-template-modal').showModal()">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+				</svg>
+				Create Template
+			</button>
+		</div>
+
+		<!-- Search and Filter Bar -->
+		<div class="flex gap-4 mb-6">
+			<div class="flex-1">
+				<input
+					type="text"
+					placeholder="Search templates..."
+					class="input input-bordered w-full"
+					hx-get={ fmt.Sprintf("/templates/search?project_id=%s", currentProject.ID) }
+					hx-trigger="keyup changed delay:300ms"
+					hx-target="#template-grid"
+					name="q"
+				/>
+			</div>
+			<select
+				class="select select-bordered"
+				hx-get={ fmt.Sprintf("/templates/filter?project_id=%s", currentProject.ID) }
+				hx-trigger="change"
+				hx-target="#template-grid"
+				name="category"
+			>
+				<option value="all">All Categories</option>
+				<option value="code_review">Code Review</option>
+				<option value="bug_fix">Bug Fix</option>
+				<option value="feature">Feature</option>
+				<option value="refactor">Refactor</option>
+				<option value="documentation">Documentation</option>
+				<option value="testing">Testing</option>
+				<option value="research">Research</option>
+				<option value="deployment">Deployment</option>
+				<option value="maintenance">Maintenance</option>
+				<option value="planning">Planning</option>
+			</select>
+		</div>
+
+		<!-- Quick Access: Favorites & Recently Used -->
+		if len(data.Favorites) > 0 || len(data.RecentlyUsed) > 0 {
+			<div class="mb-8">
+				if len(data.Favorites) > 0 {
+					<div class="mb-4">
+						<h2 class="text-xl font-semibold mb-3 flex items-center gap-2">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-warning" viewBox="0 0 20 20" fill="currentColor">
+								<path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+							</svg>
+							Favorites
+						</h2>
+						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+							for _, tmpl := range data.Favorites {
+								@TemplateCard(tmpl, currentProject.ID)
+							}
+						</div>
+					</div>
+				}
+
+				if len(data.RecentlyUsed) > 0 {
+					<div class="mb-4">
+						<h2 class="text-xl font-semibold mb-3">Recently Used</h2>
+						<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+							for _, tmpl := range data.RecentlyUsed {
+								@TemplateCard(tmpl, currentProject.ID)
+							}
+						</div>
+					</div>
+				}
+			</div>
+		}
+
+		<!-- Template Grid -->
+		<div id="template-grid">
+			@TemplateGrid(data, currentProject.ID)
+		</div>
+
+		<!-- Create Template Modal -->
+		@CreateTemplateModal(currentProject.ID)
+	</div>
+}
+
+// TemplateGrid displays the template grid
+templ TemplateGrid(data *models.TemplateDashboardData, projectID string) {
+	<!-- Built-in Templates -->
+	if len(data.BuiltInTemplates) > 0 {
+		<div class="mb-8">
+			<h2 class="text-xl font-semibold mb-3">Built-in Templates</h2>
+			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+				for _, tmpl := range data.BuiltInTemplates {
+					@TemplateCard(tmpl, projectID)
+				}
+			</div>
+		</div>
+	}
+
+	<!-- Custom Templates -->
+	<div>
+		<h2 class="text-xl font-semibold mb-3">Custom Templates</h2>
+		if len(data.CustomTemplates) == 0 {
+			<div class="card bg-base-200 p-8 text-center">
+				<p class="text-base-content/70">No custom templates yet. Create your first template!</p>
+			</div>
+		} else {
+			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+				for _, tmpl := range data.CustomTemplates {
+					@TemplateCard(tmpl, projectID)
+				}
+			</div>
+		}
+	</div>
+}
+
+// TemplateCard displays a single template card
+templ TemplateCard(tmpl models.TaskTemplate, projectID string) {
+	<div class="card bg-base-200 hover:bg-base-300 transition-all shadow-md">
+		<div class="card-body p-4">
+			<!-- Header -->
+			<div class="flex justify-between items-start mb-2">
+				<div class="flex-1">
+					<h3 class="card-title text-lg">{ tmpl.Name }</h3>
+					<div class="flex gap-2 mt-1">
+						<span class={ "badge badge-sm", categoryBadgeClass(tmpl.CategoryFilter) }>
+							{ tmpl.CategoryFilter }
+						</span>
+						if tmpl.UsageCount > 0 {
+							<span class="badge badge-sm badge-ghost">
+								Used { fmt.Sprint(tmpl.UsageCount) }×
+							</span>
+						}
+					</div>
+				</div>
+				<!-- Favorite Toggle -->
+				<button
+					class={ "btn btn-ghost btn-sm btn-circle", favoriteClass(tmpl.IsFavorite) }
+					hx-post={ fmt.Sprintf("/templates/%s/favorite?project_id=%s", tmpl.ID, projectID) }
+					hx-vals={ fmt.Sprintf(`{"is_favorite": %t}`, !tmpl.IsFavorite) }
+					hx-target="#template-grid"
+					hx-swap="outerHTML"
+				>
+					if tmpl.IsFavorite {
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+							<path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path>
+						</svg>
+					} else {
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
+						</svg>
+					}
+				</button>
+			</div>
+
+			<!-- Description -->
+			<p class="text-sm text-base-content/70 mb-3 line-clamp-2">{ tmpl.Description }</p>
+
+			<!-- Metadata -->
+			<div class="flex gap-2 text-xs text-base-content/60 mb-3">
+				<span>Priority: { priorityLabel(tmpl.Priority) }</span>
+				<span>•</span>
+				<span>Category: { string(tmpl.Category) }</span>
+			</div>
+
+			<!-- Actions -->
+			<div class="card-actions justify-end">
+				if !tmpl.IsBuiltIn {
+					<button
+						class="btn btn-ghost btn-sm text-error"
+						hx-delete={ fmt.Sprintf("/templates/%s?project_id=%s", tmpl.ID, projectID) }
+						hx-confirm="Delete this template?"
+						hx-target="#template-grid"
+						hx-swap="outerHTML"
+					>
+						Delete
+					</button>
+				}
+				<button
+					class="btn btn-primary btn-sm"
+					hx-post={ fmt.Sprintf("/templates/%s/create-task?project_id=%s", tmpl.ID, projectID) }
+				>
+					Use Template
+				</button>
+			</div>
+		</div>
+	</div>
+}
+
+// Helper functions
+func categoryBadgeClass(category string) string {
+	switch category {
+	case "code_review":
+		return "badge-info"
+	case "bug_fix":
+		return "badge-error"
+	case "feature":
+		return "badge-success"
+	case "refactor":
+		return "badge-warning"
+	case "testing":
+		return "badge-secondary"
+	default:
+		return "badge-ghost"
+	}
+}
+
+func favoriteClass(isFavorite bool) string {
+	if isFavorite {
+		return "text-warning"
+	}
+	return ""
+}
+
+
+// CreateTemplateModal for creating new templates
+templ CreateTemplateModal(projectID string) {
+	<dialog id="create-template-modal" class="modal">
+		<div class="modal-box w-11/12 max-w-3xl">
+			<h3 class="font-bold text-lg mb-4">Create Custom Template</h3>
+			<form
+				hx-post={ fmt.Sprintf("/templates?project_id=%s", projectID) }
+				hx-target="#template-grid"
+				hx-swap="outerHTML"
+				method="post"
+				onsubmit="document.getElementById('create-template-modal').close()"
+			>
+				<div class="space-y-4">
+					<div class="form-control">
+						<label class="label"><span class="label-text">Name</span></label>
+						<input type="text" name="name" class="input input-bordered" required/>
+					</div>
+
+					<div class="form-control">
+						<label class="label"><span class="label-text">Description</span></label>
+						<input type="text" name="description" class="input input-bordered"/>
+					</div>
+
+					<div class="form-control">
+						<label class="label"><span class="label-text">Default Prompt</span></label>
+						<textarea name="default_prompt" class="textarea textarea-bordered h-32" required></textarea>
+					</div>
+
+					<div class="grid grid-cols-2 gap-4">
+						<div class="form-control">
+							<label class="label"><span class="label-text">Task Category</span></label>
+							<select name="category" class="select select-bordered">
+								<option value="active">Active</option>
+								<option value="backlog" selected>Backlog</option>
+							</select>
+						</div>
+
+						<div class="form-control">
+							<label class="label"><span class="label-text">Template Category</span></label>
+							<select name="category_filter" class="select select-bordered">
+								<option value="all">General</option>
+								<option value="code_review">Code Review</option>
+								<option value="bug_fix">Bug Fix</option>
+								<option value="feature">Feature</option>
+								<option value="refactor">Refactor</option>
+								<option value="documentation">Documentation</option>
+								<option value="testing">Testing</option>
+								<option value="research">Research</option>
+								<option value="deployment">Deployment</option>
+								<option value="maintenance">Maintenance</option>
+								<option value="planning">Planning</option>
+							</select>
+						</div>
+					</div>
+
+					<div class="grid grid-cols-2 gap-4">
+						<div class="form-control">
+							<label class="label"><span class="label-text">Priority</span></label>
+							<select name="priority" class="select select-bordered">
+								<option value="1">Low</option>
+								<option value="2" selected>Normal</option>
+								<option value="3">High</option>
+								<option value="4">Urgent</option>
+							</select>
+						</div>
+
+						<div class="form-control">
+							<label class="label"><span class="label-text">Tag</span></label>
+							<select name="tag" class="select select-bordered">
+								<option value="">None</option>
+								<option value="feature">Feature</option>
+								<option value="bug">Bug</option>
+							</select>
+						</div>
+					</div>
+				</div>
+
+				<div class="modal-action">
+					<button type="button" class="btn" onclick="document.getElementById('create-template-modal').close()">Cancel</button>
+					<button type="submit" class="btn btn-primary">Create</button>
+				</div>
+			</form>
+		</div>
+		<form method="dialog" class="modal-backdrop">
+			<button>close</button>
+		</form>
+	</dialog>
+}
+
+// Search/Filter Results
+templ TemplateSearchResults(results []models.TaskTemplate) {
+	if len(results) == 0 {
+		<div class="card bg-base-200 p-8 text-center">
+			<p class="text-base-content/70">No templates found</p>
+		</div>
+	} else {
+		<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+			for _, tmpl := range results {
+				if tmpl.ProjectID != nil {
+					@TemplateCard(tmpl, *tmpl.ProjectID)
+				} else {
+					@TemplateCard(tmpl, "")
+				}
+			}
+		</div>
+	}
+}
+
+templ TemplateFilterResults(results []models.TaskTemplate) {
+	@TemplateSearchResults(results)
+}

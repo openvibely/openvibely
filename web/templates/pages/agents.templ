@@ -1,0 +1,1116 @@
+package pages
+
+import (
+	"encoding/json"
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ Agents(projects []models.Project, currentProjectID string, agents []models.Agent, modelOptions []models.AgentModelOption) {
+	@layout.Base("Agents", projects, currentProjectID) {
+		@agentsContent(agents, modelOptions)
+	}
+}
+
+templ AgentsContent(agents []models.Agent, modelOptions []models.AgentModelOption) {
+	@agentsContent(agents, modelOptions)
+}
+
+func agentToolsJSON(tools []string) string {
+	b, _ := json.Marshal(tools)
+	return string(b)
+}
+
+func agentPluginsJSON(plugins []string) string {
+	b, _ := json.Marshal(plugins)
+	return string(b)
+}
+
+func agentSkillsJSON(skills []models.SkillConfig) string {
+	b, _ := json.Marshal(skills)
+	return string(b)
+}
+
+func agentMCPJSON(mcpServers []models.MCPServerConfig) string {
+	b, _ := json.Marshal(mcpServers)
+	return string(b)
+}
+
+templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOption) {
+	<div id="agents-container" data-search-container>
+		<div class="flex items-center justify-between mb-6">
+			<h2 class="text-2xl font-bold">Agents</h2>
+			<button class="btn btn-primary btn-sm" onclick="openNewAgentModal()">
+				+ Add Agent
+			</button>
+		</div>
+		@CardSearchInput("agents", "Search agents...")
+
+		if len(agents) == 0 {
+			<div class="text-center py-12">
+				<p class="opacity-50 mb-4">No agents configured yet. Create one and attach plugins from marketplace resources.</p>
+				<button class="btn btn-primary" onclick="openNewAgentModal()">
+					Create Agent
+				</button>
+			</div>
+		} else {
+			<div class="grid gap-4">
+				for _, agent := range agents {
+					<div
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+						data-agent-id={ agent.ID }
+						data-agent-name={ agent.Name }
+						data-agent-description={ agent.Description }
+						data-agent-system-prompt={ agent.SystemPrompt }
+						data-agent-model={ agent.Model }
+						data-agent-tools={ agentToolsJSON(agent.Tools) }
+						data-agent-plugins={ agentPluginsJSON(agent.Plugins) }
+						data-agent-skills={ agentSkillsJSON(agent.Skills) }
+						data-agent-mcp-servers={ agentMCPJSON(agent.MCPServers) }
+						data-search-card
+						data-search-text={ agent.Name + " " + agent.Description + " " + agent.Model + " " + agent.SystemPrompt }
+						onclick="editAgentFromData(this)"
+					>
+						<div class="card-body relative">
+							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+								<div class="dropdown dropdown-end">
+									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+										</svg>
+									</label>
+									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+										<li>
+											<button onclick="editAgentFromData(this.closest('[data-agent-id]'))">Edit</button>
+										</li>
+										<li>
+											<button
+												class="text-error"
+												hx-delete={ fmt.Sprintf("/agents/%s", agent.ID) }
+												hx-target="#agents-container"
+												hx-swap="outerHTML"
+												hx-confirm="Delete this agent? Tasks using it will be unlinked."
+											>
+												Delete
+											</button>
+										</li>
+									</ul>
+								</div>
+							</div>
+							<div class="pr-12">
+								<h3 class="font-bold">
+									{ agent.Name }
+								</h3>
+								if agent.Description != "" {
+									<p class="text-sm opacity-60 mt-1 line-clamp-2">{ agent.Description }</p>
+								}
+								<div class="flex flex-wrap gap-2 mt-2">
+									if agent.Model != "inherit" {
+										<span class="badge badge-outline badge-sm">model: { agent.Model }</span>
+									}
+									if len(agent.Tools) > 0 {
+										<span class="badge badge-outline badge-sm">{ fmt.Sprintf("%d tools", len(agent.Tools)) }</span>
+									}
+									if len(agent.Plugins) > 0 {
+										<span class="badge badge-outline badge-sm">{ fmt.Sprintf("%d plugins", len(agent.Plugins)) }</span>
+									}
+									if len(agent.Skills) > 0 {
+										<span class="badge badge-outline badge-sm">{ fmt.Sprintf("%d skills", len(agent.Skills)) }</span>
+									}
+									if len(agent.MCPServers) > 0 {
+										<span class="badge badge-outline badge-sm">{ fmt.Sprintf("%d MCP servers", len(agent.MCPServers)) }</span>
+									}
+								</div>
+								if agent.SystemPrompt != "" {
+									<p class="text-xs opacity-40 mt-2 line-clamp-1">{ agent.SystemPrompt }</p>
+								}
+							</div>
+						</div>
+					</div>
+				}
+			</div>
+		}
+
+		<dialog id="agent_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
+			<div class="modal-box max-w-4xl p-0 overflow-hidden">
+				<div class="px-6 pt-6 pb-2">
+					<h3 id="agent_modal_title" class="font-bold text-lg">New Agent</h3>
+				</div>
+				<form id="agent_form" method="post" action="/agents" class="flex flex-col h-[78vh]">
+					<div class="px-6 pb-3 border-b border-base-300">
+						<div role="tablist" class="tabs tabs-bordered tabs-sm w-full overflow-x-auto flex-nowrap">
+							<button type="button" role="tab" class="tab tab-active" data-agent-section-tab="details" aria-selected="true" onclick="setAgentSection('details')">Agent Details</button>
+							<button type="button" role="tab" class="tab" data-agent-section-tab="plugins" aria-selected="false" onclick="setAgentSection('plugins')">Plugins</button>
+							<button type="button" role="tab" class="tab" data-agent-section-tab="marketplace" aria-selected="false" onclick="setAgentSection('marketplace')">Marketplace</button>
+						</div>
+					</div>
+
+					<div class="flex-1 min-h-0 px-6 py-3">
+						<div data-agent-section-panel="details" class="h-full overflow-y-auto pr-1">
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Name</span></label>
+								<input type="text" id="agent_name" name="name" class="input input-bordered" required placeholder="my-agent"/>
+							</div>
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Description</span></label>
+								<p class="text-xs opacity-60 mb-2">Generation uses selected plugins when helpful. If none are selected, it generates from this description only.</p>
+								<div class="flex gap-2">
+									<input type="text" id="agent_description" name="description" class="input input-bordered flex-1" placeholder="e.g., Review UI components with Playwright and suggest accessibility fixes"/>
+									<button type="button" id="agent_generate_btn" class="btn btn-outline" onclick="generateAgentFromPrompt()">Generate</button>
+								</div>
+								<p id="agent_generated_summary" class="text-xs opacity-70 mt-2"></p>
+							</div>
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">System Prompt</span></label>
+								<textarea id="agent_system_prompt" name="system_prompt" class="textarea textarea-bordered h-32" placeholder="You are a specialized agent that..."></textarea>
+							</div>
+
+							<div class="grid grid-cols-1 gap-3 mb-3">
+								<div class="form-control">
+									<label class="label"><span class="label-text">Model</span></label>
+									<select id="agent_model" name="model" class="select select-bordered">
+										<option value="inherit">Inherit (from task)</option>
+										for _, option := range modelOptions {
+											<option value={ option.Value }>{ option.Label }</option>
+										}
+									</select>
+								</div>
+							</div>
+							<div class="divider text-sm opacity-50">Allowed Tools</div>
+							<div class="flex flex-wrap gap-2 mb-3" id="agent_tools_checkboxes">
+								for _, tool := range models.AllAgentTools {
+									<label class="label cursor-pointer gap-1 px-2 py-1 border border-base-300 rounded-lg">
+										<input type="checkbox" class="checkbox checkbox-sm agent-tool-checkbox" value={ tool }/>
+										<span class="label-text text-sm">{ tool }</span>
+									</label>
+								}
+							</div>
+						</div>
+
+						<div data-agent-section-panel="plugins" class="h-full overflow-y-auto pr-1 hidden">
+							<div class="space-y-3">
+								<div class="border border-base-300 rounded-lg p-3">
+									<div class="flex items-center justify-between mb-2">
+										<p class="text-sm font-medium">Plugins</p>
+										<p id="plugin_selected_count" class="text-xs opacity-60">No plugins selected</p>
+									</div>
+									<div class="mb-2">
+										<input
+											type="text"
+											id="plugin_search_input"
+											class="input input-bordered input-sm w-full"
+											placeholder="Search plugins by name"
+											oninput="debouncedRenderPluginCatalog()"
+										/>
+									</div>
+									<div id="plugin_catalog_loading" class="hidden mb-2 text-xs opacity-70 flex items-center gap-2">
+										<span class="loading loading-spinner loading-xs"></span>
+										<span>Loading marketplace data...</span>
+									</div>
+									<div id="plugin_catalog" class="space-y-2 max-h-[500px] overflow-auto"></div>
+								</div>
+							</div>
+						</div>
+
+						<div data-agent-section-panel="marketplace" class="h-full overflow-y-auto pr-1 hidden">
+							<div class="space-y-3">
+								<div class="border border-base-300 rounded-lg p-3">
+									<p class="text-sm font-medium mb-2">Plugin Marketplace</p>
+									<div class="flex flex-wrap gap-2 mb-3">
+										<input id="plugin_marketplace_source" class="input input-bordered input-sm flex-1 min-w-[16rem]" placeholder="GitHub repo, URL, or local path"/>
+										<button id="plugin_marketplace_add_btn" type="button" class="btn btn-outline btn-sm" onclick="addPluginMarketplace()">Add</button>
+										<button id="plugin_marketplace_restore_btn" type="button" class="btn btn-ghost btn-sm" onclick="resetDefaultPluginMarketplaces()">Restore Defaults</button>
+									</div>
+									<p id="plugin_marketplace_action_status" class="hidden text-xs mb-2"></p>
+									<div id="plugin_marketplace_list" class="space-y-2"></div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<input type="hidden" id="agent_tools_json" name="tools_json"/>
+					<input type="hidden" id="agent_plugins_json" name="plugins_json"/>
+					<input type="hidden" id="agent_skills_json" name="skills_json"/>
+					<input type="hidden" id="agent_mcp_servers_json" name="mcp_servers_json"/>
+
+					<div class="modal-action mt-0 sticky bottom-0 z-10 border-t border-base-300 bg-base-100 px-6 py-3">
+						<button type="button" class="btn" onclick="agent_modal.close()">Cancel</button>
+						<button type="submit" class="btn btn-primary" onclick="serializeAgentFormData()">Save</button>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop"><button>close</button></form>
+		</dialog>
+
+		<script>
+		let agentPluginState = { marketplaces: [], installed: [], available: [], runtime: [] };
+		let selectedPluginIDs = [];
+		let generatedSkillsState = [];
+		let generatedMCPServersState = [];
+		let activeAgentSection = 'details';
+		let activeAgentID = '';
+		
+		let installingPluginIDs = new Set();
+		let uninstallingPluginIDs = new Set();
+		let pendingUninstalledPluginIDs = new Set();
+		let addingMarketplace = false;
+		let removingMarketplaceNames = new Set();
+		let syncingMarketplaceNames = new Set();
+		let restoringDefaultMarketplaces = false;
+
+			function setAgentSection(sectionName) {
+				const sectionNameMap = {
+					details: 'details',
+					plugins: 'plugins',
+					marketplace: 'marketplace',
+				};
+				const nextSection = sectionNameMap[sectionName] || 'details';
+				activeAgentSection = nextSection;
+				document.querySelectorAll('[data-agent-section-tab]').forEach(tab => {
+					const isActive = tab.dataset.agentSectionTab === nextSection;
+					tab.classList.toggle('tab-active', isActive);
+					tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+				});
+				document.querySelectorAll('[data-agent-section-panel]').forEach(panel => {
+					panel.classList.toggle('hidden', panel.dataset.agentSectionPanel !== nextSection);
+				});
+			}
+
+			let pluginSearchTerm = '';
+			let pluginRenderTimer = null;
+			let pluginCatalogLoading = false;
+			let pluginStateRequestToken = 0;
+			let pluginStateLoadInFlight = 0;
+
+		function debouncedRenderPluginCatalog() {
+			if (pluginRenderTimer) {
+				clearTimeout(pluginRenderTimer);
+			}
+			pluginRenderTimer = setTimeout(() => {
+				pluginRenderTimer = null;
+				renderPluginCatalog();
+			}, 150);
+		}
+
+		function resetGeneratedState() {
+			generatedSkillsState = [];
+			generatedMCPServersState = [];
+			document.getElementById('agent_generated_summary').textContent = '';
+		}
+
+		function updateGeneratedSummary() {
+			const skillCount = Array.isArray(generatedSkillsState) ? generatedSkillsState.length : 0;
+			const mcpCount = Array.isArray(generatedMCPServersState) ? generatedMCPServersState.length : 0;
+			const summary = document.getElementById('agent_generated_summary');
+			if (skillCount === 0 && mcpCount === 0) {
+				summary.textContent = '';
+				return;
+			}
+			summary.textContent = `Generated extras: ${skillCount} skills, ${mcpCount} MCP servers`;
+		}
+
+		function escapeHtml(value) {
+			return String(value || '')
+				.replaceAll('&', '&amp;')
+				.replaceAll('<', '&lt;')
+				.replaceAll('>', '&gt;')
+				.replaceAll('"', '&quot;')
+				.replaceAll("'", '&#39;');
+		}
+
+		function normalizePluginID(item) {
+			if (!item || typeof item !== 'object') return '';
+			if (typeof item.pluginId === 'string' && item.pluginId.trim()) return item.pluginId.trim();
+			if (typeof item.id === 'string' && item.id.trim()) return item.id.trim();
+			return '';
+		}
+
+		function setAgentModelSelection(value) {
+			const select = document.getElementById('agent_model');
+			if (!select) return;
+			const requested = String(value || '').trim() || 'inherit';
+			const hasOption = Array.from(select.options).some(opt => opt.value === requested);
+			select.value = hasOption ? requested : 'inherit';
+		}
+
+		function setAgentTools(tools) {
+			const allowed = Array.isArray(tools) ? tools : [];
+			document.querySelectorAll('.agent-tool-checkbox').forEach(cb => {
+				cb.checked = allowed.includes(cb.value);
+			});
+		}
+
+		function refreshSelectedPluginsFromDOM() {
+			const ids = [];
+			document.querySelectorAll('.agent-plugin-checkbox:checked').forEach(cb => {
+				const id = String(cb.value || '').trim();
+				if (id) ids.push(id);
+			});
+			selectedPluginIDs = Array.from(new Set(ids)).sort();
+			renderSelectedPluginCount();
+		}
+
+		function renderSelectedPluginCount() {
+			const el = document.getElementById('plugin_selected_count');
+			if (!el) return;
+			el.textContent = selectedPluginIDs.length > 0
+				? `${selectedPluginIDs.length} selected`
+				: 'No plugins selected';
+		}
+
+		function setPluginCatalogLoading(isLoading) {
+			pluginCatalogLoading = Boolean(isLoading);
+			const loadingEl = document.getElementById('plugin_catalog_loading');
+			if (loadingEl) {
+				loadingEl.classList.toggle('hidden', !pluginCatalogLoading);
+			}
+			const catalogEl = document.getElementById('plugin_catalog');
+			if (catalogEl) {
+				catalogEl.setAttribute('aria-busy', pluginCatalogLoading ? 'true' : 'false');
+			}
+			renderPluginCatalog();
+		}
+
+		function setPluginInstallInProgress(pluginID, inProgress) {
+			const id = String(pluginID || '').trim();
+			if (!id) return;
+			if (inProgress) {
+				installingPluginIDs.add(id);
+			} else {
+				installingPluginIDs.delete(id);
+			}
+			renderPluginCatalog();
+		}
+
+		function setPluginUninstallInProgress(pluginID, inProgress) {
+			const id = String(pluginID || '').trim();
+			if (!id) return;
+			if (inProgress) {
+				uninstallingPluginIDs.add(id);
+			} else {
+				uninstallingPluginIDs.delete(id);
+			}
+			renderPluginCatalog();
+		}
+
+		function setMarketplaceActionStatus(message, type) {
+			const statusEl = document.getElementById('plugin_marketplace_action_status');
+			if (!statusEl) return;
+			const text = String(message || '').trim();
+			if (!text) {
+				statusEl.textContent = '';
+				statusEl.classList.add('hidden');
+				statusEl.classList.remove('text-error', 'text-success', 'opacity-70');
+				return;
+			}
+			statusEl.textContent = text;
+			statusEl.classList.remove('hidden', 'text-error', 'text-success', 'opacity-70');
+			if (type === 'error') {
+				statusEl.classList.add('text-error');
+			} else if (type === 'success') {
+				statusEl.classList.add('text-success');
+			} else {
+				statusEl.classList.add('opacity-70');
+			}
+		}
+
+		function hasActiveMarketplaceAction() {
+			return addingMarketplace || restoringDefaultMarketplaces || syncingMarketplaceNames.size > 0 || removingMarketplaceNames.size > 0;
+		}
+
+		function hasActivePluginMutation() {
+			return installingPluginIDs.size > 0 || uninstallingPluginIDs.size > 0;
+		}
+
+		function renderPluginMarketplaces() {
+			const root = document.getElementById('plugin_marketplace_list');
+			if (!root) return;
+			const addBtn = document.getElementById('plugin_marketplace_add_btn');
+			const sourceInput = document.getElementById('plugin_marketplace_source');
+			const restoreBtn = document.getElementById('plugin_marketplace_restore_btn');
+			const anyMarketplaceAction = hasActiveMarketplaceAction();
+			if (addBtn) {
+				addBtn.disabled = anyMarketplaceAction;
+				addBtn.setAttribute('aria-busy', addingMarketplace ? 'true' : 'false');
+				addBtn.innerHTML = addingMarketplace
+					? '<span class="loading loading-spinner loading-xs"></span> Adding...'
+					: 'Add';
+			}
+			if (sourceInput) {
+				sourceInput.disabled = anyMarketplaceAction;
+				sourceInput.setAttribute('aria-busy', addingMarketplace ? 'true' : 'false');
+			}
+			if (restoreBtn) {
+				restoreBtn.disabled = anyMarketplaceAction;
+				restoreBtn.setAttribute('aria-busy', restoringDefaultMarketplaces ? 'true' : 'false');
+				restoreBtn.innerHTML = restoringDefaultMarketplaces
+					? '<span class="loading loading-spinner loading-xs"></span> Restoring...'
+					: 'Restore Defaults';
+			}
+			const marketplaces = Array.isArray(agentPluginState.marketplaces) ? agentPluginState.marketplaces : [];
+			if (marketplaces.length === 0) {
+				root.innerHTML = '<p class="text-xs opacity-60">No marketplaces configured.</p>';
+				return;
+			}
+			root.innerHTML = marketplaces.map(mp => {
+				const source = mp.url || mp.source || mp.repo || '';
+				const name = String(mp.name || source || 'marketplace');
+				const safeName = escapeHtml(name);
+				const isSyncing = syncingMarketplaceNames.has(name);
+				const isRemoving = removingMarketplaceNames.has(name);
+				const disableSync = anyMarketplaceAction;
+				const disableRemove = anyMarketplaceAction;
+				const syncLabel = isSyncing ? 'Syncing marketplace "' + safeName + '"' : 'Sync marketplace "' + safeName + '"';
+				const removeLabel = isRemoving ? 'Removing marketplace "' + safeName + '"' : 'Remove marketplace "' + safeName + '"';
+				return `
+					<div class="border border-base-300 rounded-lg p-2 flex items-start justify-between gap-2">
+						<div class="min-w-0">
+							<div class="font-medium text-sm truncate">${safeName}</div>
+							<div class="text-xs opacity-60 break-all">${escapeHtml(source)}</div>
+						</div>
+						<div class="flex items-center gap-1.5">
+							<button
+								type="button"
+								class="btn btn-ghost btn-xs btn-square"
+								data-sync-marketplace-name="${safeName}"
+								title="${syncLabel}"
+								aria-label="${syncLabel}"
+								${disableSync ? 'disabled' : ''}
+								${isSyncing ? 'aria-busy="true"' : ''}
+								onclick="updatePluginMarketplace('${safeName}')"
+							>
+								${isSyncing
+									? '<span class="loading loading-spinner loading-xs"></span>'
+									: '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>'}
+							</button>
+							<button
+								type="button"
+								class="btn btn-ghost btn-xs btn-square text-error"
+								data-remove-marketplace-name="${safeName}"
+								title="${removeLabel}"
+								aria-label="${removeLabel}"
+								${disableRemove ? 'disabled' : ''}
+								${isRemoving ? 'aria-busy="true"' : ''}
+								onclick="deletePluginMarketplace('${safeName}')"
+							>
+								${isRemoving
+									? '<span class="loading loading-spinner loading-xs"></span>'
+									: '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18"></path><path stroke-linecap="round" stroke-linejoin="round" d="M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2"></path><path stroke-linecap="round" stroke-linejoin="round" d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"></path><path stroke-linecap="round" stroke-linejoin="round" d="M10 11v6"></path><path stroke-linecap="round" stroke-linejoin="round" d="M14 11v6"></path></svg>'}
+							</button>
+						</div>
+					</div>`;
+			}).join('');
+		}
+
+		function buildPluginCatalogItems() {
+			const items = new Map();
+			const installed = Array.isArray(agentPluginState.installed) ? agentPluginState.installed : [];
+			const available = Array.isArray(agentPluginState.available) ? agentPluginState.available : [];
+
+			installed.forEach(p => {
+				const id = normalizePluginID(p);
+				if (!id) return;
+				items.set(id, {
+					id,
+					name: p.name || id.split('@')[0],
+					description: p.description || '',
+					marketplaceName: (id.split('@')[1] || ''),
+					installed: true,
+					errors: Array.isArray(p.errors) ? p.errors : []
+				});
+			});
+
+			available.forEach(p => {
+				const id = normalizePluginID(p);
+				if (!id) return;
+				const existing = items.get(id);
+				items.set(id, {
+					id,
+					name: p.name || (existing && existing.name) || id.split('@')[0],
+					description: p.description || (existing && existing.description) || '',
+					marketplaceName: p.marketplaceName || (existing && existing.marketplaceName) || (id.split('@')[1] || ''),
+					installed: existing ? true : false,
+					errors: existing ? existing.errors : []
+				});
+			});
+
+			return Array.from(items.values()).sort((a, b) => a.id.localeCompare(b.id));
+		}
+
+		function buildRuntimeStatusLookup() {
+			const runtime = Array.isArray(agentPluginState.runtime) ? agentPluginState.runtime : [];
+			const lookup = new Map();
+			runtime.forEach(item => {
+				const entry = {
+					status: String(item.status || '').trim().toLowerCase(),
+					error: String(item.error || '').trim(),
+				};
+				const runtimeName = String((item && item.name) || '').trim().toLowerCase();
+				if (runtimeName) lookup.set(runtimeName, entry);
+				// Also index by plugin ID so plugins whose MCP server name
+				// differs from the plugin name prefix can be matched.
+				const pluginID = String((item && item.plugin_id) || '').trim().toLowerCase();
+				if (pluginID) lookup.set(pluginID, entry);
+			});
+			return lookup;
+		}
+
+		function renderPluginCatalog() {
+			const root = document.getElementById('plugin_catalog');
+			if (!root) return;
+			const searchInput = document.getElementById('plugin_search_input');
+			if (searchInput) {
+				pluginSearchTerm = String(searchInput.value || '');
+			} else {
+				pluginSearchTerm = '';
+			}
+			const normalizedSearch = pluginSearchTerm.trim().toLowerCase();
+			if (searchInput && searchInput.value !== pluginSearchTerm) {
+				searchInput.value = pluginSearchTerm;
+			}
+			const items = buildPluginCatalogItems();
+			if (items.length === 0) {
+				root.innerHTML = '<p class="text-xs opacity-60">No plugins discovered yet. Add/sync a marketplace first.</p>';
+				renderSelectedPluginCount();
+				return;
+			}
+			const filteredItems = normalizedSearch
+				? items.filter(item => {
+					const name = String(item.name || '').toLowerCase();
+					const id = String(item.id || '').toLowerCase();
+					const marketplace = String(item.marketplaceName || '').toLowerCase();
+					return name.includes(normalizedSearch) || id.includes(normalizedSearch) || marketplace.includes(normalizedSearch);
+				})
+				: items;
+			if (filteredItems.length === 0) {
+				root.innerHTML = '<p class="text-xs opacity-60">No plugins match your search.</p>';
+				renderSelectedPluginCount();
+				return;
+			}
+
+			// Separate installed and available plugins
+			const installedItems = filteredItems.filter(item => item.installed);
+			const availableItems = filteredItems.filter(item => !item.installed);
+			const runtimeStatusLookup = buildRuntimeStatusLookup();
+			const pluginMutationInFlight = hasActivePluginMutation();
+
+			let html = '';
+
+			// Render installed section
+			if (installedItems.length > 0) {
+				html += '<div class="mb-4"><h4 class="text-xs font-semibold uppercase tracking-wide opacity-50 mb-2">INSTALLED</h4>';
+				html += installedItems.map(item => {
+					const checked = selectedPluginIDs.includes(item.id) ? 'checked' : '';
+					const isUninstalling = uninstallingPluginIDs.has(item.id);
+					const isInstalling = installingPluginIDs.has(item.id);
+					const controlsDisabled = isUninstalling || isInstalling || pluginCatalogLoading || pluginMutationInFlight;
+					const itemLabelClass = controlsDisabled ? 'opacity-60' : '';
+					const marketplaceLine = item.marketplaceName
+						? '<span class="text-[11px] opacity-60 truncate">' + escapeHtml(item.marketplaceName) + '</span>'
+						: '';
+					const errText = item.errors && item.errors.length > 0
+						? '<p class="text-[11px] text-error mt-1">' + escapeHtml(item.errors.join('; ')) + '</p>'
+						: '';
+					const runtimePluginKey = String(item.id || '').trim().toLowerCase();
+					const runtimeNameKey = runtimePluginKey.split('@')[0];
+					const runtimeInfo = runtimeStatusLookup.get(runtimePluginKey) || runtimeStatusLookup.get(runtimeNameKey);
+					const runtimeStatus = runtimeInfo ? runtimeInfo.status : '';
+					const runtimeError = runtimeInfo ? runtimeInfo.error : '';
+					let runtimeDotClass = 'bg-base-300';
+					if (runtimeStatus === 'running') runtimeDotClass = 'bg-success/80';
+					if (runtimeStatus === 'failed') runtimeDotClass = 'bg-error/90';
+					let runtimeTitle = 'Runtime status unavailable';
+					if (runtimeStatus === 'running') runtimeTitle = 'Runtime healthy';
+					if (runtimeStatus === 'failed') runtimeTitle = runtimeError ? ('Runtime failed: ' + runtimeError) : 'Runtime failed';
+					if (runtimeStatus && runtimeStatus !== 'running' && runtimeStatus !== 'failed') runtimeTitle = 'Runtime ' + runtimeStatus;
+					let runtimeStatusIndicator = '<span class="inline-flex h-2.5 w-2.5 rounded-full ' + runtimeDotClass + ' shrink-0" title="' + escapeHtml(runtimeTitle) + '"></span>';
+					// For failed runtime, show error message below the plugin name
+					const runtimeErrText = runtimeStatus === 'failed' && runtimeError
+						? '<p class="text-[11px] text-error mt-1">Runtime: ' + escapeHtml(runtimeError) + '</p>'
+						: '';
+					return `
+						<div class="border border-base-300 rounded-lg px-3 py-2 mb-2">
+							<div class="flex items-center justify-between gap-3">
+									<div class="flex items-center gap-2 min-w-0 flex-1 ${itemLabelClass}">
+										${runtimeStatusIndicator}
+										<span class="font-medium text-sm truncate" title="${escapeHtml(item.id)}">${escapeHtml(item.id)}</span>
+										${marketplaceLine}
+									</div>
+									<div class="flex items-center gap-2 shrink-0">
+										<input
+											type="checkbox"
+											class="toggle toggle-sm toggle-primary agent-plugin-checkbox"
+											value="${escapeHtml(item.id)}"
+											aria-label="Enable ${escapeHtml(item.id)}"
+											${checked}
+											${controlsDisabled ? 'disabled aria-disabled="true"' : ''}
+											onchange="refreshSelectedPluginsFromDOM()"
+										/>
+										<button
+											type="button"
+											class="btn btn-ghost btn-xs text-error px-1.5"
+											data-uninstall-plugin-id="${escapeHtml(item.id)}"
+											aria-label="Uninstall ${escapeHtml(item.id)}"
+											${controlsDisabled ? 'disabled aria-busy="true"' : ''}
+											onclick="uninstallPlugin('${escapeHtml(item.id)}')"
+										>
+											${isUninstalling ? '<span class="loading loading-spinner loading-xs"></span>' : isInstalling ? '<span class="loading loading-spinner loading-xs"></span>' : '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 6h18"></path><path stroke-linecap="round" stroke-linejoin="round" d="M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2"></path><path stroke-linecap="round" stroke-linejoin="round" d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"></path><path stroke-linecap="round" stroke-linejoin="round" d="M10 11v6"></path><path stroke-linecap="round" stroke-linejoin="round" d="M14 11v6"></path></svg>'}
+										</button>
+									</div>
+							</div>
+							${errText}
+							${runtimeErrText}
+						</div>`;
+				}).join('');
+				html += '</div>';
+			}
+
+			// Render available section
+			if (availableItems.length > 0) {
+				html += '<div class="mb-4"><h4 class="text-xs font-semibold uppercase tracking-wide opacity-50 mb-2">AVAILABLE</h4>';
+				html += availableItems.map(item => {
+					const descriptionLine = item.description
+						? '<p class="text-xs opacity-80 mt-1">' + escapeHtml(item.description) + '</p>'
+						: '';
+					const marketplaceLine = item.marketplaceName
+						? '<p class="text-[11px] opacity-60 mt-1">marketplace: ' + escapeHtml(item.marketplaceName) + '</p>'
+						: '';
+					const isInstalling = installingPluginIDs.has(item.id);
+					const installDisabled = isInstalling || pluginCatalogLoading || pluginMutationInFlight;
+					return `
+						<div class="block border border-base-300 rounded-lg p-2 mb-2">
+							<div class="flex items-start justify-between gap-2">
+								<div class="min-w-0 flex-1">
+									<div class="flex items-center gap-2">
+										<span class="font-medium text-sm truncate">${escapeHtml(item.name)}</span>
+										
+									</div>
+									<p class="text-xs opacity-70 break-all">${escapeHtml(item.id)}</p>
+									${descriptionLine}
+									${marketplaceLine}
+									<p class="text-[11px] opacity-60 mt-1">Install and enable for this agent in one click.</p>
+								</div>
+								<button type="button" class="btn btn-outline btn-sm self-start min-w-20" data-install-plugin-id="${escapeHtml(item.id)}" ${installDisabled ? 'disabled aria-busy="true"' : ''} onclick="installPlugin('${escapeHtml(item.id)}')">${isInstalling ? '<span class="loading loading-spinner loading-xs"></span> Installing...' : 'Install'}</button>
+							</div>
+						</div>`;
+				}).join('');
+				html += '</div>';
+			}
+
+			root.innerHTML = html;
+			renderSelectedPluginCount();
+		}
+
+		async function readErrorMessage(response, fallback) {
+			try {
+				const data = await response.json();
+				if (data && typeof data.error === 'string' && data.error.trim()) {
+					return data.error.trim();
+				}
+			} catch (e) {
+				// no-op
+			}
+			return fallback;
+		}
+
+		async function loadPluginState(showToasts, options) {
+			const shouldThrow = options && options.throwOnError === true;
+			const suppressDiscoveryWarningToast = options && options.suppressDiscoveryWarningToast === true;
+			const requestToken = ++pluginStateRequestToken;
+			pluginStateLoadInFlight += 1;
+			setPluginCatalogLoading(true);
+			try {
+				const response = await fetch('/agents/plugins/state');
+				if (!response.ok) throw new Error('Failed to load plugin state');
+				const payload = await response.json();
+				if (requestToken !== pluginStateRequestToken) {
+					return;
+				}
+				agentPluginState = payload;
+				if (pendingUninstalledPluginIDs.size > 0) {
+					agentPluginState.installed = Array.isArray(agentPluginState.installed)
+						? agentPluginState.installed.filter(p => !pendingUninstalledPluginIDs.has(normalizePluginID(p)))
+						: [];
+				}
+				renderPluginMarketplaces();
+				renderPluginCatalog();
+				if (showToasts && !suppressDiscoveryWarningToast && agentPluginState.error && window.showToast) {
+					window.showToast('Plugin discovery warning: ' + String(agentPluginState.error), 'failed');
+				}
+			} catch (err) {
+				if (requestToken !== pluginStateRequestToken) {
+					return;
+				}
+				console.error('loadPluginState', err);
+				agentPluginState = { marketplaces: [], installed: [], available: [], runtime: [] };
+				renderPluginMarketplaces();
+				renderPluginCatalog();
+				if (showToasts && window.showToast) {
+					window.showToast('Could not load plugin state', 'failed');
+				}
+				setMarketplaceActionStatus('Could not refresh marketplace/plugin state', 'error');
+				if (shouldThrow) throw err;
+			} finally {
+				pluginStateLoadInFlight = Math.max(0, pluginStateLoadInFlight - 1);
+				if (pluginStateLoadInFlight === 0) {
+					setPluginCatalogLoading(false);
+				}
+			}
+		}
+
+		async function addPluginMarketplace() {
+			if (hasActiveMarketplaceAction()) return;
+			const input = document.getElementById('plugin_marketplace_source');
+			if (!input) return;
+			const source = String(input.value || '').trim();
+			if (!source) return;
+			addingMarketplace = true;
+			setMarketplaceActionStatus('Adding marketplace...', 'info');
+			renderPluginMarketplaces();
+			try {
+				const response = await fetch('/agents/plugins/marketplaces', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ source: source, scope: 'user' })
+				});
+				if (!response.ok) {
+					const msg = await readErrorMessage(response, 'add marketplace failed');
+					throw new Error(msg);
+				}
+				input.value = '';
+				await loadPluginState(true, { throwOnError: true });
+				setMarketplaceActionStatus('Marketplace added', 'success');
+				if (window.showToast) window.showToast('Marketplace added', 'completed');
+			} catch (err) {
+				console.error('addPluginMarketplace', err);
+				const message = String(err.message || 'Could not add marketplace');
+				setMarketplaceActionStatus(message, 'error');
+				if (window.showToast) window.showToast(message, 'failed');
+			} finally {
+				addingMarketplace = false;
+				renderPluginMarketplaces();
+			}
+		}
+
+		async function resetDefaultPluginMarketplaces() {
+			if (hasActiveMarketplaceAction()) return;
+			restoringDefaultMarketplaces = true;
+			setMarketplaceActionStatus('Restoring default marketplaces...', 'info');
+			renderPluginMarketplaces();
+			try {
+				const response = await fetch('/agents/plugins/marketplaces/reset-defaults', { method: 'POST' });
+				if (!response.ok) {
+					const msg = await readErrorMessage(response, 'reset default marketplaces failed');
+					throw new Error(msg);
+				}
+				await loadPluginState(true, { throwOnError: true });
+				setMarketplaceActionStatus('Default marketplaces restored', 'success');
+				if (window.showToast) window.showToast('Default marketplaces restored', 'completed');
+			} catch (err) {
+				console.error('resetDefaultPluginMarketplaces', err);
+				const message = String(err.message || 'Could not reset default marketplaces');
+				setMarketplaceActionStatus(message, 'error');
+				if (window.showToast) window.showToast(message, 'failed');
+			} finally {
+				restoringDefaultMarketplaces = false;
+				renderPluginMarketplaces();
+			}
+		}
+
+		async function updatePluginMarketplace(name) {
+			const safeName = String(name || '').trim();
+			if (!safeName) return;
+			if (hasActiveMarketplaceAction()) return;
+			syncingMarketplaceNames.add(safeName);
+			setMarketplaceActionStatus('Syncing marketplace "' + safeName + '"...', 'info');
+			renderPluginMarketplaces();
+			try {
+				const response = await fetch('/agents/plugins/marketplaces/' + encodeURIComponent(safeName) + '/update', { method: 'POST' });
+				if (!response.ok) {
+					const msg = await readErrorMessage(response, 'update marketplace failed');
+					throw new Error(msg);
+				}
+				await loadPluginState(true, { throwOnError: true });
+				setMarketplaceActionStatus('Marketplace synced', 'success');
+				if (window.showToast) window.showToast('Marketplace synced', 'completed');
+			} catch (err) {
+				console.error('updatePluginMarketplace', err);
+				const message = String(err.message || 'Could not sync marketplace');
+				setMarketplaceActionStatus(message, 'error');
+				if (window.showToast) window.showToast(message, 'failed');
+			} finally {
+				syncingMarketplaceNames.delete(safeName);
+				renderPluginMarketplaces();
+			}
+		}
+
+		async function deletePluginMarketplace(name) {
+			const safeName = String(name || '').trim();
+			if (!safeName) return;
+			if (hasActiveMarketplaceAction()) return;
+			if (!window.confirm('Remove marketplace "' + safeName + '"?')) return;
+			removingMarketplaceNames.add(safeName);
+			setMarketplaceActionStatus('Removing marketplace "' + safeName + '"...', 'info');
+			renderPluginMarketplaces();
+			try {
+				const response = await fetch('/agents/plugins/marketplaces/' + encodeURIComponent(safeName), { method: 'DELETE' });
+				if (!response.ok) {
+					const msg = await readErrorMessage(response, 'remove marketplace failed');
+					throw new Error(msg);
+				}
+				await loadPluginState(true, { throwOnError: true });
+				setMarketplaceActionStatus('Marketplace removed', 'success');
+				if (window.showToast) window.showToast('Marketplace removed', 'completed');
+			} catch (err) {
+				console.error('deletePluginMarketplace', err);
+				const message = String(err.message || 'Could not remove marketplace');
+				setMarketplaceActionStatus(message, 'error');
+				if (window.showToast) window.showToast(message, 'failed');
+			} finally {
+				removingMarketplaceNames.delete(safeName);
+				renderPluginMarketplaces();
+			}
+		}
+
+		async function installPlugin(pluginID) {
+			const id = String(pluginID || '').trim();
+			if (!id) return;
+			if (installingPluginIDs.has(id) || uninstallingPluginIDs.has(id) || pluginCatalogLoading || hasActivePluginMutation()) return;
+			setPluginInstallInProgress(id, true);
+			try {
+				const body = { plugin_id: id, scope: 'user' };
+				const currentAgentID = String(activeAgentID || '').trim();
+				if (currentAgentID) {
+					body.agent_id = currentAgentID;
+				}
+				const response = await fetch('/agents/plugins/install', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(body)
+				});
+				if (!response.ok) {
+					const msg = await readErrorMessage(response, 'install plugin failed');
+					throw new Error(msg);
+				}
+				const payload = await response.json().catch(() => ({}));
+				const enabledForAgent = payload && payload.enabled_for_agent === true;
+				const hasEnableError = payload && typeof payload.enable_error === 'string' && payload.enable_error.trim();
+				agentPluginState.installed = Array.isArray(agentPluginState.installed)
+					? agentPluginState.installed.filter(p => normalizePluginID(p) !== id)
+					: [];
+				agentPluginState.available = Array.isArray(agentPluginState.available)
+					? agentPluginState.available.filter(p => normalizePluginID(p) !== id)
+					: [];
+				agentPluginState.installed = agentPluginState.installed.concat([{ id: id, pluginId: id, name: id.split('@')[0], enabled: true }]);
+				if (!currentAgentID || enabledForAgent) {
+					selectedPluginIDs = Array.from(new Set(selectedPluginIDs.concat([id]))).sort();
+				}
+				renderPluginCatalog();
+				await loadPluginState(true, { throwOnError: true, suppressDiscoveryWarningToast: true });
+				if (window.showToast) {
+					if (currentAgentID) {
+						if (enabledForAgent) {
+							window.showToast('Plugin installed and enabled for this agent', 'completed');
+						} else if (hasEnableError) {
+							window.showToast('Plugin installed but could not be enabled for this agent', 'failed');
+							window.showToast(String(payload.enable_error), 'failed');
+						} else {
+							window.showToast('Plugin installed', 'completed');
+						}
+					} else {
+						window.showToast('Plugin installed and selected for this new agent', 'completed');
+					}
+					if (payload && payload.warning) {
+						window.showToast(String(payload.warning), 'failed');
+					}
+				}
+				if (hasEnableError) {
+					setMarketplaceActionStatus('Plugin installed, but enabling for this agent failed. Retry install to try enabling again.', 'error');
+				}
+			} catch (err) {
+				console.error('installPlugin', err);
+				if (window.showToast) window.showToast(String(err.message || 'Could not install plugin'), 'failed');
+			} finally {
+				setPluginInstallInProgress(id, false);
+			}
+		}
+
+		async function uninstallPlugin(pluginID) {
+			const id = String(pluginID || '').trim();
+			if (!id) return;
+			if (uninstallingPluginIDs.has(id) || installingPluginIDs.has(id) || pluginCatalogLoading || hasActivePluginMutation()) return;
+			if (!window.confirm('Uninstall plugin "' + id + '"? This removes local plugin files.')) return;
+			setPluginUninstallInProgress(id, true);
+			pendingUninstalledPluginIDs.add(id);
+			setMarketplaceActionStatus('Removing plugin "' + id + '"...', 'info');
+			try {
+				const response = await fetch('/agents/plugins/uninstall', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ plugin_id: id })
+				});
+				if (!response.ok) {
+					const msg = await readErrorMessage(response, 'uninstall plugin failed');
+					throw new Error(msg);
+				}
+				await response.json().catch(() => ({}));
+				selectedPluginIDs = selectedPluginIDs.filter(x => x !== id);
+				agentPluginState.installed = Array.isArray(agentPluginState.installed)
+					? agentPluginState.installed.filter(p => normalizePluginID(p) !== id)
+					: [];
+				agentPluginState.available = Array.isArray(agentPluginState.available)
+					? agentPluginState.available
+					: [];
+				renderPluginCatalog();
+				await loadPluginState(false, { throwOnError: true });
+				pendingUninstalledPluginIDs.delete(id);
+				setMarketplaceActionStatus('Plugin removed', 'success');
+				if (window.showToast) {
+					window.showToast('Plugin uninstalled', 'completed');
+				}
+			} catch (err) {
+				pendingUninstalledPluginIDs.delete(id);
+				console.error('uninstallPlugin', err);
+				const message = String(err.message || 'Could not uninstall plugin');
+				setMarketplaceActionStatus(message, 'error');
+				if (window.showToast) window.showToast(message, 'failed');
+			} finally {
+				setPluginUninstallInProgress(id, false);
+			}
+		}
+
+
+		function openNewAgentModal() {
+			activeAgentID = '';
+			document.getElementById('agent_modal_title').textContent = 'New Agent';
+			const form = document.getElementById('agent_form');
+			form.action = '/agents';
+			form.method = 'post';
+			form.setAttribute('hx-post', '/agents');
+			form.setAttribute('hx-target', '#agents-container');
+			form.setAttribute('hx-swap', 'outerHTML');
+			form.removeAttribute('hx-put');
+			htmx.process(form);
+
+			document.getElementById('agent_name').value = '';
+			document.getElementById('agent_description').value = '';
+			document.getElementById('agent_system_prompt').value = '';
+			setAgentModelSelection('inherit');
+			setAgentTools([]);
+			selectedPluginIDs = [];
+			resetGeneratedState();
+			setAgentSection('details');
+			loadPluginState(false);
+			document.getElementById('agent_modal').showModal();
+		}
+
+		function editAgentFromData(el) {
+			const id = el.dataset.agentId;
+			activeAgentID = String(id || '').trim();
+			document.getElementById('agent_modal_title').textContent = 'Edit Agent';
+			const form = document.getElementById('agent_form');
+			form.action = '/agents/' + id;
+			form.removeAttribute('hx-post');
+			form.setAttribute('hx-put', '/agents/' + id);
+			form.setAttribute('hx-target', '#agents-container');
+			form.setAttribute('hx-swap', 'outerHTML');
+			htmx.process(form);
+
+			document.getElementById('agent_name').value = el.dataset.agentName || '';
+			document.getElementById('agent_description').value = el.dataset.agentDescription || '';
+			document.getElementById('agent_system_prompt').value = el.dataset.agentSystemPrompt || '';
+			setAgentModelSelection(el.dataset.agentModel || 'inherit');
+			setAgentTools(JSON.parse(el.dataset.agentTools || '[]'));
+
+			selectedPluginIDs = JSON.parse(el.dataset.agentPlugins || '[]');
+			generatedSkillsState = JSON.parse(el.dataset.agentSkills || '[]');
+			generatedMCPServersState = JSON.parse(el.dataset.agentMcpServers || '[]');
+			updateGeneratedSummary();
+
+			setAgentSection('details');
+			loadPluginState(false);
+			document.getElementById('agent_modal').showModal();
+		}
+
+		function fillAgentFormFromGenerated(data) {
+			if (!data || typeof data !== 'object') return;
+			document.getElementById('agent_name').value = data.name || '';
+			document.getElementById('agent_description').value = data.description || '';
+			document.getElementById('agent_system_prompt').value = data.system_prompt || '';
+			setAgentModelSelection(data.model || 'inherit');
+			setAgentTools(data.tools || []);
+			if (Array.isArray(data.plugins) && data.plugins.length > 0) {
+				selectedPluginIDs = Array.from(new Set(data.plugins.map(x => String(x).trim()).filter(Boolean))).sort();
+				renderPluginCatalog();
+			}
+			generatedSkillsState = Array.isArray(data.skills) ? data.skills : [];
+			generatedMCPServersState = Array.isArray(data.mcp_servers) ? data.mcp_servers : [];
+			updateGeneratedSummary();
+		}
+
+		async function generateAgentFromPrompt() {
+			const promptInput = document.getElementById('agent_description');
+			const button = document.getElementById('agent_generate_btn');
+			const description = (promptInput.value || '').trim();
+			if (!description) {
+				if (window.showToast) window.showToast('Enter a description first', 'failed');
+				return;
+			}
+
+			const oldLabel = button.textContent;
+			button.disabled = true;
+			button.textContent = 'Generating...';
+			try {
+				refreshSelectedPluginsFromDOM();
+				const body = new URLSearchParams();
+				body.set('description', description);
+				body.set('plugins_json', JSON.stringify(selectedPluginIDs));
+				const response = await fetch('/agents/generate', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+					body: body.toString()
+				});
+				if (!response.ok) throw new Error('generation failed');
+				const data = await response.json();
+				fillAgentFormFromGenerated(data);
+				if (window.showToast) {
+					if (data.generation_mode === 'fallback') {
+						const reason = data.generation_error ? (' (' + String(data.generation_error).slice(0, 160) + ')') : '';
+						window.showToast('Generated using local template draft' + reason, 'cancelled');
+					} else {
+						window.showToast('Agent draft generated', 'completed');
+					}
+				}
+			} catch (err) {
+				console.error('generateAgentFromPrompt', err);
+				if (window.showToast) window.showToast('Could not generate agent draft', 'failed');
+			} finally {
+				button.disabled = false;
+				button.textContent = oldLabel;
+			}
+		}
+
+		function serializeAgentFormData() {
+			const tools = [];
+			document.querySelectorAll('.agent-tool-checkbox:checked').forEach(cb => tools.push(cb.value));
+			document.getElementById('agent_tools_json').value = JSON.stringify(tools);
+
+			refreshSelectedPluginsFromDOM();
+			document.getElementById('agent_plugins_json').value = JSON.stringify(selectedPluginIDs);
+			document.getElementById('agent_skills_json').value = JSON.stringify(generatedSkillsState || []);
+			document.getElementById('agent_mcp_servers_json').value = JSON.stringify(generatedMCPServersState || []);
+		}
+
+		setTimeout(() => {
+			const form = document.getElementById('agent_form');
+			if (form && !window._agentFormSubmitHooked) {
+				window._agentFormSubmitHooked = true;
+				form.addEventListener('submit', () => serializeAgentFormData());
+			}
+			if (document.querySelector('[data-agent-section-tab]') && document.querySelector('[data-agent-section-panel]')) {
+				setAgentSection(activeAgentSection);
+			}
+		}, 0);
+		</script>
+	</div>
+}

@@ -1,0 +1,387 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/components"
+)
+
+// WorktreeInfoPanel renders the worktree information panel for a task detail page.
+templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat) {
+	<div id="worktree-info-panel" class="card bg-base-100 shadow-sm border border-base-300 mb-4">
+		<div class="card-body p-4">
+			<div class="flex items-center justify-between mb-3">
+				<h4 class="text-sm font-bold flex items-center gap-2">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"></path>
+					</svg>
+					Git Worktree
+				</h4>
+				if task.MergeStatus != "" {
+					<span class={ "badge badge-sm", mergeStatusBadgeClass(task.MergeStatus) }>
+						{ mergeStatusLabel(task.MergeStatus) }
+					</span>
+				}
+			</div>
+
+			if task.WorktreeBranch != "" {
+				<div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm mb-3">
+					<div>
+						<span class="opacity-60">Branch:</span>
+						<code class="ml-1 bg-base-200 px-2 py-0.5 rounded text-xs">{ task.WorktreeBranch }</code>
+					</div>
+					if task.MergeTargetBranch != "" {
+						<div>
+							<span class="opacity-60">Target:</span>
+							<code class="ml-1 bg-base-200 px-2 py-0.5 rounded text-xs">{ task.MergeTargetBranch }</code>
+						</div>
+					}
+					if task.WorktreePath != "" {
+						<div class="col-span-2">
+							<span class="opacity-60">Path:</span>
+							<code class="ml-1 bg-base-200 px-2 py-0.5 rounded text-xs truncate">{ task.WorktreePath }</code>
+						</div>
+					}
+				</div>
+
+				// File change summary
+				if len(fileStats) > 0 {
+					<div class="mb-3">
+						<span class="text-xs opacity-60">
+							{ fmt.Sprintf("%d file(s) changed", len(fileStats)) }
+							{ fileStatsSummary(fileStats) }
+						</span>
+					</div>
+				}
+
+				// Auto-merge toggle
+				<div class="flex items-center gap-3 mb-3 p-2 bg-base-200 rounded">
+					<form
+						method="post"
+						hx-post={ fmt.Sprintf("/tasks/%s/worktree/auto-merge", task.ID) }
+						hx-target="#worktree-info-panel"
+						hx-swap="outerHTML"
+						class="flex items-center gap-2"
+					>
+						<label class="label cursor-pointer gap-2 p-0">
+							<span class="label-text text-sm">Auto-merge on completion</span>
+							<input
+								type="checkbox"
+								name="auto_merge"
+								class="toggle toggle-sm toggle-primary"
+								if task.AutoMerge {
+									checked
+								}
+								onchange="this.form.requestSubmit()"
+							/>
+						</label>
+						<input type="hidden" name="merge_target_branch" value={ task.MergeTargetBranch }/>
+					</form>
+				</div>
+
+				// Action buttons
+				<div class="flex flex-wrap gap-2">
+					if task.MergeStatus == models.MergeStatusConflict {
+						<button
+							class="btn btn-warning btn-xs"
+							hx-post={ fmt.Sprintf("/tasks/%s/worktree/resolve", task.ID) }
+							hx-target="#worktree-info-panel"
+							hx-swap="outerHTML"
+						>
+							AI Resolve Conflicts
+						</button>
+						<button
+							class="btn btn-ghost btn-xs"
+							hx-post={ fmt.Sprintf("/tasks/%s/worktree/abort", task.ID) }
+							hx-target="#worktree-info-panel"
+							hx-swap="outerHTML"
+						>
+							Abort Merge
+						</button>
+					} else if task.MergeStatus != models.MergeStatusMerged {
+						// Merge buttons with dropdown
+						<div class="dropdown dropdown-end" id="merge-dropdown">
+							<div tabindex="0" role="button" class="btn btn-primary btn-xs">
+								Merge to { mergeTargetDisplay(task) }
+							</div>
+							<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300">
+								<li>
+									<button
+										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
+										hx-target="#worktree-info-panel"
+										hx-swap="outerHTML"
+										hx-vals='{"merge_type": "merge"}'
+										hx-indicator="#merge-indicator"
+										class="text-xs"
+									>
+										<span class="htmx-indicator" id="merge-indicator">
+											<span class="loading loading-spinner loading-xs"></span>
+										</span>
+										Merge commit
+									</button>
+								</li>
+								<li>
+									<button
+										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
+										hx-target="#worktree-info-panel"
+										hx-swap="outerHTML"
+										hx-vals='{"merge_type": "ff"}'
+										hx-indicator="#merge-indicator-ff"
+										class="text-xs"
+									>
+										<span class="htmx-indicator" id="merge-indicator-ff">
+											<span class="loading loading-spinner loading-xs"></span>
+										</span>
+										Fast-forward only
+									</button>
+								</li>
+								<li>
+									<button
+										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
+										hx-target="#worktree-info-panel"
+										hx-swap="outerHTML"
+										hx-vals='{"merge_type": "squash"}'
+										hx-indicator="#merge-indicator-squash"
+										class="text-xs"
+									>
+										<span class="htmx-indicator" id="merge-indicator-squash">
+											<span class="loading loading-spinner loading-xs"></span>
+										</span>
+										Squash merge
+									</button>
+								</li>
+							</ul>
+						</div>
+					}
+
+					if task.WorktreePath != "" && task.MergeStatus != "" {
+						<button
+							class="btn btn-ghost btn-xs"
+							hx-post={ fmt.Sprintf("/tasks/%s/worktree/cleanup", task.ID) }
+							hx-target="#worktree-info-panel"
+							hx-swap="outerHTML"
+							hx-vals='{"delete_branch": "true"}'
+							hx-confirm="Delete worktree and branch? This cannot be undone."
+						>
+							Cleanup Worktree
+						</button>
+					}
+				</div>
+			} else {
+				<p class="text-sm opacity-50">No worktree created for this task.</p>
+				<p class="text-xs opacity-40 mt-1">A worktree will be created automatically when this task starts executing in a project with a git repository.</p>
+			}
+		</div>
+	</div>
+}
+
+// TaskChangesWorktreeContent renders the changes tab for worktree-based tasks.
+templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, showMergeOptions bool) {
+	<div class="card bg-base-100 shadow-sm border border-base-300">
+		<div class="card-body">
+			// Worktree branch info header
+			if task.WorktreeBranch != "" {
+				<div class="flex items-center justify-between mb-4">
+					<div>
+						<h4 class="text-lg font-bold">Worktree Changes</h4>
+						<p class="text-sm opacity-60">
+							Changes on branch
+							<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs">{ task.WorktreeBranch }</code>
+							vs
+							<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs">{ mergeTargetDisplay(task) }</code>
+						</p>
+					</div>
+					<div class="inline-flex items-center gap-2">
+						if taskPR != nil {
+							<a href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm">
+								View PR #{ fmt.Sprintf("%d", taskPR.PRNumber) }
+							</a>
+						} else if task.WorktreeBranch != "" {
+							<button
+								class="btn btn-outline btn-sm"
+								hx-post={ fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID) }
+								hx-target="#changes-content"
+								hx-swap="innerHTML"
+							>
+								Create PR
+							</button>
+						}
+					</div>
+					// Merge button directly in changes tab
+					if showMergeOptions && task.MergeStatus != models.MergeStatusMerged && task.WorktreeBranch != "" {
+						<div class="dropdown dropdown-end inline-flex items-center gap-2" id="merge-dropdown-changes">
+							<div tabindex="0" role="button" class="btn btn-primary btn-sm">
+								Merge to { mergeTargetDisplay(task) }
+							</div>
+							<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300">
+								<li>
+									<button
+										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
+										hx-target="#worktree-info-panel"
+										hx-swap="outerHTML"
+										hx-vals='{"merge_type": "merge", "merge_source": "changes_tab"}'
+										hx-indicator="#merge-changes-indicator"
+									>
+										<span class="htmx-indicator" id="merge-changes-indicator">
+											<span class="loading loading-spinner loading-xs"></span>
+										</span>
+										Merge commit
+									</button>
+								</li>
+								<li>
+									<button
+										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
+										hx-target="#worktree-info-panel"
+										hx-swap="outerHTML"
+										hx-vals='{"merge_type": "ff", "merge_source": "changes_tab"}'
+										hx-indicator="#merge-changes-indicator-ff"
+									>
+										<span class="htmx-indicator" id="merge-changes-indicator-ff">
+											<span class="loading loading-spinner loading-xs"></span>
+										</span>
+										Fast-forward only
+									</button>
+								</li>
+								<li>
+									<button
+										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
+										hx-target="#worktree-info-panel"
+										hx-swap="outerHTML"
+										hx-vals='{"merge_type": "squash", "merge_source": "changes_tab"}'
+										hx-indicator="#merge-changes-indicator-squash"
+									>
+										<span class="htmx-indicator" id="merge-changes-indicator-squash">
+											<span class="loading loading-spinner loading-xs"></span>
+										</span>
+										Squash merge
+									</button>
+								</li>
+							</ul>
+						</div>
+					}
+				</div>
+			}
+
+			// File change summary list
+			if len(fileStats) > 0 {
+				<div class="mb-4 p-3 bg-base-200 rounded-lg">
+					<div class="text-sm font-semibold mb-2">
+						{ fmt.Sprintf("%d file(s) changed", len(fileStats)) }
+					</div>
+					<ul class="text-xs space-y-1">
+						for _, fs := range fileStats {
+							<li class="flex items-center gap-2">
+								<span class={ fileStatusBadgeClass(fs.Status) }>{ fileStatusChar(fs.Status) }</span>
+								<span class="font-mono">{ fs.Path }</span>
+							</li>
+						}
+					</ul>
+				</div>
+			}
+
+			// Diff viewer
+			@components.DiffViewerWithReview(diffOutput, task.ID, reviewComments)
+		</div>
+	</div>
+}
+
+// Helper functions for worktree templates
+
+func mergeStatusBadgeClass(status models.MergeStatus) string {
+	switch status {
+	case models.MergeStatusPending:
+		return "badge-warning"
+	case models.MergeStatusMerged:
+		return "badge-success"
+	case models.MergeStatusFailed:
+		return "badge-error"
+	case models.MergeStatusConflict:
+		return "badge-error"
+	default:
+		return "badge-ghost"
+	}
+}
+
+func mergeStatusLabel(status models.MergeStatus) string {
+	switch status {
+	case models.MergeStatusPending:
+		return "Pending Merge"
+	case models.MergeStatusMerged:
+		return "Merged"
+	case models.MergeStatusFailed:
+		return "Merge Failed"
+	case models.MergeStatusConflict:
+		return "Conflicts"
+	default:
+		return ""
+	}
+}
+
+func mergeTargetDisplay(task *models.Task) string {
+	if task.MergeTargetBranch != "" {
+		return task.MergeTargetBranch
+	}
+	return "main"
+}
+
+func fileStatusBadgeClass(status string) string {
+	switch status {
+	case "added":
+		return "badge badge-xs badge-success"
+	case "deleted":
+		return "badge badge-xs badge-error"
+	default:
+		return "badge badge-xs badge-warning"
+	}
+}
+
+func fileStatusChar(status string) string {
+	switch status {
+	case "added":
+		return "A"
+	case "deleted":
+		return "D"
+	default:
+		return "M"
+	}
+}
+
+func fileStatsSummary(stats []service.WorktreeFileStat) string {
+	added, modified, deleted := 0, 0, 0
+	for _, s := range stats {
+		switch s.Status {
+		case "added":
+			added++
+		case "modified":
+			modified++
+		case "deleted":
+			deleted++
+		}
+	}
+	parts := []string{}
+	if added > 0 {
+		parts = append(parts, fmt.Sprintf("+%d", added))
+	}
+	if modified > 0 {
+		parts = append(parts, fmt.Sprintf("~%d", modified))
+	}
+	if deleted > 0 {
+		parts = append(parts, fmt.Sprintf("-%d", deleted))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "(" + joinParts(parts) + ")"
+}
+
+func joinParts(parts []string) string {
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += ", "
+		}
+		result += p
+	}
+	return result
+}

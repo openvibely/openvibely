@@ -1,0 +1,417 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+type ProjectWorkerStats struct {
+	ID         string
+	Name       string
+	Running    int
+	QueueSize  int
+	MaxWorkers *int
+}
+
+type ModelWorkerStats struct {
+	ID         string
+	Name       string
+	Model      string
+	Running    int
+	MaxWorkers int
+}
+
+templ WorkerSettings(projects []models.Project, currentProjectID string, maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
+	@layout.Base("Workers", projects, currentProjectID) {
+		@workerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats)
+	}
+}
+
+// WorkerSettingsContent renders just the worker settings content for HTMX requests
+templ WorkerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
+	@workerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats)
+}
+
+templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
+	<div id="worker-settings-content">
+		<h2 class="text-2xl font-bold mb-6">Workers</h2>
+
+		<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+			<div class="card-body">
+				<h3 class="card-title text-lg">Worker Capacity &amp; Utilization</h3>
+				<p class="text-sm opacity-60 mb-4">Global and per-project worker limits shown together. Click a limit value to edit it.</p>
+				<div class="overflow-x-auto">
+					<table class="table table-sm">
+						<thead>
+							<tr>
+								<th>Scope</th>
+								<th>Name</th>
+								<th>Running</th>
+								<th>Queue</th>
+								<th>Limit</th>
+								<th>Status</th>
+							</tr>
+						</thead>
+						@projectStatsTableBody(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats)
+					</table>
+				</div>
+			</div>
+		</div>
+
+		<!-- Per-Model Utilization -->
+		if len(modelStats) > 0 {
+			<div class="card bg-base-100 shadow-sm border border-base-300">
+				<div class="card-body">
+					<h3 class="card-title text-lg">Per-Model Worker Pools</h3>
+					<p class="text-sm opacity-60 mb-4">Models with dedicated worker pools. Configure limits on the Models page.</p>
+					<div class="overflow-x-auto">
+						<table class="table table-sm">
+							<thead>
+								<tr>
+									<th>Model</th>
+									<th>Running</th>
+									<th>Limit</th>
+									<th>Status</th>
+								</tr>
+							</thead>
+							@modelStatsTableBody(modelStats)
+						</table>
+					</div>
+				</div>
+			</div>
+		}
+
+					<style>
+						/* Keep worker-limit inputs visually stable on mouse/spinner focus, while preserving keyboard focus indication. */
+						#worker-settings-content .worker-limit-input:focus {
+							outline: none;
+							box-shadow: none;
+						}
+						#worker-settings-content .worker-limit-input:focus-visible {
+							outline: 2px solid hsl(var(--p));
+							outline-offset: 1px;
+						}
+					</style>
+					<script>
+				if (!window._workerSettingsHandlersBound) {
+					window._workerSettingsHandlersBound = true;
+					window._workerLimitSuppressDirtyRestoreUntil = 0;
+
+					function markWorkerInputDirty(input) {
+						input.setAttribute('data-dirty', 'true');
+					}
+
+					function markWorkerInputClean(input) {
+						input.removeAttribute('data-dirty');
+					}
+
+					function suppressDirtyRestore(ms) {
+						window._workerLimitSuppressDirtyRestoreUntil = Date.now() + ms;
+					}
+
+					// Track dirty state when user edits input fields
+					document.body.addEventListener('input', function(evt) {
+						if (evt.target.classList.contains('worker-limit-input')) {
+							markWorkerInputDirty(evt.target);
+						}
+					});
+
+					// Clear dirty state when form is submitted
+					document.body.addEventListener('submit', function(evt) {
+						if (!evt.target.classList.contains('worker-limit-form')) {
+							return;
+						}
+						const input = evt.target.querySelector('.worker-limit-input');
+						if (input) {
+							markWorkerInputClean(input);
+						}
+						suppressDirtyRestore(2000);
+					});
+
+					// Also clear state when HTMX request starts for worker limit forms.
+					document.body.addEventListener('htmx:beforeRequest', function(evt) {
+						if (!evt.detail || !evt.detail.elt || !evt.detail.elt.closest) {
+							return;
+						}
+						const form = evt.detail.elt.closest('.worker-limit-form');
+						if (!form) {
+							return;
+						}
+						const input = form.querySelector('.worker-limit-input');
+						if (input) {
+							markWorkerInputClean(input);
+						}
+						suppressDirtyRestore(2000);
+					});
+
+					// Ensure successful updates never keep warning styling.
+					document.body.addEventListener('htmx:afterRequest', function(evt) {
+						if (!evt.detail || !evt.detail.successful || !evt.detail.elt || !evt.detail.elt.closest) {
+							return;
+						}
+						const form = evt.detail.elt.closest('.worker-limit-form');
+						if (!form) {
+							return;
+						}
+						suppressDirtyRestore(2000);
+						const projectId = form.getAttribute('data-project-id');
+						if (!projectId) {
+							return;
+						}
+						const input = document.getElementById('limit-input-' + projectId);
+						if (input) {
+							markWorkerInputClean(input);
+						}
+					});
+
+					// Preserve dirty input fields during auto-refresh.
+					document.body.addEventListener('htmx:beforeSwap', function(evt) {
+						if (!evt.detail || !evt.detail.target || evt.detail.target.id !== 'project-stats-tbody') {
+							return;
+						}
+						if (Date.now() < window._workerLimitSuppressDirtyRestoreUntil) {
+							return;
+						}
+
+						const dirtyInputs = evt.detail.target.querySelectorAll('input[data-dirty="true"]');
+						const dirtyValues = new Map();
+						dirtyInputs.forEach(function(input) {
+							const projectId = input.getAttribute('data-project-id');
+							if (projectId) {
+								dirtyValues.set(projectId, input.value);
+							}
+						});
+
+						if (dirtyValues.size > 0) {
+							requestAnimationFrame(function() {
+								if (Date.now() < window._workerLimitSuppressDirtyRestoreUntil) {
+									return;
+								}
+								dirtyValues.forEach(function(value, projectId) {
+									const input = document.getElementById('limit-input-' + projectId);
+									if (input) {
+										input.value = value;
+										markWorkerInputDirty(input);
+									}
+								});
+							});
+						}
+					});
+
+					// Pause polling when page is not visible to save resources.
+					document.addEventListener('visibilitychange', function() {
+						if (document.hidden) {
+							htmx.findAll('[hx-trigger*="every"]').forEach(function(el) {
+								htmx.trigger(el, 'htmx:abort');
+							});
+						} else {
+							htmx.findAll('[hx-trigger*="every"]').forEach(function(el) {
+								htmx.trigger(el, 'htmx:load');
+							});
+						}
+					});
+				}
+			</script>
+	</div>
+}
+
+// Fragment template for global worker stats (used for polling)
+templ GlobalWorkerStats(runningWorkers int, totalRunning int, queueSize int) {
+	@globalWorkerStats(runningWorkers, totalRunning, queueSize)
+}
+
+templ globalWorkerStats(runningWorkers int, totalRunning int, queueSize int) {
+	<div
+		id="global-worker-stats"
+		class="mb-4 flex gap-6 flex-wrap"
+		hx-get="/workers/stats/global"
+		hx-trigger="every 3s"
+		hx-swap="outerHTML"
+	>
+		<div>
+			<span class="text-sm opacity-60">Worker Pool Size:</span>
+			<span class="ml-2 badge badge-primary">{ fmt.Sprintf("%d", runningWorkers) }</span>
+		</div>
+		<div>
+			<span class="text-sm opacity-60">Tasks Running:</span>
+			<span class={ "ml-2 badge", templ.KV("badge-success", totalRunning > 0), templ.KV("badge-ghost", totalRunning == 0) }>
+				{ fmt.Sprintf("%d / %d", totalRunning, runningWorkers) }
+			</span>
+		</div>
+		<div>
+			<span class="text-sm opacity-60">Queue:</span>
+			<span class={ "ml-2 badge", templ.KV("badge-warning", queueSize > 0), templ.KV("badge-ghost", queueSize == 0) }>
+				{ fmt.Sprintf("%d", queueSize) }
+			</span>
+		</div>
+	</div>
+}
+
+// Fragment template for project stats table body (used for polling)
+templ ProjectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats) {
+	@projectStatsTableBody(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats)
+}
+
+templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats) {
+	<tbody
+		id="project-stats-tbody"
+		hx-get="/workers/stats/projects"
+		hx-trigger="every 3s"
+		hx-swap="outerHTML"
+	>
+		<tr id="global-row" class="bg-base-200">
+			<td>
+				<span class="badge badge-primary badge-sm">Global</span>
+			</td>
+			<td class="font-medium">All Projects</td>
+			<td>
+				<span class={ "badge badge-sm", templ.KV("badge-warning", totalRunning >= runningWorkers), templ.KV("badge-success", totalRunning > 0 && totalRunning < runningWorkers), templ.KV("badge-ghost", totalRunning == 0) }>
+					{ fmt.Sprintf("%d / %d", totalRunning, runningWorkers) }
+				</span>
+			</td>
+			<td>
+				<span class={ "badge badge-sm", templ.KV("badge-warning", queueSize > 10), templ.KV("badge-info", queueSize > 0 && queueSize <= 10), templ.KV("badge-ghost", queueSize == 0) }>
+					{ fmt.Sprintf("%d", queueSize) }
+				</span>
+			</td>
+			<td id="limit-cell-global">
+				<form
+					method="post"
+					action="/workers"
+					hx-post="/workers"
+					hx-target="#worker-settings-content"
+					hx-swap="outerHTML"
+					class="flex items-center gap-2 worker-limit-form"
+					data-project-id="global"
+				>
+					<input
+						type="number"
+						name="max_workers"
+						id="limit-input-global"
+						value={ fmt.Sprintf("%d", maxWorkers) }
+						min="1"
+						max="10"
+						class="input input-bordered input-xs w-20 worker-limit-input"
+						title="1-10 = Max concurrent workers across all projects"
+						data-project-id="global"
+					/>
+					<button type="submit" class="btn btn-xs btn-primary">Set</button>
+				</form>
+			</td>
+			<td>
+				if totalRunning >= runningWorkers {
+					<span class="badge badge-warning badge-sm">At capacity</span>
+				} else if totalRunning > 0 {
+					<span class="badge badge-success badge-sm">Active</span>
+				} else {
+					<span class="badge badge-ghost badge-sm">Idle</span>
+				}
+			</td>
+		</tr>
+		for _, ps := range projectStats {
+			<tr id={ fmt.Sprintf("project-row-%s", ps.ID) }>
+				<td>
+					<span class="badge badge-outline badge-sm">Project</span>
+				</td>
+				<td class="font-medium">{ ps.Name }</td>
+				<td>
+					if ps.MaxWorkers != nil && *ps.MaxWorkers > 0 && ps.Running >= *ps.MaxWorkers {
+						<span class="badge badge-warning badge-sm">{ fmt.Sprintf("%d / %d", ps.Running, *ps.MaxWorkers) }</span>
+					} else if ps.Running > 0 {
+						<span class="badge badge-success badge-sm">
+							{ fmt.Sprintf("%d / %d", ps.Running, func() int { if ps.MaxWorkers != nil { return *ps.MaxWorkers } else { return 0 } }()) }
+						</span>
+					} else {
+						<span class="badge badge-ghost badge-sm">
+							{ fmt.Sprintf("0 / %d", func() int { if ps.MaxWorkers != nil { return *ps.MaxWorkers } else { return 0 } }()) }
+						</span>
+					}
+				</td>
+				<td>
+					<span class={ "badge badge-sm", templ.KV("badge-warning", ps.QueueSize > 10), templ.KV("badge-info", ps.QueueSize > 0 && ps.QueueSize <= 10), templ.KV("badge-ghost", ps.QueueSize == 0) }>
+						{ fmt.Sprintf("%d", ps.QueueSize) }
+					</span>
+				</td>
+				<td id={ fmt.Sprintf("limit-cell-%s", ps.ID) }>
+					<form
+						method="post"
+						hx-post={ fmt.Sprintf("/workers/projects/%s/limit", ps.ID) }
+						hx-target="#worker-settings-content"
+						hx-swap="outerHTML"
+						class="flex items-center gap-2 worker-limit-form"
+						data-project-id={ ps.ID }
+					>
+						<input
+							type="number"
+							name="max_workers"
+							id={ fmt.Sprintf("limit-input-%s", ps.ID) }
+							value={ fmt.Sprintf("%d", func() int { if ps.MaxWorkers != nil { return *ps.MaxWorkers } else { return 0 } }()) }
+							min="0"
+							max="10"
+							placeholder="No limit"
+							class="input input-bordered input-xs w-20 worker-limit-input"
+							title="0 = No limit, 1-10 = Max concurrent workers"
+							data-project-id={ ps.ID }
+						/>
+						<button type="submit" class="btn btn-xs btn-primary">Set</button>
+					</form>
+					if ps.MaxWorkers == nil {
+						<span class="text-xs opacity-60 mt-1 block">No limit</span>
+					} else if *ps.MaxWorkers == 0 {
+						<span class="text-xs opacity-60 mt-1 block">No limit</span>
+					}
+				</td>
+				<td>
+					if ps.MaxWorkers != nil && *ps.MaxWorkers > 0 && ps.Running >= *ps.MaxWorkers {
+						<span class="badge badge-warning badge-sm" title={ fmt.Sprintf("Project is using all %d allowed workers", *ps.MaxWorkers) }>At capacity</span>
+					} else if ps.Running > 0 {
+						<span class="badge badge-success badge-sm">Active</span>
+					} else {
+						<span class="badge badge-ghost badge-sm">Idle</span>
+					}
+				</td>
+			</tr>
+		}
+	</tbody>
+}
+
+// Fragment template for model stats table body (used for polling)
+templ ModelStatsTableBody(modelStats []ModelWorkerStats) {
+	@modelStatsTableBody(modelStats)
+}
+
+templ modelStatsTableBody(modelStats []ModelWorkerStats) {
+	<tbody
+		id="model-stats-tbody"
+		hx-get="/workers/stats/models"
+		hx-trigger="every 3s"
+		hx-swap="outerHTML"
+	>
+		for _, ms := range modelStats {
+			<tr>
+				<td>
+					<div class="font-medium">{ ms.Name }</div>
+					<div class="text-xs opacity-60">{ ms.Model }</div>
+				</td>
+				<td>
+					<span class={ "badge badge-sm", templ.KV("badge-warning", ms.Running >= ms.MaxWorkers), templ.KV("badge-success", ms.Running > 0 && ms.Running < ms.MaxWorkers), templ.KV("badge-ghost", ms.Running == 0) }>
+						{ fmt.Sprintf("%d / %d", ms.Running, ms.MaxWorkers) }
+					</span>
+				</td>
+				<td>
+					{ fmt.Sprintf("%d", ms.MaxWorkers) }
+				</td>
+				<td>
+					if ms.Running >= ms.MaxWorkers {
+						<span class="badge badge-warning badge-sm">At capacity</span>
+					} else if ms.Running > 0 {
+						<span class="badge badge-success badge-sm">Active</span>
+					} else {
+						<span class="badge badge-ghost badge-sm">Idle</span>
+					}
+				</td>
+			</tr>
+		}
+	</tbody>
+}

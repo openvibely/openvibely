@@ -1,0 +1,51 @@
+package pages
+
+import (
+	"fmt"
+	"strings"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+templ Dashboard(projects []models.Project, currentProject *models.Project, counts map[string]int) {
+	@layout.Base("Dashboard", projects, projectID(currentProject)) {
+		<h2 class="text-2xl font-bold mb-6">Dashboard</h2>
+		if currentProject != nil {
+			<p class="mb-4 opacity-60">{ currentProject.Name }</p>
+			<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+				for _, cat := range models.AllCategories {
+					<a
+						href={ templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s&category=%s", currentProject.ID, string(cat))) }
+						class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary transition-colors"
+					>
+						<div class="card-body p-4 text-center">
+							<p class="text-3xl font-bold">{ fmt.Sprintf("%d", counts[string(cat)]) }</p>
+							<p class="text-sm opacity-60">{ capitalize(string(cat)) }</p>
+						</div>
+					</a>
+				}
+			</div>
+			<a href={ templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s", currentProject.ID)) } class="btn btn-primary">
+				View Tasks
+			</a>
+		} else {
+			<div class="text-center py-12 opacity-50">
+				<p>No projects yet. Create one to get started.</p>
+			</div>
+		}
+	}
+}
+
+func projectID(p *models.Project) string {
+	if p == nil {
+		return "default"
+	}
+	return p.ID
+}

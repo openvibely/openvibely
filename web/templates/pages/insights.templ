@@ -1,0 +1,574 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ Insights(projects []models.Project, currentProject *models.Project, data *models.InsightDashboardData) {
+	@layout.Base("Proactive Insights", projects, projectID(currentProject)) {
+		@InsightsContent(currentProject, data)
+	}
+}
+
+templ InsightsContent(currentProject *models.Project, data *models.InsightDashboardData) {
+	<div class="flex justify-between items-center mb-6">
+		<h2 class="text-2xl font-bold">Proactive Insights</h2>
+		if currentProject != nil {
+			<div class="flex gap-2 items-center">
+				<span class="opacity-60">Project:</span>
+				<span class="font-semibold">{ currentProject.Name }</span>
+			</div>
+		}
+	</div>
+	if currentProject != nil && data != nil {
+		<!-- Project Health Check -->
+		<div id="health-check-section" class="mb-8">
+			@HealthCheckCard(currentProject, data.LatestHealthCheck, data.HealthHistory)
+		</div>
+		<!-- Idea Grade -->
+		<div id="idea-grade-section" class="mb-8">
+			@IdeaGradeCard(currentProject.ID, data.LatestIdeaGrade, data.IdeaGradeHistory)
+		</div>
+	} else {
+		<div class="alert alert-info">
+			<span>Select a project to view proactive insights.</span>
+		</div>
+	}
+}
+
+templ InsightsList(insights []models.Insight) {
+	if len(insights) == 0 {
+		<div class="text-center py-8 opacity-60">
+			<p>No insights found. Run an analysis to detect improvement opportunities.</p>
+		</div>
+	} else {
+		<div class="space-y-3">
+			for _, insight := range insights {
+				@InsightCard(&insight)
+			}
+		</div>
+	}
+}
+
+templ InsightCard(insight *models.Insight) {
+	<div id={ fmt.Sprintf("insight-%s", insight.ID) } class="card bg-base-100 shadow-sm border border-base-300">
+		<div class="card-body p-4">
+			<div class="flex justify-between items-start">
+				<div class="flex-1">
+					<div class="flex items-center gap-2 mb-1">
+						@insightTypeBadge(insight.Type)
+						@insightSeverityBadge(insight.Severity)
+						@insightStatusBadge(insight.Status)
+						<span class="text-xs opacity-50">
+							{ fmt.Sprintf("%.0f%% confidence", insight.Confidence*100) }
+						</span>
+					</div>
+					<h4 class="font-semibold">{ insight.Title }</h4>
+					if insight.Description != "" {
+						<p class="text-sm opacity-70 mt-1">{ insight.Description }</p>
+					}
+					if insight.Suggestion != "" {
+						<p class="text-sm mt-2">
+							<span class="font-medium">Suggestion:</span> { insight.Suggestion }
+						</p>
+					}
+					if insight.Impact != "" {
+						<p class="text-sm opacity-70 mt-1">
+							<span class="font-medium">Impact:</span> { insight.Impact }
+						</p>
+					}
+				</div>
+				<div class="flex gap-1 ml-2">
+					if insight.Status == models.InsightStatusNew {
+						<button
+							class="btn btn-xs btn-success"
+							hx-patch={ fmt.Sprintf("/insights/%s/status", insight.ID) }
+							hx-vals='{"status": "accepted"}'
+							hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
+							hx-swap="outerHTML"
+							title="Accept"
+						>Accept</button>
+						<button
+							class="btn btn-xs btn-ghost"
+							hx-patch={ fmt.Sprintf("/insights/%s/status", insight.ID) }
+							hx-vals='{"status": "rejected"}'
+							hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
+							hx-swap="outerHTML"
+							title="Reject"
+						>Reject</button>
+					}
+					if insight.Status == models.InsightStatusAccepted {
+						<button
+							class="btn btn-xs btn-primary"
+							hx-patch={ fmt.Sprintf("/insights/%s/status", insight.ID) }
+							hx-vals='{"status": "resolved"}'
+							hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
+							hx-swap="outerHTML"
+							title="Mark Resolved"
+						>Resolve</button>
+					}
+					<button
+						class="btn btn-xs btn-ghost btn-error"
+						hx-delete={ fmt.Sprintf("/insights/%s", insight.ID) }
+						hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
+						hx-swap="outerHTML"
+						hx-confirm="Delete this insight?"
+						title="Delete"
+					>X</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+templ insightTypeBadge(t models.InsightType) {
+	switch t {
+		case models.InsightBugPattern:
+			<span class="badge badge-outline badge-sm">Bug Pattern</span>
+		case models.InsightIncompleteFeature:
+			<span class="badge badge-outline badge-sm">Incomplete</span>
+		case models.InsightTechDebt:
+			<span class="badge badge-outline badge-sm">Tech Debt</span>
+		case models.InsightOptimization:
+			<span class="badge badge-outline badge-sm">Optimization</span>
+		case models.InsightDependency:
+			<span class="badge badge-outline badge-sm">Dependency</span>
+		case models.InsightKnowledge:
+			<span class="badge badge-outline badge-sm">Knowledge</span>
+		case models.InsightProactiveSuggestion:
+			<span class="badge badge-outline badge-sm">AI Suggestion</span>
+	}
+}
+
+templ insightSeverityBadge(s models.InsightSeverity) {
+	switch s {
+		case models.InsightSeverityCritical:
+			<span class="badge badge-error badge-outline badge-sm">Critical</span>
+		case models.InsightSeverityHigh:
+			<span class="badge badge-outline badge-sm">High</span>
+		case models.InsightSeverityMedium:
+			<span class="badge badge-ghost badge-sm">Medium</span>
+		case models.InsightSeverityLow:
+			<span class="badge badge-ghost badge-sm">Low</span>
+		case models.InsightSeverityInfo:
+			<span class="badge badge-ghost badge-sm">Info</span>
+	}
+}
+
+templ insightStatusBadge(s models.InsightStatus) {
+	switch s {
+		case models.InsightStatusNew:
+			<span class="badge badge-primary badge-outline badge-sm">New</span>
+		case models.InsightStatusReviewed:
+			<span class="badge badge-outline badge-sm">Reviewed</span>
+		case models.InsightStatusAccepted:
+			<span class="badge badge-outline badge-sm">Accepted</span>
+		case models.InsightStatusRejected:
+			<span class="badge badge-ghost badge-sm">Rejected</span>
+		case models.InsightStatusResolved:
+			<span class="badge badge-ghost badge-sm">Resolved</span>
+	}
+}
+
+templ InsightAnalysisResult(report *models.InsightReport, err error) {
+	if err != nil {
+		<div class="alert alert-error mb-4">
+			<span>Analysis failed: { err.Error() }</span>
+		</div>
+	} else if report != nil {
+		<div class="alert alert-success mb-4">
+			<div>
+				<h3 class="font-bold">Analysis Complete</h3>
+				<div class="text-sm whitespace-pre-wrap">{ report.AnalysisLog }</div>
+			</div>
+		</div>
+	}
+}
+
+templ KnowledgeExtractionResult(entries []models.KnowledgeEntry, err error) {
+	if err != nil {
+		<div class="alert alert-error mb-4">
+			<span>Knowledge extraction failed: { err.Error() }</span>
+		</div>
+	} else if len(entries) > 0 {
+		<div class="alert alert-success mb-4">
+			<span>Extracted { fmt.Sprintf("%d", len(entries)) } knowledge entries.</span>
+		</div>
+	} else {
+		<div class="alert alert-info mb-4">
+			<span>No new knowledge entries to extract.</span>
+		</div>
+	}
+}
+
+templ KnowledgeList(entries []models.KnowledgeEntry) {
+	if len(entries) == 0 {
+		<div class="text-center py-4 opacity-60">
+			<p>No knowledge entries yet. Extract knowledge from completed tasks.</p>
+		</div>
+	} else {
+		<div class="space-y-2">
+			for _, entry := range entries {
+				<div id={ fmt.Sprintf("knowledge-%s", entry.ID) } class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body p-3">
+						<div class="flex justify-between items-start">
+							<div class="flex-1">
+								<h4 class="font-semibold text-sm">{ entry.Topic }</h4>
+								<p class="text-sm opacity-70 mt-1">{ entry.Content }</p>
+								<div class="flex gap-1 mt-2">
+									<span class="badge badge-ghost badge-xs">{ entry.Source }</span>
+									if entry.SourceRef != "" {
+										<span class="badge badge-ghost badge-xs">{ entry.SourceRef }</span>
+									}
+								</div>
+							</div>
+							<button
+								class="btn btn-xs btn-ghost btn-error ml-2"
+								hx-delete={ fmt.Sprintf("/insights/knowledge/%s", entry.ID) }
+								hx-target={ fmt.Sprintf("#knowledge-%s", entry.ID) }
+								hx-swap="outerHTML"
+								hx-confirm="Delete this knowledge entry?"
+							>X</button>
+						</div>
+					</div>
+				</div>
+			}
+		</div>
+	}
+}
+
+templ HealthCheckCard(project *models.Project, latest *models.HealthCheck, history []models.HealthCheck) {
+	<div class="card bg-base-100 shadow-lg border-2 border-primary/20">
+		<div class="card-body">
+			<div class="flex justify-between items-center mb-4">
+				<div>
+					<h3 class="card-title text-xl">Project Management</h3>
+					<p class="text-sm opacity-60">AI-powered project health evaluation</p>
+				</div>
+				<button
+					class="btn btn-primary"
+					hx-post={ fmt.Sprintf("/insights/health-check?project_id=%s", project.ID) }
+					hx-target="#health-check-content"
+					hx-swap="innerHTML"
+					hx-indicator="#health-check-spinner"
+				>
+					<span id="health-check-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+					if latest != nil {
+						Refresh Analysis
+					} else {
+						Evaluate My Project
+					}
+				</button>
+			</div>
+			<div id="health-check-content">
+				if latest != nil {
+					@HealthCheckDisplay(latest, history)
+				} else {
+					<div class="text-center py-8">
+						<div class="text-5xl mb-4 opacity-20">?</div>
+						<p class="opacity-60">Click "Evaluate My Project" to get your personalized project health grade and feedback.</p>
+					</div>
+				}
+			</div>
+		</div>
+	</div>
+}
+
+templ HealthCheckDisplay(hc *models.HealthCheck, history []models.HealthCheck) {
+	<div class="space-y-6">
+		<!-- Grade and Quick Stats -->
+		<div class="flex flex-col md:flex-row gap-6">
+			<!-- Grade Display -->
+			<div class="flex flex-col items-center justify-center min-w-[140px]">
+				<div class={ "text-6xl font-black", gradeColorClass(hc.Grade) }>
+					{ hc.Grade }
+				</div>
+				<div class="text-sm opacity-60 mt-1">Project Grade</div>
+				<div class="text-xs opacity-40 mt-1">{ hc.CreatedAt.Local().Format("Jan 2, 2006") }</div>
+			</div>
+			<!-- Quick Metrics -->
+			<div class="stats stats-vertical md:stats-horizontal shadow-sm flex-1">
+				<div class="stat py-2 px-4">
+					<div class="stat-title text-xs">Tasks</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%d", hc.TasksTotal) }</div>
+				</div>
+				<div class="stat py-2 px-4">
+					<div class="stat-title text-xs">Completed</div>
+					<div class="stat-value text-lg text-success">{ fmt.Sprintf("%d", hc.TasksCompleted) }</div>
+				</div>
+				<div class="stat py-2 px-4">
+					<div class="stat-title text-xs">Failed</div>
+					<div class="stat-value text-lg text-error">{ fmt.Sprintf("%d", hc.TasksFailed) }</div>
+				</div>
+				<div class="stat py-2 px-4">
+					<div class="stat-title text-xs">Backlog</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%d", hc.BacklogSize) }</div>
+				</div>
+				<div class="stat py-2 px-4">
+					<div class="stat-title text-xs">Completion</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%.0f%%", hc.AvgCompletionPct) }</div>
+				</div>
+			</div>
+		</div>
+		<!-- Strengths -->
+		<div class="bg-success/10 rounded-lg p-4">
+			<h4 class="font-bold text-success mb-2 flex items-center gap-2">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+					<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+				</svg>
+				What You're Doing Well
+			</h4>
+			<div class="text-sm whitespace-pre-wrap">{ hc.Strengths }</div>
+		</div>
+		<!-- Areas to Improve -->
+		<div class="bg-warning/10 rounded-lg p-4">
+			<h4 class="font-bold text-warning mb-2 flex items-center gap-2">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+					<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+				</svg>
+				Areas to Improve
+			</h4>
+			<div class="text-sm whitespace-pre-wrap">{ hc.Improvements }</div>
+		</div>
+		<!-- Overall Assessment -->
+		<div class="bg-base-200 rounded-lg p-4">
+			<h4 class="font-bold mb-2 flex items-center gap-2">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+					<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+				</svg>
+				Overall Assessment
+			</h4>
+			<div class="text-sm whitespace-pre-wrap">{ hc.Assessment }</div>
+		</div>
+		<!-- How to Improve -->
+		<div class="bg-info/10 rounded-lg p-4">
+			<h4 class="font-bold text-info mb-2 flex items-center gap-2">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+					<path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z"></path>
+				</svg>
+				How to Improve Your Grade
+			</h4>
+			<div class="text-sm whitespace-pre-wrap">{ hc.HowToImprove }</div>
+		</div>
+		<!-- Grade History -->
+		if len(history) > 1 {
+			<div class="mt-4">
+				<h4 class="font-bold mb-2 text-sm">Grade History</h4>
+				<div class="flex gap-2 flex-wrap">
+					for _, h := range history {
+						<div class="flex flex-col items-center bg-base-200 rounded-lg px-3 py-2 min-w-[60px]">
+							<span class={ "font-bold text-lg", gradeColorClass(h.Grade) }>{ h.Grade }</span>
+							<span class="text-xs opacity-50">{ h.CreatedAt.Local().Format("Jan 2") }</span>
+						</div>
+					}
+				</div>
+			</div>
+		}
+	</div>
+}
+
+templ HealthCheckResult(hc *models.HealthCheck, err error, history ...models.HealthCheck) {
+	if err != nil {
+		<div class="alert alert-error mb-4">
+			<span>Health check failed: { err.Error() }</span>
+		</div>
+	} else if hc != nil {
+		@HealthCheckDisplay(hc, history)
+	}
+}
+
+func gradeColorClass(grade string) string {
+	switch {
+	case grade == "A+" || grade == "A":
+		return "text-success"
+	case grade == "A-" || grade == "B+":
+		return "text-success/80"
+	case grade == "B" || grade == "B-":
+		return "text-info"
+	case grade == "C+" || grade == "C":
+		return "text-warning"
+	case grade == "C-" || grade == "D+" || grade == "D":
+		return "text-warning/80"
+	default:
+		return "text-error"
+	}
+}
+
+// IdeaGradeCard renders the idea grading section with consistent styling.
+templ IdeaGradeCard(projectID string, latest *models.IdeaGrade, gradeHistory []models.IdeaGrade) {
+	<div class="card bg-base-100 shadow-lg border-2 border-primary/20">
+		<div class="card-body">
+			<div class="flex justify-between items-center mb-4">
+				<div>
+					<h3 class="card-title text-xl">Ideas</h3>
+					<p class="text-sm opacity-60">AI evaluation of your task quality and clarity</p>
+				</div>
+				<button
+					class="btn btn-primary"
+					hx-post={ fmt.Sprintf("/history/grade-ideas?project_id=%s", projectID) }
+					hx-target="#idea-grade-content"
+					hx-swap="innerHTML"
+					hx-indicator="#idea-grade-spinner"
+				>
+					<span id="idea-grade-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+					if latest != nil {
+						Refresh Analysis
+					} else {
+						Grade My Ideas
+					}
+				</button>
+			</div>
+			<div id="idea-grade-content">
+				if latest != nil {
+					@IdeaGradeDisplay(latest, gradeHistory)
+				} else {
+					<div class="text-center py-8">
+						<div class="text-5xl mb-4 opacity-20">?</div>
+						<p class="opacity-60">Click "Grade My Ideas" to get an AI evaluation of your task quality and clarity.</p>
+					</div>
+				}
+			</div>
+		</div>
+	</div>
+}
+
+templ IdeaGradeDisplay(ig *models.IdeaGrade, history []models.IdeaGrade) {
+	<div class="space-y-6">
+		<!-- Grade and Quick Stats -->
+		<div class="flex flex-col md:flex-row gap-6">
+			<!-- Grade Display -->
+			<div class="flex flex-col items-center justify-center min-w-[140px]">
+				<div class={ "text-6xl font-black", gradeColorClass(ig.Grade) }>
+					{ ig.Grade }
+				</div>
+				<div class="text-sm opacity-60 mt-1">Idea Quality</div>
+				<div class="text-xs opacity-40 mt-1">{ ig.CreatedAt.Local().Format("Jan 2, 2006") }</div>
+			</div>
+			<!-- Quick Metrics -->
+			<div class="stats stats-vertical md:stats-horizontal shadow-sm flex-1">
+				<div class="stat py-2 px-4">
+					<div class="stat-title text-xs">Tasks Evaluated</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%d", ig.TasksEvaluated) }</div>
+				</div>
+				<div class="stat py-2 px-4">
+					<div class="stat-title text-xs">Clarity</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%.0f%%", ig.ClarityScore) }</div>
+				</div>
+				<div class="stat py-2 px-4">
+					<div class="stat-title text-xs">Ambition</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%.0f%%", ig.AmbitionScore) }</div>
+				</div>
+				<div class="stat py-2 px-4">
+					<div class="stat-title text-xs">Follow-Through</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%.0f%%", ig.FollowThrough) }</div>
+				</div>
+			</div>
+		</div>
+		<!-- What You're Doing Well -->
+		if ig.Strengths != "" {
+			<div class="bg-success/10 rounded-lg p-4">
+				<h4 class="font-bold text-success mb-2 flex items-center gap-2">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+						<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+					</svg>
+					What You're Doing Well
+				</h4>
+				<div class="text-sm whitespace-pre-wrap">{ ig.Strengths }</div>
+			</div>
+		}
+		<!-- Areas to Improve -->
+		if ig.Improvements != "" {
+			<div class="bg-warning/10 rounded-lg p-4">
+				<h4 class="font-bold text-warning mb-2 flex items-center gap-2">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+						<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+					</svg>
+					Areas to Improve
+				</h4>
+				<div class="text-sm whitespace-pre-wrap">{ ig.Improvements }</div>
+			</div>
+		}
+		<!-- Overall Assessment -->
+		if ig.Summary != "" {
+			<div class="bg-base-200 rounded-lg p-4">
+				<h4 class="font-bold mb-2 flex items-center gap-2">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+						<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+					</svg>
+					Overall Assessment
+				</h4>
+				<div class="text-sm whitespace-pre-wrap">{ ig.Summary }</div>
+			</div>
+		}
+		<!-- How to Improve Your Grade -->
+		if ig.HowToNextGrade != "" {
+			<div class="bg-info/10 rounded-lg p-4">
+				<h4 class="font-bold text-info mb-2 flex items-center gap-2">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+						<path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z"></path>
+					</svg>
+					How to Improve Your Grade
+				</h4>
+				<div class="text-sm whitespace-pre-wrap">{ ig.HowToNextGrade }</div>
+				if ig.NextGrade != "" {
+					<div class="mt-2 text-sm">
+						<span class="opacity-60">Target grade:</span>
+						<span class={ "font-bold ml-1", gradeColorClass(ig.NextGrade) }>{ ig.NextGrade }</span>
+					</div>
+				}
+			</div>
+		}
+		<!-- Grade History -->
+		if len(history) > 1 {
+			<div class="mt-4">
+				<h4 class="font-bold mb-2 text-sm">Grade History</h4>
+				<div class="flex gap-2 flex-wrap">
+					for _, h := range history {
+						<div class="flex flex-col items-center bg-base-200 rounded-lg px-3 py-2 min-w-[60px]">
+							<span class={ "font-bold text-lg", gradeColorClass(h.Grade) }>{ h.Grade }</span>
+							<span class="text-xs opacity-50">{ h.CreatedAt.Local().Format("Jan 2") }</span>
+						</div>
+					}
+				</div>
+			</div>
+		}
+	</div>
+}
+
+// IdeaGradeResult renders the result of a grade-ideas POST (swapped into #idea-grade-content).
+templ IdeaGradeResult(ig *models.IdeaGrade, err error, gradeHistory ...models.IdeaGrade) {
+	if err != nil {
+		<div class="alert alert-error mb-4">
+			<span>Grading failed: { err.Error() }</span>
+		</div>
+	} else if ig != nil {
+		@IdeaGradeDisplay(ig, gradeHistory)
+	}
+}
+
+templ InsightReportsList(reports []models.InsightReport) {
+	<h3 class="text-lg font-semibold mb-4">Analysis Reports</h3>
+	if len(reports) == 0 {
+		<div class="text-center py-4 opacity-60">
+			<p>No reports yet. Run an analysis to generate a report.</p>
+		</div>
+	} else {
+		<div class="space-y-3">
+			for _, report := range reports {
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body p-4">
+						<div class="flex justify-between items-center mb-2">
+							<h4 class="font-semibold">Report: { report.ReportDate }</h4>
+							<span class="text-xs opacity-50">{ report.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM") }</span>
+						</div>
+						<div class="prose prose-sm max-w-none">
+							<pre class="whitespace-pre-wrap text-sm">{ report.Summary }</pre>
+						</div>
+					</div>
+				</div>
+			}
+		</div>
+	}
+}

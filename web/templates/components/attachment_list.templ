@@ -1,0 +1,123 @@
+package components
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+templ AttachmentList(attachments []models.Attachment, projectID string, taskID string) {
+	<div>
+		<!-- Upload Form -->
+		<div class="mb-4">
+			<button
+				id="add-attachment-btn"
+				class="btn btn-sm btn-primary"
+				onclick="document.getElementById('attachment-upload-form').classList.remove('hidden'); document.getElementById('add-attachment-btn').classList.add('hidden')"
+			>
+				+ Add Attachment
+			</button>
+
+			<div id="attachment-upload-form" class="hidden mt-3 card bg-base-200 shadow-sm border border-base-300">
+				<div class="card-body p-4">
+					<form
+						method="post"
+						id="attachment-form"
+						hx-post={ fmt.Sprintf("/tasks/%s/attachments", taskID) }
+						hx-target="#attachment-list"
+						hx-swap="outerHTML"
+						hx-encoding="multipart/form-data"
+					>
+						<div class="form-control mb-4">
+							<label class="label">
+								<span class="label-text">Select Files</span>
+								<span class="label-text-alt text-xs opacity-60">Max 10MB per file</span>
+							</label>
+							<input
+								type="file"
+								name="files"
+								multiple
+								class="file-input file-input-bordered file-input-sm w-full"
+								onchange="this.form.requestSubmit()"
+								required
+							/>
+						</div>
+
+						<div class="flex gap-2">
+							<button
+								type="button"
+								class="btn btn-ghost btn-sm"
+								onclick="document.getElementById('attachment-upload-form').classList.add('hidden'); document.getElementById('add-attachment-btn').classList.remove('hidden'); this.closest('form').reset()"
+							>
+								Cancel
+							</button>
+						</div>
+					</form>
+
+					<script>
+						// Reset form and show button after successful upload
+						document.body.addEventListener('htmx:afterSwap', function(event) {
+							if (event.detail.target && event.detail.target.id === 'attachment-list') {
+								const uploadForm = document.getElementById('attachment-upload-form');
+								const addBtn = document.getElementById('add-attachment-btn');
+								if (uploadForm && addBtn) {
+									uploadForm.classList.add('hidden');
+									addBtn.classList.remove('hidden');
+									const form = uploadForm.querySelector('form');
+									if (form) form.reset();
+								}
+							}
+						});
+					</script>
+				</div>
+			</div>
+		</div>
+
+		<!-- Attachments List -->
+		@AttachmentListOnly(attachments)
+	</div>
+}
+
+templ AttachmentListOnly(attachments []models.Attachment) {
+	<div id="attachment-list" class="space-y-2">
+		if len(attachments) == 0 {
+			<p class="text-sm opacity-50">No attachments</p>
+		} else {
+			for _, att := range attachments {
+				<div class="flex items-center justify-between p-2 bg-base-200 rounded">
+					<div class="flex items-center gap-2">
+						<svg class="w-5 h-5 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+						</svg>
+						<div>
+							<p class="text-sm font-medium">{ att.FileName }</p>
+							<p class="text-xs text-base-content/60">{ FormatFileSize(att.FileSize) }</p>
+						</div>
+					</div>
+					<button
+						class="btn btn-ghost btn-xs text-error"
+						hx-delete={ fmt.Sprintf("/attachments/%s", att.ID) }
+						hx-target="#attachment-list"
+						hx-swap="outerHTML"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+						</svg>
+					</button>
+				</div>
+			}
+		}
+	</div>
+}
+
+func FormatFileSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}

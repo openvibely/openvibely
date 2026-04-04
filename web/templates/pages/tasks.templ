@@ -1,0 +1,415 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+	"github.com/openvibely/openvibely/web/templates/components"
+)
+
+func getProjectID(project *models.Project, projects []models.Project) string {
+	if project != nil {
+		return project.ID
+	}
+	if len(projects) > 0 {
+		return projects[0].ID
+	}
+	return ""
+}
+
+templ Tasks(projects []models.Project, project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string) {
+	@layout.Base("Tasks", projects, getProjectID(project, projects)) {
+		@TasksContent(project, tasks, agents, agentDefs, backlogSort, completedSort)
+	}
+}
+
+templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string) {
+	<div class="flex flex-col h-full overflow-hidden">
+		<div class="flex items-center justify-between mb-6 flex-shrink-0">
+			<h2 class="text-2xl font-bold">Tasks</h2>
+			<div class="flex gap-2">
+				<button class="btn btn-primary btn-sm" onclick="openNewTaskModal()">
+					+ Add Task
+				</button>
+			</div>
+		</div>
+
+		if project != nil {
+			<div id="tasks-page" data-project-id={ project.ID } class="flex-1 overflow-hidden">
+			<!-- Kanban Board -->
+			@components.KanbanBoard(tasks, project.ID, backlogSort, completedSort, agents, agentDefs)
+			</div>
+		}
+	</div>
+
+	<!-- New Task Dialog -->
+	if project != nil {
+			<dialog id="new_task_modal" class="modal">
+				<div class="modal-box">
+					<div class="flex items-center justify-between mb-4">
+					<h3 class="font-bold text-lg">New Task</h3>
+					<button
+						class="btn btn-sm btn-circle btn-ghost"
+						onclick="new_task_modal.close()"
+					>✕</button>
+				</div>
+					<form
+						method="post"
+						hx-post={ fmt.Sprintf("/tasks?project_id=%s", project.ID) }
+						hx-target="#kanban-board"
+						hx-swap="outerHTML"
+						hx-encoding="multipart/form-data"
+					>
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">Title</span></label>
+							<input type="text" name="title" id="task-title-input" class="input input-bordered" required placeholder="Task title"/>
+							<div id="title-error" class="hidden mt-2 flex items-center gap-2 text-error text-sm">
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+								</svg>
+								<span id="title-error-message"></span>
+							</div>
+						</div>
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">Prompt</span></label>
+							<textarea name="prompt" class="textarea textarea-bordered h-32" required placeholder="The prompt/instruction for the model to execute"></textarea>
+						</div>
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">Model</span></label>
+							<select name="agent_id" class="select select-bordered">
+								<option value="">Use Default Model</option>
+								for _, agent := range agents {
+									<option value={ agent.ID }>
+										{ agent.Name }
+										if agent.IsDefault {
+											(Default)
+										}
+									</option>
+								}
+							</select>
+						</div>
+						if len(agentDefs) > 0 {
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Agent</span></label>
+								<select name="agent_definition_id" class="select select-bordered" id="task-agent-def-select">
+									<option value="">No Agent</option>
+									for _, ad := range agentDefs {
+										<option value={ ad.ID } data-agent-model={ ad.Model }>
+											{ ad.Name }
+											if ad.Model != "inherit" {
+												({ ad.Model })
+											}
+										</option>
+									}
+								</select>
+							</div>
+						}
+						<div class="grid grid-cols-2 gap-3">
+							<div class="form-control">
+								<label class="label"><span class="label-text">Category</span></label>
+								<select name="category" class="select select-bordered" id="task-category-select">
+									for _, cat := range models.SelectableCategories {
+										<option value={ string(cat) }>
+											{ string(cat) }
+										</option>
+									}
+								</select>
+							</div>
+							<div class="form-control">
+								<label class="label"><span class="label-text">Priority</span></label>
+								<select name="priority" class="select select-bordered">
+									<option value="1">Low</option>
+									<option value="2" selected>Normal</option>
+									<option value="3">High</option>
+									<option value="4">Urgent</option>
+								</select>
+							</div>
+						</div>
+						<div class="form-control mt-3">
+							<label class="label"><span class="label-text">Tag</span></label>
+							<select name="tag" class="select select-bordered">
+								<option value="">None</option>
+								<option value="feature">Feature</option>
+								<option value="bug">Bug</option>
+							</select>
+						</div>
+						<!-- Git Worktree: Auto-merge -->
+						<div class="form-control mt-3">
+							<label class="label cursor-pointer justify-start gap-2">
+								<input type="checkbox" name="auto_merge" class="toggle toggle-sm toggle-primary"/>
+								<span class="label-text">Auto-merge to target branch on completion</span>
+							</label>
+						</div>
+						<!-- Attachment field -->
+						<div class="form-control mt-3">
+							<label class="label">
+								<span class="label-text">Attachments (optional)</span>
+								<span class="label-text-alt text-xs opacity-60">Max 10MB per file</span>
+							</label>
+							<input type="file" id="create-task-file-input" multiple class="file-input file-input-bordered file-input-sm"/>
+							<input type="file" name="files" multiple class="hidden" id="create-task-files-hidden"/>
+							<div id="create-task-file-list" class="mt-2 space-y-1"></div>
+						</div>
+						<div class="modal-action">
+							<button type="button" class="btn" onclick="new_task_modal.close()">Cancel</button>
+							<button type="submit" class="btn btn-primary">Create Task</button>
+						</div>
+					</form>
+				</div>
+				<form method="dialog" class="modal-backdrop">
+					<button>close</button>
+				</form>
+			</dialog>
+
+			
+
+			<script type="text/javascript">
+				// Auto-load task dialog if task_id is in URL (e.g., from alert navigation)
+				(function() {
+					const urlParams = new URLSearchParams(window.location.search);
+					const taskId = urlParams.get('task_id');
+					if (taskId) {
+						// Navigate to the task detail page
+						htmx.ajax('GET', '/tasks/' + taskId, {
+							target: '#main-content',
+							swap: 'innerHTML'
+						});
+						history.pushState({}, '', '/tasks/' + taskId);
+					}
+				})();
+
+				// File accumulator for create task dialog
+				(function() {
+					const fileInput = document.getElementById('create-task-file-input');
+					const hiddenInput = document.getElementById('create-task-files-hidden');
+					const fileListDiv = document.getElementById('create-task-file-list');
+					if (!fileInput || !hiddenInput || !fileListDiv) return;
+
+					let accumulatedFiles = [];
+
+					function formatSize(bytes) {
+						if (bytes < 1024) return bytes + ' B';
+						if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+						return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+					}
+
+					function syncHiddenInput() {
+						const dt = new DataTransfer();
+						accumulatedFiles.forEach(function(f) { dt.items.add(f); });
+						hiddenInput.files = dt.files;
+					}
+
+					function renderFileList() {
+						fileListDiv.innerHTML = '';
+						accumulatedFiles.forEach(function(file, idx) {
+							var div = document.createElement('div');
+							div.className = 'flex items-center justify-between p-1.5 bg-base-200 rounded text-sm';
+							div.innerHTML = '<span class="truncate mr-2">' + file.name + ' <span class="opacity-60">(' + formatSize(file.size) + ')</span></span>';
+							var btn = document.createElement('button');
+							btn.type = 'button';
+							btn.className = 'btn btn-ghost btn-xs text-error';
+							btn.textContent = '\u2715';
+							btn.onclick = function() {
+								accumulatedFiles.splice(idx, 1);
+								syncHiddenInput();
+								renderFileList();
+							};
+							div.appendChild(btn);
+							fileListDiv.appendChild(div);
+						});
+					}
+
+					fileInput.addEventListener('change', function() {
+						for (var i = 0; i < this.files.length; i++) {
+							// Skip duplicates by name+size
+							var f = this.files[i];
+							var isDupe = accumulatedFiles.some(function(af) {
+								return af.name === f.name && af.size === f.size;
+							});
+							if (!isDupe) {
+								accumulatedFiles.push(f);
+							}
+						}
+						syncHiddenInput();
+						renderFileList();
+						this.value = '';
+					});
+
+					// Reset accumulated files when modal closes
+					var modal = document.getElementById('new_task_modal');
+					if (modal) {
+						modal.addEventListener('close', function() {
+							accumulatedFiles = [];
+							syncHiddenInput();
+							renderFileList();
+						});
+					}
+				})();
+
+				// Track unsaved changes in the new task modal
+				(function() {
+					const modal = document.getElementById('new_task_modal');
+					if (!modal) return;
+
+					let hasChanges = false;
+					const form = modal.querySelector('form');
+
+					if (form) {
+						form.addEventListener('input', function() {
+							hasChanges = true;
+						});
+
+						modal.addEventListener('close', function() {
+							hasChanges = false;
+						});
+					}
+
+					// Warn before navigating away with unsaved changes
+					window.addEventListener('beforeunload', function(event) {
+						if (modal.open && hasChanges) {
+							const message = 'You have unsaved changes in the task form. Are you sure you want to leave?';
+							event.preventDefault();
+							event.returnValue = message;
+							return message;
+						}
+					});
+				})();
+
+				// Listen to real-time task events from sidebar's shared SSE connection.
+				// This avoids creating a duplicate EventSource (the sidebar already has one).
+				(function() {
+					const tasksPage = document.getElementById('tasks-page');
+					if (!tasksPage) return;
+
+					const projectID = tasksPage.getAttribute('data-project-id');
+					let refreshTimeout = null;
+
+					function handleTaskEvent(event) {
+						const data = event.detail;
+						console.log('[SSE] Received event:', data);
+
+						// Only refresh if the event is for a task in the current project
+						if (data.project_id === projectID) {
+							// Check if user is currently dragging tasks - if so, don't auto-refresh
+							if (window.isDragging) {
+								console.log('[SSE] Drag in progress, skipping auto-refresh');
+								return;
+							}
+
+							// Check if ANY modal is currently open (e.g. new task, import)
+							const openModals = document.querySelectorAll('dialog[open]');
+							if (openModals.length > 0) {
+								console.log('[SSE] Modal open, skipping auto-refresh to avoid interrupting user');
+								return;
+							}
+
+							// Debounce: clear any pending refresh and schedule a new one
+							if (refreshTimeout) {
+								clearTimeout(refreshTimeout);
+							}
+
+							refreshTimeout = setTimeout(function() {
+								htmx.ajax('GET', '/tasks?project_id=' + projectID, {
+									target: '#kanban-board',
+									swap: 'outerHTML'
+								});
+								refreshTimeout = null;
+							}, 500);
+						}
+					}
+
+					// Listen to events dispatched by the sidebar's shared SSE connection
+					window.addEventListener('sse-task-event', handleTaskEvent);
+
+					// Clean up listener when navigating away via HTMX
+					document.body.addEventListener('htmx:beforeSwap', function(event) {
+						if (event.detail.target && event.detail.target.id === 'main-content') {
+							window.removeEventListener('sse-task-event', handleTaskEvent);
+							if (refreshTimeout) clearTimeout(refreshTimeout);
+						}
+					});
+				})();
+
+				// Reset and open the new task modal
+				function openNewTaskModal() {
+					const modal = document.getElementById('new_task_modal');
+					const form = modal.querySelector('form');
+					const titleInput = document.getElementById('task-title-input');
+					const titleError = document.getElementById('title-error');
+
+					// Reset the form
+					form.reset();
+
+					// Clear any previous errors
+					if (titleError) {
+						titleError.classList.add('hidden');
+					}
+					if (titleInput) {
+						titleInput.classList.remove('input-error');
+					}
+
+					// Open the modal
+					modal.showModal();
+				}
+
+
+				// Handle HTMX response errors for duplicate task titles
+				document.body.addEventListener('htmx:responseError', function(event) {
+					// Check if this is the new task form
+					if (event.detail.target && event.detail.target.id === 'kanban-board') {
+						const xhr = event.detail.xhr;
+
+						// Check for 409 Conflict (duplicate task)
+						if (xhr.status === 409) {
+							event.preventDefault(); // Prevent default HTMX error handling
+
+							const titleInput = document.getElementById('task-title-input');
+							const titleError = document.getElementById('title-error');
+							const titleErrorMessage = document.getElementById('title-error-message');
+
+							if (titleInput && titleError && titleErrorMessage) {
+								// Add error styling to input
+								titleInput.classList.add('input-error');
+
+								// Show error message
+								titleErrorMessage.textContent = xhr.responseText || 'A task with this name already exists in this project';
+								titleError.classList.remove('hidden');
+
+								// Don't close the modal - keep it open so user can fix the error
+								const modal = document.getElementById('new_task_modal');
+								if (modal && !modal.open) {
+									modal.showModal();
+								}
+							}
+						}
+					}
+				});
+
+				// Clear error when user starts typing in the title field
+				document.getElementById('task-title-input')?.addEventListener('input', function() {
+					const titleError = document.getElementById('title-error');
+					if (titleError && !titleError.classList.contains('hidden')) {
+						titleError.classList.add('hidden');
+						this.classList.remove('input-error');
+					}
+				});
+
+				// Guard against duplicate handler registration from repeated HTMX navigation
+				if (!window._tasksDialogHandlersAttached) {
+					window._tasksDialogHandlersAttached = true;
+
+					// Close modal on successful task creation
+					document.body.addEventListener('htmx:afterSwap', function(event) {
+						// Check if this was a successful task creation (kanban board updated)
+						if (event.detail.target && event.detail.target.id === 'kanban-board') {
+							const modal = document.getElementById('new_task_modal');
+							if (modal && modal.open) {
+								modal.close();
+							}
+						}
+					});
+
+					}
+			</script>
+		}
+}

@@ -1,0 +1,744 @@
+package pages
+
+import (
+	"fmt"
+	"strings"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+func autonomousPhaseName(title string) string {
+	title = strings.TrimPrefix(title, "[Auto Build] ")
+	return title
+}
+
+func autonomousHasAnySummary(summaries map[string]*service.BuildSummary) bool {
+	for _, s := range summaries {
+		if s != nil && s.Summary != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func trendPatternTypeBadge(pt models.TrendPatternType) string {
+	switch pt {
+	case models.PatternFeatureRequest:
+		return "badge-info"
+	case models.PatternPainPoint:
+		return "badge-error"
+	case models.PatternEmergingTech:
+		return "badge-accent"
+	case models.PatternMarketShift:
+		return "badge-warning"
+	case models.PatternCompetitorMove:
+		return "badge-secondary"
+	case models.PatternUserSentiment:
+		return "badge-primary"
+	default:
+		return "badge-ghost"
+	}
+}
+
+templ AutonomousPage(projects []models.Project, currentProject *models.Project, config *models.AutonomousConfig, recentBuilds []models.Task, summaries map[string]*service.BuildSummary, trendData *models.TrendDashboardData) {
+	@layout.Base("Autonomous Builds", projects, projectID(currentProject)) {
+		@AutonomousContent(currentProject, config, recentBuilds, summaries, trendData)
+	}
+}
+
+templ AutonomousContent(currentProject *models.Project, config *models.AutonomousConfig, recentBuilds []models.Task, summaries map[string]*service.BuildSummary, trendData *models.TrendDashboardData) {
+	<div class="flex justify-between items-center mb-6">
+		<div>
+			<h2 class="text-2xl font-bold">Autonomous Builds</h2>
+			<p class="text-sm opacity-60 mt-1">AI discovers, designs, and builds new features — informed by market intelligence</p>
+		</div>
+		if currentProject != nil {
+			<div class="flex gap-2 items-center">
+				<span class="opacity-60">Project:</span>
+				<span class="font-semibold">{ currentProject.Name }</span>
+			</div>
+		}
+	</div>
+	if currentProject != nil {
+		<!-- Action Buttons -->
+		<div class="flex flex-wrap gap-2 mb-6">
+			<button
+				class="btn btn-sm btn-primary"
+				hx-post={ fmt.Sprintf("/api/autonomous/trigger?project_id=%s", currentProject.ID) }
+				hx-target="#trigger-result"
+				hx-swap="innerHTML"
+				hx-indicator="#trigger-spinner"
+			>
+				<span id="trigger-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+				Trigger Build Now
+			</button>
+			<a
+				href={ templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s", currentProject.ID)) }
+				class="btn btn-sm btn-ghost"
+			>
+				View Task Board
+			</a>
+		</div>
+		<!-- Trigger Result Container -->
+		<div id="trigger-result" class="mb-4"></div>
+		<!-- How It Works -->
+		<div class="mb-6">
+			<div class="card bg-base-100 shadow-sm border border-base-300 p-4">
+				<h3 class="font-semibold mb-2">How it works</h3>
+				<p class="text-sm opacity-70 mb-3">
+					Triggering a build creates a chain of tasks that execute sequentially on the task board. External trend data enriches the discovery phase:
+				</p>
+				<div class="flex flex-wrap gap-2 text-xs">
+					<span class="badge badge-info badge-sm">1. Discovery</span>
+					<span class="opacity-40">&rarr;</span>
+					<span class="badge badge-info badge-sm">2. Selection</span>
+					<span class="opacity-40">&rarr;</span>
+					<span class="badge badge-warning badge-sm">3. Design</span>
+					<span class="opacity-40">&rarr;</span>
+					<span class="badge badge-warning badge-sm">4. Implementation</span>
+					<span class="opacity-40">&rarr;</span>
+					<span class="badge badge-secondary badge-sm">5. Testing</span>
+					<span class="opacity-40">&rarr;</span>
+					<span class="badge badge-accent badge-sm">6. Review</span>
+					<span class="opacity-40">&rarr;</span>
+					<span class="badge badge-success badge-sm">7. Summary</span>
+				</div>
+				<p class="text-xs opacity-50 mt-2">
+					Each phase completes and automatically chains to the next. Trend intelligence feeds into Discovery and Selection phases.
+				</p>
+			</div>
+		</div>
+		<!-- Trend Intelligence Section -->
+		<div class="mb-6">
+			@TrendDashboardSection(currentProject.ID, trendData)
+		</div>
+		<!-- Completed Build Summaries -->
+		if autonomousHasAnySummary(summaries) {
+			<div class="mb-6">
+				<h3 class="text-lg font-semibold mb-3">Latest Build Summary</h3>
+				for _, t := range recentBuilds {
+					if s, ok := summaries[t.ID]; ok && s.Summary != "" {
+						@AutonomousBuildSummaryCard(t, s)
+					}
+				}
+			</div>
+		}
+		<!-- Recent Builds -->
+		if len(recentBuilds) > 0 {
+			<div class="mb-6">
+				<h3 class="text-lg font-semibold mb-3">Recent Builds</h3>
+				<div class="overflow-x-auto">
+					<table class="table table-sm">
+						<thead>
+							<tr>
+								<th>Task</th>
+								<th>Status</th>
+								<th>Created</th>
+								<th>Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, t := range recentBuilds {
+								<tr>
+									<td class="font-medium">{ t.Title }</td>
+									<td>
+										switch t.Status {
+											case models.StatusPending:
+												<span class="badge badge-ghost badge-sm">Pending</span>
+											case models.StatusRunning:
+												<span class="badge badge-info badge-sm">Running</span>
+											case models.StatusCompleted:
+												<span class="badge badge-success badge-sm">Completed</span>
+											case models.StatusFailed:
+												<span class="badge badge-error badge-sm">Failed</span>
+											case models.StatusCancelled:
+												<span class="badge badge-warning badge-sm">Cancelled</span>
+											default:
+												<span class="badge badge-ghost badge-sm">{ string(t.Status) }</span>
+										}
+									</td>
+									<td class="text-xs opacity-60">{ t.CreatedAt.Local().Format("2006-01-02 15:04") }</td>
+									<td class="flex gap-1">
+										<a
+											href={ templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s", t.ProjectID)) }
+											class="btn btn-xs btn-ghost"
+										>
+											View Board
+										</a>
+										if t.Status == models.StatusCompleted {
+											<button
+												class="btn btn-xs btn-outline btn-success"
+												hx-get={ fmt.Sprintf("/api/autonomous/summary/%s", t.ID) }
+												hx-target={ fmt.Sprintf("#summary-panel-%s", t.ID) }
+												hx-swap="innerHTML"
+											>
+												View Summary
+											</button>
+										}
+										<button
+											class="btn btn-xs btn-outline"
+											hx-get={ fmt.Sprintf("/api/autonomous/chain/%s", t.ID) }
+											hx-target={ fmt.Sprintf("#chain-panel-%s", t.ID) }
+											hx-swap="innerHTML"
+										>
+											Build Phases
+										</button>
+									</td>
+								</tr>
+								<tr>
+									<td colspan="4" class="p-0">
+										<div id={ fmt.Sprintf("summary-panel-%s", t.ID) }></div>
+										<div id={ fmt.Sprintf("chain-panel-%s", t.ID) }></div>
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		}
+		<!-- Configuration -->
+		<div class="mb-6">
+			<h3 class="text-lg font-semibold mb-3">Configuration</h3>
+			@AutonomousConfigForm(currentProject.ID, config)
+		</div>
+	} else {
+		<div class="text-center py-12 opacity-60">
+			<p class="text-lg mb-2">No project selected</p>
+			<p>Select a project from the sidebar to view autonomous builds.</p>
+		</div>
+	}
+}
+
+templ AutonomousBuildSummaryCard(task models.Task, summary *service.BuildSummary) {
+	<div class="card bg-success/10 border border-success/30 shadow-sm mb-3">
+		<div class="card-body p-4">
+			<div class="flex items-start justify-between">
+				<div class="flex-1">
+					<div class="flex items-center gap-2 mb-2">
+						<span class="badge badge-success badge-sm">Completed</span>
+						<span class="text-xs opacity-60">{ task.CreatedAt.Local().Format("2006-01-02 15:04") }</span>
+					</div>
+					<div class="prose prose-sm max-w-none">
+						<div class="whitespace-pre-wrap text-sm">{ summary.Summary }</div>
+					</div>
+				</div>
+				<a
+					href={ templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s", task.ProjectID)) }
+					class="btn btn-xs btn-ghost ml-2 shrink-0"
+				>
+					View Board
+				</a>
+			</div>
+		</div>
+	</div>
+}
+
+templ AutonomousBuildSummaryPanel(summary *service.BuildSummary) {
+	if summary != nil && summary.Summary != "" {
+		<div class="bg-base-200 rounded-lg p-4 my-2 mx-2">
+			<div class="flex items-center gap-2 mb-2">
+				<span class="font-semibold text-sm">Build Summary</span>
+				if summary.Completed {
+					<span class="badge badge-success badge-xs">Complete</span>
+				} else {
+					<span class="badge badge-warning badge-xs">{ summary.Phase }</span>
+				}
+			</div>
+			<div class="whitespace-pre-wrap text-sm opacity-80">{ summary.Summary }</div>
+		</div>
+	} else {
+		<div class="bg-base-200 rounded-lg p-4 my-2 mx-2">
+			<p class="text-sm opacity-60">No summary available yet. The build may still be in progress.</p>
+		</div>
+	}
+}
+
+templ AutonomousBuildChain(chain []models.Task) {
+	<div class="bg-base-200 rounded-lg p-4 my-2 mx-2">
+		<div class="font-semibold text-sm mb-2">Build Phases</div>
+		<div class="flex flex-wrap gap-2">
+			for i, t := range chain {
+				<div class="flex items-center gap-1">
+					switch t.Status {
+						case models.StatusCompleted:
+							<span class="badge badge-success badge-sm">{ autonomousPhaseName(t.Title) }</span>
+						case models.StatusRunning:
+							<span class="badge badge-info badge-sm">
+								<span class="loading loading-spinner loading-xs mr-1"></span>
+								{ autonomousPhaseName(t.Title) }
+							</span>
+						case models.StatusFailed:
+							<span class="badge badge-error badge-sm">{ autonomousPhaseName(t.Title) }</span>
+						case models.StatusPending:
+							<span class="badge badge-ghost badge-sm">{ autonomousPhaseName(t.Title) }</span>
+						default:
+							<span class="badge badge-ghost badge-sm">{ autonomousPhaseName(t.Title) }</span>
+					}
+					if i < len(chain)-1 {
+						<span class="opacity-40 text-xs">&rarr;</span>
+					}
+				</div>
+			}
+		</div>
+	</div>
+}
+
+templ AutonomousTriggerResult(task *models.Task, err error) {
+	if err != nil {
+		<div class="alert alert-error shadow-sm">
+			<span>Build trigger failed: { err.Error() }</span>
+		</div>
+	} else if task != nil {
+		<div class="alert alert-success shadow-sm">
+			<span>Build triggered! Task "{ task.Title }" created and running. Check the task board to watch progress.</span>
+		</div>
+	}
+}
+
+templ AutonomousConfigForm(projectID string, config *models.AutonomousConfig) {
+	<form
+		hx-put={ fmt.Sprintf("/api/autonomous/config?project_id=%s", projectID) }
+		hx-target="#main-content"
+		hx-swap="innerHTML"
+		method="post"
+		class="card bg-base-100 shadow-sm border border-base-300 p-4"
+	>
+		<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+			<div class="form-control">
+				<label class="label cursor-pointer justify-start gap-3">
+					<input
+						type="checkbox"
+						name="enabled"
+						class="toggle toggle-primary toggle-sm"
+						if config != nil && config.Enabled {
+							checked
+						}
+					/>
+					<span class="label-text">Enable Autonomous Builds</span>
+				</label>
+			</div>
+			<div class="form-control">
+				<label class="label">
+					<span class="label-text text-xs">Max Execution Hours</span>
+				</label>
+				<input
+					type="number"
+					name="max_execution_hours"
+					class="input input-bordered input-sm w-24"
+					min="1"
+					max="12"
+					if config != nil {
+						value={ fmt.Sprintf("%d", config.MaxExecutionHours) }
+					} else {
+						value="4"
+					}
+				/>
+			</div>
+			<div class="form-control">
+				<label class="label">
+					<span class="label-text text-xs">Schedule Hour (0-23)</span>
+				</label>
+				<input
+					type="number"
+					name="schedule_hour"
+					class="input input-bordered input-sm w-24"
+					min="0"
+					max="23"
+					if config != nil {
+						value={ fmt.Sprintf("%d", config.ScheduleHour) }
+					} else {
+						value="23"
+					}
+				/>
+			</div>
+			<div class="form-control">
+				<label class="label">
+					<span class="label-text text-xs">Protected Files (JSON array)</span>
+				</label>
+				<input
+					type="text"
+					name="protected_files"
+					class="input input-bordered input-sm"
+					placeholder="[&quot;database.go&quot;, &quot;.env&quot;]"
+					if config != nil {
+						value={ config.ProtectedFiles }
+					} else {
+						value="[]"
+					}
+				/>
+			</div>
+			<div class="form-control">
+				<label class="label">
+					<span class="label-text text-xs">Excluded Areas (JSON array)</span>
+				</label>
+				<input
+					type="text"
+					name="excluded_areas"
+					class="input input-bordered input-sm"
+					placeholder="[&quot;deployment&quot;, &quot;CI/CD&quot;]"
+					if config != nil {
+						value={ config.ExcludedAreas }
+					} else {
+						value="[]"
+					}
+				/>
+			</div>
+		</div>
+		<div class="mt-4">
+			<button type="submit" class="btn btn-sm btn-primary">Save Configuration</button>
+		</div>
+	</form>
+}
+
+// --- Trend Intelligence Templates ---
+
+templ TrendDashboardSection(projectID string, data *models.TrendDashboardData) {
+	<div class="collapse collapse-arrow bg-base-100 shadow-sm border border-base-300">
+		<input type="checkbox" checked />
+		<div class="collapse-title font-semibold">
+			Trend Intelligence
+			if data != nil && data.Stats.ActivePatterns > 0 {
+				<span class="badge badge-primary badge-sm ml-2">{ fmt.Sprintf("%d patterns", data.Stats.ActivePatterns) }</span>
+			}
+		</div>
+		<div class="collapse-content">
+			if data != nil {
+				<!-- Stats Overview -->
+				<div class="stats stats-horizontal shadow-sm w-full mb-4">
+					<div class="stat py-2 px-4">
+						<div class="stat-title text-xs">Entries</div>
+						<div class="stat-value text-lg">{ fmt.Sprintf("%d", data.Stats.TotalEntries) }</div>
+					</div>
+					<div class="stat py-2 px-4">
+						<div class="stat-title text-xs">Patterns</div>
+						<div class="stat-value text-lg">{ fmt.Sprintf("%d", data.Stats.ActivePatterns) }</div>
+					</div>
+					<div class="stat py-2 px-4">
+						<div class="stat-title text-xs">Competitor News</div>
+						<div class="stat-value text-lg">{ fmt.Sprintf("%d", data.Stats.CompetitorUpdates) }</div>
+					</div>
+					<div class="stat py-2 px-4">
+						<div class="stat-title text-xs">Led to Features</div>
+						<div class="stat-value text-lg">{ fmt.Sprintf("%d", data.Stats.ImplementedCount) }</div>
+					</div>
+					<div class="stat py-2 px-4">
+						<div class="stat-title text-xs">Sources</div>
+						<div class="stat-value text-lg">{ fmt.Sprintf("%d", data.Stats.MonitoredSources) }</div>
+					</div>
+				</div>
+				<!-- Action Buttons -->
+				<div class="flex flex-wrap gap-2 mb-4">
+					<button
+						class="btn btn-xs btn-outline btn-primary"
+						hx-post={ fmt.Sprintf("/api/autonomous/trends/collect?project_id=%s", projectID) }
+						hx-target="#trend-action-result"
+						hx-swap="innerHTML"
+						hx-indicator="#collect-spinner"
+					>
+						<span id="collect-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+						Collect from X
+					</button>
+					<button
+						class="btn btn-xs btn-outline btn-secondary"
+						hx-post={ fmt.Sprintf("/api/autonomous/trends/analyze?project_id=%s", projectID) }
+						hx-target="#trend-action-result"
+						hx-swap="innerHTML"
+						hx-indicator="#analyze-spinner"
+					>
+						<span id="analyze-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+						Analyze Trends
+					</button>
+					<button
+						class="btn btn-xs btn-outline btn-accent"
+						hx-post={ fmt.Sprintf("/api/autonomous/trends/competitors?project_id=%s", projectID) }
+						hx-target="#trend-action-result"
+						hx-swap="innerHTML"
+						hx-indicator="#comp-spinner"
+					>
+						<span id="comp-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+						Analyze Competitors
+					</button>
+				</div>
+				<div id="trend-action-result" class="mb-4"></div>
+				<!-- Active Patterns -->
+				if len(data.ActivePatterns) > 0 {
+					<div id="trend-patterns-panel" class="mb-4">
+						@TrendPatternsPanel(projectID, data.ActivePatterns)
+					</div>
+				}
+				<!-- Competitor Updates -->
+				if len(data.CompetitorNews) > 0 {
+					<div class="mb-4">
+						<h4 class="font-semibold text-sm mb-2">Competitor Intelligence</h4>
+						<div class="space-y-2">
+							for _, u := range data.CompetitorNews {
+								<div class="card bg-base-200 p-3">
+									<div class="flex items-start justify-between">
+										<div>
+											<div class="flex items-center gap-2 mb-1">
+												<span class="font-semibold text-sm">{ u.CompetitorName }</span>
+												<span class="badge badge-ghost badge-xs">{ string(u.UpdateType) }</span>
+											</div>
+											<p class="text-sm font-medium">{ u.Title }</p>
+											<p class="text-xs opacity-70 mt-1">{ u.Description }</p>
+											if u.ImpactAssessment != "" {
+												<p class="text-xs opacity-60 mt-1 italic">Impact: { u.ImpactAssessment }</p>
+											}
+										</div>
+										<span class="text-xs opacity-50 shrink-0 ml-2">{ u.DetectedAt.Local().Format("Jan 2") }</span>
+									</div>
+								</div>
+							}
+						</div>
+					</div>
+				}
+				<!-- Recent Entries -->
+				if len(data.RecentEntries) > 0 {
+					<div class="mb-4">
+						<h4 class="font-semibold text-sm mb-2">Recent Market Signals</h4>
+						<div class="space-y-1 max-h-48 overflow-y-auto">
+							for _, e := range data.RecentEntries {
+								<div class="flex items-start gap-2 p-2 bg-base-200 rounded text-xs">
+									<span class="badge badge-ghost badge-xs shrink-0 mt-0.5">{ e.SourceType }</span>
+									<span class="flex-1 opacity-80">{ e.Content }</span>
+									if e.EngagementScore > 0 {
+										<span class="opacity-50 shrink-0">{ fmt.Sprintf("%d", e.EngagementScore) }</span>
+									}
+								</div>
+							}
+						</div>
+					</div>
+				}
+				<!-- Source Configuration -->
+				<div class="collapse collapse-arrow bg-base-200 rounded-lg">
+					<input type="checkbox" />
+					<div class="collapse-title text-sm font-medium">
+						Monitoring Sources & X Credentials
+					</div>
+					<div class="collapse-content">
+						<!-- X Credentials Form -->
+						<div class="mb-4">
+							<h4 class="font-semibold text-xs mb-2">X (Twitter) API Credentials</h4>
+							if !data.HasXCredentials {
+								<p class="text-xs opacity-60 mb-2">Configure X API credentials to collect trend data from Twitter/X.</p>
+							}
+							<form
+								hx-put={ fmt.Sprintf("/api/autonomous/x-credentials?project_id=%s", projectID) }
+								hx-target="#x-creds-result"
+								hx-swap="innerHTML"
+								method="post"
+								class="space-y-2"
+							>
+								<div class="form-control">
+									<input type="text" name="bearer_token" class="input input-bordered input-xs" placeholder="Bearer Token (recommended for search)" />
+								</div>
+								<div class="grid grid-cols-2 gap-2">
+									<input type="text" name="api_key" class="input input-bordered input-xs" placeholder="API Key" />
+									<input type="text" name="api_secret" class="input input-bordered input-xs" placeholder="API Secret" />
+								</div>
+								<div class="grid grid-cols-2 gap-2">
+									<input type="text" name="access_token" class="input input-bordered input-xs" placeholder="Access Token" />
+									<input type="text" name="access_token_secret" class="input input-bordered input-xs" placeholder="Access Token Secret" />
+								</div>
+								<button type="submit" class="btn btn-xs btn-primary">Save Credentials</button>
+							</form>
+							<div id="x-creds-result" class="mt-2"></div>
+						</div>
+						<!-- Add Source Form -->
+						<div class="mb-4">
+							<h4 class="font-semibold text-xs mb-2">Add Monitoring Source</h4>
+							<form
+								hx-post={ fmt.Sprintf("/api/autonomous/trends/sources?project_id=%s", projectID) }
+								hx-target="#trend-sources-list"
+								hx-swap="outerHTML"
+								method="post"
+								class="flex gap-2 items-end"
+							>
+								<select name="source_type" class="select select-bordered select-xs">
+									<option value="hashtag">Hashtag</option>
+									<option value="account">Account</option>
+									<option value="keyword">Keyword</option>
+									<option value="competitor">Competitor</option>
+								</select>
+								<input type="text" name="value" class="input input-bordered input-xs flex-1" placeholder="e.g., #AItools, @competitor, multi-agent" required />
+								<button type="submit" class="btn btn-xs btn-primary">Add</button>
+							</form>
+						</div>
+						<!-- Source List -->
+						@TrendSourcesList(projectID, data.Sources)
+					</div>
+				</div>
+			} else {
+				<p class="text-sm opacity-60">No trend data collected yet. Add monitoring sources and collect data to enrich autonomous builds with market intelligence.</p>
+				<!-- Source Configuration for empty state -->
+				<div class="mt-4">
+					<h4 class="font-semibold text-sm mb-2">Get Started</h4>
+					<p class="text-xs opacity-60 mb-3">1. Add X API credentials, 2. Add monitoring sources (hashtags, accounts, keywords), 3. Click "Collect from X" to gather data.</p>
+					<!-- X Credentials Form (empty state) -->
+					<form
+						hx-put={ fmt.Sprintf("/api/autonomous/x-credentials?project_id=%s", projectID) }
+						hx-target="#x-creds-result-empty"
+						hx-swap="innerHTML"
+						method="post"
+						class="space-y-2 mb-4"
+					>
+						<div class="form-control">
+							<input type="text" name="bearer_token" class="input input-bordered input-xs" placeholder="Bearer Token (recommended for search)" />
+						</div>
+						<button type="submit" class="btn btn-xs btn-primary">Save Credentials</button>
+					</form>
+					<div id="x-creds-result-empty" class="mb-4"></div>
+					<form
+						hx-post={ fmt.Sprintf("/api/autonomous/trends/sources?project_id=%s", projectID) }
+						hx-target="#trend-sources-list-empty"
+						hx-swap="outerHTML"
+						method="post"
+						class="flex gap-2 items-end mb-4"
+					>
+						<select name="source_type" class="select select-bordered select-xs">
+							<option value="hashtag">Hashtag</option>
+							<option value="account">Account</option>
+							<option value="keyword">Keyword</option>
+							<option value="competitor">Competitor</option>
+						</select>
+						<input type="text" name="value" class="input input-bordered input-xs flex-1" placeholder="e.g., #AItools, @cursor_ai, multi-agent" required />
+						<button type="submit" class="btn btn-xs btn-primary">Add</button>
+					</form>
+					<div id="trend-sources-list-empty"></div>
+				</div>
+			}
+		</div>
+	</div>
+}
+
+templ TrendSourcesList(projectID string, sources []models.TrendSource) {
+	<div id="trend-sources-list">
+		if len(sources) > 0 {
+			<h4 class="font-semibold text-xs mb-2">Active Sources</h4>
+			<div class="space-y-1">
+				for _, src := range sources {
+					<div class="flex items-center gap-2 p-2 bg-base-100 rounded">
+						<span class="badge badge-ghost badge-xs">{ string(src.SourceType) }</span>
+						<span class="text-sm flex-1">{ src.Value }</span>
+						<label class="cursor-pointer">
+							<input
+								type="checkbox"
+								class="toggle toggle-xs toggle-primary"
+								if src.Enabled {
+									checked
+								}
+								hx-patch={ fmt.Sprintf("/api/autonomous/trends/sources/%s/toggle?project_id=%s&enabled=%s", src.ID, projectID, toggleValue(!src.Enabled)) }
+								hx-target="#trend-sources-list"
+								hx-swap="outerHTML"
+							/>
+						</label>
+						<button
+							class="btn btn-xs btn-ghost btn-error"
+							hx-delete={ fmt.Sprintf("/api/autonomous/trends/sources/%s?project_id=%s", src.ID, projectID) }
+							hx-target="#trend-sources-list"
+							hx-swap="outerHTML"
+						>
+							x
+						</button>
+					</div>
+				}
+			</div>
+		} else {
+			<p class="text-xs opacity-50">No sources configured yet.</p>
+		}
+	</div>
+}
+
+func toggleValue(enabled bool) string {
+	if enabled {
+		return "true"
+	}
+	return "false"
+}
+
+templ TrendPatternsPanel(projectID string, patterns []models.TrendPattern) {
+	<div id="trend-patterns-panel">
+		<h4 class="font-semibold text-sm mb-2">Active Patterns</h4>
+		<div class="space-y-2">
+			for _, p := range patterns {
+				<div class="card bg-base-200 p-3">
+					<div class="flex items-start justify-between">
+						<div class="flex-1">
+							<div class="flex items-center gap-2 mb-1">
+								<span class={ "badge badge-xs " + trendPatternTypeBadge(p.PatternType) }>{ string(p.PatternType) }</span>
+								<span class="font-semibold text-sm">{ p.Title }</span>
+								<span class="text-xs opacity-50">{ fmt.Sprintf("%.0f%% confidence", p.Confidence*100) }</span>
+								<span class="text-xs opacity-50">{ fmt.Sprintf("%d signals", p.SignalCount) }</span>
+							</div>
+							<p class="text-xs opacity-70">{ p.Description }</p>
+						</div>
+						<div class="flex gap-1 shrink-0 ml-2">
+							<button
+								class="btn btn-xs btn-outline btn-success"
+								hx-patch={ fmt.Sprintf("/api/autonomous/trends/patterns/%s/status?project_id=%s", p.ID, projectID) }
+								hx-vals='{"status": "implemented", "feature_name": ""}'
+								hx-target="#trend-patterns-panel"
+								hx-swap="outerHTML"
+							>
+								Done
+							</button>
+							<button
+								class="btn btn-xs btn-outline btn-ghost"
+								hx-patch={ fmt.Sprintf("/api/autonomous/trends/patterns/%s/status?project_id=%s", p.ID, projectID) }
+								hx-vals='{"status": "dismissed"}'
+								hx-target="#trend-patterns-panel"
+								hx-swap="outerHTML"
+							>
+								Dismiss
+							</button>
+						</div>
+					</div>
+				</div>
+			}
+		</div>
+	</div>
+}
+
+templ TrendCollectResult(count int, err error) {
+	if err != nil {
+		<div class="alert alert-error alert-sm shadow-sm">
+			<span class="text-sm">Collection failed: { err.Error() }</span>
+		</div>
+	} else {
+		<div class="alert alert-success alert-sm shadow-sm">
+			<span class="text-sm">Collected { fmt.Sprintf("%d", count) } entries from X.</span>
+		</div>
+	}
+}
+
+templ TrendAnalysisResult(patterns []models.TrendPattern, err error) {
+	if err != nil {
+		<div class="alert alert-error alert-sm shadow-sm">
+			<span class="text-sm">Analysis failed: { err.Error() }</span>
+		</div>
+	} else {
+		<div class="alert alert-success alert-sm shadow-sm">
+			<span class="text-sm">Identified { fmt.Sprintf("%d", len(patterns)) } patterns from trend data.</span>
+		</div>
+	}
+}
+
+templ TrendCompetitorResult(updates []models.CompetitorUpdate, err error) {
+	if err != nil {
+		<div class="alert alert-error alert-sm shadow-sm">
+			<span class="text-sm">Competitor analysis failed: { err.Error() }</span>
+		</div>
+	} else {
+		<div class="alert alert-success alert-sm shadow-sm">
+			<span class="text-sm">Found { fmt.Sprintf("%d", len(updates)) } competitor updates.</span>
+		</div>
+	}
+}
+
+templ TrendXCredentialsSaved() {
+	<div class="alert alert-success alert-sm shadow-sm">
+		<span class="text-sm">X API credentials saved successfully.</span>
+	</div>
+}

@@ -1,0 +1,398 @@
+package pages
+
+import (
+	"fmt"
+	"strings"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ HistoryPage(projects []models.Project, currentProjectID string, history *models.History) {
+	@layout.Base("Reflection", projects, currentProjectID) {
+		@historyContent(history, currentProjectID)
+	}
+}
+
+templ HistoryContent(history *models.History, currentProjectID string) {
+	@historyContent(history, currentProjectID)
+}
+
+templ historyContent(history *models.History, currentProjectID string) {
+	<div id="history-container" class="h-full overflow-y-auto">
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<h2 class="text-2xl font-bold">Reflection</h2>
+				<p class="text-sm opacity-60 mt-1">Summary of completed work</p>
+			</div>
+			<div class="flex items-center gap-2">
+				<!-- Time Range Selector -->
+				<div class="join">
+					<button
+						class={ "join-item btn btn-sm", templ.KV("btn-active", history.TimeRange == models.TimeRangeHour) }
+						hx-get={ fmt.Sprintf("/history?project_id=%s&range=hour", currentProjectID) }
+						hx-target="#history-container"
+						hx-swap="outerHTML"
+					>
+						Hour
+					</button>
+					<button
+						class={ "join-item btn btn-sm", templ.KV("btn-active", history.TimeRange == models.TimeRangeDay) }
+						hx-get={ fmt.Sprintf("/history?project_id=%s&range=day", currentProjectID) }
+						hx-target="#history-container"
+						hx-swap="outerHTML"
+					>
+						Day
+					</button>
+					<button
+						class={ "join-item btn btn-sm", templ.KV("btn-active", history.TimeRange == models.TimeRangeWeek) }
+						hx-get={ fmt.Sprintf("/history?project_id=%s&range=week", currentProjectID) }
+						hx-target="#history-container"
+						hx-swap="outerHTML"
+					>
+						Week
+					</button>
+				</div>
+				<button
+					class="btn btn-ghost btn-sm"
+					hx-get={ fmt.Sprintf("/history?project_id=%s&range=%s", currentProjectID, string(history.TimeRange)) }
+					hx-target="#history-container"
+					hx-swap="outerHTML"
+					title="Refresh"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+					</svg>
+				</button>
+			</div>
+		</div>
+
+		<!-- AI Summary -->
+		<div id="reflection-summary" class="mb-6">
+			if history.AISummary != "" {
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body p-4">
+						<p class="text-sm opacity-80">{ history.AISummary }</p>
+					</div>
+				</div>
+			} else {
+				<button
+					class="btn btn-ghost btn-sm"
+					hx-post={ fmt.Sprintf("/history/summary?project_id=%s&range=%s", currentProjectID, string(history.TimeRange)) }
+					hx-target="#reflection-summary"
+					hx-swap="innerHTML"
+					hx-indicator="#reflection-summary-spinner"
+				>
+					<span id="reflection-summary-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+					Generate Summary
+				</button>
+			}
+		</div>
+
+		<!-- Summary Stats -->
+		<div class="stats shadow w-full mb-6 bg-base-100">
+			<div class="stat">
+				<div class="stat-title">Total Executions</div>
+				<div class="stat-value text-xl">{ fmt.Sprintf("%d", history.Summary.TotalExecutions) }</div>
+				<div class="stat-desc">Since { history.Since.Local().Format("Jan 2, 3:04 PM") }</div>
+			</div>
+			<div class="stat">
+				<div class="stat-title">Succeeded</div>
+				<div class="stat-value text-xl">{ fmt.Sprintf("%d", history.Summary.SuccessCount) }</div>
+				if history.Summary.TotalExecutions > 0 {
+					<div class="stat-desc">{ fmt.Sprintf("%.0f%%", float64(history.Summary.SuccessCount)/float64(history.Summary.TotalExecutions)*100) } success rate</div>
+				}
+			</div>
+			<div class="stat">
+				<div class="stat-title">Failed</div>
+				<div class="stat-value text-xl">{ fmt.Sprintf("%d", history.Summary.FailureCount) }</div>
+				if history.Summary.CancelledCount > 0 {
+					<div class="stat-desc">{ fmt.Sprintf("%d", history.Summary.CancelledCount) } cancelled</div>
+				}
+			</div>
+			<div class="stat">
+				<div class="stat-title">Avg Duration</div>
+				<div class="stat-value text-sm">{ formatDuration(history.Summary.AvgDurationMs) }</div>
+				<div class="stat-desc">Total: { formatDuration(history.Summary.TotalDurationMs) }</div>
+			</div>
+		</div>
+
+		<!-- Project Changes Summary -->
+		if history.ProjectChanges != nil && history.ProjectChanges.Available && history.ProjectChanges.TotalCommits > 0 {
+			@projectChangesSection(history.ProjectChanges)
+		}
+
+		<!-- Execution List -->
+		<h3 class="text-lg font-semibold mb-3 mt-2">Task Executions</h3>
+		if len(history.Executions) == 0 {
+			<div class="text-center py-12">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto opacity-30 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+				</svg>
+				<p class="opacity-50">No executions in this time range.</p>
+			</div>
+		} else {
+			<div class="space-y-2">
+				for _, de := range history.Executions {
+					@historyExecutionCard(de, currentProjectID)
+				}
+			</div>
+		}
+	</div>
+
+}
+
+templ historyExecutionCard(de models.HistoryExecution, currentProjectID string) {
+	<div
+		class="card bg-base-100 shadow-sm border border-base-300 hover:shadow-md transition-shadow cursor-pointer"
+		onclick={ openHistoryTaskDialog(de.Execution.TaskID) }
+	>
+		<div class="card-body p-4">
+			<div class="flex items-center justify-between">
+				<div class="flex items-center gap-3 flex-1 min-w-0">
+					@execStatusBadge(de.Execution.Status)
+					<span class="font-medium text-sm truncate">{ de.TaskTitle }</span>
+				</div>
+				<div class="flex items-center gap-3 flex-shrink-0">
+					<span class="text-xs opacity-50">{ de.AgentName }</span>
+					if de.Execution.DurationMs > 0 {
+						<span class="text-xs opacity-60 font-mono">{ formatDuration(de.Execution.DurationMs) }</span>
+					}
+					<span class="text-xs opacity-40">{ de.Execution.StartedAt.Local().Format("Jan 2, 3:04 PM") }</span>
+				</div>
+			</div>
+			if de.Execution.Status == models.ExecFailed && de.Execution.ErrorMessage != "" {
+				<div class="mt-2 p-2 bg-error/10 rounded text-xs text-error truncate">
+					{ truncatePrompt(de.Execution.ErrorMessage, 200) }
+				</div>
+			}
+			if de.Execution.Status == models.ExecCompleted && de.Execution.Output != "" {
+				<p class="text-xs opacity-60 mt-2 line-clamp-2">{ truncatePrompt(de.Execution.Output, 300) }</p>
+			}
+		</div>
+	</div>
+}
+
+templ projectChangesSection(pc *models.ProjectChanges) {
+	<!-- Code Change Stats -->
+	<div class="stats shadow w-full mb-4 bg-base-100">
+		<div class="stat">
+			<div class="stat-figure text-primary">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+				</svg>
+			</div>
+			<div class="stat-title">Commits</div>
+			<div class="stat-value text-primary">{ fmt.Sprintf("%d", pc.TotalCommits) }</div>
+		</div>
+		<div class="stat">
+			<div class="stat-figure text-success">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+				</svg>
+			</div>
+			<div class="stat-title">Lines Added</div>
+			<div class="stat-value text-success text-2xl">+{ fmt.Sprintf("%d", pc.TotalInsertions) }</div>
+		</div>
+		<div class="stat">
+			<div class="stat-figure text-error">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path>
+				</svg>
+			</div>
+			<div class="stat-title">Lines Removed</div>
+			<div class="stat-value text-error text-2xl">-{ fmt.Sprintf("%d", pc.TotalDeletions) }</div>
+		</div>
+		<div class="stat">
+			<div class="stat-title">Files Changed</div>
+			<div class="stat-value text-2xl">{ fmt.Sprintf("%d", pc.FilesChanged) }</div>
+			if len(pc.FileTypes) > 0 {
+				<div class="stat-desc">{ topFileTypes(pc.FileTypes) }</div>
+			}
+		</div>
+	</div>
+
+	<!-- Change Categories + Recent Commits -->
+	<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+		<!-- Change Categories -->
+		<div class="card bg-base-100 shadow-sm border border-base-300">
+			<div class="card-body p-4">
+				<h3 class="font-semibold text-sm mb-3">Change Categories</h3>
+				<div class="space-y-3">
+					if len(pc.Changes.Features) > 0 {
+						<div>
+							<div class="flex items-center gap-2 mb-1">
+								<span class="badge badge-primary badge-sm">Features</span>
+								<span class="text-xs opacity-60">{ fmt.Sprintf("%d", len(pc.Changes.Features)) }</span>
+							</div>
+							<ul class="text-xs opacity-70 ml-4 space-y-0.5">
+								for _, f := range limitItems(pc.Changes.Features, 5) {
+									<li class="truncate">{ f }</li>
+								}
+								if len(pc.Changes.Features) > 5 {
+									<li class="opacity-50">+{ fmt.Sprintf("%d", len(pc.Changes.Features)-5) } more</li>
+								}
+							</ul>
+						</div>
+					}
+					if len(pc.Changes.BugFixes) > 0 {
+						<div>
+							<div class="flex items-center gap-2 mb-1">
+								<span class="badge badge-error badge-sm">Bug Fixes</span>
+								<span class="text-xs opacity-60">{ fmt.Sprintf("%d", len(pc.Changes.BugFixes)) }</span>
+							</div>
+							<ul class="text-xs opacity-70 ml-4 space-y-0.5">
+								for _, f := range limitItems(pc.Changes.BugFixes, 5) {
+									<li class="truncate">{ f }</li>
+								}
+								if len(pc.Changes.BugFixes) > 5 {
+									<li class="opacity-50">+{ fmt.Sprintf("%d", len(pc.Changes.BugFixes)-5) } more</li>
+								}
+							</ul>
+						</div>
+					}
+					if len(pc.Changes.ConfigChanges) > 0 {
+						<div>
+							<div class="flex items-center gap-2 mb-1">
+								<span class="badge badge-warning badge-sm">Config / Refactor</span>
+								<span class="text-xs opacity-60">{ fmt.Sprintf("%d", len(pc.Changes.ConfigChanges)) }</span>
+							</div>
+							<ul class="text-xs opacity-70 ml-4 space-y-0.5">
+								for _, f := range limitItems(pc.Changes.ConfigChanges, 5) {
+									<li class="truncate">{ f }</li>
+								}
+								if len(pc.Changes.ConfigChanges) > 5 {
+									<li class="opacity-50">+{ fmt.Sprintf("%d", len(pc.Changes.ConfigChanges)-5) } more</li>
+								}
+							</ul>
+						</div>
+					}
+					if len(pc.Changes.Features) == 0 && len(pc.Changes.BugFixes) == 0 && len(pc.Changes.ConfigChanges) == 0 {
+						<p class="text-xs opacity-50">No categorized changes</p>
+					}
+				</div>
+			</div>
+		</div>
+
+		<!-- Recent Commits Timeline -->
+		<div class="card bg-base-100 shadow-sm border border-base-300">
+			<div class="card-body p-4">
+				<h3 class="font-semibold text-sm mb-3">Recent Commits</h3>
+				<div class="space-y-2 max-h-64 overflow-y-auto">
+					for _, commit := range limitCommits(pc.Commits, 10) {
+						<div class="flex items-start gap-2 text-xs">
+							<span class="font-mono text-primary opacity-70 flex-shrink-0">{ commit.ShortHash }</span>
+							<div class="flex-1 min-w-0">
+								<p class="truncate">{ commit.Subject }</p>
+								<div class="flex items-center gap-2 opacity-50 mt-0.5">
+									<span>{ commit.Author }</span>
+									<span>{ commit.Date.Local().Format("Jan 2, 3:04 PM") }</span>
+									if commit.Insertions > 0 || commit.Deletions > 0 {
+										<span class="text-success">+{ fmt.Sprintf("%d", commit.Insertions) }</span>
+										<span class="text-error">-{ fmt.Sprintf("%d", commit.Deletions) }</span>
+									}
+								</div>
+							</div>
+						</div>
+					}
+					if len(pc.Commits) > 10 {
+						<p class="text-xs opacity-50 text-center pt-1">+{ fmt.Sprintf("%d", len(pc.Commits)-10) } more commits</p>
+					}
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- File Types Breakdown -->
+	if len(pc.FileTypes) > 0 {
+		<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+			<div class="card-body p-4">
+				<h3 class="font-semibold text-sm mb-3">Files Modified by Type</h3>
+				<div class="flex flex-wrap gap-2">
+					for _, ft := range limitFileTypes(pc.FileTypes, 12) {
+						<div class="badge badge-outline gap-1">
+							<span class="font-mono text-xs">{ ft.Extension }</span>
+							<span class="opacity-60">{ fmt.Sprintf("%d", ft.Count) }</span>
+						</div>
+					}
+					if len(pc.FileTypes) > 12 {
+						<div class="badge badge-ghost">+{ fmt.Sprintf("%d", len(pc.FileTypes)-12) } more</div>
+					}
+				</div>
+			</div>
+		</div>
+	}
+}
+
+templ execStatusBadge(status models.ExecutionStatus) {
+	switch status {
+		case models.ExecCompleted:
+			<span class="badge badge-success badge-sm">Success</span>
+		case models.ExecFailed:
+			<span class="badge badge-error badge-sm">Failed</span>
+		case models.ExecCancelled:
+			<span class="badge badge-warning badge-sm">Cancelled</span>
+		case models.ExecRunning:
+			<span class="badge badge-primary badge-sm">Running</span>
+		default:
+			<span class="badge badge-ghost badge-sm">{ string(status) }</span>
+	}
+}
+
+func formatDuration(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	secs := ms / 1000
+	if secs < 60 {
+		return fmt.Sprintf("%ds", secs)
+	}
+	mins := secs / 60
+	remainSecs := secs % 60
+	if mins < 60 {
+		return fmt.Sprintf("%dm %ds", mins, remainSecs)
+	}
+	hours := mins / 60
+	remainMins := mins % 60
+	return fmt.Sprintf("%dh %dm", hours, remainMins)
+}
+
+func topFileTypes(fts []models.FileTypeCount) string {
+	limit := 3
+	if len(fts) < limit {
+		limit = len(fts)
+	}
+	parts := make([]string, limit)
+	for i := 0; i < limit; i++ {
+		parts[i] = fmt.Sprintf("%s (%d)", fts[i].Extension, fts[i].Count)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func limitItems(items []string, max int) []string {
+	if len(items) <= max {
+		return items
+	}
+	return items[:max]
+}
+
+func limitCommits(commits []models.GitCommit, max int) []models.GitCommit {
+	if len(commits) <= max {
+		return commits
+	}
+	return commits[:max]
+}
+
+func limitFileTypes(fts []models.FileTypeCount, max int) []models.FileTypeCount {
+	if len(fts) <= max {
+		return fts
+	}
+	return fts[:max]
+}
+
+script openHistoryTaskDialog(taskID string) {
+	htmx.ajax('GET', '/tasks/' + taskID + '?tab=history', {
+		target: '#main-content',
+		swap: 'innerHTML'
+	});
+	history.pushState({}, '', '/tasks/' + taskID);
+}

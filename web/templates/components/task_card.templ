@@ -1,0 +1,275 @@
+package components
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+func findModelByID(models []models.LLMConfig, agentID *string) *models.LLMConfig {
+	if agentID == nil {
+		// Find default model
+		for _, m := range models {
+			if m.IsDefault {
+				return &m
+			}
+		}
+		return nil
+	}
+	for _, m := range models {
+		if m.ID == *agentID {
+			return &m
+		}
+	}
+	return nil
+}
+
+func getModelDisplayName(model *models.LLMConfig) string {
+	if model == nil {
+		return "No Model"
+	}
+	return model.Name
+}
+
+func findAgentDefinitionByID(agentDefs []models.Agent, agentDefinitionID *string) *models.Agent {
+	if agentDefinitionID == nil {
+		return nil
+	}
+	for _, ad := range agentDefs {
+		if ad.ID == *agentDefinitionID {
+			return &ad
+		}
+	}
+	return nil
+}
+
+func StatusBadgeClass(status models.TaskStatus) string {
+	switch status {
+	case models.StatusRunning:
+		return "badge-warning"
+	case models.StatusCompleted:
+		return "badge-success"
+	case models.StatusFailed:
+		return "badge-error"
+	case models.StatusCancelled:
+		return "badge-ghost"
+	default:
+		return "badge-info"
+	}
+}
+
+func StatusLabel(status models.TaskStatus) string {
+	switch status {
+	case models.StatusPending:
+		return "Queued"
+	case models.StatusQueued:
+		return "Queued"
+	case models.StatusRunning:
+		return "In Progress"
+	case models.StatusCompleted:
+		return "Completed"
+	case models.StatusFailed:
+		return "Failed"
+	case models.StatusCancelled:
+		return "Cancelled"
+	default:
+		return string(status)
+	}
+}
+
+// StatusLabelForTask returns a display label considering both status and category.
+// Backlog tasks with pending status show "Pending" instead of "Queued",
+// and scheduled tasks show "Scheduled".
+func StatusLabelForTask(status models.TaskStatus, category models.TaskCategory) string {
+	if status == models.StatusPending {
+		switch category {
+		case models.CategoryBacklog:
+			return "Pending"
+		case models.CategoryScheduled:
+			return "Scheduled"
+		}
+	}
+	return StatusLabel(status)
+}
+
+func PriorityLabel(p int) string {
+	switch p {
+	case 1:
+		return "Low"
+	case 2:
+		return "Normal"
+	case 3:
+		return "High"
+	case 4:
+		return "Urgent"
+	case 0:
+		// Legacy priority value - treat as Normal but don't display badge
+		return ""
+	default:
+		return ""
+	}
+}
+
+func TagBadgeClass(tag models.TaskTag) string {
+	switch tag {
+	case models.TagFeature:
+		return "badge-primary"
+	case models.TagBug:
+		return "badge-error"
+	default:
+		return ""
+	}
+}
+
+func TagLabel(tag models.TaskTag) string {
+	switch tag {
+	case models.TagFeature:
+		return "Feature"
+	case models.TagBug:
+		return "Bug"
+	default:
+		return ""
+	}
+}
+
+func hasChainConfigEnabled(task models.Task) bool {
+	config, err := task.ParseChainConfig()
+	if err != nil {
+		return false
+	}
+	return config.Enabled
+}
+
+templ TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
+	<div
+		id={ fmt.Sprintf("task-%s", task.ID) }
+		class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all mb-2 cursor-move relative"
+		draggable="true"
+		data-task-id={ task.ID }
+		data-task-status={ string(task.Status) }
+		data-task-category={ string(task.Category) }
+		data-display-order={ fmt.Sprintf("%d", task.DisplayOrder) }
+		onclick="handleTaskSelect(event)"
+		ondragstart="handleDragStart(event)"
+		ondragend="handleDragEnd(event)"
+	>
+		<!-- Kebab menu in top right corner -->
+		<div class="dropdown dropdown-end absolute top-2 right-8 z-30" onclick="event.stopPropagation()">
+			<label tabindex="0" class="btn btn-ghost btn-xs" onclick="handleDropdownToggle(event)">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+				</svg>
+			</label>
+			<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-32 border border-base-300">
+				<!-- Run option (hide in Active column) -->
+				if viewingCategory != "active" {
+					<li>
+						<button
+							class="text-sm"
+							hx-post={ fmt.Sprintf("/tasks/%s/run", task.ID) }
+							hx-target="#kanban-board"
+							hx-swap="outerHTML"
+						>
+							Run
+						</button>
+					</li>
+				}
+				<!-- Cancel option (only show if running) -->
+				if task.Status == models.StatusRunning {
+					<li>
+						<button
+							class="text-sm text-error"
+							hx-post={ fmt.Sprintf("/tasks/%s/cancel", task.ID) }
+							hx-target="#kanban-board"
+							hx-swap="outerHTML"
+							hx-confirm="Cancel this running task?"
+						>
+							Cancel
+						</button>
+					</li>
+				}
+				<!-- Edit option (only show if not running) -->
+				if task.Status != models.StatusRunning {
+					<li>
+						<a
+							class="text-sm"
+							href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=details&from=tasks", task.ID)) }
+							hx-get={ fmt.Sprintf("/tasks/%s?tab=details&from=tasks", task.ID) }
+							hx-target="#main-content"
+							hx-swap="innerHTML"
+							hx-push-url="true"
+						>
+							Edit
+						</a>
+					</li>
+				}
+				</ul>
+		</div>
+		<!-- X button in top right corner -->
+		<button
+			class="btn btn-circle btn-ghost btn-xs absolute top-2 right-2 z-10"
+			onclick="event.stopPropagation()"
+			hx-delete={ fmt.Sprintf("/tasks/%s", task.ID) }
+			hx-target="#kanban-board"
+			hx-swap="outerHTML"
+		>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+			</svg>
+		</button>
+		<div class="card-body p-4 pr-16">
+			<div class="flex items-start justify-between">
+					<div class="flex-1 min-w-0">
+						<a
+							href={ templ.SafeURL(fmt.Sprintf("/tasks/%s?from=tasks", task.ID)) }
+							hx-get={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
+							hx-target="#main-content"
+							hx-swap="innerHTML"
+							hx-push-url={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
+							class="font-medium hover:underline cursor-pointer block truncate"
+							title={ task.Title }
+						>
+							{ task.Title }
+						</a>
+						if task.Prompt != "" {
+							<p class="text-sm opacity-60 mt-1 line-clamp-2">{ task.Prompt }</p>
+						}
+						<div class="flex gap-1 mt-1 flex-wrap">
+							if task.ParentTaskID != nil {
+								<span class="badge badge-sm badge-secondary inline-flex items-center" title="Child task (chained from parent)">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+									</svg>
+									Chained
+								</span>
+							}
+							if hasChainConfigEnabled(task) {
+								<span class="badge badge-sm badge-accent inline-flex items-center" title="Will create child task on completion">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+									</svg>
+									Chain
+								</span>
+							}
+							<!-- Model Badge -->
+							if len(llmModels) > 0 {
+								<span class="badge badge-sm badge-outline" title={ fmt.Sprintf("Model: %s", getModelDisplayName(findModelByID(llmModels, task.AgentID))) }>
+									{ getModelDisplayName(findModelByID(llmModels, task.AgentID)) }
+								</span>
+							}
+							if ad := findAgentDefinitionByID(agentDefs, task.AgentDefinitionID); ad != nil {
+								<span class="badge badge-sm badge-outline" title={ fmt.Sprintf("Agent: %s", ad.Name) }>
+									{ ad.Name }
+								</span>
+							}
+							if TagLabel(task.Tag) != "" {
+								<span class={ "badge badge-sm inline-flex items-center", TagBadgeClass(task.Tag) }>{ TagLabel(task.Tag) }</span>
+							}
+							if PriorityLabel(task.Priority) != "" {
+								<span class="badge badge-sm badge-outline">{ PriorityLabel(task.Priority) }</span>
+							}
+						</div>
+					</div>
+				</div>
+		</div>
+	</div>
+}

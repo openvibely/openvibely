@@ -1,0 +1,2004 @@
+package components
+
+import (
+	"strings"
+	"path/filepath"
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+// DiffFile represents a single file's diff
+type DiffFile struct {
+	Path    string
+	OldPath string
+	Hunks   []DiffHunk
+}
+
+// DiffHunk represents a contiguous chunk of changes
+type DiffHunk struct {
+	Header string
+	Lines  []DiffLine
+}
+
+// DiffLine represents a single line in the diff
+type DiffLine struct {
+	Type    string // "add", "del", "ctx" (context)
+	Content string
+	OldNum  int
+	NewNum  int
+}
+
+const (
+	// GitHub-style diff limits.
+	maxDiffFiles               = 300
+	maxLoadableTotalDiffLines  = 20000
+	maxLoadableTotalDiffChars  = 1 * 1024 * 1024
+	maxLoadableFileDiffLines   = 20000
+	maxLoadableFileDiffChars   = 500 * 1024
+	autoLoadFileDiffLines      = 400
+	autoLoadFileDiffChars      = 20 * 1024
+)
+
+// DiffFileRenderMeta controls how a file should render under diff limits.
+type DiffFileRenderMeta struct {
+	Index           int
+	File            DiffFile
+	LineCount       int
+	CharCount       int
+	AutoLoad        bool
+	CanLoadOnDemand bool
+	BlockedReason   string
+}
+
+// ParseDiffOutput parses unified diff output into structured DiffFile data
+func ParseDiffOutput(diffOutput string) []DiffFile {
+	if diffOutput == "" {
+		return nil
+	}
+
+	var files []DiffFile
+	lines := strings.Split(diffOutput, "\n")
+	var currentFile *DiffFile
+	var currentHunk *DiffHunk
+	oldLine, newLine := 0, 0
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+
+		// File header: diff --git a/path b/path
+		if strings.HasPrefix(line, "diff --git ") {
+			if currentFile != nil {
+				if currentHunk != nil {
+					currentFile.Hunks = append(currentFile.Hunks, *currentHunk)
+					currentHunk = nil
+				}
+				files = append(files, *currentFile)
+			}
+			parts := strings.SplitN(line, " b/", 2)
+			path := ""
+			if len(parts) == 2 {
+				path = parts[1]
+			}
+			currentFile = &DiffFile{Path: path}
+			continue
+		}
+
+		// Old file path
+		if strings.HasPrefix(line, "--- ") {
+			if currentFile != nil {
+				old := strings.TrimPrefix(line, "--- ")
+				old = strings.TrimPrefix(old, "a/")
+				currentFile.OldPath = old
+			}
+			continue
+		}
+
+		// New file path
+		if strings.HasPrefix(line, "+++ ") {
+			if currentFile != nil {
+				newPath := strings.TrimPrefix(line, "+++ ")
+				newPath = strings.TrimPrefix(newPath, "b/")
+				if newPath != "/dev/null" {
+					currentFile.Path = newPath
+				}
+			}
+			continue
+		}
+
+		// Hunk header: @@ -old,count +new,count @@
+		if strings.HasPrefix(line, "@@") {
+			if currentHunk != nil && currentFile != nil {
+				currentFile.Hunks = append(currentFile.Hunks, *currentHunk)
+			}
+			currentHunk = &DiffHunk{Header: line}
+			// Parse line numbers from hunk header
+			oldLine, newLine = parseHunkHeader(line)
+			continue
+		}
+
+		// Skip binary file notices, index lines, mode lines
+		if strings.HasPrefix(line, "index ") ||
+			strings.HasPrefix(line, "new file") ||
+			strings.HasPrefix(line, "deleted file") ||
+			strings.HasPrefix(line, "old mode") ||
+			strings.HasPrefix(line, "new mode") ||
+			strings.HasPrefix(line, "Binary files") ||
+			strings.HasPrefix(line, "# Untracked") ||
+			strings.HasPrefix(line, "# + ") {
+			continue
+		}
+
+		// Some fallback diff sources may omit hunk headers; synthesize one so content
+		// lines still render instead of producing an empty table.
+		if currentHunk == nil {
+			if currentFile == nil {
+				continue
+			}
+			if strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") {
+				currentHunk = &DiffHunk{Header: "@@ (no explicit hunk header) @@"}
+			} else {
+				continue
+			}
+		}
+
+		// Diff content lines
+		if strings.HasPrefix(line, "+") {
+			currentHunk.Lines = append(currentHunk.Lines, DiffLine{
+				Type:    "add",
+				Content: line[1:],
+				OldNum:  0,
+				NewNum:  newLine,
+			})
+			newLine++
+		} else if strings.HasPrefix(line, "-") {
+			currentHunk.Lines = append(currentHunk.Lines, DiffLine{
+				Type:    "del",
+				Content: line[1:],
+				OldNum:  oldLine,
+				NewNum:  0,
+			})
+			oldLine++
+		} else if strings.HasPrefix(line, " ") || line == "" {
+			content := ""
+			if len(line) > 0 {
+				content = line[1:]
+			}
+			currentHunk.Lines = append(currentHunk.Lines, DiffLine{
+				Type:    "ctx",
+				Content: content,
+				OldNum:  oldLine,
+				NewNum:  newLine,
+			})
+			oldLine++
+			newLine++
+		} else if line == `\ No newline at end of file` {
+			continue
+		}
+	}
+
+	// Finalize last file/hunk
+	if currentFile != nil {
+		if currentHunk != nil {
+			currentFile.Hunks = append(currentFile.Hunks, *currentHunk)
+		}
+		files = append(files, *currentFile)
+	}
+
+	return files
+}
+
+func parseHunkHeader(header string) (int, int) {
+	// @@ -old,count +new,count @@ optional context
+	oldStart, newStart := 1, 1
+	header = strings.TrimPrefix(header, "@@")
+	end := strings.Index(header[1:], "@@")
+	if end == -1 {
+		return 1, 1
+	}
+	header = strings.TrimSpace(header[:end+1])
+	parts := strings.Fields(header)
+	for _, p := range parts {
+		if strings.HasPrefix(p, "-") {
+			nums := strings.SplitN(p[1:], ",", 2)
+			fmt.Sscanf(nums[0], "%d", &oldStart)
+		} else if strings.HasPrefix(p, "+") {
+			nums := strings.SplitN(p[1:], ",", 2)
+			fmt.Sscanf(nums[0], "%d", &newStart)
+		}
+	}
+	return oldStart, newStart
+}
+
+func fileExtension(path string) string {
+	ext := filepath.Ext(path)
+	if ext != "" {
+		return ext[1:] // strip leading dot
+	}
+	return ""
+}
+
+func langClass(path string) string {
+	ext := fileExtension(path)
+	switch ext {
+	case "go":
+		return "language-go"
+	case "js":
+		return "language-javascript"
+	case "ts":
+		return "language-typescript"
+	case "tsx":
+		return "language-tsx"
+	case "jsx":
+		return "language-jsx"
+	case "py":
+		return "language-python"
+	case "rs":
+		return "language-rust"
+	case "rb":
+		return "language-ruby"
+	case "java":
+		return "language-java"
+	case "css":
+		return "language-css"
+	case "html", "templ":
+		return "language-html"
+	case "sql":
+		return "language-sql"
+	case "json":
+		return "language-json"
+	case "yaml", "yml":
+		return "language-yaml"
+	case "md":
+		return "language-markdown"
+	case "sh", "bash":
+		return "language-bash"
+	default:
+		return "language-plaintext"
+	}
+}
+
+templ DiffViewer(diffOutput string) {
+	if diffOutput == "" {
+		<div class="flex flex-col items-center justify-center py-16 text-base-content/50">
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+			</svg>
+			<p class="text-lg font-medium">No changes detected</p>
+			<p class="text-sm mt-1">No files were modified during this execution.</p>
+		</div>
+	} else {
+		@diffViewerContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)))
+	}
+}
+
+// DiffViewerWithReview renders the diff viewer with inline code review support.
+templ DiffViewerWithReview(diffOutput string, taskID string, reviewComments []models.ReviewComment) {
+	if diffOutput == "" {
+		<div class="flex flex-col items-center justify-center py-16 text-base-content/50">
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+			</svg>
+			<p class="text-lg font-medium">No changes detected</p>
+			<p class="text-sm mt-1">No files were modified during this execution.</p>
+		</div>
+	} else {
+		@diffViewerWithReviewContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), taskID, reviewComments)
+	}
+}
+
+// commentKey generates a unique key for looking up comments by file+line+type
+func commentKey(filePath string, lineNum int, lineType string) string {
+	return fmt.Sprintf("%s:%d:%s", filePath, lineNum, lineType)
+}
+
+// buildCommentMap creates a lookup map from review comments
+func buildCommentMap(comments []models.ReviewComment) map[string][]models.ReviewComment {
+	m := make(map[string][]models.ReviewComment)
+	for _, c := range comments {
+		key := commentKey(c.FilePath, c.LineNumber, c.LineType)
+		m[key] = append(m[key], c)
+	}
+	return m
+}
+
+// lineHasComment checks if a specific line has review comments
+func lineHasComment(commentMap map[string][]models.ReviewComment, filePath string, line DiffLine) bool {
+	lineNum := line.NewNum
+	lt := "new"
+	if line.Type == "del" {
+		lineNum = line.OldNum
+		lt = "old"
+	} else if line.Type == "ctx" {
+		lt = "ctx"
+	}
+	if lineNum == 0 {
+		return false
+	}
+	_, ok := commentMap[commentKey(filePath, lineNum, lt)]
+	return ok
+}
+
+// getLineComments returns comments for a specific line
+func getLineComments(commentMap map[string][]models.ReviewComment, filePath string, line DiffLine) []models.ReviewComment {
+	lineNum := line.NewNum
+	lt := "new"
+	if line.Type == "del" {
+		lineNum = line.OldNum
+		lt = "old"
+	} else if line.Type == "ctx" {
+		lt = "ctx"
+	}
+	if lineNum == 0 {
+		return nil
+	}
+	return commentMap[commentKey(filePath, lineNum, lt)]
+}
+
+// lineTypeForDiff maps diff line type to review line type
+func lineTypeForDiff(diffType string) string {
+	switch diffType {
+	case "del":
+		return "old"
+	case "ctx":
+		return "ctx"
+	default:
+		return "new"
+	}
+}
+
+// lineNumForReview returns the appropriate line number for a review comment
+func lineNumForReview(line DiffLine) int {
+	if line.Type == "del" {
+		return line.OldNum
+	}
+	return line.NewNum
+}
+
+templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment) {
+	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID }>
+		<!-- Toolbar -->
+		<div class="flex items-center justify-between mb-4">
+			<div class="flex items-center gap-2">
+				<span class="text-sm font-medium opacity-70">
+					{ fmt.Sprintf("%d", len(metas)) } file{ fileCountSuffix(len(metas)) } changed
+				</span>
+				if len(metas) > 1 {
+					<button
+						class="btn btn-xs btn-ghost opacity-60"
+						onclick="toggleAllDiffFiles(true)"
+					>
+						Expand All
+					</button>
+					<button
+						class="btn btn-xs btn-ghost opacity-60"
+						onclick="toggleAllDiffFiles(false)"
+					>
+						Collapse All
+					</button>
+				}
+			</div>
+			<div class="flex items-center gap-3">
+				@ReviewToolbar(taskID, len(reviewComments))
+				<div class="join">
+					<button
+						class="btn btn-sm join-item btn-active"
+						id="diff-btn-inline"
+						onclick="switchDiffView('inline')"
+					>
+						Inline
+					</button>
+					<button
+						class="btn btn-sm join-item"
+						id="diff-btn-split"
+						onclick="switchDiffView('split')"
+					>
+						Split
+					</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- File List -->
+		if len(metas) > 1 {
+			<div class="mb-4 p-3 bg-base-200 rounded-lg">
+				<div class="text-xs font-semibold uppercase tracking-wider mb-2 opacity-60">Changed Files</div>
+				<div class="flex flex-wrap gap-1">
+					for _, m := range metas {
+						<a
+							href={ templ.SafeURL(fmt.Sprintf("#diff-file-%d", m.Index)) }
+							class="badge badge-sm badge-outline cursor-pointer hover:badge-primary"
+							onclick={ templ.ComponentScript{Call: fmt.Sprintf("expandAndScrollDiffFile(%d)", m.Index)} }
+						>
+							{ diffFileName(m.File.Path) }
+						</a>
+					}
+				</div>
+			</div>
+		}
+		<!-- Diff Content with Review -->
+		<div id="diff-content-inline" class="space-y-4">
+			for _, m := range metas {
+				if m.AutoLoad {
+					@inlineDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
+				} else {
+					@deferredDiffFileWithReview(m, taskID, "inline", true)
+				}
+			}
+		</div>
+
+		<div id="diff-content-split" class="space-y-4 hidden">
+			for _, m := range metas {
+				if m.AutoLoad {
+					@splitDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
+				} else {
+					@deferredDiffFileWithReview(m, taskID, "split", true)
+				}
+			}
+		</div>
+
+		<!-- Inline review JavaScript -->
+		<script>
+			// Session-level state for diff file expand/collapse
+			if (!window._diffFileState) window._diffFileState = {};
+
+			function toggleDiffFile(idx) {
+				var inlineBody = document.getElementById('diff-body-' + idx);
+				var splitBody = document.getElementById('diff-body-split-' + idx);
+				var chevron = document.getElementById('diff-chevron-' + idx);
+				var chevronSplit = document.getElementById('diff-chevron-split-' + idx);
+
+				var isExpanded = chevron && chevron.classList.contains('rotate-90');
+				var newState = !isExpanded;
+
+				if (inlineBody) {
+					if (newState) {
+						inlineBody.style.maxHeight = inlineBody.scrollHeight + 'px';
+						setTimeout(function() { inlineBody.style.maxHeight = ''; }, 300);
+					} else {
+						inlineBody.style.maxHeight = inlineBody.scrollHeight + 'px';
+						inlineBody.offsetHeight;
+						inlineBody.style.maxHeight = '0';
+					}
+				}
+
+				if (splitBody) {
+					if (newState) {
+						splitBody.style.maxHeight = splitBody.scrollHeight + 'px';
+						setTimeout(function() { splitBody.style.maxHeight = ''; }, 300);
+					} else {
+						splitBody.style.maxHeight = splitBody.scrollHeight + 'px';
+						splitBody.offsetHeight;
+						splitBody.style.maxHeight = '0';
+					}
+				}
+
+				if (chevron) chevron.classList.toggle('rotate-90', newState);
+				if (chevronSplit) chevronSplit.classList.toggle('rotate-90', newState);
+
+				window._diffFileState[idx] = newState;
+			}
+
+			function toggleAllDiffFiles(expand) {
+				var viewer = document.getElementById('diff-viewer');
+				if (!viewer) return;
+				var count = parseInt(viewer.dataset.fileCount || '0');
+				for (var i = 0; i < count; i++) {
+					var chevron = document.getElementById('diff-chevron-' + i);
+					var isExpanded = chevron && chevron.classList.contains('rotate-90');
+					if (isExpanded !== expand) {
+						toggleDiffFile(i);
+					}
+				}
+			}
+
+			function expandAndScrollDiffFile(idx) {
+				var chevron = document.getElementById('diff-chevron-' + idx);
+				var isExpanded = chevron && chevron.classList.contains('rotate-90');
+				if (!isExpanded) {
+					toggleDiffFile(idx);
+				}
+				setTimeout(function() {
+					var el = document.getElementById('diff-file-' + idx);
+					if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+				}, 50);
+			}
+
+			// Restore session state on re-render (HTMX swaps)
+			(function() {
+				var viewer = document.getElementById('diff-viewer');
+				if (!viewer) return;
+				var count = parseInt(viewer.dataset.fileCount || '0');
+				for (var i = 0; i < count; i++) {
+					if (window._diffFileState.hasOwnProperty(i)) {
+						var chevron = document.getElementById('diff-chevron-' + i);
+						var isExpanded = chevron && chevron.classList.contains('rotate-90');
+						if (isExpanded !== window._diffFileState[i]) {
+							var bodies = [
+								document.getElementById('diff-body-' + i),
+								document.getElementById('diff-body-split-' + i)
+							];
+							var chevrons = [
+								chevron,
+								document.getElementById('diff-chevron-split-' + i)
+							];
+							bodies.forEach(function(body) {
+								if (!body) return;
+								body.style.transition = 'none';
+								body.style.maxHeight = window._diffFileState[i] ? '' : '0';
+								body.offsetHeight;
+								body.style.transition = '';
+							});
+							chevrons.forEach(function(c) {
+								if (c) c.classList.toggle('rotate-90', window._diffFileState[i]);
+							});
+						}
+					}
+				}
+			})();
+
+			function switchDiffView(mode) {
+				var inlineEl = document.getElementById('diff-content-inline');
+				var splitEl = document.getElementById('diff-content-split');
+				var btnInline = document.getElementById('diff-btn-inline');
+				var btnSplit = document.getElementById('diff-btn-split');
+
+				if (mode === 'split') {
+					inlineEl.classList.add('hidden');
+					splitEl.classList.remove('hidden');
+					btnSplit.classList.add('btn-active');
+					btnInline.classList.remove('btn-active');
+				} else {
+					splitEl.classList.add('hidden');
+					inlineEl.classList.remove('hidden');
+					btnInline.classList.add('btn-active');
+					btnSplit.classList.remove('btn-active');
+				}
+			}
+
+			// Inline comment functions — always active, no review mode toggle needed
+			function closeReviewForm(formRow) {
+				if (!formRow) return;
+				var lineRow = findLineRowForComment(formRow);
+				if (lineRow) lineRow.classList.remove('diff-review-line-open');
+				if (formRow.dataset.mode === 'edit') {
+					findInlineCommentRows(lineRow).forEach(function(commentRow) {
+						commentRow.style.display = '';
+					});
+					formRow.replaceWith(buildInlineCommentRow({
+						id: formRow.dataset.commentId || '',
+						filePath: formRow.dataset.filePath || '',
+						lineNum: formRow.dataset.lineNum || '',
+						lineType: formRow.dataset.lineType || '',
+						commentText: formRow.dataset.originalText || ''
+					}, formRow.dataset.reviewLayout || 'inline'));
+					return;
+				}
+				formRow.remove();
+			}
+
+			function closeOpenReviewForms(exceptForm) {
+				var viewer = document.getElementById('diff-viewer');
+				if (!viewer) return;
+				viewer.querySelectorAll('.review-comment-form').forEach(function(formRow) {
+					if (formRow !== exceptForm) {
+						closeReviewForm(formRow);
+					}
+				});
+			}
+
+			function reviewFormInnerHtml(submitLabel) {
+				return '<div class="review-comment-shell rounded-lg border border-base-300 bg-base-100 p-3">' +
+					'<textarea class="review-comment-textarea block w-full font-sans bg-transparent text-base-content placeholder:text-base-content/50" placeholder="Add review comment..." rows="2" autofocus style="resize: none;"></textarea>' +
+					'<div class="review-comment-actions mt-3 flex items-center justify-end gap-2">' +
+					'<button type="button" class="btn btn-sm btn-ghost review-cancel-btn">Cancel</button>' +
+					'<button type="button" class="btn btn-sm btn-success review-submit-btn">' + escapeHtml(submitLabel || 'Comment') + '</button>' +
+					'</div>' +
+					'</div>';
+			}
+
+			function buildReviewFormRow(options) {
+				var formRow = document.createElement('tr');
+				formRow.className = 'review-comment-form';
+				formRow.dataset.mode = options.mode || 'new';
+				formRow.dataset.commentId = options.commentId || '';
+				formRow.dataset.filePath = options.filePath || '';
+				formRow.dataset.lineNum = options.lineNum || '';
+				formRow.dataset.lineType = options.lineType || '';
+				formRow.dataset.reviewLayout = options.layout || 'inline';
+				formRow.dataset.originalText = options.originalText || '';
+				if ((options.layout || 'inline') === 'split') {
+					formRow.innerHTML = '<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>' +
+						'<td class="diff-line-content px-3 py-0 border-r border-base-300 bg-base-200"></td>' +
+						'<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>' +
+						'<td class="p-2 bg-base-200">' + reviewFormInnerHtml(options.submitLabel) + '</td>';
+				} else {
+					formRow.innerHTML = '<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>' +
+						'<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>' +
+						'<td class="p-2 bg-base-200">' + reviewFormInnerHtml(options.submitLabel) + '</td>';
+				}
+				var textarea = formRow.querySelector('textarea');
+				textarea.value = options.initialText || '';
+				textarea.addEventListener('keydown', function(e) {
+					if (e.key === 'Escape') {
+						closeReviewForm(formRow);
+					} else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+						e.preventDefault();
+						if (formRow.dataset.mode === 'edit') {
+							updateReviewComment(formRow);
+						} else {
+							submitReviewComment(options.taskId, options.filePath, options.lineNum, options.lineType, textarea.value, formRow);
+						}
+					}
+				});
+				formRow.querySelector('.review-submit-btn').addEventListener('click', function() {
+					if (formRow.dataset.mode === 'edit') {
+						updateReviewComment(formRow);
+					} else {
+						submitReviewComment(options.taskId, options.filePath, options.lineNum, options.lineType, textarea.value, formRow);
+					}
+				});
+				formRow.querySelector('.review-cancel-btn').addEventListener('click', function() {
+					closeReviewForm(formRow);
+				});
+				return formRow;
+			}
+
+			function openInlineCommentForm(row) {
+				var viewer = document.getElementById('diff-viewer');
+				if (!viewer) return;
+
+				var filePath = row.dataset.filePath;
+				var lineNum = row.dataset.lineNum;
+				var lineType = row.dataset.lineType;
+				var taskId = viewer.dataset.taskId;
+
+				if (!filePath || !lineNum || !taskId) return;
+				var existingForm = row.nextElementSibling;
+				if (existingForm && existingForm.classList.contains('review-comment-form')) {
+					closeReviewForm(existingForm);
+					return;
+				}
+				closeOpenReviewForms();
+				var formRow = buildReviewFormRow({
+					mode: 'new',
+					layout: row.dataset.reviewLayout || 'inline',
+					taskId: taskId,
+					filePath: filePath,
+					lineNum: lineNum,
+					lineType: lineType,
+					submitLabel: 'Comment'
+				});
+				row.parentNode.insertBefore(formRow, row.nextSibling);
+				row.classList.add('diff-review-line-open');
+				requestAnimationFrame(function() {
+					var textarea = formRow.querySelector('.review-comment-textarea');
+					if (!textarea) return;
+					textarea.focus();
+					textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+				});
+			}
+
+			function handleAddCommentClick(ev) {
+				ev.stopPropagation();
+				var btn = ev.target.closest('.diff-add-comment-btn');
+				if (!btn) return;
+				var row = btn.closest('tr.diff-review-line');
+				if (!row) return;
+				if (!row.dataset.lineNum || row.dataset.lineNum === '0') return;
+				openInlineCommentForm(row);
+			}
+
+			function cancelReview() {
+				var viewer = document.getElementById('diff-viewer');
+				if (!viewer) return;
+				var taskId = viewer.dataset.taskId;
+				if (!taskId) return;
+
+				// Delete all comments for this task via the API, then reload the page
+				fetch('/tasks/' + taskId + '/reviews', { method: 'GET' })
+					.then(function() {
+						window.location.reload();
+					});
+			}
+
+			function escapeHtml(value) {
+				return String(value || '')
+					.replace(/&/g, '&amp;')
+					.replace(/</g, '&lt;')
+					.replace(/>/g, '&gt;')
+					.replace(/\"/g, '&quot;')
+					.replace(/'/g, '&#39;');
+			}
+
+			function findLineRowForComment(commentRow) {
+				var cursor = commentRow ? commentRow.previousElementSibling : null;
+				while (cursor) {
+					if (cursor.classList && cursor.classList.contains('diff-review-line')) {
+						return cursor;
+					}
+					cursor = cursor.previousElementSibling;
+				}
+				return null;
+			}
+
+			function findInlineCommentRows(lineRow) {
+				var rows = [];
+				if (!lineRow) return rows;
+				var filePath = lineRow.dataset.filePath || '';
+				var lineNum = lineRow.dataset.lineNum || '';
+				var lineType = lineRow.dataset.lineType || '';
+				var cursor = lineRow.nextElementSibling;
+				while (cursor) {
+					if (cursor.classList && cursor.classList.contains('diff-review-line')) {
+						break;
+					}
+					if (cursor.classList && cursor.classList.contains('review-inline-comment')) {
+						if (cursor.dataset.filePath === filePath && cursor.dataset.lineNum === lineNum && cursor.dataset.lineType === lineType) {
+							rows.push(cursor);
+						}
+					}
+					cursor = cursor.nextElementSibling;
+				}
+				return rows;
+			}
+
+			function extractCreatedComment(html, filePath, lineNum, lineType, fallbackText) {
+				var temp = document.createElement('div');
+				temp.innerHTML = html;
+				var items = temp.querySelectorAll('.review-comment-item');
+				var match = null;
+				items.forEach(function(item) {
+					if (item.dataset.filePath === filePath && item.dataset.lineNumber === String(lineNum) && item.dataset.lineType === lineType) {
+						match = item;
+					}
+				});
+				if (!match) {
+					return {
+						id: '',
+						filePath: filePath,
+						lineNum: String(lineNum),
+						lineType: lineType,
+						commentText: fallbackText
+					};
+				}
+				var textEl = match.querySelector('p');
+				return {
+					id: match.dataset.commentId || '',
+					filePath: filePath,
+					lineNum: String(lineNum),
+					lineType: lineType,
+					commentText: textEl ? textEl.textContent : fallbackText
+				};
+			}
+
+			function parseReviewCommentsFromListHtml(html) {
+				var temp = document.createElement('div');
+				temp.innerHTML = html;
+				var comments = [];
+				temp.querySelectorAll('.review-comment-item').forEach(function(item) {
+					var textEl = item.querySelector('p');
+					comments.push({
+						id: item.dataset.commentId || '',
+						filePath: item.dataset.filePath || '',
+						lineNum: item.dataset.lineNumber || '',
+						lineType: item.dataset.lineType || 'new',
+						commentText: textEl ? textEl.textContent : ''
+					});
+				});
+				return comments;
+			}
+
+			function reviewCommentLineKey(filePath, lineNum, lineType) {
+				return String(filePath || '') + '::' + String(lineNum || '') + '::' + String(lineType || 'new');
+			}
+
+			function setReviewToolbarEnabled(hasComments) {
+				var toolbar = document.getElementById('review-toolbar');
+				if (!toolbar) return;
+				var submitBtn = toolbar.querySelector('button[hx-post]');
+				if (!submitBtn) return;
+				if (hasComments) {
+					submitBtn.removeAttribute('disabled');
+				} else {
+					submitBtn.setAttribute('disabled', 'disabled');
+				}
+			}
+
+			function syncReviewCommentsFromListHtml(html) {
+				var viewer = document.getElementById('diff-viewer');
+				if (!viewer) return;
+				var comments = parseReviewCommentsFromListHtml(html);
+				var grouped = {};
+				comments.forEach(function(comment) {
+					var key = reviewCommentLineKey(comment.filePath, comment.lineNum, comment.lineType);
+					if (!grouped[key]) grouped[key] = [];
+					grouped[key].push(comment);
+				});
+
+				viewer.querySelectorAll('tr.review-comment-form').forEach(function(formRow) {
+					formRow.remove();
+				});
+				viewer.querySelectorAll('tr.review-inline-comment').forEach(function(commentRow) {
+					commentRow.remove();
+				});
+				viewer.querySelectorAll('tr.diff-review-line').forEach(function(lineRow) {
+					lineRow.classList.remove('diff-review-line-open');
+					var key = reviewCommentLineKey(lineRow.dataset.filePath, lineRow.dataset.lineNum, lineRow.dataset.lineType);
+					(grouped[key] || []).forEach(function(comment) {
+						insertInlineCommentRow(lineRow, comment);
+					});
+				});
+
+				setReviewToolbarEnabled(comments.length > 0);
+			}
+
+			function refreshReviewComments(taskId) {
+				if (!taskId) return Promise.resolve();
+				return fetch('/tasks/' + taskId + '/reviews', {
+					headers: { 'HX-Request': 'true' }
+				})
+				.then(function(resp) {
+					if (!resp.ok) throw new Error('failed to load review comments');
+					return resp.text();
+				})
+				.then(function(html) {
+					syncReviewCommentsFromListHtml(html);
+				});
+			}
+
+			function renderInlineCommentBox(comment) {
+				var text = escapeHtml(comment.commentText || '');
+				return '<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id="' + escapeHtml(comment.id || '') + '" onclick="startEditReviewComment(event)">' +
+					'<span class="review-inline-comment-bar"></span>' +
+					'<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">' +
+						'<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>' +
+					'</button>' +
+					'<p class="review-comment-text whitespace-pre-wrap break-words">' + text + '</p>' +
+					'</div>';
+			}
+
+			function buildInlineCommentRow(comment, layout) {
+				var commentRow = document.createElement('tr');
+				commentRow.className = 'review-inline-comment';
+				commentRow.dataset.commentId = comment.id || '';
+				commentRow.dataset.filePath = comment.filePath || '';
+				commentRow.dataset.lineNum = comment.lineNum || '';
+				commentRow.dataset.lineType = comment.lineType || '';
+				commentRow.dataset.reviewLayout = layout || 'inline';
+				if ((layout || 'inline') === 'split') {
+					commentRow.innerHTML = '<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>' +
+						'<td class="diff-line-content px-3 py-0 border-r border-base-300 bg-base-200"></td>' +
+						'<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>' +
+						'<td class="p-0 bg-warning/15 align-top">' + renderInlineCommentBox(comment) + '</td>';
+				} else {
+					commentRow.innerHTML = '<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>' +
+						'<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>' +
+						'<td class="p-0 bg-warning/15 align-top">' + renderInlineCommentBox(comment) + '</td>';
+				}
+				return commentRow;
+			}
+	
+			function insertInlineCommentRow(lineRow, comment) {
+				if (!lineRow) return;
+				var layout = (lineRow.dataset && lineRow.dataset.reviewLayout) ? lineRow.dataset.reviewLayout : 'inline';
+				var commentRow = buildInlineCommentRow({
+					id: comment.id || '',
+					filePath: lineRow.dataset.filePath || comment.filePath || '',
+					lineNum: lineRow.dataset.lineNum || comment.lineNum || '',
+					lineType: lineRow.dataset.lineType || comment.lineType || '',
+					commentText: comment.commentText || ''
+				}, layout);
+				var insertionPoint = lineRow;
+				while (insertionPoint.nextElementSibling && insertionPoint.nextElementSibling.classList && insertionPoint.nextElementSibling.classList.contains('review-inline-comment')) {
+					insertionPoint = insertionPoint.nextElementSibling;
+				}
+				lineRow.parentNode.insertBefore(commentRow, insertionPoint.nextElementSibling);
+			}
+
+			function startEditReviewComment(ev) {
+				var target = ev.target;
+				if (target && target.closest && target.closest('.review-delete-btn')) {
+					ev.stopPropagation();
+					return;
+				}
+				ev.stopPropagation();
+				var row = ev.target.closest('tr.review-inline-comment');
+				if (!row) return;
+				closeOpenReviewForms();
+				var lineRow = findLineRowForComment(row);
+				if (!lineRow) return;
+				var viewer = document.getElementById('diff-viewer');
+				if (!viewer || !viewer.dataset) return;
+				var textEl = row.querySelector('.review-comment-text');
+				var currentText = textEl ? textEl.textContent : '';
+				findInlineCommentRows(lineRow).forEach(function(commentRow) {
+					commentRow.style.display = 'none';
+				});
+				var formRow = buildReviewFormRow({
+					mode: 'edit',
+					layout: row.dataset.reviewLayout || 'inline',
+					taskId: viewer.dataset.taskId || '',
+					commentId: row.dataset.commentId || '',
+					filePath: row.dataset.filePath || '',
+					lineNum: row.dataset.lineNum || '',
+					lineType: row.dataset.lineType || '',
+					initialText: currentText,
+					originalText: currentText,
+					submitLabel: 'Update'
+				});
+				row.replaceWith(formRow);
+				lineRow.classList.add('diff-review-line-open');
+			}
+
+			function updateReviewComment(formRow) {
+				if (!formRow) return;
+				var viewer = document.getElementById('diff-viewer');
+				var taskId = viewer && viewer.dataset ? viewer.dataset.taskId : '';
+				var commentId = formRow.dataset.commentId;
+				if (!commentId) return;
+				var textarea = formRow.querySelector('textarea');
+				if (!textarea) return;
+				var text = textarea.value.trim();
+				if (!text) return;
+				var formData = new URLSearchParams();
+				formData.append('comment_text', text);
+				fetch('/reviews/' + commentId, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
+					body: formData.toString()
+				})
+				.then(function(resp) {
+					if (!resp.ok) throw new Error('failed to save comment');
+					var lineRow = findLineRowForComment(formRow);
+					var existingRows = findInlineCommentRows(lineRow);
+					if (existingRows.length > 0) {
+						existingRows.forEach(function(commentRow) {
+							commentRow.style.display = '';
+							if (commentRow.dataset.commentId === commentId) {
+								var textNode = commentRow.querySelector('.review-comment-text');
+								if (textNode) textNode.textContent = text;
+							}
+						});
+						formRow.remove();
+					} else {
+						formRow.replaceWith(buildInlineCommentRow({
+							id: commentId,
+							filePath: formRow.dataset.filePath || '',
+							lineNum: formRow.dataset.lineNum || '',
+							lineType: formRow.dataset.lineType || '',
+							commentText: text
+						}, formRow.dataset.reviewLayout || 'inline'));
+					}
+					if (lineRow) lineRow.classList.remove('diff-review-line-open');
+					if (taskId) {
+						refreshReviewComments(taskId).catch(function(err) {
+							console.error(err);
+						});
+					}
+				})
+				.catch(function(err) {
+					console.error(err);
+				});
+			}
+
+			function deleteReviewComment(ev) {
+				ev.stopPropagation();
+				var row = ev.target.closest('tr.review-inline-comment, tr.review-comment-form');
+				if (!row) return;
+				var viewer = document.getElementById('diff-viewer');
+				var taskId = viewer && viewer.dataset ? viewer.dataset.taskId : '';
+				var commentId = row.dataset.commentId;
+				if (!commentId) return;
+				var lineRow = findLineRowForComment(row);
+				fetch('/reviews/' + commentId, {
+					method: 'DELETE',
+					headers: { 'HX-Request': 'true' }
+				})
+				.then(function(resp) {
+					if (!resp.ok) throw new Error('failed to delete comment');
+					row.remove();
+					if (lineRow) lineRow.classList.remove('diff-review-line-open');
+					if (taskId) {
+						refreshReviewComments(taskId).catch(function(err) {
+							console.error(err);
+						});
+					}
+				})
+				.catch(function(err) {
+					console.error(err);
+				});
+			}
+
+			function submitReviewComment(taskId, filePath, lineNum, lineType, text, formRow) {
+				if (!text.trim()) return;
+
+				var formData = new URLSearchParams();
+				formData.append('file_path', filePath);
+				formData.append('line_number', lineNum);
+				formData.append('line_type', lineType);
+				formData.append('comment_text', text);
+
+				fetch('/tasks/' + taskId + '/reviews', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'HX-Request': 'true' },
+					body: formData.toString()
+				})
+				.then(function(resp) {
+					if (!resp.ok) throw new Error('failed to add review comment');
+					return resp.text();
+				})
+				.then(function(html) {
+					var row = findLineRowForComment(formRow);
+					var comment = extractCreatedComment(html, filePath, lineNum, lineType, text);
+					var layout = formRow.dataset.reviewLayout || (row && row.dataset ? row.dataset.reviewLayout : '') || 'inline';
+					if (formRow && formRow.parentNode) {
+						formRow.replaceWith(buildInlineCommentRow({
+							id: comment.id || '',
+							filePath: filePath,
+							lineNum: String(lineNum),
+							lineType: lineType,
+							commentText: comment.commentText || text
+						}, layout));
+					}
+					if (row) row.classList.remove('diff-review-line-open');
+					refreshReviewComments(taskId).catch(function(err) {
+						console.error(err);
+					});
+				})
+				.catch(function(err) {
+					console.error(err);
+				});
+			}
+
+		</script>
+
+		<style>
+			/* Inline review styles — always active */
+			.diff-review-line {
+				position: relative;
+			}
+			.diff-line-num {
+				padding-right: 1.75rem;
+			}
+			.diff-add-comment-btn {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				position: absolute;
+				right: 0.25rem;
+				top: 50%;
+				transform: translateY(-50%);
+				width: 18px;
+				height: 18px;
+				border-radius: 9999px;
+				background: oklch(0.6 0.15 250);
+				color: white;
+				border: none;
+				cursor: pointer;
+				font-size: 14px;
+				line-height: 1;
+				padding: 0;
+				z-index: 2;
+				font-weight: bold;
+				opacity: 0;
+				pointer-events: none;
+				transition: opacity 0.15s ease, background-color 0.15s ease;
+			}
+			.diff-add-comment-btn:hover {
+				background: oklch(0.5 0.18 250);
+			}
+			.diff-review-line:hover .diff-add-comment-btn,
+			.diff-review-line-open .diff-add-comment-btn {
+				opacity: 1;
+				pointer-events: auto;
+			}
+			.review-comment-shell {
+				box-shadow: none;
+				overflow: hidden;
+			}
+			.review-comment-textarea {
+				resize: none;
+				border: 0 !important;
+				outline: none;
+				box-shadow: none !important;
+				background: transparent;
+				min-height: 56px;
+				padding: 0;
+			}
+			.review-comment-form td {
+				padding-top: 0.5rem;
+				padding-bottom: 0.5rem;
+			}
+			.review-comment-textarea:focus {
+				outline: none;
+				box-shadow: none !important;
+			}
+			.review-comment-actions {
+				z-index: 1;
+			}
+			.review-indicator {
+				z-index: 1;
+			}
+			.review-inline-comment-box {
+				position: relative;
+				box-shadow: none;
+				background: transparent;
+				min-height: 2.25rem;
+			}
+			.review-inline-comment-bar {
+				position: absolute;
+				left: 0;
+				top: 0;
+				bottom: 0;
+				width: 4px;
+				background: oklch(0.72 0.17 94);
+			}
+			.review-inline-comment-box .review-delete-btn {
+				position: absolute;
+				top: 0.25rem;
+				right: 0.25rem;
+				min-height: 1.5rem;
+				height: 1.5rem;
+				min-width: 1.5rem;
+				width: 1.5rem;
+				padding: 0;
+				line-height: 1;
+				color: white;
+				z-index: 1;
+			}
+			.review-inline-comment-box .review-delete-btn:hover {
+				background: rgb(255 255 255 / 0.12);
+			}
+		</style>
+	</div>
+}
+
+templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID string, commentMap map[string][]models.ReviewComment) {
+	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
+		<div
+			class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
+			onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
+			data-diff-toggle={ fmt.Sprintf("%d", idx) }
+		>
+			<svg
+				id={ fmt.Sprintf("diff-chevron-%d", idx) }
+				xmlns="http://www.w3.org/2000/svg"
+				class={ "h-4 w-4 opacity-60 transition-transform duration-200", templ.KV("rotate-90", defaultExpanded) }
+				fill="none"
+				viewBox="0 0 24 24"
+				stroke="currentColor"
+			>
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+			</svg>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+			</svg>
+			<span class="font-mono text-sm font-medium">{ f.Path }</span>
+			<span class="text-xs opacity-50 ml-auto">
+				{ diffStats(f) }
+			</span>
+		</div>
+		<div
+			id={ fmt.Sprintf("diff-body-%d", idx) }
+			class="overflow-hidden transition-all duration-300 ease-in-out"
+			if !defaultExpanded {
+				style="max-height: 0;"
+			}
+		>
+			<div class="overflow-x-auto">
+				<table class="diff-table w-full text-xs font-mono border-collapse">
+					for _, hunk := range f.Hunks {
+						<tr class="diff-hunk-header">
+							<td colspan="3" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
+						</tr>
+						for _, line := range hunk.Lines {
+							<tr
+								class={ "diff-review-line", inlineLineClass(line.Type) }
+								data-file-path={ f.Path }
+								data-line-num={ fmt.Sprintf("%d", lineNumForReview(line)) }
+								data-line-type={ lineTypeForDiff(line.Type) }
+							>
+								<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300 relative">
+									if line.OldNum > 0 {
+										{ fmt.Sprintf("%d", line.OldNum) }
+									}
+								</td>
+								<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300 relative">
+									if line.NewNum > 0 {
+										{ fmt.Sprintf("%d", line.NewNum) }
+									}
+									if lineHasComment(commentMap, f.Path, line) {
+									}
+									<button type="button" class="diff-add-comment-btn" onclick="handleAddCommentClick(event)" title="Add comment">+</button>
+								</td>
+								<td class="diff-line-content px-3 py-0 whitespace-pre-wrap break-all">
+									<span class="diff-marker select-none opacity-50 inline-block w-4">{ lineMarker(line.Type) }</span>{ line.Content }
+								</td>
+							</tr>
+							if lineHasComment(commentMap, f.Path, line) {
+								for _, comment := range getLineComments(commentMap, f.Path, line) {
+									<tr
+										class="review-inline-comment"
+										data-comment-id={ comment.ID }
+										data-file-path={ f.Path }
+										data-line-num={ fmt.Sprintf("%d", lineNumForReview(line)) }
+										data-line-type={ lineTypeForDiff(line.Type) }
+										data-review-layout="inline"
+									>
+										<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
+										<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
+										<td class="p-0 bg-warning/15">
+											<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
+												<span class="review-inline-comment-bar"></span>
+												<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
+													<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+												</button>
+												<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
+											</div>
+										</td>
+									</tr>
+								}
+							}
+						}
+					}
+				</table>
+			</div>
+		</div>
+	</div>
+}
+
+templ diffViewerContent(metas []DiffFileRenderMeta) {
+	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) }>
+		<!-- Toolbar -->
+		<div class="flex items-center justify-between mb-4">
+			<div class="flex items-center gap-2">
+				<span class="text-sm font-medium opacity-70">
+					{ fmt.Sprintf("%d", len(metas)) } file{ fileCountSuffix(len(metas)) } changed
+				</span>
+				if len(metas) > 1 {
+					<button
+						class="btn btn-xs btn-ghost opacity-60"
+						onclick="toggleAllDiffFiles(true)"
+					>
+						Expand All
+					</button>
+					<button
+						class="btn btn-xs btn-ghost opacity-60"
+						onclick="toggleAllDiffFiles(false)"
+					>
+						Collapse All
+					</button>
+				}
+			</div>
+			<div class="join">
+				<button
+					class="btn btn-sm join-item btn-active"
+					id="diff-btn-inline"
+					onclick="switchDiffView('inline')"
+				>
+					Inline
+				</button>
+				<button
+					class="btn btn-sm join-item"
+					id="diff-btn-split"
+					onclick="switchDiffView('split')"
+				>
+					Split
+				</button>
+			</div>
+		</div>
+
+		<!-- File List -->
+		if len(metas) > 1 {
+			<div class="mb-4 p-3 bg-base-200 rounded-lg">
+				<div class="text-xs font-semibold uppercase tracking-wider mb-2 opacity-60">Changed Files</div>
+				<div class="flex flex-wrap gap-1">
+					for _, m := range metas {
+						<a
+							href={ templ.SafeURL(fmt.Sprintf("#diff-file-%d", m.Index)) }
+							class="badge badge-sm badge-outline cursor-pointer hover:badge-primary"
+							onclick={ templ.ComponentScript{Call: fmt.Sprintf("expandAndScrollDiffFile(%d)", m.Index)} }
+						>
+							{ diffFileName(m.File.Path) }
+						</a>
+					}
+				</div>
+			</div>
+		}
+		<!-- Diff Content -->
+		<div id="diff-content-inline" class="space-y-4">
+			for _, m := range metas {
+				if m.AutoLoad {
+					@inlineDiffFile(m.File, m.Index, shouldDefaultExpand(len(metas)))
+				} else {
+					@deferredDiffFileWithReview(m, "", "inline", false)
+				}
+			}
+		</div>
+
+		<div id="diff-content-split" class="space-y-4 hidden">
+			for _, m := range metas {
+				if m.AutoLoad {
+					@splitDiffFile(m.File, m.Index, shouldDefaultExpand(len(metas)))
+				} else {
+					@deferredDiffFileWithReview(m, "", "split", false)
+				}
+			}
+		</div>
+
+		<script>
+			// Session-level state for diff file expand/collapse
+			if (!window._diffFileState) window._diffFileState = {};
+
+			function toggleDiffFile(idx) {
+				var inlineBody = document.getElementById('diff-body-' + idx);
+				var splitBody = document.getElementById('diff-body-split-' + idx);
+				var chevron = document.getElementById('diff-chevron-' + idx);
+				var chevronSplit = document.getElementById('diff-chevron-split-' + idx);
+
+				var isExpanded = chevron && chevron.classList.contains('rotate-90');
+				var newState = !isExpanded;
+
+				// Update inline view
+				if (inlineBody) {
+					if (newState) {
+						inlineBody.style.maxHeight = inlineBody.scrollHeight + 'px';
+						// After transition, remove max-height so content can resize
+						setTimeout(function() { inlineBody.style.maxHeight = ''; }, 300);
+					} else {
+						inlineBody.style.maxHeight = inlineBody.scrollHeight + 'px';
+						// Force reflow then collapse
+						inlineBody.offsetHeight;
+						inlineBody.style.maxHeight = '0';
+					}
+				}
+
+				// Update split view
+				if (splitBody) {
+					if (newState) {
+						splitBody.style.maxHeight = splitBody.scrollHeight + 'px';
+						setTimeout(function() { splitBody.style.maxHeight = ''; }, 300);
+					} else {
+						splitBody.style.maxHeight = splitBody.scrollHeight + 'px';
+						splitBody.offsetHeight;
+						splitBody.style.maxHeight = '0';
+					}
+				}
+
+				// Update chevrons
+				if (chevron) chevron.classList.toggle('rotate-90', newState);
+				if (chevronSplit) chevronSplit.classList.toggle('rotate-90', newState);
+
+				// Persist state
+				window._diffFileState[idx] = newState;
+			}
+
+			function toggleAllDiffFiles(expand) {
+				var viewer = document.getElementById('diff-viewer');
+				if (!viewer) return;
+				var count = parseInt(viewer.dataset.fileCount || '0');
+				for (var i = 0; i < count; i++) {
+					var chevron = document.getElementById('diff-chevron-' + i);
+					var isExpanded = chevron && chevron.classList.contains('rotate-90');
+					if (isExpanded !== expand) {
+						toggleDiffFile(i);
+					}
+				}
+			}
+
+			function expandAndScrollDiffFile(idx) {
+				var chevron = document.getElementById('diff-chevron-' + idx);
+				var isExpanded = chevron && chevron.classList.contains('rotate-90');
+				if (!isExpanded) {
+					toggleDiffFile(idx);
+				}
+				// Scroll after a small delay to allow expansion
+				setTimeout(function() {
+					var el = document.getElementById('diff-file-' + idx);
+					if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
+				}, 50);
+			}
+
+			// Restore session state on re-render (HTMX swaps)
+			(function() {
+				var viewer = document.getElementById('diff-viewer');
+				if (!viewer) return;
+				var count = parseInt(viewer.dataset.fileCount || '0');
+				for (var i = 0; i < count; i++) {
+					if (window._diffFileState.hasOwnProperty(i)) {
+						var chevron = document.getElementById('diff-chevron-' + i);
+						var isExpanded = chevron && chevron.classList.contains('rotate-90');
+						if (isExpanded !== window._diffFileState[i]) {
+							// Apply state without animation
+							var bodies = [
+								document.getElementById('diff-body-' + i),
+								document.getElementById('diff-body-split-' + i)
+							];
+							var chevrons = [
+								chevron,
+								document.getElementById('diff-chevron-split-' + i)
+							];
+							bodies.forEach(function(body) {
+								if (!body) return;
+								body.style.transition = 'none';
+								body.style.maxHeight = window._diffFileState[i] ? '' : '0';
+								body.offsetHeight; // force reflow
+								body.style.transition = '';
+							});
+							chevrons.forEach(function(c) {
+								if (c) c.classList.toggle('rotate-90', window._diffFileState[i]);
+							});
+						}
+					}
+				}
+			})();
+
+			function switchDiffView(mode) {
+				var inlineEl = document.getElementById('diff-content-inline');
+				var splitEl = document.getElementById('diff-content-split');
+				var btnInline = document.getElementById('diff-btn-inline');
+				var btnSplit = document.getElementById('diff-btn-split');
+
+				if (mode === 'split') {
+					inlineEl.classList.add('hidden');
+					splitEl.classList.remove('hidden');
+					btnSplit.classList.add('btn-active');
+					btnInline.classList.remove('btn-active');
+				} else {
+					splitEl.classList.add('hidden');
+					inlineEl.classList.remove('hidden');
+					btnInline.classList.add('btn-active');
+					btnSplit.classList.remove('btn-active');
+				}
+			}
+		</script>
+	</div>
+}
+
+templ inlineDiffFile(f DiffFile, idx int, defaultExpanded bool) {
+	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
+		<div
+			class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
+			onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
+			data-diff-toggle={ fmt.Sprintf("%d", idx) }
+		>
+			<svg
+				id={ fmt.Sprintf("diff-chevron-%d", idx) }
+				xmlns="http://www.w3.org/2000/svg"
+				class={ "h-4 w-4 opacity-60 transition-transform duration-200", templ.KV("rotate-90", defaultExpanded) }
+				fill="none"
+				viewBox="0 0 24 24"
+				stroke="currentColor"
+			>
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+			</svg>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+			</svg>
+			<span class="font-mono text-sm font-medium">{ f.Path }</span>
+			<span class="text-xs opacity-50 ml-auto">
+				{ diffStats(f) }
+			</span>
+		</div>
+		<div
+			id={ fmt.Sprintf("diff-body-%d", idx) }
+			class="overflow-hidden transition-all duration-300 ease-in-out"
+			if !defaultExpanded {
+				style="max-height: 0;"
+			}
+		>
+			<div class="overflow-x-auto">
+				<table class="diff-table w-full text-xs font-mono border-collapse">
+					for _, hunk := range f.Hunks {
+						<tr class="diff-hunk-header">
+							<td colspan="3" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
+						</tr>
+						for _, line := range hunk.Lines {
+							<tr class={ inlineLineClass(line.Type) }>
+								<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300">
+									if line.OldNum > 0 {
+										{ fmt.Sprintf("%d", line.OldNum) }
+									}
+								</td>
+								<td class="diff-line-num text-right px-2 py-0 select-none opacity-40 w-12 border-r border-base-300">
+									if line.NewNum > 0 {
+										{ fmt.Sprintf("%d", line.NewNum) }
+									}
+								</td>
+								<td class="diff-line-content px-3 py-0 whitespace-pre-wrap break-all">
+									<span class="diff-marker select-none opacity-50 inline-block w-4">{ lineMarker(line.Type) }</span>{ line.Content }
+								</td>
+							</tr>
+						}
+					}
+				</table>
+			</div>
+		</div>
+	</div>
+}
+
+templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID string, commentMap map[string][]models.ReviewComment) {
+	<div id={ fmt.Sprintf("diff-file-split-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
+		<div
+			class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
+			onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
+			data-diff-toggle={ fmt.Sprintf("%d", idx) }
+		>
+			<svg
+				id={ fmt.Sprintf("diff-chevron-split-%d", idx) }
+				xmlns="http://www.w3.org/2000/svg"
+				class={ "h-4 w-4 opacity-60 transition-transform duration-200", templ.KV("rotate-90", defaultExpanded) }
+				fill="none"
+				viewBox="0 0 24 24"
+				stroke="currentColor"
+			>
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+			</svg>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+			</svg>
+			<span class="font-mono text-sm font-medium">{ f.Path }</span>
+			<span class="text-xs opacity-50 ml-auto">
+				{ diffStats(f) }
+			</span>
+		</div>
+		<div
+			id={ fmt.Sprintf("diff-body-split-%d", idx) }
+			class="overflow-hidden transition-all duration-300 ease-in-out"
+			if !defaultExpanded {
+				style="max-height: 0;"
+			}
+		>
+			<div class="overflow-x-auto">
+				<table class="diff-table w-full text-xs font-mono border-collapse">
+					<colgroup>
+						<col style="width: 40px"/>
+						<col style="width: 50%"/>
+						<col style="width: 40px"/>
+						<col style="width: 50%"/>
+					</colgroup>
+					for _, hunk := range f.Hunks {
+						<tr class="diff-hunk-header">
+							<td colspan="4" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
+						</tr>
+						for _, pair := range buildSplitLines(hunk.Lines) {
+							<tr
+								class="diff-review-line"
+								data-file-path={ f.Path }
+								data-line-num={ fmt.Sprintf("%d", lineNumForReview(pair.Right)) }
+								data-line-type={ lineTypeForDiff(pair.Right.Type) }
+								data-review-layout="split"
+								data-review-side="right"
+							>
+								<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Left.Type) }>
+									if pair.Left.Type != "empty" && pair.Left.OldNum > 0 {
+										{ fmt.Sprintf("%d", pair.Left.OldNum) }
+									}
+								</td>
+								<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all border-r border-base-300", splitCellBg(pair.Left.Type) }>
+									if pair.Left.Type != "empty" {
+										{ pair.Left.Content }
+									}
+								</td>
+								<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300 relative", splitCellBg(pair.Right.Type) }>
+									if pair.Right.Type != "empty" && pair.Right.NewNum > 0 {
+										{ fmt.Sprintf("%d", pair.Right.NewNum) }
+									}
+									if pair.Right.Type != "empty" && lineHasComment(commentMap, f.Path, pair.Right) {
+									}
+									if pair.Right.Type != "empty" {
+										<button type="button" class="diff-add-comment-btn" onclick="handleAddCommentClick(event)" title="Add comment">+</button>
+									}
+								</td>
+								<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all", splitCellBg(pair.Right.Type) }>
+									if pair.Right.Type != "empty" {
+										{ pair.Right.Content }
+									}
+								</td>
+							</tr>
+							if pair.Right.Type != "empty" && lineHasComment(commentMap, f.Path, pair.Right) {
+								for _, comment := range getLineComments(commentMap, f.Path, pair.Right) {
+									<tr
+										class="review-inline-comment"
+										data-comment-id={ comment.ID }
+										data-file-path={ f.Path }
+										data-line-num={ fmt.Sprintf("%d", lineNumForReview(pair.Right)) }
+										data-line-type={ lineTypeForDiff(pair.Right.Type) }
+										data-review-layout="split"
+									>
+										<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
+										<td class="diff-line-content px-3 py-0 border-r border-base-300 bg-base-200"></td>
+										<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
+										<td class="p-0 bg-warning/15">
+											<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
+												<span class="review-inline-comment-bar"></span>
+												<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
+													<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+												</button>
+												<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
+											</div>
+										</td>
+									</tr>
+								}
+							}
+						}
+					}
+				</table>
+			</div>
+		</div>
+	</div>
+}
+
+templ splitDiffFile(f DiffFile, idx int, defaultExpanded bool) {
+	<div id={ fmt.Sprintf("diff-file-split-%d", idx) } class="card bg-base-100 border border-base-300 overflow-hidden">
+		<div
+			class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2 cursor-pointer select-none hover:bg-base-300/50 transition-colors"
+			onclick={ templ.ComponentScript{Call: fmt.Sprintf("toggleDiffFile(%d)", idx)} }
+			data-diff-toggle={ fmt.Sprintf("%d", idx) }
+		>
+			<svg
+				id={ fmt.Sprintf("diff-chevron-split-%d", idx) }
+				xmlns="http://www.w3.org/2000/svg"
+				class={ "h-4 w-4 opacity-60 transition-transform duration-200", templ.KV("rotate-90", defaultExpanded) }
+				fill="none"
+				viewBox="0 0 24 24"
+				stroke="currentColor"
+			>
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+			</svg>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+			</svg>
+			<span class="font-mono text-sm font-medium">{ f.Path }</span>
+			<span class="text-xs opacity-50 ml-auto">
+				{ diffStats(f) }
+			</span>
+		</div>
+		<div
+			id={ fmt.Sprintf("diff-body-split-%d", idx) }
+			class="overflow-hidden transition-all duration-300 ease-in-out"
+			if !defaultExpanded {
+				style="max-height: 0;"
+			}
+		>
+			<div class="overflow-x-auto">
+				<table class="diff-table w-full text-xs font-mono border-collapse">
+					<colgroup>
+						<col style="width: 40px"/>
+						<col style="width: 50%"/>
+						<col style="width: 40px"/>
+						<col style="width: 50%"/>
+					</colgroup>
+					for _, hunk := range f.Hunks {
+						<tr class="diff-hunk-header">
+							<td colspan="4" class="px-3 py-1 bg-info/10 text-info text-xs select-none">{ hunk.Header }</td>
+						</tr>
+						for _, pair := range buildSplitLines(hunk.Lines) {
+							<tr>
+								<!-- Left side (old) -->
+								<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Left.Type) }>
+									if pair.Left.Type != "empty" && pair.Left.OldNum > 0 {
+										{ fmt.Sprintf("%d", pair.Left.OldNum) }
+									}
+								</td>
+								<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all border-r border-base-300", splitCellBg(pair.Left.Type) }>
+									if pair.Left.Type != "empty" {
+										{ pair.Left.Content }
+									}
+								</td>
+								<!-- Right side (new) -->
+								<td class={ "diff-line-num text-right px-2 py-0 select-none opacity-40 border-r border-base-300", splitCellBg(pair.Right.Type) }>
+									if pair.Right.Type != "empty" && pair.Right.NewNum > 0 {
+										{ fmt.Sprintf("%d", pair.Right.NewNum) }
+									}
+								</td>
+								<td class={ "diff-line-content px-3 py-0 whitespace-pre-wrap break-all", splitCellBg(pair.Right.Type) }>
+									if pair.Right.Type != "empty" {
+										{ pair.Right.Content }
+									}
+								</td>
+							</tr>
+						}
+					}
+				</table>
+			</div>
+		</div>
+	</div>
+}
+
+// SplitPair represents a side-by-side line pair
+type SplitPair struct {
+	Left  DiffLine
+	Right DiffLine
+}
+
+func buildSplitLines(lines []DiffLine) []SplitPair {
+	var pairs []SplitPair
+	var delQueue []DiffLine
+	var addQueue []DiffLine
+
+	flushQueues := func() {
+		maxLen := len(delQueue)
+		if len(addQueue) > maxLen {
+			maxLen = len(addQueue)
+		}
+		for i := 0; i < maxLen; i++ {
+			pair := SplitPair{
+				Left:  DiffLine{Type: "empty"},
+				Right: DiffLine{Type: "empty"},
+			}
+			if i < len(delQueue) {
+				pair.Left = delQueue[i]
+			}
+			if i < len(addQueue) {
+				pair.Right = addQueue[i]
+			}
+			pairs = append(pairs, pair)
+		}
+		delQueue = nil
+		addQueue = nil
+	}
+
+	for _, line := range lines {
+		switch line.Type {
+		case "del":
+			if len(addQueue) > 0 {
+				flushQueues()
+			}
+			delQueue = append(delQueue, line)
+		case "add":
+			addQueue = append(addQueue, line)
+		case "ctx":
+			flushQueues()
+			pairs = append(pairs, SplitPair{Left: line, Right: line})
+		}
+	}
+	flushQueues()
+	return pairs
+}
+
+func inlineLineClass(lineType string) string {
+	switch lineType {
+	case "add":
+		return "bg-success/10"
+	case "del":
+		return "bg-error/10"
+	default:
+		return ""
+	}
+}
+
+func splitCellBg(lineType string) string {
+	switch lineType {
+	case "add":
+		return "bg-success/10"
+	case "del":
+		return "bg-error/10"
+	case "empty":
+		return "bg-base-200/50"
+	default:
+		return ""
+	}
+}
+
+func lineMarker(lineType string) string {
+	switch lineType {
+	case "add":
+		return "+"
+	case "del":
+		return "-"
+	default:
+		return " "
+	}
+}
+
+func diffFileName(path string) string {
+	parts := strings.Split(path, "/")
+	if len(parts) > 2 {
+		return ".../" + strings.Join(parts[len(parts)-2:], "/")
+	}
+	return path
+}
+
+func diffStats(f DiffFile) string {
+	adds, dels := 0, 0
+	for _, h := range f.Hunks {
+		for _, l := range h.Lines {
+			if l.Type == "add" {
+				adds++
+			} else if l.Type == "del" {
+				dels++
+			}
+		}
+	}
+	return fmt.Sprintf("+%d -%d", adds, dels)
+}
+
+func fileCountSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+func diffFileMetrics(f DiffFile) (int, int) {
+	totalLines := 0
+	totalChars := 0
+	for _, h := range f.Hunks {
+		totalChars += len(h.Header)
+		for _, l := range h.Lines {
+			totalLines++
+			totalChars += len(l.Content)
+		}
+	}
+	return totalLines, totalChars
+}
+
+func buildDiffRenderMetas(files []DiffFile) []DiffFileRenderMeta {
+	metas := make([]DiffFileRenderMeta, 0, minInt(len(files), maxDiffFiles))
+	cumulativeLines := 0
+	cumulativeChars := 0
+
+	for i, f := range files {
+		if i >= maxDiffFiles {
+			break
+		}
+
+		lineCount, charCount := diffFileMetrics(f)
+		meta := DiffFileRenderMeta{
+			Index:     i,
+			File:      f,
+			LineCount: lineCount,
+			CharCount: charCount,
+		}
+
+		switch {
+		case lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars:
+			meta.BlockedReason = fmt.Sprintf(
+				"This file exceeds single-file limit (%d lines or %s raw diff).",
+				maxLoadableFileDiffLines,
+				formatByteSize(maxLoadableFileDiffChars),
+			)
+		case cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars:
+			meta.BlockedReason = fmt.Sprintf(
+				"Total diff load limit reached (%d lines or %s raw diff).",
+				maxLoadableTotalDiffLines,
+				formatByteSize(maxLoadableTotalDiffChars),
+			)
+		default:
+			cumulativeLines += lineCount
+			cumulativeChars += charCount
+			if lineCount <= autoLoadFileDiffLines && charCount <= autoLoadFileDiffChars {
+				meta.AutoLoad = true
+			} else {
+				meta.CanLoadOnDemand = true
+			}
+		}
+
+		metas = append(metas, meta)
+	}
+
+	return metas
+}
+
+func diffFileCardID(idx int, view string) string {
+	if view == "split" {
+		return fmt.Sprintf("diff-file-split-%d", idx)
+	}
+	return fmt.Sprintf("diff-file-%d", idx)
+}
+
+func diffFileCardTargetSelector(idx int, view string) string {
+	return "#" + diffFileCardID(idx, view)
+}
+
+templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view string, reviewMode bool) {
+	<div
+		id={ diffFileCardID(meta.Index, view) }
+		class="card bg-base-100 border border-base-300 overflow-hidden"
+	>
+		<div class="bg-base-200 px-4 py-2 border-b border-base-300 flex items-center gap-2">
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+			</svg>
+			<span class="font-mono text-sm font-medium">{ meta.File.Path }</span>
+			<span class="text-xs opacity-50 ml-auto">
+				{ diffStats(meta.File) }
+			</span>
+		</div>
+		<div class="p-6 bg-base-100 text-center">
+			if meta.CanLoadOnDemand {
+				<div class="text-sm font-medium mb-1">Large file diff not shown by default</div>
+				<div class="text-xs opacity-60 mb-4">
+					Auto-load is limited to { fmt.Sprintf("%d lines / %s", autoLoadFileDiffLines, formatByteSize(autoLoadFileDiffChars)) } per file.
+				</div>
+				<button
+					class="btn btn-sm btn-primary"
+					hx-get={ fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, reviewMode) }
+					hx-target={ diffFileCardTargetSelector(meta.Index, view) }
+					hx-swap="outerHTML"
+				>
+					Load diff
+				</button>
+			} else {
+				<div class="text-sm font-medium mb-1">Diff not available</div>
+				<div class="text-xs opacity-60">{ meta.BlockedReason }</div>
+			}
+		</div>
+	</div>
+}
+
+templ LoadDiffFileCard(diffOutput string, fileIndex int, view string, taskID string, reviewComments []models.ReviewComment, reviewMode bool) {
+	if !diffFileMetaExists(diffOutput, fileIndex) {
+		<div class="alert alert-warning">
+			<span>Unable to load diff file.</span>
+		</div>
+	} else if !isDiffFileLoadable(diffOutput, fileIndex) {
+		<div class="alert alert-warning">
+			<span>{ getDiffFileBlockedReason(diffOutput, fileIndex) }</span>
+		</div>
+	} else if view == "split" {
+		if reviewMode {
+			@splitDiffFileWithReview(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true, taskID, buildCommentMap(reviewComments))
+		} else {
+			@splitDiffFile(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true)
+		}
+	} else {
+		if reviewMode {
+			@inlineDiffFileWithReview(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true, taskID, buildCommentMap(reviewComments))
+		} else {
+			@inlineDiffFile(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true)
+		}
+	}
+}
+
+func getDiffRenderMetaByIndex(files []DiffFile, fileIndex int) (DiffFileRenderMeta, bool) {
+	metas := buildDiffRenderMetas(files)
+	for _, meta := range metas {
+		if meta.Index == fileIndex {
+			return meta, true
+		}
+	}
+	return DiffFileRenderMeta{}, false
+}
+
+func diffFileMetaExists(diffOutput string, fileIndex int) bool {
+	_, ok := getDiffRenderMetaByIndex(ParseDiffOutput(diffOutput), fileIndex)
+	return ok
+}
+
+func getDiffRenderMeta(diffOutput string, fileIndex int) DiffFileRenderMeta {
+	meta, _ := getDiffRenderMetaByIndex(ParseDiffOutput(diffOutput), fileIndex)
+	return meta
+}
+
+func isDiffFileLoadable(diffOutput string, fileIndex int) bool {
+	meta := getDiffRenderMeta(diffOutput, fileIndex)
+	return meta.AutoLoad || meta.CanLoadOnDemand
+}
+
+func getDiffFileBlockedReason(diffOutput string, fileIndex int) string {
+	return getDiffRenderMeta(diffOutput, fileIndex).BlockedReason
+}
+
+func formatByteSize(bytes int) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	if bytes < 1024*1024 {
+		return fmt.Sprintf("%d KB", bytes/1024)
+	}
+	return fmt.Sprintf("%.1f MB", float64(bytes)/(1024*1024))
+}
+
+func minInt(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// shouldDefaultExpand returns true so all diff files are expanded by default.
+func shouldDefaultExpand(fileCount int) bool {
+	return true
+}

@@ -1,0 +1,762 @@
+package layout
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+templ Sidebar(projects []models.Project, currentProjectID string) {
+	<aside id="sidebar" class="sidebar-aside bg-base-100 w-64 h-screen border-r border-base-300 flex flex-col">
+		<div class="p-4 flex-1 overflow-y-auto overflow-x-hidden sidebar-inner">
+			<!-- Header with toggle -->
+			<div class="sidebar-header flex items-center justify-between mb-6">
+				<div class="flex items-center gap-2">
+					<h1 class="text-2xl font-bold sidebar-text">OpenVibely</h1>
+				</div>
+				<button
+					id="sidebar-collapse-btn"
+					type="button"
+					class="sidebar-toggle-btn btn btn-ghost btn-sm btn-square"
+					title="Collapse sidebar (Ctrl+B)"
+					aria-label="Collapse sidebar (Ctrl+B)"
+					aria-controls="sidebar"
+					aria-expanded="true"
+					data-tip="Collapse sidebar"
+				>
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 sidebar-toggle-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<rect x="3" y="3" width="18" height="18" rx="2"/>
+						<line x1="9" y1="3" x2="9" y2="21"/>
+					</svg>
+				</button>
+			</div>
+
+			<!-- Project Selector -->
+			<div class="form-control mb-6 sidebar-hide-collapsed">
+				<div class="flex items-center justify-between mb-1">
+					<span class="label-text text-xs uppercase tracking-wider opacity-60">Project</span>
+					<div class="flex items-center gap-1">
+						<button
+							id="project-settings-btn"
+							class="btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100"
+							title="Project Settings"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+							</svg>
+						</button>
+						<button
+							id="new-project-btn"
+							class="btn btn-ghost btn-xs p-0 [&>svg]:opacity-60 hover:[&>svg]:opacity-100"
+							title="New Project"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+							</svg>
+						</button>
+					</div>
+				</div>
+				<select
+					id="project-selector"
+					class="select select-bordered select-sm w-full sidebar-project-select"
+				>
+					for _, p := range projects {
+						<option
+							value={ p.ID }
+							if p.ID == currentProjectID {
+								selected
+							}
+						>
+							{ p.Name }
+						</option>
+					}
+				</select>
+			</div>
+			<script>
+				(function() {
+					const sel = document.getElementById('project-selector');
+					if (!sel) return;
+
+					sel.addEventListener('change', function() {
+						const newProjectId = sel.value;
+
+						// Check for open modals with unsaved changes
+						const openModals = document.querySelectorAll('dialog[open]');
+						if (openModals.length > 0) {
+							if (!confirm('You may have unsaved changes. Switch project anyway?')) {
+								// Revert selector to previous value
+								const params = new URLSearchParams(window.location.search);
+								const prevId = params.get('project_id');
+								if (prevId) sel.value = prevId;
+								return;
+							}
+							openModals.forEach(m => m.close());
+						}
+
+						// Update all sidebar nav links with new project_id
+						document.querySelectorAll('[data-nav-base]').forEach(function(link) {
+							const base = link.getAttribute('data-nav-base');
+							const newUrl = base + '?project_id=' + newProjectId;
+							link.setAttribute('href', newUrl);
+							link.setAttribute('hx-get', newUrl);
+							htmx.process(link);
+						});
+
+						// Update alert badge polling URL
+						const alertBadge = document.getElementById('alert-badge');
+						if (alertBadge) {
+							alertBadge.setAttribute('hx-get', '/alerts/unread-count?project_id=' + newProjectId);
+							htmx.process(alertBadge);
+							htmx.trigger(alertBadge, 'load');
+						}
+
+						// Determine which page to load based on current URL
+						const currentPath = window.location.pathname;
+						let newUrl;
+						if (currentPath.includes('/dashboard-mockup')) {
+							newUrl = '/dashboard-mockup?project_id=' + newProjectId;
+						} else if (currentPath.includes('/schedule')) {
+							newUrl = '/schedule?project_id=' + newProjectId;
+						} else if (currentPath.includes('/agents')) {
+							newUrl = '/agents?project_id=' + newProjectId;
+						} else if (currentPath.includes('/models')) {
+							newUrl = '/models?project_id=' + newProjectId;
+						} else if (currentPath.includes('/chat')) {
+							newUrl = '/chat?project_id=' + newProjectId;
+						} else if (currentPath.includes('/upcoming')) {
+							newUrl = '/upcoming?project_id=' + newProjectId;
+						} else if (currentPath.includes('/history')) {
+							newUrl = '/history?project_id=' + newProjectId;
+						} else if (currentPath.includes('/analytics')) {
+							newUrl = '/analytics?project_id=' + newProjectId;
+						} else if (currentPath.includes('/alerts')) {
+							newUrl = '/alerts?project_id=' + newProjectId;
+						} else if (currentPath.includes('/workers')) {
+							newUrl = '/workers?project_id=' + newProjectId;
+						} else if (currentPath.includes('/suggestions')) {
+							newUrl = '/suggestions?project_id=' + newProjectId;
+						} else if (currentPath.includes('/insights')) {
+							newUrl = '/insights?project_id=' + newProjectId;
+						} else if (currentPath.includes('/architect')) {
+							newUrl = '/architect?project_id=' + newProjectId;
+						} else if (currentPath.includes('/backlog')) {
+							newUrl = '/backlog?project_id=' + newProjectId;
+						} else if (currentPath.includes('/autonomous')) {
+							newUrl = '/autonomous?project_id=' + newProjectId;
+						} else if (currentPath.includes('/channels')) {
+							newUrl = '/channels?project_id=' + newProjectId;
+						} else if (currentPath.includes('/personality')) {
+							newUrl = '/personality?project_id=' + newProjectId;
+						} else {
+							newUrl = '/tasks?project_id=' + newProjectId;
+						}
+
+						// HTMX swap for main content (no full page reload)
+						htmx.ajax('GET', newUrl, {
+							target: '#main-content',
+							swap: 'innerHTML'
+						});
+
+						// Update URL bar
+						history.pushState({}, '', newUrl);
+					});
+				})();
+
+				// Setup Server-Sent Events for real-time alert badge updates and toast notifications
+				// Uses the global TabVisibilityManager to auto-pause when tab is hidden
+				(function() {
+					const projectSelector = document.getElementById('project-selector');
+
+					window._sidebarSSE = window._tabVisibility.registerSSE('sidebar-tasks', '/events/tasks', {
+						onopen: function() {
+							console.log('[SSE-Alerts] Connected to task events');
+						},
+						onerror: function(err) {
+							console.error('[SSE-Alerts] Connection error:', err);
+						},
+						onmessage: function(event) {
+							try {
+								const data = JSON.parse(event.data);
+
+								// Dispatch to any page listeners (tasks page, etc.)
+								window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
+
+								// Only refresh alert badge if this is an alert_created event for the current project
+								if (data.type === 'alert_created' && projectSelector) {
+									const currentProjectID = projectSelector.value;
+									if (data.project_id === currentProjectID) {
+										console.log('[SSE-Alerts] Alert created, refreshing badge');
+										htmx.trigger('body', 'alertUpdate');
+									}
+								}
+
+								// Show toast notifications for task completion events (current project only)
+								// Skip chat tasks — chat responses appear inline in the chat UI
+								if (data.type === 'task_status_changed' && projectSelector && data.category !== 'chat') {
+									const currentProjectID = projectSelector.value;
+									if (data.project_id === currentProjectID) {
+										const terminalStatuses = ['completed', 'failed', 'cancelled'];
+										if (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {
+											const taskName = data.task_name || 'Task';
+											window.showToast(taskName, data.status, data.task_id);
+										}
+									}
+								}
+							} catch (err) {
+								console.error('[SSE-Alerts] Error parsing event:', err);
+							}
+						}
+					});
+
+					// Clean up on page unload
+					window.addEventListener('beforeunload', function() {
+						if (window._sidebarSSE) {
+							window._sidebarSSE.close();
+						}
+					});
+				})();
+
+				// Prevent re-navigation when clicking the nav link for the current page.
+				// Without this, clicking e.g. "Chat" while already on /chat triggers a
+				// full HTMX content swap (tearing down SSE connections, resetting scroll, etc.)
+				// which looks like a page reload.
+				//
+				// Also aborts in-flight HTMX polling requests within main-content when
+				// navigating away, preventing expensive morph operations (e.g. thread
+				// view's every-3s morph:outerHTML) from blocking sidebar navigation.
+				(function() {
+					// Early navigation signal: set flag on capture-phase pointerdown (fires
+					// before bubble handlers and before click) so stale morph swaps can be
+					// suppressed even when the main thread is busy with thread polling work.
+					document.body.addEventListener('pointerdown', function(event) {
+						var link = event.target.closest('[data-nav-base]');
+						if (!link) return;
+						var navBase = link.getAttribute('data-nav-base');
+						if (window.location.pathname === navBase) return;
+						window._sidebarNavigating = true;
+						// Safety: clear flag if navigation doesn't complete within 3s
+						// (e.g., drag-off, cancelled click, or network failure)
+						clearTimeout(window._sidebarNavTimeout);
+						window._sidebarNavTimeout = setTimeout(function() {
+							window._sidebarNavigating = false;
+						}, 3000);
+					}, true);
+
+					document.body.addEventListener('htmx:beforeRequest', function(event) {
+						var elt = event.detail.elt;
+						if (elt && elt.hasAttribute('data-nav-base')) {
+							var navBase = elt.getAttribute('data-nav-base');
+							if (window.location.pathname === navBase) {
+								event.preventDefault();
+								return;
+							}
+							// Abort in-flight polling to prevent morph from blocking navigation
+							window._sidebarNavigating = true;
+							var mainContent = document.getElementById('main-content');
+							if (mainContent) {
+								mainContent.querySelectorAll('[hx-trigger*="every"]').forEach(function(el) {
+									htmx.trigger(el, 'htmx:abort');
+									el.removeAttribute('hx-trigger');
+									htmx.process(el);
+								});
+							}
+							// Clean up thread streaming state
+							window._taskThreadStreamingActive = false;
+							// Close thread EventSource connections
+							if (window._threadEventSources) {
+								window._threadEventSources.forEach(function(es) {
+									try { es.close(); } catch(e) {}
+								});
+								window._threadEventSources = [];
+							}
+							// Clean up chat-live SSE so it doesn't reconnect on other pages
+							if (window._tabVisibility) {
+								window._tabVisibility.unregisterSSE('chat-live');
+							}
+						}
+					});
+
+					// Suppress stale polling morph responses during sidebar navigation.
+					// If a polling response arrives after we started navigating, skip
+					// its swap to avoid expensive DOM work that would block the page change.
+					document.body.addEventListener('htmx:beforeSwap', function(event) {
+						if (!window._sidebarNavigating) return;
+						var target = event.detail.target;
+						if (!target) return;
+						if (target.id === 'main-content') {
+							// This is the sidebar navigation swap — allow it and clear flag
+							window._sidebarNavigating = false;
+							clearTimeout(window._sidebarNavTimeout);
+							return;
+						}
+						// Suppress swap for any polling element inside main-content
+						if (target.closest && target.closest('#main-content')) {
+							event.detail.shouldSwap = false;
+						}
+					});
+				})();
+
+				// Sidebar collapse/expand toggle with localStorage persistence
+				(function() {
+					var sidebar = document.getElementById('sidebar');
+					var btn = document.getElementById('sidebar-collapse-btn');
+					if (!sidebar || !btn) return;
+
+					// Update accessibility attributes based on collapsed state
+					function updateSidebarToggleA11y(isCollapsed) {
+						btn.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+						btn.setAttribute('aria-label', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');
+						btn.setAttribute('title', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');
+						btn.setAttribute('data-tip', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+					}
+
+					// Restore saved state
+					var collapsed = localStorage.getItem('sidebar-collapsed') === 'true';
+					if (collapsed) {
+						sidebar.classList.add('sidebar-collapsed');
+					}
+					updateSidebarToggleA11y(collapsed);
+
+					btn.addEventListener('click', function(e) {
+						e.preventDefault();
+						sidebar.classList.toggle('sidebar-collapsed');
+						var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
+						localStorage.setItem('sidebar-collapsed', isCollapsed);
+						updateSidebarToggleA11y(isCollapsed);
+					});
+
+					// Keyboard shortcut: Ctrl+B or Cmd+B to toggle sidebar
+					document.addEventListener('keydown', function(e) {
+						if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+							// Don't toggle if user is typing in an input/textarea
+							var tag = document.activeElement && document.activeElement.tagName;
+							if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+							e.preventDefault();
+							sidebar.classList.toggle('sidebar-collapsed');
+							var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
+							localStorage.setItem('sidebar-collapsed', isCollapsed);
+							updateSidebarToggleA11y(isCollapsed);
+						}
+					});
+				})();
+			</script>
+
+			<!-- Sidebar navigation links -->
+			<ul class="menu menu-sm gap-1" aria-label="Main navigation">
+				<!-- Workspace Section: core orchestration tools -->
+				<li class="menu-title sidebar-hide-collapsed">
+					<span class="text-xs uppercase tracking-wider opacity-50 font-semibold">Workspace</span>
+				</li>
+				<li>
+					<a
+						data-nav-base="/chat"
+						data-tip="Chat"
+						href={ templ.SafeURL(fmt.Sprintf("/chat?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/chat?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+						</svg>
+						<span class="sidebar-text">Chat</span>
+					</a>
+				</li>
+				<li>
+					<a
+						data-nav-base="/tasks"
+						data-tip="Tasks"
+						href={ templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/tasks?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+						</svg>
+						<span class="sidebar-text">Tasks</span>
+					</a>
+				</li>
+				<li>
+					<a
+						data-nav-base="/schedule"
+						data-tip="Schedule"
+						href={ templ.SafeURL(fmt.Sprintf("/schedule?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/schedule?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+						</svg>
+						<span class="sidebar-text">Schedule</span>
+					</a>
+				</li>
+
+				<!-- Divider -->
+				<li class="my-1 sidebar-divider"><hr class="border-base-300 opacity-30"/></li>
+
+				<!-- Insights Section -->
+				<li class="menu-title sidebar-hide-collapsed">
+					<span class="text-xs uppercase tracking-wider opacity-50 font-semibold">Insights</span>
+				</li>
+				<li>
+					<a
+						data-nav-base="/insights"
+						data-tip="Grades"
+						href={ templ.SafeURL(fmt.Sprintf("/insights?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/insights?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+						</svg>
+						<span class="sidebar-text">Grades</span>
+					</a>
+				</li>
+				<li>
+					<a
+						data-nav-base="/upcoming"
+						data-tip="Pulse"
+						href={ templ.SafeURL(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/upcoming?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+						</svg>
+						<span class="sidebar-text">Pulse</span>
+					</a>
+				</li>
+				<li>
+					<a
+						data-nav-base="/history"
+						data-tip="Reflection"
+						href={ templ.SafeURL(fmt.Sprintf("/history?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/history?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+						</svg>
+						<span class="sidebar-text">Reflection</span>
+					</a>
+				</li>
+				<li>
+					<a
+						data-nav-base="/analytics"
+						data-tip="Analytics"
+						href={ templ.SafeURL(fmt.Sprintf("/analytics?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/analytics?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+						</svg>
+						<span class="sidebar-text">Analytics</span>
+					</a>
+				</li>
+				<!-- Divider -->
+				<li class="my-1 sidebar-divider"><hr class="border-base-300 opacity-30"/></li>
+
+				<!-- System Section: configuration and infrastructure -->
+				<li class="menu-title sidebar-hide-collapsed">
+					<span class="text-xs uppercase tracking-wider opacity-50 font-semibold">System</span>
+				</li>
+
+				<li>
+					<a
+						data-nav-base="/alerts"
+						data-tip="Alerts"
+						href={ templ.SafeURL(fmt.Sprintf("/alerts?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+						</svg>
+						<span class="sidebar-text">Alerts</span>
+						<span
+							id="alert-badge"
+							class="sidebar-text"
+							hx-get={ fmt.Sprintf("/alerts/unread-count?project_id=%s", currentProjectID) }
+							hx-trigger="load, every 30s, alertUpdate from:body"
+							hx-swap="innerHTML"
+							hx-target="this"
+							hx-push-url="false"
+						></span>
+					</a>
+				</li>
+				<li>
+					<a
+						data-nav-base="/models"
+						data-tip="Models"
+						href={ templ.SafeURL(fmt.Sprintf("/models?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/models?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+						</svg>
+						<span class="sidebar-text">Models</span>
+					</a>
+				</li>
+				<li>
+					<a
+						data-nav-base="/agents"
+						data-tip="Agents"
+						href={ templ.SafeURL(fmt.Sprintf("/agents?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/agents?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"></path>
+						</svg>
+						<span class="sidebar-text">Agents</span>
+					</a>
+				</li>
+				<li>
+					<a
+						data-nav-base="/workers"
+						data-tip="Workers"
+						href={ templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/workers?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.11 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+						</svg>
+						<span class="sidebar-text">Workers</span>
+					</a>
+				</li>
+				<li>
+					<a
+						data-nav-base="/channels"
+						data-tip="Channels"
+						href={ templ.SafeURL(fmt.Sprintf("/channels?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/channels?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+						</svg>
+						<span class="sidebar-text">Channels</span>
+					</a>
+				</li>
+				<li>
+					<a
+						data-nav-base="/personality"
+						data-tip="Personality"
+						href={ templ.SafeURL(fmt.Sprintf("/personality?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/personality?project_id=%s", currentProjectID) }
+						hx-target="#main-content"
+						hx-push-url="true"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0"></path>
+						</svg>
+						<span class="sidebar-text">Personality</span>
+					</a>
+				</li>
+			</ul>
+		</div>
+
+		<!-- Theme toggle pinned to bottom of sidebar -->
+		<div class="sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end">
+			<!-- Theme toggle (expanded sidebar) -->
+			<label class="theme-toggle-pill sidebar-hide-collapsed" title="Toggle light/dark mode" onclick="window.toggleTheme()">
+				<span class="theme-toggle-icon theme-toggle-sun">
+					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="11" height="11">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+					</svg>
+				</span>
+				<span class="theme-toggle-icon theme-toggle-moon">
+					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="11" height="11">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+					</svg>
+				</span>
+				<span class="theme-toggle-thumb"></span>
+			</label>
+			<!-- Theme toggle (collapsed sidebar) -->
+			<a class="theme-toggle-collapsed-btn" data-tip="Toggle theme" onclick="window.toggleTheme(); return false;" href="#">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0 theme-collapsed-sun" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+				</svg>
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0 theme-collapsed-moon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+				</svg>
+			</a>
+		</div>
+
+		<style>
+			/* Sidebar collapse toggle button */
+			.sidebar-toggle-btn {
+				opacity: 0.7;
+				transition: opacity 0.15s, background-color 0.15s;
+			}
+			.sidebar-toggle-btn:hover {
+				opacity: 1;
+				background-color: oklch(var(--b2));
+			}
+			
+			.sidebar-theme-toggle-container {
+				flex-shrink: 0;
+			}
+			/* Project selector: keep single border in nav, avoid extra outer ring */
+			.sidebar-project-select,
+			.sidebar-project-select:hover,
+			.sidebar-project-select:focus,
+			.sidebar-project-select:active {
+				outline: none;
+				box-shadow: none;
+				--tw-ring-shadow: 0 0 #0000;
+			}
+			.sidebar-project-select:focus-visible {
+				outline: none;
+				box-shadow: 0 0 0 2px hsl(var(--p) / 0.28);
+			}
+			[data-theme="dark"] .sidebar-project-select:focus-visible {
+				box-shadow: 0 0 0 2px hsl(var(--bc) / 0.35);
+			}
+			.theme-toggle-pill {
+				display: inline-flex;
+				align-items: center;
+				justify-content: space-between;
+				position: relative;
+				width: 46px;
+				height: 24px;
+				border-radius: 9999px;
+				background: oklch(var(--b3));
+				cursor: pointer;
+				padding: 0 4px;
+				transition: background 0.2s;
+				user-select: none;
+				flex-shrink: 0;
+			}
+			.theme-toggle-icon {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				width: 16px;
+				height: 16px;
+				z-index: 1;
+				transition: opacity 0.2s, color 0.2s;
+			}
+			.theme-toggle-thumb {
+				position: absolute;
+				top: 3px;
+				width: 18px;
+				height: 18px;
+				border-radius: 50%;
+				background: oklch(var(--bc));
+				transition: transform 0.25s ease, left 0.25s ease, right 0.25s ease;
+				box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+			}
+			/* Light mode: thumb on LEFT (sun side), sun visible and bright on left */
+			.theme-toggle-thumb {
+				left: 3px;
+			}
+			.theme-toggle-sun {
+				color: oklch(var(--p));
+				opacity: 1;
+			}
+			.theme-toggle-moon {
+				color: #9ca3af;
+				opacity: 0.5;
+			}
+			/* Dark mode: thumb slides RIGHT (moon side), moon visible and bright on right */
+			[data-theme="dark"] .theme-toggle-thumb {
+				left: auto;
+				right: 3px;
+			}
+			[data-theme="dark"] .theme-toggle-sun {
+				color: #9ca3af;
+				opacity: 0.5;
+			}
+			[data-theme="dark"] .theme-toggle-moon {
+				color: oklch(var(--p));
+				opacity: 1;
+			}
+			/* Collapsed-only theme toggle icon button */
+			.theme-toggle-collapsed-btn {
+				display: none;  /* Hidden by default in expanded sidebar */
+				align-items: center;
+				justify-content: center;
+				width: 2rem;
+				height: 2rem;
+				border-radius: 0.375rem;
+				cursor: pointer;
+				opacity: 0.6;
+				transition: opacity 0.15s, background-color 0.15s;
+			}
+			.theme-toggle-collapsed-btn:hover {
+				opacity: 1;
+				background-color: oklch(var(--b3));
+			}
+			.sidebar-collapsed .theme-toggle-collapsed-btn {
+				display: flex;
+			}
+			/* Light mode: show sun, hide moon */
+			.theme-collapsed-moon {
+				display: none;
+			}
+			.theme-collapsed-sun {
+				display: block;
+			}
+			/* Dark mode: show moon, hide sun */
+			[data-theme="dark"] .theme-collapsed-sun {
+				display: none;
+			}
+			[data-theme="dark"] .theme-collapsed-moon {
+				display: block;
+			}
+		</style>
+
+		<!-- New Project Dialog Container (loaded via HTMX) -->
+		<div id="new-project-container"></div>
+		<script>
+			(function() {
+				var btn = document.getElementById('new-project-btn');
+				if (!btn) return;
+				btn.addEventListener('click', function(e) {
+					e.preventDefault();
+					var container = document.getElementById('new-project-container');
+					htmx.ajax('GET', '/projects/new', {
+						target: container,
+						swap: 'innerHTML'
+					});
+				});
+			})();
+		</script>
+
+		<!-- Project Settings Dialog Container (loaded via HTMX) -->
+		<div id="project-settings-container"></div>
+		<script>
+			(function() {
+				const btn = document.getElementById('project-settings-btn');
+				if (!btn) return;
+				btn.addEventListener('click', function(e) {
+					e.preventDefault();
+					const sel = document.getElementById('project-selector');
+					if (!sel || !sel.value) return;
+					const container = document.getElementById('project-settings-container');
+					htmx.ajax('GET', '/projects/' + sel.value + '/edit', {
+						target: container,
+						swap: 'innerHTML'
+					});
+				});
+			})();
+		</script>
+
+	</aside>
+}

@@ -1,0 +1,751 @@
+package pages
+
+import (
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+// Chat renders the full chat page with sidebar
+templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment) {
+	@layout.Base("Chat", projects, currentProjectID) {
+		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments)
+	}
+}
+
+// ChatContent renders just the chat content (for HTMX)
+templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment) {
+	<div id="chat-page-root" class="h-full flex flex-col" data-project-id={ currentProjectID }>
+		<div class="mb-4 flex items-center justify-between">
+			<div>
+				<h2 class="text-2xl font-bold">Chat</h2>
+				<p class="text-sm opacity-60 mt-1">Coordinate and orchestrate AI tasks across your project</p>
+			</div>
+			<div class="dropdown dropdown-end">
+				<button tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+					</svg>
+				</button>
+				<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">
+					<li>
+						<button
+							hx-delete={ "/chat/history?project_id=" + currentProjectID }
+							hx-target="closest #chat-page-root"
+							hx-swap="outerHTML"
+							hx-confirm="Clear all chat history? This cannot be undone."
+							class="text-error"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+							</svg>
+							Clear Chat
+						</button>
+					</li>
+				</ul>
+			</div>
+		</div>
+
+		<!-- Chat Messages Container -->
+		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6">
+			if len(chatHistory) == 0 {
+				@components.ChatEmptyState("Start a conversation by typing a message below")
+			} else {
+				for _, exec := range chatHistory {
+					if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
+						@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
+					} else {
+						@components.ChatBubble("User", exec.PromptSent)
+					}
+					if exec.Status == models.ExecCompleted {
+						@components.ChatBubble("Assistant", exec.Output)
+					} else if exec.Status == models.ExecFailed {
+						@components.ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+					} else if exec.Status == models.ExecRunning {
+						@components.ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, "chat-messages", "")
+					}
+				}
+			}
+		</div>
+
+		<div id="chat-plan-complete-prompt" class="hidden mb-3 alert bg-base-200/60 border border-base-content/10">
+			<div class="w-full flex flex-wrap items-center justify-between gap-3">
+				<div>
+					<div class="font-medium text-sm">Plan complete.</div>
+					<div class="text-xs opacity-70">Switch to Orchestrate mode to implement this plan?</div>
+				</div>
+				<div class="flex items-center gap-2">
+					<button id="chat-plan-stay-btn" type="button" class="btn btn-ghost btn-xs">Stay in Plan</button>
+					<button id="chat-plan-switch-btn" type="button" class="btn btn-primary btn-xs">Switch to Orchestrate</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- Message Input Form (shared component) -->
+		@components.ChatInputForm(components.ChatInputFormConfig{
+			FormID:            "chat-form",
+			InputID:           "message-input",
+			PostEndpoint:      "/chat/send?project_id=" + currentProjectID,
+			TargetID:          "chat-messages",
+			Agents:            agents,
+			ShowModelSelector: true,
+			ShowModeSelector:  true,
+			ChatMode:          models.ChatModeOrchestrate,
+			ProjectID:         currentProjectID,
+		})
+
+		<!-- Shared auto-scroll and marker cleaning utilities -->
+		@components.ChatAutoScrollScript()
+
+		<!-- Chat-specific: task link conversion, draft persistence, HTMX swap handler -->
+		<script>
+			// Scroll to bottom on page load to show latest messages
+			setTimeout(function() {
+				var chatMessages = document.getElementById('chat-messages');
+				if (chatMessages) {
+					if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
+					if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
+					if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();
+				}
+			}, 0);
+
+			// Draft message persistence (scoped per project)
+			(function() {
+				var chatRoot = document.getElementById('chat-page-root');
+				if (!chatRoot) return;
+				var projectId = chatRoot.getAttribute('data-project-id');
+				var draftKey = 'chat-draft-' + projectId;
+				var messageInput = document.getElementById('message-input');
+				var chatForm = document.getElementById('chat-form');
+				if (!messageInput || !chatForm) return;
+
+				var savedDraft = localStorage.getItem(draftKey);
+				if (savedDraft && savedDraft.trim() !== '') {
+					messageInput.value = savedDraft;
+				}
+
+				var saveTimeout;
+				messageInput.addEventListener('input', function() {
+					clearTimeout(saveTimeout);
+					saveTimeout = setTimeout(function() {
+						var value = messageInput.value.trim();
+						if (value !== '') {
+							localStorage.setItem(draftKey, messageInput.value);
+						} else {
+							localStorage.removeItem(draftKey);
+						}
+					}, 500);
+				});
+
+				chatForm.addEventListener('htmx:afterRequest', function(event) {
+					if (event.detail.successful) {
+						localStorage.removeItem(draftKey);
+					}
+				});
+			})();
+
+			// Convert task creation markers to clickable links
+			window.convertTaskLinksInMessage = function(messageElement) {
+				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
+				var nodesToProcess = [];
+				var node;
+				while (node = walker.nextNode()) {
+					if (node.textContent.includes('[TASK_ID:')) {
+						nodesToProcess.push(node);
+					}
+				}
+
+				nodesToProcess.forEach(function(textNode) {
+						var regex = /(?:-\s*)?"([^"]+)"\s*(?:\(([^)]+)\)\s*)?\[TASK_ID:([^\]]+)\]/g;
+						var text = textNode.textContent;
+						var matches = [];
+						var m;
+						while ((m = regex.exec(text)) !== null) { matches.push(m); }
+						if (matches.length === 0) return;
+						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
+
+					var fragment = document.createDocumentFragment();
+					var lastIndex = 0;
+
+					matches.forEach(function(match) {
+						var fullMatch = match[0], taskTitle = match[1], category = match[2], taskId = match[3];
+						var matchStart = match.index;
+						if (matchStart > lastIndex) {
+							var beforeText = text.substring(lastIndex, matchStart);
+							// Strip trailing newline before the task item since the div provides its own line break
+							beforeText = beforeText.replace(/\n$/, '');
+							if (beforeText) {
+								fragment.appendChild(document.createTextNode(beforeText));
+							}
+						}
+						var linkWrapper = document.createElement('div');
+						linkWrapper.style.cssText = 'display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.25rem 0;';
+						// Only add bullet if not already inside a list item (markdown renders - as <li>)
+						var insideLi = textNode.parentNode && textNode.parentNode.nodeName === 'LI';
+						if (!insideLi) {
+							var bullet = document.createElement('span');
+							bullet.textContent = '\u2022';
+							bullet.style.opacity = '0.5';
+							linkWrapper.appendChild(bullet);
+						}
+							var link = document.createElement('a');
+							link.href = '/tasks/' + taskId;
+							link.className = inToolOutput
+								? 'text-primary underline decoration-2 underline-offset-2 hover:decoration-2 cursor-pointer font-medium'
+								: 'text-primary hover:underline cursor-pointer font-medium';
+							link.textContent = taskTitle;
+						link.onclick = function(e) {
+							e.preventDefault();
+							e.stopPropagation();
+							htmx.ajax('GET', '/tasks/' + taskId + '?from=chat', { target: '#main-content', swap: 'innerHTML' }).catch(function(err) { console.error('[chat] Failed to load task detail:', err); });
+							history.pushState({}, '', '/tasks/' + taskId + '?from=chat');
+						};
+						linkWrapper.appendChild(link);
+						if (category) {
+							var catBadge = document.createElement('span');
+							catBadge.className = 'badge badge-sm badge-ghost';
+							catBadge.textContent = category;
+							linkWrapper.appendChild(catBadge);
+						}
+						if (category && (category === 'backlog' || category === 'pending')) {
+							var startBtn = document.createElement('button');
+							startBtn.className = 'btn btn-xs btn-primary gap-1';
+							startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><polygon points="6,4 16,10 6,16"/></svg> Start Task';
+							startBtn.onclick = function(e) {
+								e.preventDefault();
+								e.stopPropagation();
+								startBtn.disabled = true;
+								startBtn.classList.add('btn-disabled');
+								startBtn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> Starting...';
+								var formData = new URLSearchParams();
+								formData.set('category', 'active');
+								fetch('/tasks/' + taskId + '/category', {
+									method: 'PATCH',
+									headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+									body: formData.toString()
+								}).then(function(resp) {
+									if (resp.ok) {
+										startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Started';
+										startBtn.classList.remove('btn-primary');
+										startBtn.classList.add('btn-success');
+									} else {
+										startBtn.innerHTML = 'Failed';
+										startBtn.classList.remove('btn-primary');
+										startBtn.classList.add('btn-error');
+									}
+								}).catch(function() {
+									startBtn.innerHTML = 'Failed';
+									startBtn.disabled = false;
+									startBtn.classList.remove('btn-disabled', 'btn-primary');
+									startBtn.classList.add('btn-error');
+								});
+							};
+							linkWrapper.appendChild(startBtn);
+						}
+						fragment.appendChild(linkWrapper);
+						lastIndex = matchStart + fullMatch.length;
+					});
+
+					if (lastIndex < text.length) {
+						var remaining = text.substring(lastIndex);
+						// Style "Attachments copied to tasks:" as a muted info line
+						var attMatch = remaining.match(/\n*Attachments copied to tasks:\s*(.*)/);
+						if (attMatch) {
+							var beforeAtt = remaining.substring(0, remaining.indexOf('Attachments copied to tasks:'));
+							if (beforeAtt.trim()) {
+								fragment.appendChild(document.createTextNode(beforeAtt));
+							}
+							var attDiv = document.createElement('div');
+							attDiv.className = 'text-xs opacity-60 mt-1';
+							attDiv.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>';
+							attDiv.appendChild(document.createTextNode('Attachments copied: ' + attMatch[1]));
+							fragment.appendChild(attDiv);
+						} else {
+							// Strip leading newline since divs provide their own line breaks
+							remaining = remaining.replace(/^\n/, '');
+							if (remaining) {
+								fragment.appendChild(document.createTextNode(remaining));
+							}
+						}
+					}
+					textNode.parentNode.replaceChild(fragment, textNode);
+				});
+			};
+
+			// Convert task edit markers to clickable links
+			window.convertTaskEditLinksInMessage = function(messageElement) {
+				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
+				var nodesToProcess = [];
+				var node;
+				while (node = walker.nextNode()) {
+					if (node.textContent.includes('[TASK_EDITED:')) {
+						nodesToProcess.push(node);
+					}
+				}
+
+				nodesToProcess.forEach(function(textNode) {
+						var regex = /(?:-\s*)?"([^"]+)"\s*\(updated:\s*([^)]+)\)\s*\[TASK_EDITED:([^\]]+)\]/g;
+						var text = textNode.textContent;
+						var matches = [];
+						var m;
+						while ((m = regex.exec(text)) !== null) { matches.push(m); }
+						if (matches.length === 0) return;
+						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
+
+					var fragment = document.createDocumentFragment();
+					var lastIndex = 0;
+
+					matches.forEach(function(match) {
+						var fullMatch = match[0], taskTitle = match[1], updatedFields = match[2], taskId = match[3];
+						var matchStart = match.index;
+						if (matchStart > lastIndex) {
+							fragment.appendChild(document.createTextNode(text.substring(lastIndex, matchStart)));
+						}
+						var linkWrapper = document.createElement('span');
+						linkWrapper.innerHTML = '- ';
+							var link = document.createElement('a');
+							link.href = '/tasks/' + taskId;
+							link.className = inToolOutput
+								? 'text-success underline decoration-2 underline-offset-2 hover:decoration-2 cursor-pointer font-medium'
+								: 'text-success hover:underline cursor-pointer font-medium';
+							link.textContent = '"' + taskTitle + '"';
+						link.onclick = function(e) {
+							e.preventDefault();
+							htmx.ajax('GET', '/tasks/' + taskId + '?from=chat', { target: '#main-content', swap: 'innerHTML' });
+							history.pushState({}, '', '/tasks/' + taskId + '?from=chat');
+						};
+						linkWrapper.appendChild(link);
+						linkWrapper.appendChild(document.createTextNode(' (updated: ' + updatedFields + ')'));
+						fragment.appendChild(linkWrapper);
+						lastIndex = matchStart + fullMatch.length;
+					});
+
+					if (lastIndex < text.length) {
+						fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
+					}
+					textNode.parentNode.replaceChild(fragment, textNode);
+				});
+			};
+
+			window.planModeHasProposedPlan = function(rawText) {
+				if (!rawText) return false;
+				return /<\s*proposed_plan\s*>[\s\S]*<\s*\/\s*proposed_plan\s*>/i.test(rawText) || /<\s*proposed_plan\s*>/i.test(rawText);
+			};
+
+			window.currentChatModeValue = function() {
+				var form = document.getElementById('chat-form');
+				if (!form) return '';
+				var modeInput = form.querySelector('input[name="chat_mode"]');
+				var modeSelect = form.querySelector('select[id$="-mode-select"]');
+				return modeInput ? modeInput.value : (modeSelect ? modeSelect.value : '');
+			};
+
+			window.hidePlanCompletionPrompt = function() {
+				var prompt = document.getElementById('chat-plan-complete-prompt');
+				if (!prompt) return;
+				prompt.classList.add('hidden');
+			};
+
+			window.showPlanCompletionPrompt = function() {
+				var prompt = document.getElementById('chat-plan-complete-prompt');
+				if (!prompt) return;
+				prompt.classList.remove('hidden');
+			};
+
+			window.applyChatBubbleTransforms = function(chatMessages) {
+				if (!chatMessages) return;
+				chatMessages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
+					if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+					if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+					if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+				});
+			};
+
+			window.switchChatMode = function(mode) {
+				var form = document.getElementById('chat-form');
+				if (!form) return;
+				var modeInput = form.querySelector('input[name="chat_mode"]');
+				var modeSelect = form.querySelector('select[id$="-mode-select"]');
+				if (modeInput) modeInput.value = mode;
+				if (modeSelect) modeSelect.value = mode;
+
+				var chatRoot = document.getElementById('chat-page-root');
+				if (chatRoot) {
+					var pid = chatRoot.getAttribute('data-project-id');
+					if (pid) {
+						localStorage.setItem('chat-mode-' + pid, mode);
+					}
+				}
+			};
+
+			window.handlePlanModeCompletion = function(rawText) {
+				if (!window.planModeHasProposedPlan(rawText)) return false;
+				if (window.currentChatModeValue && window.currentChatModeValue() !== 'plan') return false;
+				window.showPlanCompletionPrompt();
+				return true;
+			};
+
+			window.maybeShowPlanCompletionPromptFromHistory = function() {
+				if (window.currentChatModeValue && window.currentChatModeValue() !== 'plan') {
+					if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+					return false;
+				}
+				var chatMessages = document.getElementById('chat-messages');
+				if (!chatMessages) return false;
+				var assistantBubbles = chatMessages.querySelectorAll('.chat-bubble-assistant-msg');
+				if (!assistantBubbles || assistantBubbles.length === 0) {
+					if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+					return false;
+				}
+
+				// Walk newest -> oldest and inspect raw assistant payload first.
+				for (var i = assistantBubbles.length - 1; i >= 0; i--) {
+					var bubble = assistantBubbles[i];
+					var rawNode = bubble.querySelector('.chat-stream-content[data-raw-content], [data-streaming-resume][data-raw-content]');
+					var raw = rawNode ? (rawNode.getAttribute('data-raw-content') || '') : '';
+					if (!raw.trim()) {
+						raw = bubble.textContent || '';
+					}
+					if (!raw.trim()) continue;
+					if (window.handlePlanModeCompletion && window.handlePlanModeCompletion(raw)) {
+						return true;
+					}
+				}
+				if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+				return false;
+			};
+
+			// Page-level scroll tracker for HTMX swap decisions
+			// Persists across swaps so we know if user manually scrolled up
+			(function() {
+				var chatMessages = document.getElementById('chat-messages');
+				if (chatMessages && window.ChatScrollTracker) {
+					// Clean up any previous tracker
+					if (window._chatPageTracker) window._chatPageTracker.destroy();
+					window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
+				}
+			})();
+
+			// Process task links and clean markers on HTMX swaps
+			if (!window._chatSwapHandlerAttached) {
+				window._chatSwapHandlerAttached = true;
+
+				// Rule 1: Reset tracker when user sends a message (beforeRequest fires before swap)
+				document.body.addEventListener('htmx:beforeRequest', function(event) {
+					var triggerEl = event.detail.elt;
+					if (triggerEl && (triggerEl.id === 'chat-form' || triggerEl.closest('#chat-form'))) {
+						var tracker = window._chatPageTracker;
+						if (tracker) tracker.resetOnUserSend();
+						if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+						// Flag that a web send is in progress (prevents live SSE duplication)
+						window._chatWebSendInProgress = true;
+					}
+				});
+
+				document.body.addEventListener('htmx:afterSwap', function(event) {
+					var swapTarget = event.detail.target;
+					var isChatMessagesSwap = !!(swapTarget && swapTarget.id === 'chat-messages');
+					var isChatRootSwap = !!(swapTarget && swapTarget.id === 'chat-page-root');
+					if (isChatMessagesSwap || isChatRootSwap) {
+						var chatMessages = isChatMessagesSwap ? swapTarget : (swapTarget ? swapTarget.querySelector('#chat-messages') : null);
+						if (!chatMessages) return;
+						// Clear web send flag and mark new exec IDs as known
+						window._chatWebSendInProgress = false;
+						chatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {
+							if (window._chatKnownExecIds) window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
+						});
+						if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
+						if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();
+						// Auto-scroll after swap: always scroll unless user manually scrolled up
+						// (tracker was already reset in beforeRequest if this was a user send)
+						var tracker = window._chatPageTracker;
+						if (!tracker || tracker.shouldAutoScroll()) {
+							requestAnimationFrame(function() {
+								if (chatMessages && window.chatAutoScroll) {
+									window.chatAutoScroll.scrollToBottom(chatMessages, true);
+								}
+							});
+						}
+						// Re-attach tracker to possibly new element (the container itself didn't change
+						// for beforeend swaps, but for outerHTML swaps it might be a new DOM node)
+						if (chatMessages !== (window._chatPageTracker && window._chatPageTracker.element)) {
+							if (window.ChatScrollTracker) {
+								if (window._chatPageTracker) window._chatPageTracker.destroy();
+								window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
+							}
+						}
+					}
+				});
+			}
+
+			// Plan completion prompt buttons (delegated so handlers survive outerHTML swaps)
+			if (!window._chatPlanPromptClickHandlerAttached) {
+				window._chatPlanPromptClickHandlerAttached = true;
+				document.body.addEventListener('click', function(event) {
+					var stayBtn = event.target && event.target.closest ? event.target.closest('#chat-plan-stay-btn') : null;
+					if (stayBtn) {
+						if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+						return;
+					}
+
+					var switchBtn = event.target && event.target.closest ? event.target.closest('#chat-plan-switch-btn') : null;
+					if (!switchBtn) return;
+					event.preventDefault();
+
+					var messageInput = document.getElementById('message-input');
+					var chatForm = document.getElementById('chat-form');
+					var planHandoffMessage = 'Create one active task for the whole proposed plan above. Do not execute or start any other existing tasks. Report progress.';
+
+					if (window.switchChatMode) window.switchChatMode('orchestrate');
+					if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+					if (messageInput) messageInput.value = planHandoffMessage;
+					if (chatForm) {
+						chatForm.requestSubmit();
+						return;
+					}
+					if (messageInput) {
+						messageInput.focus();
+						messageInput.selectionStart = messageInput.value.length;
+						messageInput.selectionEnd = messageInput.value.length;
+					}
+				});
+			}
+		</script>
+
+		<!-- Real-time chat updates via SSE (receives messages from Telegram, API, other tabs) -->
+		<script>
+			(function() {
+				var chatRoot = document.getElementById('chat-page-root');
+				if (!chatRoot) return;
+				var projectId = chatRoot.getAttribute('data-project-id');
+
+				// Track exec IDs already displayed to avoid duplicates
+				window._chatKnownExecIds = window._chatKnownExecIds || {};
+
+				// Mark already-rendered executions as known
+				document.querySelectorAll('[data-exec-id]').forEach(function(el) {
+					window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
+				});
+
+				// Helper: create a user message bubble
+				function createUserBubble(message, source) {
+					var bubble = document.createElement('div');
+					bubble.className = 'chat-bubble-user-msg rounded-xl p-4';
+					var roleDiv = document.createElement('div');
+					roleDiv.className = 'text-xs font-semibold opacity-50 mb-2';
+					roleDiv.textContent = 'User';
+					if (source && source !== 'web') {
+						var badge = document.createElement('span');
+						badge.className = 'badge badge-xs badge-ghost ml-2';
+						badge.textContent = source;
+						roleDiv.appendChild(badge);
+					}
+					var innerDiv = document.createElement('div');
+					innerDiv.className = 'chat-bubble-inner';
+					var textDiv = document.createElement('div');
+					textDiv.className = 'whitespace-pre-wrap leading-relaxed text-sm';
+					textDiv.style.wordWrap = 'break-word';
+					textDiv.textContent = message;
+					innerDiv.appendChild(textDiv);
+					bubble.appendChild(roleDiv);
+					bubble.appendChild(innerDiv);
+					return bubble;
+				}
+
+				// Helper: create a streaming assistant bubble and connect to SSE
+				function createStreamingBubble(execId) {
+					var bubble = document.createElement('div');
+					bubble.className = 'chat-bubble-assistant-msg rounded-xl p-4';
+
+					var roleDiv = document.createElement('div');
+					roleDiv.className = 'text-xs font-semibold opacity-50 mb-2';
+					roleDiv.textContent = 'Assistant';
+
+					var innerDiv = document.createElement('div');
+					innerDiv.className = 'chat-bubble-inner';
+
+					var thinking = document.createElement('div');
+					thinking.className = 'flex flex-col items-start gap-1';
+					thinking.innerHTML = '<span class="block h-5" aria-hidden="true"></span><span class="ov-loading-dots ov-loading-dots-sm" aria-hidden="true"><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span></span>';
+
+					var contentDiv = document.createElement('div');
+					contentDiv.className = 'whitespace-pre-wrap leading-relaxed text-sm hidden';
+					contentDiv.style.wordWrap = 'break-word';
+					contentDiv.setAttribute('data-exec-id', execId);
+
+					var dots = document.createElement('div');
+					dots.className = 'hidden flex items-center gap-1 mt-2 opacity-40';
+					dots.innerHTML = '<span class="loading loading-dots loading-xs"></span>';
+
+					innerDiv.appendChild(thinking);
+					innerDiv.appendChild(contentDiv);
+					innerDiv.appendChild(dots);
+					bubble.appendChild(roleDiv);
+					bubble.appendChild(innerDiv);
+
+					// Set up streaming via EventSource
+					var textBuffer = '';
+					var chatMessages = document.getElementById('chat-messages');
+					var tracker = window._chatPageTracker;
+
+					var eventSource = new EventSource('/events/chat/' + execId);
+
+					eventSource.onmessage = function(event) {
+						if (!thinking.classList.contains('hidden')) {
+							thinking.classList.add('hidden');
+							contentDiv.classList.remove('hidden');
+							dots.classList.remove('hidden');
+						}
+						textBuffer += event.data;
+						contentDiv.textContent = textBuffer;
+
+						if (!tracker || tracker.shouldAutoScroll()) {
+							requestAnimationFrame(function() {
+								if (chatMessages && window.chatAutoScroll) {
+									window.chatAutoScroll.scrollToBottom(chatMessages, false);
+								}
+							});
+						}
+					};
+
+					eventSource.addEventListener('done', function() {
+						dots.classList.add('hidden');
+						eventSource.close();
+						if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+						if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+						if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+						if (window.handlePlanModeCompletion) window.handlePlanModeCompletion(textBuffer);
+						if (!tracker || tracker.shouldAutoScroll()) {
+							requestAnimationFrame(function() {
+								if (chatMessages && window.chatAutoScroll) {
+									window.chatAutoScroll.scrollToBottom(chatMessages, true);
+								}
+							});
+						}
+					});
+
+					eventSource.addEventListener('error', function(event) {
+						thinking.classList.add('hidden');
+						dots.classList.add('hidden');
+						contentDiv.classList.remove('hidden');
+						if (event.data) {
+							contentDiv.textContent += '\n\nError: ' + event.data;
+						}
+						eventSource.close();
+					});
+
+					eventSource.onerror = function() {
+						thinking.classList.add('hidden');
+						dots.classList.add('hidden');
+						contentDiv.classList.remove('hidden');
+						eventSource.close();
+					};
+
+					return bubble;
+				}
+
+				// Register chat live SSE via tab visibility manager
+				if (window._tabVisibility) {
+					// Clean up previous chat live SSE if re-rendering
+					window._tabVisibility.unregisterSSE('chat-live');
+
+					// Track whether this is the first SSE connect or a reconnection
+					// (e.g., after tab was hidden and events were missed)
+					var chatSSEHasConnected = false;
+
+					window._tabVisibility.registerSSE('chat-live', '/events/chat/live?project_id=' + encodeURIComponent(projectId), {
+						onopen: function() {
+							if (chatSSEHasConnected) {
+								var chatContainer = document.getElementById('chat-page-root');
+								if (!chatContainer) return;
+								// Reconnection after tab was hidden — refresh chat to catch missed events.
+								// While the SSE was disconnected, messages from API/Telegram/other tabs
+								// were published but never delivered. A full refresh loads current state from DB.
+								var pid = chatContainer.getAttribute('data-project-id');
+								if (pid) {
+									htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
+								}
+							}
+							chatSSEHasConnected = true;
+						},
+						listeners: {
+							'chat_new_message': function(event) {
+								try {
+									var data = JSON.parse(event.data);
+								} catch(e) { return; }
+
+								// Skip if already displayed or sender's own tab
+								if (window._chatKnownExecIds[data.exec_id]) return;
+								if (data.source === 'web' && window._chatWebSendInProgress) return;
+								window._chatKnownExecIds[data.exec_id] = true;
+
+								var chatMessages = document.getElementById('chat-messages');
+								if (!chatMessages) return;
+
+								// Remove empty state if present
+								var emptyState = chatMessages.querySelector('.flex.flex-col.items-center.justify-center');
+								if (emptyState) emptyState.remove();
+
+								// Append user bubble
+								chatMessages.appendChild(createUserBubble(data.message, data.source));
+
+								// Append streaming assistant bubble
+								chatMessages.appendChild(createStreamingBubble(data.exec_id));
+
+								// Scroll to bottom (respect user scroll position)
+								var tracker = window._chatPageTracker;
+								if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
+									window.chatAutoScroll.scrollToBottom(chatMessages, true);
+								}
+							},
+							'chat_response_done': function(event) {
+								// Guard: only act if we're still on the chat page
+								if (!document.getElementById('chat-messages')) return;
+								// Safety net: if we missed the chat_new_message event (e.g., channel
+								// buffer was full), the completed message won't be displayed. Detect
+								// this by checking if the exec_id is unknown and refresh if so.
+								try {
+									var data = JSON.parse(event.data);
+								} catch(e) { return; }
+								if (data.exec_id && !window._chatKnownExecIds[data.exec_id]) {
+									var chatContainer = document.getElementById('chat-page-root');
+									if (chatContainer) {
+										var pid = chatContainer.getAttribute('data-project-id');
+										if (pid) {
+											htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
+										}
+									}
+								}
+							}
+						}
+					});
+				}
+
+				// Also mark exec IDs from HTMX swaps to avoid duplicates after page updates
+				document.body.addEventListener('htmx:afterSwap', function(event) {
+					var swapTarget = event.detail.target;
+					if (swapTarget && swapTarget.id === 'chat-messages') {
+						swapTarget.querySelectorAll('[data-exec-id]').forEach(function(el) {
+							window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
+						});
+					}
+					if (swapTarget && swapTarget.id === 'main-content' && !swapTarget.querySelector('#chat-page-root')) {
+						if (window._tabVisibility) {
+							window._tabVisibility.unregisterSSE('chat-live');
+						}
+					}
+				});
+			})();
+		</script>
+
+	</div>
+}
+
+// ChatModelInfo renders a small info badge showing which agent was auto-selected
+templ ChatModelInfo(info string) {
+	if info != "" {
+		<div class="text-xs opacity-50 text-center my-1">
+			{ info }
+		</div>
+	}
+}

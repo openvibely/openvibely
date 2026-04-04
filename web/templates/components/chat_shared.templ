@@ -1,0 +1,2109 @@
+package components
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+// jsStringLength returns the JavaScript string.length for a Go string.
+// JS uses UTF-16 encoding, so characters outside the BMP (U+10000+) count as
+// 2 code units (surrogate pair), matching how JS .length works.
+func jsStringLength(s string) int {
+	n := 0
+	for _, r := range s {
+		if r >= 0x10000 {
+			n += 2 // surrogate pair
+		} else {
+			n += 1
+		}
+	}
+	return n
+}
+
+// ChatInputFormConfig holds configuration for the shared chat input form.
+type ChatInputFormConfig struct {
+	FormID        string
+	InputID       string
+	PostEndpoint  string
+	TargetID      string
+	Agents        []models.LLMConfig
+	ShowModelSelector bool
+	ShowModeSelector  bool
+	ChatMode          models.ChatMode // default when not persisted
+	TaskID        string // non-empty enables cancel button when IsRunning
+	IsRunning     bool
+	ProjectID     string // non-empty enables model selection persistence via localStorage
+}
+
+// chatElementIDs returns derived element IDs based on the form ID prefix.
+func chatAttachmentPreviewID(formID string) string { return formID + "-attachments-preview" }
+func chatAttachmentListID(formID string) string    { return formID + "-attachments-list" }
+func chatSessionInputID(formID string) string      { return formID + "-session-id" }
+func chatFileInputID(formID string) string         { return formID + "-file-input" }
+func chatDropOverlayID(formID string) string       { return formID + "-drop-overlay" }
+func chatModeOrDefault(mode models.ChatMode) string {
+	if mode == "" {
+		return string(models.ChatModeOrchestrate)
+	}
+	return string(mode)
+}
+
+templ ChatLoadingDots(size string) {
+	<span class={
+		"ov-loading-dots",
+		templ.KV("ov-loading-dots-xs", size == "xs"),
+		templ.KV("ov-loading-dots-sm", size != "xs"),
+	} aria-hidden="true">
+		<span class="ov-loading-dot"></span>
+		<span class="ov-loading-dot"></span>
+		<span class="ov-loading-dot"></span>
+	</span>
+}
+
+// ChatBubble renders a static chat message bubble (completed or failed text).
+templ ChatBubble(role, content string) {
+	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+		<div class="text-xs font-semibold opacity-50 mb-2">
+			{ role }
+		</div>
+		<div class="chat-bubble-inner">
+			if role == "User" {
+				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
+			} else {
+				<div class="chat-stream-content" data-raw-content={ content }></div>
+				<script>
+					(function() {
+						var el = document.currentScript.previousElementSibling;
+						function render() {
+							var raw = el.getAttribute('data-raw-content');
+							if (window.renderStreamingContent && raw) {
+								window.renderStreamingContent(el, raw);
+							} else if (window.renderChatMarkdown && raw) {
+								el.className = 'chat-markdown';
+								el.innerHTML = window.renderChatMarkdown(raw);
+								if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
+							} else {
+								el.textContent = raw;
+								el.classList.add('whitespace-pre-wrap');
+							}
+						// After rendering, process task links and clean markers
+						var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
+						if (bubble) {
+							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+						}
+						}
+						// renderStreamingContent may not be defined yet (defined later in page).
+						if (window.renderStreamingContent) { render(); }
+						else {
+							// Poll until renderStreamingContent is defined (defined by ChatAutoScrollScript later in page)
+							var poll = setInterval(function() {
+								if (window.renderStreamingContent) { clearInterval(poll); render(); }
+							}, 10);
+							setTimeout(function() { clearInterval(poll); render(); }, 2000); // fallback
+						}
+					})();
+				</script>
+			}
+		</div>
+	</div>
+}
+
+// ChatBubbleError renders an assistant error message bubble.
+templ ChatBubbleError(role, errorMsg, output string) {
+	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+		<div class="text-xs font-semibold opacity-50 mb-2">
+			{ role }
+		</div>
+		<div class="chat-bubble-inner">
+			if errorMsg != "" {
+				<div class="text-error/80 text-sm font-medium mb-2">{ "Error: " + errorMsg }</div>
+			}
+			if output != "" {
+				<div class="chat-stream-content" data-raw-content={ output }></div>
+				<script>
+					(function() {
+						var el = document.currentScript.previousElementSibling;
+						function render() {
+							var raw = el.getAttribute('data-raw-content');
+							if (window.renderStreamingContent && raw) {
+								window.renderStreamingContent(el, raw);
+							} else if (window.renderChatMarkdown && raw) {
+								el.className = 'chat-markdown';
+								el.innerHTML = window.renderChatMarkdown(raw);
+								if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
+							} else {
+								el.textContent = raw;
+								el.classList.add('whitespace-pre-wrap');
+							}
+						}
+						if (window.renderStreamingContent) { render(); }
+						else {
+							var poll = setInterval(function() {
+								if (window.renderStreamingContent) { clearInterval(poll); render(); }
+							}, 10);
+							setTimeout(function() { clearInterval(poll); render(); }, 2000);
+						}
+					})();
+				</script>
+			}
+		</div>
+	</div>
+}
+
+// ChatBubbleThinking renders a loading/thinking indicator bubble.
+templ ChatBubbleThinking(role string) {
+	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+		<div class="text-xs font-semibold opacity-50 mb-2">
+			{ role }
+		</div>
+		<div class="chat-bubble-inner">
+			<div id="streaming-message" class="flex flex-col items-start gap-1">
+				<span class="block h-5" aria-hidden="true"></span>
+				@ChatLoadingDots("sm")
+			</div>
+		</div>
+	</div>
+}
+
+// ChatBubbleRunning renders a running bubble with partial output and a loading indicator.
+templ ChatBubbleRunning(role, partialOutput string) {
+	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+		<div class="text-xs font-semibold opacity-50 mb-2">
+			{ role }
+		</div>
+		<div class="chat-bubble-inner">
+			if cleanedOutput := CleanDisplayContent(partialOutput); cleanedOutput == "" || strings.TrimSpace(cleanedOutput) == "" {
+				<div id="streaming-message" class="flex items-center gap-2">
+					@ChatLoadingDots("sm")
+					<span class="text-sm opacity-60">Working...</span>
+				</div>
+			} else {
+				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ cleanedOutput }</div>
+				<div class="flex items-center gap-1 mt-2 opacity-40">
+					@ChatLoadingDots("xs")
+				</div>
+			}
+		</div>
+	</div>
+}
+
+// ChatBubbleWithAttachments renders a message with inline attachment display.
+templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatAttachment) {
+	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+		<div class="text-xs font-semibold opacity-50 mb-2 flex items-center gap-2">
+			{ role }
+			if len(attachments) > 0 {
+				<span class="badge badge-sm badge-neutral">
+					<svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+					</svg>
+					{ fmt.Sprintf("%d", len(attachments)) }
+				</span>
+			}
+		</div>
+		<div class="chat-bubble-inner">
+			<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
+			if len(attachments) > 0 {
+				<div class="mt-3 pt-3 border-t border-base-content/10">
+					<div class="text-xs font-medium opacity-70 mb-2">Attachments</div>
+					for _, att := range attachments {
+						if IsImageMediaType(att.MediaType) {
+							<div class="mb-3">
+								<a href={ templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)) } target="_blank" class="block">
+									<img
+										src={ templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)) }
+										alt={ att.FileName }
+										class="max-w-full rounded-lg border border-base-content/10 hover:opacity-90 transition-opacity cursor-pointer"
+										style="max-height: 400px; object-fit: contain;"
+										loading="lazy"
+									/>
+								</a>
+								<div class="flex items-center gap-2 text-xs opacity-60 mt-1.5">
+									<svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+									</svg>
+									<span class="font-medium">{ att.FileName }</span>
+									<span>({ FormatFileSize(att.FileSize) })</span>
+								</div>
+							</div>
+						} else {
+							<div class="flex items-center gap-2 text-xs opacity-90 mb-1.5">
+								<svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+								</svg>
+								<a href={ templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)) } class="hover:underline font-medium" target="_blank">
+									{ att.FileName }
+								</a>
+								<span class="opacity-60">({ FormatFileSize(att.FileSize) })</span>
+							</div>
+						}
+					}
+				</div>
+			}
+		</div>
+	</div>
+}
+
+// ChatBubbleStreaming renders a streaming SSE message bubble for new messages.
+// messagesContainerID: the ID of the scrollable messages container (e.g. "chat-messages" or "task-thread-messages")
+// pausePollingTargetID: if non-empty, pauses HTMX polling on this element during streaming (thread uses "task-thread-view")
+// isThread: true uses thread behavior (refresh on done); false uses main-chat behavior (link conversion + marker cleaning)
+templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID string, isThread bool) {
+	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+		<div class="text-xs font-semibold opacity-50 mb-2">
+			{ role }
+		</div>
+		<div class="chat-bubble-inner">
+			<div id={ "streaming-thinking-" + execID } class="flex flex-col items-start gap-1">
+				<span class="block h-5" aria-hidden="true"></span>
+				@ChatLoadingDots("sm")
+			</div>
+			<div
+				id={ "streaming-message-" + execID }
+				class="whitespace-pre-wrap leading-relaxed text-sm hidden"
+				data-exec-id={ execID }
+				data-messages-container={ messagesContainerID }
+				data-pause-polling-target={ pausePollingTargetID }
+				data-is-thread={ boolStr(isThread) }
+				style="word-wrap: break-word;"
+			></div>
+			<div id={ "streaming-dots-" + execID } class="hidden flex items-center gap-1 mt-2 opacity-40">
+				@ChatLoadingDots("xs")
+			</div>
+			<script type="text/javascript">
+				(function() {
+					var streamingDots = document.currentScript.previousElementSibling;
+					var container = streamingDots.previousElementSibling;
+					var thinkingIndicator = container.previousElementSibling;
+					var execId = container.getAttribute('data-exec-id');
+					var messagesId = container.getAttribute('data-messages-container');
+					var pauseTarget = container.getAttribute('data-pause-polling-target');
+					var isThread = container.getAttribute('data-is-thread') === 'true';
+					// Pause HTMX polling if requested (prevents morph:outerHTML from destroying the EventSource)
+					if (pauseTarget) {
+						window._taskThreadStreamingActive = true;
+						var pollingEl = document.getElementById(pauseTarget);
+						if (pollingEl) {
+							pollingEl.removeAttribute('hx-trigger');
+							pollingEl.removeAttribute('hx-get');
+							htmx.process(pollingEl);
+						}
+					}
+
+					// Get or create page-level tracker for this chat container
+					var chatMessages = document.getElementById(messagesId);
+					var tracker = null;
+					var trackerKey = 'scrollTracker_' + messagesId;
+					
+					if (chatMessages) {
+						// Reuse existing page-level tracker, or create new one if this is first stream
+						if (!window[trackerKey]) {
+							window[trackerKey] = new window.ChatScrollTracker(chatMessages);
+						}
+						tracker = window[trackerKey];
+						
+						// User just sent a message, reset scroll tracking and scroll to bottom
+						tracker.resetOnUserSend();
+					}
+
+					// Buffer for accumulating streaming content
+					var textBuffer = '';
+
+					var eventSource = new EventSource('/events/chat/' + execId);
+
+					eventSource.onmessage = function(event) {
+						// Hide thinking indicator and show content on first message
+						if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
+							thinkingIndicator.classList.add('hidden');
+							container.classList.remove('hidden');
+							streamingDots.classList.remove('hidden');
+						}
+						
+						// Append to buffer and re-render
+						textBuffer += event.data;
+						window.renderStreamingContent(container, textBuffer);
+
+						// Auto-scroll if tracker allows it (Rule 2: auto-scroll unless user scrolled up)
+						if (!tracker || tracker.shouldAutoScroll()) {
+							requestAnimationFrame(function() {
+								var chatMessages = document.getElementById(messagesId);
+								if (chatMessages) {
+									window.chatAutoScroll.scrollToBottom(chatMessages, false);
+								}
+							});
+						}
+					};
+
+					eventSource.addEventListener('done', function(event) {
+						// Hide streaming dots
+						if (streamingDots) streamingDots.classList.add('hidden');
+						eventSource.close();
+						window._taskThreadStreamingActive = false;
+						if (isThread) {
+							// Refresh the entire chat view to get final state (re-enables polling)
+							// Server-side rendering will handle tool markers display
+							setTimeout(function() {
+								htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+							}, 500);
+						} else {
+							// Convert task links BEFORE cleaning markers
+							var bubble = container.closest('.chat-bubble-assistant-msg');
+							if (bubble && window.convertTaskLinksInMessage) {
+								window.convertTaskLinksInMessage(bubble);
+							}
+							if (bubble && window.convertTaskEditLinksInMessage) {
+								window.convertTaskEditLinksInMessage(bubble);
+							}
+							if (bubble && window.cleanBubbleContent) {
+								window.cleanBubbleContent(bubble);
+							}
+							if (window.handlePlanModeCompletion) {
+								window.handlePlanModeCompletion(textBuffer);
+							}
+							// Final scroll if tracker allows it
+							if (!tracker || tracker.shouldAutoScroll()) {
+								requestAnimationFrame(function() {
+									var chatMessages = document.getElementById(messagesId);
+									if (chatMessages) {
+										window.chatAutoScroll.scrollToBottom(chatMessages, true);
+									}
+								});
+							}
+						}
+					});
+
+					eventSource.addEventListener('error', function(event) {
+						// Hide thinking indicator and streaming dots, ensure content shows
+						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
+						if (streamingDots) streamingDots.classList.add('hidden');
+						container.classList.remove('hidden');
+						if (event.data) {
+							container.appendChild(document.createTextNode('\n\nError: ' + event.data));
+						}
+						eventSource.close();
+						window._taskThreadStreamingActive = false;
+						if (isThread) {
+							setTimeout(function() {
+								htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+							}, 1000);
+						}
+					});
+
+					eventSource.onerror = function(error) {
+						console.error('EventSource failed:', error);
+						// Hide thinking indicator and streaming dots, ensure content shows
+						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
+						if (streamingDots) streamingDots.classList.add('hidden');
+						container.classList.remove('hidden');
+						eventSource.close();
+						window._taskThreadStreamingActive = false;
+						if (isThread) {
+							setTimeout(function() {
+								htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+							}, 1000);
+						}
+					};
+				})();
+			</script>
+		</div>
+	</div>
+}
+
+// ChatBubbleStreamingResume renders a chat message that reconnects to an in-progress SSE stream.
+// The EventSource is initialized by _initThreadStreaming() (called from TaskThreadView's
+// afterSwap handler) since inline scripts don't re-execute after morph:outerHTML swaps.
+// Content is stored in data-raw-content (not as text content) so it renders formatted
+// immediately via the inline script, matching ChatBubble's pattern. This prevents
+// raw/unformatted text flash on hard refresh.
+templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID, pausePollingTargetID string) {
+	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
+		<div class="text-xs font-semibold opacity-50 mb-2">
+			{ role }
+		</div>
+		<div class="chat-bubble-inner">
+			if partialContent == "" {
+				<div id={ "streaming-thinking-resume-" + execID } class="flex flex-col items-start gap-1">
+					<span class="block h-5" aria-hidden="true"></span>
+					@ChatLoadingDots("sm")
+				</div>
+			}
+			<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-length={ fmt.Sprintf("%d", jsStringLength(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ partialContent } style="word-wrap: break-word;"></div>
+			<script>
+				(function() {
+					var el = document.currentScript.previousElementSibling;
+					function render() {
+						var raw = el.getAttribute('data-raw-content');
+						if (!raw) return;
+						if (window.renderStreamingContent) {
+							window.renderStreamingContent(el, raw);
+						} else if (window.renderChatMarkdown) {
+							el.className = el.className.replace('whitespace-pre-wrap', '').trim();
+							var div = document.createElement('div');
+							div.className = 'chat-markdown';
+							div.innerHTML = window.renderChatMarkdown(raw);
+							if (window.addCodeCopyButtons) window.addCodeCopyButtons(div);
+							el.innerHTML = '';
+							el.appendChild(div);
+						} else {
+							el.textContent = raw;
+							el.classList.add('whitespace-pre-wrap');
+						}
+					}
+					if (window.renderStreamingContent) { render(); }
+					else {
+						var poll = setInterval(function() {
+							if (window.renderStreamingContent) { clearInterval(poll); render(); }
+						}, 10);
+						setTimeout(function() { clearInterval(poll); render(); }, 2000);
+					}
+				})();
+			</script>
+			<div id={ "streaming-dots-resume-" + execID } class={ "hidden flex items-center gap-1 mt-2 opacity-40", templ.KV("!hidden", partialContent != "") } >
+				@ChatLoadingDots("xs")
+			</div>
+		</div>
+	</div>
+}
+
+// _initThreadStreamingScript emits the global _initThreadStreaming function.
+// It finds [data-streaming-resume] containers without an active EventSource
+// and connects them to the SSE endpoint. Called on initial page load and
+// after each morph:outerHTML swap from TaskThreadView's afterSwap handler.
+templ _initThreadStreamingScript() {
+	<script type="text/javascript">
+		window._initThreadStreaming = function() {
+			var containers = document.querySelectorAll('[data-streaming-resume="true"]');
+			containers.forEach(function(container) {
+				// Skip if already connected
+				if (container._sseConnected) return;
+				container._sseConnected = true;
+
+				var execId = container.getAttribute('data-exec-id');
+				var messagesId = container.getAttribute('data-messages-container');
+				var pauseTarget = container.getAttribute('data-pause-polling-target');
+				var initialLength = parseInt(container.getAttribute('data-initial-length') || '0', 10);
+				var cumulativeContent = '';
+
+				// Find streaming dots by ID (reliable across morph swaps and inline script siblings)
+				var streamingDots = document.getElementById('streaming-dots-resume-' + execId);
+				// Content is in data-raw-content attribute (not textContent)
+				var hasContent = !!container.getAttribute('data-raw-content');
+				var thinkingIndicator = !hasContent ? container.previousElementSibling : null;
+
+				// Pause HTMX polling if requested
+				if (pauseTarget) {
+					window._taskThreadStreamingActive = true;
+					var pollingEl = document.getElementById(pauseTarget);
+					if (pollingEl) {
+						pollingEl.removeAttribute('hx-trigger');
+						pollingEl.removeAttribute('hx-get');
+						if (typeof htmx !== 'undefined') htmx.process(pollingEl);
+					}
+				}
+
+				// Get or reuse page-level tracker
+				var chatMessages = document.getElementById(messagesId);
+				var tracker = null;
+				var trackerKey = 'scrollTracker_' + messagesId;
+				if (chatMessages) {
+					if (!window[trackerKey] && window.ChatScrollTracker) {
+						window[trackerKey] = new window.ChatScrollTracker(chatMessages);
+					}
+					tracker = window[trackerKey];
+				}
+
+				var eventSource = new EventSource('/events/chat/' + execId);
+				// Track EventSource globally so sidebar navigation can close it
+				if (!window._threadEventSources) window._threadEventSources = [];
+				window._threadEventSources.push(eventSource);
+
+				eventSource.onmessage = function(event) {
+					cumulativeContent += event.data;
+					if (cumulativeContent.length >= initialLength) {
+						if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
+							thinkingIndicator.classList.add('hidden');
+							container.classList.remove('hidden');
+							if (streamingDots) streamingDots.classList.remove('hidden');
+						}
+						window.renderStreamingContent(container, cumulativeContent);
+					}
+					if (!tracker || tracker.shouldAutoScroll()) {
+						requestAnimationFrame(function() {
+							var cm = document.getElementById(messagesId);
+							if (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, false);
+						});
+					}
+				};
+
+				eventSource.addEventListener('done', function(event) {
+					if (streamingDots) streamingDots.classList.add('hidden');
+					eventSource.close();
+					window._taskThreadStreamingActive = false;
+					if (pauseTarget) {
+						setTimeout(function() {
+							htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+						}, 500);
+					} else {
+						var bubble = container.closest('.chat-bubble-assistant-msg');
+						if (bubble && window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+						if (bubble && window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+						if (bubble && window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+						if (window.handlePlanModeCompletion) window.handlePlanModeCompletion(cumulativeContent);
+						if (!tracker || tracker.shouldAutoScroll()) {
+							requestAnimationFrame(function() {
+								var cm = document.getElementById(messagesId);
+								if (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, true);
+							});
+						}
+					}
+				});
+
+				eventSource.addEventListener('error', function(event) {
+					if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
+					if (streamingDots) streamingDots.classList.add('hidden');
+					container.classList.remove('hidden');
+					if (event.data) container.appendChild(document.createTextNode('\n\nError: ' + event.data));
+					eventSource.close();
+					window._taskThreadStreamingActive = false;
+					if (pauseTarget) {
+						setTimeout(function() {
+							htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+						}, 1000);
+					}
+				});
+
+				eventSource.onerror = function(error) {
+					console.error('EventSource failed:', error);
+					if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
+					if (streamingDots) streamingDots.classList.add('hidden');
+					container.classList.remove('hidden');
+					eventSource.close();
+					window._taskThreadStreamingActive = false;
+					if (pauseTarget) {
+						setTimeout(function() {
+							htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
+						}, 1000);
+					}
+				};
+			});
+		};
+	</script>
+}
+
+// ChatFollowupResponse renders user message + streaming assistant for a follow-up.
+// Used by both ChatSend (main chat) and TaskThreadSend (task thread).
+templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment) {
+	if len(attachments) > 0 {
+		@ChatBubbleWithAttachments("User", message, attachments)
+	} else {
+		@ChatBubble("User", message)
+	}
+	@ChatBubbleStreaming("Assistant", execID, messagesContainerID, pausePollingTargetID, isThread)
+}
+
+// ChatMessages renders a list of executions as chat message bubbles.
+// This is the shared message rendering loop used by both /chat and task thread.
+// For task thread, deduplicates the original task prompt: only shows it for the
+// first non-followup execution. Subsequent re-runs skip the user bubble.
+templ ChatMessages(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
+	for i, exec := range executions {
+		<!-- User message: show for followups and first non-followup only -->
+		if exec.IsFollowup || !hasEarlierNonFollowup(executions, i) {
+			if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
+				@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, i), atts)
+			} else {
+				@ChatBubble("User", chatUserContent(exec, task, executions, i))
+			}
+		}
+		<!-- Assistant response -->
+		if exec.Status == models.ExecCompleted {
+			@ChatBubble("Assistant", exec.Output)
+		} else if exec.Status == models.ExecFailed {
+			@ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+		} else if exec.Status == models.ExecRunning {
+			@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
+		}
+	}
+}
+
+// ChatEmptyState renders the empty chat placeholder.
+templ ChatEmptyState(message string) {
+	<div class="flex flex-col items-center justify-center h-full text-center">
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 opacity-20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+		</svg>
+		<p class="text-sm opacity-50">{ message }</p>
+	</div>
+}
+
+// ChatInputForm renders a shared chat input form with attachment support.
+templ ChatInputForm(config ChatInputFormConfig) {
+	<form
+		id={ config.FormID }
+		method="post"
+		hx-post={ config.PostEndpoint }
+		hx-target={ "#" + config.TargetID }
+		hx-swap="beforeend"
+		data-input-id={ config.InputID }
+		data-clear-func-name={ config.FormID + "ClearAttachments" }
+		class="chat-input-container rounded-xl p-4 relative"
+	>
+		<!-- Drop zone overlay -->
+		<div id={ chatDropOverlayID(config.FormID) } class="hidden absolute inset-0 z-10 rounded-xl border-2 border-dashed border-primary bg-primary/10 flex items-center justify-center pointer-events-none">
+			<div class="flex flex-col items-center gap-2 text-primary">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+				</svg>
+				<span class="text-sm font-medium">Drop files here to attach</span>
+			</div>
+		</div>
+		if config.ShowModelSelector {
+			<input type="hidden" id={ config.FormID + "-agent-id" } name="agent_id" value="auto"/>
+		}
+		if config.ShowModeSelector {
+			<input type="hidden" id={ config.FormID + "-chat-mode" } name="chat_mode" value={ chatModeOrDefault(config.ChatMode) }/>
+		}
+		if config.ProjectID != "" {
+			<input type="hidden" id={ config.FormID + "-project-id" } name="_project_id" value={ config.ProjectID }/>
+		}
+		<input type="hidden" id={ chatSessionInputID(config.FormID) } name="attachment_session_id" value=""/>
+		<!-- File Attachments Preview -->
+		<div id={ chatAttachmentPreviewID(config.FormID) } class="hidden border-b border-base-content/[0.12] -mx-4 px-4 -mt-4 pt-2.5 pb-2.5 mb-3">
+			<div class="flex items-center justify-between mb-1.5">
+				<span class="text-xs font-medium opacity-70">Attached Files</span>
+				<button type="button" class="btn btn-ghost btn-xs text-xs" data-clear-func={ config.FormID + "ClearAttachments" }>Clear All</button>
+			</div>
+			<div id={ chatAttachmentListID(config.FormID) } class="space-y-1"></div>
+		</div>
+		<!-- Textarea -->
+		<div>
+			<textarea
+				id={ config.InputID }
+				name="message"
+				class="w-full resize-none bg-transparent text-sm leading-relaxed focus:outline-none placeholder:opacity-40 p-0 text-left"
+				if config.IsRunning {
+					placeholder="Waiting for response... (you can queue a follow-up)"
+				} else {
+					placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
+				}
+				rows="3"
+				enterkeyhint="send"
+				required
+			></textarea>
+		</div>
+		<!-- Bottom controls row -->
+		<div class="flex items-center justify-between pt-2">
+			<div class="flex items-center gap-1 -ml-2">
+				if config.ShowModelSelector {
+					<select id={ config.FormID + "-agent-select" } class="chat-model-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 max-w-[140px] rounded-lg" data-agent-input={ config.FormID + "-agent-id" }>
+						<option value="auto" selected>Auto</option>
+						<option value="default">Default</option>
+						for _, agent := range config.Agents {
+							<option value={ agent.ID }>
+								{ agent.Name } ({ agent.Model })
+							</option>
+						}
+					</select>
+				}
+				if config.ShowModeSelector {
+					<select id={ config.FormID + "-mode-select" } class="chat-mode-select select select-ghost select-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 max-w-[120px] rounded-lg" data-mode-input={ config.FormID + "-chat-mode" }>
+						<option value="orchestrate" selected>Orchestrate</option>
+						<option value="plan">Plan</option>
+					</select>
+				}
+				<!-- Cancel button for running tasks -->
+				if config.TaskID != "" && config.IsRunning {
+					<button
+						type="button"
+						class="btn btn-ghost btn-xs text-error rounded-lg"
+						hx-post={ fmt.Sprintf("/tasks/%s/cancel", config.TaskID) }
+						hx-swap="none"
+						hx-confirm="Cancel this running task?"
+						title="Cancel running task"
+					>
+						Cancel
+					</button>
+				}
+			</div>
+			<div class="flex items-center gap-2">
+				<!-- Attachment button -->
+				<label for={ chatFileInputID(config.FormID) } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300" title="Attach files">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
+					</svg>
+				</label>
+				<input type="file" id={ chatFileInputID(config.FormID) } multiple class="hidden"/>
+				<!-- Speech-to-text microphone button -->
+				<button type="button" id={ config.FormID + "-mic-btn" } class="btn btn-ghost btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0 opacity-50 hover:opacity-100 hover:bg-base-300 stt-btn" title="Speech to text" aria-label="Start speech to text">
+					<!-- Mic icon (shown when not recording) -->
+					<svg class="stt-mic-icon h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
+					</svg>
+					<!-- Stop icon (shown when recording) -->
+					<svg class="stt-stop-icon h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+						<rect x="6" y="6" width="12" height="12" rx="2"></rect>
+					</svg>
+				</button>
+				<button type="submit" class="btn btn-primary btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0" title="Send message">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+						<path d="M2 3l20 9-20 9 5-9-5-9z"></path>
+					</svg>
+				</button>
+			</div>
+		</div>
+	</form>
+	<!-- Shared input form scripts: Enter key, file upload, drag-and-drop -->
+	<script type="text/javascript">
+		(function() {
+			// Find our form by walking up from the script tag
+			var script = document.currentScript;
+			var form = script.previousElementSibling;
+			if (!form || form.tagName !== 'FORM') return;
+
+			var formId = form.id;
+			var inputId = form.querySelector('textarea[name="message"]').id;
+			var messageInput = document.getElementById(inputId);
+			var sessionInput = form.querySelector('input[name="attachment_session_id"]');
+			var fileInput = form.querySelector('input[type="file"]');
+			var preview = form.querySelector('[id$="-attachments-preview"]');
+			var listContainer = form.querySelector('[id$="-attachments-list"]');
+			var dropOverlay = form.querySelector('[id$="-drop-overlay"]');
+			var clearBtn = form.querySelector('[data-clear-func]');
+			var clearFuncName = clearBtn ? clearBtn.getAttribute('data-clear-func') : (formId + 'ClearAttachments');
+			var agentSelect = form.querySelector('select[id$="-agent-select"]');
+			var agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;
+			var modeSelect = form.querySelector('select[id$="-mode-select"]');
+			var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
+
+			// Clear attachments function (registered on window for onclick handlers)
+			window[clearFuncName] = function() {
+				if (preview) preview.classList.add('hidden');
+				if (listContainer) listContainer.innerHTML = '';
+				if (sessionInput) sessionInput.value = '';
+				if (fileInput) fileInput.value = '';
+			};
+
+			// Wire up the Clear All button
+			if (clearBtn) {
+				clearBtn.onclick = function() { window[clearFuncName](); };
+			}
+
+			// Enter key submission
+			if (messageInput) {
+				messageInput.addEventListener('keydown', function(e) {
+					if (e.key === 'Enter' && !e.shiftKey) {
+						e.preventDefault();
+						form.requestSubmit();
+					}
+				});
+			}
+
+			// Model selector -> hidden input sync + localStorage persistence
+			var projectIdInput = form.querySelector('input[name="_project_id"]');
+			var projectId = projectIdInput ? projectIdInput.value : '';
+			var modelStorageKey = projectId ? 'chat-model-' + projectId : '';
+			var modeStorageKey = projectId ? 'chat-mode-' + projectId : '';
+
+			if (agentSelect && agentInput) {
+				// Restore persisted selection
+				if (modelStorageKey) {
+					var saved = localStorage.getItem(modelStorageKey);
+					if (saved) {
+						// Verify the saved option still exists in the dropdown
+						var optExists = Array.from(agentSelect.options).some(function(opt) { return opt.value === saved; });
+						if (optExists) {
+							agentSelect.value = saved;
+							agentInput.value = saved;
+						} else {
+							localStorage.removeItem(modelStorageKey);
+						}
+					}
+				}
+				agentSelect.addEventListener('change', function() {
+					agentInput.value = this.value;
+					if (modelStorageKey) {
+						localStorage.setItem(modelStorageKey, this.value);
+					}
+				});
+			}
+
+			// Chat mode selector -> hidden input sync + localStorage persistence
+			if (modeSelect && modeInput) {
+				// Ensure UI reflects current hidden default first
+				if (modeInput.value) {
+					modeSelect.value = modeInput.value;
+				}
+
+				// Restore persisted selection
+				if (modeStorageKey) {
+					var savedMode = localStorage.getItem(modeStorageKey);
+					if (savedMode) {
+						var modeExists = Array.from(modeSelect.options).some(function(opt) { return opt.value === savedMode; });
+						if (modeExists) {
+							modeSelect.value = savedMode;
+							modeInput.value = savedMode;
+						} else {
+							localStorage.removeItem(modeStorageKey);
+						}
+					}
+				}
+
+				modeSelect.addEventListener('change', function() {
+					modeInput.value = this.value;
+					if (modeStorageKey) {
+						localStorage.setItem(modeStorageKey, this.value);
+					}
+				});
+			}
+
+			function formatBytes(bytes) {
+				if (bytes < 1024) return bytes + ' B';
+				var k = 1024;
+				var sizes = ['KB', 'MB', 'GB'];
+				var i = Math.floor(Math.log(bytes) / Math.log(k));
+				return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i - 1];
+			}
+
+			async function handleFiles(files) {
+				if (files.length === 0) return;
+				if (files.length > 3) {
+					alert('Maximum 3 files allowed');
+					return;
+				}
+				var maxSize = 10 * 1024 * 1024;
+				for (var j = 0; j < files.length; j++) {
+					if (files[j].size > maxSize) {
+						alert('File "' + files[j].name + '" exceeds 10MB limit');
+						return;
+					}
+				}
+				var formData = new FormData();
+				files.forEach(function(file) { formData.append('files', file); });
+				try {
+					var response = await fetch('/chat/attachments', {
+						method: 'POST',
+						body: formData
+					});
+					if (!response.ok) {
+						var error = await response.text();
+						alert('Upload failed: ' + error);
+						return;
+					}
+					var result = await response.json();
+					sessionInput.value = result.session_id;
+					preview.classList.remove('hidden');
+					listContainer.innerHTML = '';
+					result.attachments.forEach(function(att) {
+						var div = document.createElement('div');
+						div.className = 'flex items-center gap-2 text-sm';
+						div.innerHTML = '<svg class="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg><span class="font-medium">' + att.filename + '</span><span class="text-xs opacity-60">' + formatBytes(att.size) + '</span>';
+						listContainer.appendChild(div);
+					});
+					// Auto-scroll to show the attachment preview after upload
+					requestAnimationFrame(function() {
+						// Find the chat messages container (works for both /chat and task thread)
+						var chatMessages = document.getElementById('chat-messages') || document.getElementById('task-thread-messages');
+						if (chatMessages && window.chatAutoScroll) {
+							window.chatAutoScroll.scrollToBottom(chatMessages, true);
+						}
+					});
+				} catch (error) {
+					console.error('Upload error:', error);
+					alert('Upload failed: ' + error.message);
+				}
+			}
+
+			// File input handler
+			if (fileInput) {
+				fileInput.addEventListener('change', function(e) {
+					handleFiles(Array.from(e.target.files));
+					e.target.value = '';
+				});
+			}
+
+			// Drag-and-drop
+			var dragCounter = 0;
+			form.addEventListener('dragenter', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				dragCounter++;
+				if (dropOverlay) dropOverlay.classList.remove('hidden');
+			});
+			form.addEventListener('dragover', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+			});
+			form.addEventListener('dragleave', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				dragCounter--;
+				if (dragCounter <= 0) {
+					dragCounter = 0;
+					if (dropOverlay) dropOverlay.classList.add('hidden');
+				}
+			});
+			form.addEventListener('drop', function(e) {
+				e.preventDefault();
+				e.stopPropagation();
+				dragCounter = 0;
+				if (dropOverlay) dropOverlay.classList.add('hidden');
+				var files = Array.from(e.dataTransfer.files);
+				if (files.length > 0) handleFiles(files);
+			});
+
+			// Speech-to-text via Web Speech API with audio level detection
+			(function() {
+				var micBtn = form.querySelector('.stt-btn');
+				if (!micBtn || !messageInput) return;
+
+				var micIcon = micBtn.querySelector('.stt-mic-icon');
+				var stopIcon = micBtn.querySelector('.stt-stop-icon');
+				var recognition = null;
+				var isRecording = false;
+				var manualStop = false;
+
+				// Audio analysis for silence detection
+				var audioContext = null;
+				var audioAnalyzer = null;
+				var audioStream = null;
+				var silenceTimer = null;
+				var silenceThreshold = 2000; // 2 seconds like Chrome plugin
+				var audioLevel = 0;
+				var countdownInterval = null;
+				var countdownSeconds = 0;
+
+				// Speech transcription state
+				var finalTranscript = '';
+				var startPos = 0;
+				var existingText = '';
+				var initialValue = '';
+				var prefix = '';
+				var suffix = '';
+
+				// Check browser support
+				var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+				if (!SpeechRecognition) {
+					micBtn.title = 'Speech-to-text not supported in this browser';
+					micBtn.classList.add('opacity-20', 'cursor-not-allowed');
+					micBtn.classList.remove('hover:opacity-100', 'hover:bg-base-300');
+					micBtn.setAttribute('aria-label', 'Speech-to-text not supported');
+					micBtn.onclick = function() {
+						alert('Speech-to-text is not supported in this browser. Please use Chrome, Edge, or Safari.');
+					};
+					return;
+				}
+
+				function startRecording() {
+					recognition = new SpeechRecognition();
+					recognition.continuous = true;
+					recognition.interimResults = true;
+					recognition.lang = navigator.language || 'en-US';
+
+					finalTranscript = '';
+					startPos = messageInput.selectionStart || messageInput.value.length;
+					existingText = messageInput.value;
+					initialValue = messageInput.value;
+					manualStop = false;
+
+					// Insert at cursor position or append
+					prefix = existingText.substring(0, startPos);
+					suffix = existingText.substring(startPos);
+					if (prefix.length > 0 && !prefix.endsWith(' ') && !prefix.endsWith('\n')) {
+						prefix += ' ';
+					}
+
+					recognition.onstart = function() {
+						console.log('[STT] Recognition started');
+						// Start audio analysis for silence detection
+						startAudioAnalysis();
+					};
+
+					recognition.onresult = function(event) {
+						var interimTranscript = '';
+						for (var i = event.resultIndex; i < event.results.length; i++) {
+							var transcript = event.results[i][0].transcript;
+							if (event.results[i].isFinal) {
+								finalTranscript += transcript + ' ';
+							} else {
+								interimTranscript += transcript;
+							}
+						}
+						// Show interim + final results in the textarea
+						messageInput.value = prefix + finalTranscript + interimTranscript + suffix;
+						// Trigger input event for draft persistence
+						messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+					};
+
+					recognition.onerror = function(event) {
+						if (event.error === 'not-allowed') {
+							alert('Microphone access was denied. Please allow microphone access in your browser settings.');
+						} else if (event.error === 'no-speech') {
+							// Silence detected - this is normal, don't alert
+						} else if (event.error !== 'aborted') {
+							console.error('Speech recognition error:', event.error);
+						}
+						stopListening();
+					};
+
+					recognition.onend = function() {
+						console.log('[STT] Recognition ended, manualStop=' + manualStop);
+						// If continuous mode, restart unless manually stopped
+						if (isRecording && !manualStop) {
+							try {
+								recognition.start();
+							} catch (e) {
+								console.error('[STT] Failed to restart recognition:', e);
+								stopListening();
+							}
+						}
+					};
+
+					try {
+						recognition.start();
+						isRecording = true;
+						micBtn.classList.add('stt-recording');
+						micBtn.classList.remove('opacity-50');
+						micBtn.setAttribute('aria-label', 'Stop recording');
+						micBtn.title = 'Stop recording';
+						if (micIcon) micIcon.classList.add('hidden');
+						if (stopIcon) stopIcon.classList.remove('hidden');
+					} catch (err) {
+						console.error('Failed to start speech recognition:', err);
+						alert('Failed to start speech recognition. Please try again.');
+					}
+				}
+
+				function startAudioAnalysis() {
+					if (audioContext) return;
+
+					navigator.mediaDevices.getUserMedia({ audio: true })
+						.then(function(stream) {
+							audioStream = stream;
+							audioContext = new (window.AudioContext || window.webkitAudioContext)();
+							audioAnalyzer = audioContext.createAnalyser();
+							audioAnalyzer.fftSize = 2048;
+
+							var source = audioContext.createMediaStreamSource(stream);
+							source.connect(audioAnalyzer);
+
+							// Start monitoring audio levels
+							monitorAudioLevel();
+						})
+						.catch(function(err) {
+							console.error('[STT] Failed to start audio analysis:', err);
+							// Don't stop voice recognition if audio analysis fails
+						});
+				}
+
+				function monitorAudioLevel() {
+					if (!audioAnalyzer || !isRecording) return;
+
+					var bufferLength = audioAnalyzer.frequencyBinCount;
+					var dataArray = new Uint8Array(bufferLength);
+
+					var checkLevel = function() {
+						if (!isRecording || !audioAnalyzer) return;
+
+						audioAnalyzer.getByteFrequencyData(dataArray);
+
+						// Calculate average volume
+						var sum = dataArray.reduce(function(a, b) { return a + b; }, 0);
+						audioLevel = sum / bufferLength;
+
+						// Silence threshold: if volume is below 10 (very quiet)
+						var isSilent = audioLevel < 10;
+
+						if (isSilent) {
+							// Start or continue silence timer
+							if (!silenceTimer) {
+								startSilenceTimer();
+							}
+						} else {
+							// Reset silence timer if user is speaking
+							clearSilenceTimer();
+							clearCountdown();
+						}
+
+						// Continue monitoring
+						requestAnimationFrame(checkLevel);
+					};
+
+					checkLevel();
+				}
+
+				function startSilenceTimer() {
+					if (silenceTimer) return;
+
+					console.log('[STT] Silence detected, starting timer...');
+
+					// Start countdown visual feedback
+					countdownSeconds = Math.ceil(silenceThreshold / 1000);
+					startCountdown();
+
+					silenceTimer = setTimeout(function() {
+						console.log('[STT] Silence threshold reached, auto-submitting...');
+						autoSubmitVoiceFeedback();
+					}, silenceThreshold);
+				}
+
+				function clearSilenceTimer() {
+					if (silenceTimer) {
+						clearTimeout(silenceTimer);
+						silenceTimer = null;
+					}
+				}
+
+				function startCountdown() {
+					clearCountdown();
+
+					updateCountdownDisplay();
+
+					countdownInterval = setInterval(function() {
+						countdownSeconds--;
+						if (countdownSeconds <= 0) {
+							clearCountdown();
+						} else {
+							updateCountdownDisplay();
+						}
+					}, 1000);
+				}
+
+				function updateCountdownDisplay() {
+					if (countdownSeconds > 0) {
+						micBtn.title = 'Auto-send in ' + countdownSeconds + 's...';
+					} else {
+						micBtn.title = 'Recording...';
+					}
+				}
+
+				function clearCountdown() {
+					if (countdownInterval) {
+						clearInterval(countdownInterval);
+						countdownInterval = null;
+					}
+					countdownSeconds = 0;
+					if (isRecording) {
+						micBtn.title = 'Recording...';
+					}
+				}
+
+				function stopAudioAnalysis() {
+					if (audioContext) {
+						audioContext.close();
+						audioContext = null;
+					}
+					if (audioStream) {
+						audioStream.getTracks().forEach(function(track) { track.stop(); });
+						audioStream = null;
+					}
+					audioAnalyzer = null;
+					audioLevel = 0;
+				}
+
+				function autoSubmitVoiceFeedback() {
+					// Stop listening first
+					stopListening();
+
+					// Wait a moment for final transcript to be processed
+					setTimeout(function() {
+						// Submit the feedback if there's text
+						if (messageInput.value.trim()) {
+							form.requestSubmit();
+						}
+					}, 500);
+				}
+
+				function stopListening() {
+					isRecording = false;
+					clearSilenceTimer();
+					clearCountdown();
+					stopAudioAnalysis();
+
+					if (recognition) {
+						try { recognition.stop(); } catch (e) { /* ignore */ }
+						recognition = null;
+					}
+
+					micBtn.classList.remove('stt-recording');
+					micBtn.classList.add('opacity-50');
+					micBtn.setAttribute('aria-label', 'Start speech to text');
+					micBtn.title = 'Speech to text';
+					if (micIcon) micIcon.classList.remove('hidden');
+					if (stopIcon) stopIcon.classList.add('hidden');
+				}
+
+				micBtn.addEventListener('click', function(e) {
+					e.preventDefault();
+					if (isRecording) {
+						manualStop = true;
+						stopListening();
+					} else {
+						startRecording();
+					}
+				});
+
+				// Stop recording on form submit
+				form.addEventListener('submit', function() {
+					if (isRecording) {
+						manualStop = true;
+						stopListening();
+					}
+				});
+			})();
+
+			// Clear input and attachments after successful submission
+			form.addEventListener('htmx:afterRequest', function(event) {
+				if (event.detail.successful) {
+					var xhr = event.detail.xhr;
+					var responseText = xhr ? (xhr.responseText || '') : '';
+					// Keep user draft intact when the handler intentionally returns no content
+					// (e.g. model-setup guard toasts) so users don't lose their message.
+					if (responseText.trim() !== '') {
+						if (messageInput) messageInput.value = '';
+						if (window[clearFuncName]) window[clearFuncName]();
+					}
+				}
+			});
+		})();
+	</script>
+}
+
+// ChatAutoScrollScript emits the shared auto-scroll utility and marker cleaning JS.
+// Should be included once per page that uses chat components.
+templ ChatAutoScrollScript() {
+	<script>
+		// Shared auto-scroll utility
+		window.chatAutoScroll = {
+			isNearBottom: function(element) {
+				if (!element) return false;
+				var threshold = 100;
+				return element.scrollHeight - element.scrollTop - element.clientHeight < threshold;
+			},
+			scrollToBottom: function(element, smooth) {
+				if (!element) return;
+				element.scrollTo({
+					top: element.scrollHeight,
+					behavior: smooth ? 'smooth' : 'auto'
+				});
+			},
+			autoScrollIfNearBottom: function(element) {
+				if (this.isNearBottom(element)) {
+					this.scrollToBottom(element, true);
+				}
+			}
+		};
+		// Alias for backward compatibility (task thread used a separate namespace)
+		window.threadAutoScroll = window.chatAutoScroll;
+
+		// ScrollTracker: distinguishes between user-initiated scroll events and programmatic/content-driven ones
+		// - User-initiated: wheel, touchmove, pointer drag on scrollbar → sets userScrolledUp flag
+		// - Content-driven: programmatic scrollTo, content growth → does NOT set flag
+		// - Flag is reset when: (1) user sends message via resetOnUserSend(), (2) user scrolls back to bottom
+		window.ChatScrollTracker = function(element) {
+			this.element = element;
+			this.userScrolledUp = false;
+			this._userInteracting = false;
+			this._userInteractTimeout = null;
+			this._handlers = {};
+			this._init();
+		};
+
+		window.ChatScrollTracker.prototype = {
+			_init: function() {
+				var self = this;
+				if (!this.element) return;
+
+				// Detect user interaction: wheel events (mouse wheel, trackpad)
+				this._handlers.wheel = function(e) {
+					// Mark that user is physically interacting with the scroll area
+					self._userInteracting = true;
+					// Keep the flag set for 100ms after the last wheel event (captures momentum scrolling)
+					if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
+					self._userInteractTimeout = setTimeout(function() {
+						self._userInteracting = false;
+					}, 100);
+				};
+
+				// Detect user interaction: touch/pointer drag (scrollbar drag on touch devices)
+				this._handlers.pointerdown = function(e) {
+					// Only for scrollbar area (right side of the element)
+					var rect = self.element.getBoundingClientRect();
+					// Check if pointer is within ~20px of the right edge (approximate scrollbar width)
+					if (e.clientX > rect.right - 20) {
+						self._userInteracting = true;
+						if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
+						self._userInteractTimeout = setTimeout(function() {
+							self._userInteracting = false;
+						}, 100);
+					}
+				};
+
+				this._handlers.pointerup = function() {
+					// Continue marking interaction for a bit after pointer up
+					if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
+					self._userInteractTimeout = setTimeout(function() {
+						self._userInteracting = false;
+					}, 100);
+				};
+
+				// Detect user-initiated scrolls and update flag accordingly
+				// Called AFTER user interaction events to correlate with scroll position
+				this._handlers.scroll = function(e) {
+					var isNear = window.chatAutoScroll.isNearBottom(self.element);
+
+					if (self._userInteracting) {
+						// User is actively scrolling
+						if (!isNear) {
+							self.userScrolledUp = true;
+						} else {
+							// User scrolled back to bottom, reset the flag
+							self.userScrolledUp = false;
+						}
+					} else {
+						// Programmatic scroll or delayed scroll event
+						// Always clear the flag if we're at the bottom (re-enables auto-scroll)
+						if (isNear) {
+							self.userScrolledUp = false;
+						}
+						// Don't set the flag if not at bottom - preserve user's scroll-up state
+					}
+				};
+
+				// Attach event listeners
+				this.element.addEventListener('wheel', this._handlers.wheel, { passive: true });
+				this.element.addEventListener('pointerdown', this._handlers.pointerdown, { passive: true });
+				this.element.addEventListener('pointerup', this._handlers.pointerup, { passive: true });
+				this.element.addEventListener('scroll', this._handlers.scroll, { passive: true });
+			},
+
+			// Check if auto-scroll should be enabled (i.e., user hasn't manually scrolled up)
+			shouldAutoScroll: function() {
+				return !this.userScrolledUp;
+			},
+
+			// Reset the flag when user sends a message (Rule 1)
+			resetOnUserSend: function() {
+				this.userScrolledUp = false;
+				// Also immediately scroll to bottom when user sends
+				if (this.element) {
+					window.chatAutoScroll.scrollToBottom(this.element, false);
+				}
+			},
+
+			// Scroll to bottom if flag allows it
+			autoScroll: function() {
+				if (this.shouldAutoScroll() && this.element) {
+					window.chatAutoScroll.scrollToBottom(this.element, true);
+				}
+			},
+
+			// Clean up event listeners
+			destroy: function() {
+				if (!this.element) return;
+				this.element.removeEventListener('wheel', this._handlers.wheel);
+				this.element.removeEventListener('pointerdown', this._handlers.pointerdown);
+				this.element.removeEventListener('pointerup', this._handlers.pointerup);
+				this.element.removeEventListener('scroll', this._handlers.scroll);
+				if (this._userInteractTimeout) clearTimeout(this._userInteractTimeout);
+			}
+		};
+
+		// Persistent store for thinking section open states (survives DOM replacement by morph:outerHTML)
+		if (!window._thinkingOpenStates) window._thinkingOpenStates = {};
+
+		// Generate a stable key for a container to persist thinking states across morph swaps.
+		// Uses container ID (streaming-message-{execID}) or data-raw-content fingerprint.
+		function _thinkingStateKey(container) {
+			if (container.id) return container.id;
+			var raw = container.getAttribute('data-raw-content');
+			if (raw) return 'raw:' + raw.substring(0, 200);
+			// Fallback: use position among chat-stream-content siblings
+			var parent = container.parentElement;
+			if (parent) {
+				var siblings = parent.querySelectorAll('.chat-stream-content, [data-streaming-resume]');
+				for (var i = 0; i < siblings.length; i++) {
+					if (siblings[i] === container) return 'pos:' + i;
+				}
+			}
+			return '';
+		}
+
+		// Shared streaming content renderer — parses [Thinking] and [Using tool:] markers
+		// into styled DOM elements matching Claude Code VSCode extension style.
+		// Tools: flat row with bold name + checkmark (completed) or spinner (active).
+		// Thinking: collapsible <details> with italic label and markdown content.
+		window.renderStreamingContent = function(container, textBuffer) {
+			// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
+			var displayNames = {
+				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
+				'bash': 'Bash', 'grep_search': 'Grep', 'list_files': 'List Files'
+			};
+			// Normalize provider-specific tool aliases to canonical IDs so
+			// [Using tool: X] can be linked with [Tool X done] across providers.
+			var normalizedToolNames = {
+				'Read': 'read_file',
+				'Write': 'write_file',
+				'Edit': 'edit_file',
+				'Bash': 'bash',
+				'Grep': 'grep_search',
+				'Glob': 'list_files',
+				'List Files': 'list_files',
+				'Search': 'grep_search'
+			};
+			function normalizeToolName(raw) {
+				if (!raw) return raw;
+				return normalizedToolNames[raw] || raw;
+			}
+			function toolDisplayName(raw) {
+				var normalized = normalizeToolName(raw);
+				return displayNames[normalized] || displayNames[raw] || raw;
+			}
+			function currentChatMode() {
+				var form = document.getElementById('chat-form');
+				if (!form) return '';
+				var modeInput = form.querySelector('input[name="chat_mode"]');
+				if (modeInput && modeInput.value) return modeInput.value;
+				var modeSelect = form.querySelector('select[id$="-mode-select"]');
+				if (modeSelect && modeSelect.value) return modeSelect.value;
+				return '';
+			}
+			function shouldHidePlanToolCard(seg) {
+				// Keep tool cards visible outside /chat or outside plan mode.
+				// This only suppresses noisy read-only repo exploration cards in /chat plan mode.
+				if (!container || !container.closest || !container.closest('#chat-messages')) return false;
+				// Preserve persisted chat history rendering on refresh: historical assistant
+				// bubbles use data-raw-content without data-exec-id and should render
+				// exactly as stored regardless of the current mode selector value.
+				var isHistoryRender = container.hasAttribute('data-raw-content') && !container.hasAttribute('data-exec-id');
+				if (isHistoryRender) return false;
+				if (currentChatMode() !== 'plan') return false;
+				var normalized = seg.normalizedName || normalizeToolName(seg.name);
+				return normalized === 'read_file' || normalized === 'list_files' || normalized === 'grep_search';
+			}
+
+			var thinkingPattern = /\[Thinking\]([\s\S]*?)(?:\[\/Thinking\]|$)/g;
+			var toolUsingPattern = /\[Using tool:\s*([^\]]+)\]/g;
+			var toolResultBlockPattern = /\[Tool\s+(\S+)\s+(done|error)\]\n([\s\S]*?)\n\[\/Tool\]\n?/g;
+			var toolResultLegacyPattern = /\[Tool\s+(\S+)\s+(done|error):\s*([^\n]*)\]\n?/g;
+
+			// Pre-strip protocol artifact lines (e.g. multi_tool_use.parallel fragments)
+			// before segment parsing so they don't appear as leaked text between tool cards
+			textBuffer = textBuffer.replace(/^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$/gm, '');
+
+			var allMatches = [];
+			var match;
+
+			while ((match = thinkingPattern.exec(textBuffer)) !== null) {
+				allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
+			}
+			while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
+				var raw = match[1].trim();
+				var pipeIdx = raw.indexOf(' | ');
+				var toolName = pipeIdx >= 0 ? raw.substring(0, pipeIdx) : raw;
+				var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
+				allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
+			}
+			while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
+				allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+			}
+			while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
+				var dominated = allMatches.some(function(m) { return m.index <= match.index && m.index + m.length >= match.index + match[0].length; });
+				if (!dominated) {
+					allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+				}
+			}
+
+			allMatches.sort(function(a, b) { return a.index - b.index; });
+
+			var segments = [];
+			var lastIndex = 0;
+			allMatches.forEach(function(m) {
+				if (m.index < lastIndex) return;
+				if (m.index > lastIndex) {
+					segments.push({ type: 'text', content: textBuffer.substring(lastIndex, m.index) });
+				}
+				segments.push(m);
+				lastIndex = m.index + m.length;
+			});
+			if (lastIndex < textBuffer.length) {
+				segments.push({ type: 'text', content: textBuffer.substring(lastIndex) });
+			}
+
+			// Link tool_result → preceding [Using tool:] with same normalized name
+			for (var si = 0; si < segments.length; si++) {
+				if (segments[si].type === 'tool_result') {
+					var resultName = segments[si].normalizedName || segments[si].name;
+					for (var sk = si - 1; sk >= 0; sk--) {
+						if (segments[sk].type !== 'using' || segments[sk].resultLinked) continue;
+						var usingName = segments[sk].normalizedName || segments[sk].name;
+						if (usingName === resultName) {
+							segments[sk].resultLinked = true;
+							segments[sk].resultStatus = segments[si].status;
+							segments[sk].resultOutput = segments[si].output || '';
+							break;
+						}
+					}
+				}
+			}
+			// Mark tools as completed if anything follows them
+			for (var si = 0; si < segments.length; si++) {
+				if (segments[si].type !== 'using') continue;
+				if (segments[si].resultLinked) { segments[si].completed = true; continue; }
+				for (var sj = si + 1; sj < segments.length; sj++) {
+					if (segments[sj].type !== 'text' || segments[sj].content.trim()) {
+						segments[si].completed = true;
+						break;
+					}
+				}
+			}
+
+			// Save open state of existing thinking sections before clearing.
+			// Uses both a local array (fast path for same-call re-renders) and a
+			// persistent window._thinkingOpenStates map (survives morph:outerHTML DOM replacement).
+			var containerKey = _thinkingStateKey(container);
+			var prevThinkingStates = [];
+			container.querySelectorAll('details.stream-thinking').forEach(function(d) {
+				prevThinkingStates.push(d.open);
+			});
+			if (containerKey && prevThinkingStates.length > 0) {
+				window._thinkingOpenStates[containerKey] = prevThinkingStates.slice();
+			}
+			// If no local states found (DOM was replaced by morph), restore from persistent store
+			if (prevThinkingStates.length === 0 && containerKey && window._thinkingOpenStates[containerKey]) {
+				prevThinkingStates = window._thinkingOpenStates[containerKey];
+			}
+
+			container.innerHTML = '';
+			// Remove pre-wrap styling from streaming container since we're creating
+			// properly-styled .chat-markdown children (pre-wrap leaks via inheritance
+			// and causes extra spacing in markdown/task-link elements)
+			container.classList.remove('whitespace-pre-wrap');
+
+			var chevronSvg = '<svg class="thinking-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>';
+			var checkSvg = '<svg class="tool-status-icon tool-status-done" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>';
+			var errorSvg = '<svg class="tool-status-icon tool-status-error" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>';
+
+			var pendingText = '';
+			var pendingThinking = []; // accumulate consecutive thinking blocks
+			function flushThinking() {
+				if (pendingThinking.length === 0) return;
+				// Merge all consecutive thinking blocks into one collapsible element
+				var merged = pendingThinking.join('\n\n');
+				pendingThinking = [];
+				var details = document.createElement('details');
+				details.className = 'stream-thinking';
+				// Update persistent store when user toggles thinking section
+				details.addEventListener('toggle', function() {
+					if (!containerKey) return;
+					var states = [];
+					container.querySelectorAll('details.stream-thinking').forEach(function(d) {
+						states.push(d.open);
+					});
+					window._thinkingOpenStates[containerKey] = states;
+				});
+				var summary = document.createElement('summary');
+				summary.innerHTML = chevronSvg + '<span>Thinking\u2026</span>';
+				var body = document.createElement('div');
+				body.className = 'stream-thinking-body';
+				if (window.renderChatMarkdown) {
+					body.innerHTML = window.renderChatMarkdown(merged);
+				} else {
+					body.textContent = merged;
+					body.style.whiteSpace = 'pre-wrap';
+				}
+				details.appendChild(summary);
+				details.appendChild(body);
+				container.appendChild(details);
+			}
+			function flushText() {
+				if (!pendingText) return;
+				// Strip action markers ([CREATE_TASK], [EDIT_TASK], etc.) before rendering
+				var t = pendingText;
+				if (window.cleanActionMarkers) t = window.cleanActionMarkers(t);
+				else t = t.trim();
+				if (!t) { pendingText = ''; return; }
+				var div = document.createElement('div');
+				div.className = 'chat-markdown';
+				if (window.renderChatMarkdown) {
+					div.innerHTML = window.renderChatMarkdown(t);
+					if (window.addCodeCopyButtons) window.addCodeCopyButtons(div);
+				} else {
+					div.textContent = t;
+					div.classList.add('whitespace-pre-wrap');
+				}
+				container.appendChild(div);
+				pendingText = '';
+			}
+
+			// Helper: build tool body grid with IN/OUT rows
+			function buildToolBody(seg) {
+				var hasIn = false;
+				var inLabel = '';
+				var inContent = '';
+				var dn = toolDisplayName(seg.name);
+
+				// Extract IN content based on tool type
+				if (dn === 'Bash' && seg.secondary) {
+					hasIn = true;
+					inLabel = 'IN';
+					inContent = seg.secondary;
+				} else if (dn === 'Grep' && seg.secondary) {
+					hasIn = true;
+					inLabel = 'IN';
+					inContent = seg.secondary;
+				}
+
+				// Don't show output body for Read/List Files/Write — not useful
+				var suppressOut = (dn === 'Read' || dn === 'List Files' || dn === 'Write');
+				var hasOut = !suppressOut && seg.resultOutput && seg.resultOutput.trim();
+
+				if (!hasIn && !hasOut) return null;
+
+				var body = document.createElement('div');
+				body.className = 'stream-tool-body';
+				var grid = document.createElement('div');
+				grid.className = 'stream-tool-body-grid';
+
+				if (hasIn) {
+					var inRow = document.createElement('div');
+					inRow.className = 'stream-tool-body-row';
+					var inLbl = document.createElement('div');
+					inLbl.className = 'stream-tool-body-label';
+					inLbl.textContent = inLabel;
+					var inVal = document.createElement('div');
+					inVal.className = 'stream-tool-body-content';
+					var inPre = document.createElement('pre');
+					inPre.textContent = inContent;
+					inVal.appendChild(inPre);
+					inRow.appendChild(inLbl);
+					inRow.appendChild(inVal);
+					grid.appendChild(inRow);
+				}
+
+				if (hasOut) {
+					var outRow = document.createElement('div');
+					outRow.className = 'stream-tool-body-row';
+					var outLbl = document.createElement('div');
+					outLbl.className = 'stream-tool-body-label';
+					outLbl.textContent = 'OUT';
+					var outVal = document.createElement('div');
+					outVal.className = 'stream-tool-body-content';
+					var outPre = document.createElement('pre');
+					outPre.textContent = seg.resultOutput.trim();
+					outVal.appendChild(outPre);
+					outRow.appendChild(outLbl);
+					outRow.appendChild(outVal);
+					grid.appendChild(outRow);
+				}
+
+				body.appendChild(grid);
+				return body;
+			}
+
+			segments.forEach(function(seg, idx) {
+				if (seg.type === 'text') {
+					// If we're accumulating thinking and this text is a short fragment
+					// between thinking blocks, absorb it into thinking instead of
+					// rendering it as visible text (these are typically tool output
+					// fragments that leaked between thinking blocks).
+					if (pendingThinking.length > 0) {
+						var nextThinking = false;
+						for (var ni = idx + 1; ni < segments.length; ni++) {
+							if (segments[ni].type === 'thinking') { nextThinking = true; break; }
+							if (segments[ni].type !== 'text') break;
+						}
+						if (nextThinking && seg.content.trim().length < 100) {
+							// Absorb short inter-thinking text into thinking context
+							var trimmed = seg.content.trim();
+							if (trimmed) pendingThinking.push(trimmed);
+							return;
+						}
+					}
+					pendingText += seg.content;
+					return;
+				}
+				if (seg.type === 'tool_result') return;
+
+				if (seg.type === 'thinking') {
+					var c = seg.content.trim();
+					if (c) {
+						// If there's pending text, flush it before starting thinking
+						if (pendingText.trim()) {
+							flushThinking();
+							flushText();
+						}
+						pendingThinking.push(c);
+					}
+					return;
+				}
+
+				// Non-thinking, non-text segment — flush accumulated thinking and text
+				flushThinking();
+				flushText();
+
+				if (seg.type === 'using') {
+					if (shouldHidePlanToolCard(seg)) return;
+					var wrap = document.createElement('div');
+					wrap.className = 'stream-tool';
+
+					// Header: status icon or spinner, display name, secondary
+					var header = document.createElement('div');
+					header.className = 'stream-tool-summary';
+					var headerHtml = '';
+					if (seg.completed) {
+						headerHtml += (seg.resultStatus === 'error') ? errorSvg : checkSvg;
+					} else {
+						headerHtml += '<span class="loading loading-spinner tool-spinner"></span>';
+					}
+					var dn = toolDisplayName(seg.name);
+					headerHtml += '<span class="tool-name-text">' + dn + '</span>';
+					// Show secondary in header for file-based tools (filename), but NOT for bash/grep
+					// (those show their input in the IN row instead to avoid duplication)
+					if (seg.secondary && dn !== 'Bash' && dn !== 'Grep') {
+						headerHtml += '<span class="tool-name-secondary">' + seg.secondary + '</span>';
+					}
+					header.innerHTML = headerHtml;
+					wrap.appendChild(header);
+
+					// Body grid with IN/OUT rows
+					var toolBody = buildToolBody(seg);
+					if (toolBody) wrap.appendChild(toolBody);
+
+					container.appendChild(wrap);
+				}
+			});
+			flushThinking();
+			flushText();
+
+			// Restore open state of thinking sections from before re-render
+			if (prevThinkingStates.length > 0) {
+				var newThinkingSections = container.querySelectorAll('details.stream-thinking');
+				for (var ti = 0; ti < newThinkingSections.length && ti < prevThinkingStates.length; ti++) {
+					if (prevThinkingStates[ti]) {
+						newThinkingSections[ti].open = true;
+					}
+				}
+			}
+			// Persist current states to window store (update after restoring so new sections are tracked)
+			if (containerKey) {
+				var currentStates = [];
+				container.querySelectorAll('details.stream-thinking').forEach(function(d) {
+					currentStates.push(d.open);
+				});
+				if (currentStates.length > 0) {
+					window._thinkingOpenStates[containerKey] = currentStates;
+				}
+			}
+
+			// Convert [TASK_ID:xxx] references to clickable links after rendering
+			if (window.convertTaskLinksInMessage) {
+				window.convertTaskLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);
+			}
+			if (window.convertTaskEditLinksInMessage) {
+				window.convertTaskEditLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);
+			}
+		};
+
+		// Clean action markers from chat message content (shared between chat and task thread)
+		window.cleanActionMarkers = function(text, noTrim) {
+			if (!text) return text;
+			text = text.replace(/\[CREATE_TASK\][\s\S]*?\[\/CREATE_TASK\]/g, '');
+			text = text.replace(/\[EDIT_TASK\][\s\S]*?\[\/EDIT_TASK\]/g, '');
+			text = text.replace(/\[EXECUTE_TASKS\][\s\S]*?\[\/EXECUTE_TASKS\]/g, '');
+			text = text.replace(/\[VIEW_TASK_CHAT\][\s\S]*?\[\/VIEW_TASK_CHAT\]/g, '');
+			text = text.replace(/\[SEND_TO_TASK\][\s\S]*?\[\/SEND_TO_TASK\]/g, '');
+			text = text.replace(/\[SCHEDULE_TASK\][\s\S]*?\[\/SCHEDULE_TASK\]/g, '');
+			text = text.replace(/\[DELETE_SCHEDULE\][\s\S]*?\[\/DELETE_SCHEDULE\]/g, '');
+			text = text.replace(/\[MODIFY_SCHEDULE\][\s\S]*?\[\/MODIFY_SCHEDULE\]/g, '');
+			text = text.replace(/\[LIST_PERSONALITIES\]/g, '');
+			text = text.replace(/\[SET_PERSONALITY\][\s\S]*?\[\/SET_PERSONALITY\]/g, '');
+			text = text.replace(/\[LIST_MODELS\]/g, '');
+			text = text.replace(/\[VIEW_SETTINGS\]/g, '');
+			text = text.replace(/\[PROJECT_INFO\]/g, '');
+			text = text.replace(/\[LIST_AGENTS\]/g, '');
+			text = text.replace(/\[LIST_ALERTS\]/g, '');
+			text = text.replace(/\[CREATE_ALERT\][\s\S]*?\[\/CREATE_ALERT\]/g, '');
+			text = text.replace(/\[DELETE_ALERT\][\s\S]*?\[\/DELETE_ALERT\]/g, '');
+			text = text.replace(/\[TOGGLE_ALERT\][\s\S]*?\[\/TOGGLE_ALERT\]/g, '');
+			text = text.replace(/\[LIST_PROJECTS\]/g, '');
+			text = text.replace(/\[SWITCH_PROJECT\][\s\S]*?\[\/SWITCH_PROJECT\]/g, '');
+			text = text.replace(/\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*?)?\]/g, '');
+			text = text.replace(/\[Using tool:\s*[^\]]+\]/g, '');
+			text = text.replace(/\[Tool\s+\S+\s+(?:done|error)\]\n[\s\S]*?\n\[\/Tool\]\n?/g, '');
+			text = text.replace(/\[Tool\s+\S+\s+(?:done|error):[^\n]*\]\n?/g, '');
+			// Strip protocol artifact lines (e.g. multi_tool_use.parallel fragments
+			// that leak between tool calls when the LLM narrates malformed tool attempts)
+			text = text.replace(/^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$/gm, '');
+			var beforeThinking = text;
+			text = text.replace(/\n?\[Thinking\][\s\S]*?(?:\[\/Thinking\]\n?|$)/g, '');
+			// If stripping thinking left us empty but there was content, extract thinking text
+			if (text.trim() === '' && beforeThinking.trim() !== '') {
+				var extracted = [];
+				var re = /\[Thinking\]([\s\S]*?)(?:\[\/Thinking\]|$)/g;
+				var m;
+				while ((m = re.exec(beforeThinking)) !== null) {
+					var c = m[1].trim();
+					if (c) extracted.push(c);
+				}
+				if (extracted.length > 0) {
+					text = extracted.join('\n\n');
+					// Strip any embedded [Thinking]/[/Thinking] markers from extracted content
+					// (happens when thinking blocks are unclosed and the first block captures
+					// everything including subsequent markers)
+					text = text.replace(/\[Thinking\]/g, '').replace(/\[\/Thinking\]/g, '');
+				}
+			}
+			['Created ', 'Edited '].forEach(function(keyword) {
+				var marker = '\n---\n' + keyword;
+				var firstIdx = text.indexOf(marker);
+				var lastIdx = text.lastIndexOf(marker);
+				if (firstIdx !== -1 && firstIdx !== lastIdx) {
+					text = text.substring(0, firstIdx) + text.substring(lastIdx);
+				}
+			});
+			// Note: [TASK_ID:xxx] and [TASK_EDITED:xxx] are NOT stripped here.
+			// convertTaskLinksInMessage / convertTaskEditLinksInMessage convert them
+			// to clickable links. They get cleaned up after link conversion.
+			text = text.replace(/\n{3,}/g, '\n\n');
+			return noTrim ? text : text.trim();
+		};
+		// Alias for backward compatibility
+		window.cleanThreadMarkers = window.cleanActionMarkers;
+
+		// Apply action marker cleaning to a chat bubble element (walks text nodes, preserves DOM elements)
+		// Uses noTrim=true to preserve leading/trailing whitespace in individual text nodes,
+		// which is needed for whitespace-pre-wrap to render line breaks between DOM elements.
+		window.cleanBubbleContent = function(bubble) {
+			var contentDivs = bubble.querySelectorAll('.whitespace-pre-wrap');
+			contentDivs.forEach(function(div) {
+				var walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null);
+				var textNodes = [];
+				var node;
+				while (node = walker.nextNode()) {
+					textNodes.push(node);
+				}
+				textNodes.forEach(function(textNode) {
+					var original = textNode.textContent;
+					var cleaned = window.cleanActionMarkers(original, true);
+					if (cleaned !== original) {
+						textNode.textContent = cleaned;
+					}
+				});
+			});
+		};
+
+			// Clean all assistant messages in a container.
+			// Uses content signatures to avoid re-processing unchanged bubbles on each poll/morph swap.
+			window.cleanAssistantMessages = function(container) {
+				if (!container) return;
+				// Handle chat-stream-content elements with data-raw-content (rendered by ChatBubble for completed assistant messages).
+				// After morph:outerHTML replaces JS-formatted content with server-rendered empty divs,
+				// these need to be re-rendered using the raw content stored in the data attribute.
+				container.querySelectorAll('.chat-stream-content[data-raw-content]').forEach(function(el) {
+					var raw = el.getAttribute('data-raw-content') || '';
+					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
+					if (el.dataset.cleanedRaw === raw && hasRenderedContent) return;
+					if (raw && window.renderStreamingContent) {
+						window.renderStreamingContent(el, raw);
+					} else if (raw && window.renderChatMarkdown) {
+						el.className = 'chat-markdown';
+						el.innerHTML = window.renderChatMarkdown(raw);
+						if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
+					}
+					el.dataset.cleanedRaw = raw;
+					// After rendering, process task links and clean markers
+					var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
+					if (bubble) {
+						if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+						if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+						if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+					}
+				});
+				// Handle streaming resume containers with data-raw-content (rendered by ChatBubbleStreamingResume).
+				// After morph:outerHTML, the inline render script doesn't re-execute, so these need
+				// to be re-rendered using the raw content stored in the data attribute.
+				container.querySelectorAll('[data-streaming-resume][data-raw-content]').forEach(function(el) {
+					var raw = el.getAttribute('data-raw-content') || '';
+					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
+					if (el.dataset.cleanedRaw === raw && hasRenderedContent) return;
+					if (raw && window.renderStreamingContent) {
+						window.renderStreamingContent(el, raw);
+					} else if (raw && window.renderChatMarkdown) {
+						var div = document.createElement('div');
+						div.className = 'chat-markdown';
+						div.innerHTML = window.renderChatMarkdown(raw);
+						if (window.addCodeCopyButtons) window.addCodeCopyButtons(div);
+						el.innerHTML = '';
+						el.appendChild(div);
+					}
+					el.dataset.cleanedRaw = raw;
+				});
+				container.querySelectorAll('.chat-bubble-assistant-msg .whitespace-pre-wrap').forEach(function(div) {
+					var text = div.textContent || '';
+					if (div.dataset.cleanedText === text) return;
+					// Check if content has streaming markers that need rendering
+					if (text.indexOf('[Thinking]') >= 0 || text.indexOf('[Using tool:') >= 0) {
+						// Render streaming markers into styled DOM elements
+						if (window.renderStreamingContent) {
+							window.renderStreamingContent(div, text);
+							div.dataset.cleanedText = text;
+							return;
+						}
+					}
+					var walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null);
+					var textNodes = [];
+					var node;
+					while (node = walker.nextNode()) {
+						textNodes.push(node);
+					}
+					textNodes.forEach(function(textNode) {
+						var original = textNode.textContent;
+						var cleaned = window.cleanActionMarkers(original);
+						if (cleaned !== original) {
+							textNode.textContent = cleaned;
+						}
+					});
+					div.dataset.cleanedText = div.textContent || '';
+				});
+			};
+	</script>
+}
+
+// --- Go helper functions ---
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+func chatBubbleClass(role string) string {
+	if role == "User" {
+		return "chat-bubble-user-msg"
+	}
+	return "chat-bubble-assistant-msg"
+}
+
+// hasEarlierNonFollowup checks if there's a non-followup execution before currentIdx.
+// Used to deduplicate the task prompt: only the first non-followup shows the user bubble.
+func hasEarlierNonFollowup(execs []models.Execution, currentIdx int) bool {
+	for j := 0; j < currentIdx; j++ {
+		if !execs[j].IsFollowup {
+			return true
+		}
+	}
+	return false
+}
+
+// chatUserContent returns the display text for a user message in a chat thread.
+// For the first non-followup execution in a task context, it shows the task prompt.
+// For follow-up messages or when there's no task, it shows PromptSent.
+func chatUserContent(exec models.Execution, task *models.Task, execs []models.Execution, idx int) string {
+	if task != nil && !exec.IsFollowup && !hasEarlierNonFollowup(execs, idx) {
+		return task.Prompt
+	}
+	return exec.PromptSent
+}
+
+// IsImageMediaType checks if a media type is an image type.
+func IsImageMediaType(mediaType string) bool {
+	return strings.HasPrefix(mediaType, "image/")
+}
+
+// Regex patterns for cleaning action markers from display content (server-side).
+var (
+	reCreateTask  = regexp.MustCompile(`(?s)\[CREATE_TASK\].*?\[/CREATE_TASK\]`)
+	reEditTask    = regexp.MustCompile(`(?s)\[EDIT_TASK\].*?\[/EDIT_TASK\]`)
+	reExecTasks   = regexp.MustCompile(`(?s)\[EXECUTE_TASKS\].*?\[/EXECUTE_TASKS\]`)
+	reStatus      = regexp.MustCompile(`\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*?)?\]`)
+	reUsingTool   = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
+	reToolBlock   = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\]\n?[\s\S]*?\n?\[/Tool\]\n?`)
+	reToolDone    = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]]*\](?:\n)?`)
+	reProtocolArt = regexp.MustCompile(`(?m)^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$`)
+	reThinking    = regexp.MustCompile(`(?s)\n?\[Thinking\][\s\S]*?(?:\[/Thinking\]\n?|$)`)
+	reExcessLines = regexp.MustCompile(`\n{3,}`)
+)
+
+// CleanDisplayContent strips action markers from chat content for display.
+func CleanDisplayContent(text string) string {
+	if text == "" {
+		return text
+	}
+	text = reCreateTask.ReplaceAllString(text, "")
+	text = reEditTask.ReplaceAllString(text, "")
+	text = reExecTasks.ReplaceAllString(text, "")
+	text = reStatus.ReplaceAllString(text, "")
+	text = reUsingTool.ReplaceAllString(text, "")
+	text = reToolBlock.ReplaceAllString(text, "")
+	text = reToolDone.ReplaceAllString(text, "")
+	text = reProtocolArt.ReplaceAllString(text, "")
+
+	// Strip thinking blocks, but if that would leave the text empty,
+	// extract the thinking content as the display text (the model put
+	// its entire response inside a thinking block).
+	cleaned := reThinking.ReplaceAllString(text, "")
+	if strings.TrimSpace(cleaned) == "" && strings.TrimSpace(text) != "" {
+		text = extractThinkingContent(text)
+	} else {
+		text = cleaned
+	}
+
+	text = DedupTaskSummaries(text)
+	text = reExcessLines.ReplaceAllString(text, "\n\n")
+	return strings.TrimSpace(text)
+}
+
+// extractThinkingContent pulls the text from inside [Thinking]...[/Thinking]
+// blocks (or unclosed [Thinking]... to end of string). Used as a fallback when
+// the model's entire response is inside thinking blocks.
+// When thinking blocks are unclosed (no [/Thinking] marker — common with Claude CLI
+// extended thinking), the first [Thinking] captures everything to end-of-string,
+// which may include subsequent [Thinking] markers as raw text. We strip these
+// embedded markers so the extracted content is clean for display.
+func extractThinkingContent(text string) string {
+	var parts []string
+	for {
+		start := strings.Index(text, "[Thinking]")
+		if start == -1 {
+			break
+		}
+		after := text[start+len("[Thinking]"):]
+		end := strings.Index(after, "[/Thinking]")
+		var content string
+		if end != -1 {
+			content = after[:end]
+			text = after[end+len("[/Thinking]"):]
+		} else {
+			content = after
+			text = ""
+		}
+		content = strings.TrimSpace(content)
+		if content != "" {
+			parts = append(parts, content)
+		}
+	}
+	result := strings.Join(parts, "\n\n")
+	// Strip any embedded [Thinking]/[/Thinking] markers that ended up in
+	// the extracted content (happens when thinking blocks are unclosed and
+	// the first block captures everything including subsequent markers).
+	result = strings.ReplaceAll(result, "[Thinking]", "")
+	result = strings.ReplaceAll(result, "[/Thinking]", "")
+	return strings.TrimSpace(result)
+}
+
+// DedupTaskSummaries removes duplicate task summary blocks.
+func DedupTaskSummaries(text string) string {
+	for _, marker := range []string{"\n---\nCreated ", "\n---\nEdited "} {
+		firstIdx := strings.Index(text, marker)
+		lastIdx := strings.LastIndex(text, marker)
+		if firstIdx != -1 && firstIdx != lastIdx {
+			text = text[:firstIdx] + text[lastIdx:]
+		}
+	}
+	return text
+}

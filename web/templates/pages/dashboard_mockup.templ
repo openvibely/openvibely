@@ -1,0 +1,259 @@
+package pages
+
+import (
+	"fmt"
+	"strings"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+type DashboardPowerTask struct {
+	Title  string
+	Status string
+}
+
+func dashboardSuggestedGoals() []string {
+	return []string{
+		"I want to create a business for home pet grooming. Build my first 30-day launch plan.",
+		"I want to launch a niche ecommerce brand. Build setup, marketing, and operations.",
+		"I want to automate my local service business workflow from lead to payment.",
+	}
+}
+
+func dashboardPowerTasks(goal string) []DashboardPowerTask {
+	base := strings.TrimSpace(goal)
+	if base == "" {
+		base = "your new business"
+	}
+	return []DashboardPowerTask{
+		{
+			Title:  fmt.Sprintf("Ravi is building your launch blueprint for %s", base),
+			Status: "Working now",
+		},
+		{
+			Title:  "Offer, pricing, and first-customer plan",
+			Status: "Up next",
+		},
+		{
+			Title:  "Market snapshot and positioning brief",
+			Status: "Done",
+		},
+	}
+}
+
+func dashboardPowerStatusClass(status string) string {
+	switch status {
+	case "Working now":
+		return "badge badge-success badge-outline"
+	case "Up next":
+		return "badge badge-warning badge-outline"
+	default:
+		return "badge badge-info badge-outline"
+	}
+}
+
+func dashboardCount(counts map[string]int, category models.TaskCategory) int {
+	if counts == nil {
+		return 0
+	}
+	return counts[string(category)]
+}
+
+templ DashboardMockupPage(projects []models.Project, currentProject *models.Project, counts map[string]int) {
+	@layout.Base("Dashboard Mockup", projects, projectID(currentProject)) {
+		@DashboardMockupContent(currentProject, counts, "", "", false, "")
+	}
+}
+
+templ DashboardMockupContent(currentProject *models.Project, counts map[string]int, actionMessage string, actionTone string, showPowerMoment bool, goal string) {
+	<div id="dashboard-mockup-root" class="h-full overflow-y-auto pb-10">
+		<div class="mb-6 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+			<div>
+				<div class="badge badge-primary badge-outline mb-2">Onboarding Runway</div>
+				<h2 class="text-2xl font-bold">Tell us what you want to build</h2>
+				<p class="mt-1 text-sm opacity-70">This dashboard is your fast start. No technical setup needed.</p>
+			</div>
+			if currentProject != nil {
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body p-3">
+						<p class="text-xs uppercase tracking-wide opacity-60">Project</p>
+						<p class="font-semibold">{ currentProject.Name }</p>
+					</div>
+				</div>
+			}
+		</div>
+
+		if actionMessage != "" {
+			<div class={ "alert mb-4", templ.KV("alert-success", actionTone == "success"), templ.KV("alert-warning", actionTone == "warning"), templ.KV("alert-error", actionTone == "error"), templ.KV("alert-info", actionTone != "success" && actionTone != "warning" && actionTone != "error") }>
+				<span>{ actionMessage }</span>
+			</div>
+		}
+
+		if currentProject == nil {
+			<div class="alert alert-info mb-4">
+				<span>Create or choose a project to start the onboarding runway.</span>
+			</div>
+		}
+
+		if !showPowerMoment {
+			<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+				<div class="card-body p-4">
+					<h3 class="text-lg font-semibold mb-2">One sentence is enough</h3>
+					<p class="text-sm opacity-70 mb-3">Example: “I want to create a business for xyz, build it for me using this app.”</p>
+					if currentProject != nil {
+						<form
+							method="post"
+							hx-post={ fmt.Sprintf("/dashboard-mockup/actions?project_id=%s", currentProject.ID) }
+							hx-target="#dashboard-mockup-root"
+							hx-swap="outerHTML"
+							class="grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto]"
+						>
+							<input type="hidden" name="action" value="power_moment"/>
+							<input
+								type="text"
+								name="goal"
+								class="input input-bordered w-full"
+								placeholder="I want to create a business for home pet grooming in Austin."
+							/>
+							<button type="submit" class="btn btn-primary">Build It For Me</button>
+						</form>
+					}
+				</div>
+			</div>
+
+			<div class="grid grid-cols-1 gap-3 md:grid-cols-3 mb-6">
+				for _, suggestedGoal := range dashboardSuggestedGoals() {
+					<div class="card bg-base-100 shadow-sm border border-base-300">
+						<div class="card-body p-4">
+							<p class="text-sm opacity-80">{ suggestedGoal }</p>
+							if currentProject != nil {
+								<form
+									method="post"
+									hx-post={ fmt.Sprintf("/dashboard-mockup/actions?project_id=%s", currentProject.ID) }
+									hx-target="#dashboard-mockup-root"
+									hx-swap="outerHTML"
+									class="mt-3"
+								>
+									<input type="hidden" name="action" value="power_moment"/>
+									<input type="hidden" name="goal" value={ suggestedGoal }/>
+									<button type="submit" class="btn btn-outline btn-sm w-full">Try This Use Case</button>
+								</form>
+							}
+						</div>
+					</div>
+				}
+			</div>
+
+			<div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body p-4">
+						<p class="text-xs uppercase tracking-wide opacity-60">Step 1</p>
+						<p class="font-semibold">Describe your goal</p>
+						<p class="text-sm opacity-70">Plain language, no app knowledge needed.</p>
+					</div>
+				</div>
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body p-4">
+						<p class="text-xs uppercase tracking-wide opacity-60">Step 2</p>
+						<p class="font-semibold">Watch the first work start</p>
+						<p class="text-sm opacity-70">You immediately see what is running and what is queued.</p>
+					</div>
+				</div>
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body p-4">
+						<p class="text-xs uppercase tracking-wide opacity-60">Step 3</p>
+						<p class="font-semibold">Discover deeper controls naturally</p>
+						<p class="text-sm opacity-70">Pulse, Reflection, and Tasks appear as next steps.</p>
+					</div>
+				</div>
+			</div>
+		} else {
+			<div class="card bg-base-100 shadow-sm border border-success/30 mb-6">
+				<div class="card-body p-4">
+					<div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+						<h3 class="text-lg font-semibold">Power Moment</h3>
+						<span class="badge badge-success badge-outline">Unlocked</span>
+					</div>
+					<p class="text-sm opacity-80">
+						Goal captured:
+						<span class="font-medium">{ goal }</span>
+					</p>
+					<div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-3 text-sm">
+						<div class="rounded-xl border border-base-300 p-3">
+							<p class="font-semibold">Workspace prepared</p>
+							<p class="opacity-70">Project context and workflow initialized.</p>
+						</div>
+						<div class="rounded-xl border border-base-300 p-3">
+							<p class="font-semibold">First execution started</p>
+							<p class="opacity-70">You can see active work immediately.</p>
+						</div>
+						<div class="rounded-xl border border-base-300 p-3">
+							<p class="font-semibold">Next steps queued</p>
+							<p class="opacity-70">You get momentum without setup friction.</p>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 mb-6">
+				for _, task := range dashboardPowerTasks(goal) {
+					<div class="card bg-base-100 shadow-sm border border-base-300">
+						<div class="card-body p-4">
+							<div class="flex items-center justify-between mb-2">
+								<span class={ dashboardPowerStatusClass(task.Status) }>{ task.Status }</span>
+								if task.Status == "Working now" {
+									<span class="loading loading-spinner loading-xs text-success"></span>
+								}
+							</div>
+							<p class="font-semibold">{ task.Title }</p>
+						</div>
+					</div>
+				}
+			</div>
+
+			<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+				<div class="card-body p-4">
+					<h3 class="text-lg font-semibold mb-2">Natural Next Steps</h3>
+					<p class="text-sm opacity-70 mb-3">Start simple, then go deeper when you want more control.</p>
+					if currentProject != nil {
+						<div class="grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-4">
+							<a href={ templ.SafeURL(fmt.Sprintf("/chat?project_id=%s", currentProject.ID)) } class="btn btn-primary">Tell It What To Adjust</a>
+							<a href={ templ.SafeURL(fmt.Sprintf("/upcoming?project_id=%s", currentProject.ID)) } class="btn btn-outline">Open Pulse</a>
+							<a href={ templ.SafeURL(fmt.Sprintf("/history?project_id=%s", currentProject.ID)) } class="btn btn-outline">Open Reflection</a>
+							<a href={ templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s", currentProject.ID)) } class="btn btn-ghost">Open Tasks</a>
+						</div>
+					}
+				</div>
+			</div>
+
+			<div class="grid grid-cols-2 gap-3">
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body p-4">
+						<p class="text-xs uppercase tracking-wide opacity-60">Current Snapshot</p>
+						<p class="text-sm opacity-70 mt-1">In motion: { fmt.Sprintf("%d", dashboardCount(counts, models.CategoryActive)) }</p>
+						<p class="text-sm opacity-70">Queued planning: { fmt.Sprintf("%d", dashboardCount(counts, models.CategoryBacklog)) }</p>
+						<p class="text-sm opacity-70">Completed: { fmt.Sprintf("%d", dashboardCount(counts, models.CategoryCompleted)) }</p>
+					</div>
+				</div>
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body p-4">
+						<p class="text-xs uppercase tracking-wide opacity-60">Try Another Goal</p>
+						<p class="text-sm opacity-70 mt-1">Restart the runway with a fresh use case.</p>
+						if currentProject != nil {
+							<form
+								method="post"
+								hx-post={ fmt.Sprintf("/dashboard-mockup/actions?project_id=%s", currentProject.ID) }
+								hx-target="#dashboard-mockup-root"
+								hx-swap="outerHTML"
+								class="mt-2"
+							>
+								<input type="hidden" name="action" value="reset"/>
+								<button type="submit" class="btn btn-outline btn-sm w-full">Start Over</button>
+							</form>
+						}
+					</div>
+				</div>
+			</div>
+		}
+	</div>
+}

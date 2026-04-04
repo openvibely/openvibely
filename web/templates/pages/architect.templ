@@ -1,0 +1,762 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+func truncateStr(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+templ ArchitectMode(projects []models.Project, currentProject *models.Project, data *models.ArchitectDashboardData) {
+	@layout.Base("Architect", projects, projectID(currentProject)) {
+		@ArchitectModeContent(currentProject, data)
+	}
+}
+
+templ ArchitectModeContent(currentProject *models.Project, data *models.ArchitectDashboardData) {
+	<div class="p-6">
+		<div class="flex justify-between items-center mb-6">
+			<div>
+				<h2 class="text-2xl font-bold">Architect</h2>
+				<p class="text-sm opacity-60 mt-1">Plan your project from vision to execution with AI-powered guidance</p>
+			</div>
+			if currentProject != nil {
+				<button
+					class="btn btn-primary btn-sm"
+					onclick="document.getElementById('new-session-dialog').showModal()"
+				>
+					+ New Vision
+				</button>
+			}
+		</div>
+
+		if currentProject == nil {
+			<div class="alert alert-info">
+				<span>Select a project to start using Architect.</span>
+			</div>
+		} else if data != nil {
+			<!-- Active Sessions -->
+			if len(data.ActiveSessions) > 0 {
+				<div class="mb-8">
+					<h3 class="text-lg font-semibold mb-3">Active Sessions</h3>
+					<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+						for _, session := range data.ActiveSessions {
+							@ArchitectSessionCard(&session, currentProject.ID)
+						}
+					</div>
+				</div>
+			}
+
+			<!-- Templates -->
+			<div class="mb-8">
+				<h3 class="text-lg font-semibold mb-3">Project Templates</h3>
+				<div id="template-list">
+					@ArchitectTemplateList(data.Templates)
+				</div>
+			</div>
+
+			<!-- Completed Sessions -->
+			if len(data.CompletedSessions) > 0 {
+				<div class="mb-8">
+					<details class="collapse collapse-arrow bg-base-200">
+						<summary class="collapse-title text-md font-medium">
+							Completed Sessions ({ fmt.Sprintf("%d", len(data.CompletedSessions)) })
+						</summary>
+						<div class="collapse-content">
+							<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
+								for _, session := range data.CompletedSessions {
+									@ArchitectSessionCard(&session, currentProject.ID)
+								}
+							</div>
+						</div>
+					</details>
+				</div>
+			}
+
+			<!-- New Session Dialog -->
+			<dialog id="new-session-dialog" class="modal">
+				<div class="modal-box">
+					<h3 class="text-lg font-bold mb-4">Start New Vision</h3>
+					<form
+						id="new-vision-form"
+						method="post"
+						hx-post={ fmt.Sprintf("/architect/sessions?project_id=%s", currentProject.ID) }
+						hx-target="#main-content"
+						hx-swap="innerHTML"
+						hx-indicator="#vision-submit-btn"
+					>
+						<div class="form-control mb-4">
+							<label class="label"><span class="label-text">Project Name</span></label>
+							<input type="text" name="title" class="input input-bordered" placeholder="e.g., E-commerce Platform" required/>
+						</div>
+						<div class="form-control mb-4">
+							<label class="label"><span class="label-text">Brief Description</span></label>
+							<textarea name="description" class="textarea textarea-bordered" rows="3" placeholder="What are you building? What problem does it solve?"></textarea>
+						</div>
+						<div class="form-control mb-4">
+							<label class="label"><span class="label-text">Start from Template (optional)</span></label>
+							<select name="template_id" class="select select-bordered">
+								<option value="">Blank canvas</option>
+								for _, tmpl := range data.Templates {
+									<option value={ tmpl.ID }>{ tmpl.Name } - { tmpl.Description }</option>
+								}
+							</select>
+						</div>
+						<div class="modal-action">
+							<button type="button" class="btn" onclick="document.getElementById('new-session-dialog').close()">Cancel</button>
+							<button id="vision-submit-btn" type="submit" class="btn btn-primary">
+								<span class="loading loading-spinner loading-xs htmx-indicator"></span>
+								Start Planning
+							</button>
+						</div>
+					</form>
+					<script>
+						(function() {
+							var form = document.getElementById('new-vision-form');
+							if (form) {
+								form.addEventListener('htmx:afterRequest', function(evt) {
+									document.getElementById('new-session-dialog').close();
+								});
+								form.addEventListener('htmx:responseError', function(evt) {
+									document.getElementById('new-session-dialog').close();
+									var toast = document.createElement('div');
+									toast.className = 'toast toast-end toast-top z-50';
+									toast.innerHTML = '<div class="alert alert-error"><span>Failed to create vision. Please try again.</span></div>';
+									document.body.appendChild(toast);
+									setTimeout(function() { toast.remove(); }, 4000);
+								});
+							}
+						})();
+					</script>
+				</div>
+				<form method="dialog" class="modal-backdrop">
+					<button>close</button>
+				</form>
+			</dialog>
+		}
+	</div>
+}
+
+templ ArchitectSessionCard(session *models.ArchitectSession, projectID string) {
+	<div class="card bg-base-200 shadow-sm">
+		<div class="card-body p-4">
+			<div class="flex justify-between items-start">
+				<h4 class="card-title text-sm">{ session.Title }</h4>
+				@architectStatusBadge(session.Status)
+			</div>
+			if session.Description != "" {
+				<p class="text-xs opacity-60 mt-1">{ truncateStr(session.Description, 80) }</p>
+			}
+			<div class="flex items-center gap-2 mt-2">
+				@architectPhaseBadge(session.Phase)
+			</div>
+			<div class="card-actions justify-end mt-3">
+				if session.Status == models.ArchitectStatusActive {
+					<a
+						href={ templ.SafeURL(fmt.Sprintf("/architect/sessions/%s?project_id=%s", session.ID, projectID)) }
+						hx-get={ fmt.Sprintf("/architect/sessions/%s?project_id=%s", session.ID, projectID) }
+						hx-target="#main-content"
+						hx-swap="innerHTML"
+						hx-push-url="true"
+						class="btn btn-primary btn-xs"
+					>Continue</a>
+				} else {
+					<a
+						href={ templ.SafeURL(fmt.Sprintf("/architect/sessions/%s?project_id=%s", session.ID, projectID)) }
+						hx-get={ fmt.Sprintf("/architect/sessions/%s?project_id=%s", session.ID, projectID) }
+						hx-target="#main-content"
+						hx-swap="innerHTML"
+						hx-push-url="true"
+						class="btn btn-ghost btn-xs"
+					>View</a>
+				}
+				<button
+					class="btn btn-ghost btn-xs text-error"
+					hx-delete={ fmt.Sprintf("/architect/sessions/%s?project_id=%s", session.ID, projectID) }
+					hx-target="#main-content"
+					hx-swap="innerHTML"
+					hx-confirm="Delete this session and all its data?"
+				>Delete</button>
+			</div>
+		</div>
+	</div>
+}
+
+templ architectStatusBadge(status models.ArchitectSessionStatus) {
+	switch status {
+		case models.ArchitectStatusActive:
+			<span class="badge badge-success badge-sm">Active</span>
+		case models.ArchitectStatusCompleted:
+			<span class="badge badge-info badge-sm">Completed</span>
+		case models.ArchitectStatusAbandoned:
+			<span class="badge badge-warning badge-sm">Abandoned</span>
+	}
+}
+
+templ architectPhaseBadge(phase models.ArchitectPhase) {
+	<span class="badge badge-outline badge-sm">
+		switch phase {
+			case models.PhaseVisionRefinement:
+				Vision
+			case models.PhaseArchitecture:
+				Architecture
+			case models.PhaseRiskAnalysis:
+				Risk Analysis
+			case models.PhasePhasing:
+				Phasing
+			case models.PhaseDependencies:
+				Dependencies
+			case models.PhaseEstimation:
+				Estimation
+			case models.PhaseReview:
+				Review
+			case models.PhaseComplete:
+				Complete
+		}
+	</span>
+}
+
+// ArchitectSessionPage wraps the wizard in a full page layout
+templ ArchitectSessionPage(projects []models.Project, currentProject *models.Project, detail *models.ArchitectSessionDetail) {
+	@layout.Base("Architect - "+detail.Session.Title, projects, projectID(currentProject)) {
+		@ArchitectWizard(detail)
+	}
+}
+
+// ArchitectWizard is the main wizard view for an active session
+templ ArchitectWizard(detail *models.ArchitectSessionDetail) {
+	<div class="p-6">
+		<!-- Header -->
+		<div class="flex justify-between items-center mb-4">
+			<div>
+				<h2 class="text-2xl font-bold">{ detail.Session.Title }</h2>
+				if detail.Session.Description != "" {
+					<p class="text-sm opacity-60 mt-1">{ detail.Session.Description }</p>
+				}
+			</div>
+			<div class="flex gap-2">
+				if detail.Session.Status == models.ArchitectStatusActive {
+					<button
+						class="btn btn-warning btn-sm"
+						hx-post={ fmt.Sprintf("/architect/sessions/%s/abandon", detail.Session.ID) }
+						hx-target="#main-content"
+						hx-swap="innerHTML"
+						hx-confirm="Abandon this planning session?"
+					>Abandon</button>
+				}
+				<a
+					href={ templ.SafeURL(fmt.Sprintf("/architect?project_id=%s", detail.Session.ProjectID)) }
+					hx-get={ fmt.Sprintf("/architect?project_id=%s", detail.Session.ProjectID) }
+					hx-target="#main-content"
+					hx-swap="innerHTML"
+					hx-push-url="true"
+					class="btn btn-ghost btn-sm"
+				>Back</a>
+			</div>
+		</div>
+
+		<!-- Phase Progress -->
+		<div class="mb-6">
+			<ul class="steps steps-horizontal w-full text-xs">
+				@architectPhaseStep("Vision", detail.Session.Phase, models.PhaseVisionRefinement)
+				@architectPhaseStep("Architecture", detail.Session.Phase, models.PhaseArchitecture)
+				@architectPhaseStep("Risks", detail.Session.Phase, models.PhaseRiskAnalysis)
+				@architectPhaseStep("Phasing", detail.Session.Phase, models.PhasePhasing)
+				@architectPhaseStep("Dependencies", detail.Session.Phase, models.PhaseDependencies)
+				@architectPhaseStep("Estimation", detail.Session.Phase, models.PhaseEstimation)
+				@architectPhaseStep("Review", detail.Session.Phase, models.PhaseReview)
+			</ul>
+		</div>
+
+		<!-- Conversation Area -->
+		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+			<!-- Chat Column -->
+			<div class="lg:col-span-2">
+				<div class="card bg-base-200">
+					<div class="card-body p-4">
+						<div id="architect-messages" class="space-y-4 max-h-96 overflow-y-auto mb-4">
+							for _, msg := range detail.Messages {
+								@ArchitectMessage(&msg)
+							}
+						</div>
+						if detail.Session.Status == models.ArchitectStatusActive {
+							<form
+								method="post"
+								hx-post={ fmt.Sprintf("/architect/sessions/%s/messages", detail.Session.ID) }
+								hx-target="#architect-messages"
+								hx-swap="beforeend"
+								class="flex gap-2"
+								id="architect-chat-form"
+							>
+								<input
+									type="text"
+									name="message"
+									class="input input-bordered flex-1 input-sm"
+									placeholder="Type your response..."
+									autocomplete="off"
+								/>
+								<button type="submit" class="btn btn-primary btn-sm">Send</button>
+							</form>
+							<script>
+								(function() {
+									var form = document.getElementById('architect-chat-form');
+									if (form) {
+										form.addEventListener('htmx:afterRequest', function(evt) {
+											form.querySelector('input[name="message"]').value = '';
+											var container = document.getElementById('architect-messages');
+											if (container) container.scrollTop = container.scrollHeight;
+										});
+									}
+								})();
+							</script>
+						}
+					</div>
+				</div>
+			</div>
+
+			<!-- Actions Column -->
+			<div>
+				<div class="card bg-base-200">
+					<div class="card-body p-4">
+						<h3 class="font-semibold mb-3">Actions</h3>
+						if detail.Session.Status == models.ArchitectStatusActive {
+							<div class="space-y-2">
+								<!-- Phase-specific actions -->
+								switch detail.Session.Phase {
+									case models.PhaseArchitecture:
+										<button
+											class="btn btn-outline btn-sm w-full"
+											hx-post={ fmt.Sprintf("/architect/sessions/%s/architecture", detail.Session.ID) }
+											hx-target="#phase-results"
+											hx-swap="innerHTML"
+											hx-indicator="#arch-spinner"
+										>
+											<span id="arch-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+											Generate Architecture
+										</button>
+									case models.PhaseRiskAnalysis:
+										<button
+											class="btn btn-outline btn-sm w-full"
+											hx-post={ fmt.Sprintf("/architect/sessions/%s/risks", detail.Session.ID) }
+											hx-target="#phase-results"
+											hx-swap="innerHTML"
+											hx-indicator="#risk-spinner"
+										>
+											<span id="risk-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+											Analyze Risks
+										</button>
+									case models.PhasePhasing, models.PhaseDependencies, models.PhaseEstimation:
+										<button
+											class="btn btn-outline btn-sm w-full"
+											hx-post={ fmt.Sprintf("/architect/sessions/%s/tasks", detail.Session.ID) }
+											hx-target="#phase-results"
+											hx-swap="innerHTML"
+											hx-indicator="#task-spinner"
+										>
+											<span id="task-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+											Generate Task Plan
+										</button>
+									case models.PhaseReview:
+										<button
+											class="btn btn-success btn-sm w-full"
+											onclick="document.getElementById('save-template-dialog').showModal()"
+										>Save as Template</button>
+								}
+
+								<!-- Phase navigation -->
+								<div class="divider text-xs">Navigation</div>
+								<button
+									class="btn btn-primary btn-sm w-full"
+									hx-post={ fmt.Sprintf("/architect/sessions/%s/advance", detail.Session.ID) }
+									hx-target="#main-content"
+									hx-swap="innerHTML"
+								>Next Phase &rarr;</button>
+							</div>
+
+							<!-- Task Activation (available after phasing) -->
+							if len(detail.Tasks) > 0 {
+								<div class="divider text-xs">Activate Tasks</div>
+								@architectActivateButtons(detail)
+							}
+						}
+					</div>
+				</div>
+
+				<!-- Phase Results -->
+				<div id="phase-results" class="mt-4"></div>
+			</div>
+		</div>
+
+		<!-- Save Template Dialog -->
+		if detail.Session.Status == models.ArchitectStatusActive {
+			<dialog id="save-template-dialog" class="modal">
+				<div class="modal-box">
+					<h3 class="text-lg font-bold mb-4">Save as Template</h3>
+					<form
+						method="post"
+						hx-post={ fmt.Sprintf("/architect/sessions/%s/template", detail.Session.ID) }
+						hx-target="#phase-results"
+						hx-swap="innerHTML"
+					>
+						<div class="form-control mb-4">
+							<label class="label"><span class="label-text">Template Name</span></label>
+							<input type="text" name="name" class="input input-bordered" placeholder="e.g., REST API with Auth" required/>
+						</div>
+						<div class="form-control mb-4">
+							<label class="label"><span class="label-text">Description</span></label>
+							<textarea name="description" class="textarea textarea-bordered" rows="2" placeholder="Brief description of this project type"></textarea>
+						</div>
+						<div class="form-control mb-4">
+							<label class="label"><span class="label-text">Category</span></label>
+							<select name="category" class="select select-bordered">
+								<option value="web_app">Web Application</option>
+								<option value="api">API / Backend</option>
+								<option value="data_pipeline">Data Pipeline</option>
+								<option value="mobile">Mobile App</option>
+								<option value="general">General</option>
+							</select>
+						</div>
+						<div class="modal-action">
+							<button type="button" class="btn" onclick="document.getElementById('save-template-dialog').close()">Cancel</button>
+							<button type="submit" class="btn btn-primary" onclick="document.getElementById('save-template-dialog').close()">Save</button>
+						</div>
+					</form>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button>close</button></form>
+			</dialog>
+		}
+	</div>
+}
+
+templ architectPhaseStep(label string, currentPhase models.ArchitectPhase, stepPhase models.ArchitectPhase) {
+	if isArchitectPhaseCompleted(currentPhase, stepPhase) {
+		<li class="step step-primary text-xs">{ label }</li>
+	} else if currentPhase == stepPhase {
+		<li class="step step-primary text-xs font-bold">{ label }</li>
+	} else {
+		<li class="step text-xs">{ label }</li>
+	}
+}
+
+templ architectActivateButtons(detail *models.ArchitectSessionDetail) {
+	<div class="space-y-2">
+		if hasArchitectPhaseTasks(detail.Tasks, models.TaskPhaseMVP) {
+			<button
+				class="btn btn-success btn-xs w-full"
+				hx-post={ fmt.Sprintf("/architect/sessions/%s/activate?project_id=%s", detail.Session.ID, detail.Session.ProjectID) }
+				hx-vals='{"phase": "mvp"}'
+				hx-target="#phase-results"
+				hx-swap="innerHTML"
+				hx-confirm="Activate all MVP tasks? They will be added to your backlog."
+			>Activate MVP ({ fmt.Sprintf("%d", countArchitectPhaseTasks(detail.Tasks, models.TaskPhaseMVP)) } tasks)</button>
+		}
+		if hasArchitectPhaseTasks(detail.Tasks, models.TaskPhaseTwo) {
+			<button
+				class="btn btn-outline btn-success btn-xs w-full"
+				hx-post={ fmt.Sprintf("/architect/sessions/%s/activate?project_id=%s", detail.Session.ID, detail.Session.ProjectID) }
+				hx-vals='{"phase": "phase_2"}'
+				hx-target="#phase-results"
+				hx-swap="innerHTML"
+				hx-confirm="Activate Phase 2 tasks?"
+			>Activate Phase 2 ({ fmt.Sprintf("%d", countArchitectPhaseTasks(detail.Tasks, models.TaskPhaseTwo)) } tasks)</button>
+		}
+		if hasArchitectPhaseTasks(detail.Tasks, models.TaskPhaseThree) {
+			<button
+				class="btn btn-outline btn-xs w-full"
+				hx-post={ fmt.Sprintf("/architect/sessions/%s/activate?project_id=%s", detail.Session.ID, detail.Session.ProjectID) }
+				hx-vals='{"phase": "phase_3"}'
+				hx-target="#phase-results"
+				hx-swap="innerHTML"
+				hx-confirm="Activate Phase 3 tasks?"
+			>Activate Phase 3 ({ fmt.Sprintf("%d", countArchitectPhaseTasks(detail.Tasks, models.TaskPhaseThree)) } tasks)</button>
+		}
+		if hasArchitectPhaseTasks(detail.Tasks, models.TaskPhaseMitigation) {
+			<button
+				class="btn btn-outline btn-warning btn-xs w-full"
+				hx-post={ fmt.Sprintf("/architect/sessions/%s/activate?project_id=%s", detail.Session.ID, detail.Session.ProjectID) }
+				hx-vals='{"phase": "mitigation"}'
+				hx-target="#phase-results"
+				hx-swap="innerHTML"
+				hx-confirm="Activate risk mitigation tasks?"
+			>Activate Mitigation ({ fmt.Sprintf("%d", countArchitectPhaseTasks(detail.Tasks, models.TaskPhaseMitigation)) } tasks)</button>
+		}
+	</div>
+}
+
+templ ArchitectMessage(msg *models.ArchitectMessage) {
+	if msg.Role == "user" {
+		<div class="chat chat-end">
+			<div class="chat-bubble chat-bubble-primary text-sm">{ msg.Content }</div>
+		</div>
+	} else {
+		<div class="chat chat-start">
+			<div class="chat-bubble text-sm">{ msg.Content }</div>
+		</div>
+	}
+}
+
+templ ArchitectMessagePair(userMsg string, reply *models.ArchitectMessage) {
+	<div class="chat chat-end">
+		<div class="chat-bubble chat-bubble-primary text-sm">{ userMsg }</div>
+	</div>
+	<div class="chat chat-start">
+		<div class="chat-bubble text-sm">{ reply.Content }</div>
+	</div>
+}
+
+templ ArchitectArchResult(rec *models.ArchRecommendation) {
+	<div class="card bg-base-200">
+		<div class="card-body p-4">
+			<h3 class="font-semibold mb-3">Architecture Recommendations</h3>
+			if rec.Summary != "" {
+				<p class="text-sm mb-4">{ rec.Summary }</p>
+			}
+			for _, category := range []struct{ Title string; Options []models.ArchOption }{
+				{"Tech Stack", rec.TechStack},
+				{"Architecture", rec.Architecture},
+				{"Design Patterns", rec.Patterns},
+				{"Infrastructure", rec.Infrastructure},
+			} {
+				if len(category.Options) > 0 {
+					<h4 class="text-sm font-medium mt-3 mb-2">{ category.Title }</h4>
+					for _, opt := range category.Options {
+						<div class={ "border rounded p-3 mb-2", templ.KV("border-primary", opt.Recommended) }>
+							<div class="flex items-center gap-2">
+								<span class="font-medium text-sm">{ opt.Name }</span>
+								if opt.Recommended {
+									<span class="badge badge-primary badge-xs">Recommended</span>
+								}
+							</div>
+							<p class="text-xs opacity-70 mt-1">{ opt.Description }</p>
+							<div class="grid grid-cols-2 gap-2 mt-2">
+								<div>
+									<span class="text-xs font-medium text-success">Pros:</span>
+									<ul class="text-xs list-disc list-inside">
+										for _, pro := range opt.Pros {
+											<li>{ pro }</li>
+										}
+									</ul>
+								</div>
+								<div>
+									<span class="text-xs font-medium text-error">Cons:</span>
+									<ul class="text-xs list-disc list-inside">
+										for _, con := range opt.Cons {
+											<li>{ con }</li>
+										}
+									</ul>
+								</div>
+							</div>
+						</div>
+					}
+				}
+			}
+		</div>
+	</div>
+}
+
+templ ArchitectRiskResult(analysis *models.RiskAnalysis) {
+	<div class="card bg-base-200">
+		<div class="card-body p-4">
+			<h3 class="font-semibold mb-3">Risk Analysis</h3>
+			if analysis.Summary != "" {
+				<p class="text-sm mb-4">{ analysis.Summary }</p>
+			}
+			<div class="space-y-3">
+				for _, risk := range analysis.Risks {
+					<div class="border rounded p-3">
+						<div class="flex items-center gap-2 mb-1">
+							@riskSeverityBadge(risk.Severity)
+							<span class="font-medium text-sm">{ risk.Title }</span>
+							<span class="badge badge-outline badge-xs">{ risk.Category }</span>
+						</div>
+						<p class="text-xs opacity-70">{ risk.Description }</p>
+						<div class="mt-2 text-xs">
+							<span class="font-medium">Mitigation:</span> { risk.Mitigation }
+						</div>
+					</div>
+				}
+			</div>
+		</div>
+	</div>
+}
+
+templ riskSeverityBadge(severity string) {
+	switch severity {
+		case "critical":
+			<span class="badge badge-error badge-xs">Critical</span>
+		case "high":
+			<span class="badge badge-warning badge-xs">High</span>
+		case "medium":
+			<span class="badge badge-info badge-xs">Medium</span>
+		default:
+			<span class="badge badge-xs">Low</span>
+	}
+}
+
+templ ArchitectTaskPlan(tasks []models.ArchitectTask, detail *models.ArchitectSessionDetail) {
+	<div class="card bg-base-200">
+		<div class="card-body p-4">
+			<h3 class="font-semibold mb-3">Task Plan ({ fmt.Sprintf("%d", len(tasks)) } tasks)</h3>
+
+			<!-- Phase summary -->
+			<div class="stats stats-horizontal shadow mb-4 w-full">
+				<div class="stat py-2 px-3">
+					<div class="stat-title text-xs">MVP</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%d", countArchitectPhaseTasks(tasks, models.TaskPhaseMVP)) }</div>
+				</div>
+				<div class="stat py-2 px-3">
+					<div class="stat-title text-xs">Phase 2</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%d", countArchitectPhaseTasks(tasks, models.TaskPhaseTwo)) }</div>
+				</div>
+				<div class="stat py-2 px-3">
+					<div class="stat-title text-xs">Phase 3</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%d", countArchitectPhaseTasks(tasks, models.TaskPhaseThree)) }</div>
+				</div>
+				<div class="stat py-2 px-3">
+					<div class="stat-title text-xs">Mitigation</div>
+					<div class="stat-value text-lg">{ fmt.Sprintf("%d", countArchitectPhaseTasks(tasks, models.TaskPhaseMitigation)) }</div>
+				</div>
+			</div>
+
+			<!-- Task list by phase -->
+			for _, phase := range []struct{ Label string; Phase models.ArchitectTaskPhase }{
+				{"MVP - Core Features", models.TaskPhaseMVP},
+				{"Phase 2 - Enhancements", models.TaskPhaseTwo},
+				{"Phase 3 - Polish", models.TaskPhaseThree},
+				{"Risk Mitigation", models.TaskPhaseMitigation},
+			} {
+				if hasArchitectPhaseTasks(tasks, phase.Phase) {
+					<h4 class="text-sm font-medium mt-3 mb-2">{ phase.Label }</h4>
+					<div class="space-y-2">
+						for _, task := range tasks {
+							if task.Phase == phase.Phase {
+								<div class="flex items-center gap-2 text-sm border rounded p-2">
+									@complexityDot(task.Complexity)
+									<span class="flex-1">{ task.Title }</span>
+									<span class="badge badge-outline badge-xs">P{ fmt.Sprintf("%d", task.Priority) }</span>
+									<span class="text-xs opacity-50">{ fmt.Sprintf("%.0fh", task.EstHours) }</span>
+									if task.IsBlocking {
+										<span class="badge badge-warning badge-xs">Blocking</span>
+									}
+									if task.IsActivated {
+										<span class="badge badge-success badge-xs">Activated</span>
+									}
+								</div>
+							}
+						}
+					</div>
+				}
+			}
+
+			<!-- Resource estimate -->
+			if detail != nil {
+				<div class="divider text-xs">Resource Estimate</div>
+				<div class="text-xs opacity-70">
+					<p>Total: { fmt.Sprintf("%d tasks, %.0f estimated hours", len(tasks), totalArchitectEstHours(tasks)) }</p>
+				</div>
+			}
+		</div>
+	</div>
+}
+
+templ complexityDot(complexity string) {
+	switch complexity {
+		case "high":
+			<span class="w-2 h-2 rounded-full bg-error inline-block" title="High complexity"></span>
+		case "medium":
+			<span class="w-2 h-2 rounded-full bg-warning inline-block" title="Medium complexity"></span>
+		default:
+			<span class="w-2 h-2 rounded-full bg-success inline-block" title="Low complexity"></span>
+	}
+}
+
+templ ArchitectActivateResult(count int, phase string) {
+	<div class="alert alert-success">
+		<span>Activated { fmt.Sprintf("%d", count) } { phase } tasks. They have been added to your backlog.</span>
+	</div>
+}
+
+templ ArchitectError(errMsg string) {
+	<div class="alert alert-error">
+		<span>{ errMsg }</span>
+	</div>
+}
+
+templ ArchitectTemplateList(templates []models.ArchitectTemplate) {
+	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+		for _, tmpl := range templates {
+			@ArchitectTemplateCard(&tmpl)
+		}
+	</div>
+	if len(templates) == 0 {
+		<p class="text-sm opacity-50">No templates yet. Complete a planning session and save it as a template.</p>
+	}
+}
+
+templ ArchitectTemplateCard(tmpl *models.ArchitectTemplate) {
+	<div class="card bg-base-200 shadow-sm">
+		<div class="card-body p-3">
+			<div class="flex justify-between items-start">
+				<h4 class="text-sm font-medium">{ tmpl.Name }</h4>
+				<span class="badge badge-outline badge-xs">{ tmpl.Category }</span>
+			</div>
+			<p class="text-xs opacity-60">{ truncateStr(tmpl.Description, 60) }</p>
+			<div class="text-xs opacity-40 mt-1">Used { fmt.Sprintf("%d", tmpl.UsageCount) } times</div>
+		</div>
+	</div>
+}
+
+// Helper functions for templates
+
+func isArchitectPhaseCompleted(current models.ArchitectPhase, step models.ArchitectPhase) bool {
+	phases := []models.ArchitectPhase{
+		models.PhaseVisionRefinement,
+		models.PhaseArchitecture,
+		models.PhaseRiskAnalysis,
+		models.PhasePhasing,
+		models.PhaseDependencies,
+		models.PhaseEstimation,
+		models.PhaseReview,
+		models.PhaseComplete,
+	}
+	currentIdx := -1
+	stepIdx := -1
+	for i, p := range phases {
+		if p == current { currentIdx = i }
+		if p == step { stepIdx = i }
+	}
+	return stepIdx < currentIdx
+}
+
+func hasArchitectPhaseTasks(tasks []models.ArchitectTask, phase models.ArchitectTaskPhase) bool {
+	for _, t := range tasks {
+		if t.Phase == phase {
+			return true
+		}
+	}
+	return false
+}
+
+func countArchitectPhaseTasks(tasks []models.ArchitectTask, phase models.ArchitectTaskPhase) int {
+	count := 0
+	for _, t := range tasks {
+		if t.Phase == phase {
+			count++
+		}
+	}
+	return count
+}
+
+func totalArchitectEstHours(tasks []models.ArchitectTask) float64 {
+	total := 0.0
+	for _, t := range tasks {
+		total += t.EstHours
+	}
+	return total
+}

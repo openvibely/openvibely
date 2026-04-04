@@ -1,0 +1,477 @@
+package pages
+
+import (
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ Analytics(projects []models.Project, currentProject *models.Project) {
+	@layout.Base("Analytics Dashboard", projects, projectID(currentProject)) {
+		@analyticsContent(currentProject)
+	}
+}
+
+// AnalyticsContent renders just the analytics content for HTMX requests
+templ AnalyticsContent(currentProject *models.Project) {
+	@analyticsContent(currentProject)
+}
+
+templ analyticsContent(currentProject *models.Project) {
+	<div class="flex justify-between items-center mb-6">
+			<h2 class="text-2xl font-bold">Analytics Dashboard</h2>
+			if currentProject != nil {
+				<div class="flex gap-2 items-center">
+					<span class="opacity-60">Project:</span>
+					<span class="font-semibold">{ currentProject.Name }</span>
+				</div>
+			}
+		</div>
+		if currentProject != nil {
+			<!-- Filters -->
+			<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+				<div class="card-body p-4">
+					<div class="flex flex-wrap gap-4 items-end">
+						<div class="form-control">
+							<label class="label"><span class="label-text">Date Range</span></label>
+							<select id="dateRange" class="select select-bordered select-sm">
+								<option value="7">Last 7 Days</option>
+								<option value="30" selected>Last 30 Days</option>
+								<option value="90">Last 90 Days</option>
+								<option value="365">Last Year</option>
+								<option value="all">All Time</option>
+							</select>
+						</div>
+						<div class="form-control">
+							<label class="label"><span class="label-text">Group By</span></label>
+							<select id="groupBy" class="select select-bordered select-sm">
+								<option value="day" selected>Day</option>
+								<option value="week">Week</option>
+								<option value="month">Month</option>
+							</select>
+						</div>
+						<button id="refreshBtn" class="btn btn-primary btn-sm">Refresh</button>
+					</div>
+				</div>
+			</div>
+			<!-- Charts Grid -->
+			<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+				<!-- Success/Failure Rates -->
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body">
+						<h3 class="card-title text-lg">Success/Failure Rates Over Time</h3>
+						<div class="h-64">
+							<canvas id="successFailureChart"></canvas>
+						</div>
+					</div>
+				</div>
+				<!-- Execution Trends by Hour -->
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body">
+						<h3 class="card-title text-lg">Task Execution by Hour</h3>
+						<div class="h-64">
+							<canvas id="hourlyTrendsChart"></canvas>
+						</div>
+					</div>
+				</div>
+				<!-- Average Execution Time by Task -->
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body">
+						<h3 class="card-title text-lg">Average Execution Time by Task</h3>
+						<div class="h-64">
+							<canvas id="avgTimeTaskChart"></canvas>
+						</div>
+					</div>
+				</div>
+				<!-- Average Execution Time by Model -->
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body">
+						<h3 class="card-title text-lg">Average Execution Time by Model</h3>
+						<div class="h-64">
+							<canvas id="avgTimeAgentChart"></canvas>
+						</div>
+					</div>
+				</div>
+				<!-- Model Usage Breakdown -->
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body">
+						<h3 class="card-title text-lg">Model Usage Breakdown</h3>
+						<div class="h-64">
+							<canvas id="agentUsageChart"></canvas>
+						</div>
+					</div>
+				</div>
+				<!-- Most Frequent Tasks -->
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body">
+						<h3 class="card-title text-lg">Most Frequently Run Tasks</h3>
+						<div class="h-64 overflow-y-auto" id="frequentTasksList"></div>
+					</div>
+				</div>
+			</div>
+			<!-- Failed Task Patterns -->
+			<div class="card bg-base-100 shadow-sm border border-base-300 mt-6">
+				<div class="card-body">
+					<h3 class="card-title text-lg">Failed Task Patterns</h3>
+					<div class="overflow-x-auto">
+						<table class="table table-sm" id="failedPatternsTable">
+							<thead>
+								<tr>
+									<th>Task</th>
+									<th>Failure Count</th>
+									<th>Last Error</th>
+									<th>Last Failed At</th>
+								</tr>
+							</thead>
+							<tbody></tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+			<!-- Chart.js and Custom Script -->
+			<div id="analytics-data" data-project-id={ currentProject.ID } class="hidden"></div>
+			<script type="text/javascript">
+				(function() {
+				// Destroy any charts from a previous analytics page visit
+				if (window._analyticsCharts) {
+					Object.values(window._analyticsCharts).forEach(function(c) {
+						try { c.destroy(); } catch(e) {}
+					});
+				}
+				window._analyticsCharts = {};
+
+				function initAnalytics() {
+					var dataEl = document.getElementById('analytics-data');
+					if (!dataEl) return;
+					var projectID = dataEl.dataset.projectId;
+					var charts = window._analyticsCharts;
+
+					// Helper to safely fetch JSON arrays from API
+					async function fetchJSON(url) {
+						const response = await fetch(url);
+						if (!response.ok) return [];
+						const data = await response.json();
+						return Array.isArray(data) ? data : [];
+					}
+
+					// Format milliseconds as human-readable duration (e.g., "5m 30s", "2h 15m")
+					function formatDuration(ms) {
+						if (ms < 1000) return ms.toFixed(0) + 'ms';
+						var totalSeconds = Math.round(ms / 1000);
+						var hours = Math.floor(totalSeconds / 3600);
+						var minutes = Math.floor((totalSeconds % 3600) / 60);
+						var seconds = totalSeconds % 60;
+						if (hours > 0) return hours + 'h ' + minutes + 'm';
+						if (minutes > 0) return minutes + 'm ' + seconds + 's';
+						return seconds + 's';
+					}
+
+					// Utility function to get date range
+					function getDateRange() {
+						const range = document.getElementById('dateRange').value;
+						if (range === 'all') {
+							return { dateFrom: '', dateTo: '' };
+						}
+						const dateTo = new Date();
+						const dateFrom = new Date();
+						dateFrom.setDate(dateTo.getDate() - parseInt(range));
+						return {
+							dateFrom: dateFrom.toISOString(),
+							dateTo: dateTo.toISOString()
+						};
+					}
+
+					// Load Success/Failure Rates
+					async function loadSuccessFailureRates() {
+						try {
+						const groupBy = document.getElementById('groupBy').value;
+						const { dateFrom, dateTo } = getDateRange();
+						const params = new URLSearchParams({ project_id: projectID, group_by: groupBy });
+						if (dateFrom) params.append('date_from', dateFrom);
+						if (dateTo) params.append('date_to', dateTo);
+
+						const data = await fetchJSON(`/api/analytics/success-failure-rates?${params}`);
+						if (data.length === 0) return;
+
+						if (charts.successFailure) charts.successFailure.destroy();
+						const ctx = document.getElementById('successFailureChart');
+						if (!ctx) return;
+						charts.successFailure = new Chart(ctx.getContext('2d'), {
+							type: 'line',
+							data: {
+								labels: data.map(d => d.Period || 'N/A'),
+								datasets: [
+									{
+										label: 'Success Rate (%)',
+										data: data.map(d => d.SuccessRate || 0),
+										borderColor: 'rgb(34, 197, 94)',
+										backgroundColor: 'rgba(34, 197, 94, 0.1)',
+										yAxisID: 'y'
+									},
+									{
+										label: 'Total Executions',
+										data: data.map(d => d.TotalCount || 0),
+										borderColor: 'rgb(59, 130, 246)',
+										backgroundColor: 'rgba(59, 130, 246, 0.1)',
+										yAxisID: 'y1'
+									}
+								]
+							},
+							options: {
+								responsive: true,
+								maintainAspectRatio: false,
+								interaction: { mode: 'index', intersect: false },
+								scales: {
+									y: { type: 'linear', display: true, position: 'left', max: 100, title: { display: true, text: 'Success Rate (%)' } },
+									y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Total Executions' }, grid: { drawOnChartArea: false } }
+								}
+							}
+						});
+						} catch (e) { console.error('loadSuccessFailureRates:', e); }
+					}
+
+					// Load Hourly Trends
+					async function loadHourlyTrends() {
+						try {
+						const { dateFrom, dateTo } = getDateRange();
+						const params = new URLSearchParams({ project_id: projectID });
+						if (dateFrom) params.append('date_from', dateFrom);
+						if (dateTo) params.append('date_to', dateTo);
+
+						const data = await fetchJSON(`/api/analytics/execution-trends-by-hour?${params}`);
+
+						if (charts.hourlyTrends) charts.hourlyTrends.destroy();
+						const ctx = document.getElementById('hourlyTrendsChart');
+						if (!ctx) return;
+						charts.hourlyTrends = new Chart(ctx.getContext('2d'), {
+							type: 'bar',
+							data: {
+								labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
+								datasets: [{
+									label: 'Executions',
+									data: Array.from({ length: 24 }, (_, i) => {
+										const found = data.find(d => d.Hour === i);
+										return found ? found.Count : 0;
+									}),
+									backgroundColor: 'rgba(147, 51, 234, 0.5)',
+									borderColor: 'rgb(147, 51, 234)',
+									borderWidth: 1
+								}]
+							},
+							options: {
+								responsive: true,
+								maintainAspectRatio: false,
+								scales: { y: { beginAtZero: true, title: { display: true, text: 'Count' } } }
+							}
+						});
+						} catch (e) { console.error('loadHourlyTrends:', e); }
+					}
+
+					// Load Avg Execution Time by Task
+					async function loadAvgTimeByTask() {
+						try {
+						const data = await fetchJSON(`/api/analytics/avg-execution-time-by-task?project_id=${projectID}&limit=10`);
+						if (data.length === 0) return;
+
+						if (charts.avgTimeTask) charts.avgTimeTask.destroy();
+						const ctx = document.getElementById('avgTimeTaskChart');
+						if (!ctx) return;
+						charts.avgTimeTask = new Chart(ctx.getContext('2d'), {
+							type: 'bar',
+							data: {
+								labels: data.map(d => d.Name || 'Unknown'),
+								datasets: [{
+									label: 'Avg Time (min)',
+									data: data.map(d => (d.AvgMs || 0) / 60000),
+									backgroundColor: 'rgba(251, 146, 60, 0.5)',
+									borderColor: 'rgb(251, 146, 60)',
+									borderWidth: 1
+								}]
+							},
+							options: {
+								responsive: true,
+								maintainAspectRatio: false,
+								indexAxis: 'y',
+								scales: { x: { beginAtZero: true, title: { display: true, text: 'Minutes' } } },
+								plugins: {
+									tooltip: {
+										callbacks: {
+											label: function(context) {
+												return 'Avg: ' + formatDuration(data[context.dataIndex].AvgMs || 0);
+											}
+										}
+									}
+								}
+							}
+						});
+						} catch (e) { console.error('loadAvgTimeByTask:', e); }
+					}
+
+					// Load Avg Execution Time by Agent
+					async function loadAvgTimeByAgent() {
+						try {
+						const data = await fetchJSON(`/api/analytics/avg-execution-time-by-agent?project_id=${projectID}`);
+						if (data.length === 0) return;
+
+						if (charts.avgTimeAgent) charts.avgTimeAgent.destroy();
+						const ctx = document.getElementById('avgTimeAgentChart');
+						if (!ctx) return;
+						charts.avgTimeAgent = new Chart(ctx.getContext('2d'), {
+							type: 'bar',
+							data: {
+								labels: data.map(d => d.Name || 'Unknown'),
+								datasets: [{
+									label: 'Avg Time (min)',
+									data: data.map(d => (d.AvgMs || 0) / 60000),
+									backgroundColor: 'rgba(20, 184, 166, 0.5)',
+									borderColor: 'rgb(20, 184, 166)',
+									borderWidth: 1
+								}]
+							},
+							options: {
+								responsive: true,
+								maintainAspectRatio: false,
+								scales: { y: { beginAtZero: true, title: { display: true, text: 'Minutes' } } },
+								plugins: {
+									tooltip: {
+										callbacks: {
+											label: function(context) {
+												return 'Avg: ' + formatDuration(data[context.dataIndex].AvgMs || 0);
+											}
+										}
+									}
+								}
+							}
+						});
+						} catch (e) { console.error('loadAvgTimeByAgent:', e); }
+					}
+
+					// Load Agent Usage
+					async function loadAgentUsage() {
+						try {
+						const data = await fetchJSON(`/api/analytics/agent-usage-by-project?project_id=${projectID}`);
+						if (data.length === 0) return;
+
+						if (charts.agentUsage) charts.agentUsage.destroy();
+						const ctx = document.getElementById('agentUsageChart');
+						if (!ctx) return;
+						charts.agentUsage = new Chart(ctx.getContext('2d'), {
+							type: 'pie',
+							data: {
+								labels: data.map(d => d.AgentName || 'Unknown'),
+								datasets: [{
+									data: data.map(d => d.ExecutionCount || 0),
+									backgroundColor: [
+										'rgba(239, 68, 68, 0.7)',
+										'rgba(34, 197, 94, 0.7)',
+										'rgba(59, 130, 246, 0.7)',
+										'rgba(251, 146, 60, 0.7)',
+										'rgba(147, 51, 234, 0.7)',
+										'rgba(20, 184, 166, 0.7)'
+									]
+								}]
+							},
+							options: {
+								responsive: true,
+								maintainAspectRatio: false,
+								plugins: { legend: { position: 'bottom' } }
+							}
+						});
+						} catch (e) { console.error('loadAgentUsage:', e); }
+					}
+
+					// Load Most Frequent Tasks
+					async function loadMostFrequentTasks() {
+						try {
+						const data = await fetchJSON(`/api/analytics/most-frequent-tasks?project_id=${projectID}&limit=10`);
+
+						const container = document.getElementById('frequentTasksList');
+						if (!container) return;
+						if (data.length === 0) {
+							container.innerHTML = '<p class="text-center opacity-50 py-4">No data available</p>';
+							return;
+						}
+
+						container.innerHTML = data.map((task, idx) => `
+							<div class="flex justify-between items-center py-2 border-b border-base-300">
+								<div>
+									<span class="font-mono text-sm opacity-50">${idx + 1}.</span>
+									<span class="ml-2">${task.TaskTitle || 'Unknown'}</span>
+								</div>
+								<span class="badge badge-primary">${task.ExecutionCount || 0} runs</span>
+							</div>
+						`).join('');
+						} catch (e) { console.error('loadMostFrequentTasks:', e); }
+					}
+
+					// Load Failed Task Patterns
+					async function loadFailedTaskPatterns() {
+						try {
+						const data = await fetchJSON(`/api/analytics/failed-task-patterns?project_id=${projectID}&limit=10`);
+
+						const tbody = document.querySelector('#failedPatternsTable tbody');
+						if (!tbody) return;
+						if (data.length === 0) {
+							tbody.innerHTML = '<tr><td colspan="4" class="text-center opacity-50">No failed tasks</td></tr>';
+							return;
+						}
+
+						tbody.innerHTML = data.map(pattern => {
+							const lastError = pattern.LastError || 'N/A';
+							const truncatedError = lastError.length > 50 ? lastError.substring(0, 50) + '...' : lastError;
+							const lastFailedAt = pattern.LastFailedAt ? new Date(pattern.LastFailedAt).toLocaleString() : 'N/A';
+							return `
+								<tr>
+									<td>${pattern.TaskTitle || 'Unknown'}</td>
+									<td><span class="badge badge-error">${pattern.FailureCount || 0}</span></td>
+									<td><span class="text-xs" title="${lastError}">${truncatedError}</span></td>
+									<td class="text-xs opacity-60">${lastFailedAt}</td>
+								</tr>
+							`;
+						}).join('');
+						} catch (e) { console.error('loadFailedTaskPatterns:', e); }
+					}
+
+					// Load all data - use Promise.allSettled to prevent one failure from blocking others
+					async function loadAllData() {
+						await Promise.allSettled([
+							loadSuccessFailureRates(),
+							loadHourlyTrends(),
+							loadAvgTimeByTask(),
+							loadAvgTimeByAgent(),
+							loadAgentUsage(),
+							loadMostFrequentTasks(),
+							loadFailedTaskPatterns()
+						]);
+					}
+
+					// Event listeners
+					document.getElementById('refreshBtn').addEventListener('click', loadAllData);
+					document.getElementById('dateRange').addEventListener('change', () => {
+						loadSuccessFailureRates();
+						loadHourlyTrends();
+					});
+					document.getElementById('groupBy').addEventListener('change', loadSuccessFailureRates);
+
+					// Initial load
+					loadAllData();
+				}
+
+				// Load Chart.js dynamically if not already loaded, then initialize.
+				// This fixes HTMX navigation: external <script src> tags load async during
+				// HTMX swaps, so the inline script would run before Chart.js was available.
+				if (typeof Chart !== 'undefined') {
+					setTimeout(initAnalytics, 0);
+				} else {
+					var script = document.createElement('script');
+					script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+					script.onload = initAnalytics;
+					document.head.appendChild(script);
+				}
+				})();
+			</script>
+	} else {
+		<div class="text-center py-12 opacity-50">
+			<p>No projects yet. Create one to view analytics.</p>
+		</div>
+	}
+}

@@ -1,0 +1,1731 @@
+basePath: /
+definitions:
+  handler.ChatMessageAcceptedResponse:
+    properties:
+      attachment_urls:
+        example:
+        - /chat/attachments/abc/download
+        items:
+          type: string
+        type: array
+      message_id:
+        example: exec123
+        type: string
+      status:
+        example: processing
+        type: string
+      status_url:
+        example: /api/chat/message/exec123
+        type: string
+    type: object
+  handler.ChatMessageStatusResponse:
+    properties:
+      duration_ms:
+        example: 2500
+        type: integer
+      error:
+        example: ""
+        type: string
+      message_id:
+        example: exec123
+        type: string
+      response:
+        example: Here's the information you requested...
+        type: string
+      status:
+        example: completed
+        type: string
+      task_ids:
+        example:
+        - task1
+        - task2
+        items:
+          type: string
+        type: array
+      tokens_used:
+        example: 150
+        type: integer
+    type: object
+  handler.ErrorResponse:
+    properties:
+      error:
+        example: error message
+        type: string
+    type: object
+  handler.GlobalCapacityResponse:
+    properties:
+      available_slots:
+        type: integer
+      has_capacity:
+        type: boolean
+      max_workers:
+        type: integer
+      queue_size:
+        type: integer
+      total_running:
+        type: integer
+    type: object
+  handler.ModelCapacityResponse:
+    properties:
+      available_slots:
+        type: integer
+      has_capacity:
+        type: boolean
+      id:
+        type: string
+      max_workers:
+        type: integer
+      model:
+        type: string
+      name:
+        type: string
+      running:
+        type: integer
+    type: object
+  handler.ProjectCapacityResponse:
+    properties:
+      available_slots:
+        type: integer
+      has_capacity:
+        type: boolean
+      id:
+        type: string
+      max_workers:
+        type: integer
+      name:
+        type: string
+      queue_size:
+        type: integer
+      running:
+        type: integer
+    type: object
+  handler.ProjectResponse:
+    properties:
+      created_at:
+        example: "2024-01-15T10:30:00Z"
+        type: string
+      id:
+        example: abc123
+        type: string
+      name:
+        example: My Project
+        type: string
+      path:
+        example: /Users/user/projects/myproject
+        type: string
+    type: object
+  handler.ProjectsListResponse:
+    properties:
+      projects:
+        items:
+          $ref: '#/definitions/handler.ProjectResponse'
+        type: array
+    type: object
+  models.AgentPerformanceMetric:
+    properties:
+      agent_config_id:
+        type: string
+      avg_cost_cents:
+        type: integer
+      avg_duration_ms:
+        type: integer
+      avg_quality_score:
+        description: 0-1
+        type: number
+      failure_count:
+        type: integer
+      id:
+        type: string
+      last_updated:
+        type: string
+      success_count:
+        type: integer
+      task_type:
+        description: '"frontend", "backend", "testing", "refactor", "bugfix", "architecture"'
+        type: string
+    type: object
+  models.CollisionReport:
+    properties:
+      analyses:
+        items:
+          $ref: '#/definitions/models.ImpactAnalysis'
+        type: array
+      conflicts:
+        items:
+          $ref: '#/definitions/models.ConflictPrediction'
+        type: array
+      generated_at:
+        type: string
+      project_id:
+        type: string
+      recommendation:
+        $ref: '#/definitions/models.ExecutionOrderRecommendation'
+    type: object
+  models.ConflictHistory:
+    properties:
+      actual_files:
+        description: JSON array
+        type: string
+      conflict_type:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      impact_score:
+        type: number
+      prediction_id:
+        type: string
+      project_id:
+        type: string
+      resolution:
+        type: string
+      task_a_id:
+        type: string
+      task_b_id:
+        type: string
+      was_predicted:
+        type: boolean
+    type: object
+  models.ConflictPrediction:
+    properties:
+      conflict_type:
+        $ref: '#/definitions/models.ConflictType'
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      overlapping_resources:
+        description: JSON array
+        type: string
+      project_id:
+        type: string
+      resolution_strategy:
+        type: string
+      resolved_at:
+        type: string
+      severity:
+        $ref: '#/definitions/models.ConflictSeverity'
+      status:
+        $ref: '#/definitions/models.ConflictStatus'
+      task_a_id:
+        type: string
+      task_b_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.ConflictSeverity:
+    enum:
+    - low
+    - medium
+    - high
+    - critical
+    type: string
+    x-enum-varnames:
+    - SeverityLow
+    - SeverityMedium
+    - SeverityHigh
+    - SeverityCritical
+  models.ConflictStatus:
+    enum:
+    - detected
+    - acknowledged
+    - resolved
+    - false_positive
+    type: string
+    x-enum-varnames:
+    - ConflictDetected
+    - ConflictAcknowledged
+    - ConflictResolved
+    - ConflictFalsePositive
+  models.ConflictType:
+    enum:
+    - file
+    - api
+    - schema
+    - component
+    - semantic
+    type: string
+    x-enum-varnames:
+    - ConflictTypeFile
+    - ConflictTypeAPI
+    - ConflictTypeSchema
+    - ConflictTypeComponent
+    - ConflictTypeSemantic
+  models.ExecutionOrderRecommendation:
+    properties:
+      batch_groups:
+        description: JSON array of arrays
+        type: string
+      conflict_count:
+        type: integer
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: string
+      project_id:
+        type: string
+      reasoning:
+        type: string
+      status:
+        $ref: '#/definitions/models.RecommendationStatus'
+      task_ids:
+        description: JSON array of task IDs in order
+        type: string
+    type: object
+  models.ImpactAnalysis:
+    properties:
+      analysis_model:
+        type: string
+      apis_impacted:
+        description: JSON array
+        type: string
+      components_impacted:
+        description: JSON array
+        type: string
+      confidence:
+        type: number
+      created_at:
+        type: string
+      files_impacted:
+        description: JSON array
+        type: string
+      id:
+        type: string
+      impact_summary:
+        type: string
+      project_id:
+        type: string
+      schemas_impacted:
+        description: JSON array
+        type: string
+      task_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.RecommendationStatus:
+    enum:
+    - pending
+    - accepted
+    - rejected
+    - expired
+    type: string
+    x-enum-varnames:
+    - RecommendationPending
+    - RecommendationAccepted
+    - RecommendationRejected
+    - RecommendationExpired
+  models.VoteRecord:
+    properties:
+      agent_config_id:
+        type: string
+      choice:
+        description: The option voted for
+        type: string
+      confidence:
+        description: 0-1 confidence in the vote
+        type: number
+      created_at:
+        type: string
+      id:
+        type: string
+      reasoning:
+        description: Agent's reasoning
+        type: string
+      step_execution_id:
+        type: string
+    type: object
+  repository.AgentUsage:
+    properties:
+      agentID:
+        type: string
+      agentName:
+        type: string
+      executionCount:
+        type: integer
+      failureCount:
+        type: integer
+      projectID:
+        type: string
+      projectName:
+        type: string
+      successCount:
+        type: integer
+    type: object
+  repository.AvgExecutionTime:
+    properties:
+      avgMs:
+        format: float64
+        type: number
+      count:
+        type: integer
+      id:
+        type: string
+      maxMs:
+        format: int64
+        type: integer
+      minMs:
+        format: int64
+        type: integer
+      name:
+        type: string
+    type: object
+  repository.ExecutionTrend:
+    properties:
+      count:
+        type: integer
+      hour:
+        type: integer
+    type: object
+  repository.FailedTaskPattern:
+    properties:
+      failureCount:
+        type: integer
+      lastError:
+        type: string
+      lastFailedAt:
+        type: string
+      taskID:
+        type: string
+      taskTitle:
+        type: string
+    type: object
+  repository.SuccessFailureRate:
+    properties:
+      failureCount:
+        type: integer
+      period:
+        type: string
+      successCount:
+        type: integer
+      successRate:
+        format: float64
+        type: number
+      totalCount:
+        type: integer
+    type: object
+  repository.TaskFrequency:
+    properties:
+      executionCount:
+        type: integer
+      lastExecutedAt:
+        type: string
+      taskID:
+        type: string
+      taskTitle:
+        type: string
+    type: object
+host: localhost:3001
+info:
+  contact:
+    email: support@openvibely.dev
+    name: API Support
+    url: https://github.com/openvibely/openvibely
+  description: |-
+    REST API for OpenVibely - AI-powered task scheduling and management
+    This API provides endpoints for managing projects, tasks, and chat interactions with AI agents.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: OpenVibely API
+  version: "1.0"
+paths:
+  /api/analytics/agent-usage-by-project:
+    get:
+      description: Returns model usage, success count, and failure count grouped by
+        project.
+      parameters:
+      - description: Project ID filter
+        in: query
+        name: project_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Model usage breakdown
+          schema:
+            items:
+              $ref: '#/definitions/repository.AgentUsage'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get model usage by project
+      tags:
+      - analytics
+  /api/analytics/avg-execution-time-by-agent:
+    get:
+      description: Returns average execution durations grouped by configured model.
+      parameters:
+      - description: Project ID filter
+        in: query
+        name: project_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Average execution time by model
+          schema:
+            items:
+              $ref: '#/definitions/repository.AvgExecutionTime'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get average execution time by model
+      tags:
+      - analytics
+  /api/analytics/avg-execution-time-by-task:
+    get:
+      description: Returns average task execution durations for completed executions.
+      parameters:
+      - description: Project ID filter
+        in: query
+        name: project_id
+        type: string
+      - default: 10
+        description: Maximum number of tasks to return
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Average execution time by task
+          schema:
+            items:
+              $ref: '#/definitions/repository.AvgExecutionTime'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get average execution time by task
+      tags:
+      - analytics
+  /api/analytics/execution-trends-by-hour:
+    get:
+      description: Returns execution counts grouped by hour-of-day.
+      parameters:
+      - description: Project ID filter
+        in: query
+        name: project_id
+        type: string
+      - description: Optional start datetime filter
+        in: query
+        name: date_from
+        type: string
+      - description: Optional end datetime filter
+        in: query
+        name: date_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Execution counts by hour
+          schema:
+            items:
+              $ref: '#/definitions/repository.ExecutionTrend'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get execution trends by hour
+      tags:
+      - analytics
+  /api/analytics/failed-task-patterns:
+    get:
+      description: Returns tasks with repeated failures, grouped by last observed
+        error.
+      parameters:
+      - description: Project ID filter
+        in: query
+        name: project_id
+        type: string
+      - default: 10
+        description: Maximum number of patterns to return
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Failed task patterns
+          schema:
+            items:
+              $ref: '#/definitions/repository.FailedTaskPattern'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get failed task patterns
+      tags:
+      - analytics
+  /api/analytics/most-frequent-tasks:
+    get:
+      description: Returns tasks ordered by execution count.
+      parameters:
+      - description: Project ID filter
+        in: query
+        name: project_id
+        type: string
+      - default: 10
+        description: Maximum number of tasks to return
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Most frequently executed tasks
+          schema:
+            items:
+              $ref: '#/definitions/repository.TaskFrequency'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get most frequent tasks
+      tags:
+      - analytics
+  /api/analytics/success-failure-rates:
+    get:
+      description: Returns execution success/failure rates grouped by day, week, or
+        month.
+      parameters:
+      - description: Project ID filter
+        in: query
+        name: project_id
+        type: string
+      - default: day
+        description: 'Grouping period: day, week, or month'
+        in: query
+        name: group_by
+        type: string
+      - description: Optional start datetime filter
+        in: query
+        name: date_from
+        type: string
+      - description: Optional end datetime filter
+        in: query
+        name: date_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Success/failure rates
+          schema:
+            items:
+              $ref: '#/definitions/repository.SuccessFailureRate'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get success/failure rates
+      tags:
+      - analytics
+  /api/autonomous/chain/{taskId}:
+    get:
+      description: Returns build-chain status HTML for an autonomous build root task.
+      parameters:
+      - description: Root task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Build chain HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing task_id
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Get autonomous build chain status
+      tags:
+      - autonomous
+  /api/autonomous/config:
+    put:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Updates autonomous build settings for a project and returns an
+        updated HTML dashboard fragment.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Enable autonomous builds
+        in: formData
+        name: enabled
+        type: boolean
+      - default: 4
+        description: Maximum execution hours
+        in: formData
+        name: max_execution_hours
+        type: integer
+      - default: 23
+        description: Daily schedule hour (0-23)
+        in: formData
+        name: schedule_hour
+        type: integer
+      - description: JSON array of protected file paths
+        in: formData
+        name: protected_files
+        type: string
+      - description: JSON array of excluded areas
+        in: formData
+        name: excluded_areas
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Autonomous dashboard HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing project_id
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Update autonomous build configuration
+      tags:
+      - autonomous
+  /api/autonomous/summary/{taskId}:
+    get:
+      description: Returns the build summary panel HTML for an autonomous build root
+        task.
+      parameters:
+      - description: Root task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Build summary HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing task_id
+          schema:
+            type: string
+      summary: Get autonomous build summary
+      tags:
+      - autonomous
+  /api/autonomous/trends/analyze:
+    post:
+      description: Runs trend pattern analysis and returns analysis result HTML.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Trend analysis HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing project_id
+          schema:
+            type: string
+      summary: Analyze trends
+      tags:
+      - autonomous
+  /api/autonomous/trends/collect:
+    post:
+      description: Collects trend data from configured sources and returns collection
+        result HTML.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Collection result HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing project_id
+          schema:
+            type: string
+      summary: Collect trends
+      tags:
+      - autonomous
+  /api/autonomous/trends/competitors:
+    post:
+      description: Runs competitor update analysis and returns result HTML.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Competitor analysis HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing project_id
+          schema:
+            type: string
+      summary: Analyze competitors
+      tags:
+      - autonomous
+  /api/autonomous/trends/dashboard:
+    get:
+      description: Returns the trend dashboard HTML section for a project.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Trend dashboard HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing project_id
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Get trend dashboard section
+      tags:
+      - autonomous
+  /api/autonomous/trends/patterns/{id}/status:
+    patch:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Updates a trend pattern status and returns updated patterns HTML.
+      parameters:
+      - description: Trend pattern ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Pattern status (implemented or dismissed)
+        in: formData
+        name: status
+        required: true
+        type: string
+      - description: Feature name when status is implemented
+        in: formData
+        name: feature_name
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Updated trend patterns HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing or invalid parameters
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Update trend pattern status
+      tags:
+      - autonomous
+  /api/autonomous/trends/sources:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Adds a monitored trend source and returns updated source-list HTML.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Source type (hashtag, account, keyword, competitor)
+        in: formData
+        name: source_type
+        required: true
+        type: string
+      - description: Source value
+        in: formData
+        name: value
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Updated source list HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing or invalid parameters
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Add trend source
+      tags:
+      - autonomous
+  /api/autonomous/trends/sources/{id}:
+    delete:
+      description: Deletes a trend source and returns updated source-list HTML.
+      parameters:
+      - description: Trend source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Updated source list HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing parameters
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Delete trend source
+      tags:
+      - autonomous
+  /api/autonomous/trends/sources/{id}/toggle:
+    patch:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Enables or disables a trend source and returns updated source-list
+        HTML.
+      parameters:
+      - description: Trend source ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: Whether source is enabled
+        in: formData
+        name: enabled
+        required: true
+        type: boolean
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Updated source list HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing parameters
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Toggle trend source
+      tags:
+      - autonomous
+  /api/autonomous/trigger:
+    post:
+      description: Starts a new autonomous build chain for a project and returns an
+        HTML fragment with result status.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Autonomous trigger result HTML
+          schema:
+            type: string
+        "400":
+          description: Missing project_id
+          schema:
+            type: string
+      summary: Trigger autonomous build
+      tags:
+      - autonomous
+  /api/autonomous/x-credentials:
+    put:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Saves X API credentials for trend intelligence and returns an HTML
+        confirmation fragment.
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      - description: X API key
+        in: formData
+        name: api_key
+        type: string
+      - description: X API secret
+        in: formData
+        name: api_secret
+        type: string
+      - description: X access token
+        in: formData
+        name: access_token
+        type: string
+      - description: X access token secret
+        in: formData
+        name: access_token_secret
+        type: string
+      - description: X bearer token
+        in: formData
+        name: bearer_token
+        type: string
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: Credentials saved HTML fragment
+          schema:
+            type: string
+        "400":
+          description: Missing project_id
+          schema:
+            type: string
+        "500":
+          description: Internal server error
+          schema:
+            type: string
+      summary: Save X credentials
+      tags:
+      - autonomous
+  /api/capacity/global:
+    get:
+      description: Returns global worker pool usage and available slots.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Global capacity information
+          schema:
+            $ref: '#/definitions/handler.GlobalCapacityResponse'
+      summary: Get global worker capacity
+      tags:
+      - capacity
+  /api/capacity/models:
+    get:
+      description: Returns worker capacity information for models that have explicit
+        model-level limits.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Per-model capacity information
+          schema:
+            items:
+              $ref: '#/definitions/handler.ModelCapacityResponse'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get model worker capacities
+      tags:
+      - capacity
+  /api/capacity/models/{modelId}:
+    get:
+      description: Returns worker capacity information for a specific model configuration.
+      parameters:
+      - description: Model configuration ID
+        in: path
+        name: modelId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Model capacity information
+          schema:
+            $ref: '#/definitions/handler.ModelCapacityResponse'
+        "404":
+          description: Model not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get model worker capacity
+      tags:
+      - capacity
+  /api/capacity/projects:
+    get:
+      description: Returns worker capacity and queue information for each project.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Per-project capacity information
+          schema:
+            items:
+              $ref: '#/definitions/handler.ProjectCapacityResponse'
+            type: array
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get project worker capacities
+      tags:
+      - capacity
+  /api/capacity/projects/{projectId}:
+    get:
+      description: Returns worker capacity and queue information for a specific project.
+      parameters:
+      - description: Project ID
+        in: path
+        name: projectId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Project capacity information
+          schema:
+            $ref: '#/definitions/handler.ProjectCapacityResponse'
+        "404":
+          description: Project not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get project worker capacity
+      tags:
+      - capacity
+  /api/chat/message:
+    post:
+      consumes:
+      - multipart/form-data
+      description: |-
+        Send a chat message to the AI agent with optional file attachments.
+        Returns 201 immediately with a message ID. The AI processes the message asynchronously.
+        Poll GET /api/chat/message/{id} to check status and retrieve the response.
+        Supported file types: Images (JPG, PNG, GIF, WebP), Documents (PDF, TXT, MD, CSV), Code (Go, Python, JS, TS, Rust, Java, C/C++, Ruby, PHP, Swift, Kotlin, Shell, SQL, HTML, CSS, SCSS, XML, JSON, YAML, TOML, INI, diff/patch)
+        Maximum file size: 10 MB per file
+        Maximum files per request: 10
+      parameters:
+      - description: Chat message text to send to the AI
+        in: formData
+        name: message
+        required: true
+        type: string
+      - description: Project ID to associate with this chat message
+        in: formData
+        name: project_id
+        required: true
+        type: string
+      - description: File attachments (screenshots, images, PDFs, text files)
+        in: formData
+        name: attachments
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Message accepted for async processing
+          schema:
+            $ref: '#/definitions/handler.ChatMessageAcceptedResponse'
+        "400":
+          description: Bad request - missing required fields or invalid input
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Project not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "413":
+          description: File too large
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "415":
+          description: Unsupported file type
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Send a chat message with optional file attachments (async)
+      tags:
+      - chat
+  /api/chat/message/{id}:
+    get:
+      description: |-
+        Poll this endpoint to check if an async chat message has completed processing.
+        Returns the current status (processing, completed, failed) and the response when available.
+      parameters:
+      - description: Message/execution ID returned from POST /api/chat/message
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Message status and response
+          schema:
+            $ref: '#/definitions/handler.ChatMessageStatusResponse'
+        "404":
+          description: Message not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get the status and result of a chat message
+      tags:
+      - chat
+  /api/collisions/analyze/{taskId}:
+    post:
+      description: Performs AI-powered semantic analysis of what files, APIs, schemas,
+        and components a task will likely modify
+      parameters:
+      - description: Task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ImpactAnalysis'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Analyze task impact
+      tags:
+      - collisions
+  /api/collisions/conflicts/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      description: Updates the status of a conflict prediction (acknowledge, resolve,
+        mark as false positive)
+      parameters:
+      - description: Conflict Prediction ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Status update
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update conflict status
+      tags:
+      - collisions
+  /api/collisions/conflicts/{taskId}:
+    get:
+      description: Returns all active conflicts involving a specific task
+      parameters:
+      - description: Task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.ConflictPrediction'
+            type: array
+      summary: Get conflicts for a task
+      tags:
+      - collisions
+  /api/collisions/detect:
+    post:
+      description: Compares impact analyses across pending/running tasks to predict
+        conflicts
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.ConflictPrediction'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Detect conflicts between tasks
+      tags:
+      - collisions
+  /api/collisions/history:
+    get:
+      description: Returns historical conflict data for a project (for learning)
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get conflict history
+      tags:
+      - collisions
+    post:
+      consumes:
+      - application/json
+      description: Records a conflict that actually occurred for learning and prediction
+        improvement
+      parameters:
+      - description: Conflict history record
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.ConflictHistory'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.ConflictHistory'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Record an actual conflict
+      tags:
+      - collisions
+  /api/collisions/impact/{taskId}:
+    get:
+      description: Returns the latest impact analysis for a task
+      parameters:
+      - description: Task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ImpactAnalysis'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get task impact analysis
+      tags:
+      - collisions
+  /api/collisions/recommend:
+    post:
+      description: Generates an optimal task execution order recommendation based
+        on detected conflicts
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ExecutionOrderRecommendation'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Recommend task execution order
+      tags:
+      - collisions
+  /api/collisions/recommendation:
+    get:
+      description: Returns the latest pending recommendation for a project
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ExecutionOrderRecommendation'
+      summary: Get latest execution order recommendation
+      tags:
+      - collisions
+  /api/collisions/recommendation/{id}/accept:
+    post:
+      description: Marks a recommendation as accepted
+      parameters:
+      - description: Recommendation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Accept execution order recommendation
+      tags:
+      - collisions
+  /api/collisions/recommendation/{id}/reject:
+    post:
+      description: Marks a recommendation as rejected
+      parameters:
+      - description: Recommendation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Reject execution order recommendation
+      tags:
+      - collisions
+  /api/collisions/report:
+    get:
+      description: Returns a full collision report for a project including analyses,
+        conflicts, and recommendations
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.CollisionReport'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get collision report
+      tags:
+      - collisions
+  /api/projects:
+    get:
+      description: Get a list of all available projects with their IDs, names, paths,
+        and creation timestamps
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Successfully retrieved projects
+          schema:
+            $ref: '#/definitions/handler.ProjectsListResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: List all projects
+      tags:
+      - projects
+  /api/workflows/best-agent:
+    get:
+      description: Returns the best-performing model for the requested task type based
+        on workflow metrics.
+      parameters:
+      - default: general
+        description: Task type
+        in: query
+        name: task_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Best model and metric payload, or message when unavailable
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Agent not found
+          schema:
+            type: string
+      summary: Get best model for task type
+      tags:
+      - workflows
+  /api/workflows/cheapest-agent:
+    get:
+      description: Returns the cheapest model that meets the requested minimum quality
+        threshold.
+      parameters:
+      - default: general
+        description: Task type
+        in: query
+        name: task_type
+        type: string
+      - default: 0.6
+        description: Minimum quality threshold (0..1)
+        in: query
+        name: min_quality
+        type: number
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Cheapest model and metric payload, or message when unavailable
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Agent not found
+          schema:
+            type: string
+      summary: Get cheapest model for task type
+      tags:
+      - workflows
+  /api/workflows/metrics:
+    get:
+      description: Returns workflow performance metrics for all configured model configurations.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: All model performance metrics
+          schema:
+            items:
+              $ref: '#/definitions/models.AgentPerformanceMetric'
+            type: array
+        "500":
+          description: Failed to get metrics
+          schema:
+            type: string
+      summary: Get metrics for all models
+      tags:
+      - workflows
+  /api/workflows/metrics/{agentId}:
+    get:
+      description: Returns workflow performance metrics for a specific model configuration.
+      parameters:
+      - description: Model configuration ID
+        in: path
+        name: agentId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Model performance metrics
+          schema:
+            items:
+              $ref: '#/definitions/models.AgentPerformanceMetric'
+            type: array
+        "500":
+          description: Failed to get metrics
+          schema:
+            type: string
+      summary: Get metrics for a model
+      tags:
+      - workflows
+  /api/workflows/votes/{stepExecId}:
+    get:
+      description: Returns all agent vote records for a workflow voting step execution.
+      parameters:
+      - description: Step execution ID
+        in: path
+        name: stepExecId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Vote records
+          schema:
+            items:
+              $ref: '#/definitions/models.VoteRecord'
+            type: array
+        "500":
+          description: Failed to get votes
+          schema:
+            type: string
+      summary: Get vote records for workflow step execution
+      tags:
+      - workflows
+schemes:
+- http
+- https
+swagger: "2.0"
+tags:
+- description: Operations for managing projects
+  name: projects
+- description: AI chat operations with file upload support
+  name: chat
+- description: Execution analytics API endpoints
+  name: analytics
+- description: Worker capacity and utilization API endpoints
+  name: capacity
+- description: Multi-agent workflow and metrics API endpoints
+  name: workflows
+- description: Autonomous build and trend intelligence API endpoints
+  name: autonomous
+- description: Semantic collision analysis API endpoints
+  name: collisions

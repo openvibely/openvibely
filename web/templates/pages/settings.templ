@@ -1,0 +1,999 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/layout"
+	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+func githubConnectionBadgeClass(status service.GitHubConnectionStatus) string {
+	if !status.Configured {
+		return "badge-ghost"
+	}
+	if status.Connected {
+		return "badge-success"
+	}
+	return "badge-warning"
+}
+
+func githubConnectionLabel(status service.GitHubConnectionStatus) string {
+	if !status.Configured {
+		return "Not Configured"
+	}
+	if status.Connected {
+		return "Connected"
+	}
+	return "Not Connected"
+}
+
+func githubPrivateKeyPlaceholder(hasPrivateKey bool) string {
+	if hasPrivateKey {
+		return "Leave blank to keep existing private key, or paste a new key to rotate."
+	}
+	return "Paste your GitHub App private key (PEM format)."
+}
+
+func githubPATPlaceholder(hasPAT bool) string {
+	if hasPAT {
+		return "Leave blank to keep existing token, or paste a new token to rotate."
+	}
+	return "Paste a GitHub personal access token (classic or fine-grained)."
+}
+
+func slackConnectionBadgeClass(status service.SlackConnectionStatus) string {
+	if !status.Configured {
+		return "badge-ghost"
+	}
+	if status.Connected {
+		return "badge-success"
+	}
+	return "badge-warning"
+}
+
+func slackConnectionLabel(status service.SlackConnectionStatus) string {
+	if !status.Configured {
+		return "Not Configured"
+	}
+	if status.Connected {
+		return "Connected"
+	}
+	return "Not Connected"
+}
+
+func slackSecretPlaceholder(hasSecret bool, label string) string {
+	if hasSecret {
+		return "Leave blank to keep existing " + label + ", or paste a new value to rotate."
+	}
+	return "Enter " + label + "."
+}
+
+func telegramChannelStatusText(isBotRunning bool) string {
+	if isBotRunning {
+		return "Running"
+	}
+	return "Not Running"
+}
+
+templ SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, sendResponses bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool) {
+	@layout.Base("Channels", projects, currentProjectID) {
+		@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel)
+	}
+}
+
+// SettingsContent renders just the settings content for HTMX requests
+templ SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool) {
+	@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel)
+}
+
+templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool) {
+	<div id="channels-container" data-search-container>
+		<div class="flex items-center justify-between mb-6">
+			<h2 class="text-2xl font-bold">Channels</h2>
+			<div class="dropdown dropdown-end">
+				<label tabindex="0" class="btn btn-primary btn-sm" onclick="handleDropdownToggle(event)">
+					+ Add Channel
+				</label>
+				<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+					if !hasGitHubChannel {
+						<li>
+							<button type="button" onclick="openGitHubChannelFromMenu(event)">
+								GitHub
+							</button>
+						</li>
+					}
+					if !hasSlackChannel {
+						<li>
+							<button type="button" onclick="openSlackChannelFromMenu(event)">
+								Slack
+							</button>
+						</li>
+					}
+					if !hasTelegramChannel {
+						<li>
+							<button type="button" onclick="openTelegramChannelFromMenu(event)">
+								Telegram Bot
+							</button>
+						</li>
+					}
+					if hasGitHubChannel && hasTelegramChannel && hasSlackChannel {
+						<li>
+							<button type="button" disabled>
+								All channels added
+							</button>
+						</li>
+					}
+				</ul>
+			</div>
+		</div>
+
+		@CardSearchInput("channels", "Search channels...")
+
+		<!-- Active Channels -->
+		<div class="grid gap-4 mb-8">
+			if hasGitHubChannel {
+				<!-- GitHub Card -->
+				<div
+					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+					data-channel-type="github"
+					data-search-card
+					data-search-text={ "GitHub " + githubConnectionLabel(githubStatus) }
+					onclick="editChannelFromData(this)"
+				>
+					<div class="card-body relative">
+						<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+							<div class="dropdown dropdown-end">
+								<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+									</svg>
+								</label>
+								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+									<li><button type="button" onclick="openGitHubConfigModal()">Edit</button></li>
+									<li>
+										<button
+											type="button"
+											hx-post="/channels/github/remove"
+											hx-swap="none"
+										>
+											Remove
+										</button>
+									</li>
+								</ul>
+							</div>
+						</div>
+						<div class="pr-12">
+							<h3 class="font-bold flex items-center gap-2">
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+									<path d="M12 .5a12 12 0 00-3.792 23.39c.6.112.82-.258.82-.576 0-.285-.011-1.04-.017-2.04-3.338.726-4.043-1.61-4.043-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.09-.746.083-.73.083-.73 1.205.085 1.84 1.237 1.84 1.237 1.07 1.835 2.807 1.305 3.492.998.108-.775.419-1.305.762-1.605-2.665-.304-5.467-1.334-5.467-5.932 0-1.31.468-2.381 1.235-3.22-.124-.303-.535-1.527.117-3.181 0 0 1.007-.322 3.3 1.23A11.52 11.52 0 0112 6.317c1.02.005 2.047.138 3.007.404 2.291-1.553 3.297-1.23 3.297-1.23.653 1.655.242 2.879.12 3.181.77.839 1.233 1.91 1.233 3.22 0 4.61-2.807 5.625-5.48 5.922.43.37.814 1.102.814 2.222 0 1.604-.014 2.896-.014 3.29 0 .32.216.694.825.576A12 12 0 0012 .5z"/>
+								</svg>
+								GitHub
+							</h3>
+							if githubStatus.AuthMode == service.GitHubAuthModePAT {
+								if githubStatus.Connected {
+									<p class="text-sm opacity-60">Connected with personal access token.</p>
+								} else {
+									<p class="text-sm opacity-60">Add a personal access token to import repositories and create pull requests.</p>
+								}
+							} else {
+								if githubStatus.Connected {
+									<p class="text-sm opacity-60">Connected using installation `{ githubStatus.InstallationID }`.</p>
+								} else {
+									<p class="text-sm opacity-60">Connect your GitHub App installation to import repositories and create pull requests.</p>
+								}
+							}
+							if githubStatus.AccountLogin != "" {
+								<p class="text-sm opacity-60">Account: { githubStatus.AccountLogin }</p>
+							}
+							<div class="mt-3 flex items-center gap-2">
+								<span class={ "badge badge-sm", githubConnectionBadgeClass(githubStatus) }>{ githubConnectionLabel(githubStatus) }</span>
+							</div>
+							if githubStatus.AuthMode == service.GitHubAuthModeApp {
+								<div class="mt-3">
+									<div onclick="event.stopPropagation()">
+									if githubStatus.Configured && !githubStatus.Connected {
+										<a class="btn btn-primary btn-sm" href="/channels/github/connect">Connect</a>
+									} else if githubStatus.Connected {
+										<form method="post" hx-post="/channels/github/disconnect" hx-swap="none" class="inline">
+											<button type="submit" class="btn btn-ghost btn-sm">Disconnect</button>
+										</form>
+									}
+									</div>
+								</div>
+							}
+						</div>
+					</div>
+				</div>
+			}
+
+			if hasSlackChannel {
+				<!-- Slack Card -->
+				<div
+					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+					data-channel-type="slack"
+					data-search-card
+					data-search-text={ "Slack " + slackConnectionLabel(slackStatus) }
+					onclick="editChannelFromData(this)"
+				>
+					<div class="card-body relative">
+						<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+							<div class="dropdown dropdown-end">
+								<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+									</svg>
+								</label>
+								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+									<li><button type="button" onclick="openSlackConfigModal()">Edit</button></li>
+									<li>
+										<button
+											type="button"
+											hx-post="/channels/slack/test"
+											hx-target="#test-result-slack"
+											hx-swap="innerHTML"
+										>
+											Test Connection
+										</button>
+									</li>
+									<li>
+										<button
+											type="button"
+											hx-post="/channels/slack/remove"
+											hx-swap="none"
+										>
+											Remove
+										</button>
+									</li>
+								</ul>
+							</div>
+						</div>
+						<div class="pr-12">
+							<h3 class="font-bold flex items-center gap-2">
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+									<path d="M6.6 15.6c0 1.32-1.08 2.4-2.4 2.4S1.8 16.92 1.8 15.6s1.08-2.4 2.4-2.4h2.4v2.4zM7.8 15.6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4v6c0 1.32-1.08 2.4-2.4 2.4s-2.4-1.08-2.4-2.4v-6zM10.2 6c-1.32 0-2.4-1.08-2.4-2.4S8.88 1.2 10.2 1.2s2.4 1.08 2.4 2.4V6h-2.4zM10.2 7.2c1.32 0 2.4 1.08 2.4 2.4s-1.08 2.4-2.4 2.4H4.2c-1.32 0-2.4-1.08-2.4-2.4S2.88 7.2 4.2 7.2h6zM19.8 9.6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4-1.08 2.4-2.4 2.4h-2.4V9.6zM18.6 9.6c0 1.32-1.08 2.4-2.4 2.4s-2.4-1.08-2.4-2.4v-6c0-1.32 1.08-2.4 2.4-2.4s2.4 1.08 2.4 2.4v6zM16.2 19.2c1.32 0 2.4 1.08 2.4 2.4S17.52 24 16.2 24s-2.4-1.08-2.4-2.4v-2.4h2.4zM16.2 18c-1.32 0-2.4-1.08-2.4-2.4s1.08-2.4 2.4-2.4h6c1.32 0 2.4 1.08 2.4 2.4s-1.08 2.4-2.4 2.4h-6z"/>
+								</svg>
+								Slack
+							</h3>
+							if slackStatus.Connected {
+								<p class="text-sm opacity-60">Connected via OAuth.</p>
+							} else {
+								<p class="text-sm opacity-60">Connect Slack to chat with OpenVibely from app mentions and direct messages.</p>
+							}
+							if slackStatus.TeamName != "" {
+								<p class="text-sm opacity-60">Workspace: { slackStatus.TeamName }</p>
+							}
+							if len(slackAuthorizedUsers) > 0 {
+								<div class="mt-2 flex items-center gap-2">
+									<span class="text-sm opacity-60">Authorized users:</span>
+									<span class="badge badge-sm badge-ghost">
+										{ fmt.Sprintf("%d user(s)", len(slackAuthorizedUsers)) }
+									</span>
+								</div>
+							}
+							<div class="mt-3 flex items-center gap-2">
+								<span class={ "badge badge-sm", slackConnectionBadgeClass(slackStatus) }>{ slackConnectionLabel(slackStatus) }</span>
+							</div>
+							<div class="mt-3" onclick="event.stopPropagation()">
+								if slackStatus.Configured && !slackStatus.Connected {
+									<a class="btn btn-primary btn-sm" href="/channels/slack/connect">Connect</a>
+								}
+							</div>
+							<div id="test-result-slack" class="mt-2"></div>
+						</div>
+					</div>
+				</div>
+			}
+
+			if hasTelegramChannel {
+				<!-- Telegram Bot Card -->
+				<div
+					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+					data-channel-type="telegram"
+					data-channel-token={ telegramToken }
+					data-channel-running={ templ.JSONString(isBotRunning) }
+					data-search-card
+					data-search-text={ "Telegram Bot " + telegramChannelStatusText(isBotRunning) }
+					onclick="editChannelFromData(this)"
+				>
+					<div class="card-body relative">
+						<!-- Kebab menu in top right -->
+						<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+							<div class="dropdown dropdown-end">
+								<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+									</svg>
+								</label>
+								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+									<li>
+										<button onclick="editChannelFromData(this.closest('[data-channel-type]'))">
+											Edit
+										</button>
+									</li>
+									<li>
+										<button
+											hx-post="/channels/telegram/test"
+											hx-target="#test-result-telegram"
+											hx-swap="innerHTML"
+										>
+											Test Connection
+										</button>
+									</li>
+								</ul>
+							</div>
+						</div>
+						<!-- Channel content with padding for kebab menu -->
+						<div class="pr-12">
+							<h3 class="font-bold flex items-center gap-2">
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-icon="telegram-brand">
+									<path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+								</svg>
+								Telegram Bot
+							</h3>
+							<p class="text-sm opacity-60">
+								Chat with your bot to manage tasks and get insights
+							</p>
+							if len(authorizedUsers) > 0 {
+								<div class="mt-2 flex items-center gap-2">
+									<span class="text-sm opacity-60">Authorized users:</span>
+									<span class="badge badge-sm badge-ghost">
+										{ fmt.Sprintf("%d user(s)", len(authorizedUsers)) }
+									</span>
+								</div>
+							}
+							<div class="mt-3 flex items-center gap-2">
+								if isBotRunning {
+									<span class="badge badge-success badge-sm">Connected</span>
+								} else {
+									<span class="badge badge-warning badge-sm">Not Connected</span>
+								}
+							</div>
+							<div id="test-result-telegram" class="mt-2"></div>
+						</div>
+					</div>
+				</div>
+			}
+			if !hasGitHubChannel && !hasTelegramChannel && !hasSlackChannel {
+				<div class="card bg-base-100 shadow-sm border border-dashed border-base-300" data-search-card data-search-text="No channels added yet">
+					<div class="card-body">
+						<h3 class="font-semibold">No channels added yet</h3>
+						<p class="text-sm opacity-70">Use `Add Channel` to configure GitHub, Slack, or Telegram Bot.</p>
+					</div>
+				</div>
+			}
+		</div>
+
+		<!-- Coming Soon Section -->
+		<div class="mb-8">
+			<h3 class="text-lg font-semibold mb-4 opacity-70">Coming Soon</h3>
+			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+				<!-- Discord Placeholder -->
+				<div class="card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed" data-search-card data-search-text="Discord Bot Coming Soon">
+					<div class="card-body">
+						<h3 class="card-title">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"></path>
+							</svg>
+							Discord Bot
+							<span class="badge badge-ghost badge-sm">Coming Soon</span>
+						</h3>
+						<p class="text-sm opacity-70">
+							Connect your Discord server for task management.
+						</p>
+					</div>
+				</div>
+
+				<!-- Webhooks Placeholder -->
+				<div class="card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed" data-search-card data-search-text="Webhooks Coming Soon">
+					<div class="card-body">
+						<h3 class="card-title">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+							</svg>
+							Webhooks
+							<span class="badge badge-ghost badge-sm">Coming Soon</span>
+						</h3>
+						<p class="text-sm opacity-70">
+							Configure webhooks for custom integrations and notifications.
+						</p>
+					</div>
+				</div>
+
+				<!-- Email Placeholder -->
+				<div class="card bg-base-100 shadow-sm border border-base-300 opacity-50 cursor-not-allowed" data-search-card data-search-text="Email Notifications Coming Soon">
+					<div class="card-body">
+						<h3 class="card-title">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+							</svg>
+							Email Notifications
+							<span class="badge badge-ghost badge-sm">Coming Soon</span>
+						</h3>
+						<p class="text-sm opacity-70">
+							Receive email alerts for important task events.
+						</p>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Channel Configuration Modal -->
+		<dialog id="channel_modal" class="modal">
+			<div class="modal-box max-w-2xl">
+				<h3 id="channel_modal_title" class="font-bold text-lg mb-4">Configure Telegram Bot</h3>
+				<form id="channel_form" method="post" action="/channels/telegram" hx-post="/channels/telegram" hx-swap="none">
+					<div class="form-control mb-4">
+						<label class="label">
+							<span class="label-text">Bot Token</span>
+						</label>
+						<div class="relative">
+							<input
+								type="password"
+								id="channel_telegram_token"
+								name="token"
+								class="input input-bordered w-full pr-10"
+								placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+								required
+							/>
+							<button
+								type="button"
+								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
+								onclick="togglePasswordVisibility('channel_telegram_token', this)"
+								tabindex="-1"
+								aria-label="Toggle token visibility"
+							>
+								<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+								</svg>
+								<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+								</svg>
+							</button>
+						</div>
+						<label class="label">
+							<span class="label-text-alt opacity-70">
+								Get your bot token from <a href="https://t.me/BotFather" target="_blank" class="link">BotFather</a>
+							</span>
+						</label>
+					</div>
+
+					<!-- Help Section -->
+					<div class="alert alert-info mb-4">
+						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+						</svg>
+						<div>
+							<p class="font-semibold text-sm">How to Use the Bot</p>
+							<p class="text-xs opacity-80 mt-1">
+								Send natural language messages to your bot just like the Chat page. The bot can answer questions, create tasks, view execution output, and more.
+							</p>
+							<details class="text-xs opacity-70 mt-2">
+								<summary class="cursor-pointer hover:opacity-100">Optional slash command shortcuts</summary>
+								<ul class="list-disc list-inside space-y-1 ml-2 mt-2">
+									<li><code class="bg-base-300 px-1 rounded">/start</code> - Welcome message and project setup</li>
+									<li><code class="bg-base-300 px-1 rounded">/projects</code> - List all projects</li>
+									<li><code class="bg-base-300 px-1 rounded">/switch &lt;project_id&gt;</code> - Switch active project</li>
+								</ul>
+							</details>
+						</div>
+					</div>
+
+					<!-- Authorized Users Section -->
+					if currentProjectID != "" {
+						<div class="divider"></div>
+						<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+							</svg>
+							Authorized Users
+						</h4>
+						<p class="text-xs opacity-50 mb-3">
+							Restrict bot access to specific Telegram users for this project. If no users are added, the bot is open to everyone.
+						</p>
+						@components.TelegramAuthorizedUsersList(authorizedUsers, currentProjectID)
+					}
+
+					<!-- Notification Settings -->
+					<div class="divider"></div>
+					<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+						</svg>
+						Notification Settings
+					</h4>
+					<div class="form-control">
+						<label class="label cursor-pointer justify-start gap-3">
+							<input
+								type="checkbox"
+								class="toggle toggle-primary"
+								if sendResponses {
+									checked
+								}
+								hx-post="/channels/telegram/send-responses"
+								hx-swap="none"
+								hx-trigger="change"
+								hx-include="this"
+								name="enabled"
+								value="true"
+							/>
+							<div>
+								<span class="label-text font-semibold">Send task responses to Telegram</span>
+								<p class="text-xs opacity-50 mt-1">
+									When tasks created via Telegram complete or fail, send the result back to the user who created them
+								</p>
+							</div>
+						</label>
+					</div>
+
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="closeChannelModal()">Cancel</button>
+						<button type="submit" id="channel_submit_btn" class="btn btn-primary">Save & Start Bot</button>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop">
+				<button>close</button>
+			</form>
+		</dialog>
+
+		<dialog id="github_config_modal" class="modal">
+			<div class="modal-box max-w-2xl">
+				<h3 class="font-bold text-lg mb-4">Configure GitHub</h3>
+				<form id="github_config_form" method="post" action="/channels/github/configure" hx-post="/channels/github/configure" hx-swap="none">
+					<div class="form-control mb-4">
+						<label class="label"><span class="label-text">Authentication</span></label>
+						<select id="github_auth_mode" name="github_auth_mode" class="select select-bordered w-full" onchange="toggleGitHubAuthMode(this.value)">
+							<option value={ service.GitHubAuthModePAT } if githubAuthMode == service.GitHubAuthModePAT { selected }>Personal Access Token (Recommended)</option>
+							<option value={ service.GitHubAuthModeApp } if githubAuthMode == service.GitHubAuthModeApp { selected }>GitHub App (Advanced)</option>
+						</select>
+						<label class="label">
+							<span class="label-text-alt opacity-70">Use PAT for local/self-hosted installs. Use GitHub App for centralized cloud deployments.</span>
+						</label>
+					</div>
+
+					<div id="github_pat_section">
+						<div class="alert alert-info mb-3 text-sm">
+							PAT mode is the fastest setup for local open-source usage. Create a token with repository read/write and pull request permissions.
+						</div>
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">GitHub Personal Access Token</span></label>
+							<div class="relative">
+								<input
+									type="password"
+									id="github_pat"
+									name="github_pat"
+									class="input input-bordered w-full pr-10 font-mono text-xs"
+									value={ githubPATValue }
+									placeholder={ githubPATPlaceholder(githubHasPAT) }
+								/>
+								<button
+									type="button"
+									class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
+									onclick="togglePasswordVisibility('github_pat', this)"
+									tabindex="-1"
+									aria-label="Toggle token visibility"
+								>
+									<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+									</svg>
+									<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+									</svg>
+								</button>
+							</div>
+						</div>
+					</div>
+
+					<div id="github_app_section">
+						<div class="alert mb-3 text-sm">
+							GitHub App mode is for advanced/cloud deployments where one app installation is shared by your deployment.
+						</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">GitHub App ID</span></label>
+						<input type="text" name="github_app_id" class="input input-bordered" value={ githubAppID }/>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">GitHub App Slug</span></label>
+						<input type="text" name="github_app_slug" class="input input-bordered" value={ githubAppSlug }/>
+					</div>
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">GitHub App Private Key (PEM)</span></label>
+							<div class="relative">
+								<textarea
+									id="github_app_private_key"
+									name="github_app_private_key"
+									class="textarea textarea-bordered h-40 w-full pr-10 font-mono text-xs secret-textarea-masked"
+									placeholder={ githubPrivateKeyPlaceholder(githubHasPrivateKey) }
+								>{ githubPrivateKeyValue }</textarea>
+								<button
+									type="button"
+									class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-2 h-8 min-h-0 px-2"
+									onclick="toggleSecretTextareaVisibility('github_app_private_key', this)"
+									tabindex="-1"
+									aria-label="Toggle private key visibility"
+								>
+									<svg class="eye-open h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+									</svg>
+									<svg class="eye-closed h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+									</svg>
+								</button>
+							</div>
+						</div>
+						</div>
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="closeGitHubConfigModal()">Cancel</button>
+						<button type="submit" class="btn btn-primary">Save GitHub Settings</button>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop">
+				<button>close</button>
+			</form>
+		</dialog>
+
+		<dialog id="slack_config_modal" class="modal">
+			<div class="modal-box max-w-2xl">
+				<h3 class="font-bold text-lg mb-4">Configure Slack</h3>
+				<form id="slack_config_form" method="post" action="/channels/slack/configure" hx-post="/channels/slack/configure" hx-swap="none">
+					<div class="alert alert-info mb-4 text-sm">
+						<div>
+							<p class="font-semibold">Use OAuth + Socket Mode</p>
+							<p class="mt-1 opacity-80">Configure `Client ID`, `Client Secret`, and `App-Level Token (xapp-...)`, then click Connect from the Slack card.</p>
+							<p class="mt-1 opacity-80">If Slack blocks local OAuth with “use a complete URL beginning with https”, either use an HTTPS tunnel callback URL or select `Manual Override Token` mode with an `xoxb-...` token.</p>
+						</div>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Client ID</span></label>
+						<input type="text" name="slack_client_id" class="input input-bordered" value={ slackClientID } placeholder={ slackSecretPlaceholder(slackHasClientID, "Client ID") }/>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Client Secret</span></label>
+						<div class="relative">
+							<input
+								type="password"
+								id="slack_client_secret"
+								name="slack_client_secret"
+								class="input input-bordered w-full pr-10 font-mono text-xs"
+								value={ slackClientSecret }
+								placeholder={ slackSecretPlaceholder(slackHasClientSecret, "Client Secret") }
+							/>
+							<button
+								type="button"
+								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
+								onclick="togglePasswordVisibility('slack_client_secret', this)"
+								tabindex="-1"
+								aria-label="Toggle client secret visibility"
+							>
+								<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+								</svg>
+								<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+								</svg>
+							</button>
+						</div>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">App-Level Token (xapp-...)</span></label>
+						<div class="relative">
+							<input
+								type="password"
+								id="slack_app_token"
+								name="slack_app_token"
+								class="input input-bordered w-full pr-10 font-mono text-xs"
+								value={ slackAppToken }
+								placeholder={ slackSecretPlaceholder(slackHasAppToken, "App-Level Token") }
+							/>
+							<button
+								type="button"
+								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
+								onclick="togglePasswordVisibility('slack_app_token', this)"
+								tabindex="-1"
+								aria-label="Toggle app token visibility"
+							>
+								<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+								</svg>
+								<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+								</svg>
+							</button>
+						</div>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Bot Token Source</span></label>
+						<select
+							id="slack_bot_token_mode"
+							name="slack_bot_token_mode"
+							class="select select-bordered w-full"
+							onchange="toggleSlackBotTokenMode(this.value)"
+						>
+							<option value={ service.SlackBotTokenSourceOAuth } if slackBotTokenMode == service.SlackBotTokenSourceOAuth { selected }>
+								OAuth Callback Token (Recommended)
+							</option>
+							<option value={ service.SlackBotTokenSourceManual } if slackBotTokenMode == service.SlackBotTokenSourceManual { selected }>
+								Manual Override Token
+							</option>
+						</select>
+						<label class="label">
+							<span class="label-text-alt opacity-70">
+								OAuth mode uses the token returned by Connect. Manual mode uses a fixed `xoxb-...` override token.
+							</span>
+						</label>
+					</div>
+					<div id="slack_bot_token_override_section" class="form-control mb-3">
+						<label class="label"><span class="label-text">Bot Token Override (xoxb-...)</span></label>
+						<div class="relative">
+							<input
+								type="password"
+								id="slack_bot_token"
+								name="slack_bot_token"
+								class="input input-bordered w-full pr-10 font-mono text-xs"
+								value={ slackBotToken }
+								placeholder={ slackSecretPlaceholder(slackHasBotToken, "Bot Token") }
+							/>
+							<button
+								type="button"
+								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
+								onclick="togglePasswordVisibility('slack_bot_token', this)"
+								tabindex="-1"
+								aria-label="Toggle bot token visibility"
+							>
+								<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+								</svg>
+								<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+								</svg>
+							</button>
+						</div>
+					</div>
+					if currentProjectID != "" {
+						<div class="divider"></div>
+						<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+							</svg>
+							Authorized Users
+						</h4>
+						<p class="text-xs opacity-50 mb-3">
+							Restrict Slack access to specific users for this project. If no users are configured, access is denied until authorized users are added.
+						</p>
+						@components.SlackAuthorizedUsersList(slackAuthorizedUsers, currentProjectID)
+					}
+					<div class="divider"></div>
+					<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+						</svg>
+						Notification Settings
+					</h4>
+					<div class="form-control mb-4">
+						<label class="label cursor-pointer justify-start gap-3">
+							<input type="checkbox" class="checkbox checkbox-primary" name="slack_send_responses" value="true" if slackSendResponses { checked }/>
+							<span class="label-text">Send task completion/failure notifications for Slack-created tasks</span>
+						</label>
+					</div>
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="closeSlackConfigModal()">Cancel</button>
+						<button type="submit" class="btn btn-primary">Save Slack Settings</button>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop">
+				<button>close</button>
+			</form>
+		</dialog>
+
+		<style>
+			.dropdown-content {
+				display: none;
+			}
+			.dropdown-content.show {
+				display: block;
+			}
+			/* Keep password toggle button fixed inside input across press/focus states */
+			.password-toggle-btn:active,
+			.password-toggle-btn:focus,
+			.password-toggle-btn:focus-visible {
+				transform: translate(0, -50%) !important;
+			}
+			.secret-textarea-masked {
+				-webkit-text-security: disc;
+			}
+		</style>
+
+		<script>
+			function togglePasswordVisibility(inputId, button) {
+				const input = document.getElementById(inputId);
+				const eyeOpen = button.querySelector('.eye-open');
+				const eyeClosed = button.querySelector('.eye-closed');
+				
+				if (input.type === 'password') {
+					input.type = 'text';
+					eyeOpen.classList.add('hidden');
+					eyeClosed.classList.remove('hidden');
+				} else {
+					input.type = 'password';
+					eyeOpen.classList.remove('hidden');
+					eyeClosed.classList.add('hidden');
+				}
+			}
+
+			function handleDropdownToggle(event) {
+				event.stopPropagation();
+				const dropdown = event.currentTarget.parentElement;
+				const menu = dropdown.querySelector('ul');
+				const wasOpen = menu.classList.contains('show');
+				
+				closeAllDropdownMenus();
+				
+				// Toggle this dropdown
+				if (!wasOpen) {
+					menu.classList.add('show');
+					// Close when clicking outside
+					setTimeout(() => {
+						document.addEventListener('click', function closeDropdown(e) {
+							if (!dropdown.contains(e.target)) {
+								menu.classList.remove('show');
+								document.removeEventListener('click', closeDropdown);
+							}
+						});
+					}, 0);
+				}
+			}
+
+			function toggleSecretTextareaVisibility(textareaId, button) {
+				const textarea = document.getElementById(textareaId);
+				if (!textarea) return;
+				const eyeOpen = button.querySelector('.eye-open');
+				const eyeClosed = button.querySelector('.eye-closed');
+				const isMasked = textarea.classList.contains('secret-textarea-masked');
+				if (isMasked) {
+					textarea.classList.remove('secret-textarea-masked');
+					if (eyeOpen) eyeOpen.classList.remove('hidden');
+					if (eyeClosed) eyeClosed.classList.add('hidden');
+				} else {
+					textarea.classList.add('secret-textarea-masked');
+					if (eyeOpen) eyeOpen.classList.add('hidden');
+					if (eyeClosed) eyeClosed.classList.remove('hidden');
+				}
+			}
+
+			function editChannelFromData(card) {
+				const type = card.dataset.channelType;
+				if (type === 'telegram') {
+					const token = card.dataset.channelToken || '';
+					document.getElementById('channel_telegram_token').value = token;
+					document.getElementById('channel_modal_title').textContent = 'Configure Telegram Bot';
+					channel_modal.showModal();
+				} else if (type === 'github') {
+					openGitHubConfigModal();
+				} else if (type === 'slack') {
+					openSlackConfigModal();
+				}
+			}
+
+			function closeAllDropdownMenus() {
+				document.querySelectorAll('.dropdown ul').forEach(m => m.classList.remove('show'));
+			}
+
+			function openTelegramChannelFromMenu(event) {
+				if (event) event.stopPropagation();
+				closeAllDropdownMenus();
+				document.getElementById('channel_telegram_token').value = '';
+				document.getElementById('channel_modal_title').textContent = 'Add Telegram Bot';
+				channel_modal.showModal();
+			}
+
+			function openGitHubChannelFromMenu(event) {
+				if (event) event.stopPropagation();
+				closeAllDropdownMenus();
+				openGitHubConfigModal();
+			}
+
+			function openSlackChannelFromMenu(event) {
+				if (event) event.stopPropagation();
+				closeAllDropdownMenus();
+				openSlackConfigModal();
+			}
+
+			function closeChannelModal() {
+				channel_modal.close();
+			}
+
+			function openGitHubConfigModal() {
+				const modal = document.getElementById('github_config_modal');
+				if (!modal) return;
+				const modeSelect = document.getElementById('github_auth_mode');
+				if (modeSelect) {
+					toggleGitHubAuthMode(modeSelect.value);
+				}
+				modal.showModal();
+			}
+
+			function closeGitHubConfigModal() {
+				const modal = document.getElementById('github_config_modal');
+				if (modal) modal.close();
+			}
+
+			function openSlackConfigModal() {
+				const modal = document.getElementById('slack_config_modal');
+				if (!modal) return;
+				const modeSelect = document.getElementById('slack_bot_token_mode');
+				if (modeSelect) {
+					toggleSlackBotTokenMode(modeSelect.value);
+				}
+				modal.showModal();
+			}
+
+			function closeSlackConfigModal() {
+				const modal = document.getElementById('slack_config_modal');
+				if (modal) modal.close();
+			}
+
+			function toggleSlackBotTokenMode(mode) {
+				const section = document.getElementById('slack_bot_token_override_section');
+				if (!section) {
+					return;
+				}
+				const normalized = (mode || '').toLowerCase();
+				section.style.display = normalized === 'manual' ? '' : 'none';
+			}
+
+			function toggleGitHubAuthMode(mode) {
+				const normalized = (mode || '').toLowerCase();
+				const patSection = document.getElementById('github_pat_section');
+				const appSection = document.getElementById('github_app_section');
+				if (!patSection || !appSection) {
+					return;
+				}
+				const isAppMode = normalized === 'app';
+				patSection.style.display = isAppMode ? 'none' : '';
+				appSection.style.display = isAppMode ? '' : 'none';
+			}
+
+			// Close modal and refresh after successful save
+			document.body.addEventListener('htmx:afterRequest', function(event) {
+				if (event.detail.pathInfo.requestPath === '/channels/telegram' && event.detail.successful) {
+					const modal = document.getElementById('channel_modal');
+					if (modal && modal.open) {
+						modal.close();
+					}
+				}
+				if (event.detail.pathInfo.requestPath === '/channels/github/configure' && event.detail.successful) {
+					const modal = document.getElementById('github_config_modal');
+					if (modal && modal.open) {
+						modal.close();
+					}
+				}
+				if (event.detail.pathInfo.requestPath === '/channels/slack/configure' && event.detail.successful) {
+					const modal = document.getElementById('slack_config_modal');
+					if (modal && modal.open) {
+						modal.close();
+					}
+				}
+			});
+
+			setTimeout(function() {
+				const modeSelect = document.getElementById('github_auth_mode');
+				if (modeSelect) {
+					toggleGitHubAuthMode(modeSelect.value);
+				}
+				const slackModeSelect = document.getElementById('slack_bot_token_mode');
+				if (slackModeSelect) {
+					toggleSlackBotTokenMode(slackModeSelect.value);
+				}
+			}, 0);
+		</script>
+	</div>
+}

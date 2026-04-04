@@ -1,0 +1,303 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ BacklogPage(projects []models.Project, currentProject *models.Project, data *models.BacklogDashboardData) {
+	@layout.Base("Suggestions", projects, projectID(currentProject)) {
+		@BacklogContent(currentProject, data)
+	}
+}
+
+templ BacklogContent(currentProject *models.Project, data *models.BacklogDashboardData) {
+	<div class="flex justify-between items-center mb-6">
+		<h2 class="text-2xl font-bold">Suggestions</h2>
+		if currentProject != nil {
+			<div class="flex gap-2 items-center">
+				<span class="opacity-60">Project:</span>
+				<span class="font-semibold">{ currentProject.Name }</span>
+			</div>
+		}
+	</div>
+	if currentProject != nil && data != nil {
+		<!-- Suggestion Stats -->
+		<div class="stats shadow w-full mb-6 bg-base-100">
+			<div class="stat">
+				<div class="stat-title">Pending</div>
+				<div class="stat-value text-xl">{ fmt.Sprintf("%d", data.Stats.PendingCount) }</div>
+			</div>
+			<div class="stat">
+				<div class="stat-title">Quick Wins</div>
+				<div class="stat-value text-xl">{ fmt.Sprintf("%d", data.Stats.QuickWinCount) }</div>
+			</div>
+			<div class="stat">
+				<div class="stat-title">Decompose</div>
+				<div class="stat-value text-xl">{ fmt.Sprintf("%d", data.Stats.DecomposeCount) }</div>
+			</div>
+			<div class="stat">
+				<div class="stat-title">Applied</div>
+				<div class="stat-value text-xl">{ fmt.Sprintf("%d", data.Stats.AppliedCount) }</div>
+			</div>
+		</div>
+		<!-- Action Buttons -->
+		<div class="flex flex-wrap gap-2 mb-6">
+			<button
+				class="btn btn-sm btn-primary"
+				hx-post={ fmt.Sprintf("/backlog/analyze?project_id=%s", currentProject.ID) }
+				hx-target="#analysis-result"
+				hx-swap="innerHTML"
+				hx-indicator="#analysis-spinner"
+			>
+				<span id="analysis-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
+				Analyze Backlog
+			</button>
+			<button
+				class="btn btn-sm btn-ghost"
+				hx-get={ fmt.Sprintf("/backlog/reports?project_id=%s", currentProject.ID) }
+				hx-target="#reports-container"
+				hx-swap="innerHTML"
+			>
+				View Reports
+			</button>
+		</div>
+		<!-- Analysis Result Container -->
+		<div id="analysis-result" class="mb-4"></div>
+		<!-- Pending Suggestions -->
+		if len(data.PendingSuggestions) > 0 {
+			<div class="mb-6">
+				<h3 class="text-lg font-semibold mb-3">Pending Suggestions</h3>
+				<div class="space-y-3">
+					for _, s := range data.PendingSuggestions {
+						@BacklogSuggestionCard(s, currentProject.ID)
+					}
+				</div>
+			</div>
+		}
+		<!-- Recent Suggestions -->
+		if len(data.RecentSuggestions) > 0 {
+			<div class="mb-6">
+				<h3 class="text-lg font-semibold mb-3">All Suggestions</h3>
+				<div class="overflow-x-auto">
+					<table class="table table-sm">
+						<thead>
+							<tr>
+								<th>Type</th>
+								<th>Title</th>
+								<th>Status</th>
+								<th>Confidence</th>
+								<th>Created</th>
+								<th>Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, s := range data.RecentSuggestions {
+								<tr>
+									<td>
+										@SuggestionTypeBadge(s.Type)
+									</td>
+									<td class="max-w-xs truncate">{ s.Title }</td>
+									<td>
+										@SuggestionStatusBadge(s.Status)
+									</td>
+									<td>{ fmt.Sprintf("%.0f%%", s.Confidence*100) }</td>
+									<td class="text-xs opacity-60">{ s.CreatedAt.Local().Format("Jan 2, 15:04") }</td>
+									<td>
+										if s.Status == models.SuggestionPending {
+											<div class="flex gap-1">
+												<button
+													class="btn btn-xs btn-primary"
+													hx-post={ fmt.Sprintf("/backlog/suggestions/%s/apply?project_id=%s", s.ID, currentProject.ID) }
+													hx-target="#main-content"
+													hx-swap="innerHTML"
+												>Accept</button>
+												<button
+													class="btn btn-xs btn-ghost"
+													hx-patch={ fmt.Sprintf("/backlog/suggestions/%s/status?project_id=%s", s.ID, currentProject.ID) }
+													hx-vals='{"status": "rejected"}'
+													hx-target="#main-content"
+													hx-swap="innerHTML"
+												>Dismiss</button>
+											</div>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		}
+		<!-- Reports Container -->
+		<div id="reports-container"></div>
+		<!-- Latest Report -->
+		if data.LatestReport != nil {
+			<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+				<div class="card-body p-4">
+					<h3 class="card-title text-sm">Latest Analysis Report</h3>
+					<div class="text-xs opacity-60 mb-2">{ data.LatestReport.ReportDate }</div>
+					<div class="prose prose-sm max-w-none">{ data.LatestReport.Summary }</div>
+				</div>
+			</div>
+		}
+	} else {
+		<div class="alert alert-info">
+			<span>Select a project to view backlog suggestions.</span>
+		</div>
+	}
+}
+
+templ BacklogSuggestionCard(s models.BacklogSuggestion, projectID string) {
+	<div class="card bg-base-100 shadow-sm border border-base-300">
+		<div class="card-body p-4">
+			<div class="flex justify-between items-start">
+				<div class="flex-1">
+					<div class="flex items-center gap-2 mb-1">
+						@SuggestionTypeBadge(s.Type)
+						<span class="font-semibold">{ s.Title }</span>
+						<span class="text-xs opacity-50">{ fmt.Sprintf("%.0f%% confident", s.Confidence*100) }</span>
+					</div>
+					<p class="text-sm opacity-80 mb-2">{ s.Description }</p>
+					if s.Reasoning != "" {
+						<details class="text-xs">
+							<summary class="cursor-pointer opacity-60">Reasoning</summary>
+							<p class="mt-1 opacity-80">{ s.Reasoning }</p>
+						</details>
+					}
+					if s.SuggestedPriority != nil {
+						<div class="text-xs mt-1">
+							<span class="opacity-60">Suggested priority:</span>
+							<span class="font-semibold">{ priorityLabel(*s.SuggestedPriority) }</span>
+						</div>
+					}
+				</div>
+				<div class="flex gap-1 ml-4">
+					<button
+						class="btn btn-xs btn-primary"
+						hx-post={ fmt.Sprintf("/backlog/suggestions/%s/apply?project_id=%s", s.ID, projectID) }
+						hx-target="#main-content"
+						hx-swap="innerHTML"
+					>Accept</button>
+					<button
+						class="btn btn-xs btn-ghost"
+						hx-patch={ fmt.Sprintf("/backlog/suggestions/%s/status?project_id=%s", s.ID, projectID) }
+						hx-vals='{"status": "rejected"}'
+						hx-target="#main-content"
+						hx-swap="innerHTML"
+					>Dismiss</button>
+					<button
+						class="btn btn-xs btn-ghost"
+						hx-delete={ fmt.Sprintf("/backlog/suggestions/%s?project_id=%s", s.ID, projectID) }
+						hx-target="#main-content"
+						hx-swap="innerHTML"
+						hx-confirm="Delete this suggestion?"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+						</svg>
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+templ SuggestionTypeBadge(t models.BacklogSuggestionType) {
+	switch t {
+		case models.SuggestionReprioritize:
+			<span class="badge badge-sm badge-outline">Reprioritize</span>
+		case models.SuggestionObsolete:
+			<span class="badge badge-sm badge-outline">Obsolete</span>
+		case models.SuggestionDecompose:
+			<span class="badge badge-sm badge-outline">Decompose</span>
+		case models.SuggestionQuickWin:
+			<span class="badge badge-sm badge-outline">Quick Win</span>
+		case models.SuggestionSchedule:
+			<span class="badge badge-sm badge-outline">Schedule</span>
+		case models.SuggestionStale:
+			<span class="badge badge-sm badge-outline">Stale</span>
+		default:
+			<span class="badge badge-sm badge-outline">{ string(t) }</span>
+	}
+}
+
+templ SuggestionStatusBadge(status models.BacklogSuggestionStatus) {
+	switch status {
+		case models.SuggestionPending:
+			<span class="badge badge-sm badge-outline">Pending</span>
+		case models.SuggestionApproved:
+			<span class="badge badge-sm badge-outline">Approved</span>
+		case models.SuggestionRejected:
+			<span class="badge badge-sm badge-ghost">Rejected</span>
+		case models.SuggestionApplied:
+			<span class="badge badge-sm badge-primary badge-outline">Applied</span>
+		case models.SuggestionExpired:
+			<span class="badge badge-sm badge-ghost">Expired</span>
+		default:
+			<span class="badge badge-sm badge-outline">{ string(status) }</span>
+	}
+}
+
+templ BacklogAnalysisResult(report *models.BacklogAnalysisReport, err error) {
+	if err != nil {
+		<div class="alert alert-error mb-4">
+			<span>Analysis failed: { err.Error() }</span>
+		</div>
+	} else if report != nil {
+		<div class="alert alert-success mb-4">
+			<div>
+				<span class="font-semibold">Analysis complete!</span>
+				<span>{ report.Summary }</span>
+			</div>
+		</div>
+	}
+}
+
+templ BacklogReportsList(reports []models.BacklogAnalysisReport) {
+	if len(reports) == 0 {
+		<div class="alert alert-info mb-4">
+			<span>No analysis reports yet. Run an analysis to generate suggestions.</span>
+		</div>
+	} else {
+		<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+			<div class="card-body p-4">
+				<h3 class="card-title text-sm">Analysis Reports</h3>
+				<div class="overflow-x-auto">
+					<table class="table table-sm">
+						<thead>
+							<tr>
+								<th>Date</th>
+								<th>Summary</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, r := range reports {
+								<tr>
+									<td class="whitespace-nowrap">{ r.ReportDate }</td>
+									<td class="max-w-md truncate">{ r.Summary }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+	}
+}
+
+func priorityLabel(p int) string {
+	switch p {
+	case 1:
+		return "Low"
+	case 2:
+		return "Normal"
+	case 3:
+		return "High"
+	case 4:
+		return "Urgent"
+	default:
+		return fmt.Sprintf("P%d", p)
+	}
+}

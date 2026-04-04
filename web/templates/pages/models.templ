@@ -1,0 +1,988 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ Models(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelWorkerStats map[string]int) {
+	@layout.Base("Models", projects, currentProjectID) {
+		@modelsContent(agents, modelWorkerStats)
+	}
+}
+
+// AgentsContent renders just the agents content for HTMX requests
+templ ModelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) {
+	@modelsContent(agents, modelWorkerStats)
+}
+
+func hasDefault(agents []models.LLMConfig) bool {
+	for _, a := range agents {
+		if a.IsDefault {
+			return true
+		}
+	}
+	return false
+}
+
+func oauthStatusText(agent models.LLMConfig) string {
+	if !agent.IsOAuth() {
+		return ""
+	}
+	if agent.HasValidOAuthToken() {
+		return "Connected"
+	}
+	if agent.OAuthAccessToken != "" {
+		return "Token Expired"
+	}
+	return "Not Connected"
+}
+
+func oauthStatusClass(agent models.LLMConfig) string {
+	if !agent.IsOAuth() {
+		return ""
+	}
+	if agent.HasValidOAuthToken() {
+		return "badge-success"
+	}
+	if agent.OAuthAccessToken != "" {
+		return "badge-warning"
+	}
+	return "badge-error"
+}
+
+func modelSearchText(agent models.LLMConfig) string {
+	status := "active"
+	if agent.IsDefault {
+		status = "default"
+	}
+	if agent.IsOAuth() {
+		if agent.HasValidOAuthToken() {
+			status += " connected"
+		} else {
+			status += " not connected"
+		}
+	}
+	return agent.Name + " " + string(agent.Provider) + " " + agent.Model + " " + status
+}
+
+func modelWorkerRunning(stats map[string]int, id string) int {
+	if stats == nil {
+		return 0
+	}
+	return stats[id]
+}
+
+func maskedSecret(secret string) string {
+	if secret != "" {
+		return "***"
+	}
+	return ""
+}
+
+templ providerIcon(provider models.LLMProvider) {
+	if provider == models.ProviderAnthropic {
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+			<path d="M17.3041 3.541h-3.6718l6.696 16.918H24Z"/>
+			<path d="M6.6959 3.541 0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/>
+		</svg>
+	} else if provider == models.ProviderOpenAI {
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+			<path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.998 5.998 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.085a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/>
+		</svg>
+	} else if provider == models.ProviderOllama {
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
+		</svg>
+	} else {
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+		</svg>
+	}
+}
+
+templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) {
+	<div id="models-container" data-search-container>
+	<div class="flex items-center justify-between mb-6">
+			<h2 class="text-2xl font-bold">Models</h2>
+			<button class="btn btn-primary btn-sm" onclick="openNewModelModal()">
+				+ Add Model
+			</button>
+		</div>
+		@CardSearchInput("models", "Search models...")
+
+		if len(agents) == 0 {
+			<div class="text-center py-12">
+				<p class="opacity-50 mb-4">No models configured yet. Add one to start executing tasks.</p>
+				<button class="btn btn-primary" onclick="openNewModelModal()">
+					Configure Model
+				</button>
+			</div>
+		} else {
+			<div class="grid gap-4">
+				for _, agent := range agents {
+					<div
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+						data-model-id={ agent.ID }
+						data-model-name={ agent.Name }
+						data-model-provider={ string(agent.Provider) }
+						data-model-model={ agent.Model }
+						data-search-card
+						data-search-text={ modelSearchText(agent) }
+						data-model-reasoning-effort={ agent.ReasoningEffort }
+						data-model-max-tokens={ fmt.Sprintf("%d", agent.MaxTokens) }
+						data-model-temperature={ fmt.Sprintf("%f", agent.Temperature) }
+						data-model-is-default={ fmt.Sprintf("%t", agent.IsDefault) }
+						data-model-auth-method={ string(agent.AuthMethod) }
+						data-model-max-workers={ fmt.Sprintf("%d", agent.MaxWorkers) }
+						data-model-worker-timeout={ fmt.Sprintf("%d", agent.WorkerTimeout) }
+						data-model-oauth-client-id={ agent.OAuthClientID }
+						data-model-oauth-client-secret={ maskedSecret(agent.OAuthClientSecret) }
+						data-model-oauth-authorize-url={ agent.OAuthAuthorizeURL }
+						data-model-oauth-token-url={ agent.OAuthTokenURL }
+						data-model-oauth-scopes={ agent.OAuthScopes }
+						data-model-ollama-base-url={ agent.OllamaBaseURL }
+						data-model-auto-start-tasks={ fmt.Sprintf("%t", agent.AutoStartTasks) }
+						onclick="editModelFromData(this)"
+					>
+						<div class="card-body relative">
+							<!-- Kebab menu in top right -->
+							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+								<div class="dropdown dropdown-end">
+									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+										</svg>
+									</label>
+									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+										<li>
+											<button onclick="editModelFromData(this.closest('[data-model-id]'))">
+												Edit
+											</button>
+										</li>
+										if !agent.IsDefault {
+											<li>
+												<button
+													hx-post={ fmt.Sprintf("/models/%s/set-default", agent.ID) }
+													hx-target="#models-container"
+													hx-swap="outerHTML"
+												>
+													Set as Default
+												</button>
+											</li>
+										}
+										<li>
+											<button
+												class="text-error"
+												data-model-id={ agent.ID }
+												data-model-name={ agent.Name }
+												data-model-is-default={ fmt.Sprintf("%t", agent.IsDefault) }
+												onclick="deleteModel(this)"
+											>
+												Delete
+											</button>
+										</li>
+									</ul>
+								</div>
+							</div>
+							<!-- Model content with padding for kebab menu -->
+							<div class="pr-12">
+								<h3 class="font-bold flex items-center gap-2">
+									@providerIcon(agent.Provider)
+									{ agent.Name }
+									if agent.IsDefault {
+										<span class="badge badge-sm ov-badge-default">Default</span>
+									}
+								</h3>
+								<p class="text-sm opacity-60">
+									if agent.Provider == models.ProviderAnthropic {
+										if agent.AuthMethod == models.AuthMethodOAuth {
+											Anthropic (OAuth - API) / { agent.Model }
+										} else if agent.AuthMethod == models.AuthMethodCLI && agent.APIKey == "" {
+											Anthropic (OAuth - CLI) / { agent.Model }
+										} else {
+											Anthropic (API Key) / { agent.Model }
+										}
+									} else if agent.Provider == models.ProviderOpenAI {
+										if agent.AuthMethod == models.AuthMethodAPIKey {
+											OpenAI (API Key) / { agent.Model }
+										} else if agent.AuthMethod == models.AuthMethodOAuth {
+											OpenAI (OAuth - API) / { agent.Model }
+										} else {
+											OpenAI (OAuth - CLI) / { agent.Model }
+										}
+									} else if agent.Provider == models.ProviderOllama {
+										Ollama / { agent.Model }
+										if agent.OllamaBaseURL != "" && agent.OllamaBaseURL != "http://localhost:11434" {
+											<span class="text-xs opacity-40">({ agent.OllamaBaseURL })</span>
+										}
+									} else {
+										{ string(agent.Provider) } / { agent.Model }
+									}
+								</p>
+								<p class="text-sm opacity-60">
+									{ fmt.Sprintf("Max tokens: %d | Temperature: %.1f", agent.MaxTokens, agent.Temperature) }
+								</p>
+								if agent.Provider == models.ProviderOpenAI && agent.ReasoningEffort != "" {
+									<p class="text-sm opacity-60">
+										Reasoning effort: { agent.ReasoningEffort }
+									</p>
+								}
+								if agent.IsOAuth() {
+									<div class="mt-2 flex items-center gap-2">
+										<span class={ "badge badge-sm", oauthStatusClass(agent) }>
+											{ oauthStatusText(agent) }
+										</span>
+										if !agent.HasValidOAuthToken() {
+											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } class="btn btn-xs btn-outline" onclick="event.stopPropagation()">
+												Connect with OAuth
+											</a>
+										} else {
+											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } class="btn btn-xs btn-ghost" onclick="event.stopPropagation()">
+												Re-authorize
+											</a>
+										}
+									</div>
+								}
+								if agent.MaxWorkers > 0 {
+									<div class="mt-2 flex items-center gap-2">
+										<span class="text-sm opacity-60">Workers:</span>
+										<span class={ "badge badge-sm", templ.KV("badge-warning", modelWorkerRunning(modelWorkerStats, agent.ID) >= agent.MaxWorkers), templ.KV("badge-success", modelWorkerRunning(modelWorkerStats, agent.ID) > 0 && modelWorkerRunning(modelWorkerStats, agent.ID) < agent.MaxWorkers), templ.KV("badge-ghost", modelWorkerRunning(modelWorkerStats, agent.ID) == 0) }>
+											{ fmt.Sprintf("%d / %d active", modelWorkerRunning(modelWorkerStats, agent.ID), agent.MaxWorkers) }
+										</span>
+										if agent.WorkerTimeout > 0 {
+											<span class="text-xs opacity-50">
+												{ fmt.Sprintf("timeout: %ds", agent.WorkerTimeout) }
+											</span>
+										}
+									</div>
+								}
+							</div>
+						</div>
+					</div>
+				}
+			</div>
+		}
+
+		<!-- Reassign Default Modal -->
+		<dialog id="reassign_default_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
+			<div class="modal-box">
+				<h3 class="font-bold text-lg mb-2">Reassign Default Model</h3>
+				<p class="text-sm opacity-70 mb-4">You are deleting the default model. Please select a new default before proceeding.</p>
+				<div class="form-control mb-4">
+					<label class="label"><span class="label-text">New Default Model</span></label>
+					<select id="reassign_default_select" class="select select-bordered w-full">
+						for _, agent := range agents {
+							if !agent.IsDefault {
+								<option value={ agent.ID }>{ agent.Name }</option>
+							}
+						}
+					</select>
+				</div>
+				<div class="modal-action">
+					<button type="button" class="btn" onclick="reassign_default_modal.close()">Cancel</button>
+					<button type="button" class="btn btn-error" onclick="confirmDeleteDefault()">Delete &amp; Reassign</button>
+				</div>
+			</div>
+			<form method="dialog" class="modal-backdrop">
+				<button>close</button>
+			</form>
+		</dialog>
+
+		<!-- Model Modal (for both create and edit) -->
+		<dialog id="new_model_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
+			<div class="modal-box">
+				<h3 id="model_modal_title" class="font-bold text-lg mb-4">New Model Configuration</h3>
+				<form id="model_form" method="post" action="/agents">
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Name</span></label>
+						<input type="text" id="model_name" name="name" class="input input-bordered" required placeholder="My Model"/>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Provider</span></label>
+						<select name="provider" id="model_provider" class="select select-bordered" onchange="toggleProviderFields()">
+							<option value="anthropic">Anthropic</option>
+							<option value="openai">OpenAI</option>
+							<option value="ollama">Ollama</option>
+						</select>
+					</div>
+					<!-- Auth type selector for Anthropic -->
+					<div id="anthropic_auth_type_field" class="form-control mb-3">
+						<label class="label"><span class="label-text">Authentication</span></label>
+						<select name="anthropic_auth_type" id="model_anthropic_auth_type" class="select select-bordered" onchange="toggleAnthropicAuthFields()">
+							<option value="api_key">API Key</option>
+							<option value="oauth">OAuth</option>
+						</select>
+					</div>
+					<!-- Auth type selector for OpenAI -->
+					<div id="openai_auth_type_field" class="form-control mb-3 hidden">
+						<label class="label"><span class="label-text">Authentication</span></label>
+						<select name="openai_auth_type" id="model_openai_auth_type" class="select select-bordered" onchange="toggleOpenAIAuthFields()">
+							<option value="api_key">API Key</option>
+							<option value="oauth">OAuth</option>
+						</select>
+					</div>
+					<!-- Connection method selector for OpenAI OAuth -->
+					<div id="openai_connection_method_field" class="form-control mb-3 hidden">
+						<label class="label"><span class="label-text">Connection Method</span></label>
+						<select name="auth_method" id="model_openai_connection_method" class="select select-bordered" onchange="toggleOpenAIConnectionMethodFields()">
+							<option value="oauth">API (OAuth via web)</option>
+							<option value="cli">CLI (OAuth via terminal)</option>
+						</select>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Model</span></label>
+						<select name="model" id="model_id" class="select select-bordered" onchange="handleModelChange()">
+							<option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
+							<option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+							<option value="claude-opus-4-6">Claude Opus 4.6</option>
+						</select>
+					</div>
+					<div id="reasoning_effort_field" class="form-control mb-3 hidden">
+						<label class="label"><span class="label-text">Reasoning Effort</span></label>
+						<select name="reasoning_effort" id="model_reasoning_effort" class="select select-bordered"></select>
+						<label class="label">
+							<span class="label-text-alt opacity-70">Supported values depend on the selected model.</span>
+						</label>
+					</div>
+					<div id="api_key_field" class="form-control mb-3">
+						<label class="label"><span class="label-text">API Key</span></label>
+						<div class="relative">
+							<input type="password" id="model_api_key" name="api_key" class="input input-bordered pr-10" placeholder="sk-ant-... (leave empty to keep existing)"/>
+							<button
+								type="button"
+								class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
+								onclick="togglePasswordVisibility('model_api_key', this)"
+								tabindex="-1"
+								aria-label="Toggle API key visibility"
+							>
+								<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+								</svg>
+								<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+								</svg>
+							</button>
+						</div>
+					</div>
+					<!-- Connection method selector for Anthropic OAuth -->
+					<div id="auth_method_field" class="form-control mb-3 hidden">
+						<label class="label"><span class="label-text">Connection Method</span></label>
+						<select name="auth_method" id="model_auth_method" class="select select-bordered" onchange="toggleSubscriptionMethodFields()">
+							<option value="oauth">API (OAuth via web)</option>
+							<option value="cli">CLI (OAuth via terminal)</option>
+						</select>
+					</div>
+					<div id="subscription_info_cli" class="mb-3 hidden">
+						<div class="alert alert-info">
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+							<div>
+								<p class="font-semibold">OAuth via CLI</p>
+								<p class="text-sm">Uses the <code>claude</code> CLI for authentication. Make sure you are logged in. No API key needed.</p>
+							</div>
+						</div>
+					</div>
+					<div id="subscription_info_oauth" class="mb-3 hidden">
+						<div class="alert alert-info">
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+							<div>
+								<p class="font-semibold">OAuth via API</p>
+								<p class="text-sm">Uses the Anthropic API directly via OAuth. After saving, click "Connect with OAuth" on the model card to authorize.</p>
+							</div>
+						</div>
+					</div>
+					<div id="subscription_info_codex" class="mb-3 hidden">
+						<div class="alert alert-info">
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+							<div>
+								<p class="font-semibold">Uses local Codex CLI</p>
+								<p class="text-sm">No API key needed here. Ensure the <code>codex</code> command is installed and authenticated on this machine.</p>
+							</div>
+						</div>
+					</div>
+					<div id="openai_subscription_info_cli" class="mb-3 hidden">
+						<div class="alert alert-info">
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+							<div>
+								<p class="font-semibold">OAuth via CLI</p>
+								<p class="text-sm">Uses the <code>codex</code> CLI for authentication. Make sure you are logged in. No API key needed.</p>
+							</div>
+						</div>
+					</div>
+						<div id="openai_subscription_info_oauth" class="mb-3 hidden">
+							<div class="alert alert-info">
+								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+								<div>
+									<p class="font-semibold">OAuth via API</p>
+									<p class="text-sm">Uses the OpenAI API directly via OAuth. After saving, click "Connect with OAuth" on the model card to authorize.</p>
+								</div>
+							</div>
+						</div>
+					<div id="ollama_info" class="mb-3 hidden">
+						<div class="alert alert-info">
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+							<div>
+								<p class="font-semibold">Local Ollama Instance</p>
+								<p class="text-sm">Connects to your local Ollama server. Make sure Ollama is running with <code>ollama serve</code>.</p>
+							</div>
+						</div>
+					</div>
+					<div id="ollama_fields" class="hidden">
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">Base URL</span></label>
+							<input type="text" id="model_ollama_base_url" name="ollama_base_url" class="input input-bordered" placeholder="http://localhost:11434" value="http://localhost:11434"/>
+							<label class="label">
+								<span class="label-text-alt opacity-70">Default: http://localhost:11434</span>
+							</label>
+						</div>
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">Custom Model Name</span></label>
+							<input type="text" id="model_ollama_custom_model" name="ollama_custom_model" class="input input-bordered" placeholder="e.g. llama3.1:8b, codellama:13b"/>
+							<label class="label">
+								<span class="label-text-alt opacity-70">Enter any model name from <code>ollama list</code>, or select from common ones above</span>
+							</label>
+						</div>
+					</div>
+					<div id="openai_api_key_info" class="mb-3 hidden">
+						<div class="alert alert-info">
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+							<div>
+								<p class="font-semibold">OpenAI API Key</p>
+								<p class="text-sm">Enter your OpenAI API key to make direct API calls.</p>
+							</div>
+						</div>
+					</div>
+						<div class="grid grid-cols-2 gap-3">
+						<div class="form-control">
+							<label class="label"><span class="label-text">Max Tokens</span></label>
+							<input type="number" id="model_max_tokens" name="max_tokens" class="input input-bordered" value="4096"/>
+						</div>
+						<div class="form-control">
+							<label class="label"><span class="label-text">Temperature</span></label>
+							<input type="number" id="model_temperature" name="temperature" class="input input-bordered" value="0" step="0.1" min="0" max="1"/>
+						</div>
+					</div>
+					<div class="form-control mt-3">
+						<label class="label cursor-pointer justify-start gap-2">
+							<input type="checkbox" id="model_is_default" name="is_default" class="checkbox checkbox-sm"/>
+							<span class="label-text">Set as default model</span>
+						</label>
+					</div>
+					<div class="form-control mt-2">
+						<label class="label cursor-pointer justify-start gap-2">
+							<input type="checkbox" id="model_auto_start_tasks" name="auto_start_tasks" class="checkbox checkbox-sm"/>
+							<span class="label-text">Auto-start created tasks</span>
+						</label>
+						<label class="label">
+							<span class="label-text-alt opacity-70">When enabled, tasks created with this model automatically move to "active" status</span>
+						</label>
+					</div>
+					<div class="divider text-sm opacity-60 mt-4 mb-2">Worker Pool</div>
+					<div class="grid grid-cols-2 gap-3">
+						<div class="form-control">
+							<label class="label"><span class="label-text">Max Workers</span></label>
+							<input type="number" id="model_max_workers" name="model_max_workers" class="input input-bordered" value="0" min="0" max="10"/>
+							<label class="label">
+								<span class="label-text-alt opacity-70">0 = use global pool</span>
+							</label>
+						</div>
+						<div class="form-control">
+							<label class="label"><span class="label-text">Timeout (seconds)</span></label>
+							<input type="number" id="model_worker_timeout" name="worker_timeout" class="input input-bordered" value="0" min="0"/>
+							<label class="label">
+								<span class="label-text-alt opacity-70">0 = no override</span>
+							</label>
+						</div>
+					</div>
+					<div class="modal-action">
+						<button type="button" class="btn" onclick="closeModelModal()">Cancel</button>
+						<button type="submit" id="model_submit_btn" class="btn btn-primary">Create</button>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop">
+				<button>close</button>
+			</form>
+		</dialog>
+
+		<style>
+			/* Prevent password toggle button from moving on click */
+			.password-toggle-btn:active {
+				transform: translate(0.25rem, -50%) !important;
+			}
+		</style>
+
+		<script>
+			function togglePasswordVisibility(inputId, button) {
+				const input = document.getElementById(inputId);
+				const eyeOpen = button.querySelector('.eye-open');
+				const eyeClosed = button.querySelector('.eye-closed');
+				
+				if (input.type === 'password') {
+					input.type = 'text';
+					eyeOpen.classList.add('hidden');
+					eyeClosed.classList.remove('hidden');
+				} else {
+					input.type = 'password';
+					eyeOpen.classList.remove('hidden');
+					eyeClosed.classList.add('hidden');
+				}
+			}
+
+			var reasoningEffortOptions = {
+				low: 'Low',
+				medium: 'Medium',
+				high: 'High',
+				xhigh: 'XHigh'
+			};
+
+			var modelOptionsByProvider = {
+				anthropic: [
+					{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', efforts: [] },
+					{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', efforts: [] },
+					{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', efforts: [] }
+				],
+				openai: [
+					{ value: 'gpt-5.4', label: 'gpt-5.4', efforts: ['low', 'medium', 'high', 'xhigh'] },
+					{ value: 'gpt-5.3-codex', label: 'gpt-5.3-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },
+					{ value: 'gpt-5.2-codex', label: 'gpt-5.2-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },
+					{ value: 'gpt-5.1-codex-max', label: 'gpt-5.1-codex-max', efforts: ['low', 'medium', 'high', 'xhigh'] },
+					{ value: 'gpt-5.1-codex', label: 'gpt-5.1-codex', efforts: ['low', 'medium', 'high'] },
+					{ value: 'gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini', efforts: ['low', 'medium', 'high'] },
+					{ value: 'gpt-5-codex', label: 'gpt-5-codex', efforts: ['low', 'medium', 'high'] },
+					{ value: 'gpt-5-codex-mini', label: 'gpt-5-codex-mini', efforts: ['low', 'medium', 'high'] }
+				],
+				ollama: [
+					{ value: 'llama3.1:8b', label: 'Llama 3.1 (8B)', efforts: [] },
+					{ value: 'llama3.1:70b', label: 'Llama 3.1 (70B)', efforts: [] },
+					{ value: 'llama3.2:3b', label: 'Llama 3.2 (3B)', efforts: [] },
+					{ value: 'codellama:7b', label: 'Code Llama (7B)', efforts: [] },
+					{ value: 'codellama:13b', label: 'Code Llama (13B)', efforts: [] },
+					{ value: 'mistral:7b', label: 'Mistral (7B)', efforts: [] },
+					{ value: 'deepseek-coder-v2:16b', label: 'DeepSeek Coder V2 (16B)', efforts: [] },
+					{ value: 'qwen2.5-coder:7b', label: 'Qwen 2.5 Coder (7B)', efforts: [] },
+					{ value: 'gemma2:9b', label: 'Gemma 2 (9B)', efforts: [] },
+					{ value: 'phi3:14b', label: 'Phi-3 (14B)', efforts: [] }
+				]
+			};
+
+			function selectedModelOption(provider, model) {
+				var options = modelOptionsByProvider[provider] || [];
+				for (var i = 0; i < options.length; i++) {
+					if (options[i].value === model) {
+						return options[i];
+					}
+				}
+				return null;
+			}
+
+			function preferredReasoningEffort(supportedEfforts) {
+				var preferred = ['high', 'medium', 'low', 'xhigh'];
+				for (var i = 0; i < preferred.length; i++) {
+					if (supportedEfforts.indexOf(preferred[i]) !== -1) {
+						return preferred[i];
+					}
+				}
+				if (supportedEfforts.length > 0) {
+					return supportedEfforts[0];
+				}
+				return 'high';
+			}
+
+			function setReasoningEffortOptions(provider, model, selectedEffort) {
+				var reasoningField = document.getElementById('reasoning_effort_field');
+				var reasoningSelect = document.getElementById('model_reasoning_effort');
+
+				if (provider !== 'openai') {
+					reasoningField.classList.add('hidden');
+					reasoningSelect.disabled = true;
+					reasoningSelect.innerHTML = '';
+					return;
+				}
+
+				reasoningField.classList.remove('hidden');
+				reasoningSelect.disabled = false;
+
+				var modelOption = selectedModelOption(provider, model);
+				var supportedEfforts = ['low', 'medium', 'high'];
+				if (modelOption && modelOption.efforts && modelOption.efforts.length > 0) {
+					supportedEfforts = modelOption.efforts;
+				}
+
+				reasoningSelect.innerHTML = '';
+				for (var i = 0; i < supportedEfforts.length; i++) {
+					var effort = supportedEfforts[i];
+					var opt = document.createElement('option');
+					opt.value = effort;
+					opt.textContent = reasoningEffortOptions[effort] || effort;
+					reasoningSelect.appendChild(opt);
+				}
+
+				var normalizedSelected = (selectedEffort || '').toLowerCase();
+				if (normalizedSelected && supportedEfforts.indexOf(normalizedSelected) !== -1) {
+					reasoningSelect.value = normalizedSelected;
+					return;
+				}
+				reasoningSelect.value = preferredReasoningEffort(supportedEfforts);
+			}
+
+			function setModelOptions(provider, selectedModel) {
+				var modelSelect = document.getElementById('model_id');
+				var options = modelOptionsByProvider[provider] || modelOptionsByProvider.anthropic;
+
+				modelSelect.innerHTML = '';
+				var hasSelected = false;
+				for (var i = 0; i < options.length; i++) {
+					var opt = document.createElement('option');
+					opt.value = options[i].value;
+					opt.textContent = options[i].label;
+					if (selectedModel && selectedModel === options[i].value) {
+						hasSelected = true;
+					}
+					modelSelect.appendChild(opt);
+				}
+
+				if (selectedModel && !hasSelected) {
+					var customOpt = document.createElement('option');
+					customOpt.value = selectedModel;
+					customOpt.textContent = selectedModel + ' (custom)';
+					modelSelect.appendChild(customOpt);
+				}
+
+				if (selectedModel) {
+					modelSelect.value = selectedModel;
+				} else if (options.length > 0) {
+					modelSelect.value = options[0].value;
+				}
+
+				return modelSelect.value;
+			}
+
+			function handleModelChange() {
+				var provider = document.getElementById('model_provider').value;
+				var model = document.getElementById('model_id').value;
+				var selectedEffort = document.getElementById('model_reasoning_effort').value;
+				setReasoningEffortOptions(provider, model, selectedEffort);
+			}
+
+				function hideAllInfoBoxes() {
+					document.getElementById('subscription_info_cli').classList.add('hidden');
+					document.getElementById('subscription_info_oauth').classList.add('hidden');
+					document.getElementById('subscription_info_codex').classList.add('hidden');
+					document.getElementById('ollama_info').classList.add('hidden');
+					document.getElementById('ollama_fields').classList.add('hidden');
+					document.getElementById('openai_api_key_info').classList.add('hidden');
+					document.getElementById('openai_subscription_info_cli').classList.add('hidden');
+					document.getElementById('openai_subscription_info_oauth').classList.add('hidden');
+				}
+
+			var _deleteModelId = '';
+
+			function deleteModel(button) {
+				var id = button.dataset.modelId;
+				var name = button.dataset.modelName;
+				var isDefault = button.dataset.modelIsDefault === 'true';
+
+				if (isDefault) {
+					// Check if there are other models to reassign to
+					var select = document.getElementById('reassign_default_select');
+					if (!select || select.options.length === 0) {
+						if (confirm('Delete default model "' + name + '"? This action cannot be undone.')) {
+							htmx.ajax('DELETE', '/models/' + id, {
+								target: '#models-container',
+								swap: 'outerHTML'
+							}).catch(function(xhr) {
+								var msg = 'Failed to delete model.';
+								try {
+									var data = JSON.parse(xhr.responseText);
+									if (data.message) msg = data.message;
+								} catch(e) {}
+								alert(msg);
+							});
+						}
+						return;
+					}
+					_deleteModelId = id;
+					reassign_default_modal.showModal();
+					return;
+				}
+
+				if (confirm('Delete model "' + name + '"? This action cannot be undone.')) {
+					htmx.ajax('DELETE', '/models/' + id, {
+						target: '#models-container',
+						swap: 'outerHTML'
+					}).catch(function(xhr) {
+						var msg = 'Failed to delete model.';
+						try {
+							var data = JSON.parse(xhr.responseText);
+							if (data.message) msg = data.message;
+						} catch(e) {}
+						alert(msg);
+					});
+				}
+			}
+
+			function confirmDeleteDefault() {
+				var newDefaultId = document.getElementById('reassign_default_select').value;
+				if (!newDefaultId) {
+					alert('Please select a new default model.');
+					return;
+				}
+				reassign_default_modal.close();
+				htmx.ajax('DELETE', '/models/' + _deleteModelId + '?new_default_id=' + newDefaultId, {
+					target: '#models-container',
+					swap: 'outerHTML'
+				}).catch(function(xhr) {
+					var msg = 'Failed to delete model.';
+					try {
+						var data = JSON.parse(xhr.responseText);
+						if (data.message) msg = data.message;
+					} catch(e) {}
+					alert(msg);
+				});
+			}
+
+			function editModelFromData(button) {
+				var id = button.dataset.modelId;
+				var name = button.dataset.modelName;
+				var dbProvider = button.dataset.modelProvider;
+				var model = button.dataset.modelModel;
+				var reasoningEffort = button.dataset.modelReasoningEffort || '';
+				var maxTokens = parseInt(button.dataset.modelMaxTokens);
+				var temperature = parseFloat(button.dataset.modelTemperature);
+				var isDefault = button.dataset.modelIsDefault === 'true';
+					var authMethod = button.dataset.modelAuthMethod || 'cli';
+					var modelMaxWorkers = parseInt(button.dataset.modelMaxWorkers) || 0;
+					var workerTimeout = parseInt(button.dataset.modelWorkerTimeout) || 0;
+					var ollamaBaseUrl = button.dataset.modelOllamaBaseUrl || '';
+					var autoStartTasks = button.dataset.modelAutoStartTasks === 'true';
+
+				// Map DB provider values to UI values
+				var uiProvider = dbProvider;
+				var anthropicAuthType = 'api_key';
+				var openaiAuthType = 'api_key';
+				var openaiConnectionMethod = 'oauth';
+				if (dbProvider === 'anthropic') {
+					uiProvider = 'anthropic';
+					if (authMethod === 'api_key' || (authMethod === '' && !dbProvider)) {
+						anthropicAuthType = 'api_key';
+					} else {
+						anthropicAuthType = 'oauth';
+					}
+				} else if (dbProvider === 'openai') {
+					if (authMethod === 'api_key') {
+						openaiAuthType = 'api_key';
+					} else {
+						openaiAuthType = 'oauth';
+						openaiConnectionMethod = authMethod; // 'cli' or 'oauth'
+					}
+				}
+
+				var form = document.getElementById('model_form');
+				document.getElementById('model_modal_title').textContent = 'Edit Model Configuration';
+				form.action = '';
+				form.method = 'post';
+				form.setAttribute('hx-put', '/models/' + id);
+				form.setAttribute('hx-target', '#models-container');
+				form.setAttribute('hx-swap', 'outerHTML');
+				htmx.process(form);
+				document.getElementById('model_name').value = name;
+				document.getElementById('model_provider').value = uiProvider;
+				document.getElementById('model_anthropic_auth_type').value = anthropicAuthType;
+				document.getElementById('model_openai_auth_type').value = openaiAuthType;
+				document.getElementById('model_openai_connection_method').value = openaiConnectionMethod;
+				document.getElementById('model_api_key').value = '';
+				document.getElementById('model_api_key').placeholder = '(leave empty to keep existing)';
+				document.getElementById('model_api_key').required = false;
+				document.getElementById('model_max_tokens').value = maxTokens.toString();
+				document.getElementById('model_temperature').value = temperature.toString();
+				document.getElementById('model_is_default').checked = isDefault;
+					document.getElementById('model_auth_method').value = authMethod;
+					document.getElementById('model_max_workers').value = modelMaxWorkers.toString();
+					document.getElementById('model_worker_timeout').value = workerTimeout.toString();
+					document.getElementById('model_ollama_base_url').value = ollamaBaseUrl || 'http://localhost:11434';
+					document.getElementById('model_ollama_custom_model').value = '';
+					document.getElementById('model_auto_start_tasks').checked = autoStartTasks;
+				document.getElementById('model_submit_btn').textContent = 'Save';
+				toggleProviderFields(model, reasoningEffort);
+				new_model_modal.showModal();
+			}
+
+			function toggleProviderFields(selectedModel, selectedReasoningEffort) {
+				var provider = document.getElementById('model_provider').value;
+				var apiKeyField = document.getElementById('api_key_field');
+				var apiKeyInput = document.getElementById('model_api_key');
+				var anthropicAuthTypeField = document.getElementById('anthropic_auth_type_field');
+				var openaiAuthTypeField = document.getElementById('openai_auth_type_field');
+				var openaiConnectionMethodField = document.getElementById('openai_connection_method_field');
+				var authMethodField = document.getElementById('auth_method_field');
+				var ollamaInfo = document.getElementById('ollama_info');
+
+				hideAllInfoBoxes();
+				var activeModel = setModelOptions(provider, selectedModel);
+
+				if (provider === 'anthropic') {
+					anthropicAuthTypeField.classList.remove('hidden');
+					openaiAuthTypeField.classList.add('hidden');
+					openaiConnectionMethodField.classList.add('hidden');
+					document.getElementById('model_openai_connection_method').disabled = true;
+					toggleAnthropicAuthFields();
+				} else if (provider === 'openai') {
+					anthropicAuthTypeField.classList.add('hidden');
+					openaiAuthTypeField.classList.remove('hidden');
+					authMethodField.classList.add('hidden');
+					document.getElementById('model_auth_method').disabled = true;
+					toggleOpenAIAuthFields();
+				} else if (provider === 'ollama') {
+					anthropicAuthTypeField.classList.add('hidden');
+					openaiAuthTypeField.classList.add('hidden');
+					openaiConnectionMethodField.classList.add('hidden');
+					authMethodField.classList.add('hidden');
+					apiKeyField.classList.add('hidden');
+					apiKeyInput.required = false;
+					ollamaInfo.classList.remove('hidden');
+					document.getElementById('ollama_fields').classList.remove('hidden');
+					document.getElementById('model_auth_method').disabled = true;
+					document.getElementById('model_openai_connection_method').disabled = true;
+				} else {
+					anthropicAuthTypeField.classList.add('hidden');
+					openaiAuthTypeField.classList.add('hidden');
+					openaiConnectionMethodField.classList.add('hidden');
+					authMethodField.classList.add('hidden');
+					apiKeyField.classList.remove('hidden');
+					apiKeyInput.required = true;
+					document.getElementById('model_auth_method').disabled = true;
+					document.getElementById('model_openai_connection_method').disabled = true;
+				}
+				setReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);
+			}
+
+			function toggleAnthropicAuthFields() {
+				var authType = document.getElementById('model_anthropic_auth_type').value;
+				var apiKeyField = document.getElementById('api_key_field');
+				var apiKeyInput = document.getElementById('model_api_key');
+				var authMethodField = document.getElementById('auth_method_field');
+				var authMethodSelect = document.getElementById('model_auth_method');
+
+				hideAllInfoBoxes();
+
+				if (authType === 'api_key') {
+					apiKeyField.classList.remove('hidden');
+					apiKeyInput.required = true;
+					authMethodField.classList.add('hidden');
+					authMethodSelect.disabled = true;
+				} else {
+					apiKeyField.classList.add('hidden');
+					apiKeyInput.required = false;
+					authMethodField.classList.remove('hidden');
+					authMethodSelect.disabled = false;
+					toggleSubscriptionMethodFields();
+				}
+			}
+
+			function toggleSubscriptionMethodFields() {
+				var method = document.getElementById('model_auth_method').value;
+				var subscriptionInfoCli = document.getElementById('subscription_info_cli');
+				var subscriptionInfoOauth = document.getElementById('subscription_info_oauth');
+				if (method === 'oauth') {
+					subscriptionInfoCli.classList.add('hidden');
+					subscriptionInfoOauth.classList.remove('hidden');
+				} else {
+					subscriptionInfoCli.classList.remove('hidden');
+					subscriptionInfoOauth.classList.add('hidden');
+				}
+			}
+
+			function toggleOpenAIAuthFields() {
+				var authType = document.getElementById('model_openai_auth_type').value;
+				var apiKeyField = document.getElementById('api_key_field');
+				var apiKeyInput = document.getElementById('model_api_key');
+				var openaiConnectionMethodField = document.getElementById('openai_connection_method_field');
+				var openaiConnectionMethodSelect = document.getElementById('model_openai_connection_method');
+
+				hideAllInfoBoxes();
+
+				if (authType === 'api_key') {
+					apiKeyField.classList.remove('hidden');
+					apiKeyInput.required = true;
+					openaiConnectionMethodField.classList.add('hidden');
+					openaiConnectionMethodSelect.disabled = true;
+					document.getElementById('openai_api_key_info').classList.remove('hidden');
+				} else {
+					// subscription
+					apiKeyField.classList.add('hidden');
+					apiKeyInput.required = false;
+					openaiConnectionMethodField.classList.remove('hidden');
+					openaiConnectionMethodSelect.disabled = false;
+					toggleOpenAIConnectionMethodFields();
+				}
+			}
+
+				function toggleOpenAIConnectionMethodFields() {
+					var method = document.getElementById('model_openai_connection_method').value;
+					var subscriptionInfoCli = document.getElementById('openai_subscription_info_cli');
+					var subscriptionInfoOauth = document.getElementById('openai_subscription_info_oauth');
+
+					hideAllInfoBoxes();
+
+					if (method === 'oauth') {
+						subscriptionInfoOauth.classList.remove('hidden');
+						subscriptionInfoCli.classList.add('hidden');
+					} else {
+						// cli
+						subscriptionInfoCli.classList.remove('hidden');
+						subscriptionInfoOauth.classList.add('hidden');
+					}
+				}
+
+			function closeModelModal() {
+				new_model_modal.close();
+			}
+
+			function openNewModelModal() {
+				var form = document.getElementById('model_form');
+				document.getElementById('model_modal_title').textContent = 'New Model Configuration';
+				form.action = '';
+				form.method = 'post';
+				form.removeAttribute('hx-put');
+				form.setAttribute('hx-post', '/models');
+				form.setAttribute('hx-target', '#models-container');
+				form.setAttribute('hx-swap', 'outerHTML');
+				htmx.process(form);
+				document.getElementById('model_name').value = '';
+				document.getElementById('model_provider').value = 'anthropic';
+				document.getElementById('model_anthropic_auth_type').value = 'api_key';
+				document.getElementById('model_openai_auth_type').value = 'api_key';
+				document.getElementById('model_openai_connection_method').value = 'oauth';
+				document.getElementById('model_api_key').value = '';
+				document.getElementById('model_api_key').placeholder = 'sk-ant-...';
+				document.getElementById('model_api_key').required = true;
+				document.getElementById('model_max_tokens').value = '4096';
+				document.getElementById('model_temperature').value = '0';
+				document.getElementById('model_is_default').checked = false;
+					document.getElementById('model_auth_method').value = 'oauth';
+					document.getElementById('model_max_workers').value = '0';
+					document.getElementById('model_worker_timeout').value = '0';
+					document.getElementById('model_ollama_base_url').value = 'http://localhost:11434';
+					document.getElementById('model_ollama_custom_model').value = '';
+					document.getElementById('model_auto_start_tasks').checked = false;
+				document.getElementById('model_submit_btn').textContent = 'Create';
+				toggleProviderFields('', '');
+				new_model_modal.showModal();
+			}
+		</script>
+		<script>
+			// Close modal after successful HTMX form submission
+			document.body.addEventListener('htmx:afterSwap', function(event) {
+				if (event.detail.target && event.detail.target.id === 'models-container') {
+					var modal = document.getElementById('new_model_modal');
+					if (modal && modal.open) {
+						modal.close();
+					}
+				}
+			});
+		</script>
+	</div>
+}

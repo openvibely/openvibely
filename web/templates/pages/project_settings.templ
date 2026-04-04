@@ -1,0 +1,590 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+func isProjectDefaultModel(project *models.Project, agentID string) bool {
+	return project.DefaultAgentConfigID != nil && *project.DefaultAgentConfigID == agentID
+}
+
+func projectMaxWorkersValue(project *models.Project) string {
+	if project.MaxWorkers != nil {
+		return fmt.Sprintf("%d", *project.MaxWorkers)
+	}
+	return ""
+}
+
+func projectRepoSource(project *models.Project) string {
+	if project != nil && project.RepoURL != "" {
+		return "github"
+	}
+	return "local"
+}
+
+script deleteProjectAction(projectID string) {
+	var confirmModal = document.getElementById('delete_project_confirm_modal');
+	if (confirmModal) confirmModal.close();
+	var editModal = document.getElementById('edit_project_modal');
+	if (editModal) editModal.close();
+	htmx.ajax('DELETE', '/projects/' + projectID, {target: 'body', swap: 'none'});
+}
+
+templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, localRepoPathEnabled bool) {
+	<dialog id="edit_project_modal" class="modal" data-local-repo-path-enabled={ fmt.Sprintf("%t", localRepoPathEnabled) }>
+		<div class="modal-box">
+			<div class="flex items-center justify-between mb-4">
+				<h3 class="font-bold text-lg">Project Settings</h3>
+				<button
+					class="btn btn-sm btn-circle btn-ghost"
+					onclick="edit_project_modal.close()"
+				>&times;</button>
+			</div>
+			<form
+				method="post"
+				hx-put={ fmt.Sprintf("/projects/%s", project.ID) }
+				hx-swap="none"
+			>
+				<div class="form-control mb-3">
+					<label class="label"><span class="label-text">Name</span></label>
+					<input type="text" name="name" class="input input-bordered" required value={ project.Name }/>
+				</div>
+				<div class="form-control mb-3">
+					<label class="label"><span class="label-text">Description</span></label>
+					<textarea name="description" class="textarea textarea-bordered">{ project.Description }</textarea>
+				</div>
+				<div class="form-control mb-3">
+					<label class="label"><span class="label-text">Repository Source</span></label>
+					if localRepoPathEnabled {
+						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered">
+							<option value="local" if projectRepoSource(project) == "local" { selected }>Local Path</option>
+							<option value="github" if projectRepoSource(project) == "github" { selected }>GitHub URL</option>
+						</select>
+					} else {
+						if projectRepoSource(project) == "github" {
+							<input type="hidden" id="edit-project-repo-source" name="repo_source" value="github"/>
+							<div class="text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2">GitHub URL</div>
+						} else {
+							<input type="hidden" id="edit-project-repo-source" name="repo_source" value="local"/>
+							<div class="text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2">Local Path (existing project)</div>
+							<label class="label">
+								<span class="label-text-alt text-warning">Local-path editing is disabled in this environment. Existing local path will be preserved when saving.</span>
+							</label>
+						}
+					}
+				</div>
+				if localRepoPathEnabled {
+					<div id="edit-project-local-fields" class="form-control mb-3">
+						<label class="label"><span class="label-text">Repository Path</span></label>
+						<div class="flex gap-2">
+							<input type="text" id="edit-project-repo-path" name="repo_path" class="input input-bordered flex-1" value={ project.RepoPath } placeholder="/path/to/repo"/>
+							<button
+								type="button"
+								id="edit-project-browse-btn"
+								class="btn btn-outline btn-sm self-center"
+							>Choose Folder</button>
+						</div>
+						<label class="label">
+							<span class="label-text-alt opacity-70">Use native folder picker when available. If unavailable, paste an absolute path manually.</span>
+						</label>
+						<p id="edit-project-picker-feedback" class="text-xs text-base-content/70 hidden"></p>
+					</div>
+					<div id="edit-project-github-fields" class="form-control mb-3">
+						<label class="label"><span class="label-text">GitHub URL</span></label>
+						<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
+						<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
+					</div>
+				} else if projectRepoSource(project) == "github" {
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">GitHub URL</span></label>
+						<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
+						<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
+					</div>
+				} else {
+					<input type="hidden" name="repo_path" value={ project.RepoPath }/>
+					<input type="hidden" name="repo_url" value={ project.RepoURL }/>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Repository Path (legacy local)</span></label>
+						<input type="text" class="input input-bordered" value={ project.RepoPath } readonly/>
+						<label class="label"><span class="label-text-alt opacity-70">This existing local path stays unchanged on save in this environment.</span></label>
+					</div>
+				}
+				<div class="form-control mb-3">
+					<label class="label">
+						<span class="label-text">Default Model</span>
+						<span class="label-text-alt opacity-60">Used when no model is specified on a task</span>
+					</label>
+					<select name="default_agent_config_id" class="select select-bordered">
+						<option value="">Use global default</option>
+						for _, agent := range agents {
+							<option
+								value={ agent.ID }
+								if isProjectDefaultModel(project, agent.ID) {
+									selected
+								}
+							>
+								{ agent.Name } ({ string(agent.Provider) }/{ agent.Model })
+								if agent.IsDefault {
+									[global default]
+								}
+							</option>
+						}
+					</select>
+				</div>
+				<div class="form-control mb-4">
+					<label class="label">
+						<span class="label-text">Max Concurrent Workers</span>
+						<span class="label-text-alt opacity-60">Limit parallel tasks for this project</span>
+					</label>
+					<select name="max_workers" class="select select-bordered" id="edit-project-max-workers">
+						<option value="" if project.MaxWorkers == nil { selected }>No limit (use global)</option>
+						for _, v := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10} {
+							<option
+								value={ fmt.Sprintf("%d", v) }
+								if project.MaxWorkers != nil && *project.MaxWorkers == v {
+									selected
+								}
+							>
+								{ fmt.Sprintf("%d", v) }
+								if v == 1 {
+									worker
+								} else {
+									workers
+								}
+							</option>
+						}
+					</select>
+				</div>
+				<div class="modal-action">
+					if !project.IsDefault {
+						<button
+							type="button"
+							class="btn btn-error btn-outline mr-auto"
+							onclick="document.getElementById('delete_project_confirm_modal').showModal()"
+						>Delete Project</button>
+					}
+					<button type="button" class="btn" onclick="edit_project_modal.close()">Cancel</button>
+					<button type="submit" class="btn btn-primary">Save</button>
+				</div>
+			</form>
+		</div>
+		<form method="dialog" class="modal-backdrop">
+			<button>close</button>
+		</form>
+	</dialog>
+	if !project.IsDefault {
+		<dialog id="delete_project_confirm_modal" class="modal">
+			<div class="modal-box">
+				<h3 class="font-bold text-lg text-error">Delete Project</h3>
+				<p class="py-4">
+					Are you sure you want to delete <strong>{ project.Name }</strong>? This action cannot be undone.
+				</p>
+				<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">
+					<p class="font-medium mb-1">The following data will be permanently deleted:</p>
+					<ul class="list-disc list-inside space-y-1">
+						<li>All tasks and their execution history</li>
+						<li>All scheduled runs</li>
+						<li>Chat history for this project</li>
+						<li>Workflows and workflow executions</li>
+						<li>Project-specific settings and configurations</li>
+					</ul>
+				</div>
+				<div class="modal-action">
+					<button type="button" class="btn" onclick="delete_project_confirm_modal.close()">Cancel</button>
+					<button
+						type="button"
+						class="btn btn-error"
+						onclick={ deleteProjectAction(project.ID) }
+					>Delete Permanently</button>
+				</div>
+			</div>
+			<form method="dialog" class="modal-backdrop">
+				<button>close</button>
+			</form>
+		</dialog>
+	}
+	<script>
+		(function() {
+			var m = document.getElementById('edit_project_modal');
+			if (m) m.showModal();
+
+			var input = document.getElementById('edit-project-repo-path');
+			var githubInput = document.getElementById('edit-project-repo-url');
+			var browseBtn = document.getElementById('edit-project-browse-btn');
+			var pickerFeedback = document.getElementById('edit-project-picker-feedback');
+			var repoSourceSelect = document.getElementById('edit-project-repo-source');
+			var localFields = document.getElementById('edit-project-local-fields');
+			var githubFields = document.getElementById('edit-project-github-fields');
+			var localRepoPathEnabled = !!m && m.dataset.localRepoPathEnabled === 'true';
+
+			function isAbsolutePath(pathValue) {
+				return !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\') || /^[a-zA-Z]:[\\/]/.test(pathValue) || pathValue.startsWith('\\\\'));
+			}
+
+			function applySelectedDirectoryPath(selectedPath) {
+				if (!input || !isAbsolutePath(selectedPath)) return;
+				input.value = selectedPath;
+				input.dispatchEvent(new Event('input', { bubbles: true }));
+			}
+
+			function setPickerFeedback(message, isError) {
+				if (!pickerFeedback) return;
+				pickerFeedback.textContent = message || '';
+				pickerFeedback.classList.remove('hidden');
+				pickerFeedback.classList.toggle('text-error', !!isError);
+			}
+
+			async function chooseDirectoryNative() {
+				if (!browseBtn || !localRepoPathEnabled) return;
+				browseBtn.disabled = true;
+				try {
+					var response = await fetch('/projects/pick-folder', {
+						method: 'POST',
+						headers: {
+							'HX-Request': 'true'
+						}
+					});
+					var payload = {};
+					try {
+						payload = await response.json();
+					} catch (err) {
+						payload = {};
+					}
+
+					if (response.status === 501) {
+						var unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';
+						setPickerFeedback(unavailableMessage, true);
+						return;
+					}
+					if (response.status === 403) {
+						setPickerFeedback('Local repository path mode is disabled in this environment.', true);
+						return;
+					}
+					if (!response.ok) {
+						var message = payload && payload.message ? payload.message : 'Unable to open folder picker. Paste an absolute path manually.';
+						setPickerFeedback(message, true);
+						return;
+					}
+					if (!payload.selected) {
+						setPickerFeedback('No folder selected. You can paste an absolute path manually.', false);
+						return;
+					}
+					if (!isAbsolutePath(payload.path)) {
+						setPickerFeedback('Folder picker returned a non-absolute path. Paste an absolute path manually.', true);
+						return;
+					}
+					applySelectedDirectoryPath(payload.path);
+					setPickerFeedback('Folder selected from native picker.', false);
+				} catch (err) {
+					setPickerFeedback('Native folder picker is unavailable. Paste an absolute path manually.', true);
+				} finally {
+					browseBtn.disabled = false;
+				}
+			}
+
+			function updateRepoSourceFields() {
+				if (!repoSourceSelect || !localFields || !githubFields || !localRepoPathEnabled) return;
+				var source = repoSourceSelect.value === 'github' ? 'github' : 'local';
+				localFields.classList.toggle('hidden', source !== 'local');
+				githubFields.classList.toggle('hidden', source !== 'github');
+				if (input) input.required = (source === 'local');
+				if (githubInput) githubInput.required = (source === 'github');
+				if (pickerFeedback) pickerFeedback.classList.add('hidden');
+			}
+
+			if (browseBtn && localRepoPathEnabled) {
+				browseBtn.addEventListener('click', function() {
+					chooseDirectoryNative();
+				});
+			}
+
+			if (repoSourceSelect && localRepoPathEnabled) {
+				repoSourceSelect.addEventListener('change', updateRepoSourceFields);
+				updateRepoSourceFields();
+			}
+		})();
+	</script>
+}
+
+templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
+	<dialog id="new_project_modal" class="modal" data-local-repo-path-enabled={ fmt.Sprintf("%t", localRepoPathEnabled) }>
+		<div class="modal-box">
+			<div class="flex items-center justify-between mb-4">
+				<h3 class="font-bold text-lg">New Project</h3>
+				<button
+					class="btn btn-sm btn-circle btn-ghost"
+					onclick="new_project_modal.close()"
+				>&times;</button>
+			</div>
+			<form
+				id="new-project-form"
+				method="post"
+				action="/projects"
+				hx-post="/projects"
+				hx-swap="none"
+			>
+				<div class="form-control mb-3">
+					<label class="label"><span class="label-text">Name</span></label>
+					<input type="text" id="new-project-name" name="name" class="input input-bordered" required placeholder="My Project"/>
+				</div>
+				<div class="form-control mb-3">
+					<label class="label"><span class="label-text">Description</span></label>
+					<textarea name="description" class="textarea textarea-bordered" placeholder="Project description"></textarea>
+				</div>
+				<div class="form-control mb-3">
+					<label class="label"><span class="label-text">Repository Source</span></label>
+					if localRepoPathEnabled {
+						<select id="new-project-repo-source" name="repo_source" class="select select-bordered">
+							<option value="local" selected>Local Path</option>
+							<option value="github">GitHub URL</option>
+						</select>
+					} else {
+						<input type="hidden" id="new-project-repo-source" name="repo_source" value="github"/>
+						<div class="text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2">GitHub URL</div>
+						<label class="label">
+							<span class="label-text-alt opacity-70">Local repository paths are disabled in this environment.</span>
+						</label>
+					}
+				</div>
+				if localRepoPathEnabled {
+					<div id="new-project-local-fields" class="form-control mb-3">
+						<label class="label"><span class="label-text">Repository Path</span></label>
+						<div class="flex gap-2">
+							<input type="text" id="new-project-repo-path" name="repo_path" class="input input-bordered flex-1" placeholder="/path/to/repo"/>
+							<button
+								type="button"
+								id="new-project-browse-btn"
+								class="btn btn-outline btn-sm self-center"
+							>Choose Folder</button>
+						</div>
+						<label class="label">
+							<span class="label-text-alt opacity-70">Use native folder picker when available. If unavailable, paste an absolute path manually.</span>
+						</label>
+						<p id="new-project-picker-feedback" class="text-xs text-base-content/70 hidden"></p>
+					</div>
+					<div id="new-project-github-fields" class="form-control mb-3 hidden">
+						<label class="label"><span class="label-text">GitHub URL</span></label>
+						<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
+						<label class="label">
+							<span class="label-text-alt opacity-60">The repository is cloned into managed storage using your connected GitHub App installation.</span>
+						</label>
+					</div>
+					<div id="new-project-create-dir-wrapper" class="form-control mb-2">
+						<label class="label cursor-pointer justify-start gap-3">
+							<input type="checkbox" id="new-project-create-dir" name="create_directory" value="true" class="checkbox checkbox-sm checkbox-primary"/>
+							<span class="label-text">Create directory if it doesn't exist</span>
+						</label>
+					</div>
+					<div id="new-project-path-preview" class="mb-4 hidden">
+						<div class="text-xs text-base-content/60 bg-base-200 rounded-lg px-3 py-2">
+							<span class="font-medium">Will create:</span>
+							<code id="new-project-path-preview-text" class="ml-1 break-all"></code>
+						</div>
+					</div>
+				} else {
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">GitHub URL</span></label>
+						<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo" required/>
+						<label class="label">
+							<span class="label-text-alt opacity-60">The repository is cloned into managed storage using your connected GitHub App installation.</span>
+						</label>
+					</div>
+				}
+				<div class="form-control mb-3">
+					<label class="label">
+						<span class="label-text">Default Model</span>
+						<span class="label-text-alt opacity-60">Used when no model is specified on a task</span>
+					</label>
+					<select name="default_agent_config_id" class="select select-bordered">
+						<option value="">Use global default</option>
+						for _, agent := range agents {
+							<option value={ agent.ID }>
+								{ agent.Name } ({ string(agent.Provider) }/{ agent.Model })
+								if agent.IsDefault {
+									[global default]
+								}
+							</option>
+						}
+					</select>
+				</div>
+				<div class="form-control mb-4">
+					<label class="label">
+						<span class="label-text">Max Concurrent Workers</span>
+						<span class="label-text-alt opacity-60">Limit parallel tasks for this project</span>
+					</label>
+					<select name="max_workers" class="select select-bordered">
+						<option value="" selected>No limit (use global)</option>
+						for _, v := range []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10} {
+							<option value={ fmt.Sprintf("%d", v) }>
+								{ fmt.Sprintf("%d", v) }
+								if v == 1 {
+									worker
+								} else {
+									workers
+								}
+							</option>
+						}
+					</select>
+				</div>
+				<div id="new-project-error" class="alert alert-error mb-4 hidden">
+					<svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+					<span id="new-project-error-text"></span>
+				</div>
+				<div class="modal-action">
+					<button type="button" class="btn" onclick="new_project_modal.close()">Cancel</button>
+					<button type="submit" class="btn btn-primary">Create</button>
+				</div>
+			</form>
+		</div>
+		<form method="dialog" class="modal-backdrop">
+			<button>close</button>
+		</form>
+	</dialog>
+	<script>
+		(function() {
+			var modal = document.getElementById('new_project_modal');
+			if (modal) modal.showModal();
+
+			var repoPathInput = document.getElementById('new-project-repo-path');
+			var repoURLInput = document.getElementById('new-project-repo-url');
+			var createDirCheckbox = document.getElementById('new-project-create-dir');
+			var createDirWrapper = document.getElementById('new-project-create-dir-wrapper');
+			var pathPreview = document.getElementById('new-project-path-preview');
+			var pathPreviewText = document.getElementById('new-project-path-preview-text');
+			var errorDiv = document.getElementById('new-project-error');
+			var pickerFeedback = document.getElementById('new-project-picker-feedback');
+			var repoSourceSelect = document.getElementById('new-project-repo-source');
+			var localFields = document.getElementById('new-project-local-fields');
+			var githubFields = document.getElementById('new-project-github-fields');
+			var browseBtn = document.getElementById('new-project-browse-btn');
+			var localRepoPathEnabled = !!modal && modal.dataset.localRepoPathEnabled === 'true';
+
+			function updatePathPreview() {
+				if (!repoPathInput || !createDirCheckbox || !repoSourceSelect || !pathPreview || !pathPreviewText) return;
+				var path = repoPathInput.value.trim();
+				if (repoSourceSelect.value === 'local' && createDirCheckbox.checked && path) {
+					pathPreviewText.textContent = path;
+					pathPreview.classList.remove('hidden');
+				} else {
+					pathPreview.classList.add('hidden');
+				}
+				if (errorDiv) {
+					errorDiv.classList.add('hidden');
+				}
+			}
+
+			function updateRepoSourceFields() {
+				if (!repoSourceSelect || !localFields || !githubFields) return;
+				var source = repoSourceSelect.value === 'github' ? 'github' : 'local';
+				localFields.classList.toggle('hidden', source !== 'local');
+				githubFields.classList.toggle('hidden', source !== 'github');
+				if (createDirWrapper) {
+					createDirWrapper.classList.toggle('hidden', source !== 'local');
+				}
+				if (repoPathInput) {
+					repoPathInput.required = (source === 'local');
+				}
+				if (repoURLInput) repoURLInput.required = (source === 'github');
+				if (createDirCheckbox && source !== 'local') {
+					createDirCheckbox.checked = false;
+				}
+				updatePathPreview();
+			}
+
+			function isAbsolutePath(pathValue) {
+				return !!pathValue && (pathValue.startsWith('/') || pathValue.startsWith('~/') || pathValue.startsWith('~\\') || /^[a-zA-Z]:[\\/]/.test(pathValue) || pathValue.startsWith('\\\\'));
+			}
+
+			function applySelectedDirectoryPath(selectedPath) {
+				if (!repoPathInput || !isAbsolutePath(selectedPath)) return;
+				repoPathInput.value = selectedPath;
+				repoPathInput.dispatchEvent(new Event('input', { bubbles: true }));
+			}
+
+			function setPickerFeedback(message, isError) {
+				if (!pickerFeedback) return;
+				pickerFeedback.textContent = message || '';
+				pickerFeedback.classList.remove('hidden');
+				pickerFeedback.classList.toggle('text-error', !!isError);
+			}
+
+			async function chooseDirectoryNative() {
+				if (!browseBtn || !localRepoPathEnabled) return;
+				browseBtn.disabled = true;
+				try {
+					var response = await fetch('/projects/pick-folder', {
+						method: 'POST',
+						headers: {
+							'HX-Request': 'true'
+						}
+					});
+					var payload = {};
+					try {
+						payload = await response.json();
+					} catch (err) {
+						payload = {};
+					}
+
+					if (response.status === 501) {
+						var unavailableMessage = payload && payload.error ? payload.error : 'Native folder picker is unavailable on this system. Paste an absolute path manually.';
+						setPickerFeedback(unavailableMessage, true);
+						return;
+					}
+					if (response.status === 403) {
+						setPickerFeedback('Local repository path mode is disabled in this environment.', true);
+						return;
+					}
+					if (!response.ok) {
+						var message = payload && payload.message ? payload.message : 'Unable to open folder picker. Paste an absolute path manually.';
+						setPickerFeedback(message, true);
+						return;
+					}
+					if (!payload.selected) {
+						setPickerFeedback('No folder selected. You can paste an absolute path manually.', false);
+						return;
+					}
+					if (!isAbsolutePath(payload.path)) {
+						setPickerFeedback('Folder picker returned a non-absolute path. Paste an absolute path manually.', true);
+						return;
+					}
+					applySelectedDirectoryPath(payload.path);
+					setPickerFeedback('Folder selected from native picker.', false);
+				} catch (err) {
+					setPickerFeedback('Native folder picker is unavailable. Paste an absolute path manually.', true);
+				} finally {
+					browseBtn.disabled = false;
+				}
+			}
+
+			if (repoPathInput) {
+				repoPathInput.addEventListener('input', updatePathPreview);
+			}
+			if (createDirCheckbox) {
+				createDirCheckbox.addEventListener('change', updatePathPreview);
+			}
+			if (browseBtn && localRepoPathEnabled) {
+				browseBtn.addEventListener('click', function() {
+					chooseDirectoryNative();
+				});
+			}
+			if (repoSourceSelect && localRepoPathEnabled) {
+				repoSourceSelect.addEventListener('change', updateRepoSourceFields);
+				updateRepoSourceFields();
+			}
+
+			if (modal) {
+				modal.addEventListener('close', function() {
+					var form = document.getElementById('new-project-form');
+					if (form) form.reset();
+					if (errorDiv) errorDiv.classList.add('hidden');
+					if (pathPreview) pathPreview.classList.add('hidden');
+					if (pickerFeedback) pickerFeedback.classList.add('hidden');
+					if (repoSourceSelect && localRepoPathEnabled) {
+						updateRepoSourceFields();
+					}
+				});
+			}
+		})();
+	</script>
+}

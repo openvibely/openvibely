@@ -1,0 +1,175 @@
+package pages
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ Alerts(projects []models.Project, currentProjectID string, alerts []models.Alert, unreadCount int) {
+	@layout.Base("Alerts", projects, currentProjectID) {
+		@alertsContent(alerts, currentProjectID, unreadCount)
+	}
+}
+
+templ AlertsContent(alerts []models.Alert, currentProjectID string, unreadCount int) {
+	@alertsContent(alerts, currentProjectID, unreadCount)
+}
+
+templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount int) {
+	<div id="alerts-container" class="h-full overflow-y-auto max-w-full" data-search-container>
+		<div class="flex items-center justify-between mb-6">
+			<h2 class="text-2xl font-bold">
+				Alerts
+				if unreadCount > 0 {
+					<span class="badge badge-error badge-sm ml-2">{ fmt.Sprintf("%d", unreadCount) } unread</span>
+				}
+			</h2>
+			<div class="flex items-center gap-2">
+				if len(alerts) > 0 || unreadCount > 0 {
+					<!-- Kebab menu -->
+					<div class="dropdown dropdown-end">
+						<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+							</svg>
+						</label>
+						<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300">
+							if unreadCount > 0 {
+								<li>
+									<a
+										hx-post={ fmt.Sprintf("/alerts/read-all?project_id=%s", currentProjectID) }
+										hx-target="#alerts-container"
+										hx-swap="outerHTML"
+									>
+										Mark all as read
+									</a>
+								</li>
+							}
+							if len(alerts) > 0 {
+								<li>
+									<a
+										class="text-error"
+										hx-delete={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
+										hx-target="#alerts-container"
+										hx-swap="outerHTML"
+										hx-confirm="Delete all alerts? This action cannot be undone."
+									>
+										Delete All Alerts
+									</a>
+								</li>
+							}
+						</ul>
+					</div>
+				}
+			</div>
+		</div>
+
+		@CardSearchInput("alerts", "Search alerts...")
+
+		if len(alerts) == 0 {
+			<div class="text-center py-12">
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto opacity-30 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+				</svg>
+				<p class="opacity-50">No alerts. You're all clear!</p>
+			</div>
+		} else {
+			<div class="grid gap-4 max-w-full">
+				for _, alert := range alerts {
+					@alertRow(alert, currentProjectID)
+				}
+			</div>
+		}
+	</div>
+
+	<!-- Task Detail Dialog Container -->
+	<script>
+		function openAlertTaskDialog(taskId) {
+			htmx.ajax('GET', '/tasks/' + taskId + '?tab=history&from=alerts', {
+				target: '#main-content',
+				swap: 'innerHTML'
+			});
+			history.pushState({}, '', '/tasks/' + taskId + '?from=alerts');
+		}
+	</script>
+}
+
+func alertSearchText(alert models.Alert) string {
+	return alert.Title + " " + alert.Message + " " + string(alert.Severity) + " " + alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM")
+}
+
+templ alertRow(alert models.Alert, currentProjectID string) {
+	<div
+		class={ "card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil) }
+		data-search-card
+		data-search-text={ alertSearchText(alert) }
+		if alert.TaskID != nil {
+			data-task-id={ *alert.TaskID }
+			onclick="openAlertTaskDialog(this.dataset.taskId)"
+		}
+	>
+		<div class="card-body max-w-full">
+			<div class="flex items-start justify-between gap-4 max-w-full">
+				<div class="flex items-start gap-3 flex-1 min-w-0 max-w-full">
+					<div class="mt-0.5">
+						if alert.Severity == models.SeverityError {
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-error" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+							</svg>
+						} else if alert.Severity == models.SeverityWarning {
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+							</svg>
+						} else {
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-info" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+							</svg>
+						}
+					</div>
+					<div class="flex-1 min-w-0">
+						<p class={ "font-semibold", templ.KV("font-bold", !alert.IsRead) }>
+							{ alert.Title }
+						</p>
+						if alert.Message != "" {
+							<p class="text-sm opacity-60 mt-1 break-words overflow-wrap-anywhere">{ alert.Message }</p>
+						}
+						<p class="text-sm opacity-50 mt-1">{ alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM") }</p>
+					</div>
+				</div>
+				<div class="flex items-center gap-1 flex-shrink-0" onclick="event.stopPropagation()">
+					if !alert.IsRead {
+						<button
+							class="btn btn-ghost btn-xs"
+							hx-post={ fmt.Sprintf("/alerts/%s/read?project_id=%s", alert.ID, currentProjectID) }
+							hx-target="#alerts-container"
+							hx-swap="outerHTML"
+							title="Mark as read"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+							</svg>
+						</button>
+					}
+					<button
+						class="btn btn-ghost btn-xs text-error"
+						hx-delete={ fmt.Sprintf("/alerts/%s?project_id=%s", alert.ID, currentProjectID) }
+						hx-target="#alerts-container"
+						hx-swap="outerHTML"
+						hx-confirm="Delete this alert?"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+						</svg>
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+}
+
+templ AlertBadge(count int) {
+	if count > 0 {
+		<span class="badge badge-error badge-sm inline-flex items-center">{ fmt.Sprintf("%d", count) }</span>
+	}
+}

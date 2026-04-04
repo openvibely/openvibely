@@ -1,0 +1,63 @@
+package components
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+// ReviewCommentList renders a list of review comments (used for HTMX responses).
+templ ReviewCommentList(comments []models.ReviewComment, taskID string) {
+	<div id="review-comments-list" data-task-id={ taskID } data-comment-count={ fmt.Sprintf("%d", len(comments)) }>
+		if len(comments) > 0 {
+			for _, comment := range comments {
+				<div class="review-comment-item flex items-start gap-2 px-3 py-2 bg-warning/10 border-l-4 border-warning text-xs"
+					data-comment-id={ comment.ID }
+					data-file-path={ comment.FilePath }
+					data-line-number={ fmt.Sprintf("%d", comment.LineNumber) }
+					data-line-type={ comment.LineType }
+				>
+					<div class="flex-1 min-w-0">
+						<div class="flex items-center gap-2 mb-1">
+							<span class="font-semibold opacity-70">{ comment.ReviewedBy }</span>
+							<span class="opacity-40">·</span>
+							<span class="font-mono opacity-50">{ comment.FilePath }:{ fmt.Sprintf("%d", comment.LineNumber) }</span>
+						</div>
+						<p class="whitespace-pre-wrap break-words">{ comment.CommentText }</p>
+					</div>
+					<button
+						class="btn btn-ghost btn-xs opacity-50 hover:opacity-100 flex-shrink-0"
+						hx-delete={ fmt.Sprintf("/reviews/%s", comment.ID) }
+						hx-target="closest .review-comment-item"
+						hx-swap="outerHTML"
+						title="Remove comment"
+					>
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+						</svg>
+					</button>
+				</div>
+			}
+		}
+	</div>
+}
+
+// ReviewToolbar renders the review toolbar for the diff viewer.
+// Inline commenting is always enabled — no "Start Review" step required.
+templ ReviewToolbar(taskID string, commentCount int) {
+	<div id="review-toolbar" class="flex items-center gap-2">
+		<button
+			class="btn btn-sm btn-success gap-1"
+			hx-post={ fmt.Sprintf("/tasks/%s/reviews/submit", taskID) }
+			hx-confirm="Submit review? This will send all comments to the AI agent and reactivate the task."
+			if commentCount == 0 {
+				disabled
+			}
+		>
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+			</svg>
+			Submit Review
+		</button>
+	</div>
+}
+

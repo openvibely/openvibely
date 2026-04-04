@@ -1,0 +1,498 @@
+package components
+
+import (
+	"fmt"
+	"strings"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func filterByCategory(tasks []models.Task, cat models.TaskCategory) []models.Task {
+	var result []models.Task
+	for _, t := range tasks {
+		if t.Category == cat {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
+// filterActiveColumn returns tasks for the active column: all active-category tasks,
+// plus scheduled-category tasks that are currently running (so users can see scheduled
+// tasks executing alongside active tasks without them being invisible on the kanban board).
+func filterActiveColumn(tasks []models.Task) []models.Task {
+	var result []models.Task
+	for _, t := range tasks {
+		if t.Category == models.CategoryActive {
+			result = append(result, t)
+		} else if t.Category == models.CategoryScheduled && t.Status == models.StatusRunning {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
+func filterRunningTasks(tasks []models.Task) []models.Task {
+	var running []models.Task
+	for _, task := range tasks {
+		if task.Status == models.StatusRunning {
+			running = append(running, task)
+		}
+	}
+	return running
+}
+
+func filterPendingTasks(tasks []models.Task) []models.Task {
+	var pending []models.Task
+	for _, task := range tasks {
+		// Include pending/queued tasks AND completed/failed tasks (transitional state before auto-move to Complete)
+		if task.Status == models.StatusPending || task.Status == models.StatusQueued || task.Status == models.StatusCompleted || task.Status == models.StatusFailed {
+			pending = append(pending, task)
+		}
+	}
+	return pending
+}
+
+
+func countActiveDisplayedTasks(tasks []models.Task) int {
+	count := 0
+	for _, task := range tasks {
+		if task.Status == models.StatusRunning || task.Status == models.StatusPending || task.Status == models.StatusQueued {
+			count++
+		}
+	}
+	return count
+}
+
+func countEligibleBacklogTasks(tasks []models.Task) int {
+	count := 0
+	for _, t := range tasks {
+		if t.Status == models.StatusPending || t.Status == models.StatusFailed || t.Status == models.StatusCancelled {
+			count++
+		}
+	}
+	return count
+}
+
+func countEligibleBacklogByPriority(tasks []models.Task, priority int) int {
+	count := 0
+	for _, t := range tasks {
+		if t.Priority == priority && (t.Status == models.StatusPending || t.Status == models.StatusFailed || t.Status == models.StatusCancelled) {
+			count++
+		}
+	}
+	return count
+}
+
+func hasEligibleBacklogTasks(tasks []models.Task) bool {
+	return countEligibleBacklogTasks(tasks) > 0
+}
+
+func isSortActive(sortBy, option string) string {
+	if sortBy == option {
+		return "active font-semibold"
+	}
+	return ""
+}
+
+templ KanbanBoard(tasks []models.Task, projectID string, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
+	<div id="kanban-board" class="flex gap-4 overflow-x-auto h-full">
+		for _, cat := range models.AllCategories {
+			if cat == models.CategoryActive {
+				@KanbanColumn(filterActiveColumn(tasks), projectID, cat, backlogSort, completedSort, llmModels, agentDefs)
+			} else {
+				@KanbanColumn(filterByCategory(tasks, cat), projectID, cat, backlogSort, completedSort, llmModels, agentDefs)
+			}
+		}
+	</div>
+}
+
+templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCategory, backlogSort string, completedSort string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
+	<div class="kanban-column min-w-0 bg-base-300 rounded-lg p-3 flex flex-col h-full">
+		<div class="flex items-center justify-between mb-3 flex-shrink-0">
+			<div class="flex items-center gap-2">
+				<h3 class="font-bold text-lg">{ capitalize(string(category)) }</h3>
+				if category == models.CategoryActive {
+					<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d", countActiveDisplayedTasks(tasks)) }</span>
+				} else {
+					<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d", len(tasks)) }</span>
+				}
+			</div>
+			if category == models.CategoryCompleted {
+				<div class="dropdown dropdown-end">
+					<button tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+						</svg>
+					</button>
+					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">
+						<li class="menu-title"><span>Sort By</span></li>
+						<li>
+							<a
+								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_asc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(completedSort, "title_asc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
+								</svg>
+								Name (A-Z)
+							</a>
+						</li>
+						<li>
+							<a
+								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_desc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(completedSort, "title_desc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
+								</svg>
+								Name (Z-A)
+							</a>
+						</li>
+						<li class="border-t border-base-300 mt-1 pt-1">
+							<a
+								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=created_desc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(completedSort, "created_desc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+								</svg>
+								Date (Newest First)
+							</a>
+						</li>
+						<li>
+							<a
+								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=created_asc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(completedSort, "created_asc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+								</svg>
+								Date (Oldest First)
+							</a>
+						</li>
+						<li class="border-t border-base-300 mt-1 pt-1">
+							<a
+								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_desc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(completedSort, "priority_desc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+								</svg>
+								Priority (High to Low)
+							</a>
+						</li>
+						<li>
+							<a
+								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=priority_asc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(completedSort, "priority_asc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+								</svg>
+								Priority (Low to High)
+							</a>
+						</li>
+						if len(tasks) > 0 {
+							<li class="menu-title mt-2"><span>Actions</span></li>
+							<li>
+								<a
+									hx-delete={ fmt.Sprintf("/tasks/completed?project_id=%s", projectID) }
+									hx-target="#kanban-board"
+									hx-swap="outerHTML"
+									hx-confirm="Are you sure you want to delete all completed tasks? This action cannot be undone."
+									class="text-error"
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+									</svg>
+									Delete All
+								</a>
+							</li>
+						}
+					</ul>
+				</div>
+			}
+			if category == models.CategoryBacklog {
+				<div class="dropdown dropdown-end">
+					<button tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+						</svg>
+					</button>
+					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">
+						<li class="menu-title"><span>Sort By</span></li>
+						<li>
+							<a
+								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_asc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(backlogSort, "title_asc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
+								</svg>
+								Name (A-Z)
+							</a>
+						</li>
+						<li>
+							<a
+								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_desc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(backlogSort, "title_desc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12"></path>
+								</svg>
+								Name (Z-A)
+							</a>
+						</li>
+						<li class="border-t border-base-300 mt-1 pt-1">
+							<a
+								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_desc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(backlogSort, "created_desc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+								</svg>
+								Date (Newest First)
+							</a>
+						</li>
+						<li>
+							<a
+								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=created_asc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(backlogSort, "created_asc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+								</svg>
+								Date (Oldest First)
+							</a>
+						</li>
+						<li class="border-t border-base-300 mt-1 pt-1">
+							<a
+								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_desc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(backlogSort, "priority_desc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+								</svg>
+								Priority (High to Low)
+							</a>
+						</li>
+						<li>
+							<a
+								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=priority_asc", projectID) }
+								hx-target="#kanban-board"
+								hx-swap="outerHTML"
+								class={ "text-sm", isSortActive(backlogSort, "priority_asc") }
+							>
+								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path>
+								</svg>
+								Priority (Low to High)
+							</a>
+						</li>
+						if len(tasks) > 0 {
+							<li class="menu-title mt-2"><span>Actions</span></li>
+							if hasEligibleBacklogTasks(tasks) {
+								<li>
+									<a
+										hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s", projectID) }
+										hx-target="#kanban-board"
+										hx-swap="outerHTML"
+										hx-confirm={ fmt.Sprintf("Execute all %d eligible backlog tasks? They will be moved to Active and submitted for execution.", countEligibleBacklogTasks(tasks)) }
+										class="text-sm"
+									>
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+										</svg>
+										{ fmt.Sprintf("Execute All (%d)", countEligibleBacklogTasks(tasks)) }
+									</a>
+								</li>
+								if countEligibleBacklogByPriority(tasks, 4) > 0 {
+									<li>
+										<a
+											hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=4", projectID) }
+											hx-target="#kanban-board"
+											hx-swap="outerHTML"
+											hx-confirm={ fmt.Sprintf("Execute %d urgent priority backlog tasks?", countEligibleBacklogByPriority(tasks, 4)) }
+											class="text-sm pl-8"
+										>
+											{ fmt.Sprintf("Execute Urgent (%d)", countEligibleBacklogByPriority(tasks, 4)) }
+										</a>
+									</li>
+								}
+								if countEligibleBacklogByPriority(tasks, 3) > 0 {
+									<li>
+										<a
+											hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=3", projectID) }
+											hx-target="#kanban-board"
+											hx-swap="outerHTML"
+											hx-confirm={ fmt.Sprintf("Execute %d high priority backlog tasks?", countEligibleBacklogByPriority(tasks, 3)) }
+											class="text-sm pl-8"
+										>
+											{ fmt.Sprintf("Execute High (%d)", countEligibleBacklogByPriority(tasks, 3)) }
+										</a>
+									</li>
+								}
+								if countEligibleBacklogByPriority(tasks, 2) > 0 {
+									<li>
+										<a
+											hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=2", projectID) }
+											hx-target="#kanban-board"
+											hx-swap="outerHTML"
+											hx-confirm={ fmt.Sprintf("Execute %d normal priority backlog tasks?", countEligibleBacklogByPriority(tasks, 2)) }
+											class="text-sm pl-8"
+										>
+											{ fmt.Sprintf("Execute Normal (%d)", countEligibleBacklogByPriority(tasks, 2)) }
+										</a>
+									</li>
+								}
+								if countEligibleBacklogByPriority(tasks, 1) > 0 {
+									<li>
+										<a
+											hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=1", projectID) }
+											hx-target="#kanban-board"
+											hx-swap="outerHTML"
+											hx-confirm={ fmt.Sprintf("Execute %d low priority backlog tasks?", countEligibleBacklogByPriority(tasks, 1)) }
+											class="text-sm pl-8"
+										>
+											{ fmt.Sprintf("Execute Low (%d)", countEligibleBacklogByPriority(tasks, 1)) }
+										</a>
+									</li>
+								}
+							}
+							<li>
+								<a
+									hx-post={ fmt.Sprintf("/tasks/backlog/activate?project_id=%s", projectID) }
+									hx-target="#kanban-board"
+									hx-swap="outerHTML"
+									hx-confirm="Are you sure you want to activate all backlog tasks? They will be moved to Active and submitted for execution."
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path>
+									</svg>
+									Activate All
+								</a>
+							</li>
+							<li>
+								<a
+									hx-delete={ fmt.Sprintf("/tasks/backlog?project_id=%s", projectID) }
+									hx-target="#kanban-board"
+									hx-swap="outerHTML"
+									hx-confirm="Are you sure you want to delete all backlog tasks? This action cannot be undone."
+									class="text-error"
+								>
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+									</svg>
+									Delete All
+								</a>
+							</li>
+						}
+					</ul>
+				</div>
+			}
+		</div>
+		if category == models.CategoryActive {
+			<div class="flex-1 flex flex-col min-h-0">
+				@activeColumnContent(tasks, projectID, llmModels, agentDefs)
+			</div>
+		} else {
+			<div
+				class="category-drop-zone space-y-2 flex-1 rounded-lg border-2 border-dashed border-transparent transition-colors overflow-y-auto min-h-0"
+				data-drop-type="category"
+				data-category={ string(category) }
+				data-project-id={ projectID }
+				ondragover="handleDragOver(event)"
+				ondragenter="handleDragEnter(event)"
+				ondragleave="handleDragLeave(event)"
+				ondrop="handleCategoryDrop(event)"
+			>
+				if len(tasks) > 0 {
+					for _, task := range tasks {
+						@TaskCard(task, projectID, "", llmModels, agentDefs)
+					}
+				} else {
+					<div class="text-center py-8 opacity-30 text-sm">Drop tasks here</div>
+				}
+			</div>
+		}
+	</div>
+}
+
+templ activeColumnContent(tasks []models.Task, projectID string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
+	<!-- In Progress -->
+	<div class="mb-4 flex-1 flex flex-col min-h-0">
+		<h4 class="text-sm font-semibold mb-2 text-primary flex-shrink-0">In Progress</h4>
+		<div
+			class="task-drop-zone category-drop-zone space-y-2 flex-1 rounded-lg border-2 border-dashed border-transparent transition-colors overflow-y-auto"
+			data-drop-type="status"
+			data-status="running"
+			data-category="active"
+			data-project-id={ projectID }
+			ondragover="handleDragOver(event)"
+			ondragenter="handleDragEnter(event)"
+			ondragleave="handleDragLeave(event)"
+			ondrop="handleActiveDrop(event)"
+		>
+			if len(filterRunningTasks(tasks)) > 0 {
+				for _, task := range filterRunningTasks(tasks) {
+					@TaskCard(task, projectID, "active", llmModels, agentDefs)
+				}
+			} else {
+				<div class="text-center py-4 opacity-30 text-sm">Drop tasks here</div>
+			}
+		</div>
+	</div>
+	<!-- Queued (includes pending + completed/failed tasks awaiting auto-move) -->
+	<div class="flex-1 flex flex-col min-h-0">
+		<h4 class="text-sm font-semibold mb-2 flex-shrink-0">Queued</h4>
+		<div
+			class="task-drop-zone category-drop-zone space-y-2 flex-1 rounded-lg border-2 border-dashed border-transparent transition-colors overflow-y-auto"
+			data-drop-type="status"
+			data-status="pending"
+			data-category="active"
+			data-project-id={ projectID }
+			ondragover="handleDragOver(event)"
+			ondragenter="handleDragEnter(event)"
+			ondragleave="handleDragLeave(event)"
+			ondrop="handleActiveDrop(event)"
+		>
+			if len(filterPendingTasks(tasks)) > 0 {
+				for _, task := range filterPendingTasks(tasks) {
+					@TaskCard(task, projectID, "active", llmModels, agentDefs)
+				}
+			} else {
+				<div class="text-center py-4 opacity-30 text-sm">Drop tasks here</div>
+			}
+		</div>
+	</div>
+}

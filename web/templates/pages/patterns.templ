@@ -1,0 +1,461 @@
+package pages
+
+import (
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
+	"fmt"
+	"strings"
+)
+
+// Full page with layout
+templ PatternsPage(projects []models.Project, currentProject *models.Project, data *models.PatternDashboardData) {
+	@layout.Base("Pattern Library", projects, projectID(currentProject)) {
+		@PatternsContent(currentProject, data)
+	}
+}
+
+// Content-only for HTMX swaps
+templ PatternsContent(currentProject *models.Project, data *models.PatternDashboardData) {
+	<div class="container mx-auto p-6">
+		<!-- Header -->
+		<div class="flex justify-between items-center mb-6">
+			<div>
+				<h1 class="text-3xl font-bold">Pattern Library</h1>
+				<p class="text-sm text-gray-600 mt-1">Reusable prompt templates for common tasks</p>
+			</div>
+			if currentProject != nil {
+				<div class="flex gap-2">
+					<a href={ templ.URL(fmt.Sprintf("/patterns/export?project_id=%s", currentProject.ID)) } class="btn btn-sm btn-outline">
+						Export
+					</a>
+					<button class="btn btn-sm btn-outline" onclick="document.getElementById('import-modal').showModal()">
+						Import
+					</button>
+					<button class="btn btn-sm btn-primary" onclick="document.getElementById('create-modal').showModal()">
+						New Pattern
+					</button>
+				</div>
+			}
+		</div>
+		<!-- Stats -->
+		if data != nil && currentProject != nil {
+			<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+				<div class="stat bg-base-200 rounded-lg">
+					<div class="stat-title">Total Patterns</div>
+					<div class="stat-value text-primary">{ fmt.Sprintf("%d", data.TotalPatterns) }</div>
+					<div class="stat-desc">{ fmt.Sprintf("%d built-in, %d custom", data.BuiltinCount, data.CustomPatternCount) }</div>
+				</div>
+				<div class="stat bg-base-200 rounded-lg">
+					<div class="stat-title">Total Usage</div>
+					<div class="stat-value text-secondary">{ fmt.Sprintf("%d", data.TotalUsage) }</div>
+					<div class="stat-desc">Times applied</div>
+				</div>
+				<div class="stat bg-base-200 rounded-lg">
+					<div class="stat-title">Categories</div>
+					<div class="stat-value">{ fmt.Sprintf("%d", len(data.ByCategory)) }</div>
+					<div class="stat-desc">Active categories</div>
+				</div>
+				<div class="stat bg-base-200 rounded-lg">
+					<div class="stat-title">Most Popular</div>
+					<div class="stat-value text-sm">
+						if len(data.MostPopular) > 0 {
+							{ data.MostPopular[0].Title }
+						} else {
+							None yet
+						}
+					</div>
+					if len(data.MostPopular) > 0 {
+						<div class="stat-desc">{ fmt.Sprintf("%d uses", data.MostPopular[0].UsageCount) }</div>
+					}
+				</div>
+			</div>
+			<!-- Search & Filter -->
+			<div class="mb-6">
+				<div class="flex gap-4">
+					<input
+						type="text"
+						placeholder="Search patterns..."
+						class="input input-bordered flex-1"
+						hx-get={ fmt.Sprintf("/patterns/search?project_id=%s", currentProject.ID) }
+						hx-trigger="keyup changed delay:500ms"
+						hx-target="#pattern-list"
+						name="q"
+					/>
+					<select
+						class="select select-bordered"
+						hx-get={ fmt.Sprintf("/patterns/search?project_id=%s", currentProject.ID) }
+						hx-trigger="change"
+						hx-target="#pattern-list"
+						name="category"
+					>
+						<option value="">All Categories</option>
+						for _, cat := range models.AllPatternCategories() {
+							<option value={ string(cat) }>{ formatCategory(cat) }</option>
+						}
+					</select>
+				</div>
+			</div>
+			<!-- Pattern List -->
+			<div id="pattern-list">
+				@PatternList(data.AllPatterns, currentProject.ID)
+			</div>
+			<!-- Create Modal -->
+			@CreatePatternModal(currentProject.ID)
+			<!-- Import Modal -->
+			@ImportPatternModal(currentProject.ID)
+		}
+		<!-- Apply Modal -->
+		<dialog id="apply-modal" class="modal">
+			<div id="apply-modal-content" class="modal-box max-w-2xl"></div>
+		</dialog>
+		<!-- Edit Modal -->
+		<dialog id="edit-modal" class="modal">
+			<div id="edit-modal-content" class="modal-box max-w-2xl"></div>
+		</dialog>
+	</div>
+}
+
+templ PatternList(patterns []models.PromptPattern, projectID string) {
+	<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+		for _, p := range patterns {
+			@PatternCard(p, projectID)
+		}
+		if len(patterns) == 0 {
+			<div class="col-span-full text-center py-12 text-gray-500">
+				No patterns found. Create your first pattern to get started!
+			</div>
+		}
+	</div>
+}
+
+templ PatternCard(p models.PromptPattern, projectID string) {
+	<div class="card bg-base-100 shadow-md hover:shadow-lg transition-shadow">
+		<div class="card-body p-4">
+			<div class="flex justify-between items-start">
+				<div class="flex-1">
+					<h3 class="card-title text-lg">{ p.Title }</h3>
+					<div class="flex gap-2 mt-1">
+						<span class="badge badge-sm badge-outline">{ formatCategory(p.Category) }</span>
+						if p.IsBuiltin {
+							<span class="badge badge-sm badge-info">Built-in</span>
+						}
+					</div>
+				</div>
+				<div class="dropdown dropdown-end">
+					<label tabindex="0" class="btn btn-ghost btn-sm btn-circle">⋮</label>
+					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-200 rounded-box w-52">
+						<li>
+							<a
+								hx-get={ fmt.Sprintf("/patterns/%s/apply", p.ID) }
+								hx-target="#apply-modal-content"
+								onclick="document.getElementById('apply-modal').showModal()"
+							>
+								Apply Pattern
+							</a>
+						</li>
+						<li>
+							<a
+								hx-post={ fmt.Sprintf("/patterns/%s/duplicate?project_id=%s", p.ID, projectID) }
+								hx-target="closest .container"
+								hx-swap="outerHTML"
+							>
+								Duplicate
+							</a>
+						</li>
+						if !p.IsBuiltin {
+							<li>
+								<a
+									hx-get={ fmt.Sprintf("/patterns/%s", p.ID) }
+									hx-target="#edit-modal-content"
+									onclick="document.getElementById('edit-modal').showModal()"
+								>
+									Edit
+								</a>
+							</li>
+							<li>
+								<a
+									hx-delete={ fmt.Sprintf("/patterns/%s?project_id=%s", p.ID, projectID) }
+									hx-target="closest .container"
+									hx-swap="outerHTML"
+									hx-confirm="Delete this pattern?"
+								>
+									Delete
+								</a>
+							</li>
+						}
+					</ul>
+				</div>
+			</div>
+			<p class="text-sm text-gray-600 mt-2 line-clamp-2">{ p.Description }</p>
+			if vars, err := p.ParseVariables(); err == nil && len(vars) > 0 {
+				<div class="mt-3">
+					<div class="text-xs text-gray-500 mb-1">Variables:</div>
+					<div class="flex flex-wrap gap-1">
+						for _, v := range vars {
+							<code class="text-xs px-2 py-1 bg-base-200 rounded">{ v }</code>
+						}
+					</div>
+				</div>
+			}
+			<div class="flex justify-between items-center mt-4 text-sm text-gray-500">
+				<span>{ fmt.Sprintf("Used %d times", p.UsageCount) }</span>
+				if p.LastUsedAt != nil {
+					<span>Last: { p.LastUsedAt.Format("Jan 2") }</span>
+				}
+			</div>
+		</div>
+	</div>
+}
+
+templ CreatePatternModal(projectID string) {
+	<dialog id="create-modal" class="modal">
+		<div class="modal-box max-w-2xl">
+			<h3 class="font-bold text-lg mb-4">Create New Pattern</h3>
+			<form
+				hx-post="/patterns"
+				hx-target="closest .container"
+				hx-swap="outerHTML"
+				method="post"
+			>
+				<input type="hidden" name="project_id" value={ projectID }/>
+				<div class="form-control mb-4">
+					<label class="label"><span class="label-text">Title</span></label>
+					<input type="text" name="title" class="input input-bordered" required/>
+				</div>
+				<div class="form-control mb-4">
+					<label class="label"><span class="label-text">Description</span></label>
+					<input type="text" name="description" class="input input-bordered"/>
+				</div>
+				<div class="form-control mb-4">
+					<label class="label"><span class="label-text">Category</span></label>
+					<select name="category" class="select select-bordered">
+						for _, cat := range models.AllPatternCategories() {
+							<option value={ string(cat) }>{ formatCategory(cat) }</option>
+						}
+					</select>
+				</div>
+				<div class="form-control mb-4">
+					<label class="label">
+						<span class="label-text">Template Text</span>
+						<span class="label-text-alt text-xs">Use &#123;&#123;variable_name&#125;&#125; for placeholders</span>
+					</label>
+					<textarea name="template_text" class="textarea textarea-bordered h-64" required></textarea>
+				</div>
+				<div class="form-control mb-4">
+					<label class="label">
+						<span class="label-text">Tags (comma-separated)</span>
+					</label>
+					<input type="text" name="tags" class="input input-bordered" placeholder="debug, urgent, api"/>
+				</div>
+				<div class="modal-action">
+					<button type="button" class="btn" onclick="document.getElementById('create-modal').close()">Cancel</button>
+					<button type="submit" class="btn btn-primary">Create</button>
+				</div>
+			</form>
+		</div>
+	</dialog>
+}
+
+templ ImportPatternModal(projectID string) {
+	<dialog id="import-modal" class="modal">
+		<div class="modal-box">
+			<h3 class="font-bold text-lg mb-4">Import Patterns</h3>
+			<form
+				hx-post="/patterns/import"
+				hx-encoding="multipart/form-data"
+				hx-target="#import-result"
+				method="post"
+			>
+				<input type="hidden" name="project_id" value={ projectID }/>
+				<div class="form-control mb-4">
+					<label class="label"><span class="label-text">JSON File</span></label>
+					<input type="file" name="file" class="file-input file-input-bordered" accept=".json" required/>
+				</div>
+				<div id="import-result"></div>
+				<div class="modal-action">
+					<button type="button" class="btn" onclick="document.getElementById('import-modal').close()">Cancel</button>
+					<button type="submit" class="btn btn-primary">Import</button>
+				</div>
+			</form>
+		</div>
+	</dialog>
+}
+
+templ PatternApplyForm(pattern *models.PromptPattern, agents []models.LLMConfig) {
+	<div>
+		<h3 class="font-bold text-lg mb-4">Apply Pattern: { pattern.Title }</h3>
+		<form
+			hx-post={ fmt.Sprintf("/patterns/%s/apply", pattern.ID) }
+			hx-target="#apply-result"
+			method="post"
+		>
+			<div class="form-control mb-4">
+				<label class="label"><span class="label-text">Task Title</span></label>
+				<input type="text" name="task_title" class="input input-bordered" value={ pattern.Title } required/>
+			</div>
+			if vars, err := pattern.ParseVariables(); err == nil && len(vars) > 0 {
+				<div class="mb-4">
+					<h4 class="font-semibold mb-2">Fill in Variables:</h4>
+					for _, v := range vars {
+						<div class="form-control mb-3">
+							<label class="label"><span class="label-text">{ v }</span></label>
+							<input type="text" name={ fmt.Sprintf("var_%s", v) } class="input input-bordered" required/>
+						</div>
+					}
+				</div>
+			}
+			<div class="form-control mb-4">
+				<label class="label"><span class="label-text">Agent (optional)</span></label>
+				<select name="agent_id" class="select select-bordered">
+					<option value="">Default</option>
+					for _, agent := range agents {
+						<option value={ agent.ID }>{ agent.Name }</option>
+					}
+				</select>
+			</div>
+			<div class="form-control mb-4">
+				<label class="label"><span class="label-text">Category</span></label>
+				<select name="category" class="select select-bordered">
+					<option value="backlog">Backlog</option>
+					<option value="active">Active (run immediately)</option>
+				</select>
+			</div>
+			<div id="apply-result"></div>
+			<div class="modal-action">
+				<button type="button" class="btn" onclick="document.getElementById('apply-modal').close()">Cancel</button>
+				<button type="submit" class="btn btn-primary">Apply</button>
+			</div>
+		</form>
+	</div>
+}
+
+templ PatternEditForm(pattern *models.PromptPattern) {
+	<div>
+		<h3 class="font-bold text-lg mb-4">Edit Pattern</h3>
+		<form
+			hx-put={ fmt.Sprintf("/patterns/%s", pattern.ID) }
+			hx-target="closest .container"
+			hx-swap="outerHTML"
+			method="post"
+		>
+			<input type="hidden" name="project_id" value={ pattern.ProjectID }/>
+			<div class="form-control mb-4">
+				<label class="label"><span class="label-text">Title</span></label>
+				<input type="text" name="title" class="input input-bordered" value={ pattern.Title } required/>
+			</div>
+			<div class="form-control mb-4">
+				<label class="label"><span class="label-text">Description</span></label>
+				<input type="text" name="description" class="input input-bordered" value={ pattern.Description }/>
+			</div>
+			<div class="form-control mb-4">
+				<label class="label"><span class="label-text">Category</span></label>
+				<select name="category" class="select select-bordered">
+					for _, cat := range models.AllPatternCategories() {
+						if cat == pattern.Category {
+							<option value={ string(cat) } selected>{ formatCategory(cat) }</option>
+						} else {
+							<option value={ string(cat) }>{ formatCategory(cat) }</option>
+						}
+					}
+				</select>
+			</div>
+			<div class="form-control mb-4">
+				<label class="label">
+					<span class="label-text">Template Text</span>
+					<span class="label-text-alt text-xs">Use &#123;&#123;variable_name&#125;&#125; for placeholders</span>
+				</label>
+				<textarea name="template_text" class="textarea textarea-bordered h-64" required>{ pattern.TemplateText }</textarea>
+			</div>
+			<div class="form-control mb-4">
+				<label class="label">
+					<span class="label-text">Tags (comma-separated)</span>
+				</label>
+				if tags, err := pattern.ParseTags(); err == nil {
+					<input type="text" name="tags" class="input input-bordered" value={ strings.Join(tags, ", ") }/>
+				} else {
+					<input type="text" name="tags" class="input input-bordered"/>
+				}
+			</div>
+			<div class="modal-action">
+				<button type="button" class="btn" onclick="document.getElementById('edit-modal').close()">Cancel</button>
+				<button type="submit" class="btn btn-primary">Update</button>
+			</div>
+		</form>
+	</div>
+}
+
+templ PatternFormResult(pattern *models.PromptPattern, err error) {
+	if err != nil {
+		<div class="alert alert-error mb-4">
+			<span>{ err.Error() }</span>
+		</div>
+	} else {
+		<script type="text/javascript">
+			document.getElementById('create-modal').close();
+			window.location.reload();
+		</script>
+	}
+}
+
+templ PatternApplyResult(task *models.Task, err error) {
+	if err != nil {
+		<div class="alert alert-error mb-4">
+			<span>{ err.Error() }</span>
+		</div>
+	} else if task != nil {
+		<div class="alert alert-success mb-4">
+			<span>Task created successfully!</span>
+			<a href={ templ.URL(fmt.Sprintf("/tasks?project_id=%s", task.ProjectID)) } class="btn btn-sm">View Tasks</a>
+		</div>
+	}
+}
+
+templ PatternImportResult(imported int, errors []string, err error) {
+	if err != nil {
+		<div class="alert alert-error mb-4">
+			<span>{ err.Error() }</span>
+		</div>
+	} else {
+		<div class="alert alert-success mb-4">
+			<span>{ fmt.Sprintf("Imported %d patterns", imported) }</span>
+		</div>
+		if len(errors) > 0 {
+			<div class="alert alert-warning mb-4">
+				<div>
+					<span class="font-semibold">Some patterns were skipped:</span>
+					<ul class="list-disc list-inside mt-2">
+						for _, e := range errors {
+							<li class="text-sm">{ e }</li>
+						}
+					</ul>
+				</div>
+			</div>
+		}
+		<script type="text/javascript">
+			setTimeout(function() {
+				document.getElementById('import-modal').close();
+				window.location.reload();
+			}, 2000);
+		</script>
+	}
+}
+
+templ PatternCategoryList(category models.PatternCategory, patterns []models.PromptPattern) {
+	<div>
+		<h3 class="text-lg font-semibold mb-4">{ formatCategory(category) } Patterns</h3>
+		@PatternList(patterns, "")
+	</div>
+}
+
+func formatCategory(cat models.PatternCategory) string {
+	str := string(cat)
+	str = strings.ReplaceAll(str, "_", " ")
+	// Title case
+	words := strings.Split(str, " ")
+	for i, word := range words {
+		if len(word) > 0 {
+			words[i] = strings.ToUpper(word[:1]) + word[1:]
+		}
+	}
+	return strings.Join(words, " ")
+}

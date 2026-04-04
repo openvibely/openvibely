@@ -1,0 +1,567 @@
+package pages
+
+import (
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ AppSettingsPage(personality string, projects []models.Project, currentProjectID string, customPersonalities []models.CustomPersonality) {
+	@layout.Base("Personality", projects, currentProjectID) {
+		@appSettingsContent(personality, currentProjectID, customPersonalities)
+	}
+}
+
+// AppSettingsContent renders just the settings content for HTMX requests
+templ AppSettingsContent(personality string, currentProjectID string, customPersonalities []models.CustomPersonality) {
+	@appSettingsContent(personality, currentProjectID, customPersonalities)
+}
+
+templ appSettingsContent(personality string, currentProjectID string, customPersonalities []models.CustomPersonality) {
+	<div id="personality-container">
+		@PersonalitySection(personality, customPersonalities)
+	</div>
+}
+
+func presetByKey(key string) (service.PersonalityInfo, bool) {
+	for _, p := range service.AllPersonalities() {
+		if p.Key == key {
+			return p, true
+		}
+	}
+	return service.PersonalityInfo{}, false
+}
+
+func customByKey(customPersonalities []models.CustomPersonality, key string) (models.CustomPersonality, bool) {
+	for _, cp := range customPersonalities {
+		if cp.Key == key {
+			return cp, true
+		}
+	}
+	return models.CustomPersonality{}, false
+}
+
+func nonPresetCustoms(customPersonalities []models.CustomPersonality) []models.CustomPersonality {
+	filtered := make([]models.CustomPersonality, 0, len(customPersonalities))
+	for _, cp := range customPersonalities {
+		if !service.IsPresetPersonality(cp.Key) {
+			filtered = append(filtered, cp)
+		}
+	}
+	return filtered
+}
+
+func personalityHasCustomEntry(key string, customPersonalities []models.CustomPersonality) bool {
+	_, ok := customByKey(customPersonalities, key)
+	return ok
+}
+
+func personalityNameForKey(key string, customPersonalities []models.CustomPersonality) string {
+	if cp, ok := customByKey(customPersonalities, key); ok {
+		return cp.Name
+	}
+	if preset, ok := presetByKey(key); ok {
+		return preset.Name
+	}
+	if key == "" {
+		return "Base"
+	}
+	return key
+}
+
+func personalityDescriptionForKey(key string, customPersonalities []models.CustomPersonality) string {
+	if cp, ok := customByKey(customPersonalities, key); ok {
+		return cp.Description
+	}
+	if preset, ok := presetByKey(key); ok {
+		return preset.Description
+	}
+	return ""
+}
+
+func personalityPromptForKey(key string, customPersonalities []models.CustomPersonality) string {
+	if cp, ok := customByKey(customPersonalities, key); ok {
+		return cp.SystemPrompt
+	}
+	return service.GetPersonalityPrompt(key)
+}
+
+func boolString(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
+}
+
+templ builtInPersonalityCard(p service.PersonalityInfo, personality string, customPersonalities []models.CustomPersonality) {
+	<div
+		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+		data-personality-key={ p.Key }
+		data-personality-name={ personalityNameForKey(p.Key, customPersonalities) }
+		data-personality-description={ personalityDescriptionForKey(p.Key, customPersonalities) }
+		data-personality-prompt={ personalityPromptForKey(p.Key, customPersonalities) }
+		data-personality-is-preset="true"
+		data-personality-has-custom={ boolString(personalityHasCustomEntry(p.Key, customPersonalities)) }
+		data-search-card
+		data-search-text={ personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptForKey(p.Key, customPersonalities) }
+		onclick="editPersonalityFromData(this)"
+	>
+		<div class="card-body relative">
+			<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+				<div class="dropdown dropdown-end">
+					<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+						</svg>
+					</label>
+					<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+						<li>
+							<button onclick="editPersonalityFromData(this.closest('[data-personality-key]'))">Edit</button>
+						</li>
+						if personality != p.Key {
+							<li>
+								<button
+									hx-post={ "/personality/save?personality=" + p.Key }
+									hx-target="#personality-section"
+									hx-swap="outerHTML"
+								>
+									Set as Default
+								</button>
+							</li>
+						}
+					</ul>
+				</div>
+			</div>
+			<div class="pr-12">
+				<h3 class="font-bold">
+					{ personalityNameForKey(p.Key, customPersonalities) }
+					if personality == p.Key {
+						<span class="badge badge-sm ml-2 ov-badge-default">Active</span>
+					}
+					if personalityHasCustomEntry(p.Key, customPersonalities) {
+						<span class="badge badge-warning badge-sm ml-1">Override</span>
+					}
+				</h3>
+				<p class="text-sm opacity-60 mt-1">{ personalityDescriptionForKey(p.Key, customPersonalities) }</p>
+				<p class="text-sm opacity-40 mt-1 line-clamp-2">{ truncatePrompt(personalityPromptForKey(p.Key, customPersonalities), 150) }</p>
+			</div>
+		</div>
+	</div>
+}
+
+templ customPersonalityCard(cp models.CustomPersonality, personality string) {
+	<div
+		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+		data-personality-key={ cp.Key }
+		data-personality-name={ cp.Name }
+		data-personality-description={ cp.Description }
+		data-personality-prompt={ cp.SystemPrompt }
+		data-personality-is-preset="false"
+		data-personality-has-custom="true"
+		data-search-card
+		data-search-text={ cp.Name + " " + cp.Description + " " + cp.SystemPrompt }
+		onclick="editPersonalityFromData(this)"
+	>
+		<div class="card-body relative">
+			<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+				<div class="dropdown dropdown-end">
+					<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+						</svg>
+					</label>
+					<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+						<li>
+							<button onclick="editPersonalityFromData(this.closest('[data-personality-key]'))">Edit</button>
+						</li>
+						if personality != cp.Key {
+							<li>
+								<button
+									hx-post={ "/personality/save?personality=" + cp.Key }
+									hx-target="#personality-section"
+									hx-swap="outerHTML"
+								>
+									Set as Default
+								</button>
+							</li>
+						}
+						<li>
+							<button
+								class="text-error"
+								hx-delete={ "/personality/custom/" + cp.Key }
+								hx-target="#personality-section"
+								hx-swap="outerHTML"
+								hx-confirm="Delete this custom personality?"
+							>
+								Delete
+							</button>
+						</li>
+					</ul>
+				</div>
+			</div>
+			<div class="pr-12">
+				<h3 class="font-bold">
+					{ cp.Name }
+					if personality == cp.Key {
+						<span class="badge badge-sm ml-2 ov-badge-default">Active</span>
+					}
+					<span class="badge badge-ghost badge-sm ml-1">Custom</span>
+				</h3>
+				if cp.Description != "" {
+					<p class="text-sm opacity-60 mt-1">{ cp.Description }</p>
+				}
+				<p class="text-sm opacity-40 mt-1 line-clamp-2">{ truncatePrompt(cp.SystemPrompt, 150) }</p>
+			</div>
+		</div>
+	</div>
+}
+
+// PersonalitySection renders the personality card list with create/edit modal.
+templ PersonalitySection(personality string, customPersonalities []models.CustomPersonality) {
+	<div id="personality-section" data-selected-personality={ personality } data-search-container>
+		<div class="flex items-center justify-between mb-6">
+			<h2 class="text-2xl font-bold">Personality</h2>
+			<button class="btn btn-primary btn-sm" onclick="openNewPersonalityModal()">
+				+ Add Personality
+			</button>
+		</div>
+		@CardSearchInput("personality", "Search personalities...")
+
+		<div class="grid gap-4">
+			if personality != "" {
+				for _, p := range service.AllPersonalities() {
+					if p.Key == personality {
+						@builtInPersonalityCard(p, personality, customPersonalities)
+					}
+				}
+				for _, cp := range nonPresetCustoms(customPersonalities) {
+					if cp.Key == personality {
+						@customPersonalityCard(cp, personality)
+					}
+				}
+			}
+			<!-- Base (No Personality) card — non-clickable -->
+			<div
+				class="card bg-base-100 shadow-sm border border-base-300"
+				data-personality-key=""
+				data-personality-name="Base"
+				data-personality-description=""
+				data-personality-prompt=""
+				data-personality-is-preset="true"
+				data-personality-has-custom="false"
+				data-personality-is-default-card="true"
+				data-search-card
+				data-search-text="Base No personality prompt applied"
+			>
+				<div class="card-body relative">
+					if personality != "" {
+						<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+							<div class="dropdown dropdown-end">
+								<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+									</svg>
+								</label>
+								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+									<li>
+										<button
+											hx-post="/personality/save?personality="
+											hx-target="#personality-section"
+											hx-swap="outerHTML"
+										>
+											Set as Default
+										</button>
+									</li>
+								</ul>
+							</div>
+						</div>
+					}
+					<div class="pr-12">
+						<h3 class="font-bold">
+							Base
+							if personality == "" {
+								<span class="badge badge-sm ml-2 ov-badge-default">Default</span>
+							}
+						</h3>
+						<p class="text-sm opacity-50 mt-1 italic">No personality prompt applied.</p>
+					</div>
+				</div>
+			</div>
+
+			<!-- Built-in personality cards -->
+			for _, p := range service.AllPersonalities() {
+				if p.Key != "" && p.Key != personality {
+					<div
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+						data-personality-key={ p.Key }
+						data-personality-name={ personalityNameForKey(p.Key, customPersonalities) }
+						data-personality-description={ personalityDescriptionForKey(p.Key, customPersonalities) }
+						data-personality-prompt={ personalityPromptForKey(p.Key, customPersonalities) }
+						data-personality-is-preset="true"
+						data-personality-has-custom={ boolString(personalityHasCustomEntry(p.Key, customPersonalities)) }
+						data-search-card
+						data-search-text={ personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptForKey(p.Key, customPersonalities) }
+						onclick="editPersonalityFromData(this)"
+					>
+						<div class="card-body relative">
+							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+								<div class="dropdown dropdown-end">
+									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+										</svg>
+									</label>
+									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+										<li>
+											<button onclick="editPersonalityFromData(this.closest('[data-personality-key]'))">Edit</button>
+										</li>
+										if personality != p.Key {
+											<li>
+												<button
+													hx-post={ "/personality/save?personality=" + p.Key }
+													hx-target="#personality-section"
+													hx-swap="outerHTML"
+												>
+													Set as Default
+												</button>
+											</li>
+										}
+									</ul>
+								</div>
+							</div>
+							<div class="pr-12">
+								<h3 class="font-bold">
+									{ personalityNameForKey(p.Key, customPersonalities) }
+									if personality == p.Key {
+										<span class="badge badge-sm ml-2 ov-badge-default">Active</span>
+									}
+									if personalityHasCustomEntry(p.Key, customPersonalities) {
+										<span class="badge badge-warning badge-sm ml-1">Override</span>
+									}
+								</h3>
+								<p class="text-sm opacity-60 mt-1">{ personalityDescriptionForKey(p.Key, customPersonalities) }</p>
+								<p class="text-sm opacity-40 mt-1 line-clamp-2">{ truncatePrompt(personalityPromptForKey(p.Key, customPersonalities), 150) }</p>
+							</div>
+						</div>
+					</div>
+				}
+			}
+
+			<!-- Non-preset custom personality cards -->
+			for _, cp := range nonPresetCustoms(customPersonalities) {
+				if cp.Key != personality {
+					<div
+					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+					data-personality-key={ cp.Key }
+					data-personality-name={ cp.Name }
+					data-personality-description={ cp.Description }
+					data-personality-prompt={ cp.SystemPrompt }
+					data-personality-is-preset="false"
+					data-personality-has-custom="true"
+					data-search-card
+					data-search-text={ cp.Name + " " + cp.Description + " " + cp.SystemPrompt }
+					onclick="editPersonalityFromData(this)"
+				>
+					<div class="card-body relative">
+						<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+							<div class="dropdown dropdown-end">
+								<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+									</svg>
+								</label>
+								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+									<li>
+										<button onclick="editPersonalityFromData(this.closest('[data-personality-key]'))">Edit</button>
+									</li>
+									if personality != cp.Key {
+										<li>
+											<button
+												hx-post={ "/personality/save?personality=" + cp.Key }
+												hx-target="#personality-section"
+												hx-swap="outerHTML"
+											>
+												Set as Default
+											</button>
+										</li>
+									}
+									<li>
+										<button
+											class="text-error"
+											hx-delete={ "/personality/custom/" + cp.Key }
+											hx-target="#personality-section"
+											hx-swap="outerHTML"
+											hx-confirm="Delete this custom personality?"
+										>
+											Delete
+										</button>
+									</li>
+								</ul>
+							</div>
+						</div>
+						<div class="pr-12">
+							<h3 class="font-bold">
+								{ cp.Name }
+								if personality == cp.Key {
+									<span class="badge badge-sm ml-2 ov-badge-default">Active</span>
+								}
+								<span class="badge badge-ghost badge-sm ml-1">Custom</span>
+							</h3>
+							if cp.Description != "" {
+								<p class="text-sm opacity-60 mt-1">{ cp.Description }</p>
+							}
+							<p class="text-sm opacity-40 mt-1 line-clamp-2">{ truncatePrompt(cp.SystemPrompt, 150) }</p>
+						</div>
+					</div>
+				</div>
+			}
+			}
+		</div>
+
+		<!-- Create/Edit Personality Modal -->
+		<dialog id="personality_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
+			<div class="modal-box">
+				<h3 id="personality_modal_title" class="font-bold text-lg mb-4">New Custom Personality</h3>
+				<form id="personality_form" method="post">
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Name *</span></label>
+						<input type="text" id="personality_name" name="name" class="input input-bordered" required placeholder="My Custom Personality"/>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">Description</span></label>
+						<input type="text" id="personality_description" name="description" class="input input-bordered" placeholder="Short description of this personality"/>
+					</div>
+					<div class="form-control mb-3">
+						<label class="label"><span class="label-text">System Prompt * (min 20 chars)</span></label>
+						<textarea id="personality_prompt" name="system_prompt" class="textarea textarea-bordered w-full h-32" required minlength="20" placeholder="Describe how the AI should behave..."></textarea>
+					</div>
+					<div class="modal-action">
+						<div class="flex gap-2 w-full justify-between">
+							<div id="personality_modal_extra_actions" class="flex gap-2"></div>
+							<div class="flex gap-2">
+								<button type="button" class="btn" onclick="closePersonalityModal()">Cancel</button>
+								<button type="submit" id="personality_submit_btn" class="btn btn-primary">Create</button>
+							</div>
+						</div>
+					</div>
+				</form>
+			</div>
+			<form method="dialog" class="modal-backdrop">
+				<button>close</button>
+			</form>
+		</dialog>
+
+		<script type="text/javascript">
+			function openNewPersonalityModal() {
+				var form = document.getElementById('personality_form');
+				document.getElementById('personality_modal_title').textContent = 'New Custom Personality';
+				form.removeAttribute('hx-put');
+				form.setAttribute('hx-post', '/personality/custom');
+				form.setAttribute('hx-target', '#personality-section');
+				form.setAttribute('hx-swap', 'outerHTML');
+				if (window.htmx) htmx.process(form);
+				document.getElementById('personality_name').value = '';
+				document.getElementById('personality_description').value = '';
+				document.getElementById('personality_prompt').value = '';
+				document.getElementById('personality_submit_btn').textContent = 'Create';
+				document.getElementById('personality_modal_extra_actions').innerHTML = '';
+				personality_modal.showModal();
+			}
+
+			function editPersonalityFromData(card) {
+				if (!card) return;
+				var key = card.dataset.personalityKey || '';
+				var name = card.dataset.personalityName || '';
+				var description = card.dataset.personalityDescription || '';
+				var prompt = card.dataset.personalityPrompt || '';
+				var isPreset = card.dataset.personalityIsPreset === 'true';
+				var hasCustom = card.dataset.personalityHasCustom === 'true';
+
+				var form = document.getElementById('personality_form');
+				document.getElementById('personality_modal_title').textContent = 'Edit: ' + name;
+				form.removeAttribute('hx-post');
+				form.setAttribute('hx-put', '/personality/custom/' + encodeURIComponent(key));
+				form.setAttribute('hx-target', '#personality-section');
+				form.setAttribute('hx-swap', 'outerHTML');
+				if (window.htmx) htmx.process(form);
+
+				document.getElementById('personality_name').value = name;
+				document.getElementById('personality_description').value = description;
+				document.getElementById('personality_prompt').value = prompt;
+
+				if (isPreset && hasCustom) {
+					document.getElementById('personality_submit_btn').textContent = 'Save Changes';
+				} else if (isPreset && !hasCustom) {
+					document.getElementById('personality_submit_btn').textContent = 'Save Override';
+				} else {
+					document.getElementById('personality_submit_btn').textContent = 'Save Changes';
+				}
+
+				// Extra actions: Reset to Default (for preset overrides) or Delete (for custom)
+				var extras = document.getElementById('personality_modal_extra_actions');
+				extras.innerHTML = '';
+
+				if (isPreset && hasCustom) {
+					var resetBtn = document.createElement('button');
+					resetBtn.type = 'button';
+					resetBtn.className = 'btn btn-outline btn-warning btn-sm';
+					resetBtn.textContent = 'Reset to Default';
+					resetBtn.setAttribute('hx-delete', '/personality/custom/' + encodeURIComponent(key));
+					resetBtn.setAttribute('hx-target', '#personality-section');
+					resetBtn.setAttribute('hx-swap', 'outerHTML');
+					resetBtn.setAttribute('hx-confirm', 'Reset this personality to its built-in default?');
+					if (window.htmx) {
+						extras.appendChild(resetBtn);
+						htmx.process(resetBtn);
+					}
+				} else if (!isPreset) {
+					var delBtn = document.createElement('button');
+					delBtn.type = 'button';
+					delBtn.className = 'btn btn-outline btn-error btn-sm';
+					delBtn.textContent = 'Delete';
+					delBtn.setAttribute('hx-delete', '/personality/custom/' + encodeURIComponent(key));
+					delBtn.setAttribute('hx-target', '#personality-section');
+					delBtn.setAttribute('hx-swap', 'outerHTML');
+					delBtn.setAttribute('hx-confirm', 'Delete this custom personality?');
+					if (window.htmx) {
+						extras.appendChild(delBtn);
+						htmx.process(delBtn);
+					}
+				}
+
+				// Add "Set as Default" button when editing a non-default personality
+				var section = document.getElementById('personality-section');
+				var selectedPersonality = section ? (section.dataset.selectedPersonality || '') : '';
+				if (key !== selectedPersonality) {
+					var setDefaultBtn = document.createElement('button');
+					setDefaultBtn.type = 'button';
+					setDefaultBtn.className = 'btn btn-outline btn-primary btn-sm';
+					setDefaultBtn.textContent = 'Set as Default';
+					setDefaultBtn.setAttribute('hx-post', '/personality/save?personality=' + encodeURIComponent(key));
+					setDefaultBtn.setAttribute('hx-target', '#personality-section');
+					setDefaultBtn.setAttribute('hx-swap', 'outerHTML');
+					if (window.htmx) {
+						extras.appendChild(setDefaultBtn);
+						htmx.process(setDefaultBtn);
+					}
+				}
+
+				personality_modal.showModal();
+			}
+
+			function closePersonalityModal() {
+				personality_modal.close();
+			}
+
+			// Close modal after successful HTMX swap
+			document.body.addEventListener('htmx:afterSwap', function(event) {
+				if (event.detail.target && event.detail.target.id === 'personality-section') {
+					var modal = document.getElementById('personality_modal');
+					if (modal && modal.open) {
+						modal.close();
+					}
+				}
+			});
+		</script>
+	</div>
+}

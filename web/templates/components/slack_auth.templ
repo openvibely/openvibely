@@ -1,0 +1,66 @@
+package components
+
+import (
+	"fmt"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+// SlackAuthorizedUsersList renders the list of authorized Slack users with add/remove controls.
+templ SlackAuthorizedUsersList(users []models.SlackAuthorizedUser, projectID string) {
+	<div id="slack-authorized-users">
+		if len(users) == 0 {
+			<p class="text-sm opacity-50 italic mb-3">No authorized users configured.</p>
+		} else {
+			<div class="space-y-2 mb-3">
+				for _, user := range users {
+					<div class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2">
+						<div class="flex items-center gap-2">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+							</svg>
+							<span class="text-sm font-medium">{ user.DisplayName }</span>
+							<span class="text-xs opacity-50">{ fmt.Sprintf("ID: %s", user.SlackUserID) }</span>
+						</div>
+						<button
+							type="button"
+							class="btn btn-ghost btn-xs text-error"
+							hx-delete={ fmt.Sprintf("/channels/slack/authorized-users/%s?project_id=%s", user.ID, projectID) }
+							hx-target="#slack-authorized-users"
+							hx-swap="outerHTML"
+							hx-confirm="Remove this authorized user?"
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+							</svg>
+						</button>
+					</div>
+				}
+			</div>
+		}
+		<div class="flex gap-2" id="slack-authorized-users-add-controls">
+			<input type="hidden" name="project_id" value={ projectID }/>
+			<input
+				type="text"
+				name="slack_user_id"
+				placeholder="Slack user ID (e.g. U12345678)"
+				class="input input-bordered input-sm flex-1"
+			/>
+			<input
+				type="text"
+				name="display_name"
+				placeholder="Display name (optional)"
+				class="input input-bordered input-sm w-40"
+			/>
+			<button
+				type="button"
+				class="btn btn-primary btn-sm"
+				hx-post="/channels/slack/authorized-users"
+				hx-target="#slack-authorized-users"
+				hx-swap="outerHTML"
+				hx-include="#slack-authorized-users-add-controls"
+			>
+				Add
+			</button>
+		</div>
+	</div>
+}

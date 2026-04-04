@@ -1,0 +1,275 @@
+package pages
+
+import (
+	"bytes"
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
+	tests := []struct {
+		name               string
+		status             models.TaskStatus
+		category           models.TaskCategory
+		shouldShowStatus   bool
+		expectedStatusText string
+	}{
+		{
+			name:             "backlog pending hides status badge",
+			status:           models.StatusPending,
+			category:         models.CategoryBacklog,
+			shouldShowStatus: false,
+		},
+		{
+			name:             "scheduled pending hides status badge",
+			status:           models.StatusPending,
+			category:         models.CategoryScheduled,
+			shouldShowStatus: false,
+		},
+		{
+			name:               "active pending shows status badge",
+			status:             models.StatusPending,
+			category:           models.CategoryActive,
+			shouldShowStatus:   true,
+			expectedStatusText: "Queued",
+		},
+		{
+			name:               "backlog running shows status badge",
+			status:             models.StatusRunning,
+			category:           models.CategoryBacklog,
+			shouldShowStatus:   true,
+			expectedStatusText: "In Progress",
+		},
+		{
+			name:               "backlog completed shows status badge",
+			status:             models.StatusCompleted,
+			category:           models.CategoryBacklog,
+			shouldShowStatus:   true,
+			expectedStatusText: "Completed",
+		},
+		{
+			name:               "backlog failed shows status badge",
+			status:             models.StatusFailed,
+			category:           models.CategoryBacklog,
+			shouldShowStatus:   true,
+			expectedStatusText: "Failed",
+		},
+		{
+			name:               "scheduled running shows status badge",
+			status:             models.StatusRunning,
+			category:           models.CategoryScheduled,
+			shouldShowStatus:   true,
+			expectedStatusText: "In Progress",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &models.Task{
+				ID:       "task1",
+				Title:    "Test Task",
+				Status:   tt.status,
+				Category: tt.category,
+			}
+			executions := []models.Execution{}
+
+			var buf bytes.Buffer
+			err := TaskDetailMetrics(task, executions).Render(context.Background(), &buf)
+			if err != nil {
+				t.Fatalf("render failed: %v", err)
+			}
+
+			output := buf.String()
+
+			// Check if category badge is always shown
+			if !strings.Contains(output, string(tt.category)) {
+				t.Errorf("expected category %q to be shown", tt.category)
+			}
+
+			// Check if status badge visibility matches expectation
+			hasStatusLabel := strings.Contains(output, "Status:")
+			if hasStatusLabel != tt.shouldShowStatus {
+				t.Errorf("status badge visibility = %v, want %v", hasStatusLabel, tt.shouldShowStatus)
+			}
+
+			// If status should be shown, verify the correct label appears
+			if tt.shouldShowStatus && tt.expectedStatusText != "" {
+				if !strings.Contains(output, tt.expectedStatusText) {
+					t.Errorf("expected status text %q not found in output", tt.expectedStatusText)
+				}
+			}
+		})
+	}
+}
+
+func TestTaskDetailContent_ChangesTabHidesReviewCommentCountBadge(t *testing.T) {
+	task := &models.Task{
+		ID:       "task-1",
+		Title:    "Task",
+		ProjectID:"project-1",
+		Status:   models.StatusCompleted,
+		Category: models.CategoryCompleted,
+	}
+	reviewComments := []models.ReviewComment{{ID: "c1", CommentText: "x"}}
+
+	var buf bytes.Buffer
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "changes", reviewComments).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, ">Changes</a>") {
+		t.Fatal("expected Changes tab to render")
+	}
+	if strings.Contains(output, "badge badge-warning badge-xs") {
+		t.Fatal("did not expect Changes tab review comment count badge")
+	}
+}
+
+func TestTaskDetailContent_ReactivatesFileChangesSSEWhenTaskBecomesActive(t *testing.T) {
+	task := &models.Task{
+		ID:       "task-2",
+		Title:    "Task",
+		ProjectID:"project-1",
+		Status:   models.StatusCompleted,
+		Category: models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "changes", nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "var nowActive = (status === 'running' || status === 'queued');") {
+		t.Fatal("expected status watcher to calculate active task states")
+	}
+	if !strings.Contains(output, "if (!wasActive && nowActive && _fileChangesTaskId && _isChangesTabActive()) {") {
+		t.Fatal("expected status watcher to restart file changes SSE only when changes tab is active")
+	}
+	if !strings.Contains(output, "_startFileChangesSSE(_fileChangesTaskId);") {
+		t.Fatal("expected status watcher to call _startFileChangesSSE for reactivated follow-up runs")
+	}
+}
+
+func TestTaskDetailContent_FileChangesRefreshRequiresActiveTab(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-3",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "function _isChangesTabActive() {") {
+		t.Fatal("expected helper for checking active changes tab")
+	}
+	if !strings.Contains(output, "if (!_isChangesTabActive()) return;") {
+		t.Fatal("expected diff viewer refresh to no-op when changes tab is inactive")
+	}
+	if !strings.Contains(output, "if (triggerEl.id === 'changes-content' && !_isChangesTabActive()) {") {
+		t.Fatal("expected beforeRequest guard to block hidden-tab refreshChanges requests")
+	}
+}
+
+func TestTaskDetailContent_FileChangesListenersRebindAndCleanup(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-4",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+
+	var buf bytes.Buffer
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "changes", nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "if (window._taskDetailFileChangesHandlers) {") {
+		t.Fatal("expected previous task-detail file-change handlers to be removed before rebinding")
+	}
+	if !strings.Contains(output, "window._taskDetailFileChangesHandlers = {") {
+		t.Fatal("expected task-detail file-change handlers to be stored for future cleanup")
+	}
+	if !strings.Contains(output, "if (target.id === 'main-content' || target.id === 'task-detail-content') {") {
+		t.Fatal("expected beforeSwap handler to stop file-change SSE on navigation/content replacement")
+	}
+	if !strings.Contains(output, "window.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);") {
+		t.Fatal("expected beforeunload cleanup binding for file-change SSE")
+	}
+}
+
+func TestTaskDetailContent_ThreadTabLazyLoadsOnDemand(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-thread-1",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Thread loads on demand when you open this tab.") {
+		t.Fatal("expected thread placeholder copy for inactive tab")
+	}
+	if strings.Contains(output, "id=\"task-thread-view\"") {
+		t.Fatal("did not expect eager thread view render for inactive thread tab")
+	}
+	if !strings.Contains(output, "function _loadThreadContent(taskId) {") {
+		t.Fatal("expected on-demand thread loader helper")
+	}
+	if !strings.Contains(output, "htmx.ajax('GET', '/tasks/' + taskId + '/thread'") {
+		t.Fatal("expected thread loader to fetch /tasks/:id/thread via HTMX")
+	}
+	if !strings.Contains(output, "if (tabName === 'chat') {") || !strings.Contains(output, "_loadThreadContent(taskId).then(function() {") {
+		t.Fatal("expected chat tab switch to trigger thread lazy load")
+	}
+}
+
+func TestTaskDetailContent_ThreadAutoLoadsWhenChatTabInitiallyActive(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-thread-2",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+
+	var buf bytes.Buffer
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "Thread is loading...") {
+		t.Fatal("expected loading placeholder when chat tab is initially active")
+	}
+	if !strings.Contains(output, "if (_isChatTabActive()) {") {
+		t.Fatal("expected initial-load handler to detect active chat tab")
+	}
+	if !strings.Contains(output, "_loadThreadContent(taskId).then(function() {") {
+		t.Fatal("expected initial-load handler to lazy load thread content")
+	}
+}
