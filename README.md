@@ -8,7 +8,10 @@ If you want AI that produces real code changes without losing visibility or cont
 
 Self-hosted and fully under your control.
 
+
 ## Features
+
+![OpenVibely Tasks board in dark theme](docs/screenshots/tasks-board-dark.png)
 
 - Task workspace with `Backlog`, `Active`, `Scheduled`, and `Completed` lanes.
 - Plan + run from chat (`/chat`) with orchestrate and read-only plan modes.
