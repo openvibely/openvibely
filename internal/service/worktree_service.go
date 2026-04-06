@@ -973,17 +973,21 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 			continue
 		}
 
-		// Get all tasks with worktrees for this project
-		allTasks, err := ws.taskRepo.ListWithWorktrees(ctx)
+		// Get all tasks for this project. We need both:
+		// 1) knownPaths (worktree path already recorded in DB)
+		// 2) knownTaskIDs (task exists but may not have worktree_path persisted yet)
+		allTasks, err := ws.taskRepo.ListByProject(ctx, project.ID, "")
 		if err != nil {
 			log.Printf("[worktree] cleanup: failed to list tasks for project %s: %v", project.ID, err)
 			continue
 		}
 
-		// Build a map of worktree paths that have corresponding tasks
+		// Build maps of known paths and known task IDs.
 		knownPaths := make(map[string]bool)
+		knownTaskIDs := make(map[string]bool)
 		for _, task := range allTasks {
-			if task.ProjectID == project.ID && task.WorktreePath != "" {
+			knownTaskIDs[task.ID] = true
+			if task.WorktreePath != "" {
 				knownPaths[task.WorktreePath] = true
 			}
 		}
@@ -995,42 +999,72 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 				continue
 			}
 
-			// Check if this worktree path has a corresponding task
-			if !knownPaths[worktree.Path] {
-				log.Printf("[worktree] cleanup: found orphaned worktree at %s (branch: %s)", worktree.Path, worktree.Branch)
-
-				// Try to remove the worktree using git first
-				cmd := exec.Command("git", "worktree", "remove", "--force", worktree.Path)
-				cmd.Dir = project.RepoPath
-				if output, err := cmd.CombinedOutput(); err != nil {
-					// If git worktree remove fails, try manual cleanup
-					log.Printf("[worktree] cleanup: git worktree remove failed, attempting manual cleanup: %v (output: %s)", err, string(output))
-
-					// Remove the worktree directory manually
-					if err := os.RemoveAll(worktree.Path); err != nil {
-						log.Printf("[worktree] cleanup: failed to remove orphaned worktree directory %s: %v", worktree.Path, err)
-						continue
-					}
-
-					// Prune stale worktree entries
-					pruneCmd := exec.Command("git", "worktree", "prune")
-					pruneCmd.Dir = project.RepoPath
-					_ = pruneCmd.Run() // Ignore errors
-				}
-
-				// Delete the branch if it exists
-				if worktree.Branch != "" {
-					cmd = exec.Command("git", "branch", "-D", worktree.Branch)
-					cmd.Dir = project.RepoPath
-					_ = cmd.Run() // Ignore errors - branch might already be deleted
-				}
-
-				cleanedCount++
+			// Known in DB, not orphaned.
+			if knownPaths[worktree.Path] {
+				continue
 			}
+
+			// Worktree directories follow .worktrees/task_<taskID>. If the task still
+			// exists but worktree_path wasn't persisted yet, treat it as in-use.
+			if taskID, ok := taskIDFromWorktreePath(worktree.Path); ok && knownTaskIDs[taskID] {
+				log.Printf("[worktree] cleanup: skipping worktree at %s because task %s still exists", worktree.Path, taskID)
+				continue
+			}
+
+			log.Printf("[worktree] cleanup: found orphaned worktree at %s (branch: %s)", worktree.Path, worktree.Branch)
+
+			// Try to remove the worktree using git first
+			cmd := exec.Command("git", "worktree", "remove", "--force", worktree.Path)
+			cmd.Dir = project.RepoPath
+			if output, err := cmd.CombinedOutput(); err != nil {
+				outputText := string(output)
+
+				// A locked worktree may still be actively initializing. Don't perform
+				// manual filesystem deletion in this case; retry on a future cleanup cycle.
+				if strings.Contains(outputText, "cannot remove a locked working tree") {
+					log.Printf("[worktree] cleanup: skipping locked orphaned worktree at %s (output: %s)", worktree.Path, outputText)
+					continue
+				}
+
+				// If git worktree remove fails, try manual cleanup
+				log.Printf("[worktree] cleanup: git worktree remove failed, attempting manual cleanup: %v (output: %s)", err, outputText)
+
+				// Remove the worktree directory manually
+				if err := os.RemoveAll(worktree.Path); err != nil {
+					log.Printf("[worktree] cleanup: failed to remove orphaned worktree directory %s: %v", worktree.Path, err)
+					continue
+				}
+
+				// Prune stale worktree entries
+				pruneCmd := exec.Command("git", "worktree", "prune")
+				pruneCmd.Dir = project.RepoPath
+				_ = pruneCmd.Run() // Ignore errors
+			}
+
+			// Delete the branch if it exists
+			if worktree.Branch != "" {
+				cmd = exec.Command("git", "branch", "-D", worktree.Branch)
+				cmd.Dir = project.RepoPath
+				_ = cmd.Run() // Ignore errors - branch might already be deleted
+			}
+
+			cleanedCount++
 		}
 	}
 
 	return cleanedCount, nil
+}
+
+func taskIDFromWorktreePath(worktreePath string) (string, bool) {
+	base := filepath.Base(strings.TrimSpace(worktreePath))
+	if !strings.HasPrefix(base, "task_") {
+		return "", false
+	}
+	taskID := strings.TrimPrefix(base, "task_")
+	if taskID == "" {
+		return "", false
+	}
+	return taskID, true
 }
 
 // WorktreeInfo represents information about a git worktree.

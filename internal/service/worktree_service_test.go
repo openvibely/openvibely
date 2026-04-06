@@ -1145,6 +1145,91 @@ func TestCleanupOrphanedWorktrees(t *testing.T) {
 	}
 }
 
+func TestCleanupOrphanedWorktrees_SkipsWhenTaskStillExists(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	settingsRepo := repository.NewSettingsRepo(db)
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	repoDir := createTestGitRepo(t)
+	if err := settingsRepo.Set(ctx, "worktree_cleanup", "after_merge"); err != nil {
+		t.Fatalf("failed to set cleanup policy: %v", err)
+	}
+
+	project := &models.Project{
+		ID:       "project-skip-existing-task",
+		Name:     "Skip Existing Task",
+		RepoPath: repoDir,
+	}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+
+	task := &models.Task{
+		ID:        "existing-task-id",
+		ProjectID: project.ID,
+		Title:     "Existing Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	worktreeDir, branch, err := worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("failed to create worktree: %v", err)
+	}
+
+	// Simulate stale metadata: task exists but worktree fields are empty in DB.
+	if err := taskRepo.ClearWorktreeInfo(ctx, task.ID); err != nil {
+		t.Fatalf("failed to clear worktree info: %v", err)
+	}
+
+	cleanedCount, err := worktreeSvc.CleanupOrphanedWorktrees(ctx)
+	if err != nil {
+		t.Fatalf("CleanupOrphanedWorktrees failed: %v", err)
+	}
+	if cleanedCount != 0 {
+		t.Fatalf("expected 0 orphaned worktrees cleaned, got %d", cleanedCount)
+	}
+
+	if _, err := os.Stat(worktreeDir); os.IsNotExist(err) {
+		t.Fatalf("worktree should not be cleaned while task %s still exists", task.ID)
+	}
+
+	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	cmd.Dir = repoDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("worktree branch should still exist: %v", err)
+	}
+}
+
+func TestTaskIDFromWorktreePath(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		id   string
+		ok   bool
+	}{
+		{name: "valid", path: "/tmp/repo/.worktrees/task_abc123", id: "abc123", ok: true},
+		{name: "missing prefix", path: "/tmp/repo/.worktrees/abc123", id: "", ok: false},
+		{name: "empty id", path: "/tmp/repo/.worktrees/task_", id: "", ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			id, ok := taskIDFromWorktreePath(tt.path)
+			if id != tt.id || ok != tt.ok {
+				t.Fatalf("taskIDFromWorktreePath(%q) = (%q, %v), want (%q, %v)", tt.path, id, ok, tt.id, tt.ok)
+			}
+		})
+	}
+}
+
 func TestListGitWorktrees(t *testing.T) {
 	// Create a test git repo
 	tempDir := t.TempDir()

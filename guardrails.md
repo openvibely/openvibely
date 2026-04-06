@@ -278,6 +278,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - **Startup auto-merge safety** — At task start, only merge latest `main`/default branch into worktree branch when `git status --porcelain` is clean. Dirty worktrees must skip startup auto-merge to avoid overwriting in-progress task edits
 - **Startup conflict recovery** — If startup auto-merge conflicts, detect conflict files, run `git merge --abort`, set task `merge_status=conflict`, and return actionable error text (do not leave repo in in-progress merge state)
 - **Worktree diff during execution** — Never construct worktree paths from `filepath.Join(repoDir, "worktrees", worktreeBranch)` — worktrees live at `.worktrees/task_{id}`, use the `workDir`/`task.WorktreePath` variable. Use `GetWorktreeDiffWithUncommitted` for running tasks to capture both committed branch changes and uncommitted working directory changes
+- **Orphan cleanup race safety** — `CleanupOrphanedWorktrees` must not delete `.worktrees/task_<id>` when task `<id>` still exists but DB worktree fields are temporarily empty (startup/dispatch race). Also, if `git worktree remove --force` returns `cannot remove a locked working tree`, skip manual filesystem deletion and retry on a later cleanup cycle.
 
 ## Task PR Workflow
 

@@ -71,6 +71,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
   - Automatic detection of manually merged branches via `IsBranchMerged()`
   - Periodic cleanup scan every 5 minutes via scheduler (`CleanupMergedWorktrees()`)
   - Orphaned worktree cleanup: Detects and removes worktrees with no corresponding task (`CleanupOrphanedWorktrees()`)
+  - Orphan cleanup safety: `.worktrees/task_<id>` paths are treated as in-use when that task ID still exists (even if `worktree_path` metadata is temporarily empty), and locked worktrees are skipped instead of manual `os.RemoveAll` cleanup
   - Handles edge cases: deleted branches, force pushes, manual merges outside auto-merge, deleted tasks
 - **Service**: `WorktreeService` in `internal/service/worktree_service.go`
 - **Migration**: `059_git_worktrees.sql` adds `worktree_path`, `worktree_branch`, `auto_merge`, `merge_target_branch`, `merge_status` to tasks table
