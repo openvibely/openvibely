@@ -391,11 +391,23 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					document.body.addEventListener('htmx:beforeSwap', function(event) {
 						var target = event.detail.target;
 						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view')) {
-							// Save textarea value before swap to prevent clearing during morph polling
-							var textarea = document.getElementById('task-message-input');
-							if (textarea) {
-								window._taskThreadSavedInput = textarea.value;
-								_syncTaskThreadDraftFromTextarea();
+							var triggerEl = event.detail.requestConfig && event.detail.requestConfig.elt;
+							var isThreadFormRequest = triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')));
+							var xhr = event.detail.xhr;
+							var responseText = xhr ? (xhr.responseText || '') : '';
+
+							if (isThreadFormRequest && responseText.trim() !== '') {
+								window._taskThreadSavedInput = '';
+								window._taskThreadDrafts = window._taskThreadDrafts || {};
+								var sentKey = _taskThreadDraftStorageKey();
+								if (sentKey) delete window._taskThreadDrafts[sentKey];
+							} else {
+								// Save textarea value before swap to prevent clearing during morph polling
+								var textarea = document.getElementById('task-message-input');
+								if (textarea) {
+									window._taskThreadSavedInput = textarea.value;
+									_syncTaskThreadDraftFromTextarea();
+								}
 							}
 							var tracker = window._taskThreadPageTracker;
 							if (tracker && tracker.userScrolledUp) {
