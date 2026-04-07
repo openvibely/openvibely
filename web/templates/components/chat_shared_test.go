@@ -86,6 +86,12 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	if !strings.Contains(content, "new EventSource") {
 		t.Error("Missing EventSource for streaming")
 	}
+	if !strings.Contains(content, "window.registerChatStreamEventSource(execId, eventSource)") {
+		t.Error("Missing chat stream EventSource registration for non-thread streaming")
+	}
+	if !strings.Contains(content, "window.unregisterChatStreamEventSource(execId, es)") {
+		t.Error("Missing chat stream EventSource unregister helper call")
+	}
 
 	// Verify onmessage handler exists
 	if !strings.Contains(content, "eventSource.onmessage") {
@@ -951,7 +957,6 @@ func TestChatBubbleStreamingResume_UsesDataRawContent(t *testing.T) {
 	if strings.Contains(html, ">Hello, I&#39;m working") || strings.Contains(html, ">Hello, I'm working") {
 		t.Error("ChatBubbleStreamingResume should NOT render raw text content in the div (causes unformatted flash on hard refresh)")
 	}
-
 
 	// Must have an inline render script (matching ChatBubble pattern)
 	if !strings.Contains(html, "renderStreamingContent") {

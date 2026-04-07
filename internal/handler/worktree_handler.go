@@ -83,6 +83,9 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	}
 
 	if result != nil && !result.Success && len(result.ConflictFiles) > 0 {
+		if isHTMX(c) {
+			setHTMXToast(c, "Local merge has conflicts. Resolve conflicts or abort merge.", "failed")
+		}
 		// Conflicts detected - refresh the view to show conflict status
 		task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
 		return h.renderWorktreeInfo(c, task)

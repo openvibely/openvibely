@@ -275,6 +275,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Never target chat refresh/swap logic at generic `[data-project-id]` selectors. Non-chat pages (`/tasks`, `/workers`, analytics) also use `data-project-id`; generic selectors can swap chat HTML into unrelated pages after tab refocus
 - The tab visibility manager closes and recreates SSE on hide/show; the `onopen` handler that refreshes chat content must pass the current project and target `#chat-page-root` only. On reconnect, skip forced `/chat` outerHTML refresh while a chat stream bubble is actively in progress; refreshing mid-stream can replace the live bubble with partial persisted output and hide plan-complete CTA state until later fallback events.
 - When leaving chat via `#main-content` swap, explicitly unregister `chat-live` SSE to prevent stale reconnect side effects
+- Per-execution chat stream EventSources (`/events/chat/:exec_id`) must be globally tracked (by exec ID) and force-closed on `#chat-page-root` / `#main-content` swaps. Without this, reconnect outerHTML swaps can leak old streams and exhaust the browser’s per-host connection slots.
 
 ## Chat Bubble Styling
 
@@ -298,6 +299,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - **Fixed bug** — Previously, merge button stayed disabled after first merge even when follow-ups created new changes to merge
 - **Startup auto-merge safety** — At task start, only merge latest `main`/default branch into worktree branch when `git status --porcelain` is clean. Dirty worktrees must skip startup auto-merge to avoid overwriting in-progress task edits
 - **Startup conflict recovery** — If startup auto-merge conflicts, detect conflict files, run `git merge --abort`, set task `merge_status=conflict`, and return actionable error text (do not leave repo in in-progress merge state)
+- **Manual merge conflict UX** — In `MergeTaskBranch`, conflict outcomes (`result.Success=false` with `ConflictFiles`) must emit an HTMX `openvibelyToast` failure trigger in addition to re-rendering the worktree panel; otherwise users see conflict status changes with no toast feedback.
 - **Worktree diff during execution** — Never construct worktree paths from `filepath.Join(repoDir, "worktrees", worktreeBranch)` — worktrees live at `.worktrees/task_{id}`, use the `workDir`/`task.WorktreePath` variable. Use `GetWorktreeDiffWithUncommitted` for running tasks to capture both committed branch changes and uncommitted working directory changes
 - **Orphan cleanup race safety** — `CleanupOrphanedWorktrees` must not delete `.worktrees/task_<id>` when task `<id>` still exists but DB worktree fields are temporarily empty (startup/dispatch race). Also, if `git worktree remove --force` returns `cannot remove a locked working tree`, skip manual filesystem deletion and retry on a later cleanup cycle.
 

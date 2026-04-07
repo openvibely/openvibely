@@ -78,6 +78,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - **UI**: Worktree info panel on task detail, merge buttons on changes tab, auto-merge toggle in create/edit forms
 - **Integration**: `LLMService.ExecuteTaskWithAgent` creates worktree before execution, runs startup sync from latest `main`/default branch when the worktree is clean, and handles post-execution merge
 - **Startup sync safety**: Startup sync uses `git status --porcelain` guard (skip when dirty), logs explicit ran/skipped/failed outcomes, and aborts on merge conflicts (`git merge --abort`) while marking task `merge_status=conflict`
+- **Manual merge conflict feedback**: when `/tasks/:id/worktree/merge` returns a conflict result (`merge_status=conflict`), the handler now also emits an HTMX `openvibelyToast` failure message while refreshing the worktree panel so conflicts are visible immediately.
 - **Diff view**: Changes tab shows worktree branch diff when available (vs target branch), falls back to execution diff
 - **Merged-branch stale-status fallback**: Changes-tab handlers now fall back to preserved execution diff when live worktree diff is empty and the task branch is already merged into target, even if `tasks.merge_status` is still stale (`pending`) before cleanup updates run
 - **Scheduler integration**: `SchedulerService` runs cleanup scan every 5 minutes when worktree service is configured
@@ -147,6 +148,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 
 - **Shared Live SSE** (`/events/live`) — multiplexed task/chat/file-change events on one stream (`task_status_changed`, `task_category_changed`, `alert_created`, `chat_new_message`, `chat_response_done`, `file_modified`, `file_deleted`, `diff_snapshot`). Sidebar owns this single per-tab stream and dispatches browser custom events (`sse-task-event`, `sse-chat-live-event`, `sse-file-change-event`, `sse-live-connected`) for page-specific consumers.
 - **Chat page live updates** now consume shared `sse-chat-live-event` + `sse-live-connected` events (no dedicated `/events/chat/live` connection in the page script). Reconnect refresh remains scoped to `#chat-page-root` with `project_id` preserved.
+- Chat page now tracks per-exec `/events/chat/:exec_id` EventSources in a global registry (`_chatEventSourceByExec`, `_chatEventSources`), de-dupes by `exec_id`, and force-closes streams on `#chat-page-root` / `#main-content` swaps to prevent stale stream leaks during reconnect-driven outerHTML refreshes.
 - **Task detail Changes tab** now consumes shared `sse-file-change-event` events with task-id filtering in-page (no dedicated `/events/filechanges` EventSource in task-detail script).
 - **Chat Stream SSE** (`/events/chat/:exec_id`) remains per-execution for token streaming.
 - Legacy dedicated endpoints (`/events/tasks`, `/events/chat/live`, `/events/filechanges`) were removed; shared live updates now route through `/events/live`.
