@@ -274,6 +274,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Never target chat refresh/swap logic at generic `[data-project-id]` selectors. Non-chat pages (`/tasks`, `/workers`, analytics) also use `data-project-id`; generic selectors can swap chat HTML into unrelated pages after tab refocus
 - The tab visibility manager closes and recreates SSE on hide/show; the `onopen` handler that refreshes chat content must pass the current project and target `#chat-page-root` only. On reconnect, skip forced `/chat` outerHTML refresh while a chat stream bubble is actively in progress; refreshing mid-stream can replace the live bubble with partial persisted output and hide plan-complete CTA state until later fallback events.
 - When leaving chat via `#main-content` swap, explicitly unregister `chat-live` SSE to prevent stale reconnect side effects
+- Per-execution chat stream EventSources (`/events/chat/:exec_id`) must be globally tracked (by exec ID) and force-closed on `#chat-page-root` / `#main-content` swaps. Without this, reconnect outerHTML swaps can leak old streams and exhaust the browser’s per-host connection slots.
 
 ## Chat Bubble Styling
 

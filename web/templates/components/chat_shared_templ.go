@@ -878,7 +878,7 @@ func ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "</div><script type=\"text/javascript\">\n\t\t\t\t(function() {\n\t\t\t\t\tvar streamingDots = document.currentScript.previousElementSibling;\n\t\t\t\t\tvar container = streamingDots.previousElementSibling;\n\t\t\t\t\tvar thinkingIndicator = container.previousElementSibling;\n\t\t\t\t\tvar execId = container.getAttribute('data-exec-id');\n\t\t\t\t\tvar messagesId = container.getAttribute('data-messages-container');\n\t\t\t\t\tvar pauseTarget = container.getAttribute('data-pause-polling-target');\n\t\t\t\t\tvar isThread = container.getAttribute('data-is-thread') === 'true';\n\t\t\t\t\t// Pause HTMX polling if requested (prevents morph:outerHTML from destroying the EventSource)\n\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\twindow._taskThreadStreamingActive = true;\n\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\tif (pollingEl) {\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-get');\n\t\t\t\t\t\t\thtmx.process(pollingEl);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\t\t// Get or create page-level tracker for this chat container\n\t\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\t\tvar tracker = null;\n\t\t\t\t\tvar trackerKey = 'scrollTracker_' + messagesId;\n\t\t\t\t\t\n\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t// Reuse existing page-level tracker, or create new one if this is first stream\n\t\t\t\t\t\tif (!window[trackerKey]) {\n\t\t\t\t\t\t\twindow[trackerKey] = new window.ChatScrollTracker(chatMessages);\n\t\t\t\t\t\t}\n\t\t\t\t\t\ttracker = window[trackerKey];\n\t\t\t\t\t\t\n\t\t\t\t\t\t// User just sent a message, reset scroll tracking and scroll to bottom\n\t\t\t\t\t\ttracker.resetOnUserSend();\n\t\t\t\t\t}\n\n\t\t\t\t\t// Buffer for accumulating streaming content\n\t\t\t\t\tvar textBuffer = '';\n\t\t\t\t\tvar renderScheduled = false;\n\t\t\t\t\tvar lastRenderedLength = 0;\n\t\t\t\t\tfunction renderBufferedOutput(force) {\n\t\t\t\t\t\tif (!window.renderStreamingContent) {\n\t\t\t\t\t\t\tcontainer.textContent = textBuffer;\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (!force && renderScheduled) return;\n\t\t\t\t\t\tvar runRender = function() {\n\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\tif (!force && textBuffer.length === lastRenderedLength) return;\n\t\t\t\t\t\t\twindow.renderStreamingContent(container, textBuffer);\n\t\t\t\t\t\t\tlastRenderedLength = textBuffer.length;\n\t\t\t\t\t\t\t// Auto-scroll if tracker allows it (Rule 2: auto-scroll unless user scrolled up)\n\t\t\t\t\t\t\tif (!tracker || tracker.shouldAutoScroll()) {\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, false);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t};\n\t\t\t\t\t\tif (force) {\n\t\t\t\t\t\t\trunRender();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\trenderScheduled = true;\n\t\t\t\t\t\trequestAnimationFrame(runRender);\n\t\t\t\t\t}\n\n\t\t\t\t\tvar eventSource = new EventSource('/events/chat/' + execId);\n\t\t\t\t\tfunction removeThreadEventSource(es) {\n\t\t\t\t\t\tif (!window._threadEventSources || !es) return;\n\t\t\t\t\t\tvar idx = window._threadEventSources.indexOf(es);\n\t\t\t\t\t\tif (idx >= 0) window._threadEventSources.splice(idx, 1);\n\t\t\t\t\t}\n\t\t\t\t\t// Track thread stream EventSource so navigation cleanup can close it.\n\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\tif (!window._threadEventSources) window._threadEventSources = [];\n\t\t\t\t\t\twindow._threadEventSources.push(eventSource);\n\t\t\t\t\t}\n\n\t\t\t\t\teventSource.onmessage = function(event) {\n\t\t\t\t\t\t// Hide thinking indicator and show content on first message\n\t\t\t\t\t\tif (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {\n\t\t\t\t\t\t\tthinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\t\tstreamingDots.classList.remove('hidden');\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Append to buffer and re-render\n\t\t\t\t\t\ttextBuffer += event.data;\n\t\t\t\t\t\t// Persist raw stream content for completion fallback logic\n\t\t\t\t\t\tcontainer.setAttribute('data-raw-content', textBuffer);\n\t\t\t\t\t\trenderBufferedOutput(false);\n\t\t\t\t\t};\n\n\t\t\t\t\teventSource.addEventListener('done', function(event) {\n\t\t\t\t\t\trenderBufferedOutput(true);\n\t\t\t\t\t\t// Hide streaming dots\n\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\t// Refresh the entire chat view to get final state (re-enables polling)\n\t\t\t\t\t\t\t// Server-side rendering will handle tool markers display\n\t\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\t\thtmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});\n\t\t\t\t\t\t\t}, 500);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t// Always evaluate plan-completion first so prompt visibility updates\n\t\t\t\t\t\t\t// even if post-render transforms throw.\n\t\t\t\t\t\t\tif (window.handlePlanModeCompletion) {\n\t\t\t\t\t\t\t\twindow.handlePlanModeCompletion(textBuffer);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Convert task links BEFORE cleaning markers\n\t\t\t\t\t\t\tvar bubble = container.closest('.chat-bubble-assistant-msg');\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tif (bubble && window.convertTaskLinksInMessage) {\n\t\t\t\t\t\t\t\t\twindow.convertTaskLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (bubble && window.convertTaskEditLinksInMessage) {\n\t\t\t\t\t\t\t\t\twindow.convertTaskEditLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (bubble && window.cleanBubbleContent) {\n\t\t\t\t\t\t\t\t\twindow.cleanBubbleContent(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\t\tconsole.error('[chat] post-stream transform failed:', err);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Final scroll if tracker allows it\n\t\t\t\t\t\t\tif (!tracker || tracker.shouldAutoScroll()) {\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, true);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\teventSource.addEventListener('error', function(event) {\n\t\t\t\t\t\t// Hide thinking indicator and streaming dots, ensure content shows\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\tif (event.data) {\n\t\t\t\t\t\t\tcontainer.appendChild(document.createTextNode('\\n\\nError: ' + event.data));\n\t\t\t\t\t\t}\n\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\t\thtmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});\n\t\t\t\t\t\t\t}, 1000);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t// Clear streaming flag and re-evaluate plan prompt on error.\n\t\t\t\t\t\t\t// The evaluator scans DOM for latest completed bubble; an error\n\t\t\t\t\t\t\t// bubble without <proposed_plan> correctly hides the prompt.\n\t\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\teventSource.onerror = function(error) {\n\t\t\t\t\t\tconsole.error('EventSource failed:', error);\n\t\t\t\t\t\t// Hide thinking indicator and streaming dots, ensure content shows\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\t\thtmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});\n\t\t\t\t\t\t\t}, 1000);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t})();\n\t\t\t</script></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "</div><script type=\"text/javascript\">\n\t\t\t\t(function() {\n\t\t\t\t\tvar streamingDots = document.currentScript.previousElementSibling;\n\t\t\t\t\tvar container = streamingDots.previousElementSibling;\n\t\t\t\t\tvar thinkingIndicator = container.previousElementSibling;\n\t\t\t\t\tvar execId = container.getAttribute('data-exec-id');\n\t\t\t\t\tvar messagesId = container.getAttribute('data-messages-container');\n\t\t\t\t\tvar pauseTarget = container.getAttribute('data-pause-polling-target');\n\t\t\t\t\tvar isThread = container.getAttribute('data-is-thread') === 'true';\n\t\t\t\t\t// Pause HTMX polling if requested (prevents morph:outerHTML from destroying the EventSource)\n\t\t\t\t\tif (pauseTarget) {\n\t\t\t\t\t\twindow._taskThreadStreamingActive = true;\n\t\t\t\t\t\tvar pollingEl = document.getElementById(pauseTarget);\n\t\t\t\t\t\tif (pollingEl) {\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-trigger');\n\t\t\t\t\t\t\tpollingEl.removeAttribute('hx-get');\n\t\t\t\t\t\t\thtmx.process(pollingEl);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\n\t\t\t\t\t// Get or create page-level tracker for this chat container\n\t\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\t\tvar tracker = null;\n\t\t\t\t\tvar trackerKey = 'scrollTracker_' + messagesId;\n\t\t\t\t\t\n\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t// Reuse existing page-level tracker, or create new one if this is first stream\n\t\t\t\t\t\tif (!window[trackerKey]) {\n\t\t\t\t\t\t\twindow[trackerKey] = new window.ChatScrollTracker(chatMessages);\n\t\t\t\t\t\t}\n\t\t\t\t\t\ttracker = window[trackerKey];\n\t\t\t\t\t\t\n\t\t\t\t\t\t// User just sent a message, reset scroll tracking and scroll to bottom\n\t\t\t\t\t\ttracker.resetOnUserSend();\n\t\t\t\t\t}\n\n\t\t\t\t\t// Buffer for accumulating streaming content\n\t\t\t\t\tvar textBuffer = '';\n\t\t\t\t\tvar renderScheduled = false;\n\t\t\t\t\tvar lastRenderedLength = 0;\n\t\t\t\t\tfunction renderBufferedOutput(force) {\n\t\t\t\t\t\tif (!window.renderStreamingContent) {\n\t\t\t\t\t\t\tcontainer.textContent = textBuffer;\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (!force && renderScheduled) return;\n\t\t\t\t\t\tvar runRender = function() {\n\t\t\t\t\t\t\trenderScheduled = false;\n\t\t\t\t\t\t\tif (!force && textBuffer.length === lastRenderedLength) return;\n\t\t\t\t\t\t\twindow.renderStreamingContent(container, textBuffer);\n\t\t\t\t\t\t\tlastRenderedLength = textBuffer.length;\n\t\t\t\t\t\t\t// Auto-scroll if tracker allows it (Rule 2: auto-scroll unless user scrolled up)\n\t\t\t\t\t\t\tif (!tracker || tracker.shouldAutoScroll()) {\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, false);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t};\n\t\t\t\t\t\tif (force) {\n\t\t\t\t\t\t\trunRender();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\trenderScheduled = true;\n\t\t\t\t\t\trequestAnimationFrame(runRender);\n\t\t\t\t\t}\n\n\t\t\t\t\tvar eventSource = new EventSource('/events/chat/' + execId);\n\t\t\t\t\tif (!isThread && window.registerChatStreamEventSource) {\n\t\t\t\t\t\twindow.registerChatStreamEventSource(execId, eventSource);\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeThreadEventSource(es) {\n\t\t\t\t\t\tif (!window._threadEventSources || !es) return;\n\t\t\t\t\t\tvar idx = window._threadEventSources.indexOf(es);\n\t\t\t\t\t\tif (idx >= 0) window._threadEventSources.splice(idx, 1);\n\t\t\t\t\t}\n\t\t\t\t\tfunction removeChatEventSource(execId, es) {\n\t\t\t\t\t\tif (!window.unregisterChatStreamEventSource) return;\n\t\t\t\t\t\twindow.unregisterChatStreamEventSource(execId, es);\n\t\t\t\t\t}\n\t\t\t\t\t// Track thread stream EventSource so navigation cleanup can close it.\n\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\tif (!window._threadEventSources) window._threadEventSources = [];\n\t\t\t\t\t\twindow._threadEventSources.push(eventSource);\n\t\t\t\t\t}\n\n\t\t\t\t\teventSource.onmessage = function(event) {\n\t\t\t\t\t\t// Hide thinking indicator and show content on first message\n\t\t\t\t\t\tif (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {\n\t\t\t\t\t\t\tthinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\t\tstreamingDots.classList.remove('hidden');\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\n\t\t\t\t\t\t// Append to buffer and re-render\n\t\t\t\t\t\ttextBuffer += event.data;\n\t\t\t\t\t\t// Persist raw stream content for completion fallback logic\n\t\t\t\t\t\tcontainer.setAttribute('data-raw-content', textBuffer);\n\t\t\t\t\t\trenderBufferedOutput(false);\n\t\t\t\t\t};\n\n\t\t\t\t\teventSource.addEventListener('done', function(event) {\n\t\t\t\t\t\trenderBufferedOutput(true);\n\t\t\t\t\t\t// Hide streaming dots\n\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\tremoveChatEventSource(execId, eventSource);\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\t// Refresh the entire chat view to get final state (re-enables polling)\n\t\t\t\t\t\t\t// Server-side rendering will handle tool markers display\n\t\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\t\thtmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});\n\t\t\t\t\t\t\t}, 500);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t// Always evaluate plan-completion first so prompt visibility updates\n\t\t\t\t\t\t\t// even if post-render transforms throw.\n\t\t\t\t\t\t\tif (window.handlePlanModeCompletion) {\n\t\t\t\t\t\t\t\twindow.handlePlanModeCompletion(textBuffer);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Convert task links BEFORE cleaning markers\n\t\t\t\t\t\t\tvar bubble = container.closest('.chat-bubble-assistant-msg');\n\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\tif (bubble && window.convertTaskLinksInMessage) {\n\t\t\t\t\t\t\t\t\twindow.convertTaskLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (bubble && window.convertTaskEditLinksInMessage) {\n\t\t\t\t\t\t\t\t\twindow.convertTaskEditLinksInMessage(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tif (bubble && window.cleanBubbleContent) {\n\t\t\t\t\t\t\t\t\twindow.cleanBubbleContent(bubble);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t} catch (err) {\n\t\t\t\t\t\t\t\tconsole.error('[chat] post-stream transform failed:', err);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Final scroll if tracker allows it\n\t\t\t\t\t\t\tif (!tracker || tracker.shouldAutoScroll()) {\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tvar chatMessages = document.getElementById(messagesId);\n\t\t\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, true);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\teventSource.addEventListener('error', function(event) {\n\t\t\t\t\t\t// Hide thinking indicator and streaming dots, ensure content shows\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\tif (event.data) {\n\t\t\t\t\t\t\tcontainer.appendChild(document.createTextNode('\\n\\nError: ' + event.data));\n\t\t\t\t\t\t}\n\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\tremoveChatEventSource(execId, eventSource);\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\t\thtmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});\n\t\t\t\t\t\t\t}, 1000);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t// Clear streaming flag and re-evaluate plan prompt on error.\n\t\t\t\t\t\t\t// The evaluator scans DOM for latest completed bubble; an error\n\t\t\t\t\t\t\t// bubble without <proposed_plan> correctly hides the prompt.\n\t\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\teventSource.onerror = function(error) {\n\t\t\t\t\t\tconsole.error('EventSource failed:', error);\n\t\t\t\t\t\t// Hide thinking indicator and streaming dots, ensure content shows\n\t\t\t\t\t\tif (thinkingIndicator) thinkingIndicator.classList.add('hidden');\n\t\t\t\t\t\tif (streamingDots) streamingDots.classList.add('hidden');\n\t\t\t\t\t\tcontainer.classList.remove('hidden');\n\t\t\t\t\t\teventSource.close();\n\t\t\t\t\t\tremoveThreadEventSource(eventSource);\n\t\t\t\t\t\tremoveChatEventSource(execId, eventSource);\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\tif (isThread) {\n\t\t\t\t\t\t\tsetTimeout(function() {\n\t\t\t\t\t\t\t\thtmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});\n\t\t\t\t\t\t\t}, 1000);\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\twindow._chatStreamInProgress = false;\n\t\t\t\t\t\t\tif (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();\n\t\t\t\t\t\t}\n\t\t\t\t\t};\n\t\t\t\t})();\n\t\t\t</script></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -938,7 +938,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var53 string
 		templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(role)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 476, Col: 9}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 486, Col: 9}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 		if templ_7745c5c3_Err != nil {
@@ -956,7 +956,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 			var templ_7745c5c3_Var54 string
 			templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs("streaming-thinking-resume-" + execID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 480, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 490, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 			if templ_7745c5c3_Err != nil {
@@ -987,7 +987,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var56 string
 		templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs("streaming-message-" + execID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 485, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 495, Col: 42}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 		if templ_7745c5c3_Err != nil {
@@ -1013,7 +1013,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var58 string
 		templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(execID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 485, Col: 144}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 495, Col: 144}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 		if templ_7745c5c3_Err != nil {
@@ -1026,7 +1026,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var59 string
 		templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", jsStringLength(partialContent)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 485, Col: 218}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 495, Col: 218}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 		if templ_7745c5c3_Err != nil {
@@ -1039,7 +1039,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var60 string
 		templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinStringErrs(messagesContainerID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 485, Col: 266}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 495, Col: 266}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
 		if templ_7745c5c3_Err != nil {
@@ -1052,7 +1052,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var61 string
 		templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.JoinStringErrs(pausePollingTargetID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 485, Col: 317}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 495, Col: 317}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var61))
 		if templ_7745c5c3_Err != nil {
@@ -1065,7 +1065,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var62 string
 		templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.JoinStringErrs(partialContent)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 485, Col: 382}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 495, Col: 382}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var62))
 		if templ_7745c5c3_Err != nil {
@@ -1087,7 +1087,7 @@ func ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerID
 		var templ_7745c5c3_Var64 string
 		templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs("streaming-dots-resume-" + execID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 516, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 526, Col: 46}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 		if templ_7745c5c3_Err != nil {
@@ -1294,7 +1294,7 @@ func ChatEmptyState(message string) templ.Component {
 		var templ_7745c5c3_Var70 string
 		templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(message)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 720, Col: 41}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 730, Col: 41}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
 		if templ_7745c5c3_Err != nil {
@@ -1337,7 +1337,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var72 string
 		templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 727, Col: 20}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 737, Col: 20}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var72))
 		if templ_7745c5c3_Err != nil {
@@ -1350,7 +1350,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var73 string
 		templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.JoinStringErrs(config.PostEndpoint)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 729, Col: 31}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 739, Col: 31}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var73))
 		if templ_7745c5c3_Err != nil {
@@ -1363,7 +1363,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var74 string
 		templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.JoinStringErrs("#" + config.TargetID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 730, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 740, Col: 35}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var74))
 		if templ_7745c5c3_Err != nil {
@@ -1376,7 +1376,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var75 string
 		templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.JoinStringErrs(config.InputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 732, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 742, Col: 32}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var75))
 		if templ_7745c5c3_Err != nil {
@@ -1389,7 +1389,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var76 string
 		templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID + "ClearAttachments")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 733, Col: 59}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 743, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var76))
 		if templ_7745c5c3_Err != nil {
@@ -1402,7 +1402,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var77 string
 		templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.JoinStringErrs(chatDropOverlayID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 737, Col: 44}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 747, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var77))
 		if templ_7745c5c3_Err != nil {
@@ -1420,7 +1420,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var78 string
 			templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID + "-agent-id")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 746, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 756, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var78))
 			if templ_7745c5c3_Err != nil {
@@ -1439,7 +1439,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var79 string
 			templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID + "-chat-mode")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 749, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 759, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
 			if templ_7745c5c3_Err != nil {
@@ -1452,7 +1452,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var80 string
 			templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(chatModeOrDefault(config.ChatMode))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 749, Col: 119}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 759, Col: 119}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 			if templ_7745c5c3_Err != nil {
@@ -1471,7 +1471,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var81 string
 			templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID + "-project-id")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 752, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 762, Col: 58}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var81))
 			if templ_7745c5c3_Err != nil {
@@ -1484,7 +1484,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var82 string
 			templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.JoinStringErrs(config.ProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 752, Col: 104}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 762, Col: 104}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var82))
 			if templ_7745c5c3_Err != nil {
@@ -1502,7 +1502,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var83 string
 		templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.JoinStringErrs(chatSessionInputID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 754, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 764, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var83))
 		if templ_7745c5c3_Err != nil {
@@ -1515,7 +1515,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var84 string
 		templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.JoinStringErrs(chatAttachmentPreviewID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 756, Col: 50}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 766, Col: 50}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var84))
 		if templ_7745c5c3_Err != nil {
@@ -1528,7 +1528,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var85 string
 		templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID + "ClearAttachments")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 759, Col: 115}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 769, Col: 115}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var85))
 		if templ_7745c5c3_Err != nil {
@@ -1541,7 +1541,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var86 string
 		templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.JoinStringErrs(chatAttachmentListID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 761, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 771, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var86))
 		if templ_7745c5c3_Err != nil {
@@ -1554,7 +1554,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var87 string
 		templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.JoinStringErrs(config.InputID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 766, Col: 23}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 776, Col: 23}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var87))
 		if templ_7745c5c3_Err != nil {
@@ -1587,7 +1587,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var88 string
 			templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID + "-agent-select")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 783, Col: 49}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 793, Col: 49}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var88))
 			if templ_7745c5c3_Err != nil {
@@ -1600,7 +1600,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var89 string
 			templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID + "-agent-id")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 783, Col: 240}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 793, Col: 240}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var89))
 			if templ_7745c5c3_Err != nil {
@@ -1618,7 +1618,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 				var templ_7745c5c3_Var90 string
 				templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.JoinStringErrs(agent.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 787, Col: 31}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 797, Col: 31}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var90))
 				if templ_7745c5c3_Err != nil {
@@ -1631,7 +1631,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 				var templ_7745c5c3_Var91 string
 				templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 788, Col: 20}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 798, Col: 20}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var91))
 				if templ_7745c5c3_Err != nil {
@@ -1644,7 +1644,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 				var templ_7745c5c3_Var92 string
 				templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 788, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 798, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var92))
 				if templ_7745c5c3_Err != nil {
@@ -1668,7 +1668,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var93 string
 			templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID + "-mode-select")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 794, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 804, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var93))
 			if templ_7745c5c3_Err != nil {
@@ -1681,7 +1681,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var94 string
 			templ_7745c5c3_Var94, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID + "-chat-mode")
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 794, Col: 238}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 804, Col: 238}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var94))
 			if templ_7745c5c3_Err != nil {
@@ -1704,7 +1704,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			var templ_7745c5c3_Var95 string
 			templ_7745c5c3_Var95, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/tasks/%s/cancel", config.TaskID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 804, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 814, Col: 62}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var95))
 			if templ_7745c5c3_Err != nil {
@@ -1722,7 +1722,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var96 string
 		templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.JoinStringErrs(chatFileInputID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 815, Col: 47}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 825, Col: 47}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var96))
 		if templ_7745c5c3_Err != nil {
@@ -1735,7 +1735,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var97 string
 		templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.JoinStringErrs(chatFileInputID(config.FormID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 820, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 830, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var97))
 		if templ_7745c5c3_Err != nil {
@@ -1748,7 +1748,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 		var templ_7745c5c3_Var98 string
 		templ_7745c5c3_Var98, templ_7745c5c3_Err = templ.JoinStringErrs(config.FormID + "-mic-btn")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 822, Col: 57}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/chat_shared.templ`, Line: 832, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var98))
 		if templ_7745c5c3_Err != nil {

@@ -344,10 +344,17 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					}
 
 					var eventSource = new EventSource('/events/chat/' + execId);
+					if (!isThread && window.registerChatStreamEventSource) {
+						window.registerChatStreamEventSource(execId, eventSource);
+					}
 					function removeThreadEventSource(es) {
 						if (!window._threadEventSources || !es) return;
 						var idx = window._threadEventSources.indexOf(es);
 						if (idx >= 0) window._threadEventSources.splice(idx, 1);
+					}
+					function removeChatEventSource(execId, es) {
+						if (!window.unregisterChatStreamEventSource) return;
+						window.unregisterChatStreamEventSource(execId, es);
 					}
 					// Track thread stream EventSource so navigation cleanup can close it.
 					if (isThread) {
@@ -376,6 +383,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						if (streamingDots) streamingDots.classList.add('hidden');
 						eventSource.close();
 						removeThreadEventSource(eventSource);
+						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
 							// Refresh the entire chat view to get final state (re-enables polling)
@@ -426,6 +434,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						eventSource.close();
 						removeThreadEventSource(eventSource);
+						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
 							setTimeout(function() {
@@ -448,6 +457,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						container.classList.remove('hidden');
 						eventSource.close();
 						removeThreadEventSource(eventSource);
+						removeChatEventSource(execId, eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
 							setTimeout(function() {

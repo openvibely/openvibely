@@ -147,6 +147,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 
 - **Shared Live SSE** (`/events/live`) — multiplexed task/chat/file-change events on one stream (`task_status_changed`, `task_category_changed`, `alert_created`, `chat_new_message`, `chat_response_done`, `file_modified`, `file_deleted`, `diff_snapshot`). Sidebar owns this single per-tab stream and dispatches browser custom events (`sse-task-event`, `sse-chat-live-event`, `sse-file-change-event`, `sse-live-connected`) for page-specific consumers.
 - **Chat page live updates** now consume shared `sse-chat-live-event` + `sse-live-connected` events (no dedicated `/events/chat/live` connection in the page script). Reconnect refresh remains scoped to `#chat-page-root` with `project_id` preserved.
+- Chat page now tracks per-exec `/events/chat/:exec_id` EventSources in a global registry (`_chatEventSourceByExec`, `_chatEventSources`), de-dupes by `exec_id`, and force-closes streams on `#chat-page-root` / `#main-content` swaps to prevent stale stream leaks during reconnect-driven outerHTML refreshes.
 - **Task detail Changes tab** now consumes shared `sse-file-change-event` events with task-id filtering in-page (no dedicated `/events/filechanges` EventSource in task-detail script).
 - **Chat Stream SSE** (`/events/chat/:exec_id`) remains per-execution for token streaming.
 - Legacy dedicated endpoints (`/events/tasks`, `/events/chat/live`, `/events/filechanges`) were removed; shared live updates now route through `/events/live`.

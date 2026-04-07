@@ -101,14 +101,26 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	}
 
 	content := buf.String()
+	bubbleStart := strings.Index(content, "function createStreamingBubble(execId)")
+	if bubbleStart == -1 {
+		t.Fatal("expected createStreamingBubble function")
+	}
+	sectionEnd := strings.Index(content[bubbleStart:], "if (window._chatLiveEventHandlers)")
+	if sectionEnd == -1 {
+		t.Fatal("expected createStreamingBubble section terminator")
+	}
+	bubbleSection := content[bubbleStart : bubbleStart+sectionEnd]
 
 	// Find the createStreamingBubble function's error handler
-	errIdx := strings.Index(content, "eventSource.addEventListener('error', function(event) {")
+	errIdx := strings.Index(bubbleSection, "eventSource.addEventListener('error', function(event) {")
 	if errIdx == -1 {
 		t.Fatal("expected error event listener in createStreamingBubble")
 	}
-	// The first occurrence is inside createStreamingBubble in chat.templ
-	errBody := content[errIdx : errIdx+600]
+	errEnd := errIdx + 700
+	if errEnd > len(bubbleSection) {
+		errEnd = len(bubbleSection)
+	}
+	errBody := bubbleSection[errIdx:errEnd]
 	if !strings.Contains(errBody, "_chatStreamInProgress = false") {
 		t.Error("error handler in createStreamingBubble must clear _chatStreamInProgress")
 	}
@@ -117,15 +129,50 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	}
 
 	// Also check onerror handler
-	oeIdx := strings.Index(content, "eventSource.onerror = function() {")
+	oeIdx := strings.Index(bubbleSection, "eventSource.onerror = function() {")
 	if oeIdx == -1 {
 		t.Fatal("expected onerror handler in createStreamingBubble")
 	}
-	oeBody := content[oeIdx : oeIdx+400]
+	oeEnd := oeIdx + 500
+	if oeEnd > len(bubbleSection) {
+		oeEnd = len(bubbleSection)
+	}
+	oeBody := bubbleSection[oeIdx:oeEnd]
 	if !strings.Contains(oeBody, "_chatStreamInProgress = false") {
 		t.Error("onerror handler in createStreamingBubble must clear _chatStreamInProgress")
 	}
 	if !strings.Contains(oeBody, "evaluatePlanCompletionPrompt") {
 		t.Error("onerror handler in createStreamingBubble must re-evaluate plan prompt")
+	}
+}
+
+func TestChatContent_ClosesChatStreamEventSourcesOnSwapAndNavigation(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+
+	content := buf.String()
+
+	if !strings.Contains(content, "window.registerChatStreamEventSource = function(execId, eventSource)") {
+		t.Error("expected chat stream EventSource registration helper")
+	}
+	if !strings.Contains(content, "window.unregisterChatStreamEventSource = function(execId, eventSource)") {
+		t.Error("expected chat stream EventSource unregister helper")
+	}
+	if !strings.Contains(content, "window.closeAllChatStreamEventSources = function()") {
+		t.Error("expected chat stream EventSource bulk-close helper")
+	}
+	if !strings.Contains(content, "document.body.addEventListener('htmx:beforeSwap', handleChatBeforeSwap);") {
+		t.Error("expected beforeSwap listener for chat stream cleanup")
+	}
+	if !strings.Contains(content, "if (swapTarget.id === 'chat-page-root')") {
+		t.Error("expected chat-page-root swap guard for stream cleanup")
+	}
+	if !strings.Contains(content, "window.closeAllChatStreamEventSources()") {
+		t.Error("expected swap/navigation cleanup to close active chat streams")
 	}
 }
