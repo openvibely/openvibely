@@ -339,13 +339,30 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			// Get current chat mode. Prefer visible selector state (user-facing)
 			// over hidden input to avoid stale mode mismatches after programmatic
 			// mode changes that update one but not the other.
+			// During HTMX reconnect swaps there is a brief hydration window where the
+			// newly-swapped select still has its default value before localStorage restore.
+			// In that window, fallback to persisted mode so CTA visibility doesn't flicker.
 			window.currentChatModeValue = function() {
 				var form = document.getElementById('chat-form');
 				if (!form) return '';
 				var modeSelect = form.querySelector('select[id$="-mode-select"]');
-				if (modeSelect && modeSelect.value) return modeSelect.value;
 				var modeInput = form.querySelector('input[name="chat_mode"]');
-				return modeInput ? modeInput.value : '';
+
+				var persistedMode = '';
+				var chatRoot = document.getElementById('chat-page-root');
+				if (chatRoot) {
+					var pid = chatRoot.getAttribute('data-project-id');
+					if (pid) persistedMode = localStorage.getItem('chat-mode-' + pid) || '';
+				}
+
+				if (modeSelect && modeSelect.value) {
+					var selectHydrated = modeSelect.dataset && modeSelect.dataset.hydrated === 'true';
+					if (selectHydrated || !persistedMode) return modeSelect.value;
+					return persistedMode;
+				}
+
+				if (modeInput && modeInput.value) return modeInput.value;
+				return persistedMode;
 			};
 
 			window.hidePlanCompletionPrompt = function() {
