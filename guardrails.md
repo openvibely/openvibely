@@ -26,6 +26,10 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - If `old_string` still fails, expand context (include nearby stable lines) rather than retrying the same snippet
 - If fallback finds multiple candidate blocks, use `replace_all=true` only when intentionally bulk-editing; otherwise make `old_string` more specific
 
+### 5. Parallel Tool Execution Safety
+- Agentic turn-level parallel tool execution is only for read-only tools (`read_file`, `list_files`, `grep_search`)
+- If any mutating tool appears in the same turn (`write_file`, `edit_file`, `bash`, or unknown custom tools), execute that turn serially to avoid filesystem races and nondeterministic write ordering
+
 ---
 
 ## Critical Rules — NEVER Violate

@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 // DefaultCompactionThreshold is the default approximate token count that
@@ -255,59 +256,44 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			break
 		}
 
-		// Execute tools and add results
-		localItemsAfterResponse := make([]any, 0, len(turnResult.toolCalls))
+		// Execute tools and add results.
+		tasks := make([]openAIToolExecutionTask, 0, len(turnResult.toolCalls))
 		for _, tc := range turnResult.toolCalls {
 			inputJSON := json.RawMessage(tc.Arguments)
 			if opts.OnToolUse != nil {
 				opts.OnToolUse(tc.Name, inputJSON)
 			}
-
-			log.Printf("[openai-client] executing tool %s", tc.Name)
-			output := ""
-			isError := false
-			var err error
-			if opts.ToolFilter != nil && !opts.ToolFilter(tc.Name) {
-				isError = true
-				output = fmt.Sprintf("tool %s is not allowed by this agent", tc.Name)
-			} else if opts.ToolExecutor != nil {
-				output, isError, err = opts.ToolExecutor(ctx, tc.Name, inputJSON)
-				if err != nil {
-					isError = true
-					output = err.Error()
-				}
-			} else {
-				output, err = ExecuteTool(ctx, opts.WorkDir, tc.Name, inputJSON)
-				if err != nil {
-					isError = true
-					output = err.Error()
-				}
-			}
-
-			if opts.OnToolResult != nil {
-				opts.OnToolResult(tc.Name, output, isError)
-			}
-
-			// Parse input for logging
 			var inputMap map[string]interface{}
-			json.Unmarshal(inputJSON, &inputMap)
+			_ = json.Unmarshal(inputJSON, &inputMap)
+			tasks = append(tasks, openAIToolExecutionTask{
+				call:     tc,
+				input:    inputJSON,
+				inputMap: inputMap,
+			})
+		}
+
+		executed := executeOpenAIToolTasks(ctx, opts, tasks)
+		localItemsAfterResponse := make([]any, 0, len(executed))
+		for _, exec := range executed {
+			if opts.OnToolResult != nil {
+				opts.OnToolResult(exec.call.Name, exec.output, exec.isError)
+			}
 
 			result.ToolCalls = append(result.ToolCalls, ToolCall{
-				Name:   tc.Name,
-				Input:  inputMap,
-				Output: output,
-				Error:  isError,
+				Name:   exec.call.Name,
+				Input:  exec.inputMap,
+				Output: exec.output,
+				Error:  exec.isError,
 			})
 
-			// Add tool result to input items
-			modelOutput := truncateToolOutputForModelInput(output, toolOutputTokenLimit)
-			if len(modelOutput) < len(output) {
+			modelOutput := truncateToolOutputForModelInput(exec.output, toolOutputTokenLimit)
+			if len(modelOutput) < len(exec.output) {
 				log.Printf("[openai-client] truncated tool output for model input tool=%s call_id=%s original_chars=%d truncated_chars=%d token_limit=%d",
-					tc.Name, tc.CallID, len(output), len(modelOutput), toolOutputTokenLimit)
+					exec.call.Name, exec.call.CallID, len(exec.output), len(modelOutput), toolOutputTokenLimit)
 			}
 			toolResultItem := agenticInputItem{
 				"type":    "function_call_output",
-				"call_id": tc.CallID,
+				"call_id": exec.call.CallID,
 				"output":  modelOutput,
 			}
 			inputItems = append(inputItems, toolResultItem)
@@ -328,6 +314,91 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
 
 	return result, nil
+}
+
+type openAIToolExecutionTask struct {
+	call     toolCallInfo
+	input    json.RawMessage
+	inputMap map[string]interface{}
+}
+
+type openAIToolExecutionResult struct {
+	call     toolCallInfo
+	inputMap map[string]interface{}
+	output   string
+	isError  bool
+}
+
+func executeOpenAIToolTasks(ctx context.Context, opts *AgenticOptions, tasks []openAIToolExecutionTask) []openAIToolExecutionResult {
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	results := make([]openAIToolExecutionResult, len(tasks))
+	runOne := func(i int) {
+		task := tasks[i]
+		output, isError := runOpenAIToolTask(ctx, opts, task.call.Name, task.input)
+		results[i] = openAIToolExecutionResult{
+			call:     task.call,
+			inputMap: task.inputMap,
+			output:   output,
+			isError:  isError,
+		}
+	}
+
+	if len(tasks) > 1 && allOpenAIToolsReadOnly(tasks) {
+		var wg sync.WaitGroup
+		wg.Add(len(tasks))
+		for i := range tasks {
+			go func(idx int) {
+				defer wg.Done()
+				runOne(idx)
+			}(i)
+		}
+		wg.Wait()
+		return results
+	}
+
+	for i := range tasks {
+		runOne(i)
+	}
+	return results
+}
+
+func runOpenAIToolTask(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool) {
+	log.Printf("[openai-client] executing tool %s", name)
+	output := ""
+	isError := false
+	var err error
+	if opts.ToolFilter != nil && !opts.ToolFilter(name) {
+		isError = true
+		output = fmt.Sprintf("tool %s is not allowed by this agent", name)
+	} else if opts.ToolExecutor != nil {
+		output, isError, err = opts.ToolExecutor(ctx, name, input)
+		if err != nil {
+			isError = true
+			output = err.Error()
+		}
+	} else {
+		output, err = ExecuteTool(ctx, opts.WorkDir, name, input)
+		if err != nil {
+			isError = true
+			output = err.Error()
+		}
+	}
+	return output, isError
+}
+
+func allOpenAIToolsReadOnly(tasks []openAIToolExecutionTask) bool {
+	for _, task := range tasks {
+		switch task.call.Name {
+		case "read_file", "list_files", "grep_search":
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func shouldAutoCompactInputItems(inputItems []any, threshold int) bool {

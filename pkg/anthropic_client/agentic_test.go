@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -876,6 +877,148 @@ func TestSendAgentic_NoCompactionWhenDisabled(t *testing.T) {
 
 	if resp.Compacted {
 		t.Error("expected Compacted=false when auto compaction is disabled")
+	}
+}
+
+func TestSendAgentic_ReadOnlyToolUsesExecuteInParallel(t *testing.T) {
+	turnCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turnCount++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		if turnCount == 1 {
+			events := []string{
+				`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":50}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"read_file"}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}`,
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_2","name":"grep_search"}}`,
+				`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}}`,
+				`{"type":"content_block_stop","index":1}`,
+				`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":20}}`,
+				`{"type":"message_stop"}`,
+			}
+			for _, evt := range events {
+				fmt.Fprintf(w, "data: %s\n\n", evt)
+			}
+			return
+		}
+
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":20}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	var inFlight int32
+	var maxInFlight int32
+
+	client := NewWithAPIKey("test-key")
+	_, err := client.SendAgentic(context.Background(), "parallel tools", &AgenticOptions{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 8192,
+		ToolExecutor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
+			curr := atomic.AddInt32(&inFlight, 1)
+			for {
+				prev := atomic.LoadInt32(&maxInFlight)
+				if curr <= prev || atomic.CompareAndSwapInt32(&maxInFlight, prev, curr) {
+					break
+				}
+			}
+			time.Sleep(40 * time.Millisecond)
+			atomic.AddInt32(&inFlight, -1)
+			return "ok", false, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxInFlight < 2 {
+		t.Fatalf("expected parallel execution for read-only tools, max in-flight=%d", maxInFlight)
+	}
+}
+
+func TestSendAgentic_MutatingToolUsesStaySerial(t *testing.T) {
+	turnCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turnCount++
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		if turnCount == 1 {
+			events := []string{
+				`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":50}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"read_file"}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}`,
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_2","name":"bash"}}`,
+				`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{}"}}`,
+				`{"type":"content_block_stop","index":1}`,
+				`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":20}}`,
+				`{"type":"message_stop"}`,
+			}
+			for _, evt := range events {
+				fmt.Fprintf(w, "data: %s\n\n", evt)
+			}
+			return
+		}
+
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":20}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	var inFlight int32
+	var maxInFlight int32
+
+	client := NewWithAPIKey("test-key")
+	_, err := client.SendAgentic(context.Background(), "serial tools", &AgenticOptions{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 8192,
+		ToolExecutor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
+			curr := atomic.AddInt32(&inFlight, 1)
+			for {
+				prev := atomic.LoadInt32(&maxInFlight)
+				if curr <= prev || atomic.CompareAndSwapInt32(&maxInFlight, prev, curr) {
+					break
+				}
+			}
+			time.Sleep(40 * time.Millisecond)
+			atomic.AddInt32(&inFlight, -1)
+			return "ok", false, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if maxInFlight != 1 {
+		t.Fatalf("expected serial execution when mutating tool is present, max in-flight=%d", maxInFlight)
 	}
 }
 

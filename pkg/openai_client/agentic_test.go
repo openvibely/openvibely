@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -470,6 +471,112 @@ func TestSendAgentic_ToolCalling(t *testing.T) {
 	}
 	if resp.InputTokens != 50 {
 		t.Errorf("InputTokens = %d, want 50 (20+30)", resp.InputTokens)
+	}
+}
+
+func TestSendAgentic_ReadOnlyToolCallsExecuteInParallel(t *testing.T) {
+	turnCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turnCount++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if turnCount == 1 {
+			_, _ = w.Write([]byte(
+				"data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read_file\"}}\n\n" +
+					"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read_file\",\"arguments\":\"{}\"}}\n\n" +
+					"data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"grep_search\"}}\n\n" +
+					"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"grep_search\",\"arguments\":\"{}\"}}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":12,\"output_tokens\":8}}}\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}}\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	var inFlight int32
+	var maxInFlight int32
+
+	client := NewWithAPIKey("sk-test")
+	_, err := client.SendAgentic(context.Background(), "parallel tools", &AgenticOptions{
+		Model: "gpt-5.3-codex",
+		ToolExecutor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
+			curr := atomic.AddInt32(&inFlight, 1)
+			for {
+				prev := atomic.LoadInt32(&maxInFlight)
+				if curr <= prev || atomic.CompareAndSwapInt32(&maxInFlight, prev, curr) {
+					break
+				}
+			}
+			time.Sleep(40 * time.Millisecond)
+			atomic.AddInt32(&inFlight, -1)
+			return "ok", false, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if maxInFlight < 2 {
+		t.Fatalf("expected parallel execution for read-only tools, max in-flight=%d", maxInFlight)
+	}
+}
+
+func TestSendAgentic_MutatingToolMixStaysSerial(t *testing.T) {
+	turnCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turnCount++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if turnCount == 1 {
+			_, _ = w.Write([]byte(
+				"data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read_file\"}}\n\n" +
+					"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_1\",\"name\":\"read_file\",\"arguments\":\"{}\"}}\n\n" +
+					"data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"bash\"}}\n\n" +
+					"data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"call_id\":\"call_2\",\"name\":\"bash\",\"arguments\":\"{}\"}}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":12,\"output_tokens\":8}}}\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_2\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}}\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	var inFlight int32
+	var maxInFlight int32
+
+	client := NewWithAPIKey("sk-test")
+	_, err := client.SendAgentic(context.Background(), "serial tools", &AgenticOptions{
+		Model: "gpt-5.3-codex",
+		ToolExecutor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, error) {
+			curr := atomic.AddInt32(&inFlight, 1)
+			for {
+				prev := atomic.LoadInt32(&maxInFlight)
+				if curr <= prev || atomic.CompareAndSwapInt32(&maxInFlight, prev, curr) {
+					break
+				}
+			}
+			time.Sleep(40 * time.Millisecond)
+			atomic.AddInt32(&inFlight, -1)
+			return "ok", false, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if maxInFlight != 1 {
+		t.Fatalf("expected serial execution when mutating tool is present, max in-flight=%d", maxInFlight)
 	}
 }
 

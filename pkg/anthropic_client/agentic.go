@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // DefaultCompactionThreshold is the default input token count that triggers compaction.
@@ -290,52 +291,35 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 		// Execute tools and collect results (initialize as empty slice, not nil,
 		// since nil marshals as JSON null and the API requires an array).
-		toolResults := make([]agenticBlock, 0)
+		toolUseBlocks := make([]agenticBlock, 0, len(resp.contentBlocks))
 		for _, block := range resp.contentBlocks {
 			if block.Type != "tool_use" {
 				continue
 			}
-
 			if opts.OnToolUse != nil {
 				opts.OnToolUse(block.Name, block.Input)
 			}
+			toolUseBlocks = append(toolUseBlocks, block)
+		}
 
-			log.Printf("[anthropicclient] executing tool %s", block.Name)
-			output := ""
-			isError := false
-			var err error
-			if opts.ToolFilter != nil && !opts.ToolFilter(block.Name) {
-				isError = true
-				output = fmt.Sprintf("tool %s is not allowed by this agent", block.Name)
-			} else if opts.ToolExecutor != nil {
-				output, isError, err = opts.ToolExecutor(ctx, block.Name, block.Input)
-				if err != nil {
-					isError = true
-					output = err.Error()
-				}
-			} else {
-				output, err = ExecuteTool(ctx, opts.WorkDir, block.Name, block.Input)
-				if err != nil {
-					isError = true
-					output = err.Error()
-				}
-			}
-
+		executed := executeAnthropicToolUses(ctx, opts, toolUseBlocks)
+		toolResults := make([]agenticBlock, 0, len(executed))
+		for _, exec := range executed {
 			if opts.OnToolResult != nil {
-				opts.OnToolResult(block.Name, output, isError)
+				opts.OnToolResult(exec.block.Name, exec.output, exec.isError)
 			}
 
 			result.ToolCalls = append(result.ToolCalls, ToolCall{
-				Name:   block.Name,
-				Output: output,
-				Error:  isError,
+				Name:   exec.block.Name,
+				Output: exec.output,
+				Error:  exec.isError,
 			})
 
 			toolResults = append(toolResults, agenticBlock{
 				Type:      "tool_result",
-				ToolUseID: block.ID,
-				Content:   output,
-				IsError:   isError,
+				ToolUseID: exec.block.ID,
+				Content:   exec.output,
+				IsError:   exec.isError,
 			})
 		}
 
@@ -360,6 +344,83 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
 
 	return result, nil
+}
+
+type anthropicToolExecutionResult struct {
+	block   agenticBlock
+	output  string
+	isError bool
+}
+
+func executeAnthropicToolUses(ctx context.Context, opts *AgenticOptions, blocks []agenticBlock) []anthropicToolExecutionResult {
+	if len(blocks) == 0 {
+		return nil
+	}
+
+	results := make([]anthropicToolExecutionResult, len(blocks))
+	runOne := func(i int) {
+		block := blocks[i]
+		output, isError := runAnthropicToolUse(ctx, opts, block.Name, block.Input)
+		results[i] = anthropicToolExecutionResult{
+			block:   block,
+			output:  output,
+			isError: isError,
+		}
+	}
+
+	if len(blocks) > 1 && allAnthropicToolsReadOnly(blocks) {
+		var wg sync.WaitGroup
+		wg.Add(len(blocks))
+		for i := range blocks {
+			go func(idx int) {
+				defer wg.Done()
+				runOne(idx)
+			}(i)
+		}
+		wg.Wait()
+		return results
+	}
+
+	for i := range blocks {
+		runOne(i)
+	}
+	return results
+}
+
+func runAnthropicToolUse(ctx context.Context, opts *AgenticOptions, name string, input json.RawMessage) (string, bool) {
+	log.Printf("[anthropicclient] executing tool %s", name)
+	output := ""
+	isError := false
+	var err error
+	if opts.ToolFilter != nil && !opts.ToolFilter(name) {
+		isError = true
+		output = fmt.Sprintf("tool %s is not allowed by this agent", name)
+	} else if opts.ToolExecutor != nil {
+		output, isError, err = opts.ToolExecutor(ctx, name, input)
+		if err != nil {
+			isError = true
+			output = err.Error()
+		}
+	} else {
+		output, err = ExecuteTool(ctx, opts.WorkDir, name, input)
+		if err != nil {
+			isError = true
+			output = err.Error()
+		}
+	}
+	return output, isError
+}
+
+func allAnthropicToolsReadOnly(blocks []agenticBlock) bool {
+	for _, block := range blocks {
+		switch block.Name {
+		case "read_file", "list_files", "grep_search":
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // turnResult holds the parsed result of a single API turn.
