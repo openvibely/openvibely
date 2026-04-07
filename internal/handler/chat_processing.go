@@ -261,13 +261,16 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 	}
 
-	// Broadcast response done for chat messages (not task followups)
+	// Broadcast response done for chat messages (not task followups).
+	// Include completed output so chat_response_done SSE fallback can evaluate
+	// plan-completion prompt visibility without a DOM scan.
 	if !params.IsTaskFollowup && h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
-			Type:      events.ChatResponseDone,
-			ProjectID: params.ProjectID,
-			ExecID:    params.ExecID,
-			TaskID:    params.TaskID,
+			Type:            events.ChatResponseDone,
+			ProjectID:       params.ProjectID,
+			ExecID:          params.ExecID,
+			TaskID:          params.TaskID,
+			CompletedOutput: output,
 		})
 	}
 }

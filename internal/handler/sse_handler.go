@@ -10,82 +10,96 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 )
 
-// TaskEventsSSE handles Server-Sent Events for real-time task updates
-func (h *Handler) TaskEventsSSE(c echo.Context) error {
-	// Subscribe to task events (with limit check)
-	sub, err := h.broadcaster.Subscribe()
-	if err == events.ErrMaxSubscribers {
-		log.Printf("[sse] subscriber limit reached (%d), rejecting connection", events.MaxSubscribers)
-		return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
-	}
+func writeSSEEvent(w http.ResponseWriter, eventType string, payload any) error {
+	data, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("[sse] subscribe error: %v", err)
-		return c.String(http.StatusInternalServerError, "SSE subscribe failed")
-	}
-	defer h.broadcaster.Unsubscribe(sub)
-
-	// Set headers for SSE
-	c.Response().Header().Set("Content-Type", "text/event-stream")
-	c.Response().Header().Set("Cache-Control", "no-cache")
-	c.Response().Header().Set("Connection", "keep-alive")
-	c.Response().Header().Set("X-Accel-Buffering", "no") // Disable nginx buffering
-
-	log.Printf("[sse] client connected, total subscribers: %d", h.broadcaster.SubscriberCount())
-
-	// Send initial ping to establish connection
-	if _, err := fmt.Fprint(c.Response(), ": ping\n\n"); err != nil {
-		log.Printf("[sse] error sending initial ping: %v", err)
 		return err
 	}
-	c.Response().Flush()
-
-	// Listen for events and client disconnect
-	ctx := c.Request().Context()
-	for {
-		select {
-		case <-ctx.Done():
-			// Client disconnected
-			log.Printf("[sse] client disconnected, remaining subscribers: %d", h.broadcaster.SubscriberCount())
-			return nil
-
-		case event := <-sub:
-			// Send event to client
-			if _, err := fmt.Fprint(c.Response(), event.ToSSE()); err != nil {
-				log.Printf("[sse] error sending event: %v", err)
-				return err
-			}
-			c.Response().Flush()
-			log.Printf("[sse] sent event: type=%s task=%s", event.Type, event.TaskID)
+	if eventType != "" {
+		if _, err := fmt.Fprintf(w, "event: %s\n", eventType); err != nil {
+			return err
 		}
 	}
+	_, err = fmt.Fprintf(w, "data: %s\n\n", string(data))
+	return err
 }
 
-// ChatLiveSSE handles Server-Sent Events for real-time chat updates.
-// Clients filter by project_id query param to receive only relevant chat events.
-func (h *Handler) ChatLiveSSE(c echo.Context) error {
-	if h.chatBroadcaster == nil {
-		return c.String(http.StatusServiceUnavailable, "Chat live updates not available")
-	}
-
+// LiveEventsSSE handles a single multiplexed SSE stream for task, chat, and file-change events.
+// Optional filters:
+// - project_id: limits task/chat events to one project
+// - task_id: limits file-change events to one task
+func (h *Handler) LiveEventsSSE(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
+	taskID := c.QueryParam("task_id")
 
-	sub, err := h.chatBroadcaster.Subscribe()
-	if err == events.ErrMaxSubscribers {
-		log.Printf("[sse-chat] subscriber limit reached, rejecting connection")
-		return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
+	var taskSub events.Subscriber
+	var taskCount int
+	if h.broadcaster != nil {
+		sub, err := h.broadcaster.Subscribe()
+		if err == events.ErrMaxSubscribers {
+			log.Printf("[sse-live] task subscriber limit reached, rejecting connection")
+			return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
+		}
+		if err != nil {
+			log.Printf("[sse-live] task subscribe error: %v", err)
+			return c.String(http.StatusInternalServerError, "SSE subscribe failed")
+		}
+		taskSub = sub
+		taskCount = h.broadcaster.SubscriberCount()
+		defer h.broadcaster.Unsubscribe(taskSub)
 	}
-	if err != nil {
-		log.Printf("[sse-chat] subscribe error: %v", err)
-		return c.String(http.StatusInternalServerError, "SSE subscribe failed")
+
+	var chatSub events.ChatSubscriber
+	var chatCount int
+	if h.chatBroadcaster != nil {
+		sub, err := h.chatBroadcaster.Subscribe()
+		if err == events.ErrMaxSubscribers {
+			log.Printf("[sse-live] chat subscriber limit reached, rejecting connection")
+			return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
+		}
+		if err != nil {
+			log.Printf("[sse-live] chat subscribe error: %v", err)
+			return c.String(http.StatusInternalServerError, "SSE subscribe failed")
+		}
+		chatSub = sub
+		chatCount = h.chatBroadcaster.SubscriberCount()
+		defer h.chatBroadcaster.Unsubscribe(chatSub)
 	}
-	defer h.chatBroadcaster.Unsubscribe(sub)
+
+	var fileSub events.FileChangeSubscriber
+	var fileCount int
+	if h.fileChangeBroadcaster != nil {
+		sub, err := h.fileChangeBroadcaster.Subscribe()
+		if err == events.ErrMaxSubscribers {
+			log.Printf("[sse-live] file subscriber limit reached, rejecting connection")
+			return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
+		}
+		if err != nil {
+			log.Printf("[sse-live] file subscribe error: %v", err)
+			return c.String(http.StatusInternalServerError, "SSE subscribe failed")
+		}
+		fileSub = sub
+		fileCount = h.fileChangeBroadcaster.SubscriberCount()
+		defer h.fileChangeBroadcaster.Unsubscribe(fileSub)
+	}
+
+	if taskSub == nil && chatSub == nil && fileSub == nil {
+		return c.String(http.StatusServiceUnavailable, "Live updates not available")
+	}
 
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().Header().Set("X-Accel-Buffering", "no")
 
-	log.Printf("[sse-chat] client connected project=%s, total subscribers: %d", projectID, h.chatBroadcaster.SubscriberCount())
+	log.Printf(
+		"[sse-live] client connected project=%s task=%s subscribers(tasks=%d chat=%d files=%d)",
+		projectID,
+		taskID,
+		taskCount,
+		chatCount,
+		fileCount,
+	)
 
 	if _, err := fmt.Fprint(c.Response(), ": ping\n\n"); err != nil {
 		return err
@@ -96,81 +110,35 @@ func (h *Handler) ChatLiveSSE(c echo.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[sse-chat] client disconnected project=%s", projectID)
+			log.Printf("[sse-live] client disconnected project=%s task=%s", projectID, taskID)
 			return nil
-
-		case event := <-sub:
-			// Filter by project if specified
+		case event := <-taskSub:
 			if projectID != "" && event.ProjectID != projectID {
 				continue
 			}
-
-			data, _ := json.Marshal(event)
-			if _, err := fmt.Fprintf(c.Response(), "event: %s\ndata: %s\n\n", event.Type, string(data)); err != nil {
-				log.Printf("[sse-chat] error sending event: %v", err)
+			if err := writeSSEEvent(c.Response(), string(event.Type), event); err != nil {
+				log.Printf("[sse-live] error sending task event: %v", err)
 				return err
 			}
 			c.Response().Flush()
-			log.Printf("[sse-chat] sent event: type=%s exec=%s project=%s", event.Type, event.ExecID, event.ProjectID)
-		}
-	}
-}
-
-// FileChangesSSE handles Server-Sent Events for real-time file change updates during task execution.
-// Clients filter by task_id query param to receive only file changes for that specific task.
-func (h *Handler) FileChangesSSE(c echo.Context) error {
-	if h.fileChangeBroadcaster == nil {
-		return c.String(http.StatusServiceUnavailable, "File change updates not available")
-	}
-
-	taskID := c.QueryParam("task_id")
-	if taskID == "" {
-		return c.String(http.StatusBadRequest, "task_id required")
-	}
-
-	sub, err := h.fileChangeBroadcaster.Subscribe()
-	if err == events.ErrMaxSubscribers {
-		log.Printf("[sse-files] subscriber limit reached, rejecting connection")
-		return c.String(http.StatusServiceUnavailable, "Too many SSE connections")
-	}
-	if err != nil {
-		log.Printf("[sse-files] subscribe error: %v", err)
-		return c.String(http.StatusInternalServerError, "SSE subscribe failed")
-	}
-	defer h.fileChangeBroadcaster.Unsubscribe(sub)
-
-	c.Response().Header().Set("Content-Type", "text/event-stream")
-	c.Response().Header().Set("Cache-Control", "no-cache")
-	c.Response().Header().Set("Connection", "keep-alive")
-	c.Response().Header().Set("X-Accel-Buffering", "no")
-
-	log.Printf("[sse-files] client connected task=%s, total subscribers: %d", taskID, h.fileChangeBroadcaster.SubscriberCount())
-
-	if _, err := fmt.Fprint(c.Response(), ": ping\n\n"); err != nil {
-		return err
-	}
-	c.Response().Flush()
-
-	ctx := c.Request().Context()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Printf("[sse-files] client disconnected task=%s", taskID)
-			return nil
-
-		case event := <-sub:
-			// Filter by task ID
-			if event.TaskID != taskID {
+		case event := <-chatSub:
+			if projectID != "" && event.ProjectID != projectID {
 				continue
 			}
-
-			data, _ := json.Marshal(event)
-			if _, err := fmt.Fprintf(c.Response(), "event: %s\ndata: %s\n\n", event.Type, string(data)); err != nil {
-				log.Printf("[sse-files] error sending event: %v", err)
+			if err := writeSSEEvent(c.Response(), string(event.Type), event); err != nil {
+				log.Printf("[sse-live] error sending chat event: %v", err)
 				return err
 			}
 			c.Response().Flush()
-			log.Printf("[sse-files] sent event: type=%s task=%s file=%s", event.Type, event.TaskID, event.FilePath)
+		case event := <-fileSub:
+			if taskID != "" && event.TaskID != taskID {
+				continue
+			}
+			if err := writeSSEEvent(c.Response(), string(event.Type), event); err != nil {
+				log.Printf("[sse-live] error sending file event: %v", err)
+				return err
+			}
+			c.Response().Flush()
 		}
 	}
 }

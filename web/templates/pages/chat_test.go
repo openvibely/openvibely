@@ -87,3 +87,45 @@ func TestChatContent_PlanPromptButtonsUseDelegatedHandlers(t *testing.T) {
 		t.Error("expected delegated click listener for plan prompt buttons")
 	}
 }
+
+func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
+	// The createStreamingBubble error/onerror handlers in chat.templ must
+	// clear _chatStreamInProgress and re-evaluate plan prompt so the flag
+	// doesn't stay stuck after streaming failures.
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+
+	content := buf.String()
+
+	// Find the createStreamingBubble function's error handler
+	errIdx := strings.Index(content, "eventSource.addEventListener('error', function(event) {")
+	if errIdx == -1 {
+		t.Fatal("expected error event listener in createStreamingBubble")
+	}
+	// The first occurrence is inside createStreamingBubble in chat.templ
+	errBody := content[errIdx : errIdx+600]
+	if !strings.Contains(errBody, "_chatStreamInProgress = false") {
+		t.Error("error handler in createStreamingBubble must clear _chatStreamInProgress")
+	}
+	if !strings.Contains(errBody, "evaluatePlanCompletionPrompt") {
+		t.Error("error handler in createStreamingBubble must re-evaluate plan prompt")
+	}
+
+	// Also check onerror handler
+	oeIdx := strings.Index(content, "eventSource.onerror = function() {")
+	if oeIdx == -1 {
+		t.Fatal("expected onerror handler in createStreamingBubble")
+	}
+	oeBody := content[oeIdx : oeIdx+400]
+	if !strings.Contains(oeBody, "_chatStreamInProgress = false") {
+		t.Error("onerror handler in createStreamingBubble must clear _chatStreamInProgress")
+	}
+	if !strings.Contains(oeBody, "evaluatePlanCompletionPrompt") {
+		t.Error("onerror handler in createStreamingBubble must re-evaluate plan prompt")
+	}
+}

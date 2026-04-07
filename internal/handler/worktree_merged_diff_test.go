@@ -4,6 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -91,7 +95,7 @@ index abc123..def456 100644
 
 	// Verify task was created with worktree info
 	t.Logf("Created task ID: %s, WorktreeBranch: %s, MergeStatus: %s", task.ID, task.WorktreeBranch, task.MergeStatus)
-	
+
 	// Fetch task again to verify it was saved correctly
 	fetchedTask, err := taskRepo.GetByID(ctx, task.ID)
 	if err != nil {
@@ -260,10 +264,118 @@ func TestHandler_GetTaskChanges_UnmergedTaskShowsLiveDiff(t *testing.T) {
 	}
 }
 
+// TestHandler_GetTaskChanges_PendingMergeStatusButMergedBranchShowsPreservedDiff verifies
+// stale merge_status records do not hide changes after a successful manual merge.
+func TestHandler_GetTaskChanges_PendingMergeStatusButMergedBranchShowsPreservedDiff(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+
+	repoDir := createHandlerTestGitRepo(t)
+	mainBranch := gitCurrentBranch(t, repoDir)
+	taskBranch := "task/stale-merge-status"
+
+	runGit(t, repoDir, "checkout", "-b", taskBranch)
+	testFile := filepath.Join(repoDir, "merged_file.txt")
+	if err := os.WriteFile(testFile, []byte("new content from merged branch\n"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGit(t, repoDir, "add", "merged_file.txt")
+	runGit(t, repoDir, "commit", "-m", "task branch change")
+	runGit(t, repoDir, "checkout", mainBranch)
+	runGit(t, repoDir, "merge", "--no-ff", "-m", "merge task branch", taskBranch)
+
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{
+		Name:     "Merged Branch Project",
+		RepoPath: repoDir,
+	}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	agents, _ := llmConfigRepo.List(ctx)
+	var agentID string
+	if len(agents) > 0 {
+		agentID = agents[0].ID
+	}
+
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Stale merge status task",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		WorktreePath:      t.TempDir(),
+		WorktreeBranch:    taskBranch,
+		MergeTargetBranch: mainBranch,
+		MergeStatus:       models.MergeStatusPending, // stale status despite merged branch
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	exec := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agentID,
+		Status:        models.ExecCompleted,
+		PromptSent:    "stale merge status regression",
+	}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+
+	preservedDiff := "diff --git a/merged_file.txt b/merged_file.txt\n+new content from merged branch"
+	if err := execRepo.UpdateDiffOutput(ctx, exec.ID, preservedDiff); err != nil {
+		t.Fatalf("update diff output: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.GetTaskChanges(c); err != nil {
+		t.Fatalf("GetTaskChanges failed: %v", err)
+	}
+
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, body)
+	}
+	if !containsString(body, "new content from merged branch") {
+		t.Fatalf("expected preserved diff content in response body, got: %s", body)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func gitCurrentBranch(t *testing.T, dir string) string {
+	t.Helper()
+	branch := runGit(t, dir, "branch", "--show-current")
+	if branch == "" {
+		t.Fatal("expected non-empty current branch")
+	}
+	return branch
+}
+
 // Helper to check if a string contains a substring
 func containsString(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && len(s) >= len(substr) && 
-		   (s == substr || findSubstring(s, substr))
+	return len(s) > 0 && len(substr) > 0 && len(s) >= len(substr) &&
+		(s == substr || findSubstring(s, substr))
 }
 
 func findSubstring(s, substr string) bool {

@@ -456,10 +456,19 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 					if targetBranch == "" {
 						targetBranch = service.GetDefaultBranch(project.RepoPath)
 					}
+					var diffOutput string
 					if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
-						return service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
+						diffOutput = service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
+					} else {
+						diffOutput = service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
 					}
-					return service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
+					if strings.TrimSpace(diffOutput) == "" &&
+						task.Status != models.StatusRunning &&
+						task.Status != models.StatusQueued &&
+						service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch) {
+						return latestNonEmptyDiff(executions)
+					}
+					return diffOutput
 				}
 			}
 		}
@@ -502,24 +511,9 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 
 		// If merged, always show preserved diff from execution (live diff would be empty)
 		if task.MergeStatus == models.MergeStatusMerged {
-			// Find the execution with the diff
-			var diffOutput string
-			var fileStats []service.WorktreeFileStat
-			for i := len(executions) - 1; i >= 0; i-- {
-				if executions[i].DiffOutput != "" {
-					diffOutput = executions[i].DiffOutput
-					// Parse file stats from preserved diff
-					project, _ := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
-					if project != nil && project.RepoPath != "" {
-						// Try to get file stats from the preserved diff
-						// This requires parsing the diff, but we can fall back to empty stats
-						// For now, leave file stats empty as the diff viewer will show the full diff
-					}
-					break
-				}
-			}
+			diffOutput := latestNonEmptyDiff(executions)
 			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-				diffOutput, task, fileStats, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(),
+				diffOutput, task, nil, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(),
 			))
 		}
 
@@ -540,6 +534,15 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 						diffOutput = service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
 					}
 					fileStats := service.GetWorktreeFileStats(project.RepoPath, task.WorktreeBranch, targetBranch)
+					if strings.TrimSpace(diffOutput) == "" &&
+						task.Status != models.StatusRunning &&
+						task.Status != models.StatusQueued &&
+						service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch) {
+						if preservedDiff := latestNonEmptyDiff(executions); preservedDiff != "" {
+							diffOutput = preservedDiff
+							fileStats = nil
+						}
+					}
 
 					return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
 						diffOutput, task, fileStats, reviewComments, taskPR, h.isTaskChangesMergeOptionsEnabled(),

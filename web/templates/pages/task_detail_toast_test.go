@@ -80,10 +80,10 @@ func TestTaskDetailView_ToastDedupKey(t *testing.T) {
 		expected string
 	}{
 		{
-			message:  "Successfully merged to main",
+			message:  "Merged locally into main",
 			toastType: "success",
 			taskId:   "task123",
-			expected: "Successfully merged to main|success|task123",
+			expected: "Merged locally into main|success|task123",
 		},
 		{
 			message:  "Merge failed",

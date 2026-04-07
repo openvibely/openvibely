@@ -2915,6 +2915,45 @@ func TestHandler_GetTaskThread(t *testing.T) {
 	assertContains(t, rec, "task-thread-form")
 }
 
+func TestHandler_GetTaskThread_DoesNotPollWhenPending(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	project := createProject(t, h, "Pending Thread Polling Project")
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
+	task := createTask(t, h, project.ID, "Pending Task", func(tk *models.Task) {
+		tk.Status = models.StatusPending
+		tk.Category = models.CategoryActive
+		tk.Prompt = "Pending prompt"
+		tk.AgentID = &agent.ID
+	})
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `id="task-thread-view"`)
+	assert.NotContains(t, body, `hx-trigger="every 3s"`)
+}
+
+func TestHandler_GetTaskThread_PollsWhenQueued(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	project := createProject(t, h, "Queued Thread Polling Project")
+	agent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Temperature = 1.0 })
+	task := createTask(t, h, project.ID, "Queued Task", func(tk *models.Task) {
+		tk.Status = models.StatusQueued
+		tk.Category = models.CategoryActive
+		tk.Prompt = "Queued prompt"
+		tk.AgentID = &agent.ID
+	})
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `id="task-thread-view"`)
+	assert.Contains(t, body, `hx-trigger="every 3s"`)
+	assert.Contains(t, body, `hx-get="/tasks/`+task.ID+`/thread"`)
+}
+
 func TestHandler_GetTaskThread_RunningPlaceholder_NoLiteralThinkingText(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -2966,6 +3005,8 @@ func TestHandler_GetTaskThread_RunningWithPartialOutput_ShowsStreamingDots(t *te
 
 	assert.Contains(t, body, "task-thread-view")
 	assert.Contains(t, body, "streaming-dots-resume-"+exec.ID)
+	assert.Contains(t, body, `id="streaming-dots-resume-`+exec.ID+`" class="flex items-center gap-1 mt-2 opacity-40"`)
+	assert.NotContains(t, body, `id="streaming-dots-resume-`+exec.ID+`" class="hidden`)
 	assert.Contains(t, body, "ov-loading-dots ov-loading-dots-xs")
 	assert.GreaterOrEqual(t, strings.Count(body, `class="ov-loading-dot"`), 3)
 	assert.NotContains(t, body, "Thinking...")

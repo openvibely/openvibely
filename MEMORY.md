@@ -79,6 +79,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - **Integration**: `LLMService.ExecuteTaskWithAgent` creates worktree before execution, runs startup sync from latest `main`/default branch when the worktree is clean, and handles post-execution merge
 - **Startup sync safety**: Startup sync uses `git status --porcelain` guard (skip when dirty), logs explicit ran/skipped/failed outcomes, and aborts on merge conflicts (`git merge --abort`) while marking task `merge_status=conflict`
 - **Diff view**: Changes tab shows worktree branch diff when available (vs target branch), falls back to execution diff
+- **Merged-branch stale-status fallback**: Changes-tab handlers now fall back to preserved execution diff when live worktree diff is empty and the task branch is already merged into target, even if `tasks.merge_status` is still stale (`pending`) before cleanup updates run
 - **Scheduler integration**: `SchedulerService` runs cleanup scan every 5 minutes when worktree service is configured
 
 ## Git Lineage for Chained Tasks
@@ -119,6 +120,9 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - **Incremental thread clean pass**: `cleanAssistantMessages` now uses content signatures (`cleanedRaw`, `cleanedText`) to skip unchanged assistant bubbles during thread polling morph updates. This avoids repeatedly re-rendering old thread messages on every 3s poll and reduces main-thread stalls that delayed sidebar navigation from `/tasks` Thread tab.
 - **Thread state cleanup on nav**: `htmx:beforeSwap` for `main-content` resets `_taskThreadStreamingActive`, destroys `_taskThreadPageTracker`, closes `_threadEventSources` SSE connections, and clears saved input/scroll state.
 - **EventSource tracking**: Thread streaming SSE connections stored in `window._threadEventSources` array for cleanup on navigation.
+- **Thread draft persistence**: task-thread textarea drafts are keyed by task ID (`window._taskThreadDrafts`) and restored after `morph:outerHTML` swaps so unsent follow-up text does not disappear while polling/refresh updates run.
+- **Thread polling scope**: `task-thread-view` polling is now limited to `running` and `queued` task statuses (not `pending`) to avoid idle morph swaps replacing the input while users draft follow-up messages.
+- **Thread EventSource lifecycle**: thread stream EventSources are now both tracked and unregistered on close (`done`/`error`/`onerror`) so navigation cleanup can close only active streams and avoid lingering connections.
 
 ## Theme Toggle Responsiveness
 
@@ -141,11 +145,12 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 
 ## Real-Time Updates
 
-- **Task Events SSE** (`/events/tasks`) — task status/category changes
-- **Chat Live SSE** (`/events/chat/live`) — new chat messages and responses. Frontend reconnects via `onopen` after tab visibility changes and refreshes chat view to catch missed events, preserving the current `project_id` from the chat root container's `data-project-id` attribute. All chat refresh/swap targets are scoped to `#chat-page-root` (never generic `[data-project-id]`) so reconnects cannot inject chat content into non-chat pages like `/tasks` or `/workers`. `chat_response_done` handler also triggers refresh for unknown exec IDs as a safety net. Chat scripts also unregister `chat-live` when `#main-content` swaps to a non-chat page.
-- **File Changes SSE** (`/events/filechanges?task_id=X`) — real-time diff snapshots during task execution (every 2s)
-- **Chat Stream SSE** (`/events/chat/:exec_id`) — streaming LLM responses
-- All SSE endpoints limit to 50 concurrent subscribers; use project/task filtering
+- **Shared Live SSE** (`/events/live`) — multiplexed task/chat/file-change events on one stream (`task_status_changed`, `task_category_changed`, `alert_created`, `chat_new_message`, `chat_response_done`, `file_modified`, `file_deleted`, `diff_snapshot`). Sidebar owns this single per-tab stream and dispatches browser custom events (`sse-task-event`, `sse-chat-live-event`, `sse-file-change-event`, `sse-live-connected`) for page-specific consumers.
+- **Chat page live updates** now consume shared `sse-chat-live-event` + `sse-live-connected` events (no dedicated `/events/chat/live` connection in the page script). Reconnect refresh remains scoped to `#chat-page-root` with `project_id` preserved.
+- **Task detail Changes tab** now consumes shared `sse-file-change-event` events with task-id filtering in-page (no dedicated `/events/filechanges` EventSource in task-detail script).
+- **Chat Stream SSE** (`/events/chat/:exec_id`) remains per-execution for token streaming.
+- Legacy dedicated endpoints (`/events/tasks`, `/events/chat/live`, `/events/filechanges`) were removed; shared live updates now route through `/events/live`.
+- All SSE broadcasters still enforce `MaxSubscribers` limits.
 
 ## GitHub Integration
 
@@ -159,6 +164,8 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - Project create/edit GitHub clone failures now return HTMX toast guardrails (`openvibelyToast`) instead of swapping raw error payloads; New Project modal submits with `hx-post` + `hx-swap="none"` and successful HTMX creates navigate via `HX-Redirect`.
 - Task Changes tab supports one-click PR creation (`POST /tasks/:taskId/worktree/pull-request`) with one PR per task persisted in `task_pull_requests`; if a task PR record already exists it is reused, otherwise existing remote branch PRs are detected/reused before creating a new ready PR.
 - Task Changes tab merge dropdown visibility is feature-flagged by `OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS` (default off). When disabled, merge actions are hidden in Changes tab and Changes-tab-triggered merge posts are blocked server-side (`merge_source=changes_tab`) with `403`.
+- Task Changes tab and WorktreeInfoPanel merge dropdowns use section-grouped menus: `Local` section (merge commit, fast-forward only, squash merge) and `GitHub` section (Create PR / View PR #N). This removes ambiguity between local and remote actions. The Changes tab uses a single "Actions" dropdown combining both sections; the WorktreeInfoPanel keeps the "Merge to <branch>" dropdown with a `Local` section header.
+- Toast messages for merge/PR actions are destination-prefixed: "Merged locally into <branch>", "GitHub PR created (#N)", "GitHub PR already exists (#N)".
 
 ## Chat System
 
@@ -179,9 +186,10 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - Legacy marker parser helpers remain in code for compatibility/tests, but chat runtime should not depend on assistant-emitted marker blocks
 - `/chat` now shows a post-plan handoff prompt when a completed assistant response contains `<proposed_plan>` while in plan mode; clicking `Switch to Orchestrate` flips mode and auto-submits a single-task handoff message (`create one active task for the first plan step`, do not start other existing tasks)
 - Plan-mode system prompt guidance is prose-first (discourages default numbered outlines) while still requiring a single `<proposed_plan>...</proposed_plan>` output block
-- `/chat` now re-evaluates latest assistant history on initial render/HTMX swaps and re-shows the plan-complete handoff prompt in plan mode after refresh (no longer stream-event-only)
-- `/chat` plan mode now suppresses read-only repo exploration tool cards (`read_file`, `list_files`, `grep_search`) in assistant bubble rendering so the proposed plan remains the primary visible content
-- Plan-mode tool-card suppression now skips persisted history bubbles (assistant containers with `data-raw-content` and no `data-exec-id`) so hard refresh preserves prior tool-call history rendering; suppression remains active for live/streaming plan turns
+- `/chat` plan-completion prompt uses a centralized evaluator (`evaluatePlanCompletionPrompt`) called from all completion paths: per-exec stream `done`, `chat_response_done` live SSE fallback, stream error/onerror, and initial hydration/HTMX swap. Prompt visibility requires all three: stream completed (`_chatStreamInProgress` false), mode is `plan`, and latest completed assistant response contains `<proposed_plan>`. A `_chatStreamInProgress` flag tracks active streaming and is set on send/new-message, cleared on done/error. The evaluator checks only the latest completed assistant bubble (newest-first scan, returns on first non-empty match) — older messages with plan markers do not trigger the prompt. `ChatResponseDone` events include `CompletedOutput`, and the handler now also reconciles the active assistant bubble with that completed output before prompt evaluation so final stream tails render immediately without refresh. Reconnect refresh skips full `/chat` outerHTML swaps while an active stream bubble is present to avoid replacing live content with partial persisted state.
+- `/chat` mode-selector hydration (hidden input + localStorage restore) now re-evaluates `evaluatePlanCompletionPrompt` after restoring persisted mode and on mode changes. This prevents blur/focus reconnect HTMX refreshes from leaving `Switch to Orchestrate` hidden when durable latest assistant state still contains `<proposed_plan>`.
+- `/chat` plan mode keeps read-only repo exploration tool cards (`read_file`, `list_files`, `grep_search`) visible in assistant bubble rendering so planning steps remain inspectable during live/streaming turns and on refresh
+- Chat streaming render paths now batch per-chunk tool/text rendering with `requestAnimationFrame` (plus a final forced flush on `done`) to keep plan-mode tool-heavy streams responsive and avoid “updates only after tab refocus” behavior
 - Runtime `execute_tasks` filtering now excludes completed tasks/statuses by default; re-running completed tasks requires explicit `include_completed=true`
 - Runtime `execute_tasks` also supports exact single-task targeting by `task_id` or `title`; use exact targeting for specific-task requests instead of broad tag/priority filters
 - Chat uses `callClaudeCLIChat` (clean prompt + history); tasks use `callClaudeCLI` (directives + STATUS markers)
@@ -190,6 +198,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - Chat uploads live under `uploads/chat/...`; task attachments may exist under legacy `uploads/{taskID}` paths and newer chat-copy paths under `uploads/tasks/{taskID}`. Task-attachment cleanup must skip the `uploads/chat` subtree entirely; chat attachments are cleaned separately by `ChatAttachmentRepo`
 - Runtime artifact directories (`uploads/`, managed `repos/`, and any package-local test spillover like `internal/service/uploads/`) are treated as non-source data and should remain ignored/untracked in git.
 - Chat/thread running placeholders now use shared custom loader markup (`ov-loading-dots` + `ov-loading-dot`) instead of DaisyUI `loading loading-dots`, with bouncing motion and token-driven color animation tied to the same primary theme color used by `btn-primary` send buttons (`oklch(var(--p))` / softened `oklch(var(--p) / 0.45)`) in `web/templates/layout/base.templ`.
+- Chat streaming resume dots stay visible for running executions with partial output: `streaming-dots-resume` must use `hidden` only when `partialContent == ""`. Using Tailwind `!hidden` in that slot hides dots with `!important` and breaks the gray in-progress phase after refresh/reconnect.
 
 ## OAuth
 

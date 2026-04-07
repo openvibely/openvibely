@@ -648,12 +648,13 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 
 	if s.chatBroadcaster != nil {
 		s.chatBroadcaster.Publish(events.ChatEvent{
-			Type:      events.ChatResponseDone,
-			ProjectID: projectID,
-			ExecID:    exec.ID,
-			TaskID:    task.ID,
-			Source:    msg.Source,
-			AgentName: agent.Name,
+			Type:            events.ChatResponseDone,
+			ProjectID:       projectID,
+			ExecID:          exec.ID,
+			TaskID:          task.ID,
+			Source:          msg.Source,
+			AgentName:       agent.Name,
+			CompletedOutput: output,
 		})
 	}
 

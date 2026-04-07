@@ -873,11 +873,11 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 				}
 				}
 
-				// File changes SSE connection
-				var _fileChangesEventSource = null;
+				// File changes are consumed from the shared sidebar live stream.
+				// Keep per-task filtering in-page to avoid creating another EventSource.
+				var _fileChangesListening = false;
 				var _fileChangesUpdatePending = false;
 				var _fileChangesTaskId = null;
-				var _fileChangesStopped = false;
 
 				function _isChangesTabActive() {
 					var changesTab = document.querySelector('[data-tab="changes"]');
@@ -886,56 +886,31 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 					return !!changesPanel && !changesPanel.classList.contains('hidden');
 				}
 
+			function _handleSharedFileChangeEvent(event) {
+				if (!_fileChangesListening || !_fileChangesTaskId) return;
+				var data = event.detail || {};
+				if (!data.task_id || data.task_id !== _fileChangesTaskId) return;
+
+				if (data.type === 'diff_snapshot') {
+					_updateDiffViewer(data.diff_output || '');
+					return;
+				}
+				if (data.type === 'file_modified') {
+					console.log('File modified:', data.file_path, 'via', data.tool_name);
+				}
+			}
+
 			function _startFileChangesSSE(taskId) {
 				if (!taskId) return;
-				if (_fileChangesEventSource) {
-					if (_fileChangesTaskId === taskId) {
-						return;
-					}
-					_stopFileChangesSSE();
-				}
-				_fileChangesStopped = false;
+				if (_fileChangesListening && _fileChangesTaskId === taskId) return;
 				_fileChangesTaskId = taskId;
-
-				var url = '/events/filechanges?task_id=' + encodeURIComponent(taskId);
-				_fileChangesEventSource = new EventSource(url);
-
-				_fileChangesEventSource.addEventListener('diff_snapshot', function(e) {
-					try {
-						var data = JSON.parse(e.data);
-						_updateDiffViewer(data.diff_output);
-					} catch (err) {
-						console.error('Failed to parse file change event:', err);
-					}
-				});
-
-				_fileChangesEventSource.addEventListener('file_modified', function(e) {
-					try {
-						var data = JSON.parse(e.data);
-						console.log('File modified:', data.file_path, 'via', data.tool_name);
-					} catch (err) {
-						console.error('Failed to parse file modified event:', err);
-					}
-				});
-
-				_fileChangesEventSource.onerror = function() {
-					// EventSource auto-reconnects on transient errors.
-					// Only fully close if we explicitly stopped.
-					if (_fileChangesStopped) {
-						_stopFileChangesSSE();
-					}
-				};
-
-				console.log('File changes SSE connected for task:', taskId);
+				_fileChangesListening = true;
+				console.log('File changes live listener active for task:', taskId);
 			}
 
 			function _stopFileChangesSSE() {
-				_fileChangesStopped = true;
-				if (_fileChangesEventSource) {
-					_fileChangesEventSource.close();
-					_fileChangesEventSource = null;
-					console.log('File changes SSE stopped');
-				}
+				_fileChangesListening = false;
+				console.log('File changes live listener paused');
 			}
 
 				// Track the last diff fingerprint to skip no-op DOM replacements.
@@ -1049,7 +1024,12 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 					if (window._taskDetailFileChangesHandlers.beforeRequest) {
 						document.body.removeEventListener('htmx:beforeRequest', window._taskDetailFileChangesHandlers.beforeRequest);
 					}
+					if (window._taskDetailFileChangesHandlers.fileChangeEvent) {
+						window.removeEventListener('sse-file-change-event', window._taskDetailFileChangesHandlers.fileChangeEvent);
+					}
 				}
+
+				var _taskDetailFileChangeEventHandler = _handleSharedFileChangeEvent;
 
 				var _taskDetailBeforeUnloadHandler = function() {
 					_stopFileChangesSSE();
@@ -1060,6 +1040,7 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 					if (!target) return;
 					if (target.id === 'main-content' || target.id === 'task-detail-content') {
 						_stopFileChangesSSE();
+						window.removeEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
 					}
 				};
 
@@ -1104,13 +1085,15 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 					beforeUnload: _taskDetailBeforeUnloadHandler,
 					beforeSwap: _taskDetailBeforeSwapHandler,
 					beforeRequest: _taskDetailBeforeRequestHandler,
-					afterSettle: _taskDetailAfterSettleHandler
+					afterSettle: _taskDetailAfterSettleHandler,
+					fileChangeEvent: _taskDetailFileChangeEventHandler
 				};
 
 				window.addEventListener('beforeunload', _taskDetailBeforeUnloadHandler);
 				document.body.addEventListener('htmx:beforeSwap', _taskDetailBeforeSwapHandler);
 				document.body.addEventListener('htmx:beforeRequest', _taskDetailBeforeRequestHandler);
 				document.addEventListener('htmx:afterSettle', _taskDetailAfterSettleHandler);
+				window.addEventListener('sse-file-change-event', _taskDetailFileChangeEventHandler);
 
 			function copyToClipboard(elementId, button) {
 				var element = document.getElementById(elementId);

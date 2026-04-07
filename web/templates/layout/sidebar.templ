@@ -163,26 +163,23 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				})();
 
 				// Setup Server-Sent Events for real-time alert badge updates and toast notifications
-				// Uses the global TabVisibilityManager to auto-pause when tab is hidden
+				// Uses one shared live stream (tasks + chat + file changes) per tab.
 				(function() {
 					const projectSelector = document.getElementById('project-selector');
+					let liveSSEHasConnected = false;
 
-					window._sidebarSSE = window._tabVisibility.registerSSE('sidebar-tasks', '/events/tasks', {
-						onopen: function() {
-							console.log('[SSE-Alerts] Connected to task events');
-						},
-						onerror: function(err) {
-							console.error('[SSE-Alerts] Connection error:', err);
-						},
-						onmessage: function(event) {
-							try {
-								const data = JSON.parse(event.data);
+					function handleLiveEvent(event) {
+						try {
+							const data = JSON.parse(event.data);
+							const eventType = data.type || event.type;
+							if (!eventType) return;
 
-								// Dispatch to any page listeners (tasks page, etc.)
+							if (eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'alert_created') {
+								// Dispatch to task-oriented page listeners.
 								window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
 
-								// Only refresh alert badge if this is an alert_created event for the current project
-								if (data.type === 'alert_created' && projectSelector) {
+								// Only refresh alert badge if this is an alert_created event for the current project.
+								if (eventType === 'alert_created' && projectSelector) {
 									const currentProjectID = projectSelector.value;
 									if (data.project_id === currentProjectID) {
 										console.log('[SSE-Alerts] Alert created, refreshing badge');
@@ -190,9 +187,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									}
 								}
 
-								// Show toast notifications for task completion events (current project only)
-								// Skip chat tasks — chat responses appear inline in the chat UI
-								if (data.type === 'task_status_changed' && projectSelector && data.category !== 'chat') {
+								// Show toast notifications for task completion events (current project only).
+								// Skip chat tasks — chat responses appear inline in the chat UI.
+								if (eventType === 'task_status_changed' && projectSelector && data.category !== 'chat') {
 									const currentProjectID = projectSelector.value;
 									if (data.project_id === currentProjectID) {
 										const terminalStatuses = ['completed', 'failed', 'cancelled'];
@@ -202,9 +199,42 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 										}
 									}
 								}
-							} catch (err) {
-								console.error('[SSE-Alerts] Error parsing event:', err);
+								return;
 							}
+
+							if (eventType === 'chat_new_message' || eventType === 'chat_response_done') {
+								window._tabVisibility.dispatchSSEEvent('sse-chat-live-event', data);
+								return;
+							}
+
+							if (eventType === 'diff_snapshot' || eventType === 'file_modified' || eventType === 'file_deleted') {
+								window._tabVisibility.dispatchSSEEvent('sse-file-change-event', data);
+							}
+						} catch (err) {
+							console.error('[SSE-Live] Error parsing event:', err);
+						}
+					}
+
+					window._sidebarSSE = window._tabVisibility.registerSSE('live-events', '/events/live', {
+						onopen: function() {
+							console.log('[SSE-Live] Connected to shared live events');
+							window._tabVisibility.dispatchSSEEvent('sse-live-connected', {
+								reconnected: liveSSEHasConnected
+							});
+							liveSSEHasConnected = true;
+						},
+						onerror: function(err) {
+							console.error('[SSE-Live] Connection error:', err);
+						},
+						listeners: {
+							'task_status_changed': handleLiveEvent,
+							'task_category_changed': handleLiveEvent,
+							'alert_created': handleLiveEvent,
+							'chat_new_message': handleLiveEvent,
+							'chat_response_done': handleLiveEvent,
+							'file_modified': handleLiveEvent,
+							'file_deleted': handleLiveEvent,
+							'diff_snapshot': handleLiveEvent
 						}
 					});
 
@@ -268,10 +298,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									try { es.close(); } catch(e) {}
 								});
 								window._threadEventSources = [];
-							}
-							// Clean up chat-live SSE so it doesn't reconnect on other pages
-							if (window._tabVisibility) {
-								window._tabVisibility.unregisterSSE('chat-live');
 							}
 						}
 					});

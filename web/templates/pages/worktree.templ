@@ -106,6 +106,7 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 								Merge to { mergeTargetDisplay(task) }
 							</div>
 							<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300">
+								<li class="menu-title"><span>Local</span></li>
 								<li>
 									<button
 										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
@@ -192,29 +193,17 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 							<code class="bg-base-200 px-1.5 py-0.5 rounded text-xs">{ mergeTargetDisplay(task) }</code>
 						</p>
 					</div>
-					<div class="inline-flex items-center gap-2">
-						if taskPR != nil {
-							<a href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm">
-								View PR #{ fmt.Sprintf("%d", taskPR.PRNumber) }
-							</a>
-						} else if task.WorktreeBranch != "" {
-							<button
-								class="btn btn-outline btn-sm"
-								hx-post={ fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID) }
-								hx-target="#changes-content"
-								hx-swap="innerHTML"
-							>
-								Create PR
-							</button>
-						}
-					</div>
-					// Merge button directly in changes tab
-					if showMergeOptions && task.MergeStatus != models.MergeStatusMerged && task.WorktreeBranch != "" {
-						<div class="dropdown dropdown-end inline-flex items-center gap-2" id="merge-dropdown-changes">
-							<div tabindex="0" role="button" class="btn btn-primary btn-sm">
-								Merge to { mergeTargetDisplay(task) }
-							</div>
-							<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300">
+					// Unified actions dropdown with Local and GitHub sections
+					<div class="dropdown dropdown-end" id="changes-actions-dropdown">
+						<div tabindex="0" role="button" class="btn btn-primary btn-sm">
+							Actions
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+							</svg>
+						</div>
+						<ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-52 border border-base-300">
+							if showMergeOptions && task.MergeStatus != models.MergeStatusMerged {
+								<li class="menu-title"><span>Local</span></li>
 								<li>
 									<button
 										hx-post={ fmt.Sprintf("/tasks/%s/worktree/merge", task.ID) }
@@ -257,9 +246,27 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 										Squash merge
 									</button>
 								</li>
-							</ul>
-						</div>
-					}
+							}
+							<li class="menu-title"><span>GitHub</span></li>
+							if taskPR != nil {
+								<li>
+									<a href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">
+										View PR #{ fmt.Sprintf("%d", taskPR.PRNumber) }
+									</a>
+								</li>
+							} else {
+								<li>
+									<button
+										hx-post={ fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID) }
+										hx-target="#changes-content"
+										hx-swap="innerHTML"
+									>
+										Create PR
+									</button>
+								</li>
+							}
+						</ul>
+					</div>
 				</div>
 			}
 

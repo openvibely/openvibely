@@ -17,13 +17,14 @@ const (
 
 // ChatEvent represents a chat event for real-time updates
 type ChatEvent struct {
-	Type      ChatEventType `json:"type"`
-	ProjectID string        `json:"project_id"`
-	ExecID    string        `json:"exec_id"`
-	TaskID    string        `json:"task_id,omitempty"`
-	Message   string        `json:"message,omitempty"`
-	Source    string        `json:"source,omitempty"` // "telegram", "web", "api"
-	AgentName string        `json:"agent_name,omitempty"`
+	Type            ChatEventType `json:"type"`
+	ProjectID       string        `json:"project_id"`
+	ExecID          string        `json:"exec_id"`
+	TaskID          string        `json:"task_id,omitempty"`
+	Message         string        `json:"message,omitempty"`
+	Source          string        `json:"source,omitempty"` // "telegram", "web", "api"
+	AgentName       string        `json:"agent_name,omitempty"`
+	CompletedOutput string        `json:"completed_output,omitempty"` // Final assistant output for ChatResponseDone; enables plan-completion prompt without DOM scan
 }
 
 // ToSSE converts a ChatEvent to SSE format

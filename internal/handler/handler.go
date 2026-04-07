@@ -579,8 +579,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/patterns/category/:category", h.ListPatternsByCategory)
 
 	// Server-Sent Events for real-time updates
-	e.GET("/events/tasks", h.TaskEventsSSE)
-	e.GET("/events/chat/live", h.ChatLiveSSE)
+	e.GET("/events/live", h.LiveEventsSSE)
 	e.GET("/events/chat/:exec_id", h.ChatStreamSSE)
-	e.GET("/events/filechanges", h.FileChangesSSE)
 }

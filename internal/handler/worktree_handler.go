@@ -92,7 +92,7 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	if targetBranch == "" {
 		targetBranch = "main"
 	}
-	c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"refreshChanges": true, "showToast": {"message": "Successfully merged to %s", "type": "success", "taskId": "%s"}}`, targetBranch, task.ID))
+	c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"refreshChanges": true, "showToast": {"message": "Merged locally into %s", "type": "success", "taskId": "%s"}}`, targetBranch, task.ID))
 
 	return h.renderWorktreeInfo(c, task)
 }
@@ -124,7 +124,7 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check existing pull request")
 	}
 	if existingPR != nil {
-		c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"refreshChanges": true, "showToast": {"message": "PR already exists (#%d)", "type": "success", "taskId": "%s"}}`, existingPR.PRNumber, task.ID))
+		c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"refreshChanges": true, "showToast": {"message": "GitHub PR already exists (#%d)", "type": "success", "taskId": "%s"}}`, existingPR.PRNumber, task.ID))
 		return h.GetTaskChanges(c)
 	}
 
@@ -179,7 +179,7 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save pull request")
 	}
 
-	c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"refreshChanges": true, "showToast": {"message": "Pull request created (#%d)", "type": "success", "taskId": "%s"}}`, pr.Number, task.ID))
+	c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"refreshChanges": true, "showToast": {"message": "GitHub PR created (#%d)", "type": "success", "taskId": "%s"}}`, pr.Number, task.ID))
 	return h.GetTaskChanges(c)
 }
 

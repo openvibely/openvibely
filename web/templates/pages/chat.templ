@@ -327,17 +327,25 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				});
 			};
 
+			// Detect <proposed_plan> marker in raw assistant content.
+			// Checks raw XML tags only; does not match HTML-escaped variants
+			// (&lt;proposed_plan&gt;) since raw content is stored unescaped in
+			// data-raw-content attributes and streamed as plain text.
 			window.planModeHasProposedPlan = function(rawText) {
 				if (!rawText) return false;
 				return /<\s*proposed_plan\s*>[\s\S]*<\s*\/\s*proposed_plan\s*>/i.test(rawText) || /<\s*proposed_plan\s*>/i.test(rawText);
 			};
 
+			// Get current chat mode. Prefer visible selector state (user-facing)
+			// over hidden input to avoid stale mode mismatches after programmatic
+			// mode changes that update one but not the other.
 			window.currentChatModeValue = function() {
 				var form = document.getElementById('chat-form');
 				if (!form) return '';
-				var modeInput = form.querySelector('input[name="chat_mode"]');
 				var modeSelect = form.querySelector('select[id$="-mode-select"]');
-				return modeInput ? modeInput.value : (modeSelect ? modeSelect.value : '');
+				if (modeSelect && modeSelect.value) return modeSelect.value;
+				var modeInput = form.querySelector('input[name="chat_mode"]');
+				return modeInput ? modeInput.value : '';
 			};
 
 			window.hidePlanCompletionPrompt = function() {
@@ -354,12 +362,27 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 
 			window.applyChatBubbleTransforms = function(chatMessages) {
 				if (!chatMessages) return;
+				// Re-hydrate assistant bubbles from raw content first (tool/thinking cards).
+				// This keeps hard-refresh behavior consistent with task-thread rendering
+				// and prevents marker-cleanup passes from stripping tool markers before
+				// tool-card rendering runs.
+				if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
 				chatMessages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
 					if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
 					if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
 					if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
 				});
 			};
+
+			// Explicit refresh helper: force assistant bubble hydration from raw content.
+			window.rehydrateChatAssistantBubbles = function() {
+				var chatMessages = document.getElementById('chat-messages');
+				if (!chatMessages) return;
+				if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+			};
+			setTimeout(function() {
+				if (window.rehydrateChatAssistantBubbles) window.rehydrateChatAssistantBubbles();
+			}, 0);
 
 			window.switchChatMode = function(mode) {
 				var form = document.getElementById('chat-form');
@@ -378,41 +401,114 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				}
 			};
 
-			window.handlePlanModeCompletion = function(rawText) {
-				if (!window.planModeHasProposedPlan(rawText)) return false;
-				if (window.currentChatModeValue && window.currentChatModeValue() !== 'plan') return false;
-				window.showPlanCompletionPrompt();
-				return true;
+			// --- Centralized plan-completion prompt evaluator ---
+			// One function that decides show/hide for all completion paths:
+			//   1. per-exec stream done event
+			//   2. chat_response_done live SSE fallback
+			//   3. initial page load / HTMX swap hydration
+			//
+			// Rules:
+			//   - Never show mid-stream (_chatStreamInProgress === true)
+			//   - Only show when mode === 'plan'
+			//   - Only show when latest completed assistant response has <proposed_plan>
+			//   - If latest completed response has no plan marker, hide prompt
+			//
+			// The optional completedText param is the raw text of the just-completed
+			// response. When provided it is used directly (per-exec done path).
+			// When omitted the function scans the DOM for the latest completed
+			// assistant bubble (hydration / chat_response_done fallback path).
+			window.evaluatePlanCompletionPrompt = function(completedText) {
+				// Guard: never show mid-stream
+				if (window._chatStreamInProgress) {
+					window.hidePlanCompletionPrompt();
+					return;
+				}
+
+				// Guard: only in plan mode
+				if (window.currentChatModeValue() !== 'plan') {
+					window.hidePlanCompletionPrompt();
+					return;
+				}
+
+				// Resolve text to evaluate
+				var text = completedText;
+				if (typeof text !== 'string') {
+					// Scan DOM for latest completed assistant bubble
+					text = window._getLatestCompletedAssistantText();
+				}
+
+				if (text && window.planModeHasProposedPlan(text)) {
+					window.showPlanCompletionPrompt();
+				} else {
+					window.hidePlanCompletionPrompt();
+				}
 			};
 
-			window.maybeShowPlanCompletionPromptFromHistory = function() {
-				if (window.currentChatModeValue && window.currentChatModeValue() !== 'plan') {
-					if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
-					return false;
-				}
+			// Extract raw content from the latest completed (non-streaming)
+			// assistant bubble. Returns the text or '' if none found.
+			// "Completed" means: has data-raw-content (persisted history) or is a
+			// streaming bubble whose loading dots are hidden (stream finished).
+			// Bubbles with visible loading indicators are considered still streaming.
+			window._getLatestCompletedAssistantText = function() {
 				var chatMessages = document.getElementById('chat-messages');
-				if (!chatMessages) return false;
+				if (!chatMessages) return '';
 				var assistantBubbles = chatMessages.querySelectorAll('.chat-bubble-assistant-msg');
-				if (!assistantBubbles || assistantBubbles.length === 0) {
-					if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
-					return false;
-				}
+				if (!assistantBubbles || assistantBubbles.length === 0) return '';
 
-				// Walk newest -> oldest and inspect raw assistant payload first.
+				// Walk newest -> oldest. Return text from the FIRST (newest)
+				// completed bubble with non-empty content. Do NOT continue to
+				// older bubbles — only the latest completed response matters.
 				for (var i = assistantBubbles.length - 1; i >= 0; i--) {
 					var bubble = assistantBubbles[i];
-					var rawNode = bubble.querySelector('.chat-stream-content[data-raw-content], [data-streaming-resume][data-raw-content]');
+
+					// Skip bubbles that are still streaming (thinking dots visible)
+					var thinkingDots = bubble.querySelector('.ov-loading-dots');
+					if (thinkingDots && !thinkingDots.closest('.hidden')) {
+						// This bubble is actively streaming — skip it and
+						// don't fall through to older bubbles either
+						return '';
+					}
+
+					// Check for streaming-in-progress dots in both DOM patterns:
+					//  - web live bubble: .loading-dots
+					//  - shared ChatBubbleStreaming: #streaming-dots-<execId> with ov-loading-dots child
+					var loadingDots = bubble.querySelector('.loading-dots');
+					if (loadingDots && !loadingDots.closest('.hidden')) {
+						return '';
+					}
+					var streamDotsContainer = bubble.querySelector('[id^="streaming-dots-"]');
+					if (streamDotsContainer && !streamDotsContainer.classList.contains('hidden')) {
+						if (streamDotsContainer.querySelector('.ov-loading-dots')) {
+							return '';
+						}
+					}
+
+					// Try data-raw-content first (persisted or rendered history).
+					// Includes live SSE bubbles which use a plain div with data-exec-id/data-raw-content
+					// (no .chat-stream-content class).
+					var rawNode = bubble.querySelector('[data-raw-content][data-exec-id], .chat-stream-content[data-raw-content], [data-streaming-resume][data-raw-content], [data-raw-content]');
 					var raw = rawNode ? (rawNode.getAttribute('data-raw-content') || '') : '';
 					if (!raw.trim()) {
 						raw = bubble.textContent || '';
 					}
 					if (!raw.trim()) continue;
-					if (window.handlePlanModeCompletion && window.handlePlanModeCompletion(raw)) {
-						return true;
-					}
+
+					// This is the latest completed assistant response — return it
+					// regardless of whether it has a plan marker or not
+					return raw;
 				}
-				if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
-				return false;
+				return '';
+			};
+
+			// Legacy compat wrapper — called from per-exec stream done handler
+			window.handlePlanModeCompletion = function(rawText) {
+				window._chatStreamInProgress = false;
+				window.evaluatePlanCompletionPrompt(rawText);
+			};
+
+			// Called on page load and HTMX swaps to re-evaluate from DOM
+			window.maybeShowPlanCompletionPromptFromHistory = function() {
+				window.evaluatePlanCompletionPrompt();
 			};
 
 			// Page-level scroll tracker for HTMX swap decisions
@@ -436,6 +532,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					if (triggerEl && (triggerEl.id === 'chat-form' || triggerEl.closest('#chat-form'))) {
 						var tracker = window._chatPageTracker;
 						if (tracker) tracker.resetOnUserSend();
+						// Hide prompt immediately on new send — will re-evaluate
+						// only after the new response completes and passes plan detection
+						window._chatStreamInProgress = true;
 						if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
 						// Flag that a web send is in progress (prevents live SSE duplication)
 						window._chatWebSendInProgress = true;
@@ -449,13 +548,16 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					if (isChatMessagesSwap || isChatRootSwap) {
 						var chatMessages = isChatMessagesSwap ? swapTarget : (swapTarget ? swapTarget.querySelector('#chat-messages') : null);
 						if (!chatMessages) return;
-						// Clear web send flag and mark new exec IDs as known
+						// Clear web send dedupe flag and mark new exec IDs as known
 						window._chatWebSendInProgress = false;
 						chatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {
 							if (window._chatKnownExecIds) window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
 						});
 						if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
-						if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();
+						// During an active stream, this swap can carry partial persisted output.
+						if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {
+							window.maybeShowPlanCompletionPromptFromHistory();
+						}
 						// Auto-scroll after swap: always scroll unless user manually scrolled up
 						// (tracker was already reset in beforeRequest if this was a user send)
 						var tracker = window._chatPageTracker;
@@ -552,8 +654,44 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					return bubble;
 				}
 
+				function syncCompletedOutputToBubble(execId, completedOutput) {
+						if (!execId || typeof completedOutput !== 'string' || completedOutput === '') return;
+						var streamContainer = document.querySelector('[data-exec-id="' + execId + '"]');
+						if (!streamContainer) return;
+						streamContainer.setAttribute('data-raw-content', completedOutput);
+						if (window.renderStreamingContent) {
+							window.renderStreamingContent(streamContainer, completedOutput);
+						} else {
+							streamContainer.textContent = completedOutput;
+						}
+						streamContainer.classList.remove('hidden');
+						var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
+						if (bubble) {
+							var thinking = bubble.querySelector('.ov-loading-dots');
+							if (thinking && !thinking.closest('.hidden')) {
+								var thinkingWrap = thinking.closest('.flex.flex-col.items-start.gap-1');
+								if (thinkingWrap) thinkingWrap.classList.add('hidden');
+							}
+							var streamDots = bubble.querySelector('.loading-dots');
+							if (streamDots) {
+								var streamDotsWrap = streamDots.closest('div');
+								if (streamDotsWrap) streamDotsWrap.classList.add('hidden');
+							}
+							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+						}
+					}
+
+					function hasActiveChatStream() {
+						var chatMessages = document.getElementById('chat-messages');
+						if (!chatMessages) return false;
+						var active = chatMessages.querySelector('.chat-bubble-assistant-msg .ov-loading-dots:not(.hidden), .chat-bubble-assistant-msg .loading-dots:not(.hidden), .chat-bubble-assistant-msg [id^="streaming-dots-"]:not(.hidden)');
+						return !!active;
+					}
+
 				// Helper: create a streaming assistant bubble and connect to SSE
-				function createStreamingBubble(execId) {
+					function createStreamingBubble(execId) {
 					var bubble = document.createElement('div');
 					bubble.className = 'chat-bubble-assistant-msg rounded-xl p-4';
 
@@ -585,6 +723,34 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 
 					// Set up streaming via EventSource
 					var textBuffer = '';
+					var renderScheduled = false;
+					var lastRenderedLength = 0;
+					function renderBufferedOutput(force) {
+						if (!window.renderStreamingContent) {
+							contentDiv.textContent = textBuffer;
+							return;
+						}
+						if (!force && renderScheduled) return;
+						var runRender = function() {
+							renderScheduled = false;
+							if (!force && textBuffer.length === lastRenderedLength) return;
+							window.renderStreamingContent(contentDiv, textBuffer);
+							lastRenderedLength = textBuffer.length;
+							if (!tracker || tracker.shouldAutoScroll()) {
+								requestAnimationFrame(function() {
+									if (chatMessages && window.chatAutoScroll) {
+										window.chatAutoScroll.scrollToBottom(chatMessages, false);
+									}
+								});
+							}
+						};
+						if (force) {
+							runRender();
+							return;
+						}
+						renderScheduled = true;
+						requestAnimationFrame(runRender);
+					}
 					var chatMessages = document.getElementById('chat-messages');
 					var tracker = window._chatPageTracker;
 
@@ -597,24 +763,25 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							dots.classList.remove('hidden');
 						}
 						textBuffer += event.data;
-						contentDiv.textContent = textBuffer;
-
-						if (!tracker || tracker.shouldAutoScroll()) {
-							requestAnimationFrame(function() {
-								if (chatMessages && window.chatAutoScroll) {
-									window.chatAutoScroll.scrollToBottom(chatMessages, false);
-								}
-							});
-						}
+						// Persist raw stream content for completion fallback logic
+						contentDiv.setAttribute('data-raw-content', textBuffer);
+						renderBufferedOutput(false);
 					};
 
 					eventSource.addEventListener('done', function() {
+						renderBufferedOutput(true);
 						dots.classList.add('hidden');
 						eventSource.close();
-						if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
-						if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-						if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+						// Always evaluate plan-completion first so prompt visibility updates
+						// even if post-render transforms throw.
 						if (window.handlePlanModeCompletion) window.handlePlanModeCompletion(textBuffer);
+						try {
+							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+						} catch (err) {
+							console.error('[chat] post-stream transform failed:', err);
+						}
 						if (!tracker || tracker.shouldAutoScroll()) {
 							requestAnimationFrame(function() {
 								if (chatMessages && window.chatAutoScroll) {
@@ -632,6 +799,10 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							contentDiv.textContent += '\n\nError: ' + event.data;
 						}
 						eventSource.close();
+						// Clear streaming flag and re-evaluate plan prompt on error.
+						// DOM scan finds error/partial bubble without <proposed_plan> → hides prompt.
+						window._chatStreamInProgress = false;
+						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 					});
 
 					eventSource.onerror = function() {
@@ -639,90 +810,121 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						dots.classList.add('hidden');
 						contentDiv.classList.remove('hidden');
 						eventSource.close();
+						window._chatStreamInProgress = false;
+						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 					};
 
 					return bubble;
 				}
 
-				// Register chat live SSE via tab visibility manager
-				if (window._tabVisibility) {
-					// Clean up previous chat live SSE if re-rendering
-					window._tabVisibility.unregisterSSE('chat-live');
+				if (window._chatLiveEventHandlers) {
+					if (window._chatLiveEventHandlers.chatEvent) {
+						window.removeEventListener('sse-chat-live-event', window._chatLiveEventHandlers.chatEvent);
+					}
+					if (window._chatLiveEventHandlers.connected) {
+						window.removeEventListener('sse-live-connected', window._chatLiveEventHandlers.connected);
+					}
+					if (window._chatLiveEventHandlers.afterSwap) {
+						document.body.removeEventListener('htmx:afterSwap', window._chatLiveEventHandlers.afterSwap);
+					}
+				}
 
-					// Track whether this is the first SSE connect or a reconnection
-					// (e.g., after tab was hidden and events were missed)
-					var chatSSEHasConnected = false;
+				var handleSharedLiveConnected = function(event) {
+						var detail = event.detail || {};
+						if (!detail.reconnected) return;
+						var chatContainer = document.getElementById('chat-page-root');
+						if (!chatContainer) return;
+						// Reconnection after tab was hidden — refresh chat to catch missed events,
+						// but avoid replacing an actively streaming bubble with stale partial state.
+						if (window._chatStreamInProgress && hasActiveChatStream()) {
+							setTimeout(function() {
+								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+							}, 0);
+							return;
+						}
+						var pid = chatContainer.getAttribute('data-project-id');
+						if (pid) {
+							htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
+						}
+					};
 
-					window._tabVisibility.registerSSE('chat-live', '/events/chat/live?project_id=' + encodeURIComponent(projectId), {
-						onopen: function() {
-							if (chatSSEHasConnected) {
-								var chatContainer = document.getElementById('chat-page-root');
-								if (!chatContainer) return;
-								// Reconnection after tab was hidden — refresh chat to catch missed events.
-								// While the SSE was disconnected, messages from API/Telegram/other tabs
-								// were published but never delivered. A full refresh loads current state from DB.
+					var handleSharedChatLiveEvent = function(event) {
+						var data = event.detail || {};
+						var eventType = data.type || '';
+						if (data.project_id && data.project_id !== projectId) {
+							return;
+						}
+
+					if (eventType === 'chat_new_message') {
+						// Skip duplicates: map guard + DOM guard for timing races
+						// between HTMX send swap and live SSE delivery.
+						if (window._chatKnownExecIds[data.exec_id]) return;
+						if (document.querySelector('[data-exec-id="' + data.exec_id + '"]')) {
+							window._chatKnownExecIds[data.exec_id] = true;
+							return;
+						}
+						if (data.source === 'web' && window._chatWebSendInProgress) return;
+						window._chatKnownExecIds[data.exec_id] = true;
+
+						// Mark stream in progress so plan prompt stays hidden mid-stream
+						window._chatStreamInProgress = true;
+						if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+
+						var chatMessages = document.getElementById('chat-messages');
+						if (!chatMessages) return;
+
+						// Remove empty state if present
+						var emptyState = chatMessages.querySelector('.flex.flex-col.items-center.justify-center');
+						if (emptyState) emptyState.remove();
+
+						// Append user bubble
+						chatMessages.appendChild(createUserBubble(data.message, data.source));
+
+						// Append streaming assistant bubble
+						chatMessages.appendChild(createStreamingBubble(data.exec_id));
+
+						// Scroll to bottom (respect user scroll position)
+						var tracker = window._chatPageTracker;
+						if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
+							window.chatAutoScroll.scrollToBottom(chatMessages, true);
+						}
+						return;
+					}
+
+					if (eventType === 'chat_response_done') {
+						// Guard: only act if we're still on the chat page.
+						if (!document.getElementById('chat-messages')) return;
+
+						// Safety net: if we missed the chat_new_message event (e.g., channel
+						// buffer was full), the completed message won't be displayed. Detect
+						// this by checking if the exec_id is unknown and refresh if so.
+						if (data.exec_id && !window._chatKnownExecIds[data.exec_id]) {
+							var chatContainer = document.getElementById('chat-page-root');
+							if (chatContainer) {
 								var pid = chatContainer.getAttribute('data-project-id');
 								if (pid) {
 									htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
 								}
 							}
-							chatSSEHasConnected = true;
-						},
-						listeners: {
-							'chat_new_message': function(event) {
-								try {
-									var data = JSON.parse(event.data);
-								} catch(e) { return; }
-
-								// Skip if already displayed or sender's own tab
-								if (window._chatKnownExecIds[data.exec_id]) return;
-								if (data.source === 'web' && window._chatWebSendInProgress) return;
-								window._chatKnownExecIds[data.exec_id] = true;
-
-								var chatMessages = document.getElementById('chat-messages');
-								if (!chatMessages) return;
-
-								// Remove empty state if present
-								var emptyState = chatMessages.querySelector('.flex.flex-col.items-center.justify-center');
-								if (emptyState) emptyState.remove();
-
-								// Append user bubble
-								chatMessages.appendChild(createUserBubble(data.message, data.source));
-
-								// Append streaming assistant bubble
-								chatMessages.appendChild(createStreamingBubble(data.exec_id));
-
-								// Scroll to bottom (respect user scroll position)
-								var tracker = window._chatPageTracker;
-								if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
-									window.chatAutoScroll.scrollToBottom(chatMessages, true);
-								}
-							},
-							'chat_response_done': function(event) {
-								// Guard: only act if we're still on the chat page
-								if (!document.getElementById('chat-messages')) return;
-								// Safety net: if we missed the chat_new_message event (e.g., channel
-								// buffer was full), the completed message won't be displayed. Detect
-								// this by checking if the exec_id is unknown and refresh if so.
-								try {
-									var data = JSON.parse(event.data);
-								} catch(e) { return; }
-								if (data.exec_id && !window._chatKnownExecIds[data.exec_id]) {
-									var chatContainer = document.getElementById('chat-page-root');
-									if (chatContainer) {
-										var pid = chatContainer.getAttribute('data-project-id');
-										if (pid) {
-											htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
-										}
-									}
-								}
-							}
+							return;
 						}
-					});
-				}
 
-				// Also mark exec IDs from HTMX swaps to avoid duplicates after page updates
-				document.body.addEventListener('htmx:afterSwap', function(event) {
+						// chat_response_done may arrive before the last per-exec delta is rendered
+						// in the active bubble (especially after blur/focus reconnect timing).
+						// Reconcile with completed_output so visible UI matches persisted state.
+						if (data.exec_id && typeof data.completed_output === 'string' && data.completed_output !== '') {
+							syncCompletedOutputToBubble(data.exec_id, data.completed_output);
+						}
+
+						window._chatStreamInProgress = false;
+						if (window.evaluatePlanCompletionPrompt) {
+							window.evaluatePlanCompletionPrompt(data.completed_output);
+						}
+					}
+				};
+
+				// Also mark exec IDs from HTMX swaps to avoid duplicates after page updates.
+				var handleChatAfterSwap = function(event) {
 					var swapTarget = event.detail.target;
 					if (swapTarget && swapTarget.id === 'chat-messages') {
 						swapTarget.querySelectorAll('[data-exec-id]').forEach(function(el) {
@@ -730,11 +932,21 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						});
 					}
 					if (swapTarget && swapTarget.id === 'main-content' && !swapTarget.querySelector('#chat-page-root')) {
-						if (window._tabVisibility) {
-							window._tabVisibility.unregisterSSE('chat-live');
-						}
+						window.removeEventListener('sse-chat-live-event', handleSharedChatLiveEvent);
+						window.removeEventListener('sse-live-connected', handleSharedLiveConnected);
+						document.body.removeEventListener('htmx:afterSwap', handleChatAfterSwap);
+						window._chatLiveEventHandlers = null;
 					}
-				});
+				};
+
+				window.addEventListener('sse-chat-live-event', handleSharedChatLiveEvent);
+				window.addEventListener('sse-live-connected', handleSharedLiveConnected);
+				document.body.addEventListener('htmx:afterSwap', handleChatAfterSwap);
+				window._chatLiveEventHandlers = {
+					chatEvent: handleSharedChatLiveEvent,
+					connected: handleSharedLiveConnected,
+					afterSwap: handleChatAfterSwap
+				};
 			})();
 		</script>
 

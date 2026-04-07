@@ -73,7 +73,7 @@ func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 		t.Fatalf("expected status 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
 	trigger := rec.Header().Get("HX-Trigger")
-	if !strings.Contains(trigger, "Pull request created (#77)") {
+	if !strings.Contains(trigger, "GitHub PR created (#77)") {
 		t.Fatalf("expected success toast trigger, got %s", trigger)
 	}
 
@@ -125,7 +125,7 @@ func TestCreateTaskPullRequest_ReusesExistingTaskPR(t *testing.T) {
 	if createCalls != 0 {
 		t.Fatalf("expected create PR not to run, got %d calls", createCalls)
 	}
-	if !strings.Contains(rec.Header().Get("HX-Trigger"), "PR already exists (#22)") {
+	if !strings.Contains(rec.Header().Get("HX-Trigger"), "GitHub PR already exists (#22)") {
 		t.Fatalf("expected existing PR toast trigger, got %s", rec.Header().Get("HX-Trigger"))
 	}
 }
@@ -168,10 +168,16 @@ func TestHandler_GetTaskChanges_ShowsMergeOptionsWhenFlagEnabled(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "Merge to") {
+	if !strings.Contains(body, "Merge commit") {
 		t.Fatalf("expected merge options to be rendered when flag enabled, body=%s", body)
 	}
 	if !strings.Contains(body, "merge_source") {
 		t.Fatalf("expected changes-tab merge actions to include merge_source marker, body=%s", body)
+	}
+	if !strings.Contains(body, "Local") {
+		t.Fatalf("expected Local section header in actions dropdown, body=%s", body)
+	}
+	if !strings.Contains(body, "GitHub") {
+		t.Fatalf("expected GitHub section header in actions dropdown, body=%s", body)
 	}
 }

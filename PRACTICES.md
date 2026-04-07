@@ -40,6 +40,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - When introducing behavior modes (for example planning vs execution), propagate mode through typed request contracts and enforce behavior in provider/tool policy layers, not only in prompt text
 - For chat action execution, prefer request-scoped runtime tool injection (contract/context + adapter tool wiring) over parsing textual action markers from assistant output
 - For task-execution actions, prefer exact entity targeting (`task_id`/`title`) when the request is about one task; reserve tag/priority filters for explicit group execution requests
+- For UI behavior that depends on both persisted status and live VCS state (for example merged vs unmerged worktree diffs), prefer resilient fallback logic that verifies git truth (ancestry/diff) instead of trusting a single DB status field during transition windows
 
 ### Data Access Conventions
 - Use raw SQL and parameterized queries (`?` placeholders).
@@ -70,16 +71,21 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - When feature-flagging UI actions, pair template-level visibility gating with server-side enforcement for the same interaction path (for example request marker/source fields) to prevent hidden-action access via crafted requests.
 - For async list/state refreshes, guard against out-of-order responses (request token/sequence checks) so older responses cannot overwrite newer user actions.
 - For polling-driven HTMX morph updates, make post-swap DOM processing incremental and content-signature based; avoid full-container reprocessing on every poll when content is unchanged.
+- For high-frequency streaming UI updates (for example SSE token/tool chunks), batch DOM re-renders with `requestAnimationFrame` and force a final flush on completion to avoid main-thread stalls that make updates appear stuck.
 - For dirty-input preservation during polling, treat successful submit/update as an explicit state transition: temporarily suppress dirty-state restoration around the request lifecycle so accepted values do not bounce back into warning/edited styling.
+- For polled chat/thread forms, scope polling to genuinely active states (for example `running`/`queued`), and persist unsent drafts by entity key so periodic swaps cannot erase in-progress user input.
 - For inline scripts inside HTMX-swapped fragments, use a window-level one-time binding guard to prevent duplicate event listeners and accumulated stale behavior.
 - For cross-page toast feedback from HTMX handlers, prefer app-scoped `HX-Trigger` events bridged centrally in the base layout over page-local listeners.
 - For toast actions (for example “Open Models”), pass structured toast metadata (`link_url`, `link_text`) and let the shared toast renderer build click behavior; avoid passing inline HTML in toast messages.
 - For modal forms that perform remote integration steps (for example project GitHub clone/re-clone), prefer HTMX no-swap submits and report failures via `openvibelyToast` instead of raw error payload swaps.
 - For HTMX-re-rendered pages that must rebind global listeners, explicitly remove old handler references before adding new ones, and shut down tab-scoped SSE connections on container swaps/navigation.
+- For SSE lifecycle hygiene, pair global EventSource registration with explicit unregister-on-close in all completion/error paths so connection tracking reflects only active streams.
+- When multiple surfaces need realtime updates (for example sidebar tasks + chat live + task diff snapshots), prefer one shared per-tab SSE connection with in-browser event fan-out over opening separate long-lived EventSources per page/feature.
 - For heavyweight tab content (large diffs, logs, timelines), prefer lazy-loading on tab activation instead of server-rendering hidden tab bodies during initial page load.
 - For heavyweight task-thread transcripts, prefer a placeholder + tab-activation fetch (`GET /tasks/:id/thread`) instead of embedding full chat bubbles in the base task-detail payload.
 - For large structured payload viewers, prefer per-item deferred rendering controls (for example per-file `Load diff`) with explicit auto-load/on-demand/hard-cap envelopes so rendering cost scales predictably.
 - For mode handoffs (for example plan -> execute), prefer explicit UI confirmation prompts with one-click state transition over implicit auto-switching, and persist the selected mode in both hidden form state and localStorage.
+- When restoring persisted mode state inside HTMX-swapped fragments, re-run dependent UI derivations (for example plan-completion CTA visibility) immediately after mode restoration/change so transient default values during hydration do not leave stale hidden states.
 - For mode-based content suppression in chat renderers, scope suppression to live/streaming renders and preserve persisted history re-renders (for example hard refresh) so historical content continuity is maintained.
 - Scope page-specific HTMX/JS selectors to page-unique roots (for example `#chat-page-root`) instead of shared semantic attributes (for example `[data-project-id]`) that may appear on multiple pages; this prevents cross-page content swaps during reconnect/refocus flows.
 - When a user action succeeds but background state refresh can carry unrelated warnings, refresh silently for that action and keep warnings scoped to the relevant surface (item/runtime status, alerts) instead of raising global failure toasts.
@@ -105,6 +111,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - For plugin marketplace/install state, prefer app-owned local operations over external vendor CLI state so discovery and install/uninstall remain deterministic across environments.
 - For Swagger/OpenAPI maintenance, treat route coverage as test-enforced contract: keep a parity test between registered API routes and spec paths so annotation drift is caught immediately.
 - When UI loader primitives are shared (e.g., `ov-loading-dots`), keep template markup and handler/template assertions synchronized to avoid cross-suite regressions from stale class names.
+- For multi-phase loading UIs (for example thinking vs streaming), preserve intended per-phase styling and verify resume/reconnect class toggles with real Tailwind semantics (`hidden` vs `!hidden`) so indicators remain visible while work is still in progress.
 
 ## Testing Practices
 

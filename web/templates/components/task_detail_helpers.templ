@@ -244,7 +244,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 	<div
 		id="task-thread-view"
 		class="flex flex-col flex-1 min-h-0"
-		if task.Status == models.StatusRunning || task.Status == models.StatusPending {
+		if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
 			hx-get={ fmt.Sprintf("/tasks/%s/thread", task.ID) }
 			hx-trigger="every 3s"
 			hx-target="#task-thread-view"
@@ -275,6 +275,51 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 		@ChatAutoScrollScript()
 		@_initThreadStreamingScript()
 		<script>
+			function _taskThreadDraftStorageKey() {
+				var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
+				if (!taskIdMatch || !taskIdMatch[1]) return '';
+				return 'task-thread-draft-' + taskIdMatch[1];
+			}
+
+			function _syncTaskThreadDraftFromTextarea() {
+				window._taskThreadDrafts = window._taskThreadDrafts || {};
+				var key = _taskThreadDraftStorageKey();
+				if (!key) return;
+				var textarea = document.getElementById('task-message-input');
+				if (!textarea) return;
+				if (textarea.value.trim() === '') {
+					delete window._taskThreadDrafts[key];
+					return;
+				}
+				window._taskThreadDrafts[key] = textarea.value;
+			}
+
+			function _restoreTaskThreadDraftToTextarea() {
+				window._taskThreadDrafts = window._taskThreadDrafts || {};
+				var textarea = document.getElementById('task-message-input');
+				if (!textarea) return;
+
+				var restoreValue = '';
+				if (typeof window._taskThreadSavedInput === 'string' && window._taskThreadSavedInput !== '') {
+					restoreValue = window._taskThreadSavedInput;
+				}
+				if (!restoreValue) {
+					var key = _taskThreadDraftStorageKey();
+					if (key && window._taskThreadDrafts[key]) {
+						restoreValue = window._taskThreadDrafts[key];
+					}
+				}
+				if (restoreValue && textarea.value !== restoreValue) {
+					textarea.value = restoreValue;
+				}
+				if (!textarea.dataset.draftSyncBound) {
+					textarea.dataset.draftSyncBound = 'true';
+					textarea.addEventListener('input', _syncTaskThreadDraftFromTextarea);
+					textarea.addEventListener('change', _syncTaskThreadDraftFromTextarea);
+				}
+				window._taskThreadSavedInput = '';
+			}
+
 			// Apply cleaning and scroll on load
 			(function() {
 				var chatMessages = document.getElementById('task-thread-messages');
@@ -304,6 +349,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					}
 				});
 				if (window._initThreadStreaming) window._initThreadStreaming();
+				_restoreTaskThreadDraftToTextarea();
 			})();
 
 			// Intelligent auto-scroll: only scroll when user hasn't manually scrolled up
@@ -312,32 +358,47 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 
 				// Rule 1: Reset tracker when user sends a message (beforeRequest fires before swap)
 				// Also cancel polling requests when SSE streaming is active to prevent morph from killing the EventSource
-				document.body.addEventListener('htmx:beforeRequest', function(event) {
-					var triggerEl = event.detail.elt;
-					if (triggerEl && (triggerEl.id === 'task-thread-form' || triggerEl.closest('#task-thread-form'))) {
-						var tracker = window._taskThreadPageTracker;
-						if (tracker) tracker.resetOnUserSend();
-					}
+					document.body.addEventListener('htmx:beforeRequest', function(event) {
+						var triggerEl = event.detail.elt;
+						if (triggerEl && (triggerEl.id === 'task-thread-form' || triggerEl.closest('#task-thread-form'))) {
+							var tracker = window._taskThreadPageTracker;
+							if (tracker) tracker.resetOnUserSend();
+						}
 					// Block polling requests to task-thread-view while SSE streaming
 					// is active or sidebar navigation is in progress
-					if (triggerEl && triggerEl.id === 'task-thread-view') {
-						if (window._taskThreadStreamingActive || window._sidebarNavigating) {
-							event.preventDefault();
+						if (triggerEl && triggerEl.id === 'task-thread-view') {
+							if (window._taskThreadStreamingActive || window._sidebarNavigating) {
+								event.preventDefault();
+							}
 						}
-					}
-				});
+					});
 
-				// Before swaps, capture scroll state and preserve textarea input
-				document.body.addEventListener('htmx:beforeSwap', function(event) {
-					var target = event.detail.target;
-					if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view')) {
-						// Save textarea value before swap to prevent clearing during morph polling
-						var textarea = document.getElementById('task-message-input');
-						if (textarea && textarea.value.trim() !== '') {
-							window._taskThreadSavedInput = textarea.value;
-						}
-						var tracker = window._taskThreadPageTracker;
-						if (tracker && tracker.userScrolledUp) {
+					document.body.addEventListener('htmx:afterRequest', function(event) {
+						var triggerEl = event.detail && event.detail.elt;
+						if (!triggerEl) return;
+						if (!(triggerEl.id === 'task-thread-form' || triggerEl.closest('#task-thread-form'))) return;
+						if (!event.detail.successful) return;
+						var xhr = event.detail.xhr;
+						var responseText = xhr ? (xhr.responseText || '') : '';
+						if (responseText.trim() === '') return;
+						window._taskThreadSavedInput = '';
+						window._taskThreadDrafts = window._taskThreadDrafts || {};
+						var key = _taskThreadDraftStorageKey();
+						if (key) delete window._taskThreadDrafts[key];
+					});
+
+					// Before swaps, capture scroll state and preserve textarea input
+					document.body.addEventListener('htmx:beforeSwap', function(event) {
+						var target = event.detail.target;
+						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view')) {
+							// Save textarea value before swap to prevent clearing during morph polling
+							var textarea = document.getElementById('task-message-input');
+							if (textarea) {
+								window._taskThreadSavedInput = textarea.value;
+								_syncTaskThreadDraftFromTextarea();
+							}
+							var tracker = window._taskThreadPageTracker;
+							if (tracker && tracker.userScrolledUp) {
 							window._taskThreadUserScrolledUp = true;
 						} else {
 							window._taskThreadUserScrolledUp = false;
@@ -412,24 +473,18 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 						if (window._initThreadStreaming) window._initThreadStreaming();
 					}
 					// Also handle full page refreshes on task-detail-content
-					else if (target && target.id === 'task-detail-content') {
-						var chatMessages = document.getElementById('task-thread-messages');
-						if (chatMessages) {
-							if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+						else if (target && target.id === 'task-detail-content') {
+							var chatMessages = document.getElementById('task-thread-messages');
+							if (chatMessages) {
+								if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+							}
 						}
-					}
-					// Restore textarea value after morph polling or full page refresh
-					if (window._taskThreadSavedInput) {
-						var textarea = document.getElementById('task-message-input');
-						if (textarea) {
-							textarea.value = window._taskThreadSavedInput;
-						}
-						window._taskThreadSavedInput = '';
-					}
-				});
-			}
-		</script>
-	</div>
+						// Restore textarea value after morph polling or full page refresh
+						_restoreTaskThreadDraftToTextarea();
+					});
+				}
+			</script>
+		</div>
 }
 
 // TaskThreadFollowupResponse renders user message + streaming assistant for a task thread follow-up.

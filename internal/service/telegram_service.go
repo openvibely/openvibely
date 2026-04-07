@@ -587,15 +587,16 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 	// Complete execution
 	s.completeExecution(ctx, exec.ID, task.ID, output, "", tokensUsed, durationMs)
 
-	// Broadcast response done event
+	// Broadcast response done event with completed output for plan-completion prompt
 	if s.chatBroadcaster != nil {
 		s.chatBroadcaster.Publish(events.ChatEvent{
-			Type:      events.ChatResponseDone,
-			ProjectID: projectID,
-			ExecID:    exec.ID,
-			TaskID:    task.ID,
-			Source:    "telegram",
-			AgentName: agent.Name,
+			Type:            events.ChatResponseDone,
+			ProjectID:       projectID,
+			ExecID:          exec.ID,
+			TaskID:          task.ID,
+			Source:          "telegram",
+			AgentName:       agent.Name,
+			CompletedOutput: output,
 		})
 	}
 

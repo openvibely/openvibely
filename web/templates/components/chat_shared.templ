@@ -81,7 +81,7 @@ templ ChatBubble(role, content string) {
 							if (window.renderStreamingContent && raw) {
 								window.renderStreamingContent(el, raw);
 							} else if (window.renderChatMarkdown && raw) {
-								el.className = 'chat-markdown';
+								el.classList.add('chat-markdown');
 								el.innerHTML = window.renderChatMarkdown(raw);
 								if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
 							} else {
@@ -132,7 +132,7 @@ templ ChatBubbleError(role, errorMsg, output string) {
 							if (window.renderStreamingContent && raw) {
 								window.renderStreamingContent(el, raw);
 							} else if (window.renderChatMarkdown && raw) {
-								el.className = 'chat-markdown';
+								el.classList.add('chat-markdown');
 								el.innerHTML = window.renderChatMarkdown(raw);
 								if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
 							} else {
@@ -312,8 +312,48 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 
 					// Buffer for accumulating streaming content
 					var textBuffer = '';
+					var renderScheduled = false;
+					var lastRenderedLength = 0;
+					function renderBufferedOutput(force) {
+						if (!window.renderStreamingContent) {
+							container.textContent = textBuffer;
+							return;
+						}
+						if (!force && renderScheduled) return;
+						var runRender = function() {
+							renderScheduled = false;
+							if (!force && textBuffer.length === lastRenderedLength) return;
+							window.renderStreamingContent(container, textBuffer);
+							lastRenderedLength = textBuffer.length;
+							// Auto-scroll if tracker allows it (Rule 2: auto-scroll unless user scrolled up)
+							if (!tracker || tracker.shouldAutoScroll()) {
+								requestAnimationFrame(function() {
+									var chatMessages = document.getElementById(messagesId);
+									if (chatMessages) {
+										window.chatAutoScroll.scrollToBottom(chatMessages, false);
+									}
+								});
+							}
+						};
+						if (force) {
+							runRender();
+							return;
+						}
+						renderScheduled = true;
+						requestAnimationFrame(runRender);
+					}
 
 					var eventSource = new EventSource('/events/chat/' + execId);
+					function removeThreadEventSource(es) {
+						if (!window._threadEventSources || !es) return;
+						var idx = window._threadEventSources.indexOf(es);
+						if (idx >= 0) window._threadEventSources.splice(idx, 1);
+					}
+					// Track thread stream EventSource so navigation cleanup can close it.
+					if (isThread) {
+						if (!window._threadEventSources) window._threadEventSources = [];
+						window._threadEventSources.push(eventSource);
+					}
 
 					eventSource.onmessage = function(event) {
 						// Hide thinking indicator and show content on first message
@@ -325,23 +365,17 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						
 						// Append to buffer and re-render
 						textBuffer += event.data;
-						window.renderStreamingContent(container, textBuffer);
-
-						// Auto-scroll if tracker allows it (Rule 2: auto-scroll unless user scrolled up)
-						if (!tracker || tracker.shouldAutoScroll()) {
-							requestAnimationFrame(function() {
-								var chatMessages = document.getElementById(messagesId);
-								if (chatMessages) {
-									window.chatAutoScroll.scrollToBottom(chatMessages, false);
-								}
-							});
-						}
+						// Persist raw stream content for completion fallback logic
+						container.setAttribute('data-raw-content', textBuffer);
+						renderBufferedOutput(false);
 					};
 
 					eventSource.addEventListener('done', function(event) {
+						renderBufferedOutput(true);
 						// Hide streaming dots
 						if (streamingDots) streamingDots.classList.add('hidden');
 						eventSource.close();
+						removeThreadEventSource(eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
 							// Refresh the entire chat view to get final state (re-enables polling)
@@ -350,19 +384,25 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
 							}, 500);
 						} else {
-							// Convert task links BEFORE cleaning markers
-							var bubble = container.closest('.chat-bubble-assistant-msg');
-							if (bubble && window.convertTaskLinksInMessage) {
-								window.convertTaskLinksInMessage(bubble);
-							}
-							if (bubble && window.convertTaskEditLinksInMessage) {
-								window.convertTaskEditLinksInMessage(bubble);
-							}
-							if (bubble && window.cleanBubbleContent) {
-								window.cleanBubbleContent(bubble);
-							}
+							// Always evaluate plan-completion first so prompt visibility updates
+							// even if post-render transforms throw.
 							if (window.handlePlanModeCompletion) {
 								window.handlePlanModeCompletion(textBuffer);
+							}
+							// Convert task links BEFORE cleaning markers
+							var bubble = container.closest('.chat-bubble-assistant-msg');
+							try {
+								if (bubble && window.convertTaskLinksInMessage) {
+									window.convertTaskLinksInMessage(bubble);
+								}
+								if (bubble && window.convertTaskEditLinksInMessage) {
+									window.convertTaskEditLinksInMessage(bubble);
+								}
+								if (bubble && window.cleanBubbleContent) {
+									window.cleanBubbleContent(bubble);
+								}
+							} catch (err) {
+								console.error('[chat] post-stream transform failed:', err);
 							}
 							// Final scroll if tracker allows it
 							if (!tracker || tracker.shouldAutoScroll()) {
@@ -385,11 +425,18 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							container.appendChild(document.createTextNode('\n\nError: ' + event.data));
 						}
 						eventSource.close();
+						removeThreadEventSource(eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
 							setTimeout(function() {
 								htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
 							}, 1000);
+						} else {
+							// Clear streaming flag and re-evaluate plan prompt on error.
+							// The evaluator scans DOM for latest completed bubble; an error
+							// bubble without <proposed_plan> correctly hides the prompt.
+							window._chatStreamInProgress = false;
+							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 						}
 					});
 
@@ -400,11 +447,15 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						if (streamingDots) streamingDots.classList.add('hidden');
 						container.classList.remove('hidden');
 						eventSource.close();
+						removeThreadEventSource(eventSource);
 						window._taskThreadStreamingActive = false;
 						if (isThread) {
 							setTimeout(function() {
 								htmx.ajax('GET', window.location.pathname + '?tab=chat', {target: '#task-detail-content', swap: 'outerHTML'});
 							}, 1000);
+						} else {
+							window._chatStreamInProgress = false;
+							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 						}
 					};
 				})();
@@ -462,7 +513,7 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 					}
 				})();
 			</script>
-			<div id={ "streaming-dots-resume-" + execID } class={ "hidden flex items-center gap-1 mt-2 opacity-40", templ.KV("!hidden", partialContent != "") } >
+			<div id={ "streaming-dots-resume-" + execID } class={ "flex items-center gap-1 mt-2 opacity-40", templ.KV("hidden", partialContent == "") } >
 				@ChatLoadingDots("xs")
 			</div>
 		</div>
@@ -517,6 +568,38 @@ templ _initThreadStreamingScript() {
 				}
 
 				var eventSource = new EventSource('/events/chat/' + execId);
+				var renderScheduled = false;
+				var lastRenderedLength = 0;
+				function renderCumulativeContent(force) {
+					if (!window.renderStreamingContent) {
+						container.textContent = cumulativeContent;
+						return;
+					}
+					if (!force && renderScheduled) return;
+					var runRender = function() {
+						renderScheduled = false;
+						if (!force && cumulativeContent.length === lastRenderedLength) return;
+						window.renderStreamingContent(container, cumulativeContent);
+						lastRenderedLength = cumulativeContent.length;
+						if (!tracker || tracker.shouldAutoScroll()) {
+							requestAnimationFrame(function() {
+								var cm = document.getElementById(messagesId);
+								if (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, false);
+							});
+						}
+					};
+					if (force) {
+						runRender();
+						return;
+					}
+					renderScheduled = true;
+					requestAnimationFrame(runRender);
+				}
+				function removeThreadEventSource(es) {
+					if (!window._threadEventSources || !es) return;
+					var idx = window._threadEventSources.indexOf(es);
+					if (idx >= 0) window._threadEventSources.splice(idx, 1);
+				}
 				// Track EventSource globally so sidebar navigation can close it
 				if (!window._threadEventSources) window._threadEventSources = [];
 				window._threadEventSources.push(eventSource);
@@ -529,19 +612,15 @@ templ _initThreadStreamingScript() {
 							container.classList.remove('hidden');
 							if (streamingDots) streamingDots.classList.remove('hidden');
 						}
-						window.renderStreamingContent(container, cumulativeContent);
-					}
-					if (!tracker || tracker.shouldAutoScroll()) {
-						requestAnimationFrame(function() {
-							var cm = document.getElementById(messagesId);
-							if (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, false);
-						});
+						renderCumulativeContent(false);
 					}
 				};
 
 				eventSource.addEventListener('done', function(event) {
+					renderCumulativeContent(true);
 					if (streamingDots) streamingDots.classList.add('hidden');
 					eventSource.close();
+					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
 						setTimeout(function() {
@@ -568,6 +647,7 @@ templ _initThreadStreamingScript() {
 					container.classList.remove('hidden');
 					if (event.data) container.appendChild(document.createTextNode('\n\nError: ' + event.data));
 					eventSource.close();
+					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
 						setTimeout(function() {
@@ -582,6 +662,7 @@ templ _initThreadStreamingScript() {
 					if (streamingDots) streamingDots.classList.add('hidden');
 					container.classList.remove('hidden');
 					eventSource.close();
+					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 					if (pauseTarget) {
 						setTimeout(function() {
@@ -833,6 +914,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 			// Chat mode selector -> hidden input sync + localStorage persistence
 			if (modeSelect && modeInput) {
+				function reevaluatePlanPrompt() {
+					setTimeout(function() {
+						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+					}, 0);
+				}
 				// Ensure UI reflects current hidden default first
 				if (modeInput.value) {
 					modeSelect.value = modeInput.value;
@@ -846,6 +932,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						if (modeExists) {
 							modeSelect.value = savedMode;
 							modeInput.value = savedMode;
+							reevaluatePlanPrompt();
 						} else {
 							localStorage.removeItem(modeStorageKey);
 						}
@@ -857,6 +944,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					if (modeStorageKey) {
 						localStorage.setItem(modeStorageKey, this.value);
 					}
+					reevaluatePlanPrompt();
 				});
 			}
 
@@ -1462,28 +1550,6 @@ templ ChatAutoScrollScript() {
 				var normalized = normalizeToolName(raw);
 				return displayNames[normalized] || displayNames[raw] || raw;
 			}
-			function currentChatMode() {
-				var form = document.getElementById('chat-form');
-				if (!form) return '';
-				var modeInput = form.querySelector('input[name="chat_mode"]');
-				if (modeInput && modeInput.value) return modeInput.value;
-				var modeSelect = form.querySelector('select[id$="-mode-select"]');
-				if (modeSelect && modeSelect.value) return modeSelect.value;
-				return '';
-			}
-			function shouldHidePlanToolCard(seg) {
-				// Keep tool cards visible outside /chat or outside plan mode.
-				// This only suppresses noisy read-only repo exploration cards in /chat plan mode.
-				if (!container || !container.closest || !container.closest('#chat-messages')) return false;
-				// Preserve persisted chat history rendering on refresh: historical assistant
-				// bubbles use data-raw-content without data-exec-id and should render
-				// exactly as stored regardless of the current mode selector value.
-				var isHistoryRender = container.hasAttribute('data-raw-content') && !container.hasAttribute('data-exec-id');
-				if (isHistoryRender) return false;
-				if (currentChatMode() !== 'plan') return false;
-				var normalized = seg.normalizedName || normalizeToolName(seg.name);
-				return normalized === 'read_file' || normalized === 'list_files' || normalized === 'grep_search';
-			}
 
 			var thinkingPattern = /\[Thinking\]([\s\S]*?)(?:\[\/Thinking\]|$)/g;
 			var toolUsingPattern = /\[Using tool:\s*([^\]]+)\]/g;
@@ -1746,7 +1812,6 @@ templ ChatAutoScrollScript() {
 				flushText();
 
 				if (seg.type === 'using') {
-					if (shouldHidePlanToolCard(seg)) return;
 					var wrap = document.createElement('div');
 					wrap.className = 'stream-tool';
 
@@ -1909,12 +1974,13 @@ templ ChatAutoScrollScript() {
 					if (el.dataset.cleanedRaw === raw && hasRenderedContent) return;
 					if (raw && window.renderStreamingContent) {
 						window.renderStreamingContent(el, raw);
+						el.dataset.cleanedRaw = raw;
 					} else if (raw && window.renderChatMarkdown) {
-						el.className = 'chat-markdown';
+						el.classList.add('chat-markdown');
 						el.innerHTML = window.renderChatMarkdown(raw);
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
+						delete el.dataset.cleanedRaw;
 					}
-					el.dataset.cleanedRaw = raw;
 					// After rendering, process task links and clean markers
 					var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
 					if (bubble) {
@@ -1932,6 +1998,7 @@ templ ChatAutoScrollScript() {
 					if (el.dataset.cleanedRaw === raw && hasRenderedContent) return;
 					if (raw && window.renderStreamingContent) {
 						window.renderStreamingContent(el, raw);
+						el.dataset.cleanedRaw = raw;
 					} else if (raw && window.renderChatMarkdown) {
 						var div = document.createElement('div');
 						div.className = 'chat-markdown';
@@ -1939,8 +2006,8 @@ templ ChatAutoScrollScript() {
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(div);
 						el.innerHTML = '';
 						el.appendChild(div);
+						delete el.dataset.cleanedRaw;
 					}
-					el.dataset.cleanedRaw = raw;
 				});
 				container.querySelectorAll('.chat-bubble-assistant-msg .whitespace-pre-wrap').forEach(function(div) {
 					var text = div.textContent || '';

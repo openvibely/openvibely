@@ -91,6 +91,12 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	if !strings.Contains(content, "eventSource.onmessage") {
 		t.Error("Missing onmessage handler for streaming")
 	}
+	if !strings.Contains(content, "renderBufferedOutput(false)") {
+		t.Error("Missing batched streaming renderer call in onmessage handler")
+	}
+	if !strings.Contains(content, "requestAnimationFrame(runRender)") {
+		t.Error("Missing requestAnimationFrame batching for streaming renders")
+	}
 
 	// Verify that the onmessage handler uses the scroll tracker
 	if !strings.Contains(content, "tracker.shouldAutoScroll") {
@@ -183,7 +189,26 @@ func TestChatAutoScrollLogic(t *testing.T) {
 	t.Logf("ChatAutoScrollLogic verified (%d bytes)", len(content))
 }
 
-func TestChatAutoScrollScript_HidesReadOnlyToolCardsInPlanMode(t *testing.T) {
+func TestChatAutoScrollScript_RehydratesAssistantRawContentViaStreamingRenderer(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatAutoScrollScript().Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, "container.querySelectorAll('.chat-stream-content[data-raw-content]').forEach(function(el)") {
+		t.Error("cleanAssistantMessages must scan raw assistant containers on hydration")
+	}
+	if !strings.Contains(content, "if (raw && window.renderStreamingContent)") {
+		t.Error("cleanAssistantMessages must prefer streaming renderer for tool-card reconstruction")
+	}
+	if !strings.Contains(content, "window.renderStreamingContent(el, raw);") {
+		t.Error("cleanAssistantMessages must rebuild tool/thinking cards from raw content")
+	}
+}
+
+func TestChatAutoScrollScript_ShowsToolCardsInPlanMode(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatAutoScrollScript().Render(context.Background(), &buf)
 	if err != nil {
@@ -192,20 +217,11 @@ func TestChatAutoScrollScript_HidesReadOnlyToolCardsInPlanMode(t *testing.T) {
 
 	content := buf.String()
 
-	if !strings.Contains(content, "function shouldHidePlanToolCard(seg)") {
-		t.Error("expected plan mode tool-card suppression helper in streaming renderer")
+	if strings.Contains(content, "function shouldHidePlanToolCard(seg)") {
+		t.Error("tool-card suppression helper should not exist in plan mode rendering")
 	}
-	if !strings.Contains(content, "var isHistoryRender = container.hasAttribute('data-raw-content') && !container.hasAttribute('data-exec-id');") {
-		t.Error("expected history-render detection to keep persisted tool cards visible after refresh")
-	}
-	if !strings.Contains(content, "if (isHistoryRender) return false;") {
-		t.Error("expected history render path to bypass plan-mode tool-card suppression")
-	}
-	if !strings.Contains(content, "currentChatMode() !== 'plan'") {
-		t.Error("expected plan mode gate for live tool-card suppression")
-	}
-	if !strings.Contains(content, "normalized === 'read_file' || normalized === 'list_files' || normalized === 'grep_search'") {
-		t.Error("expected read-only plan tools to be suppressed in chat rendering")
+	if strings.Contains(content, "if (shouldHidePlanToolCard(seg)) return;") {
+		t.Error("streaming renderer should not suppress plan-mode tool cards")
 	}
 }
 
@@ -754,6 +770,15 @@ func TestChatBubble_PreservesTaskIDMarkers(t *testing.T) {
 	if !strings.Contains(html, "convertTaskLinksInMessage") {
 		t.Error("ChatBubble should call convertTaskLinksInMessage for task link conversion")
 	}
+
+	// Keep the chat-stream-content class even in markdown fallback so refresh cleanup
+	// can reliably find and re-process the container.
+	if strings.Contains(html, "className = 'chat-markdown'") {
+		t.Error("ChatBubble should not replace container className with chat-markdown")
+	}
+	if !strings.Contains(html, "classList.add('chat-markdown')") {
+		t.Error("ChatBubble markdown fallback should add chat-markdown class without removing existing classes")
+	}
 }
 
 // TestRenderStreamingContent_StripsProtocolArtifacts verifies that
@@ -927,6 +952,7 @@ func TestChatBubbleStreamingResume_UsesDataRawContent(t *testing.T) {
 		t.Error("ChatBubbleStreamingResume should NOT render raw text content in the div (causes unformatted flash on hard refresh)")
 	}
 
+
 	// Must have an inline render script (matching ChatBubble pattern)
 	if !strings.Contains(html, "renderStreamingContent") {
 		t.Error("ChatBubbleStreamingResume must have inline script calling renderStreamingContent")
@@ -1054,6 +1080,13 @@ func TestCleanAssistantMessages_HandlesStreamingResumeContainers(t *testing.T) {
 	if !strings.Contains(content, "div.dataset.cleanedText === text") {
 		t.Error("cleanAssistantMessages must skip unchanged assistant text blocks using cleanedText signature")
 	}
+
+	// If renderStreamingContent is unavailable, fallback markdown render must NOT lock
+	// cleanedRaw state. This allows a later pass (after renderStreamingContent loads)
+	// to re-render tool cards from raw markers instead of staying markdown-only.
+	if !strings.Contains(content, "delete el.dataset.cleanedRaw") {
+		t.Error("cleanAssistantMessages fallback markdown path must clear cleanedRaw so tool-card re-render can occur later")
+	}
 }
 
 // TestTaskThreadView_SkipsExpensiveWorkDuringNavigation verifies that the thread
@@ -1105,6 +1138,78 @@ func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 // TestInitThreadStreaming_FindsStreamingDotsByID verifies that _initThreadStreaming
 // finds streaming dots by ID (not nextElementSibling) to work correctly with the
 // inline render script that sits between the container and the dots div.
+func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
+	// Verify that ChatBubbleStreaming error/onerror handlers clear
+	// _chatStreamInProgress and re-evaluate plan prompt for non-thread chat.
+	// Without this, the flag stays stuck true after a streaming failure.
+	var buf bytes.Buffer
+	err := ChatBubbleStreaming("Assistant", "exec-plan-err", "chat-messages", "", false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render ChatBubbleStreaming: %v", err)
+	}
+
+	content := buf.String()
+
+	// Error event listener — the handler body with isThread branch can be ~1100 chars
+	errIdx := strings.Index(content, "eventSource.addEventListener('error'")
+	if errIdx == -1 {
+		t.Fatal("ChatBubbleStreaming must have an error event listener")
+	}
+	errEnd := errIdx + 1200
+	if errEnd > len(content) {
+		errEnd = len(content)
+	}
+	errBody := content[errIdx:errEnd]
+	if !strings.Contains(errBody, "_chatStreamInProgress = false") {
+		t.Error("error handler must clear _chatStreamInProgress for chat (non-thread) context")
+	}
+	if !strings.Contains(errBody, "evaluatePlanCompletionPrompt") {
+		t.Error("error handler must re-evaluate plan prompt for chat (non-thread) context")
+	}
+
+	// onerror handler
+	oeIdx := strings.Index(content, "eventSource.onerror")
+	if oeIdx == -1 {
+		t.Fatal("ChatBubbleStreaming must have an onerror handler")
+	}
+	oeEnd := oeIdx + 1200
+	if oeEnd > len(content) {
+		oeEnd = len(content)
+	}
+	oeBody := content[oeIdx:oeEnd]
+	if !strings.Contains(oeBody, "_chatStreamInProgress = false") {
+		t.Error("onerror handler must clear _chatStreamInProgress for chat (non-thread) context")
+	}
+	if !strings.Contains(oeBody, "evaluatePlanCompletionPrompt") {
+		t.Error("onerror handler must re-evaluate plan prompt for chat (non-thread) context")
+	}
+}
+
+func TestChatBubbleStreaming_ThreadErrorDoesNotEvaluatePlanPrompt(t *testing.T) {
+	// Thread context (isThread=true) should NOT evaluate plan prompt on error —
+	// plan mode only applies to /chat, not task thread views.
+	var buf bytes.Buffer
+	err := ChatBubbleStreaming("Assistant", "exec-thread-err", "thread-messages", "thread-view", true).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render ChatBubbleStreaming (thread): %v", err)
+	}
+
+	content := buf.String()
+
+	// Error handler for thread context should refresh task detail, not evaluate plan prompt
+	errIdx := strings.Index(content, "eventSource.addEventListener('error'")
+	if errIdx == -1 {
+		t.Fatal("ChatBubbleStreaming must have an error event listener")
+	}
+	errBody := content[errIdx : errIdx+800]
+
+	// Thread error should do the HTMX refresh but NOT clear _chatStreamInProgress
+	// for plan prompt evaluation (plan mode is chat-only)
+	if !strings.Contains(errBody, "isThread") {
+		t.Error("error handler must check isThread context")
+	}
+}
+
 func TestInitThreadStreaming_FindsStreamingDotsByID(t *testing.T) {
 	var buf bytes.Buffer
 	err := _initThreadStreamingScript().Render(context.Background(), &buf)

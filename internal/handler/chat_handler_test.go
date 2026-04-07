@@ -588,6 +588,15 @@ func TestHandler_Chat_LoadsRunningExecutions(t *testing.T) {
 	if !strings.Contains(body, "data-initial-length") {
 		t.Error("expected data-initial-length attribute to track partial content")
 	}
+	if !strings.Contains(body, `id="streaming-dots-resume-`+exec.ID+`"`) {
+		t.Error("expected streaming resume dots container for running execution")
+	}
+	if !strings.Contains(body, `id="streaming-dots-resume-`+exec.ID+`" class="flex items-center gap-1 mt-2 opacity-40"`) {
+		t.Error("expected streaming resume dots to be visible for partial running output")
+	}
+	if strings.Contains(body, `id="streaming-dots-resume-`+exec.ID+`" class="hidden`) {
+		t.Error("expected streaming resume dots not to be hidden when partial output exists")
+	}
 
 	// Loading placeholder should not render literal text status message.
 	if strings.Contains(body, "Thinking...") {
@@ -1321,10 +1330,8 @@ func TestHandler_Chat_PlanModeRefreshPreservesToolCallHistoryRendering(t *testin
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 
-	// Refresh rendering path must preserve persisted tool-call history cards, even when
-	// chat mode is plan; renderer now bypasses plan suppression for history bubbles.
-	assert.Contains(t, body, "var isHistoryRender = container.hasAttribute('data-raw-content') && !container.hasAttribute('data-exec-id');")
-	assert.Contains(t, body, "if (isHistoryRender) return false;")
+	// Refresh rendering path must preserve persisted tool-call history cards.
+	assert.NotContains(t, body, "function shouldHidePlanToolCard(seg)")
 
 	// Server history payload includes both turns once and in chronological order.
 	firstIdx := strings.Index(body, "Inspect repository")
@@ -2501,6 +2508,704 @@ func TestHandler_Chat_ReconnectPreservesProjectID(t *testing.T) {
 	// Verify there is no bare '/chat' AJAX call that would lose project context.
 	assert.NotContains(t, body, `htmx.ajax('GET', '/chat',`,
 		"must not have bare /chat AJAX calls without project_id")
-	assert.Contains(t, body, `window._tabVisibility.unregisterSSE('chat-live')`,
-		"chat SSE must be explicitly unregistered when leaving chat content")
+	assert.Contains(t, body, `window.addEventListener('sse-chat-live-event', handleSharedChatLiveEvent);`,
+		"chat page must listen to shared live chat events")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_CentralizedEvaluator(t *testing.T) {
+	// Verify the centralized evaluatePlanCompletionPrompt function exists and
+	// implements all required guards (streaming, mode, plan marker).
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// Centralized evaluator function must exist
+	assert.Contains(t, body, "window.evaluatePlanCompletionPrompt = function(completedText)",
+		"centralized evaluatePlanCompletionPrompt must be defined")
+
+	// Guard 1: never show mid-stream
+	assert.Contains(t, body, "if (window._chatStreamInProgress)",
+		"evaluator must check _chatStreamInProgress flag")
+
+	// Guard 2: only show in plan mode
+	assert.Contains(t, body, "window.currentChatModeValue() !== 'plan'",
+		"evaluator must check plan mode")
+
+	// Guard 3: plan marker detection
+	assert.Contains(t, body, "window.planModeHasProposedPlan(text)",
+		"evaluator must check for proposed_plan marker")
+
+	// handlePlanModeCompletion must clear streaming flag and delegate
+	assert.Contains(t, body, "window._chatStreamInProgress = false",
+		"handlePlanModeCompletion must clear streaming flag on completion")
+	assert.Contains(t, body, "window.evaluatePlanCompletionPrompt(rawText)",
+		"handlePlanModeCompletion must delegate to centralized evaluator")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_StreamingFlagOnSend(t *testing.T) {
+	// Verify that user send sets _chatStreamInProgress = true and hides prompt
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// In the beforeRequest handler for chat-form, streaming flag must be set
+	// before hiding the prompt
+	beforeReqIdx := strings.Index(body, "triggerEl.id === 'chat-form'")
+	require.NotEqual(t, -1, beforeReqIdx, "beforeRequest chat-form check must exist")
+
+	streamFlagIdx := strings.Index(body[beforeReqIdx:], "_chatStreamInProgress = true")
+	require.NotEqual(t, -1, streamFlagIdx, "streaming flag must be set on send")
+
+	hideIdx := strings.Index(body[beforeReqIdx:], "hidePlanCompletionPrompt")
+	require.NotEqual(t, -1, hideIdx, "prompt must be hidden on send")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_LatestResponseOnly(t *testing.T) {
+	// Verify _getLatestCompletedAssistantText returns only the latest
+	// completed assistant text, not older messages with plan markers.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// The _getLatestCompletedAssistantText function must exist
+	assert.Contains(t, body, "window._getLatestCompletedAssistantText = function()",
+		"_getLatestCompletedAssistantText helper must be defined")
+
+	// It must walk newest -> oldest and return on the first non-empty completed
+	// bubble rather than continuing to scan older bubbles
+	assert.Contains(t, body, "// This is the latest completed assistant response",
+		"helper must return on first match, not scan all history")
+	assert.Contains(t, body, "return raw;",
+		"helper must return raw text of latest completed response")
+
+	// It must skip actively-streaming bubbles (loading dots visible)
+	assert.Contains(t, body, "var thinkingDots = bubble.querySelector('.ov-loading-dots')",
+		"helper must detect streaming-in-progress via loading dots")
+	assert.Contains(t, body, "var streamDotsContainer = bubble.querySelector('[id^=\"streaming-dots-\"]')",
+		"helper must detect shared streaming dots containers")
+
+	// It must include live SSE bubbles that store raw text on data-raw-content
+	// without the .chat-stream-content class.
+	assert.Contains(t, body, "[data-raw-content][data-exec-id]",
+		"helper must read raw content from live SSE assistant bubbles")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_ModeSelectorPreference(t *testing.T) {
+	// Verify currentChatModeValue prefers visible select over hidden input
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// currentChatModeValue must check select BEFORE hidden input for robustness
+	fnStart := strings.Index(body, "window.currentChatModeValue = function()")
+	require.NotEqual(t, -1, fnStart, "currentChatModeValue must exist")
+	fnBody := body[fnStart : fnStart+500]
+
+	selectIdx := strings.Index(fnBody, "modeSelect")
+	inputIdx := strings.Index(fnBody, "modeInput")
+	require.NotEqual(t, -1, selectIdx)
+	require.NotEqual(t, -1, inputIdx)
+	assert.Less(t, selectIdx, inputIdx,
+		"currentChatModeValue must check visible select before hidden input")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_ModeRestoreReevaluatesOnHydration(t *testing.T) {
+	// Regression: after blur/focus reconnect HTMX swap, mode restoration from localStorage
+	// must re-evaluate plan prompt from durable assistant history so CTA does not disappear.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	modeBlockIdx := strings.Index(body, "if (modeSelect && modeInput) {")
+	require.NotEqual(t, -1, modeBlockIdx, "mode selector wiring must exist")
+	modeBlock := body[modeBlockIdx : modeBlockIdx+1600]
+
+	assert.Contains(t, modeBlock, "function reevaluatePlanPrompt()",
+		"mode selector wiring must define prompt reevaluation helper")
+	assert.Contains(t, modeBlock, "if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();",
+		"mode restore must trigger centralized plan prompt evaluator")
+	assert.Contains(t, modeBlock, "modeInput.value = savedMode;",
+		"mode restore must sync hidden mode input")
+	assert.Contains(t, modeBlock, "reevaluatePlanPrompt();",
+		"mode restore/change must re-evaluate CTA visibility from history")
+
+	changeIdx := strings.Index(modeBlock, "modeSelect.addEventListener('change', function() {")
+	require.NotEqual(t, -1, changeIdx, "mode change handler must exist")
+	changeBody := modeBlock[changeIdx:]
+	assert.Contains(t, changeBody, "modeInput.value = this.value;",
+		"mode change must keep hidden input synchronized")
+	assert.Contains(t, changeBody, "reevaluatePlanPrompt();",
+		"mode change must re-evaluate plan CTA visibility")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneFallback(t *testing.T) {
+	// Verify chat_response_done SSE handler invokes plan completion evaluation
+	// as fallback when per-exec done event is missed.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// Shared live-event chat_response_done branch must invoke evaluatePlanCompletionPrompt.
+	doneHandlerIdx := strings.Index(body, "if (eventType === 'chat_response_done') {")
+	require.NotEqual(t, -1, doneHandlerIdx, "chat_response_done handler must exist")
+	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+1500]
+
+	assert.Contains(t, doneHandlerBody, "evaluatePlanCompletionPrompt",
+		"chat_response_done must invoke evaluatePlanCompletionPrompt as fallback")
+	assert.Contains(t, doneHandlerBody, "_chatStreamInProgress = false",
+		"chat_response_done must clear streaming flag")
+	assert.Contains(t, doneHandlerBody, "data.completed_output",
+		"chat_response_done fallback should use completed_output when present")
+	assert.Contains(t, doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output)",
+		"chat_response_done should reconcile the live bubble with completed_output")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_NewMessageSetsStreamingFlag(t *testing.T) {
+	// Verify chat_new_message SSE handler sets streaming flag and hides prompt,
+	// and guards against duplicate stream bubbles for the same exec_id.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// Shared live-event chat_new_message branch must set streaming flag.
+	newMsgIdx := strings.Index(body, "if (eventType === 'chat_new_message') {")
+	require.NotEqual(t, -1, newMsgIdx, "chat_new_message handler must exist")
+	newMsgBody := body[newMsgIdx : newMsgIdx+2000]
+
+	assert.Contains(t, newMsgBody, "_chatStreamInProgress = true",
+		"chat_new_message must set streaming flag")
+	assert.Contains(t, newMsgBody, "hidePlanCompletionPrompt",
+		"chat_new_message must hide prompt when new stream starts")
+	assert.Contains(t, newMsgBody, "document.querySelector('[data-exec-id=\"' + data.exec_id + '\"]')",
+		"chat_new_message must guard against duplicate exec bubbles already in DOM")
+}
+
+func TestHandler_Chat_LiveStreamingUsesRenderStreamingContent(t *testing.T) {
+	// Live SSE bubble stream updates should use renderStreamingContent, matching
+	// thread behavior, rather than raw textContent assignment.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	onMsgIdx := strings.Index(body, "eventSource.onmessage = function(event)")
+	require.NotEqual(t, -1, onMsgIdx, "live streaming onmessage handler must exist")
+	onMsgBody := body[onMsgIdx : onMsgIdx+2400]
+
+	assert.Contains(t, body, "function renderBufferedOutput(force)",
+		"live streaming should define a batched render helper")
+	assert.Contains(t, body, "if (!window.renderStreamingContent)",
+		"batched render helper should provide text fallback when renderer is unavailable")
+	assert.Contains(t, body, "window.renderStreamingContent(contentDiv, textBuffer)",
+		"batched render helper should render via shared renderer")
+	assert.Contains(t, onMsgBody, "renderBufferedOutput(false)",
+		"live streaming should batch per-chunk rendering to keep UI responsive")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_StreamDoneEvaluatesBeforeTransforms(t *testing.T) {
+	// Regression test for refresh-only prompt behavior:
+	// done handler must invoke plan completion evaluation before transform helpers
+	// so prompt state updates even if transform code throws.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	doneIdx := strings.Index(body, "eventSource.addEventListener('done', function()")
+	require.NotEqual(t, -1, doneIdx, "stream done handler must exist")
+	doneBody := body[doneIdx : doneIdx+2000]
+
+	handleIdx := strings.Index(doneBody, "handlePlanModeCompletion")
+	convertIdx := strings.Index(doneBody, "convertTaskLinksInMessage")
+	require.NotEqual(t, -1, handleIdx, "done handler must call handlePlanModeCompletion")
+	require.NotEqual(t, -1, convertIdx, "done handler must include transform calls")
+	assert.Less(t, handleIdx, convertIdx,
+		"done handler must evaluate plan completion before transforms")
+	assert.Contains(t, doneBody, "catch (err)",
+		"done handler should guard transforms to avoid blocking prompt evaluation")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_SwapDoesNotClearStreamingFlag(t *testing.T) {
+	// Verify that HTMX swap does NOT clear stream-in-progress for web sends.
+	// Stream state must only transition on stream done / chat_response_done.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// In the afterSwap handler for chat messages, stream flag should NOT be cleared.
+	swapIdx := strings.Index(body, "isChatMessagesSwap || isChatRootSwap")
+	require.NotEqual(t, -1, swapIdx, "afterSwap chat check must exist")
+	swapBody := body[swapIdx : swapIdx+1000]
+
+	assert.Contains(t, swapBody, "_chatWebSendInProgress = false",
+		"HTMX swap should clear only web send dedupe flag")
+	assert.Contains(t, swapBody, "if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory)",
+		"afterSwap should guard prompt recovery while stream is active")
+	assert.NotContains(t, swapBody, "_chatStreamInProgress = false",
+		"HTMX swap must not clear stream-in-progress flag")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_MultiTurnRegression(t *testing.T) {
+	// Regression test: plan turn shows prompt, subsequent non-plan turn hides it.
+	// The history evaluator must use ONLY the latest completed assistant message.
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	// Turn 1: assistant response with proposed_plan
+	task1 := &models.Task{
+		ProjectID: "default",
+		Title:     "Chat: Plan turn",
+		Prompt:    "plan something",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryChat,
+		AgentID:   &agent.ID,
+	}
+	err = h.taskRepo.Create(ctx, task1)
+	require.NoError(t, err)
+	exec1 := &models.Execution{
+		TaskID:        task1.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "plan something",
+	}
+	err = h.execRepo.Create(ctx, exec1)
+	require.NoError(t, err)
+	err = h.execRepo.Complete(ctx, exec1.ID, models.ExecCompleted,
+		"Here is the plan:\n<proposed_plan>\nStep 1: Do X\n</proposed_plan>", "", 10, 50)
+	require.NoError(t, err)
+
+	// Turn 2: assistant response WITHOUT proposed_plan (non-plan follow-up)
+	task2 := &models.Task{
+		ProjectID: "default",
+		Title:     "Chat: Non-plan turn",
+		Prompt:    "do something else",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryChat,
+		AgentID:   &agent.ID,
+	}
+	err = h.taskRepo.Create(ctx, task2)
+	require.NoError(t, err)
+	exec2 := &models.Execution{
+		TaskID:        task2.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "do something else",
+	}
+	err = h.execRepo.Create(ctx, exec2)
+	require.NoError(t, err)
+	err = h.execRepo.Complete(ctx, exec2.ID, models.ExecCompleted,
+		"Done, no plan here.", "", 8, 40)
+	require.NoError(t, err)
+
+	// Render chat page
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// The latest assistant bubble must be "Done, no plan here." (Turn 2)
+	// The evaluator must NOT scan back to Turn 1 and show the prompt.
+	// Verify both turns are rendered in order
+	planIdx := strings.Index(body, "proposed_plan")
+	noPlanIdx := strings.Index(body, "Done, no plan here.")
+	require.NotEqual(t, -1, planIdx, "plan turn must be rendered")
+	require.NotEqual(t, -1, noPlanIdx, "non-plan turn must be rendered")
+	assert.Less(t, planIdx, noPlanIdx, "plan turn must come before non-plan turn")
+
+	// The evaluator function must return the latest text and NOT walk older bubbles
+	// We verify this by checking the function structure returns on first match
+	assert.Contains(t, body, "// This is the latest completed assistant response — return it",
+		"evaluator must return on first (newest) completed bubble, not scan all history")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
+	// Verify that per-exec stream error/onerror handlers (in ChatBubbleStreaming)
+	// clear _chatStreamInProgress and re-evaluate the plan prompt. Without this,
+	// the flag stays stuck true after a streaming failure and blocks prompt evaluation.
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	// Trigger a chat send to get the ChatBubbleStreaming component rendered
+	projects, _ := h.projectSvc.List(ctx)
+	projectID := projects[0].ID
+
+	form := url.Values{}
+	form.Set("message", "test plan message")
+	form.Set("project_id", projectID)
+	form.Set("chat_mode", "plan")
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/send?project_id="+projectID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	// The ChatBubbleStreaming component's error handler must clear streaming flag
+	// and invoke evaluator for non-thread (chat) contexts.
+	// The handler body with isThread branch can be ~1200 chars.
+	errIdx := strings.Index(body, "eventSource.addEventListener('error'")
+	require.NotEqual(t, -1, errIdx, "streaming bubble must have error event listener")
+	errEnd := errIdx + 1200
+	if errEnd > len(body) {
+		errEnd = len(body)
+	}
+	errBody := body[errIdx:errEnd]
+
+	assert.Contains(t, errBody, "_chatStreamInProgress = false",
+		"streaming bubble error handler must clear _chatStreamInProgress for chat context")
+	assert.Contains(t, errBody, "evaluatePlanCompletionPrompt",
+		"streaming bubble error handler must re-evaluate plan prompt for chat context")
+
+	// onerror handler too
+	oeIdx := strings.Index(body, "eventSource.onerror")
+	require.NotEqual(t, -1, oeIdx, "streaming bubble must have onerror handler")
+	oeEnd := oeIdx + 1200
+	if oeEnd > len(body) {
+		oeEnd = len(body)
+	}
+	oeBody := body[oeIdx:oeEnd]
+
+	assert.Contains(t, oeBody, "_chatStreamInProgress = false",
+		"streaming bubble onerror must clear _chatStreamInProgress for chat context")
+	assert.Contains(t, oeBody, "evaluatePlanCompletionPrompt",
+		"streaming bubble onerror must re-evaluate plan prompt for chat context")
+}
+
+func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
+	// Visibility reconnect should not force a full chat outerHTML refresh while
+	// a local streaming bubble is still active.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	onConnectIdx := strings.Index(body, "var handleSharedLiveConnected = function(event) {")
+	require.NotEqual(t, -1, onConnectIdx, "visibility reconnect handler must exist")
+	onConnectBody := body[onConnectIdx : onConnectIdx+1400]
+
+	assert.Contains(t, onConnectBody, "window._chatStreamInProgress && hasActiveChatStream()",
+		"reconnect handler must detect active stream before triggering refresh")
+	assert.Contains(t, onConnectBody, "return;",
+		"reconnect handler should early-return when active stream is present")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneCompletedOutput(t *testing.T) {
+	// Verify chat_response_done handler uses completed_output from event payload
+	// for both content reconciliation and plan-completion evaluation.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// Shared live-event chat_response_done branch must pass completed_output to evaluator.
+	doneHandlerIdx := strings.Index(body, "if (eventType === 'chat_response_done') {")
+	require.NotEqual(t, -1, doneHandlerIdx, "chat_response_done handler must exist")
+	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+2200]
+
+	syncIdx := strings.Index(doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output)")
+	flagIdx := strings.Index(doneHandlerBody, "_chatStreamInProgress = false")
+	evalIdx := strings.Index(doneHandlerBody, "evaluatePlanCompletionPrompt(data.completed_output)")
+
+	require.NotEqual(t, -1, syncIdx, "chat_response_done must reconcile visible bubble with completed_output")
+	require.NotEqual(t, -1, flagIdx, "chat_response_done must clear stream-in-progress flag")
+	require.NotEqual(t, -1, evalIdx, "chat_response_done must evaluate plan prompt with completed_output")
+	assert.Less(t, syncIdx, evalIdx,
+		"chat_response_done should reconcile bubble content before evaluating completion prompt")
+}
+
+func TestHandler_Chat_AssistantBubbleRehydrationOnLoadAndSwap(t *testing.T) {
+	// Regression: hard refresh must rehydrate assistant bubbles from raw content
+	// so tool-call cards remain visible (same behavior as nav away/back).
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, "if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);",
+		"chat transforms must rehydrate assistant bubbles from data-raw-content before marker cleaning")
+	assert.Contains(t, body, "window.rehydrateChatAssistantBubbles = function()",
+		"chat page must expose explicit rehydration helper")
+	assert.Contains(t, body, "if (window.rehydrateChatAssistantBubbles) window.rehydrateChatAssistantBubbles();",
+		"chat page must schedule initial rehydration pass after load")
+	assert.Contains(t, body, "if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory)",
+		"afterSwap prompt recovery must not run while an active stream is still in progress")
+}
+
+func TestHandler_Chat_PlanCompletionPrompt_ModeOrchestrateSuppresses(t *testing.T) {
+	// When mode is orchestrate (not plan), prompt must stay hidden even if
+	// latest assistant response contains <proposed_plan>.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// The evaluator checks mode before marker detection
+	evalIdx := strings.Index(body, "window.evaluatePlanCompletionPrompt = function(completedText)")
+	require.NotEqual(t, -1, evalIdx, "evaluator function must exist")
+	evalBody := body[evalIdx : evalIdx+800]
+
+	modeCheckIdx := strings.Index(evalBody, "currentChatModeValue() !== 'plan'")
+	markerCheckIdx := strings.Index(evalBody, "planModeHasProposedPlan")
+	require.NotEqual(t, -1, modeCheckIdx, "evaluator must check mode")
+	require.NotEqual(t, -1, markerCheckIdx, "evaluator must check marker")
+	assert.Less(t, modeCheckIdx, markerCheckIdx,
+		"mode check must precede marker check — orchestrate mode hides prompt before scanning content")
 }

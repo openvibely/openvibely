@@ -339,6 +339,62 @@ func TestChatBroadcaster_ActiveConsumerReceivesAll(t *testing.T) {
 	}
 }
 
+func TestChatEvent_CompletedOutputInSSE(t *testing.T) {
+	// Verify that ChatResponseDone events with CompletedOutput serialize the
+	// completed_output field so the frontend chat_response_done handler can
+	// evaluate plan-completion prompt visibility without a DOM scan.
+	event := ChatEvent{
+		Type:            ChatResponseDone,
+		ProjectID:       "proj1",
+		ExecID:          "exec1",
+		CompletedOutput: "Here is the plan:\n<proposed_plan>\nStep 1: Do X\n</proposed_plan>",
+	}
+
+	sse := event.ToSSE()
+	jsonStr := strings.TrimPrefix(sse, "data: ")
+	jsonStr = strings.TrimSuffix(jsonStr, "\n\n")
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		t.Fatalf("failed to parse SSE JSON: %v", err)
+	}
+
+	if parsed["completed_output"] == nil {
+		t.Fatal("completed_output must be present in ChatResponseDone SSE payload")
+	}
+	co, ok := parsed["completed_output"].(string)
+	if !ok {
+		t.Fatal("completed_output must be a string")
+	}
+	if !strings.Contains(co, "<proposed_plan>") {
+		t.Error("completed_output must contain the raw assistant output including plan markers")
+	}
+}
+
+func TestChatEvent_CompletedOutputOmittedWhenEmpty(t *testing.T) {
+	// When CompletedOutput is empty (e.g., ChatNewMessage events), it should be
+	// omitted from JSON per omitempty tag.
+	event := ChatEvent{
+		Type:      ChatNewMessage,
+		ProjectID: "proj1",
+		ExecID:    "exec1",
+		Message:   "Hello",
+	}
+
+	sse := event.ToSSE()
+	jsonStr := strings.TrimPrefix(sse, "data: ")
+	jsonStr = strings.TrimSuffix(jsonStr, "\n\n")
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		t.Fatalf("failed to parse SSE JSON: %v", err)
+	}
+
+	if _, exists := parsed["completed_output"]; exists {
+		t.Error("completed_output should be omitted when empty")
+	}
+}
+
 func TestChatBroadcaster_ConcurrentSubscribeUnsubscribePublish(t *testing.T) {
 	b := NewChatBroadcaster()
 	var wg sync.WaitGroup
