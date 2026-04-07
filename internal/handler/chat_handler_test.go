@@ -2552,6 +2552,17 @@ func TestHandler_Chat_PlanCompletionPrompt_CentralizedEvaluator(t *testing.T) {
 	assert.Contains(t, body, "window.planModeHasProposedPlan(text)",
 		"evaluator must check for proposed_plan marker")
 
+	// Reconnect/hydration scans that temporarily return empty text should preserve
+	// an already-earned CTA, while explicit completion events still control clearing.
+	assert.Contains(t, body, "var fromCompletedEvent = (typeof completedText === 'string');",
+		"evaluator must distinguish completion events from DOM-scan fallback")
+	assert.Contains(t, body, "if (!fromCompletedEvent && !text && window._chatPlanPromptLatched)",
+		"empty reconnect/history scans must preserve latched CTA visibility")
+	assert.Contains(t, body, "window._chatPlanPromptLatched = true",
+		"show helper must latch CTA visibility across tab refocus")
+	assert.Contains(t, body, "window._chatPlanPromptLatched = false",
+		"hide helper must clear CTA latch when state genuinely changes")
+
 	// handlePlanModeCompletion must clear streaming flag and delegate
 	assert.Contains(t, body, "window._chatStreamInProgress = false",
 		"handlePlanModeCompletion must clear streaming flag on completion")

@@ -366,12 +366,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			};
 
 			window.hidePlanCompletionPrompt = function() {
+				window._chatPlanPromptLatched = false;
 				var prompt = document.getElementById('chat-plan-complete-prompt');
 				if (!prompt) return;
 				prompt.classList.add('hidden');
 			};
 
 			window.showPlanCompletionPrompt = function() {
+				window._chatPlanPromptLatched = true;
 				var prompt = document.getElementById('chat-plan-complete-prompt');
 				if (!prompt) return;
 				prompt.classList.remove('hidden');
@@ -448,17 +450,26 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				}
 
 				// Resolve text to evaluate
+				var fromCompletedEvent = (typeof completedText === 'string');
 				var text = completedText;
-				if (typeof text !== 'string') {
+				if (!fromCompletedEvent) {
 					// Scan DOM for latest completed assistant bubble
 					text = window._getLatestCompletedAssistantText();
 				}
 
 				if (text && window.planModeHasProposedPlan(text)) {
 					window.showPlanCompletionPrompt();
-				} else {
-					window.hidePlanCompletionPrompt();
+					return;
 				}
+
+				// Reconnect/hydration scans can transiently return empty text before DOM settles.
+				// Preserve previously-earned CTA visibility in that case.
+				if (!fromCompletedEvent && !text && window._chatPlanPromptLatched) {
+					window.showPlanCompletionPrompt();
+					return;
+				}
+
+				window.hidePlanCompletionPrompt();
 			};
 
 			// Extract raw content from the latest completed (non-streaming)

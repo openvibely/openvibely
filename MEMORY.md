@@ -200,6 +200,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - Runtime artifact directories (`uploads/`, managed `repos/`, and any package-local test spillover like `internal/service/uploads/`) are treated as non-source data and should remain ignored/untracked in git.
 - Chat/thread running placeholders now use shared custom loader markup (`ov-loading-dots` + `ov-loading-dot`) instead of DaisyUI `loading loading-dots`, with bouncing motion and token-driven color animation tied to the same primary theme color used by `btn-primary` send buttons (`oklch(var(--p))` / softened `oklch(var(--p) / 0.45)`) in `web/templates/layout/base.templ`.
 - Chat streaming resume dots stay visible for running executions with partial output: `streaming-dots-resume` must use `hidden` only when `partialContent == ""`. Using Tailwind `!hidden` in that slot hides dots with `!important` and breaks the gray in-progress phase after refresh/reconnect.
+- `/chat` plan-complete CTA now uses a small page-level latch (`window._chatPlanPromptLatched`) so tab-refocus reconnect/hydration scans that temporarily return empty latest assistant text do not erase a previously earned `Switch to Orchestrate` prompt. The latch is set only when a completed plan response is detected, preserved across DOM scans/refocus, and explicitly cleared on genuine state changes (new send/stream start, mode change away from plan, explicit dismiss, or completed non-plan response).
 
 ## OAuth
 
