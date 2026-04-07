@@ -5,11 +5,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 )
 
 func worktreeFormRequest(method, path string, form url.Values) *http.Request {
@@ -241,6 +245,77 @@ func TestHandler_CreateTask_WithAutoMerge(t *testing.T) {
 	}
 	if !found.AutoMerge {
 		t.Error("expected auto_merge=true on created task")
+	}
+}
+
+func TestHandler_MergeTaskBranch_CommitFailure_ReturnsHTMXErrorWithToast(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	repoDir := t.TempDir()
+	mustRun := func(name string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(name, args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%s %v failed: %v\n%s", name, args, err, out)
+		}
+	}
+	mustRun("git", "init")
+	mustRun("git", "config", "user.email", "test@example.com")
+	mustRun("git", "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mustRun("git", "add", "README.md")
+	mustRun("git", "commit", "-m", "initial")
+
+	project := &models.Project{
+		Name: "Test Project", Description: "Test", RepoPath: repoDir, IsDefault: true,
+	}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+
+	h.SetWorktreeService(service.NewWorktreeService(h.taskRepo, h.projectRepo, h.settingsRepo))
+
+	worktreePath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(worktreePath, "dirty.txt"), []byte("dirty\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Merge Failure",
+		Prompt:            "test",
+		Category:          models.CategoryActive,
+		Status:            models.StatusCompleted,
+		WorktreePath:      worktreePath,
+		WorktreeBranch:    "task/fail-merge",
+		MergeTargetBranch: "main",
+		MergeStatus:       models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	form := url.Values{"merge_type": {"merge"}}
+	req := worktreeFormRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/merge", form)
+	req.Header.Set("HX-Request", "true")
+	rec := worktreeExecute(e, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Local merge failed") {
+		t.Fatalf("expected merge failure body, got %s", rec.Body.String())
+	}
+	hxTrigger := rec.Header().Get("HX-Trigger")
+	if !strings.Contains(hxTrigger, "openvibelyToast") {
+		t.Fatalf("expected HX-Trigger toast, got %q", hxTrigger)
+	}
+	if !strings.Contains(hxTrigger, "Local merge failed") {
+		t.Fatalf("expected toast message to include merge failure, got %q", hxTrigger)
 	}
 }
 

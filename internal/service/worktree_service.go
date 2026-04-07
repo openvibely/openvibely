@@ -324,6 +324,10 @@ func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task
 
 // CommitWorktreeChanges stages and commits all changes in the worktree.
 func CommitWorktreeChanges(worktreePath string, message string) error {
+	if strings.TrimSpace(message) == "" {
+		return fmt.Errorf("empty commit message")
+	}
+
 	// Check for changes
 	statusCmd := exec.Command("git", "status", "--porcelain")
 	statusCmd.Dir = worktreePath
@@ -375,7 +379,8 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 	// First, commit any uncommitted changes in the worktree
 	if task.WorktreePath != "" {
 		if err := CommitWorktreeChanges(task.WorktreePath, fmt.Sprintf("Auto-commit changes for task: %s", task.Title)); err != nil {
-			log.Printf("[worktree] error auto-committing: %v", err)
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			return &MergeResult{ErrorMessage: err.Error()}, fmt.Errorf("auto-commit before merge failed: %w", err)
 		}
 	}
 

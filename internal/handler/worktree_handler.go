@@ -70,9 +70,16 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	result, mergeErr := h.worktreeSvc.MergeBranch(c.Request().Context(), task, project.RepoPath, mergeType)
 	if mergeErr != nil {
 		log.Printf("[handler] MergeTaskBranch error: %v", mergeErr)
-		// Re-fetch task to show updated status
-		task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-		return h.renderWorktreeInfo(c, task)
+		errMessage := "Local merge failed"
+		if result != nil && result.ErrorMessage != "" {
+			errMessage = fmt.Sprintf("Local merge failed: %s", result.ErrorMessage)
+		} else if mergeErr.Error() != "" {
+			errMessage = fmt.Sprintf("Local merge failed: %s", mergeErr.Error())
+		}
+		if isHTMX(c) {
+			setHTMXToast(c, errMessage, "failed")
+		}
+		return c.String(http.StatusBadRequest, errMessage)
 	}
 
 	if result != nil && !result.Success && len(result.ConflictFiles) > 0 {

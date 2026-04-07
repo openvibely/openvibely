@@ -463,6 +463,11 @@ func TestSyncWorktreeFromMainAtStart_FetchFailureFallsBackToLocalBranch(t *testi
 func TestCommitWorktreeChanges(t *testing.T) {
 	repoDir := createTestGitRepo(t)
 
+	// Empty commit message should fail
+	if err := CommitWorktreeChanges(repoDir, "   "); err == nil {
+		t.Fatal("expected error for empty commit message")
+	}
+
 	// No changes to commit
 	if err := CommitWorktreeChanges(repoDir, "no changes"); err != nil {
 		t.Errorf("expected nil for no changes, got: %v", err)
@@ -689,6 +694,55 @@ func TestMergeBranch(t *testing.T) {
 	// Verify the file exists on the target branch
 	if _, err := os.Stat(filepath.Join(repoDir, "feature.txt")); os.IsNotExist(err) {
 		t.Error("expected feature.txt to exist on target branch after merge")
+	}
+}
+
+func TestMergeBranch_ReturnsErrorWhenAutoCommitFails(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Auto Commit Failure",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: defaultBranch,
+		WorktreePath:      t.TempDir(),
+		WorktreeBranch:    "task/auto-commit-fail",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(task.WorktreePath, "dirty.txt"), []byte("dirty\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ws.MergeBranch(ctx, task, repoDir, "merge")
+	if err == nil {
+		t.Fatal("expected merge error when auto-commit fails")
+	}
+	if result == nil || result.ErrorMessage == "" {
+		t.Fatalf("expected merge result with error message, got %#v", result)
+	}
+	if !strings.Contains(result.ErrorMessage, "checking git status") && !strings.Contains(result.ErrorMessage, "staging changes") && !strings.Contains(result.ErrorMessage, "committing changes") {
+		t.Fatalf("expected commit failure details, got %q", result.ErrorMessage)
+	}
+
+	dbTask, dbErr := taskRepo.GetByID(ctx, task.ID)
+	if dbErr != nil {
+		t.Fatal(dbErr)
+	}
+	if dbTask.MergeStatus != models.MergeStatusFailed {
+		t.Fatalf("expected merge status failed, got %q", dbTask.MergeStatus)
 	}
 }
 
