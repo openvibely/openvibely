@@ -251,6 +251,7 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 							if taskPR != nil {
 								<li>
 									<a href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">
+										<span class="htmx-indicator"><span class="loading loading-spinner loading-xs"></span></span>
 										View PR #{ fmt.Sprintf("%d", taskPR.PRNumber) }
 									</a>
 								</li>
@@ -260,7 +261,9 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 										hx-post={ fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID) }
 										hx-target="#changes-content"
 										hx-swap="innerHTML"
+										hx-indicator="#create-pr-indicator"
 									>
+										<span class="htmx-indicator" id="create-pr-indicator"><span class="loading loading-spinner loading-xs"></span></span>
 										Create PR
 									</button>
 								</li>

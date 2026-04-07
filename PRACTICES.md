@@ -63,6 +63,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - Keep client-side behavior deterministic (avoid duplicate listener registration and brittle swap assumptions).
 - For global UI state flips like theme changes, prefer immediate state application over whole-tree transition choreography; broad wildcard transitions (`*`) can create large-page repaint lag.
 - For global UI overlays (toasts, dropdowns, modals), validate stacking behavior against native dialog top-layer semantics instead of relying only on larger `z-index` values.
+- For grouped dropdown actions with section headers, keep the actionable row layout structurally uniform (same leading slot/indicator footprint per row) so text alignment stays consistent across sections and themes.
 - For shared cross-surface UI primitives (for example chat + thread tool-call cards), use semantic theme tokens for foreground/background states and avoid low-contrast alpha-only color tweaks in light mode.
 - When matching cross-theme component hierarchy, keep wrapper-vs-inner emphasis consistent between themes (for example transparent outer tool wrapper with only inner IN/OUT blocks surfaced) rather than restyling one theme independently.
 - For recurring semantic chips/badges (for example `Default`), define and reuse a shared style token/class instead of per-page color classes so visual semantics stay consistent across pages and themes.

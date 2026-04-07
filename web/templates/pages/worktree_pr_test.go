@@ -22,6 +22,12 @@ func TestTaskChangesWorktreeContent_RendersCreatePRInGitHubSection(t *testing.T)
 	if !strings.Contains(out, "GitHub") {
 		t.Fatal("expected GitHub section header in dropdown")
 	}
+	if !strings.Contains(out, `hx-indicator="#create-pr-indicator"`) {
+		t.Fatal("expected Create PR action to include htmx indicator slot for consistent indentation")
+	}
+	if !strings.Contains(out, `id="create-pr-indicator"`) {
+		t.Fatal("expected Create PR indicator element in dropdown action")
+	}
 }
 
 func TestTaskChangesWorktreeContent_RendersViewPRInGitHubSection(t *testing.T) {
@@ -40,6 +46,9 @@ func TestTaskChangesWorktreeContent_RendersViewPRInGitHubSection(t *testing.T) {
 	}
 	if !strings.Contains(out, "GitHub") {
 		t.Fatal("expected GitHub section header in dropdown")
+	}
+	if !strings.Contains(out, `<span class="htmx-indicator"><span class="loading loading-spinner loading-xs"></span></span>`) {
+		t.Fatal("expected View PR action to include indicator-width slot for consistent indentation")
 	}
 }
 
