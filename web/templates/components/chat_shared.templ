@@ -919,6 +919,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 					}, 0);
 				}
+				// Mark selector as not hydrated until default + persisted restore is applied.
+				modeSelect.dataset.hydrated = 'false';
 				// Ensure UI reflects current hidden default first
 				if (modeInput.value) {
 					modeSelect.value = modeInput.value;
@@ -938,12 +940,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 					}
 				}
+				modeSelect.dataset.hydrated = 'true';
 
 				modeSelect.addEventListener('change', function() {
 					modeInput.value = this.value;
 					if (modeStorageKey) {
 						localStorage.setItem(modeStorageKey, this.value);
 					}
+					modeSelect.dataset.hydrated = 'true';
 					reevaluatePlanPrompt();
 				});
 			}

@@ -2667,7 +2667,7 @@ func TestHandler_Chat_PlanCompletionPrompt_ModeSelectorPreference(t *testing.T) 
 	// currentChatModeValue must check select BEFORE hidden input for robustness
 	fnStart := strings.Index(body, "window.currentChatModeValue = function()")
 	require.NotEqual(t, -1, fnStart, "currentChatModeValue must exist")
-	fnBody := body[fnStart : fnStart+500]
+	fnBody := body[fnStart : fnStart+1200]
 
 	selectIdx := strings.Index(fnBody, "modeSelect")
 	inputIdx := strings.Index(fnBody, "modeInput")
@@ -2675,6 +2675,10 @@ func TestHandler_Chat_PlanCompletionPrompt_ModeSelectorPreference(t *testing.T) 
 	require.NotEqual(t, -1, inputIdx)
 	assert.Less(t, selectIdx, inputIdx,
 		"currentChatModeValue must check visible select before hidden input")
+	assert.Contains(t, fnBody, "persistedMode",
+		"currentChatModeValue should use persisted mode during hydration windows")
+	assert.Contains(t, fnBody, "modeSelect.dataset",
+		"currentChatModeValue should gate select value usage on hydration state")
 }
 
 func TestHandler_Chat_PlanCompletionPrompt_ModeRestoreReevaluatesOnHydration(t *testing.T) {
@@ -2711,6 +2715,10 @@ func TestHandler_Chat_PlanCompletionPrompt_ModeRestoreReevaluatesOnHydration(t *
 		"mode restore must trigger centralized plan prompt evaluator")
 	assert.Contains(t, modeBlock, "modeInput.value = savedMode;",
 		"mode restore must sync hidden mode input")
+	assert.Contains(t, modeBlock, "modeSelect.dataset.hydrated = 'false';",
+		"mode restore must mark selector as not hydrated before persisted restore")
+	assert.Contains(t, modeBlock, "modeSelect.dataset.hydrated = 'true';",
+		"mode restore must mark selector as hydrated after persisted restore")
 	assert.Contains(t, modeBlock, "reevaluatePlanPrompt();",
 		"mode restore/change must re-evaluate CTA visibility from history")
 
