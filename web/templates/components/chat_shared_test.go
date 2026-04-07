@@ -1140,6 +1140,31 @@ func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 	}
 }
 
+func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
+	task := &models.Task{
+		ID:        "thread-clear-1",
+		ProjectID: "p1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, nil, nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render TaskThreadView: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, "isThreadFormRequest && responseText.trim() !== ''") {
+		t.Fatal("beforeSwap should detect successful thread form swaps with non-empty response")
+	}
+	if !strings.Contains(content, "window._taskThreadSavedInput = ''") {
+		t.Fatal("beforeSwap should clear saved thread input on successful thread form swap")
+	}
+	if !strings.Contains(content, "if (sentKey) delete window._taskThreadDrafts[sentKey];") {
+		t.Fatal("beforeSwap should clear persisted draft key on successful thread form swap")
+	}
+}
+
 // TestInitThreadStreaming_FindsStreamingDotsByID verifies that _initThreadStreaming
 // finds streaming dots by ID (not nextElementSibling) to work correctly with the
 // inline render script that sits between the container and the dots div.
