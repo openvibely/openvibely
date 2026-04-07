@@ -41,6 +41,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - For chat action execution, prefer request-scoped runtime tool injection (contract/context + adapter tool wiring) over parsing textual action markers from assistant output
 - For task-execution actions, prefer exact entity targeting (`task_id`/`title`) when the request is about one task; reserve tag/priority filters for explicit group execution requests
 - For UI behavior that depends on both persisted status and live VCS state (for example merged vs unmerged worktree diffs), prefer resilient fallback logic that verifies git truth (ancestry/diff) instead of trusting a single DB status field during transition windows
+- For agentic code-edit tools, prefer Codex-style resilient matching over strict byte-for-byte snippets: try exact match first, then progressively relax whitespace/punctuation matching before failing, and keep duplicate-match errors explicit when replacement intent is ambiguous
 
 ### Data Access Conventions
 - Use raw SQL and parameterized queries (`?` placeholders).

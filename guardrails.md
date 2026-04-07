@@ -21,6 +21,11 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Repeated `read_file`/`list_files`/`grep_search` turns can silently burn tokens without progress
 - Treat this as a prompt/context quality issue first (missing objective, weak handoff after compaction), not a reason to add synthetic guard messages that diverge from Codex behavior
 
+### 4. Avoid Brittle `edit_file` Replacements
+- `edit_file` now has Codex-style fallback matching (exact → trim-end → trim → unicode-normalized line matching), so whitespace-only drift should not force repeated retries
+- If `old_string` still fails, expand context (include nearby stable lines) rather than retrying the same snippet
+- If fallback finds multiple candidate blocks, use `replace_all=true` only when intentionally bulk-editing; otherwise make `old_string` more specific
+
 ---
 
 ## Critical Rules — NEVER Violate

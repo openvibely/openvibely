@@ -82,7 +82,7 @@ func editFileTool() ToolDefinition {
 	return ToolDefinition{
 		Type:        "function",
 		Name:        "edit_file",
-		Description: "Edit a file by replacing an exact string match with new content. The old_string must match exactly (including whitespace and indentation). Use this for surgical edits rather than rewriting entire files.",
+		Description: "Edit a file by replacing old_string with new_string. Tries exact match first, then whitespace-tolerant line matching (Codex-style) if exact match fails. Use this for surgical edits rather than rewriting entire files.",
 		Parameters: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -284,20 +284,33 @@ func execEditFile(workDir string, input json.RawMessage) (string, error) {
 
 	content := string(data)
 
-	if !strings.Contains(content, params.OldString) {
+	var newContent string
+	if strings.Contains(content, params.OldString) {
+		count := strings.Count(content, params.OldString)
+		if count > 1 && !params.ReplaceAll {
+			return "", fmt.Errorf("old_string found %d times in %s — set replace_all=true to replace all, or provide a more specific string", count, params.FilePath)
+		}
+		if params.ReplaceAll {
+			newContent = strings.ReplaceAll(content, params.OldString, params.NewString)
+		} else {
+			newContent = strings.Replace(content, params.OldString, params.NewString, 1)
+		}
+		if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
+			return "", fmt.Errorf("write %s: %w", params.FilePath, err)
+		}
+		if params.ReplaceAll {
+			return fmt.Sprintf("Replaced %d occurrences in %s", count, params.FilePath), nil
+		}
+		return fmt.Sprintf("Successfully edited %s (1 replacement)", params.FilePath), nil
+	}
+
+	// Codex-style fallback: progressively relax line matching when exact text fails.
+	newContent, count, ok := applyEditWithLineMatching(content, params.OldString, params.NewString, params.ReplaceAll)
+	if !ok {
 		return "", fmt.Errorf("old_string not found in %s", params.FilePath)
 	}
-
-	count := strings.Count(content, params.OldString)
 	if count > 1 && !params.ReplaceAll {
 		return "", fmt.Errorf("old_string found %d times in %s — set replace_all=true to replace all, or provide a more specific string", count, params.FilePath)
-	}
-
-	var newContent string
-	if params.ReplaceAll {
-		newContent = strings.ReplaceAll(content, params.OldString, params.NewString)
-	} else {
-		newContent = strings.Replace(content, params.OldString, params.NewString, 1)
 	}
 
 	if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
@@ -308,6 +321,130 @@ func execEditFile(workDir string, input json.RawMessage) (string, error) {
 		return fmt.Sprintf("Replaced %d occurrences in %s", count, params.FilePath), nil
 	}
 	return fmt.Sprintf("Successfully edited %s (1 replacement)", params.FilePath), nil
+}
+
+func applyEditWithLineMatching(content, oldString, newString string, replaceAll bool) (string, int, bool) {
+	contentLines, starts := splitLinesWithStarts(content)
+	targetLines := splitLinesForMatch(oldString)
+	if len(targetLines) == 0 || len(targetLines) > len(contentLines) {
+		return "", 0, false
+	}
+
+	comparators := []func(string, string) bool{
+		func(a, b string) bool { return a == b },
+		func(a, b string) bool { return strings.TrimRight(a, " \t\r") == strings.TrimRight(b, " \t\r") },
+		func(a, b string) bool { return strings.TrimSpace(a) == strings.TrimSpace(b) },
+		func(a, b string) bool { return normalizeLineForMatch(a) == normalizeLineForMatch(b) },
+	}
+
+	var matches []int
+	for _, cmp := range comparators {
+		matches = findLineBlockMatches(contentLines, targetLines, cmp)
+		if len(matches) > 0 {
+			break
+		}
+	}
+	if len(matches) == 0 {
+		return "", 0, false
+	}
+	if len(matches) > 1 && !replaceAll {
+		return "", len(matches), true
+	}
+
+	replaced := replaceLineBlockMatches(content, starts, matches, len(targetLines), newString, replaceAll)
+	if replaceAll {
+		return replaced, len(matches), true
+	}
+	return replaced, 1, true
+}
+
+func splitLinesWithStarts(content string) ([]string, []int) {
+	lines := strings.Split(content, "\n")
+	starts := make([]int, len(lines))
+	idx := 0
+	for i := range lines {
+		starts[i] = idx
+		idx += len(lines[i])
+		if i < len(lines)-1 {
+			idx++
+		}
+	}
+	return lines, starts
+}
+
+func splitLinesForMatch(s string) []string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func findLineBlockMatches(contentLines, targetLines []string, cmp func(string, string) bool) []int {
+	if len(targetLines) == 0 || len(targetLines) > len(contentLines) {
+		return nil
+	}
+	var matches []int
+	for i := 0; i <= len(contentLines)-len(targetLines); i++ {
+		ok := true
+		for j := range targetLines {
+			if !cmp(contentLines[i+j], targetLines[j]) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			matches = append(matches, i)
+		}
+	}
+	return matches
+}
+
+func replaceLineBlockMatches(content string, starts []int, matches []int, targetLen int, newString string, replaceAll bool) string {
+	if len(matches) == 0 {
+		return content
+	}
+	if !replaceAll {
+		matches = matches[:1]
+	}
+	var sb strings.Builder
+	last := 0
+	for _, startLine := range matches {
+		startByte := starts[startLine]
+		endLine := startLine + targetLen
+		endByte := len(content)
+		if endLine < len(starts) {
+			endByte = starts[endLine]
+		}
+		if startByte < last {
+			// Overlapping match, skip to keep output consistent.
+			continue
+		}
+		sb.WriteString(content[last:startByte])
+		sb.WriteString(newString)
+		last = endByte
+	}
+	sb.WriteString(content[last:])
+	return sb.String()
+}
+
+func normalizeLineForMatch(s string) string {
+	var b strings.Builder
+	for _, c := range strings.TrimSpace(s) {
+		switch c {
+		case '\u2010', '\u2011', '\u2012', '\u2013', '\u2014', '\u2015', '\u2212':
+			b.WriteRune('-')
+		case '\u2018', '\u2019', '\u201A', '\u201B':
+			b.WriteRune('\'')
+		case '\u201C', '\u201D', '\u201E', '\u201F':
+			b.WriteRune('"')
+		case '\u00A0', '\u2002', '\u2003', '\u2004', '\u2005', '\u2006', '\u2007', '\u2008', '\u2009', '\u200A', '\u202F', '\u205F', '\u3000':
+			b.WriteRune(' ')
+		default:
+			b.WriteRune(c)
+		}
+	}
+	return b.String()
 }
 
 func execBash(ctx context.Context, workDir string, input json.RawMessage) (string, error) {

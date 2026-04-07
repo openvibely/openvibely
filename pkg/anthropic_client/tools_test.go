@@ -168,6 +168,42 @@ func TestExecEditFile(t *testing.T) {
 		}
 	})
 
+	t.Run("whitespace tolerant multiline replacement", func(t *testing.T) {
+		setup("if ready {\n\tfoo()\n\tbar()\n}\n")
+		input, _ := json.Marshal(map[string]interface{}{
+			"file_path":  "edit.txt",
+			"old_string": "if ready {\n    foo()\n    bar()\n}\n",
+			"new_string": "if ready {\n\tfoo()\n\tbaz()\n}\n",
+		})
+		out, err := ExecuteTool(context.Background(), dir, "edit_file", input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, "Successfully edited") {
+			t.Errorf("unexpected output: %s", out)
+		}
+		data, _ := os.ReadFile(filepath.Join(dir, "edit.txt"))
+		if !strings.Contains(string(data), "baz()") {
+			t.Errorf("expected tolerant replacement to apply: %s", string(data))
+		}
+	})
+
+	t.Run("whitespace tolerant multiple matches without replace_all", func(t *testing.T) {
+		setup("if ready {\n\tfoo()\n\tbar()\n}\n\nif ready {\n  foo()\n  bar()\n}\n")
+		input, _ := json.Marshal(map[string]interface{}{
+			"file_path":  "edit.txt",
+			"old_string": "if ready {\n    foo()\n    bar()\n}\n",
+			"new_string": "if ready {\n  changed()\n}\n",
+		})
+		_, err := ExecuteTool(context.Background(), dir, "edit_file", input)
+		if err == nil {
+			t.Fatal("expected duplicate-match error")
+		}
+		if !strings.Contains(err.Error(), "2 times") {
+			t.Errorf("error = %q, expected duplicate count", err.Error())
+		}
+	})
+
 	t.Run("multiple matches without replace_all", func(t *testing.T) {
 		setup("aaa\naaa\n")
 		input, _ := json.Marshal(map[string]interface{}{
