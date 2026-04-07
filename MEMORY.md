@@ -78,6 +78,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - **UI**: Worktree info panel on task detail, merge buttons on changes tab, auto-merge toggle in create/edit forms
 - **Integration**: `LLMService.ExecuteTaskWithAgent` creates worktree before execution, runs startup sync from latest `main`/default branch when the worktree is clean, and handles post-execution merge
 - **Startup sync safety**: Startup sync uses `git status --porcelain` guard (skip when dirty), logs explicit ran/skipped/failed outcomes, and aborts on merge conflicts (`git merge --abort`) while marking task `merge_status=conflict`
+- **Manual merge conflict feedback**: when `/tasks/:id/worktree/merge` returns a conflict result (`merge_status=conflict`), the handler now also emits an HTMX `openvibelyToast` failure message while refreshing the worktree panel so conflicts are visible immediately.
 - **Diff view**: Changes tab shows worktree branch diff when available (vs target branch), falls back to execution diff
 - **Merged-branch stale-status fallback**: Changes-tab handlers now fall back to preserved execution diff when live worktree diff is empty and the task branch is already merged into target, even if `tasks.merge_status` is still stale (`pending`) before cleanup updates run
 - **Scheduler integration**: `SchedulerService` runs cleanup scan every 5 minutes when worktree service is configured
