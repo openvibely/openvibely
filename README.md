@@ -1,12 +1,15 @@
+
 # OpenVibely
 
-OpenVibely is an open-source AI task execution platform for software teams.
+OpenVibely is open-source infrastructure for teams that want AI to ship real code, with full visibility and control.
 
-Plan work, run tasks with your preferred models, and review every code diff before merge or PR.
+From one chat prompt, you can create and run tasks, monitor execution in real time, and review diffs before anything gets merged.
 
-If you want AI that produces real code changes without losing visibility or control, OpenVibely gives you that workflow out of the box.
+Built for teams that want speed without giving up quality, auditability, or ownership.
 
-Self-hosted and fully under your control.
+Self-hosted, single binary, and built for high performance with low overhead.
+
+User-friendly by design, simple to operate, and fast to set up.
 
 <a href="https://github.com/user-attachments/assets/377521fa-b117-476c-a52a-cfc10befb981">
   <img src="docs/screenshots/openvibely-ui-demo-poster.png" alt="Watch the OpenVibely UI demo" width="100%" />
@@ -14,16 +17,21 @@ Self-hosted and fully under your control.
 
 ## Features
 
-- Task workspace with `Backlog`, `Active`, `Scheduled`, and `Completed` lanes.
-- Plan + run from chat (`/chat`) with orchestrate and read-only plan modes.
-- Live execution visibility: streaming output, status updates, and file changes.
-- Task-level diff review flow before merge or pull request.
-- Git worktree isolation per task to keep parallel AI work safe.
-- Model/provider support for Anthropic, OpenAI, and Ollama.
-- Global + per-project worker limits and queue controls.
-- Channel integrations for GitHub, Slack, and Telegram in `/channels`.
-- REST API + Swagger UI for external automation and integrations.
-- Configurable agents with optional plugin/MCP runtime support.
+- Agent task board for clear status tracking, visibility, and control.
+- Chat-first flow: create, plan, delegate, and run work from chat.
+- Agent delegation with chained tasks for multi-step execution.
+- Custom agents with reusable skills and MCP-enabled plugins.
+- Personalities to tune behavior and communication style.
+- Insights and analytics to spot trends, bottlenecks, and quality issues.
+- Real-time execution visibility: streaming output, status updates, and live file changes.
+- Reviewable diffs before merge or pull request, with per-task git worktree isolation.
+- Auditability by default through execution logs, thread history, and code diffs.
+- Model providers: Anthropic, OpenAI, and Ollama.
+- Messaging channels: GitHub, Slack, and Telegram.
+- Task scheduling for one-time and recurring execution.
+- Minimal operations footprint: self-hosted single binary + SQLite by default.
+- High-performance runtime for fast startup, responsive execution, and low overhead.
+- REST API + Swagger UI for automation and external integrations.
 
 ## Quick Start (Recommended)
 
@@ -33,7 +41,7 @@ Self-hosted and fully under your control.
 
 ### Fresh Clone
 
-For most users, this is all you need:
+For most users, setup is this fast:
 
 ```bash
 git clone https://github.com/openvibely/openvibely.git
@@ -185,3 +193,4 @@ If you are working on this repository as an AI coding agent, read in this order:
 ## License
 
 MIT
+
