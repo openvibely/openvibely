@@ -123,6 +123,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - **EventSource tracking**: Thread streaming SSE connections stored in `window._threadEventSources` array for cleanup on navigation.
 - **Thread draft persistence**: task-thread textarea drafts are keyed by task ID (`window._taskThreadDrafts`) and restored after `morph:outerHTML` swaps so unsent follow-up text does not disappear while polling/refresh updates run.
 - **Thread successful-send clear parity**: on successful thread form swaps with non-empty responses, `htmx:beforeSwap` clears `_taskThreadSavedInput` and the keyed draft before restore runs, so submit-button sends clear the input the same way Enter sends do.
+- **Thread send path parity (Enter vs button)**: task-thread `htmx:beforeRequest`/`htmx:afterRequest` handlers now treat `/thread` request paths as thread sends (not only `#task-thread-form` trigger identity), ensuring tracker reset + auto-scroll + draft-clear behavior stays identical regardless of whether submission originated from Enter or clicking the send button.
 - **Thread polling scope**: `task-thread-view` polling is now limited to `running` and `queued` task statuses (not `pending`) to avoid idle morph swaps replacing the input while users draft follow-up messages.
 - **Thread EventSource lifecycle**: thread stream EventSources are now both tracked and unregistered on close (`done`/`error`/`onerror`) so navigation cleanup can close only active streams and avoid lingering connections.
 

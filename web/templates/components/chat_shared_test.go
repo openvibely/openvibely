@@ -1181,6 +1181,12 @@ func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
 	if !strings.Contains(content, "isThreadFormRequest && responseText.trim() !== ''") {
 		t.Fatal("beforeSwap should detect successful thread form swaps with non-empty response")
 	}
+	if !strings.Contains(content, "requestPath.indexOf('/thread') !== -1") {
+		t.Fatal("thread handlers should treat /thread requests like task-thread form submits for enter/button parity")
+	}
+	if !strings.Contains(content, "window._taskThreadUserScrolledUp = false;") {
+		t.Fatal("beforeRequest should reset thread auto-scroll state for any thread send request")
+	}
 	if !strings.Contains(content, "window._taskThreadSavedInput = ''") {
 		t.Fatal("beforeSwap should clear saved thread input on successful thread form swap")
 	}
