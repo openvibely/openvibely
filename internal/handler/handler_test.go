@@ -2954,6 +2954,25 @@ func TestHandler_GetTaskThread_PollsWhenQueued(t *testing.T) {
 	assert.Contains(t, body, `hx-get="/tasks/`+task.ID+`/thread"`)
 }
 
+func TestHandler_GetTaskThread_DraftClearLogic_DoesNotTreatPollingGetAsSend(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	project := createProject(t, h, "Thread Draft Clear Regression Project")
+	agent := createAgent(t, llmConfigRepo)
+	task := createTask(t, h, project.ID, "Thread Draft Clear Regression Task", func(tk *models.Task) {
+		tk.Status = models.StatusQueued
+		tk.Category = models.CategoryActive
+		tk.AgentID = &agent.ID
+	})
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, "var isPost = requestMethod === 'POST';")
+	assert.Contains(t, body, "var isThreadSendRequest = isPost && isThreadPath;")
+	assert.NotContains(t, body, "|| requestPath.indexOf('/thread') !== -1;")
+}
+
 func TestHandler_GetTaskThread_RunningPlaceholder_NoLiteralThinkingText(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

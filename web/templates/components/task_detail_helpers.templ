@@ -363,8 +363,12 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 						var requestConfig = detail.requestConfig || {};
 						var triggerEl = detail.elt;
 						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
-						var isThreadFormRequest = (triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')))) || requestPath.indexOf('/thread') !== -1;
-						if (isThreadFormRequest) {
+						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
+						var isPost = requestMethod === 'POST';
+						var isThreadPath = requestPath.indexOf('/thread') !== -1;
+						var isThreadFormRequest = triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')));
+						var isThreadSendRequest = isPost && isThreadPath;
+						if (isThreadFormRequest || isThreadSendRequest) {
 							var tracker = window._taskThreadPageTracker;
 							if (tracker) tracker.resetOnUserSend();
 							window._taskThreadUserScrolledUp = false;
@@ -383,8 +387,12 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 						var requestConfig = detail.requestConfig || {};
 						var triggerEl = detail.elt;
 						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
-						var isThreadFormRequest = (triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')))) || requestPath.indexOf('/thread') !== -1;
-						if (!isThreadFormRequest) return;
+						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
+						var isPost = requestMethod === 'POST';
+						var isThreadPath = requestPath.indexOf('/thread') !== -1;
+						var isThreadFormRequest = triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')));
+						var isThreadSendRequest = isPost && isThreadPath;
+						if (!(isThreadFormRequest || isThreadSendRequest)) return;
 						if (!detail.successful) return;
 						var xhr = detail.xhr;
 						var responseText = xhr ? (xhr.responseText || '') : '';

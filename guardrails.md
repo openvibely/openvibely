@@ -129,6 +129,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Streaming retries that reuse the same `exec_id` must seed any new streaming writer buffer from the execution's existing `output` before writing/flushing. Otherwise a retry attempt can flush an empty/fresh buffer and overwrite already-streamed history (observed with transient Anthropic 429/rate-limit retries)
 - For thread/chat assistant bubbles rendered from `data-raw-content`, DOM-cleaning skips must verify both content signature and rendered DOM presence; on morph swaps after failures (including provider 429/rate-limit), `data-cleaned-*` flags can survive while inner DOM is blank, which makes prior history look wiped unless re-render is forced when rendered content is missing
 - Do not fail a task or follow-up solely because no git diff was produced. Some valid tasks are read-only (analysis, summaries, screenshot inspection, reporting) and complete successfully without repository writes
+- In task-thread HTMX lifecycle handlers, never classify all `/thread` requests as sends. Polling is `GET /tasks/:id/thread`; draft-clear logic must only run for real send submissions (`POST` + `/thread` and/or `#task-thread-form` trigger), otherwise drafts can be wiped during blur/focus reconnect cycles.
 
 ## Testing
 
