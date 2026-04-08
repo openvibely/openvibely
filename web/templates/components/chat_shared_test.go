@@ -214,6 +214,30 @@ func TestChatAutoScrollScript_RehydratesAssistantRawContentViaStreamingRenderer(
 	}
 }
 
+func TestChatInputForm_SubmitButtonUsesRequestSubmit(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatInputForm(ChatInputFormConfig{
+		FormID:       "task-thread-form",
+		InputID:      "task-message-input",
+		PostEndpoint: "/tasks/task-1/thread",
+		TargetID:     "task-thread-messages",
+	}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render ChatInputForm: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, "var submitBtn = form.querySelector('button[type=\"submit\"]');") {
+		t.Fatal("chat input script must bind the submit button for click-path parity")
+	}
+	if !strings.Contains(content, "submitBtn.addEventListener('click', function(e)") {
+		t.Fatal("chat input script must normalize submit button clicks")
+	}
+	if !strings.Contains(content, "form.requestSubmit(submitBtn);") {
+		t.Fatal("submit button clicks must use form.requestSubmit(submitBtn) to match Enter submission")
+	}
+}
+
 func TestChatAutoScrollScript_ShowsToolCardsInPlanMode(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatAutoScrollScript().Render(context.Background(), &buf)
