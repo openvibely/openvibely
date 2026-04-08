@@ -867,8 +867,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			var clearFuncName = clearBtn ? clearBtn.getAttribute('data-clear-func') : (formId + 'ClearAttachments');
 			var agentSelect = form.querySelector('select[id$="-agent-select"]');
 			var agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;
-			var modeSelect = form.querySelector('select[id$="-mode-select"]');
-			var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
+				var modeSelect = form.querySelector('select[id$="-mode-select"]');
+				var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
+				var submitBtn = form.querySelector('button[type="submit"]');
 
 			// Clear attachments function (registered on window for onclick handlers)
 			window[clearFuncName] = function() {
@@ -883,15 +884,23 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				clearBtn.onclick = function() { window[clearFuncName](); };
 			}
 
-			// Enter key submission
-			if (messageInput) {
-				messageInput.addEventListener('keydown', function(e) {
-					if (e.key === 'Enter' && !e.shiftKey) {
+				// Enter key submission
+				if (messageInput) {
+					messageInput.addEventListener('keydown', function(e) {
+						if (e.key === 'Enter' && !e.shiftKey) {
+							e.preventDefault();
+							form.requestSubmit(submitBtn || undefined);
+						}
+					});
+				}
+
+				// Normalize send-button clicks to the same requestSubmit path as Enter.
+				if (submitBtn) {
+					submitBtn.addEventListener('click', function(e) {
 						e.preventDefault();
-						form.requestSubmit();
-					}
-				});
-			}
+						form.requestSubmit(submitBtn);
+					});
+				}
 
 			// Model selector -> hidden input sync + localStorage persistence
 			var projectIdInput = form.querySelector('input[name="_project_id"]');
