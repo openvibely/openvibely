@@ -1419,6 +1419,7 @@ templ ChatAutoScrollScript() {
 			this.userScrolledUp = false;
 			this._userInteracting = false;
 			this._userInteractTimeout = null;
+			this._lastScrollTop = element ? element.scrollTop : 0;
 			this._handlers = {};
 			this._init();
 		};
@@ -1461,26 +1462,22 @@ templ ChatAutoScrollScript() {
 					}, 100);
 				};
 
-				// Detect user-initiated scrolls and update flag accordingly
-				// Called AFTER user interaction events to correlate with scroll position
-				this._handlers.scroll = function(e) {
+				// Detect scroll direction and bottom proximity.
+				// Near bottom always re-enables auto-scroll regardless of cause.
+				// Only upward movement away from bottom pauses auto-scroll.
+				this._handlers.scroll = function() {
+					var currentTop = self.element.scrollTop;
 					var isNear = window.chatAutoScroll.isNearBottom(self.element);
+					var movedUp = currentTop < self._lastScrollTop;
+					self._lastScrollTop = currentTop;
 
-					if (self._userInteracting) {
-						// User is actively scrolling
-						if (!isNear) {
-							self.userScrolledUp = true;
-						} else {
-							// User scrolled back to bottom, reset the flag
-							self.userScrolledUp = false;
-						}
-					} else {
-						// Programmatic scroll or delayed scroll event
-						// Always clear the flag if we're at the bottom (re-enables auto-scroll)
-						if (isNear) {
-							self.userScrolledUp = false;
-						}
-						// Don't set the flag if not at bottom - preserve user's scroll-up state
+					if (isNear) {
+						self.userScrolledUp = false;
+						return;
+					}
+
+					if (movedUp) {
+						self.userScrolledUp = true;
 					}
 				};
 
@@ -1502,6 +1499,7 @@ templ ChatAutoScrollScript() {
 				// Also immediately scroll to bottom when user sends
 				if (this.element) {
 					window.chatAutoScroll.scrollToBottom(this.element, false);
+					this._lastScrollTop = this.element.scrollTop;
 				}
 			},
 
