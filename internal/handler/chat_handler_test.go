@@ -204,6 +204,42 @@ func TestHandler_Chat_LightModeToolCallContrastStyles(t *testing.T) {
 	assert.Contains(t, body, `color: var(--ov-l-error);`)
 }
 
+func TestHandler_Chat_TaskCreateResultRowStyling(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, `.ov-task-result-link {`)
+	assert.Contains(t, body, `text-decoration-thickness: 1px;`)
+	assert.Contains(t, body, `.ov-task-result-link:focus-visible`)
+	assert.Contains(t, body, `.ov-task-result-start-btn {`)
+	assert.Contains(t, body, `font-size: 0.75rem;`)
+	assert.Contains(t, body, `min-height: 1.9rem;`)
+	assert.Contains(t, body, `.ov-task-result-start-btn:disabled,`)
+	assert.Contains(t, body, `[data-theme="light"] .ov-task-result-start-btn {`)
+	assert.Contains(t, body, `startBtn.className = 'btn btn-xs ov-task-result-start-btn gap-1';`)
+	assert.Contains(t, body, `? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'`)
+	assert.NotContains(t, body, `? 'text-primary underline decoration-2 underline-offset-2 hover:decoration-2 cursor-pointer font-medium'`)
+	assert.NotContains(t, body, `startBtn.className = 'btn btn-xs btn-primary gap-1';`)
+}
+
 func TestHandler_ChatSend(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
