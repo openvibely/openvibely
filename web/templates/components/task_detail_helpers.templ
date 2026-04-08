@@ -326,19 +326,22 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 				var chatMessages = document.getElementById('task-thread-messages');
 				if (chatMessages) {
 					if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
-					// On initial page load, _taskThreadUserScrolledUp is undefined → scroll to bottom
-					// After streaming refresh where user was scrolled up, it's true → don't scroll
-					if (!window._taskThreadUserScrolledUp) {
+					// Preserve scroll intent across morph swaps.
+					// undefined means first page load (allow initial autoscroll to bottom).
+					var preservedUserScrolledUp = window._taskThreadUserScrolledUp;
+					if (!preservedUserScrolledUp) {
 						if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
 					}
-					// Reset flag so next fresh page load scrolls normally
-					delete window._taskThreadUserScrolledUp;
 
 					// Set up page-level scroll tracker for task thread
 					if (window.ChatScrollTracker) {
 						if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
 						window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
+						window._taskThreadPageTracker.userScrolledUp = !!preservedUserScrolledUp;
 					}
+
+					// Keep global flag as fallback source of truth across partial re-inits.
+					window._taskThreadUserScrolledUp = !!preservedUserScrolledUp;
 				}
 				// Render streaming content markers and initialize SSE for any running executions.
 				// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.
@@ -435,11 +438,9 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 								}
 							}
 							var tracker = window._taskThreadPageTracker;
-							if (tracker && tracker.userScrolledUp) {
-							window._taskThreadUserScrolledUp = true;
-						} else {
-							window._taskThreadUserScrolledUp = false;
-						}
+							if (tracker) {
+								window._taskThreadUserScrolledUp = !!tracker.userScrolledUp;
+							}
 					}
 					// Clean up thread state when navigating away via sidebar
 					// (sidebar replaces main-content, removing the thread view)
@@ -480,6 +481,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 							if (window.ChatScrollTracker) {
 								if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
 								window._taskThreadPageTracker = new window.ChatScrollTracker(target);
+								window._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;
 							}
 						}
 					}
@@ -503,6 +505,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 								if (window.ChatScrollTracker) {
 									if (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();
 									window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);
+									window._taskThreadPageTracker.userScrolledUp = !!window._taskThreadUserScrolledUp;
 								}
 							}
 						}
