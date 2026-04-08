@@ -359,10 +359,15 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 				// Rule 1: Reset tracker when user sends a message (beforeRequest fires before swap)
 				// Also cancel polling requests when SSE streaming is active to prevent morph from killing the EventSource
 					document.body.addEventListener('htmx:beforeRequest', function(event) {
-						var triggerEl = event.detail.elt;
-						if (triggerEl && (triggerEl.id === 'task-thread-form' || triggerEl.closest('#task-thread-form'))) {
+						var detail = event.detail || {};
+						var requestConfig = detail.requestConfig || {};
+						var triggerEl = detail.elt;
+						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
+						var isThreadFormRequest = (triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')))) || requestPath.indexOf('/thread') !== -1;
+						if (isThreadFormRequest) {
 							var tracker = window._taskThreadPageTracker;
 							if (tracker) tracker.resetOnUserSend();
+							window._taskThreadUserScrolledUp = false;
 						}
 					// Block polling requests to task-thread-view while SSE streaming
 					// is active or sidebar navigation is in progress
@@ -374,11 +379,14 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					});
 
 					document.body.addEventListener('htmx:afterRequest', function(event) {
-						var triggerEl = event.detail && event.detail.elt;
-						if (!triggerEl) return;
-						if (!(triggerEl.id === 'task-thread-form' || triggerEl.closest('#task-thread-form'))) return;
-						if (!event.detail.successful) return;
-						var xhr = event.detail.xhr;
+						var detail = event.detail || {};
+						var requestConfig = detail.requestConfig || {};
+						var triggerEl = detail.elt;
+						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
+						var isThreadFormRequest = (triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')))) || requestPath.indexOf('/thread') !== -1;
+						if (!isThreadFormRequest) return;
+						if (!detail.successful) return;
+						var xhr = detail.xhr;
 						var responseText = xhr ? (xhr.responseText || '') : '';
 						if (responseText.trim() === '') return;
 						window._taskThreadSavedInput = '';
