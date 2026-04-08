@@ -284,6 +284,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 
 - **NEVER use visible borders** on chat bubbles or input containers — use `border: none`
 - Depth via drop shadow only. Arrow pointers: set border vars to `transparent`
+- Task-create result links/buttons rendered from `convertTaskLinksInMessage` must use shared semantic classes (`ov-task-result-link`, `ov-task-result-start-btn`) rather than ad-hoc utility strings. Keep link underline subtle (`1px` thickness with tuned offset) and preserve explicit hover/focus/active/disabled styles across light/dark themes.
 
 ## Git Lineage for Chained Tasks
 

@@ -226,8 +226,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var link = document.createElement('a');
 							link.href = '/tasks/' + taskId;
 							link.className = inToolOutput
-								? 'text-primary underline decoration-2 underline-offset-2 hover:decoration-2 cursor-pointer font-medium'
-								: 'text-primary hover:underline cursor-pointer font-medium';
+								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
+								: 'ov-task-result-link cursor-pointer';
 							link.textContent = taskTitle;
 						link.onclick = function(e) {
 							e.preventDefault();
@@ -244,7 +244,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 						if (category && (category === 'backlog' || category === 'pending')) {
 							var startBtn = document.createElement('button');
-							startBtn.className = 'btn btn-xs btn-primary gap-1';
+							startBtn.className = 'btn btn-xs ov-task-result-start-btn gap-1';
 							startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><polygon points="6,4 16,10 6,16"/></svg> Start Task';
 							startBtn.onclick = function(e) {
 								e.preventDefault();
@@ -261,17 +261,17 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								}).then(function(resp) {
 									if (resp.ok) {
 										startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Started';
-										startBtn.classList.remove('btn-primary');
+										startBtn.classList.remove('ov-task-result-start-btn');
 										startBtn.classList.add('btn-success');
 									} else {
 										startBtn.innerHTML = 'Failed';
-										startBtn.classList.remove('btn-primary');
+										startBtn.classList.remove('ov-task-result-start-btn');
 										startBtn.classList.add('btn-error');
 									}
 								}).catch(function() {
 									startBtn.innerHTML = 'Failed';
 									startBtn.disabled = false;
-									startBtn.classList.remove('btn-disabled', 'btn-primary');
+									startBtn.classList.remove('btn-disabled', 'ov-task-result-start-btn');
 									startBtn.classList.add('btn-error');
 								});
 							};

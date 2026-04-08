@@ -37,20 +37,78 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				:root {
 					--animation-btn: 0;
 				}
-				/* Canonical "Default" badge styling used across major settings pages. */
-				.ov-badge-default {
-					background-color: hsl(var(--p));
-					color: hsl(var(--pc));
-					border-color: hsl(var(--p));
-				}
-				.ov-badge-default:hover,
-				.ov-badge-default:focus-visible {
-					background-color: hsl(var(--p));
-					color: hsl(var(--pc));
-					border-color: hsl(var(--p));
-				}
-				/* Theme toggle is intentionally immediate (no global transition choreography). */
-				/* Prevent layout shift when modal opens by reserving scrollbar space */
+					/* Canonical "Default" badge styling used across major settings pages. */
+					.ov-badge-default {
+						background-color: hsl(var(--p));
+						color: hsl(var(--pc));
+						border-color: hsl(var(--p));
+					}
+					.ov-badge-default:hover,
+					.ov-badge-default:focus-visible {
+						background-color: hsl(var(--p));
+						color: hsl(var(--pc));
+						border-color: hsl(var(--p));
+					}
+					/* Task create-result row styles (chat/tool-output cards). */
+					.ov-task-result-link {
+						color: hsl(var(--p));
+						font-weight: 500;
+						text-decoration-line: underline;
+						text-decoration-thickness: 1px;
+						text-underline-offset: 0.14em;
+						text-decoration-color: hsl(var(--p) / 0.85);
+						transition: text-decoration-color 0.15s ease, color 0.15s ease;
+					}
+					.ov-task-result-link:hover {
+						text-decoration-color: hsl(var(--p));
+					}
+					.ov-task-result-link:focus-visible {
+						outline: 2px solid hsl(var(--p) / 0.45);
+						outline-offset: 2px;
+						border-radius: 0.25rem;
+						text-decoration-color: hsl(var(--p));
+					}
+					.ov-task-result-link--tool {
+						text-decoration-line: underline;
+					}
+					.ov-task-result-start-btn {
+						font-weight: 600;
+						font-size: 0.75rem;
+						line-height: 1;
+						padding-inline: 0.7rem;
+						min-height: 1.9rem;
+						background-color: hsl(var(--p) / 0.9);
+						border-color: hsl(var(--p) / 0.85);
+						color: hsl(var(--pc));
+					}
+					.ov-task-result-start-btn:hover:not(:disabled):not(.btn-disabled) {
+						background-color: hsl(var(--p));
+						border-color: hsl(var(--p));
+					}
+					.ov-task-result-start-btn:focus-visible {
+						outline: 2px solid hsl(var(--p) / 0.4);
+						outline-offset: 2px;
+					}
+					.ov-task-result-start-btn:active:not(:disabled):not(.btn-disabled) {
+						transform: translateY(0);
+						filter: brightness(0.96);
+					}
+					.ov-task-result-start-btn:disabled,
+					.ov-task-result-start-btn.btn-disabled {
+						opacity: 0.68;
+					}
+					[data-theme="light"] .ov-task-result-link {
+						text-decoration-color: hsl(var(--p) / 0.7);
+					}
+					[data-theme="light"] .ov-task-result-start-btn {
+						background-color: hsl(var(--p) / 0.86);
+						border-color: hsl(var(--p) / 0.82);
+					}
+					[data-theme="light"] .ov-task-result-start-btn:hover:not(:disabled):not(.btn-disabled) {
+						background-color: hsl(var(--p) / 0.92);
+						border-color: hsl(var(--p) / 0.9);
+					}
+					/* Theme toggle is intentionally immediate (no global transition choreography). */				/* Prevent layout shift when modal opens by reserving scrollbar space */
 				html {
 					scrollbar-gutter: stable;
 					overflow: hidden;
