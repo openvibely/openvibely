@@ -1178,8 +1178,8 @@ func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, "isThreadFormRequest && responseText.trim() !== ''") {
-		t.Fatal("beforeSwap should detect successful thread form swaps with non-empty response")
+	if !strings.Contains(content, "isThreadSendRequest && responseText.trim() !== ''") {
+		t.Fatal("beforeSwap should detect successful thread send requests with non-empty response")
 	}
 	if !strings.Contains(content, "requestPath.indexOf('/thread') !== -1") {
 		t.Fatal("thread handlers should treat /thread requests like task-thread form submits for enter/button parity")

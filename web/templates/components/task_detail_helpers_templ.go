@@ -443,7 +443,20 @@ func TaskThreadView(task *models.Task, executions []models.Execution, agents []m
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "><!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) --><div id=\"task-thread-messages\" class=\"flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, " data-task-active=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var12 string
+		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 253, Col: 103}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\"><!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) --><div id=\"task-thread-messages\" class=\"flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -457,7 +470,7 @@ func TaskThreadView(task *models.Task, executions []models.Execution, agents []m
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, " ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, " ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -466,7 +479,7 @@ func TaskThreadView(task *models.Task, executions []models.Execution, agents []m
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</div><!-- Message Input Form (shared component with model selector) -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</div><!-- Message Input Form (shared component with model selector) -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -483,7 +496,7 @@ func TaskThreadView(task *models.Task, executions []models.Execution, agents []m
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<!-- Shared auto-scroll and marker cleaning utilities -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<!-- Shared auto-scroll and marker cleaning utilities -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -495,7 +508,7 @@ func TaskThreadView(task *models.Task, executions []models.Execution, agents []m
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<script>\n\t\t\tfunction _taskThreadDraftStorageKey() {\n\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\tif (!taskIdMatch || !taskIdMatch[1]) return '';\n\t\t\t\treturn 'task-thread-draft-' + taskIdMatch[1];\n\t\t\t}\n\n\t\t\tfunction _syncTaskThreadDraftFromTextarea() {\n\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\tvar key = _taskThreadDraftStorageKey();\n\t\t\t\tif (!key) return;\n\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\tif (!textarea) return;\n\t\t\t\tif (textarea.value.trim() === '') {\n\t\t\t\t\tdelete window._taskThreadDrafts[key];\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\twindow._taskThreadDrafts[key] = textarea.value;\n\t\t\t}\n\n\t\t\tfunction _restoreTaskThreadDraftToTextarea() {\n\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\tif (!textarea) return;\n\n\t\t\t\tvar restoreValue = '';\n\t\t\t\tif (typeof window._taskThreadSavedInput === 'string' && window._taskThreadSavedInput !== '') {\n\t\t\t\t\trestoreValue = window._taskThreadSavedInput;\n\t\t\t\t}\n\t\t\t\tif (!restoreValue) {\n\t\t\t\t\tvar key = _taskThreadDraftStorageKey();\n\t\t\t\t\tif (key && window._taskThreadDrafts[key]) {\n\t\t\t\t\t\trestoreValue = window._taskThreadDrafts[key];\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (restoreValue && textarea.value !== restoreValue) {\n\t\t\t\t\ttextarea.value = restoreValue;\n\t\t\t\t}\n\t\t\t\tif (!textarea.dataset.draftSyncBound) {\n\t\t\t\t\ttextarea.dataset.draftSyncBound = 'true';\n\t\t\t\t\ttextarea.addEventListener('input', _syncTaskThreadDraftFromTextarea);\n\t\t\t\t\ttextarea.addEventListener('change', _syncTaskThreadDraftFromTextarea);\n\t\t\t\t}\n\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t}\n\n\t\t\t// Apply cleaning and scroll on load\n\t\t\t(function() {\n\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\tif (chatMessages) {\n\t\t\t\t\tif (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);\n\t\t\t\t\t// On initial page load, _taskThreadUserScrolledUp is undefined → scroll to bottom\n\t\t\t\t\t// After streaming refresh where user was scrolled up, it's true → don't scroll\n\t\t\t\t\tif (!window._taskThreadUserScrolledUp) {\n\t\t\t\t\t\tif (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);\n\t\t\t\t\t}\n\t\t\t\t\t// Reset flag so next fresh page load scrolls normally\n\t\t\t\t\tdelete window._taskThreadUserScrolledUp;\n\n\t\t\t\t\t// Set up page-level scroll tracker for task thread\n\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\twindow._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\t// Render streaming content markers and initialize SSE for any running executions.\n\t\t\t\t// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.\n\t\t\t\tvar resumeContainers = document.querySelectorAll('[data-streaming-resume=\"true\"]');\n\t\t\t\tresumeContainers.forEach(function(c) {\n\t\t\t\t\tvar raw = c.getAttribute('data-raw-content') || '';\n\t\t\t\t\tif (raw.trim() && window.renderStreamingContent) {\n\t\t\t\t\t\twindow.renderStreamingContent(c, raw);\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t_restoreTaskThreadDraftToTextarea();\n\t\t\t})();\n\n\t\t\t// Intelligent auto-scroll: only scroll when user hasn't manually scrolled up\n\t\t\tif (!window._taskThreadScrollHandlerAttached) {\n\t\t\t\twindow._taskThreadScrollHandlerAttached = true;\n\n\t\t\t\t// Rule 1: Reset tracker when user sends a message (beforeRequest fires before swap)\n\t\t\t\t// Also cancel polling requests when SSE streaming is active to prevent morph from killing the EventSource\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', function(event) {\n\t\t\t\t\t\tvar detail = event.detail || {};\n\t\t\t\t\t\tvar requestConfig = detail.requestConfig || {};\n\t\t\t\t\t\tvar triggerEl = detail.elt;\n\t\t\t\t\t\tvar requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';\n\t\t\t\t\t\tvar requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';\n\t\t\t\t\t\tvar isPost = requestMethod === 'POST';\n\t\t\t\t\t\tvar isThreadPath = requestPath.indexOf('/thread') !== -1;\n\t\t\t\t\t\tvar isThreadFormRequest = triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')));\n\t\t\t\t\t\tvar isThreadSendRequest = isPost && isThreadPath;\n\t\t\t\t\t\tif (isThreadFormRequest || isThreadSendRequest) {\n\t\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\t\tif (tracker) tracker.resetOnUserSend();\n\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t// Block polling requests to task-thread-view while SSE streaming\n\t\t\t\t\t// is active or sidebar navigation is in progress\n\t\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-view') {\n\t\t\t\t\t\t\tif (window._taskThreadStreamingActive || window._sidebarNavigating) {\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\t\tvar detail = event.detail || {};\n\t\t\t\t\t\tvar requestConfig = detail.requestConfig || {};\n\t\t\t\t\t\tvar triggerEl = detail.elt;\n\t\t\t\t\t\tvar requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';\n\t\t\t\t\t\tvar requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';\n\t\t\t\t\t\tvar isPost = requestMethod === 'POST';\n\t\t\t\t\t\tvar isThreadPath = requestPath.indexOf('/thread') !== -1;\n\t\t\t\t\t\tvar isThreadFormRequest = triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')));\n\t\t\t\t\t\tvar isThreadSendRequest = isPost && isThreadPath;\n\t\t\t\t\t\tif (!(isThreadFormRequest || isThreadSendRequest)) return;\n\t\t\t\t\t\tif (!detail.successful) return;\n\t\t\t\t\t\tvar xhr = detail.xhr;\n\t\t\t\t\t\tvar responseText = xhr ? (xhr.responseText || '') : '';\n\t\t\t\t\t\tif (responseText.trim() === '') return;\n\t\t\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\t\t\tvar key = _taskThreadDraftStorageKey();\n\t\t\t\t\t\tif (key) delete window._taskThreadDrafts[key];\n\t\t\t\t\t});\n\n\t\t\t\t\t// Before swaps, capture scroll state and preserve textarea input\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\t\t\tvar target = event.detail.target;\n\t\t\t\t\t\tif (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view')) {\n\t\t\t\t\t\t\tvar triggerEl = event.detail.requestConfig && event.detail.requestConfig.elt;\n\t\t\t\t\t\t\tvar isThreadFormRequest = triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')));\n\t\t\t\t\t\t\tvar xhr = event.detail.xhr;\n\t\t\t\t\t\t\tvar responseText = xhr ? (xhr.responseText || '') : '';\n\n\t\t\t\t\t\t\tif (isThreadFormRequest && responseText.trim() !== '') {\n\t\t\t\t\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t\t\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\t\t\t\t\tvar sentKey = _taskThreadDraftStorageKey();\n\t\t\t\t\t\t\t\tif (sentKey) delete window._taskThreadDrafts[sentKey];\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t// Save textarea value before swap to prevent clearing during morph polling\n\t\t\t\t\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\t\t\t\t\tif (textarea) {\n\t\t\t\t\t\t\t\t\twindow._taskThreadSavedInput = textarea.value;\n\t\t\t\t\t\t\t\t\t_syncTaskThreadDraftFromTextarea();\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\t\tif (tracker && tracker.userScrolledUp) {\n\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = true;\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t// Clean up thread state when navigating away via sidebar\n\t\t\t\t\t// (sidebar replaces main-content, removing the thread view)\n\t\t\t\t\tif (target && target.id === 'main-content') {\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\tif (window._taskThreadPageTracker) {\n\t\t\t\t\t\t\twindow._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\twindow._taskThreadPageTracker = null;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Close thread EventSource connections\n\t\t\t\t\t\tif (window._threadEventSources) {\n\t\t\t\t\t\t\twindow._threadEventSources.forEach(function(es) {\n\t\t\t\t\t\t\t\ttry { es.close(); } catch(e) {}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\twindow._threadEventSources = [];\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\t\tvar target = event.detail.target;\n\t\t\t\t\tif (target && target.id === 'task-thread-messages') {\n\t\t\t\t\t\t// Skip expensive DOM work if navigating away via sidebar\n\t\t\t\t\t\tif (window._sidebarNavigating) return;\n\t\t\t\t\t\tif (window.cleanAssistantMessages) window.cleanAssistantMessages(target);\n\t\t\t\t\t\t// Auto-scroll unless user manually scrolled up\n\t\t\t\t\t\tif (!window._taskThreadUserScrolledUp) {\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\tif (target && window.chatAutoScroll) {\n\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(target, true);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Re-attach tracker if the DOM element changed\n\t\t\t\t\t\tif (target !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {\n\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = new window.ChatScrollTracker(target);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t// Handle polling updates to task-thread-view (e.g., task completion status)\n\t\t\t\t\telse if (target && target.id === 'task-thread-view') {\n\t\t\t\t\t\t// Skip expensive DOM work if navigating away via sidebar\n\t\t\t\t\t\tif (window._sidebarNavigating) return;\n\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\tif (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);\n\t\t\t\t\t\t\t// Auto-scroll unless user manually scrolled up\n\t\t\t\t\t\t\tif (!window._taskThreadUserScrolledUp) {\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tif (chatMessages && window.chatAutoScroll) {\n\t\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, true);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Re-attach tracker if the DOM element changed\n\t\t\t\t\t\t\tif (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {\n\t\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (window.cleanAssistantMessages) window.cleanAssistantMessages(document.getElementById('task-thread-messages'));\n\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t}\n\t\t\t\t\t// Also handle full page refreshes on task-detail-content\n\t\t\t\t\t\telse if (target && target.id === 'task-detail-content') {\n\t\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\tif (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Restore textarea value after morph polling or full page refresh\n\t\t\t\t\t\t_restoreTaskThreadDraftToTextarea();\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<script>\n\t\t\tfunction _taskThreadDraftStorageKey() {\n\t\t\t\tvar taskIdMatch = window.location.pathname.match(/\\/tasks\\/([^\\/]+)/);\n\t\t\t\tif (!taskIdMatch || !taskIdMatch[1]) return '';\n\t\t\t\treturn 'task-thread-draft-' + taskIdMatch[1];\n\t\t\t}\n\n\t\t\tfunction _syncTaskThreadDraftFromTextarea() {\n\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\tvar key = _taskThreadDraftStorageKey();\n\t\t\t\tif (!key) return;\n\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\tif (!textarea) return;\n\t\t\t\tif (textarea.value.trim() === '') {\n\t\t\t\t\tdelete window._taskThreadDrafts[key];\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\twindow._taskThreadDrafts[key] = textarea.value;\n\t\t\t}\n\n\t\t\tfunction _restoreTaskThreadDraftToTextarea() {\n\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\tif (!textarea) return;\n\n\t\t\t\tvar restoreValue = '';\n\t\t\t\tif (typeof window._taskThreadSavedInput === 'string' && window._taskThreadSavedInput !== '') {\n\t\t\t\t\trestoreValue = window._taskThreadSavedInput;\n\t\t\t\t}\n\t\t\t\tif (!restoreValue) {\n\t\t\t\t\tvar key = _taskThreadDraftStorageKey();\n\t\t\t\t\tif (key && window._taskThreadDrafts[key]) {\n\t\t\t\t\t\trestoreValue = window._taskThreadDrafts[key];\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (restoreValue && textarea.value !== restoreValue) {\n\t\t\t\t\ttextarea.value = restoreValue;\n\t\t\t\t}\n\t\t\t\tif (!textarea.dataset.draftSyncBound) {\n\t\t\t\t\ttextarea.dataset.draftSyncBound = 'true';\n\t\t\t\t\ttextarea.addEventListener('input', _syncTaskThreadDraftFromTextarea);\n\t\t\t\t\ttextarea.addEventListener('change', _syncTaskThreadDraftFromTextarea);\n\t\t\t\t}\n\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t}\n\n\t\t\t// Apply cleaning and scroll on load\n\t\t\t(function() {\n\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\tif (chatMessages) {\n\t\t\t\t\tif (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);\n\t\t\t\t\t// On initial page load, _taskThreadUserScrolledUp is undefined → scroll to bottom\n\t\t\t\t\t// After streaming refresh where user was scrolled up, it's true → don't scroll\n\t\t\t\t\tif (!window._taskThreadUserScrolledUp) {\n\t\t\t\t\t\tif (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);\n\t\t\t\t\t}\n\t\t\t\t\t// Reset flag so next fresh page load scrolls normally\n\t\t\t\t\tdelete window._taskThreadUserScrolledUp;\n\n\t\t\t\t\t// Set up page-level scroll tracker for task thread\n\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\twindow._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\t// Render streaming content markers and initialize SSE for any running executions.\n\t\t\t\t// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.\n\t\t\t\tvar resumeContainers = document.querySelectorAll('[data-streaming-resume=\"true\"]');\n\t\t\t\tresumeContainers.forEach(function(c) {\n\t\t\t\t\tvar raw = c.getAttribute('data-raw-content') || '';\n\t\t\t\t\tif (raw.trim() && window.renderStreamingContent) {\n\t\t\t\t\t\twindow.renderStreamingContent(c, raw);\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t_restoreTaskThreadDraftToTextarea();\n\t\t\t})();\n\n\t\t\t// Intelligent auto-scroll: only scroll when user hasn't manually scrolled up\n\t\t\tif (!window._taskThreadScrollHandlerAttached) {\n\t\t\t\twindow._taskThreadScrollHandlerAttached = true;\n\n\t\t\t\t// Rule 1: Reset tracker when user sends a message (beforeRequest fires before swap)\n\t\t\t\t// Also cancel polling requests when SSE streaming is active to prevent morph from killing the EventSource\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', function(event) {\n\t\t\t\t\t\tvar threadView = document.getElementById('task-thread-view');\n\t\t\t\t\t\tvar isTaskActive = !!(threadView && threadView.getAttribute('data-task-active') === 'true');\n\t\t\t\t\t\tvar triggerEl = event.detail && event.detail.elt;\n\t\t\t\t\t\t// Block stale polls when task is no longer active\n\t\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-view' && !isTaskActive) {\n\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tvar detail = event.detail || {};\n\t\t\t\t\t\tvar requestConfig = detail.requestConfig || {};\n\t\t\t\t\t\tvar requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';\n\t\t\t\t\t\tvar requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';\n\t\t\t\t\t\tvar isPost = requestMethod === 'POST';\n\t\t\t\t\t\tvar isThreadPath = requestPath.indexOf('/thread') !== -1;\n\t\t\t\t\t\tvar isThreadSendRequest = isPost && isThreadPath;\n\t\t\t\t\t\tif (isThreadSendRequest) {\n\t\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\t\tif (tracker) tracker.resetOnUserSend();\n\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t// Block polling requests to task-thread-view while SSE streaming\n\t\t\t\t\t// is active or sidebar navigation is in progress\n\t\t\t\t\t\tif (triggerEl && triggerEl.id === 'task-thread-view') {\n\t\t\t\t\t\t\tif (window._taskThreadStreamingActive || window._sidebarNavigating) {\n\t\t\t\t\t\t\t\tevent.preventDefault();\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\t\tvar detail = event.detail || {};\n\t\t\t\t\t\tvar requestConfig = detail.requestConfig || {};\n\t\t\t\t\t\tvar requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';\n\t\t\t\t\t\tvar requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';\n\t\t\t\t\t\tvar isPost = requestMethod === 'POST';\n\t\t\t\t\t\tvar isThreadPath = requestPath.indexOf('/thread') !== -1;\n\t\t\t\t\t\tvar isThreadSendRequest = isPost && isThreadPath;\n\t\t\t\t\t\tif (!isThreadSendRequest) return;\n\t\t\t\t\t\tif (!detail.successful) return;\n\t\t\t\t\t\tvar xhr = detail.xhr;\n\t\t\t\t\t\tvar responseText = xhr ? (xhr.responseText || '') : '';\n\t\t\t\t\t\tif (responseText.trim() === '') return;\n\t\t\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\t\t\tvar key = _taskThreadDraftStorageKey();\n\t\t\t\t\t\tif (key) delete window._taskThreadDrafts[key];\n\t\t\t\t\t});\n\n\t\t\t\t\t// Before swaps, capture scroll state and preserve textarea input\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\t\t\tvar target = event.detail.target;\n\t\t\t\t\t\tif (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view')) {\n\t\t\t\t\t\t\tvar requestConfig = event.detail.requestConfig || {};\n\t\t\t\t\t\t\tvar requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';\n\t\t\t\t\t\t\tvar requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';\n\t\t\t\t\t\t\tvar isPost = requestMethod === 'POST';\n\t\t\t\t\t\t\tvar isThreadPath = requestPath.indexOf('/thread') !== -1;\n\t\t\t\t\t\t\tvar isThreadSendRequest = isPost && isThreadPath;\n\t\t\t\t\t\t\tvar xhr = event.detail.xhr;\n\t\t\t\t\t\t\tvar responseText = xhr ? (xhr.responseText || '') : '';\n\n\t\t\t\t\t\t\tif (isThreadSendRequest && responseText.trim() !== '') {\n\t\t\t\t\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t\t\t\t\t\twindow._taskThreadDrafts = window._taskThreadDrafts || {};\n\t\t\t\t\t\t\t\tvar sentKey = _taskThreadDraftStorageKey();\n\t\t\t\t\t\t\t\tif (sentKey) delete window._taskThreadDrafts[sentKey];\n\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t// Save textarea value before swap to prevent clearing during morph polling\n\t\t\t\t\t\t\t\tvar textarea = document.getElementById('task-message-input');\n\t\t\t\t\t\t\t\tif (textarea) {\n\t\t\t\t\t\t\t\t\twindow._taskThreadSavedInput = textarea.value;\n\t\t\t\t\t\t\t\t\t_syncTaskThreadDraftFromTextarea();\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tvar tracker = window._taskThreadPageTracker;\n\t\t\t\t\t\t\tif (tracker && tracker.userScrolledUp) {\n\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = true;\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t// Clean up thread state when navigating away via sidebar\n\t\t\t\t\t// (sidebar replaces main-content, removing the thread view)\n\t\t\t\t\tif (target && target.id === 'main-content') {\n\t\t\t\t\t\twindow._taskThreadStreamingActive = false;\n\t\t\t\t\t\twindow._taskThreadSavedInput = '';\n\t\t\t\t\t\twindow._taskThreadUserScrolledUp = false;\n\t\t\t\t\t\tif (window._taskThreadPageTracker) {\n\t\t\t\t\t\t\twindow._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\twindow._taskThreadPageTracker = null;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Close thread EventSource connections\n\t\t\t\t\t\tif (window._threadEventSources) {\n\t\t\t\t\t\t\twindow._threadEventSources.forEach(function(es) {\n\t\t\t\t\t\t\t\ttry { es.close(); } catch(e) {}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\twindow._threadEventSources = [];\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t});\n\n\t\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\t\tvar target = event.detail.target;\n\t\t\t\t\tif (target && target.id === 'task-thread-messages') {\n\t\t\t\t\t\t// Skip expensive DOM work if navigating away via sidebar\n\t\t\t\t\t\tif (window._sidebarNavigating) return;\n\t\t\t\t\t\tif (window.cleanAssistantMessages) window.cleanAssistantMessages(target);\n\t\t\t\t\t\t// Auto-scroll unless user manually scrolled up\n\t\t\t\t\t\tif (!window._taskThreadUserScrolledUp) {\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\tif (target && window.chatAutoScroll) {\n\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(target, true);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Re-attach tracker if the DOM element changed\n\t\t\t\t\t\tif (target !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {\n\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = new window.ChatScrollTracker(target);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\t// Handle polling updates to task-thread-view (e.g., task completion status)\n\t\t\t\t\telse if (target && target.id === 'task-thread-view') {\n\t\t\t\t\t\t// Skip expensive DOM work if navigating away via sidebar\n\t\t\t\t\t\tif (window._sidebarNavigating) return;\n\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\tif (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);\n\t\t\t\t\t\t\t// Auto-scroll unless user manually scrolled up\n\t\t\t\t\t\t\tif (!window._taskThreadUserScrolledUp) {\n\t\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\t\tif (chatMessages && window.chatAutoScroll) {\n\t\t\t\t\t\t\t\t\t\twindow.chatAutoScroll.scrollToBottom(chatMessages, true);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t// Re-attach tracker if the DOM element changed\n\t\t\t\t\t\t\tif (chatMessages !== (window._taskThreadPageTracker && window._taskThreadPageTracker.element)) {\n\t\t\t\t\t\t\t\tif (window.ChatScrollTracker) {\n\t\t\t\t\t\t\t\t\tif (window._taskThreadPageTracker) window._taskThreadPageTracker.destroy();\n\t\t\t\t\t\t\t\t\twindow._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (window.cleanAssistantMessages) window.cleanAssistantMessages(document.getElementById('task-thread-messages'));\n\t\t\t\t\t\tif (window._initThreadStreaming) window._initThreadStreaming();\n\t\t\t\t\t}\n\t\t\t\t\t// Also handle full page refreshes on task-detail-content\n\t\t\t\t\t\telse if (target && target.id === 'task-detail-content') {\n\t\t\t\t\t\t\tvar chatMessages = document.getElementById('task-thread-messages');\n\t\t\t\t\t\t\tif (chatMessages) {\n\t\t\t\t\t\t\t\tif (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\t// Restore textarea value after morph polling or full page refresh\n\t\t\t\t\t\t_restoreTaskThreadDraftToTextarea();\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -521,9 +534,9 @@ func TaskThreadFollowupResponse(message string, execID string, attachments []mod
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var12 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var12 == nil {
-			templ_7745c5c3_Var12 = templ.NopComponent
+		templ_7745c5c3_Var13 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var13 == nil {
+			templ_7745c5c3_Var13 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments).Render(ctx, templ_7745c5c3_Buffer)
@@ -551,157 +564,157 @@ func TaskExecutionHistory(task *models.Task, executions []models.Execution) temp
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var13 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var13 == nil {
-			templ_7745c5c3_Var13 = templ.NopComponent
+		templ_7745c5c3_Var14 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var14 == nil {
+			templ_7745c5c3_Var14 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<div id=\"task-execution-history\" class=\"mt-6\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<div id=\"task-execution-history\" class=\"mt-6\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if task.Status == models.StatusRunning || task.Status == models.StatusPending {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, " hx-get=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var14 string
-			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/tasks/%s/executions", task.ID))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 530, Col: 56}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" hx-trigger=\"every 3s\" hx-target=\"#task-execution-history\" hx-swap=\"morph:outerHTML\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "><div class=\"flex items-center justify-between mb-3\"><h4 class=\"text-lg font-bold\">Execution History</h4><div class=\"flex items-center gap-2\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if task.Status == models.StatusRunning {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<button class=\"btn btn-sm btn-error\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, " hx-get=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var15 string
-			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/tasks/%s/cancel", task.ID))
+			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/tasks/%s/executions", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 542, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 539, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" hx-target=\"#task-execution-history\" hx-swap=\"morph:outerHTML\" hx-confirm=\"Cancel this running task?\">Cancel Task</button> <span class=\"loading loading-spinner loading-sm\"></span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "\" hx-trigger=\"every 3s\" hx-target=\"#task-execution-history\" hx-swap=\"morph:outerHTML\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "><div class=\"flex items-center justify-between mb-3\"><h4 class=\"text-lg font-bold\">Execution History</h4><div class=\"flex items-center gap-2\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if task.Status == models.StatusRunning {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "<button class=\"btn btn-sm btn-error\" hx-post=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var16 string
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/tasks/%s/cancel", task.ID))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 551, Col: 56}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\" hx-target=\"#task-execution-history\" hx-swap=\"morph:outerHTML\" hx-confirm=\"Cancel this running task?\">Cancel Task</button> <span class=\"loading loading-spinner loading-sm\"></span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(executions) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<p class=\"opacity-50\">No executions yet</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<p class=\"opacity-50\">No executions yet</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
 			for i, exec := range executions {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<div class=\"card bg-base-100 shadow-sm border border-base-300 mb-2\"><div class=\"card-body p-4\"><div class=\"flex items-center justify-between mb-2\"><div class=\"flex flex-col text-sm opacity-60\"><span>Started: ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<div class=\"card bg-base-100 shadow-sm border border-base-300 mb-2\"><div class=\"card-body p-4\"><div class=\"flex items-center justify-between mb-2\"><div class=\"flex flex-col text-sm opacity-60\"><span>Started: ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var16 string
-				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(exec.StartedAt.Local().Format("2006-01-02 3:04:05 PM"))
+				var templ_7745c5c3_Var17 string
+				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(exec.StartedAt.Local().Format("2006-01-02 3:04:05 PM"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 561, Col: 79}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 570, Col: 79}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</span> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if exec.CompletedAt != nil {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<span>Finished: ")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var17 string
-					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(exec.CompletedAt.Local().Format("2006-01-02 3:04:05 PM"))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 563, Col: 83}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "</span>")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</div>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				if exec.Status == models.ExecRunning && i == 0 && task.Status == models.StatusRunning {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<div class=\"text-sm opacity-60\"><span class=\"badge badge-warning\">Elapsed: ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<span>Finished: ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var18 string
-					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(FormatElapsedTime(exec.StartedAt))
+					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(exec.CompletedAt.Local().Format("2006-01-02 3:04:05 PM"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 568, Col: 87}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 572, Col: 83}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "</span></div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-				} else if exec.DurationMs > 0 || exec.TokensUsed > 0 {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<div class=\"text-sm opacity-60\">")
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "</div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if exec.Status == models.ExecRunning && i == 0 && task.Status == models.StatusRunning {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<div class=\"text-sm opacity-60\"><span class=\"badge badge-warning\">Elapsed: ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var19 string
-					templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d tokens, %s", exec.TokensUsed, formatDuration(exec.DurationMs)))
+					templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(FormatElapsedTime(exec.StartedAt))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 572, Col: 89}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 577, Col: 87}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</span></div>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				} else if exec.DurationMs > 0 || exec.TokensUsed > 0 {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<div class=\"text-sm opacity-60\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var20 string
+					templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d tokens, %s", exec.TokensUsed, formatDuration(exec.DurationMs)))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 581, Col: 89}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "</div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "</div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if exec.Status == models.ExecRunning && exec.Output == "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<div class=\"flex items-center gap-2 p-3 bg-base-200 rounded-lg\"><span class=\"loading loading-spinner loading-sm\"></span> <span class=\"text-sm opacity-60\">Model is working on this task...</span></div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "<div class=\"flex items-center gap-2 p-3 bg-base-200 rounded-lg\"><span class=\"loading loading-spinner loading-sm\"></span> <span class=\"text-sm opacity-60\">Model is working on this task...</span></div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 				if exec.Output != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "<div class=\"mb-2\"><div class=\"flex items-center justify-between mb-1\"><span class=\"text-xs opacity-60\">Model Output:</span> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<div class=\"mb-2\"><div class=\"flex items-center justify-between mb-1\"><span class=\"text-xs opacity-60\">Model Output:</span> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -709,48 +722,48 @@ func TaskExecutionHistory(task *models.Task, executions []models.Execution) temp
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<button class=\"btn btn-xs btn-ghost\" onclick=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<button class=\"btn btn-xs btn-ghost\" onclick=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var20 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-output-%s', this)", exec.ID)}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20.Call)
+					var templ_7745c5c3_Var21 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-output-%s', this)", exec.ID)}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21.Call)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "\" title=\"Copy to clipboard\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\"></path></svg></button></div><pre id=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var21 string
-					templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("exec-output-%s", exec.ID))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 596, Col: 56}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "\" class=\"p-3 bg-base-200 rounded-lg text-sm whitespace-pre-wrap max-h-96 overflow-y-auto mt-1\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "\" title=\"Copy to clipboard\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\"></path></svg></button></div><pre id=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var22 string
-					templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(exec.Output)
+					templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("exec-output-%s", exec.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 596, Col: 165}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 605, Col: 56}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "</pre></div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "\" class=\"p-3 bg-base-200 rounded-lg text-sm whitespace-pre-wrap max-h-96 overflow-y-auto mt-1\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var23 string
+					templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(exec.Output)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 605, Col: 165}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "</pre></div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 				if exec.ErrorMessage != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "<div class=\"mb-2\"><div class=\"flex items-center justify-between mb-1\"><span class=\"text-xs opacity-60 text-error\">Error:</span> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<div class=\"mb-2\"><div class=\"flex items-center justify-between mb-1\"><span class=\"text-xs opacity-60 text-error\">Error:</span> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -758,53 +771,53 @@ func TaskExecutionHistory(task *models.Task, executions []models.Execution) temp
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<button class=\"btn btn-xs btn-ghost text-error\" onclick=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "<button class=\"btn btn-xs btn-ghost text-error\" onclick=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var23 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-error-%s', this)", exec.ID)}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23.Call)
+					var templ_7745c5c3_Var24 templ.ComponentScript = templ.ComponentScript{Call: fmt.Sprintf("copyToClipboard('exec-error-%s', this)", exec.ID)}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24.Call)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "\" title=\"Copy to clipboard\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\"></path></svg></button></div><pre id=\"")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var24 string
-					templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("exec-error-%s", exec.ID))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 613, Col: 55}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "\" class=\"p-3 bg-error/10 rounded-lg text-sm text-error whitespace-pre-wrap mt-1\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "\" title=\"Copy to clipboard\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z\"></path></svg></button></div><pre id=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var25 string
-					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(exec.ErrorMessage)
+					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("exec-error-%s", exec.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 613, Col: 156}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 622, Col: 55}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "</pre></div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "\" class=\"p-3 bg-error/10 rounded-lg text-sm text-error whitespace-pre-wrap mt-1\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var26 string
+					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(exec.ErrorMessage)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_detail_helpers.templ`, Line: 622, Col: 156}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "</pre></div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "</div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "</div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

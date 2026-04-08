@@ -745,6 +745,7 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 				<div
 					id="thread-content"
 					hx-get={ fmt.Sprintf("/tasks/%s/thread", task.ID) }
+					hx-trigger="none"
 					hx-swap="innerHTML"
 					data-task-id={ task.ID }
 					data-loaded="false"
@@ -783,9 +784,20 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 					function _scrollThreadToBottom(force) {
 						requestAnimationFrame(function() {
 							var chatMessages = document.getElementById('task-thread-messages');
-							if (chatMessages && window.chatAutoScroll) {
-								window.chatAutoScroll.scrollToBottom(chatMessages, !!force);
+							if (!chatMessages || !window.chatAutoScroll) return;
+
+							if (!force) {
+								var tracker = window._taskThreadPageTracker;
+								var userScrolledUp = false;
+								if (tracker && typeof tracker.userScrolledUp === 'boolean') {
+									userScrolledUp = tracker.userScrolledUp;
+								} else if (typeof window._taskThreadUserScrolledUp === 'boolean') {
+									userScrolledUp = window._taskThreadUserScrolledUp;
+								}
+								if (userScrolledUp) return;
 							}
+
+							window.chatAutoScroll.scrollToBottom(chatMessages, !!force);
 						});
 					}
 

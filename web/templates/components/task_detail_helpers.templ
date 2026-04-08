@@ -250,6 +250,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 			hx-target="#task-thread-view"
 			hx-swap="morph:outerHTML"
 		}
+		data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued) }
 	>
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
 		<div id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0">
@@ -359,16 +360,22 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 				// Rule 1: Reset tracker when user sends a message (beforeRequest fires before swap)
 				// Also cancel polling requests when SSE streaming is active to prevent morph from killing the EventSource
 					document.body.addEventListener('htmx:beforeRequest', function(event) {
+						var threadView = document.getElementById('task-thread-view');
+						var isTaskActive = !!(threadView && threadView.getAttribute('data-task-active') === 'true');
+						var triggerEl = event.detail && event.detail.elt;
+						// Block stale polls when task is no longer active
+						if (triggerEl && triggerEl.id === 'task-thread-view' && !isTaskActive) {
+							event.preventDefault();
+							return;
+						}
 						var detail = event.detail || {};
 						var requestConfig = detail.requestConfig || {};
-						var triggerEl = detail.elt;
 						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
 						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
 						var isPost = requestMethod === 'POST';
 						var isThreadPath = requestPath.indexOf('/thread') !== -1;
-						var isThreadFormRequest = triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')));
 						var isThreadSendRequest = isPost && isThreadPath;
-						if (isThreadFormRequest || isThreadSendRequest) {
+						if (isThreadSendRequest) {
 							var tracker = window._taskThreadPageTracker;
 							if (tracker) tracker.resetOnUserSend();
 							window._taskThreadUserScrolledUp = false;
@@ -385,14 +392,12 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					document.body.addEventListener('htmx:afterRequest', function(event) {
 						var detail = event.detail || {};
 						var requestConfig = detail.requestConfig || {};
-						var triggerEl = detail.elt;
 						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
 						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
 						var isPost = requestMethod === 'POST';
 						var isThreadPath = requestPath.indexOf('/thread') !== -1;
-						var isThreadFormRequest = triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')));
 						var isThreadSendRequest = isPost && isThreadPath;
-						if (!(isThreadFormRequest || isThreadSendRequest)) return;
+						if (!isThreadSendRequest) return;
 						if (!detail.successful) return;
 						var xhr = detail.xhr;
 						var responseText = xhr ? (xhr.responseText || '') : '';
@@ -407,12 +412,16 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					document.body.addEventListener('htmx:beforeSwap', function(event) {
 						var target = event.detail.target;
 						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view')) {
-							var triggerEl = event.detail.requestConfig && event.detail.requestConfig.elt;
-							var isThreadFormRequest = triggerEl && (triggerEl.id === 'task-thread-form' || (triggerEl.closest && triggerEl.closest('#task-thread-form')));
+							var requestConfig = event.detail.requestConfig || {};
+							var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
+							var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
+							var isPost = requestMethod === 'POST';
+							var isThreadPath = requestPath.indexOf('/thread') !== -1;
+							var isThreadSendRequest = isPost && isThreadPath;
 							var xhr = event.detail.xhr;
 							var responseText = xhr ? (xhr.responseText || '') : '';
 
-							if (isThreadFormRequest && responseText.trim() !== '') {
+							if (isThreadSendRequest && responseText.trim() !== '') {
 								window._taskThreadSavedInput = '';
 								window._taskThreadDrafts = window._taskThreadDrafts || {};
 								var sentKey = _taskThreadDraftStorageKey();
