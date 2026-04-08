@@ -72,41 +72,47 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						text-decoration-line: underline;
 					}
 					.ov-task-result-start-btn {
-						font-weight: 600;
+						font-weight: 400;
 						font-size: 0.75rem;
 						line-height: 1;
 						padding-inline: 0.7rem;
 						min-height: 1.9rem;
-						background-color: hsl(var(--p) / 0.9);
-						border-color: hsl(var(--p) / 0.85);
-						color: hsl(var(--pc));
+						background-color: transparent;
+						border-color: transparent;
+						color: hsl(var(--p));
 					}
 					.ov-task-result-start-btn:hover:not(:disabled):not(.btn-disabled) {
-						background-color: hsl(var(--p));
-						border-color: hsl(var(--p));
+						background-color: hsl(var(--p) / 0.1);
+						border-color: transparent;
 					}
 					.ov-task-result-start-btn:focus-visible {
 						outline: 2px solid hsl(var(--p) / 0.4);
 						outline-offset: 2px;
+						background-color: hsl(var(--p) / 0.08);
 					}
 					.ov-task-result-start-btn:active:not(:disabled):not(.btn-disabled) {
 						transform: translateY(0);
-						filter: brightness(0.96);
+						background-color: hsl(var(--p) / 0.15);
 					}
 					.ov-task-result-start-btn:disabled,
 					.ov-task-result-start-btn.btn-disabled {
-						opacity: 0.68;
+						opacity: 0.5;
+						color: hsl(var(--bc) / 0.4);
 					}
 					[data-theme="light"] .ov-task-result-link {
 						text-decoration-color: hsl(var(--p) / 0.7);
 					}
 					[data-theme="light"] .ov-task-result-start-btn {
-						background-color: hsl(var(--p) / 0.86);
-						border-color: hsl(var(--p) / 0.82);
+						color: hsl(var(--p));
 					}
 					[data-theme="light"] .ov-task-result-start-btn:hover:not(:disabled):not(.btn-disabled) {
-						background-color: hsl(var(--p) / 0.92);
-						border-color: hsl(var(--p) / 0.9);
+						background-color: hsl(var(--p) / 0.08);
+					}
+					[data-theme="light"] .ov-task-result-start-btn:focus-visible {
+						background-color: hsl(var(--p) / 0.06);
+					}
+					[data-theme="light"] .ov-task-result-start-btn:active:not(:disabled):not(.btn-disabled) {
+						background-color: hsl(var(--p) / 0.12);
 					}
 					/* Theme toggle is intentionally immediate (no global transition choreography). */				/* Prevent layout shift when modal opens by reserving scrollbar space */
 				html {
