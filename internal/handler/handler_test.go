@@ -1529,6 +1529,29 @@ func TestHandler_ViewSchedule_NoFlickerOnHTMXNav(t *testing.T) {
 	assertContains(t, rec, `id="schedule-timeline-container"`)
 }
 
+func TestHandler_Schedule_NoViewportHeightOverflow(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Test Project")
+	base := "/schedule?project_id=" + project.ID
+
+	rec := htmxGet(e, base)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	// The schedule-content root must use flex layout to fill available space
+	// instead of a viewport-relative calc() height that causes outer scrollbar.
+	if !strings.Contains(body, `id="schedule-content"`) {
+		t.Fatal("missing schedule-content element")
+	}
+	if strings.Contains(body, "100vh") {
+		t.Error("schedule page must not use viewport-relative height (100vh); use flex layout instead")
+	}
+	// The timeline container should use flex-1 to fill remaining space
+	if !strings.Contains(body, "flex-1 min-h-0") {
+		t.Error("schedule-timeline-container should use flex-1 min-h-0 for proper overflow")
+	}
+}
+
 func TestHandler_RescheduleTask(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
