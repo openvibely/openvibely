@@ -931,17 +931,15 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 				function _computeDiffFingerprint(container) {
 					var viewer = container && container.querySelector('#diff-viewer');
 					if (!viewer) return '';
-					// Use file count + all file path badges as a lightweight fingerprint.
-					var badges = viewer.querySelectorAll('.badge');
-					var parts = [viewer.dataset.fileCount || '0'];
-					badges.forEach(function(b) { parts.push(b.textContent.trim()); });
-					// Include inline table row counts per file for content-level change detection.
-					var inlineDiv = viewer.querySelector('#diff-content-inline');
-					if (inlineDiv) {
-						var tables = inlineDiv.querySelectorAll('.diff-table');
-						tables.forEach(function(t) { parts.push(String(t.rows ? t.rows.length : 0)); });
+					// Use a simple hash of the full diff viewer HTML for accurate
+					// change detection. The previous badge+row-count approach missed
+					// content changes within existing lines.
+					var raw = viewer.innerHTML;
+					var h = 0;
+					for (var i = 0; i < raw.length; i++) {
+						h = ((h << 5) - h + raw.charCodeAt(i)) | 0;
 					}
-					return parts.join('|');
+					return String(h);
 				}
 
 				function _getDiffViewMode() {
@@ -959,35 +957,47 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 					_fileChangesUpdatePending = true;
 
 				var taskId = changesContent.dataset.taskId;
-				if (taskId && typeof htmx !== 'undefined') {
-					// Capture scroll position and UI state before the swap.
-					var scrollX = window.scrollX || window.pageXOffset || 0;
-					var scrollY = window.scrollY || window.pageYOffset || 0;
-					var viewMode = _getDiffViewMode();
-
-					htmx.ajax('GET', '/tasks/' + taskId + '/changes', {
-						target: '#changes-content',
-						swap: 'innerHTML'
-					}).then(function() {
+				if (taskId) {
+					// Fetch new HTML in the background WITHOUT touching the live DOM.
+					// Only swap if content actually changed — this prevents the viewport
+					// jumps caused by the old htmx.ajax() path which replaced innerHTML
+					// before the fingerprint check could run.
+					fetch('/tasks/' + taskId + '/changes', {
+						headers: { 'HX-Request': 'true' }
+					}).then(function(resp) {
+						if (!resp.ok) throw new Error('HTTP ' + resp.status);
+						return resp.text();
+					}).then(function(html) {
 						_fileChangesUpdatePending = false;
 
-						// If the diff content hasn't meaningfully changed, skip disruptive work.
-						var newContainer = document.getElementById('changes-content');
-						var newFp = _computeDiffFingerprint(newContainer);
+						// Parse the response in a detached element to compute fingerprint
+						// without touching the live DOM at all.
+						var offscreen = document.createElement('div');
+						offscreen.innerHTML = html;
+
+						var newFp = _computeDiffFingerprint(offscreen);
 						if (newFp && newFp === _lastDiffFingerprint) {
-							// Content identical — restore scroll and bail.
-							window.scrollTo(scrollX, scrollY);
+							// Diff unchanged — no DOM mutation, no scroll disruption.
 							return;
 						}
 						_lastDiffFingerprint = newFp;
 
-						// Restore diff view mode (inline/split).
-						if (viewMode === 'split' && typeof switchDiffView === 'function') {
-							switchDiffView('split');
-						}
+						// Content changed — apply the swap with UI state preservation.
+						var scrollX = window.scrollX || window.pageXOffset || 0;
+						var scrollY = window.scrollY || window.pageYOffset || 0;
+						var viewMode = _getDiffViewMode();
 
-						// Restore scroll position so the user stays where they were.
-						window.scrollTo(scrollX, scrollY);
+						changesContent.innerHTML = html;
+
+						// Let the browser settle the new DOM, then restore UI state.
+						requestAnimationFrame(function() {
+							// Restore diff view mode (inline/split).
+							if (viewMode === 'split' && typeof switchDiffView === 'function') {
+								switchDiffView('split');
+							}
+							// Restore scroll position so the user stays where they were.
+							window.scrollTo(scrollX, scrollY);
+						});
 					}).catch(function() {
 						_fileChangesUpdatePending = false;
 					});

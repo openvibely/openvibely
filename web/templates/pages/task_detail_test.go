@@ -247,6 +247,74 @@ func TestTaskDetailContent_ThreadTabLazyLoadsOnDemand(t *testing.T) {
 	}
 }
 
+// TestTaskDetailContent_DiffUpdateUsesPreSwapFingerprint is a regression test for the
+// Changes tab viewport-jump bug. The old code used htmx.ajax() which swapped the DOM
+// before the fingerprint check could fire, causing full DOM remounts every 2 seconds
+// during live updates. The fix uses fetch() + offscreen fingerprint comparison so the
+// DOM is only touched when content actually changes.
+func TestTaskDetailContent_DiffUpdateUsesPreSwapFingerprint(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-fp-1",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+
+	var buf bytes.Buffer
+	err := TaskDetailContent(task, nil, nil, nil, nil, nil, "changes", nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+
+	// Must use fetch() for diff updates, NOT htmx.ajax() — fetch allows pre-swap
+	// fingerprint comparison in a detached DOM element.
+	if !strings.Contains(output, "fetch('/tasks/' + taskId + '/changes'") {
+		t.Fatal("expected _updateDiffViewer to use fetch() for pre-swap fingerprint comparison")
+	}
+
+	// Must NOT use htmx.ajax for live diff updates inside _updateDiffViewer.
+	// htmx.ajax is fine for initial tab-switch loads and refreshChanges triggers.
+	// Check that the function body between "function _updateDiffViewer" and its
+	// closing does not call htmx.ajax (excluding comments).
+	if idx := strings.Index(output, "function _updateDiffViewer"); idx >= 0 {
+		end := idx + 2500
+		if end > len(output) {
+			end = len(output)
+		}
+		fnBody := output[idx:end]
+		// Remove comment lines before checking for htmx.ajax calls
+		var codeLines []string
+		for _, line := range strings.Split(fnBody, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if !strings.HasPrefix(trimmed, "//") {
+				codeLines = append(codeLines, line)
+			}
+		}
+		codeOnly := strings.Join(codeLines, "\n")
+		if strings.Contains(codeOnly, "htmx.ajax") {
+			t.Fatal("_updateDiffViewer must NOT use htmx.ajax (causes DOM swap before fingerprint check); use fetch() instead")
+		}
+	}
+
+	// Must compute fingerprint on offscreen element before touching live DOM.
+	if !strings.Contains(output, "var offscreen = document.createElement") {
+		t.Fatal("expected offscreen DOM element for pre-swap fingerprint computation")
+	}
+
+	// Must skip DOM mutation entirely when fingerprint matches.
+	if !strings.Contains(output, "// Diff unchanged") {
+		t.Fatal("expected early return path when diff fingerprint is unchanged")
+	}
+
+	// Must use requestAnimationFrame for post-swap UI state restoration.
+	if !strings.Contains(output, "requestAnimationFrame(function()") {
+		t.Fatal("expected requestAnimationFrame for post-swap state restoration")
+	}
+}
+
 func TestTaskDetailContent_ThreadAutoLoadsWhenChatTabInitiallyActive(t *testing.T) {
 	task := &models.Task{
 		ID:        "task-thread-2",
