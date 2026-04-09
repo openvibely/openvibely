@@ -129,6 +129,16 @@ func (s *Service) TriggerTaskChain(ctx context.Context, parentTask models.Task, 
 	if config.ChildCategory != "" {
 		resolvedChildCategory = models.TaskCategory(config.ChildCategory)
 		categorySource = "config"
+	} else {
+		// Parent may already be moved to completed before chain trigger runs.
+		// Default to a runnable category for sequential execution.
+		switch parentTask.Category {
+		case models.CategoryActive, models.CategoryBacklog:
+			resolvedChildCategory = parentTask.Category
+		default:
+			resolvedChildCategory = models.CategoryActive
+			categorySource = "default_active"
+		}
 	}
 
 	childTask := &models.Task{
@@ -158,7 +168,60 @@ func (s *Service) TriggerTaskChain(ctx context.Context, parentTask models.Task, 
 	}
 
 	log.Printf("[agent-svc] triggerTaskChain created child task id=%s parent=%s", childTask.ID, parentTask.ID)
+
+	// Pre-create blocked grandchild for visibility if child has its own chain config
+	if config.ChildChainConfig != nil && config.ChildChainConfig.Enabled {
+		blockedGrandchild := BuildBlockedChild(*childTask, config.ChildChainConfig)
+		if gcErr := s.taskCreator.Create(ctx, blockedGrandchild); gcErr != nil {
+			log.Printf("[agent-svc] triggerTaskChain error pre-creating blocked grandchild: %v", gcErr)
+		} else {
+			log.Printf("[agent-svc] triggerTaskChain pre-created blocked grandchild id=%s for child=%s", blockedGrandchild.ID, childTask.ID)
+		}
+	}
+
 	return nil
+}
+
+// BuildBlockedChild creates a blocked child task from a parent's chain config.
+// The child has StatusBlocked and a placeholder prompt (the real prompt comes
+// from the parent's output when TriggerTaskChain runs at completion).
+func BuildBlockedChild(parentTask models.Task, config *models.ChainConfiguration) *models.Task {
+	childTitle := fmt.Sprintf("%s (Implementation)", parentTask.Title)
+	if config.ChildTitle != "" {
+		childTitle = config.ChildTitle
+	}
+
+	childPrompt := "Waiting for parent task to complete..."
+	if config.ChildPromptPrefix != "" {
+		childPrompt = config.ChildPromptPrefix
+	}
+
+	childChainConfig := "{}"
+	if config.ChildChainConfig != nil && config.ChildChainConfig.Enabled {
+		if data, err := json.Marshal(config.ChildChainConfig); err == nil {
+			childChainConfig = string(data)
+		}
+	}
+
+	// Blocked children always go to backlog for visibility while waiting.
+	// The real category (from config or parent) is applied at activation time
+	// when triggerTaskChain runs on parent completion.
+	childTask := &models.Task{
+		ProjectID:    parentTask.ProjectID,
+		Title:        childTitle,
+		Category:     models.CategoryBacklog,
+		Priority:     parentTask.Priority,
+		Status:       models.StatusBlocked,
+		Prompt:       childPrompt,
+		ParentTaskID: &parentTask.ID,
+		Tag:          parentTask.Tag,
+		ChainConfig:  childChainConfig,
+		LineageDepth: parentTask.LineageDepth + 1,
+	}
+	if config.ChildAgentID != "" {
+		childTask.AgentID = &config.ChildAgentID
+	}
+	return childTask
 }
 
 var reThinkingBlock = regexp.MustCompile(`(?s)\[Thinking\]\n.*?\[/Thinking\]\n?`)

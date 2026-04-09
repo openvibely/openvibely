@@ -52,6 +52,11 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Keep compaction instructions separate from normal turn system instructions. Do not reuse full task/system prompt for `/responses/compact`; use dedicated compaction prompt text (default compaction prompt or explicit `CompactionPrompt` override) to avoid re-triggering bootstrap file-read directives after compaction.
 - After `/responses/compact`, preserve the compacted output returned by the API; avoid extra client-side re-summarization/re-trimming that can drop task state and cause bootstrap restarts.
 
+## Worktree Prompt Context
+
+- For API task execution/follow-up paths (OpenAI + Anthropic), include explicit worktree orientation in system prompts when `workDir` is set: `You are operating in an isolated git worktree at <path>.`
+- Do not rely on prompt text alone for isolation; keep executor/tool-level workdir confinement in place.
+
 ## SQLite
 
 - When adding columns, update ALL SELECT queries that scan the struct — not just `GetByID`/`ListByProject`. Methods like `ListActivePending`, `ListByCategory`, etc. each have their own SELECT. Also check `backlog_repo.go`, `insights_repo.go`, and the `ListWithSchedulesByProject` query which uses `t.` prefix aliases. The task SELECT pattern is: `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at` (25 columns)
@@ -221,6 +226,8 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Task-detail file-changes SSE/listener wiring must be swap-safe: before re-binding global listeners on HTMX re-render, remove previous handlers, and always stop file-changes SSE on `main-content`/`task-detail-content` swaps.
 - DnD adjacent-slot bug: use `_schedDragActive` flag (150ms timeout in dragend) to prevent click-after-drop navigation
 - Schedule page layout: never use viewport-relative heights (`h-[calc(100vh-...)]`) on the timeline container — use flex layout (`flex-1 min-h-0`) inside a `flex flex-col h-full` parent to fill available space without causing outer page scrollbar
+- Schedule `Run At` datetime controls must keep click-delegating wrapper behavior in both create and edit flows (`data-run-at-picker-container` + `openScheduleRunAtPicker(...)`) so clicking anywhere in the interactive field area opens/focuses the picker. Do not regress to icon-only open behavior.
+- Keep schedule `Repeat Every` semantics identical across `/schedule` create modal and task-detail add/edit forms: `once` must hide and disable interval input; repeating types must require/validate whole-number `repeat_interval >= 1`; and forms must always submit `repeat_interval` so create/edit behavior and scheduler execution stay consistent.
 - On HTMX pages with polling + dirty-input preservation (for example `/workers`), dirty-value restore must be submission-aware: suppress restoration briefly around form submit/request-success so server-accepted values are not immediately re-marked dirty (`input-warning`) and rendered with a stuck warning/focus ring look
 - Inline page scripts inside HTMX-swapped containers must use a window-level registration guard (`if (!window._...Bound)`) so listeners are not duplicated on each swap and stale handlers do not re-apply obsolete UI state
 - **Toast stacking prevention**: Event listeners for custom events (like `showToast`) must have registration guards (`if (!window._flag)`) and deduplication logic (timestamp-based Map) to prevent multiple toasts from rapid clicks or HTMX page updates. Dedup key: `message|type|taskId`, time window: 1 second
@@ -292,6 +299,8 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 
 - **Worker dependency gating**: `dispatchNext()` must skip chained tasks (with `parent_task_id`) whose parent is non-terminal. Do not dispatch child before parent completes or the child will run without parent edits
 - **Chain category default must inherit parent**: when chain config `child_category` is empty (`Same as parent`), child creation must copy `parentTask.Category`. Never default empty `child_category` to `backlog`, or on-completion children may not auto-run
+- **Blocked children must not be auto-submitted**: `TaskService.Create` skips worker submission for `StatusBlocked` tasks. Only `triggerTaskChain` (on parent completion) activates them by updating prompt/status and submitting
+- **New task statuses require migration + CHECK constraint update**: SQLite CHECK constraints require table recreation. When adding a status, update both the baseline migration AND create a new numbered migration for existing databases
 - **Lineage resolution order**: `BaseCommitSHA` (preferred, SHA-based so parent branch cleanup doesn't break) > `BaseBranch` (metadata/fallback) > `MergeTargetBranch` > global/default branch. Never default chained children to main if valid parent lineage exists
 - **Branch cleanup must check descendants**: before deleting a parent branch, call `HasNonTerminalDescendants()` — skip deletion if active children/grandchildren exist
 - **Lineage capture is atomic with child creation**: set `base_branch`, `base_commit_sha`, `lineage_depth` in the same `TriggerTaskChain` call path, before returning from create. Never create a chained child without capturing parent lineage first

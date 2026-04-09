@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -339,5 +340,55 @@ func TestTaskDetailContent_ThreadAutoLoadsWhenChatTabInitiallyActive(t *testing.
 	}
 	if !strings.Contains(output, "_loadThreadContent(taskId).then(function() {") {
 		t.Fatal("expected initial-load handler to lazy load thread content")
+	}
+}
+
+func TestTaskDetailContent_RunAtFieldsClickablePickerAffordance(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-schedule-1",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusPending,
+		Category:  models.CategoryScheduled,
+	}
+	runAt := time.Date(2026, 1, 20, 15, 30, 0, 0, time.UTC)
+	nextRun := runAt
+	schedules := []models.Schedule{{
+		ID:             "schedule-1",
+		TaskID:         task.ID,
+		RunAt:          runAt,
+		NextRun:        &nextRun,
+		RepeatType:     models.RepeatDaily,
+		RepeatInterval: 1,
+		Enabled:        true,
+	}}
+
+	var buf bytes.Buffer
+	err := TaskDetailContent(task, nil, schedules, nil, nil, nil, "schedules", nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	if strings.Count(output, `data-run-at-picker-container`) < 2 {
+		t.Fatal("expected run-at picker containers for both add and edit schedule forms")
+	}
+	if strings.Count(output, `onclick="openScheduleRunAtPicker(this, event)"`) < 2 {
+		t.Fatal("expected run-at container click handlers for both add and edit forms")
+	}
+	if strings.Count(output, `data-run-at-picker`) < 2 {
+		t.Fatal("expected run-at picker input hooks for both add and edit forms")
+	}
+	if strings.Count(output, `input-sm cursor-pointer`) < 2 {
+		t.Fatal("expected pointer cursor affordance on run-at datetime inputs in add/edit forms")
+	}
+	if !strings.Contains(output, `if (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;`) {
+		t.Fatal("expected run-at picker open behavior to be scoped to clicks on the datetime input")
+	}
+	if !strings.Contains(output, `function openScheduleRunAtPicker(container, event)`) {
+		t.Fatal("expected shared run-at picker open helper in task detail script")
+	}
+	if !strings.Contains(output, `if (typeof pickerInput.showPicker === 'function')`) {
+		t.Fatal("expected showPicker-based open behavior with fallback focus")
 	}
 }

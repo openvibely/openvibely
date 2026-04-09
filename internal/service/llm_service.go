@@ -911,23 +911,29 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 
 	// Claude CLI reads CLAUDE.md natively (which points to AGENTS.md),
 	// so no need to inject project instructions here.
-	fullPrompt := llmprompt.BuildTaskPromptHeader() +
-		llmprompt.BuildAttachmentInstructions(attachments) +
-		prompt
+	var fullPrompt strings.Builder
+	fullPrompt.WriteString(llmprompt.BuildTaskPromptHeader())
+	if worktreeContext := llmprompt.BuildWorktreeContextSentence(workDir); worktreeContext != "" {
+		fullPrompt.WriteString(worktreeContext)
+		fullPrompt.WriteString("\n\n")
+	}
+	fullPrompt.WriteString(llmprompt.BuildAttachmentInstructions(attachments))
+	fullPrompt.WriteString(prompt)
 
 	// Add task creation instructions so the agent can create sub-tasks
-	fullPrompt += "\n\n" + llmprompt.TaskCreationInstructions
+	fullPrompt.WriteString("\n\n")
+	fullPrompt.WriteString(llmprompt.TaskCreationInstructions)
 
 	// Append status reporting instructions AFTER the task prompt so the agent
 	// sees them last and is more likely to follow them.
-	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
+	fullPrompt.WriteString("\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
 		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
 		"- If the task completed but something needs human attention: [STATUS: NEEDS_FOLLOWUP | <describe what needs attention>]\n" +
 		"Example: [STATUS: FAILED | fail.sh returned exit code 1]\n" +
 		"Example: [STATUS: NEEDS_FOLLOWUP | tests pass but 3 warnings need review]\n" +
 		"Replace <describe what went wrong> or <describe what needs attention> with your actual description.\n" +
-		"This status line is MANDATORY. Always include it as the very last line of your response."
+		"This status line is MANDATORY. Always include it as the very last line of your response.")
 
 	// Build command: -p reads prompt from stdin, stream-json gives us JSON events,
 	// --include-partial-messages gives us token-level streaming for real-time output
@@ -978,7 +984,7 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 	cmd.Env = llmprompt.FilteredEnvWithoutClaudeCode()
 
 	// Pass prompt via stdin for streaming output
-	cmd.Stdin = strings.NewReader(fullPrompt)
+	cmd.Stdin = strings.NewReader(fullPrompt.String())
 
 	// Get stdout pipe for reading JSON stream
 	stdoutPipe, err := cmd.StdoutPipe()
@@ -1075,6 +1081,7 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 	// If resuming a session, the CLI manages its own conversation state.
 	var fullPrompt strings.Builder
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, true)
+	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	fullPrompt.WriteString(systemPromptStr)
 	fullPrompt.WriteString("\n")
 
@@ -1381,9 +1388,14 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 	}
 	log.Printf("[agent-svc] callCodexCLI using binary: %s", codexPath)
 
-	fullPrompt := llmprompt.BuildTaskPromptHeader() +
-		llmprompt.BuildAttachmentInstructions(attachments) +
-		prompt
+	var fullPrompt strings.Builder
+	fullPrompt.WriteString(llmprompt.BuildTaskPromptHeader())
+	if worktreeContext := llmprompt.BuildWorktreeContextSentence(workDir); worktreeContext != "" {
+		fullPrompt.WriteString(worktreeContext)
+		fullPrompt.WriteString("\n\n")
+	}
+	fullPrompt.WriteString(llmprompt.BuildAttachmentInstructions(attachments))
+	fullPrompt.WriteString(prompt)
 
 	imagePaths := make([]string, 0, len(attachments))
 	for _, att := range attachments {
@@ -1391,15 +1403,16 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 			imagePaths = append(imagePaths, llmprompt.AttachmentAbsPath(att))
 		}
 	}
-	fullPrompt += "\n\n" + llmprompt.TaskCreationInstructions
-	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
+	fullPrompt.WriteString("\n\n")
+	fullPrompt.WriteString(llmprompt.TaskCreationInstructions)
+	fullPrompt.WriteString("\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
 		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
 		"- If the task completed but something needs human attention: [STATUS: NEEDS_FOLLOWUP | <describe what needs attention>]\n" +
 		"Example: [STATUS: FAILED | fail.sh returned exit code 1]\n" +
 		"Example: [STATUS: NEEDS_FOLLOWUP | tests pass but 3 warnings need review]\n" +
 		"Replace <describe what went wrong> or <describe what needs attention> with your actual description.\n" +
-		"This status line is MANDATORY. Always include it as the very last line of your response."
+		"This status line is MANDATORY. Always include it as the very last line of your response.")
 
 	args := llmprompt.CodexExecArgs(agent.Model, agent.ReasoningEffort, imagePaths)
 	log.Printf("[agent-svc] callCodexCLI executing: codex %s (prompt via stdin)", strings.Join(args, " "))
@@ -1409,7 +1422,7 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 		cmd.Dir = workDir
 		log.Printf("[agent-svc] callCodexCLI using workDir=%s", workDir)
 	}
-	cmd.Stdin = strings.NewReader(fullPrompt)
+	cmd.Stdin = strings.NewReader(fullPrompt.String())
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1487,6 +1500,7 @@ func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attac
 
 	var fullPrompt strings.Builder
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, true)
+	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	fullPrompt.WriteString(systemPromptStr)
 	fullPrompt.WriteString("\n")
 

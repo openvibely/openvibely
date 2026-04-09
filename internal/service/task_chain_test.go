@@ -199,6 +199,230 @@ func TestLLMService_TriggerTaskChain_DefaultsChildCategoryToParentAndAutoSubmits
 	}
 }
 
+func TestLLMService_TriggerTaskChain_UsesLatestPersistedChainConfig(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	broadcaster := events.NewBroadcaster()
+	taskRepo := repository.NewTaskRepo(db, broadcaster)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	workerSvc := NewWorkerService(nil, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	llmSvc.taskSvc = taskSvc
+
+	project := &models.Project{Name: "Test", Description: "Test"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project failed: %v", err)
+	}
+
+	// Parent starts with chaining disabled (stale in-memory snapshot)
+	parentTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Parent task",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusRunning,
+		Prompt:    "Compute 1+1",
+	}
+	if err := taskRepo.Create(ctx, parentTask); err != nil {
+		t.Fatalf("Create parent task failed: %v", err)
+	}
+
+	// Simulate a chat edit while the task is running: chain config is persisted
+	// in DB, but triggerTaskChain still receives the stale parentTask snapshot.
+	persistedParent, err := taskRepo.GetByID(ctx, parentTask.ID)
+	if err != nil || persistedParent == nil {
+		t.Fatalf("GetByID parent failed: %v", err)
+	}
+	newChainConfig := &models.ChainConfiguration{
+		Enabled:           true,
+		Trigger:           "on_completion",
+		ChildTitle:        "Child task",
+		ChildPromptPrefix: "Use x from parent output:",
+		ChildCategory:     "active",
+	}
+	if err := persistedParent.SetChainConfig(newChainConfig); err != nil {
+		t.Fatalf("SetChainConfig failed: %v", err)
+	}
+	if err := taskRepo.Update(ctx, persistedParent); err != nil {
+		t.Fatalf("Update parent failed: %v", err)
+	}
+
+	if err := llmSvc.triggerTaskChain(ctx, *parentTask, "x=2\n[STATUS: SUCCESS]"); err != nil {
+		t.Fatalf("triggerTaskChain failed: %v", err)
+	}
+
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("ListByProject failed: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("Expected 2 tasks, got %d", len(tasks))
+	}
+
+	var childTask *models.Task
+	for _, task := range tasks {
+		if task.ParentTaskID != nil && *task.ParentTaskID == parentTask.ID {
+			childTask = &task
+			break
+		}
+	}
+	if childTask == nil {
+		t.Fatalf("Child task not found")
+	}
+
+	if childTask.Title != "Child task" {
+		t.Fatalf("Expected child title %q, got %q", "Child task", childTask.Title)
+	}
+	if childTask.Prompt != "Use x from parent output:\n\nx=2" {
+		t.Fatalf("Expected child prompt to use updated chain config, got %q", childTask.Prompt)
+	}
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != childTask.ID {
+			t.Fatalf("Expected submitted task id=%s, got %s", childTask.ID, submitted.ID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("Expected child task auto-submission to worker pool")
+	}
+}
+
+func TestLLMService_TriggerTaskChain_BlockedChildPreCreatedAndActivated(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	broadcaster := events.NewBroadcaster()
+	taskRepo := repository.NewTaskRepo(db, broadcaster)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	workerSvc := NewWorkerService(nil, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	llmSvc.taskSvc = taskSvc
+
+	project := &models.Project{Name: "Test Blocked", Description: "Test"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project failed: %v", err)
+	}
+
+	// Create parent task with chain config
+	parentTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Parent task with blocked child",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusRunning,
+		Prompt:    "Do something",
+	}
+	chainConfig := &models.ChainConfiguration{
+		Enabled:           true,
+		Trigger:           "on_completion",
+		ChildTitle:        "Child step",
+		ChildPromptPrefix: "Continue with:",
+	}
+	if err := parentTask.SetChainConfig(chainConfig); err != nil {
+		t.Fatalf("SetChainConfig failed: %v", err)
+	}
+	if err := taskRepo.Create(ctx, parentTask); err != nil {
+		t.Fatalf("Create parent task failed: %v", err)
+	}
+
+	// Pre-create blocked child (simulates what handler/task_creation does)
+	// Blocked children always go to backlog for visibility while waiting.
+	blockedChild := &models.Task{
+		ProjectID:    project.ID,
+		Title:        "Child step",
+		Category:     models.CategoryBacklog,
+		Priority:     parentTask.Priority,
+		Status:       models.StatusBlocked,
+		Prompt:       "Waiting for parent task to complete...",
+		ParentTaskID: &parentTask.ID,
+		LineageDepth: 1,
+	}
+	if err := taskRepo.Create(ctx, blockedChild); err != nil {
+		t.Fatalf("Create blocked child failed: %v", err)
+	}
+
+	// Verify blocked child is visible in backlog while waiting for parent
+	tasks, _ := taskRepo.ListByProject(ctx, project.ID, string(models.CategoryBacklog))
+	found := false
+	for _, task := range tasks {
+		if task.ID == blockedChild.ID && task.Status == models.StatusBlocked {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("Blocked child not found in backlog tasks - should be visible while waiting for parent")
+	}
+
+	// Blocked child should NOT be auto-submitted to worker pool
+	select {
+	case task := <-workerSvc.Submitted():
+		t.Fatalf("Blocked task should not be submitted, but got id=%s", task.ID)
+	case <-time.After(100 * time.Millisecond):
+		// Good - no submission
+	}
+
+	// Now trigger chain (simulates parent completing)
+	if err := llmSvc.triggerTaskChain(ctx, *parentTask, "The result is 42\n[STATUS: SUCCESS]"); err != nil {
+		t.Fatalf("triggerTaskChain failed: %v", err)
+	}
+
+	// Verify the blocked child was activated (not a new task created)
+	allTasks, _ := taskRepo.ListByProject(ctx, project.ID, "")
+	childCount := 0
+	for _, task := range allTasks {
+		if task.ParentTaskID != nil && *task.ParentTaskID == parentTask.ID {
+			childCount++
+		}
+	}
+	if childCount != 1 {
+		t.Fatalf("Expected exactly 1 child task (activated from blocked), got %d", childCount)
+	}
+
+	// Verify the child was updated with real prompt and status
+	activatedChild, err := taskRepo.GetByID(ctx, blockedChild.ID)
+	if err != nil || activatedChild == nil {
+		t.Fatalf("Failed to get activated child: %v", err)
+	}
+	if activatedChild.Status != models.StatusPending {
+		t.Errorf("Expected activated child status=pending, got %s", activatedChild.Status)
+	}
+	if activatedChild.Prompt == "Waiting for parent task to complete..." {
+		t.Error("Expected child prompt to be updated with parent output, but still has placeholder")
+	}
+	expectedPrompt := "Continue with:\n\nThe result is 42"
+	if activatedChild.Prompt != expectedPrompt {
+		t.Errorf("Expected prompt=%q, got %q", expectedPrompt, activatedChild.Prompt)
+	}
+
+	// Verify child was submitted to worker pool
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != blockedChild.ID {
+			t.Fatalf("Expected submitted task id=%s, got %s", blockedChild.ID, submitted.ID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Expected activated child to be submitted to worker pool")
+	}
+}
+
 func TestLLMService_TriggerTaskChain_ChildTitle(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -344,19 +568,33 @@ func TestLLMService_TriggerTaskChain_MultiLevel(t *testing.T) {
 	}
 
 	tasks, _ := taskRepo.ListByProject(ctx, project.ID, "")
-	if len(tasks) != 2 {
-		t.Fatalf("Expected 2 tasks after discovery chain, got %d", len(tasks))
+	// After discovery chain: parent + selection child + blocked design grandchild = 3
+	if len(tasks) != 3 {
+		t.Fatalf("Expected 3 tasks after discovery chain (parent + selection + blocked design), got %d", len(tasks))
 	}
 
 	var selectionTask *models.Task
+	var blockedDesignTask *models.Task
 	for _, task := range tasks {
 		if task.ParentTaskID != nil && *task.ParentTaskID == parentTask.ID {
 			selectionTask = &task
-			break
 		}
 	}
 	if selectionTask == nil {
 		t.Fatalf("Selection task not found")
+	}
+
+	// Find blocked grandchild (design task created as blocked for visibility)
+	for _, task := range tasks {
+		if task.ParentTaskID != nil && *task.ParentTaskID == selectionTask.ID {
+			blockedDesignTask = &task
+		}
+	}
+	if blockedDesignTask == nil {
+		t.Fatalf("Blocked design grandchild not found")
+	}
+	if blockedDesignTask.Status != models.StatusBlocked {
+		t.Errorf("Expected blocked design task status=blocked, got %s", blockedDesignTask.Status)
 	}
 
 	if selectionTask.Title != "[Auto Build] Selection" {
@@ -375,30 +613,30 @@ func TestLLMService_TriggerTaskChain_MultiLevel(t *testing.T) {
 		t.Errorf("Expected selection child_title=%q, got %q", "[Auto Build] Design", selConfig.ChildTitle)
 	}
 
-	// Step 2: Trigger chain from selection → should create design task
+	// Step 2: Trigger chain from selection → should activate blocked design task
 	selectionOutput := "Selected: Feature A"
 	if err := llmSvc.triggerTaskChain(ctx, *selectionTask, selectionOutput); err != nil {
 		t.Fatalf("triggerTaskChain (selection) failed: %v", err)
 	}
 
 	tasks, _ = taskRepo.ListByProject(ctx, project.ID, "")
+	// Still 3 tasks — the blocked design task was activated in place, no new task created
 	if len(tasks) != 3 {
-		t.Fatalf("Expected 3 tasks after selection chain, got %d", len(tasks))
+		t.Fatalf("Expected 3 tasks after selection chain (blocked design activated), got %d", len(tasks))
 	}
 
-	var designTask *models.Task
-	for _, task := range tasks {
-		if task.ParentTaskID != nil && *task.ParentTaskID == selectionTask.ID {
-			designTask = &task
-			break
-		}
-	}
-	if designTask == nil {
-		t.Fatalf("Design task not found")
+	// Re-fetch the design task and verify it was activated
+	designTask, err := taskRepo.GetByID(ctx, blockedDesignTask.ID)
+	if err != nil || designTask == nil {
+		t.Fatalf("Failed to re-fetch design task: %v", err)
 	}
 
 	if designTask.Title != "[Auto Build] Design" {
 		t.Errorf("Expected design title=%q, got %q", "[Auto Build] Design", designTask.Title)
+	}
+
+	if designTask.Status != models.StatusPending {
+		t.Errorf("Expected activated design task status=pending, got %s", designTask.Status)
 	}
 
 	expectedDesignPrompt := "Design the architecture:\n\nSelected: Feature A"
@@ -682,5 +920,179 @@ func TestLLMService_TriggerTaskChain_Disabled(t *testing.T) {
 	// Should still have only 1 task (parent)
 	if len(tasks) != 1 {
 		t.Fatalf("Expected 1 task, got %d", len(tasks))
+	}
+}
+
+func TestLLMService_TriggerTaskChain_BlockedChild_DefaultCategoryUsesRunnableWhenParentNowCompleted(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	broadcaster := events.NewBroadcaster()
+	taskRepo := repository.NewTaskRepo(db, broadcaster)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	workerSvc := NewWorkerService(nil, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	llmSvc.taskSvc = taskSvc
+
+	project := &models.Project{Name: "Test", Description: "Test"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project failed: %v", err)
+	}
+
+	parentTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Parent",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusRunning,
+		Prompt:    "Compute 1+1",
+	}
+	chainConfig := &models.ChainConfiguration{
+		Enabled:    true,
+		Trigger:    "on_completion",
+		ChildTitle: "Child",
+		// Intentionally omit child_category so default behavior is used.
+	}
+	if err := parentTask.SetChainConfig(chainConfig); err != nil {
+		t.Fatalf("SetChainConfig failed: %v", err)
+	}
+	if err := taskRepo.Create(ctx, parentTask); err != nil {
+		t.Fatalf("Create parent task failed: %v", err)
+	}
+
+	blockedChild := &models.Task{
+		ProjectID:    project.ID,
+		Title:        "Child",
+		Category:     models.CategoryBacklog,
+		Priority:     parentTask.Priority,
+		Status:       models.StatusBlocked,
+		Prompt:       "Waiting for parent task to complete...",
+		ParentTaskID: &parentTask.ID,
+	}
+	if err := taskRepo.Create(ctx, blockedChild); err != nil {
+		t.Fatalf("Create blocked child failed: %v", err)
+	}
+
+	// Simulate ExecuteTaskWithAgent moving the completed parent to completed category
+	// before triggerTaskChain runs.
+	if err := taskRepo.UpdateCategory(ctx, parentTask.ID, models.CategoryCompleted); err != nil {
+		t.Fatalf("UpdateCategory parent failed: %v", err)
+	}
+
+	if err := llmSvc.triggerTaskChain(ctx, *parentTask, "x=2\n[STATUS: SUCCESS]"); err != nil {
+		t.Fatalf("triggerTaskChain failed: %v", err)
+	}
+
+	updatedChild, err := taskRepo.GetByID(ctx, blockedChild.ID)
+	if err != nil || updatedChild == nil {
+		t.Fatalf("GetByID child failed: %v", err)
+	}
+	if updatedChild.Category != models.CategoryActive {
+		t.Fatalf("Expected default child category active when parent is now completed, got %s", updatedChild.Category)
+	}
+	if updatedChild.Status != models.StatusPending {
+		t.Fatalf("Expected activated child status pending, got %s", updatedChild.Status)
+	}
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != updatedChild.ID {
+			t.Fatalf("Expected submitted task id=%s, got %s", updatedChild.ID, submitted.ID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Expected activated child to be submitted to worker pool")
+	}
+}
+
+func TestLLMService_TriggerTaskChain_FallbackCreate_DefaultCategoryUsesRunnableWhenParentNowCompleted(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	broadcaster := events.NewBroadcaster()
+	taskRepo := repository.NewTaskRepo(db, broadcaster)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	workerSvc := NewWorkerService(nil, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	llmSvc.taskSvc = taskSvc
+
+	project := &models.Project{Name: "Test", Description: "Test"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project failed: %v", err)
+	}
+
+	parentTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Parent",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusRunning,
+		Prompt:    "Compute 1+1",
+	}
+	chainConfig := &models.ChainConfiguration{
+		Enabled:    true,
+		Trigger:    "on_completion",
+		ChildTitle: "Child",
+	}
+	if err := parentTask.SetChainConfig(chainConfig); err != nil {
+		t.Fatalf("SetChainConfig failed: %v", err)
+	}
+	if err := taskRepo.Create(ctx, parentTask); err != nil {
+		t.Fatalf("Create parent task failed: %v", err)
+	}
+
+	// Simulate parent already moved to completed before chain trigger.
+	if err := taskRepo.UpdateCategory(ctx, parentTask.ID, models.CategoryCompleted); err != nil {
+		t.Fatalf("UpdateCategory parent failed: %v", err)
+	}
+
+	if err := llmSvc.triggerTaskChain(ctx, *parentTask, "x=2\n[STATUS: SUCCESS]"); err != nil {
+		t.Fatalf("triggerTaskChain failed: %v", err)
+	}
+
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("ListByProject failed: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("Expected 2 tasks, got %d", len(tasks))
+	}
+
+	var childTask *models.Task
+	for _, task := range tasks {
+		if task.ParentTaskID != nil && *task.ParentTaskID == parentTask.ID {
+			childTask = &task
+			break
+		}
+	}
+	if childTask == nil {
+		t.Fatal("Child task not found")
+	}
+	if childTask.Category != models.CategoryActive {
+		t.Fatalf("Expected fallback child category active when parent is now completed, got %s", childTask.Category)
+	}
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != childTask.ID {
+			t.Fatalf("Expected submitted task id=%s, got %s", childTask.ID, submitted.ID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Expected created child task to be auto-submitted")
 	}
 }

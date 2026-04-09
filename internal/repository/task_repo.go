@@ -449,6 +449,37 @@ func (r *TaskRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// FindBlockedChildByParent finds a blocked child task for the given parent task ID.
+// Returns nil, nil if no blocked child exists.
+func (r *TaskRepo) FindBlockedChildByParent(ctx context.Context, parentTaskID string) (*models.Task, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at
+		 FROM tasks WHERE parent_task_id = ? AND status = ?
+		 LIMIT 1`,
+		parentTaskID, models.StatusBlocked)
+
+	var t models.Task
+	if err := row.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
+		&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding blocked child: %w", err)
+	}
+	return &t, nil
+}
+
+// DeleteBlockedChildrenByParent removes all blocked child tasks for the given parent task ID.
+func (r *TaskRepo) DeleteBlockedChildrenByParent(ctx context.Context, parentTaskID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM tasks WHERE parent_task_id = ? AND status = ?`,
+		parentTaskID, models.StatusBlocked)
+	if err != nil {
+		return fmt.Errorf("deleting blocked children: %w", err)
+	}
+	return nil
+}
+
 func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at
@@ -733,7 +764,7 @@ func (r *TaskRepo) ListRunningChatTaskIDs(ctx context.Context, projectID string)
 // with status 'pending'. Returns the number of tasks updated.
 func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (int, error) {
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE tasks SET category = 'active', status = 'pending' WHERE category = 'backlog' AND project_id = ?`, projectID)
+		`UPDATE tasks SET category = 'active', status = 'pending' WHERE category = 'backlog' AND status != 'blocked' AND project_id = ?`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("activating backlog tasks: %w", err)
 	}

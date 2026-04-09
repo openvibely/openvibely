@@ -130,8 +130,88 @@ func cleanOutputForChain(output string) string {
 	return llmworkflow.CleanOutputForChain(output)
 }
 
-// triggerTaskChain checks if a task has chaining configured and creates a child task
-// with the parent's output as the prompt (for plan-to-implementation chains).
+func defaultRunnableChildCategory(parentCategory models.TaskCategory) models.TaskCategory {
+	switch parentCategory {
+	case models.CategoryActive, models.CategoryBacklog:
+		return parentCategory
+	default:
+		// Parent can be moved to completed before chain activation runs.
+		// Defaulting to active preserves sequential execution behavior.
+		return models.CategoryActive
+	}
+}
+
+// triggerTaskChain checks if a task has chaining configured and activates the child task.
+// If a blocked child was pre-created for visibility, it is activated in place.
+// Otherwise, a new child task is created (fallback for chains without pre-created children).
 func (s *LLMService) triggerTaskChain(ctx context.Context, parentTask models.Task, parentOutput string) error {
+	// Reload latest parent from DB so chain edits made while the task was running
+	// (e.g., via chat EDIT_TASK) are respected at completion time.
+	if s.taskRepo != nil {
+		if latest, getErr := s.taskRepo.GetByID(ctx, parentTask.ID); getErr != nil {
+			log.Printf("[agent-svc] triggerTaskChain error loading latest parent task=%s: %v", parentTask.ID, getErr)
+		} else if latest != nil {
+			parentTask = *latest
+		}
+	}
+
+	config, err := parentTask.ParseChainConfig()
+	if err != nil || !config.Enabled {
+		return s.workflowChainService().TriggerTaskChain(ctx, parentTask, parentOutput)
+	}
+
+	// Look for an existing blocked child to activate
+	if s.taskRepo != nil {
+		blockedChild, findErr := s.taskRepo.FindBlockedChildByParent(ctx, parentTask.ID)
+		if findErr != nil {
+			log.Printf("[agent-svc] triggerTaskChain error finding blocked child for parent=%s: %v", parentTask.ID, findErr)
+		}
+		if blockedChild != nil {
+			log.Printf("[agent-svc] triggerTaskChain activating blocked child id=%s parent=%s", blockedChild.ID, parentTask.ID)
+
+			// Build the real prompt from parent output
+			childPrompt := llmworkflow.CleanOutputForChain(parentOutput)
+			if config.ChildPromptPrefix != "" {
+				childPrompt = config.ChildPromptPrefix + "\n\n" + childPrompt
+			}
+			blockedChild.Prompt = childPrompt
+			blockedChild.Status = models.StatusPending
+
+			// Resolve lineage now that parent is complete
+			svc := s.workflowChainService()
+			if svc != nil {
+				branch, sha, lineageErr := workflowLineageResolver{s: s}.ResolveParentLineage(ctx, parentTask)
+				if lineageErr != nil {
+					log.Printf("[agent-svc] triggerTaskChain lineage resolution failed parent=%s: %v", parentTask.ID, lineageErr)
+				} else {
+					blockedChild.BaseBranch = branch
+					blockedChild.BaseCommitSHA = sha
+					log.Printf("[agent-svc] triggerTaskChain resolved lineage for child=%s branch=%s sha=%s", blockedChild.ID, branch, sha)
+				}
+			}
+
+			// Resolve category: inherit only runnable categories by default.
+			if config.ChildCategory != "" {
+				blockedChild.Category = models.TaskCategory(config.ChildCategory)
+			} else {
+				blockedChild.Category = defaultRunnableChildCategory(parentTask.Category)
+			}
+
+			if err := s.taskRepo.Update(ctx, blockedChild); err != nil {
+				log.Printf("[agent-svc] triggerTaskChain error updating blocked child id=%s: %v", blockedChild.ID, err)
+				return fmt.Errorf("activating blocked child: %w", err)
+			}
+
+			// Submit to worker pool
+			if s.taskSvc != nil && blockedChild.Category == models.CategoryActive {
+				log.Printf("[agent-svc] triggerTaskChain submitting activated child id=%s to worker pool", blockedChild.ID)
+				s.taskSvc.workerSvc.Submit(*blockedChild)
+			}
+			return nil
+		}
+	}
+
+	// Fallback: no blocked child found, create a new one via the workflow service
+	log.Printf("[agent-svc] triggerTaskChain no blocked child found for parent=%s, creating new child", parentTask.ID)
 	return s.workflowChainService().TriggerTaskChain(ctx, parentTask, parentOutput)
 }

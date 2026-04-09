@@ -48,6 +48,7 @@ const (
 	StatusCompleted TaskStatus = "completed"
 	StatusFailed    TaskStatus = "failed"
 	StatusCancelled TaskStatus = "cancelled"
+	StatusBlocked   TaskStatus = "blocked" // Waiting for parent task to complete (chained child pre-created for visibility)
 )
 
 type TaskTag string

@@ -361,7 +361,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	opts := &anthropicclient.AgenticOptions{
 		Model:          agent.Model,
 		MaxTokens:      agenticMaxTokens(agent.MaxTokens),
-		System:         llmprompt.BuildAgentSystemPrompt(projectInstructions),
+		System:         llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
 		WorkDir:        workDir,
 		Attachments:    mcAttachments,
 		DisableTools:   disableTools,
@@ -396,6 +396,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, isTaskFollowup, chatMode)
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 
@@ -496,7 +497,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		Model:          agent.Model,
 		MaxTokens:      agenticMaxTokens(agent.MaxTokens),
 		EnableThinking: true,
-		System:         llmprompt.BuildAgentSystemPrompt(projectInstructions),
+		System:         llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
 		WorkDir:        workDir,
 		Attachments:    mcAttachments,
 		AutoCompaction: true,

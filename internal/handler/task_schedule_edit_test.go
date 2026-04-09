@@ -164,6 +164,62 @@ func TestHandler_CreateTask_FromSchedulePage(t *testing.T) {
 	if schedules[0].RepeatType != models.RepeatDaily {
 		t.Errorf("expected repeat type daily, got %s", schedules[0].RepeatType)
 	}
+	if schedules[0].RepeatInterval != 1 {
+		t.Errorf("expected repeat interval 1, got %d", schedules[0].RepeatInterval)
+	}
+}
+
+func TestHandler_CreateTask_FromSchedulePage_WithRepeatInterval(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	form := url.Values{}
+	form.Add("title", "Every 3 Hours Scheduled Task")
+	form.Add("prompt", "Run every 3 hours")
+	form.Add("category", "scheduled")
+	form.Add("priority", "2")
+	form.Add("run_at", "2026-03-15T10:00")
+	form.Add("repeat_type", "hours")
+	form.Add("repeat_interval", "3")
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default&from=schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	tasks, err := h.taskSvc.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("failed to list tasks: %v", err)
+	}
+	var found *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Every 3 Hours Scheduled Task" {
+			found = &tasks[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected scheduled task to be created")
+	}
+
+	schedules, err := h.scheduleRepo.ListByTask(ctx, found.ID)
+	if err != nil {
+		t.Fatalf("failed to list schedules: %v", err)
+	}
+	if len(schedules) == 0 {
+		t.Fatal("expected a schedule to be created for the task")
+	}
+	if schedules[0].RepeatType != models.RepeatHours {
+		t.Errorf("expected repeat type hours, got %s", schedules[0].RepeatType)
+	}
+	if schedules[0].RepeatInterval != 3 {
+		t.Errorf("expected repeat interval 3, got %d", schedules[0].RepeatInterval)
+	}
 }
 
 func TestHandler_CreateTask_FromSchedulePage_NotInKanbanBoard(t *testing.T) {

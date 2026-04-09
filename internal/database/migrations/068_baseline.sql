@@ -711,7 +711,7 @@ CREATE TABLE "tasks" (
                  CHECK (category IN ('active', 'freezer', 'completed', 'backlog', 'scheduled', 'chat')),
     priority INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'pending'
-                 CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed', 'cancelled')),
+                 CHECK (status IN ('pending', 'queued', 'running', 'completed', 'failed', 'cancelled', 'blocked')),
     prompt TEXT NOT NULL DEFAULT '',
     agent_id TEXT REFERENCES agent_configs(id),
     tag TEXT NOT NULL DEFAULT ''

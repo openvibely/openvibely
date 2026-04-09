@@ -72,8 +72,8 @@ func (s *TaskService) Create(ctx context.Context, t *models.Task) error {
 	}
 	log.Printf("[task-svc] Create success id=%s", t.ID)
 
-	// Auto-submit if created in Active category
-	if t.Category == models.CategoryActive {
+	// Auto-submit if created in Active category (blocked tasks wait for parent to activate them)
+	if t.Category == models.CategoryActive && t.Status != models.StatusBlocked {
 		log.Printf("[task-svc] Create auto-submitting active task id=%s to worker pool", t.ID)
 		s.workerSvc.Submit(*t)
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
+	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -1330,6 +1331,29 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 	if err := h.taskSvc.Update(c.Request().Context(), task); err != nil {
 		log.Printf("[handler] UpdateTaskChainConfig error updating task: %v", err)
 		return err
+	}
+
+	// Manage blocked child task for visibility:
+	// - Chain enabled: pre-create blocked child so it's visible on the board
+	// - Chain disabled: remove any existing blocked child
+	if enabled {
+		existing, _ := h.taskRepo.FindBlockedChildByParent(c.Request().Context(), taskID)
+		if existing == nil {
+			blockedChild := llmworkflow.BuildBlockedChild(*task, config)
+			if createErr := h.taskSvc.Create(c.Request().Context(), blockedChild); createErr != nil {
+				log.Printf("[handler] UpdateTaskChainConfig error creating blocked child: %v", createErr)
+			} else {
+				log.Printf("[handler] UpdateTaskChainConfig pre-created blocked child id=%s for parent=%s", blockedChild.ID, taskID)
+			}
+		} else {
+			log.Printf("[handler] UpdateTaskChainConfig blocked child already exists id=%s for parent=%s", existing.ID, taskID)
+		}
+	} else {
+		if delErr := h.taskRepo.DeleteBlockedChildrenByParent(c.Request().Context(), taskID); delErr != nil {
+			log.Printf("[handler] UpdateTaskChainConfig error deleting blocked children: %v", delErr)
+		} else {
+			log.Printf("[handler] UpdateTaskChainConfig removed blocked children for parent=%s (chain disabled)", taskID)
+		}
 	}
 
 	log.Printf("[handler] UpdateTaskChainConfig success id=%s", taskID)

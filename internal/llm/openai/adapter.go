@@ -368,7 +368,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 		Model:            agent.Model,
 		MaxOutputTokens:  agenticMaxTokens(agent.MaxTokens),
-		System:           applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions), agent),
+		System:           applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
 		ReasoningEffort:  reasoningEffort(agent.ReasoningEffort),
 		ReasoningSummary: "auto",
 		AutoCompaction:   true,
@@ -445,6 +445,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, isTaskFollowup, chatMode)
 	systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
 
@@ -575,7 +576,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
 		Model:           agent.Model,
 		MaxOutputTokens: agenticMaxTokens(agent.MaxTokens),
-		System:          applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions), agent),
+		System:          applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
 		WorkDir:         effectiveWorkDir,
 		Attachments:     oaAttachments,
 		ExtraTools:      extraTools,
@@ -625,6 +626,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, isTaskFollowup, chatMode)
 	systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
 

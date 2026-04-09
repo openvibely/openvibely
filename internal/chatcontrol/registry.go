@@ -114,31 +114,42 @@ type ActionDef struct {
 	Parameters json.RawMessage
 }
 
+// chainSchemaProperties is the JSON Schema for the chain configuration object.
+// Fully specifies all ChainConfiguration fields so the LLM can configure chaining
+// in a single create_task call without needing a follow-up edit_task.
+const chainSchemaProperties = `{"type":"object","properties":{"enabled":{"type":"boolean","description":"true to enable chaining, false to disable"},"trigger":{"type":"string","enum":["on_completion","on_planning_complete"],"description":"When to trigger the child task"},"child_title":{"type":"string","description":"Title for the child task (defaults to '{parent title} (Implementation)')"},"child_prompt_prefix":{"type":"string","description":"Text prepended to parent output to form the child prompt"},"child_category":{"type":"string","enum":["active","backlog"],"description":"Category for child task (defaults to parent category)"},"child_agent_id":{"type":"string","description":"Agent/model config ID for the child task"},"child_chain_config":{"type":"object","description":"Nested chain config for multi-step sequences"}},"required":["enabled"]}`
+
+// createTaskParams is the full JSON Schema for the create_task tool.
+const createTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string"},"agent_definition_id":{"type":"string"},"agent":{"type":"string"},"chain":` + chainSchemaProperties + `},"required":["title","prompt"],"additionalProperties":false}`
+
+// editTaskParams is the full JSON Schema for the edit_task tool.
+const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string"},"agent_config_id":{"type":"string"},"chain":` + chainSchemaProperties + `,"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
+
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
 var registry = []ActionDef{
 	// --- Tasks domain (RW in orchestrate) ---
 	{
 		Name:               "create_task",
-		Description:        "Create one task in the current project.",
+		Description:        "Create one task in the current project. For sequential workflows ('do X then Y'), create the first task with chain config to automatically trigger the follow-up on completion.",
 		Domain:             DomainTasks,
 		Access:             AccessWrite,
 		Sensitivity:        SensitivityNormal,
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string"},"agent_definition_id":{"type":"string"},"agent":{"type":"string"},"chain":{"type":"object"}},"required":["title","prompt"],"additionalProperties":false}`),
+		Parameters:         json.RawMessage(createTaskParams),
 	},
 	{
 		Name:               "edit_task",
-		Description:        "Edit an existing task by id.",
+		Description:        "Edit an existing task by id. Can add or modify chain configuration for sequential execution.",
 		Domain:             DomainTasks,
 		Access:             AccessWrite,
 		Sensitivity:        SensitivityNormal,
 		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
-		Parameters:         json.RawMessage(`{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string"},"agent_config_id":{"type":"string"},"chain":{"type":"object"},"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`),
+		Parameters:         json.RawMessage(editTaskParams),
 	},
 	{
 		Name:               "execute_tasks",

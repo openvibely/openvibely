@@ -456,18 +456,20 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 								hx-swap="outerHTML"
 							>
 								<div class="grid grid-cols-2 gap-4 mb-4">
-									<div class="form-control">
-										<label class="label">
-											<span class="label-text">Run At</span>
-										</label>
-										<input
-											type="datetime-local"
-											name="run_at"
-											class="input input-bordered input-sm"
-											required
-										/>
-									</div>
-
+										<div class="form-control">
+											<label class="label">
+												<span class="label-text">Run At</span>
+											</label>
+											<div class="relative" data-run-at-picker-container onclick="openScheduleRunAtPicker(this, event)">
+												<input
+													type="datetime-local"
+													name="run_at"
+													class="input input-bordered input-sm cursor-pointer"
+													data-run-at-picker
+													required
+												/>
+											</div>
+										</div>
 									<div class="form-control">
 										<label class="label">
 											<span class="label-text">Repeat</span>
@@ -491,9 +493,11 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 									<div class="flex items-center gap-2">
 										<input
 											type="number"
+											id="repeat-interval-input"
 											name="repeat_interval"
 											value="1"
 											min="1"
+											step="1"
 											class="input input-bordered input-sm w-20"
 										/>
 										<span class="text-sm opacity-60" id="repeat-interval-label">day(s)</span>
@@ -514,17 +518,39 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 								</div>
 							</form>
 
-							<script>
-								(function() {
-									var repeatTypeSelect = document.getElementById('repeat-type-select');
-									var repeatIntervalContainer = document.getElementById('repeat-interval-container');
-									var repeatIntervalLabel = document.getElementById('repeat-interval-label');
+								<script>
+									(function() {
+										var repeatTypeSelect = document.getElementById('repeat-type-select');
+										var repeatIntervalContainer = document.getElementById('repeat-interval-container');
+										var repeatIntervalInput = document.getElementById('repeat-interval-input');
+										var repeatIntervalLabel = document.getElementById('repeat-interval-label');
+										if (!repeatTypeSelect || !repeatIntervalContainer || !repeatIntervalInput || !repeatIntervalLabel) return;
 
-									function updateRepeatInterval() {
-										var repeatType = repeatTypeSelect.value;
-										if (repeatType === 'once') {
-											repeatIntervalContainer.style.display = 'none';
-										} else {
+										function applyIntervalValidity(enabled) {
+											if (!enabled) {
+												repeatIntervalInput.value = '1';
+												repeatIntervalInput.disabled = true;
+												repeatIntervalInput.required = false;
+												repeatIntervalInput.setCustomValidity('');
+												return;
+											}
+											repeatIntervalInput.disabled = false;
+											repeatIntervalInput.required = true;
+											var raw = (repeatIntervalInput.value || '').trim();
+											if (raw === '' || !/^\d+$/.test(raw) || Number(raw) < 1) {
+												repeatIntervalInput.setCustomValidity('Repeat interval must be a whole number of at least 1');
+											} else {
+												repeatIntervalInput.setCustomValidity('');
+											}
+										}
+
+										function updateRepeatInterval() {
+											var repeatType = repeatTypeSelect.value;
+											if (repeatType === 'once') {
+												repeatIntervalContainer.style.display = 'none';
+												applyIntervalValidity(false);
+												return;
+											}
 											repeatIntervalContainer.style.display = 'block';
 											switch(repeatType) {
 												case 'seconds': repeatIntervalLabel.textContent = 'second(s)'; break;
@@ -533,17 +559,20 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 												case 'daily': repeatIntervalLabel.textContent = 'day(s)'; break;
 												case 'weekly': repeatIntervalLabel.textContent = 'week(s)'; break;
 												case 'monthly': repeatIntervalLabel.textContent = 'month(s)'; break;
+												default: repeatIntervalLabel.textContent = 'time(s)'; break;
 											}
+											applyIntervalValidity(true);
 										}
-									}
 
-									repeatTypeSelect.addEventListener('change', updateRepeatInterval);
-									updateRepeatInterval();
-								})();
-							</script>
+										repeatTypeSelect.addEventListener('change', updateRepeatInterval);
+										repeatIntervalInput.addEventListener('input', function() {
+											applyIntervalValidity(repeatTypeSelect.value !== 'once');
+										});
+											updateRepeatInterval();
+									})();
+								</script>
+							</div>
 						</div>
-					</div>
-
 					<!-- Existing Schedules List -->
 					if len(schedules) > 0 {
 						for _, s := range schedules {
@@ -593,19 +622,21 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 											hx-swap="outerHTML"
 										>
 											<div class="grid grid-cols-2 gap-4 mb-4">
-												<div class="form-control">
-													<label class="label">
-														<span class="label-text">Run At</span>
-													</label>
-													<input
-														type="datetime-local"
-														name="run_at"
-														value={ components.GetScheduleEditTime(s) }
-														class="input input-bordered input-sm"
-														required
-													/>
-												</div>
-												<div class="form-control">
+													<div class="form-control">
+														<label class="label">
+															<span class="label-text">Run At</span>
+														</label>
+															<div class="relative" data-run-at-picker-container onclick="openScheduleRunAtPicker(this, event)">															<input
+																type="datetime-local"
+																name="run_at"
+																value={ components.GetScheduleEditTime(s) }
+																class="input input-bordered input-sm cursor-pointer"
+																data-run-at-picker
+																required
+															/>
+														</div>
+													</div>
+													<div class="form-control">
 													<label class="label">
 														<span class="label-text">Repeat</span>
 													</label>
@@ -625,16 +656,18 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 													<span class="label-text">Repeat Every</span>
 												</label>
 												<div class="flex items-center gap-2">
-													<input
-														type="number"
-														name="repeat_interval"
-														value={ fmt.Sprintf("%d", s.RepeatInterval) }
-														min="1"
-														class="input input-bordered input-sm w-20"
-													/>
-													<span class="text-sm opacity-60" id={ fmt.Sprintf("edit-repeat-label-%s", s.ID) }>day(s)</span>
-												</div>
-											</div>
+														<input
+															type="number"
+															id={ fmt.Sprintf("edit-repeat-interval-input-%s", s.ID) }
+															name="repeat_interval"
+															value={ fmt.Sprintf("%d", s.RepeatInterval) }
+															min="1"
+															step="1"
+															class="input input-bordered input-sm w-20"
+														/>
+														<span class="text-sm opacity-60" id={ fmt.Sprintf("edit-repeat-label-%s", s.ID) }>day(s)</span>
+														</div>
+								</div>
 											<div class="flex gap-2">
 												<button type="submit" class="btn btn-primary btn-sm">
 													Save Changes
@@ -649,38 +682,63 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 											</div>
 										</form>
 										<script>
-											(function() {
-												var container = document.currentScript.closest('[data-schedule-id]');
-												if (!container) return;
-												var scheduleId = container.dataset.scheduleId;
-												var repeatTypeSelect = document.getElementById('edit-repeat-type-' + scheduleId);
-												var repeatIntervalContainer = document.getElementById('edit-repeat-interval-' + scheduleId);
-												var repeatIntervalLabel = document.getElementById('edit-repeat-label-' + scheduleId);
+													(function() {
+														var container = document.currentScript.closest('[data-schedule-id]');
+														if (!container) return;
+														var scheduleId = container.dataset.scheduleId;
+														var repeatTypeSelect = document.getElementById('edit-repeat-type-' + scheduleId);
+														var repeatIntervalContainer = document.getElementById('edit-repeat-interval-' + scheduleId);
+														var repeatIntervalInput = document.getElementById('edit-repeat-interval-input-' + scheduleId);
+														var repeatIntervalLabel = document.getElementById('edit-repeat-label-' + scheduleId);
 
-												if (!repeatTypeSelect || !repeatIntervalContainer || !repeatIntervalLabel) return;
+														if (!repeatTypeSelect || !repeatIntervalContainer || !repeatIntervalInput || !repeatIntervalLabel) return;
 
-												function updateRepeatInterval() {
-													var repeatType = repeatTypeSelect.value;
-													if (repeatType === 'once') {
-														repeatIntervalContainer.style.display = 'none';
-													} else {
-														repeatIntervalContainer.style.display = 'block';
-														switch(repeatType) {
-															case 'seconds': repeatIntervalLabel.textContent = 'second(s)'; break;
-															case 'minutes': repeatIntervalLabel.textContent = 'minute(s)'; break;
-															case 'hours': repeatIntervalLabel.textContent = 'hour(s)'; break;
-															case 'daily': repeatIntervalLabel.textContent = 'day(s)'; break;
-															case 'weekly': repeatIntervalLabel.textContent = 'week(s)'; break;
-															case 'monthly': repeatIntervalLabel.textContent = 'month(s)'; break;
+														function applyIntervalValidity(enabled) {
+															if (!enabled) {
+																repeatIntervalInput.value = '1';
+																repeatIntervalInput.disabled = true;
+																repeatIntervalInput.required = false;
+																repeatIntervalInput.setCustomValidity('');
+																return;
+															}
+															repeatIntervalInput.disabled = false;
+															repeatIntervalInput.required = true;
+															var raw = (repeatIntervalInput.value || '').trim();
+															if (raw === '' || !/^\d+$/.test(raw) || Number(raw) < 1) {
+																repeatIntervalInput.setCustomValidity('Repeat interval must be a whole number of at least 1');
+															} else {
+																repeatIntervalInput.setCustomValidity('');
+															}
 														}
-													}
-												}
 
-												repeatTypeSelect.addEventListener('change', updateRepeatInterval);
-												updateRepeatInterval();
-											})();
-										</script>
-									</div>
+														function updateRepeatInterval() {
+															var repeatType = repeatTypeSelect.value;
+															if (repeatType === 'once') {
+																repeatIntervalContainer.style.display = 'none';
+																applyIntervalValidity(false);
+																return;
+															}
+															repeatIntervalContainer.style.display = 'block';
+															switch(repeatType) {
+																case 'seconds': repeatIntervalLabel.textContent = 'second(s)'; break;
+																case 'minutes': repeatIntervalLabel.textContent = 'minute(s)'; break;
+																case 'hours': repeatIntervalLabel.textContent = 'hour(s)'; break;
+																case 'daily': repeatIntervalLabel.textContent = 'day(s)'; break;
+																case 'weekly': repeatIntervalLabel.textContent = 'week(s)'; break;
+																case 'monthly': repeatIntervalLabel.textContent = 'month(s)'; break;
+																default: repeatIntervalLabel.textContent = 'time(s)'; break;
+															}
+															applyIntervalValidity(true);
+														}
+
+														repeatTypeSelect.addEventListener('change', updateRepeatInterval);
+														repeatIntervalInput.addEventListener('input', function() {
+															applyIntervalValidity(repeatTypeSelect.value !== 'once');
+														});
+															updateRepeatInterval();
+														})();
+													</script>
+												</div>
 								</div>
 							</div>
 						}
@@ -766,9 +824,19 @@ templ TaskDetailContent(task *models.Task, executions []models.Execution, schedu
 			</div>
 			<!-- End Tab: Thread -->
 
-				<script>
-					var _threadContentLoading = false;
+					<script>
+						function openScheduleRunAtPicker(container, event) {
+							if (!container) return;
+							var pickerInput = container.querySelector('input[data-run-at-picker]');
+							if (!pickerInput) return;
+							if (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;
+							pickerInput.focus();
+							if (typeof pickerInput.showPicker === 'function') {
+								pickerInput.showPicker();
+							}
+						}
 
+						var _threadContentLoading = false;
 					function _currentTaskIdFromPath() {
 						var taskIdMatch = window.location.pathname.match(/\/tasks\/([^\/]+)/);
 						return taskIdMatch && taskIdMatch[1] ? taskIdMatch[1] : '';

@@ -2217,6 +2217,131 @@ func TestExecuteTaskCreations_WithChainConfig(t *testing.T) {
 	}
 }
 
+// TestParseTaskCreations_ToolCallChainConfig simulates the runtime tool-call path
+// where JSON input is wrapped into a [CREATE_TASK] marker and parsed back.
+// This is the exact flow used when the LLM calls the create_task tool in orchestrate mode.
+// Regression test for: chain config must be fully preserved through the
+// buildToolMarker → ParseTaskCreations roundtrip so no follow-up edit_task is needed.
+func TestParseTaskCreations_ToolCallChainConfig(t *testing.T) {
+	// Simulate the JSON payload a model would send via create_task tool call
+	// with full chain config (as defined by the tool schema)
+	toolInput := `{"title":"Compute 1+1 and save result to file","prompt":"Compute 1+1 and write the result to result.txt","category":"active","chain":{"enabled":true,"trigger":"on_completion","child_title":"Compute x+1 from parent output","child_prompt_prefix":"Read x from result.txt and compute x+1, saving the answer to final.txt","child_category":"active"}}`
+
+	// Simulate buildToolMarker: wrap the JSON input as a CREATE_TASK marker
+	marker := "[CREATE_TASK]\n" + toolInput + "\n[/CREATE_TASK]"
+
+	tasks := ParseTaskCreations(marker)
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+
+	req := tasks[0]
+	if req.Title != "Compute 1+1 and save result to file" {
+		t.Errorf("title mismatch: %q", req.Title)
+	}
+	if req.Category != "active" {
+		t.Errorf("category mismatch: %q", req.Category)
+	}
+
+	// Chain must be fully parsed — no follow-up edit needed
+	if req.Chain == nil {
+		t.Fatal("chain config was not parsed from tool call input — LLM would need edit_task to fix this")
+	}
+	if !req.Chain.Enabled {
+		t.Error("chain.enabled should be true")
+	}
+	if req.Chain.Trigger != "on_completion" {
+		t.Errorf("chain.trigger = %q, want on_completion", req.Chain.Trigger)
+	}
+	if req.Chain.ChildTitle != "Compute x+1 from parent output" {
+		t.Errorf("chain.child_title = %q, want 'Compute x+1 from parent output'", req.Chain.ChildTitle)
+	}
+	if req.Chain.ChildPromptPrefix == "" {
+		t.Error("chain.child_prompt_prefix should not be empty")
+	}
+	if req.Chain.ChildCategory != "active" {
+		t.Errorf("chain.child_category = %q, want active", req.Chain.ChildCategory)
+	}
+}
+
+// TestExecuteTaskCreations_ToolCallChainConfig verifies that a tool-call-style
+// chain config creates both parent and blocked child in one call with no edits.
+func TestExecuteTaskCreations_ToolCallChainConfig(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	workerSvc := NewWorkerService(nil, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	ctx := context.Background()
+	requests := []TaskCreationRequest{
+		{
+			Title:    "Compute 1+1",
+			Prompt:   "Compute 1+1 and write result to file.",
+			Category: "active",
+			Priority: 2,
+			Chain: &models.ChainConfiguration{
+				Enabled:           true,
+				Trigger:           "on_completion",
+				ChildTitle:        "Compute x+1 using parent output",
+				ChildPromptPrefix: "Read x from result.txt and compute x+1.",
+				ChildCategory:     "active",
+			},
+		},
+	}
+
+	createdTasks, summary := ExecuteTaskCreationsWithReturn(ctx, requests, "default", taskSvc)
+	if len(createdTasks) != 1 {
+		t.Fatalf("expected 1 created task, got %d", len(createdTasks))
+	}
+
+	// Summary should show chain info
+	if !strings.Contains(summary, `chains to: "Compute x+1 using parent output"`) {
+		t.Errorf("summary missing chain info: %q", summary)
+	}
+
+	// Verify parent task has chain config stored
+	parentTask, err := taskSvc.GetByID(ctx, createdTasks[0].ID)
+	if err != nil {
+		t.Fatalf("get parent task: %v", err)
+	}
+	chainCfg, err := parentTask.ParseChainConfig()
+	if err != nil {
+		t.Fatalf("parse chain config: %v", err)
+	}
+	if !chainCfg.Enabled {
+		t.Error("parent chain config should be enabled")
+	}
+	if chainCfg.ChildTitle != "Compute x+1 using parent output" {
+		t.Errorf("child_title = %q", chainCfg.ChildTitle)
+	}
+	if chainCfg.ChildPromptPrefix != "Read x from result.txt and compute x+1." {
+		t.Errorf("child_prompt_prefix = %q", chainCfg.ChildPromptPrefix)
+	}
+
+	// Verify blocked child was pre-created
+	allTasks, err := taskRepo.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	var blockedChild *models.Task
+	for i := range allTasks {
+		if allTasks[i].ParentTaskID != nil && *allTasks[i].ParentTaskID == parentTask.ID {
+			blockedChild = &allTasks[i]
+			break
+		}
+	}
+	if blockedChild == nil {
+		t.Fatal("expected blocked child task to be pre-created")
+	}
+	if blockedChild.Status != models.StatusBlocked {
+		t.Errorf("blocked child status = %q, want blocked", blockedChild.Status)
+	}
+	if blockedChild.Title != "Compute x+1 using parent output" {
+		t.Errorf("blocked child title = %q", blockedChild.Title)
+	}
+}
+
 func TestParseTaskEdits_WithChainConfig(t *testing.T) {
 	output := `I'll add chaining to that task.
 
@@ -2321,6 +2446,24 @@ func TestExecuteTaskEdits_WithChainConfig(t *testing.T) {
 	if chainCfg.ChildTitle != "Implement the feature" {
 		t.Errorf("expected child title 'Implement the feature', got %q", chainCfg.ChildTitle)
 	}
+
+	// Verify a blocked child was pre-created in the backlog for visibility
+	blockedChild, err := taskRepo.FindBlockedChildByParent(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("error finding blocked child: %v", err)
+	}
+	if blockedChild == nil {
+		t.Fatal("expected blocked child to be pre-created when chain config is enabled via edit")
+	}
+	if blockedChild.Title != "Implement the feature" {
+		t.Errorf("expected blocked child title 'Implement the feature', got %q", blockedChild.Title)
+	}
+	if blockedChild.Category != models.CategoryBacklog {
+		t.Errorf("expected blocked child category=backlog, got %s", blockedChild.Category)
+	}
+	if blockedChild.Status != models.StatusBlocked {
+		t.Errorf("expected blocked child status=blocked, got %s", blockedChild.Status)
+	}
 }
 
 func TestExecuteTaskEdits_DisableChain(t *testing.T) {
@@ -2350,11 +2493,33 @@ func TestExecuteTaskEdits_DisableChain(t *testing.T) {
 		t.Fatalf("error creating task: %v", err)
 	}
 
-	// Verify chain is initially enabled
+	// Pre-create a blocked child (simulates what ExecuteTaskEdits or handler does)
+	blockedChild, _ := taskRepo.FindBlockedChildByParent(ctx, task.ID)
+	if blockedChild == nil {
+		// create_task path already pre-creates; if not, manually create one
+		blockedChild = &models.Task{
+			ProjectID:    "default",
+			Title:        "Implement",
+			Category:     models.CategoryBacklog,
+			Priority:     2,
+			Status:       models.StatusBlocked,
+			Prompt:       "Waiting for parent task to complete...",
+			ParentTaskID: &task.ID,
+		}
+		if err := taskSvc.Create(ctx, blockedChild); err != nil {
+			t.Fatalf("error creating blocked child: %v", err)
+		}
+	}
+
+	// Verify chain is initially enabled and blocked child exists
 	created, _ := taskSvc.GetByID(ctx, task.ID)
 	chainCfg, _ := created.ParseChainConfig()
 	if !chainCfg.Enabled {
 		t.Fatal("expected chain to be enabled initially")
+	}
+	existing, _ := taskRepo.FindBlockedChildByParent(ctx, task.ID)
+	if existing == nil {
+		t.Fatal("expected blocked child to exist before disabling chain")
 	}
 
 	// Disable chaining via edit
@@ -2375,6 +2540,12 @@ func TestExecuteTaskEdits_DisableChain(t *testing.T) {
 	chainCfg, _ = updated.ParseChainConfig()
 	if chainCfg.Enabled {
 		t.Error("expected chain config to be disabled after edit")
+	}
+
+	// Verify blocked child was removed when chain was disabled
+	remaining, _ := taskRepo.FindBlockedChildByParent(ctx, task.ID)
+	if remaining != nil {
+		t.Error("expected blocked child to be removed when chain config is disabled via edit")
 	}
 }
 

@@ -1453,6 +1453,31 @@ func TestHandler_ViewSchedule_RecurringTasks(t *testing.T) {
 	assertContains(t, rec, "Today")
 }
 
+func TestHandler_ViewSchedule_NewTaskDialogRepeatIntervalControls(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Test Project")
+
+	rec := htmxGet(e, "/schedule?project_id="+project.ID)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `id="sched-repeat-interval-container"`) {
+		t.Fatal("expected schedule create dialog to render repeat interval container")
+	}
+	if !strings.Contains(body, `id="sched-repeat-interval-input"`) {
+		t.Fatal("expected schedule create dialog to render repeat interval input")
+	}
+	if !strings.Contains(body, `name="repeat_interval"`) {
+		t.Fatal("expected schedule create dialog to submit repeat_interval")
+	}
+	if !strings.Contains(body, `window.updateScheduleCreateRepeatInterval`) {
+		t.Fatal("expected schedule create dialog repeat interval behavior hook")
+	}
+	if !strings.Contains(body, `Repeat interval must be a whole number of at least 1`) {
+		t.Fatal("expected schedule create dialog interval validation message")
+	}
+}
+
 func TestHandler_ViewSchedule_WeekNavigation(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Test Project")
@@ -1509,6 +1534,27 @@ func TestHandler_ViewSchedule_WeekNavigation_TimelineMarkup(t *testing.T) {
 				t.Error("missing time slot labels")
 			}
 		})
+	}
+}
+
+func TestHandler_ViewSchedule_TimelineTracerUsesAccentColor(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Test Project")
+
+	rec := htmxGet(e, "/schedule?project_id="+project.ID)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	assertContains(t, rec, `id="timeline-before"`)
+	assertContains(t, rec, `id="timeline-current"`)
+	if !strings.Contains(body, `border-top: 2px dashed var(--ov-link-color);`) {
+		t.Error("expected dashed timeline tracer to use shared accent token var(--ov-link-color)")
+	}
+	if c := strings.Count(body, `style="background-color: var(--ov-link-color);"`); c < 3 {
+		t.Errorf("expected timeline dots/line to use accent token var(--ov-link-color) in 3 elements, got %d", c)
+	}
+	if strings.Contains(body, "#166534") || strings.Contains(body, "bg-green-800") {
+		t.Error("schedule timeline tracer must not use legacy green styles")
 	}
 }
 

@@ -994,6 +994,49 @@ func TestTaskRepo_ActivateAllBacklog_NoBacklogTasks(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_ActivateAllBacklog_SkipsBlockedTasks(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	// Create a parent task (needed for foreign key on parent_task_id)
+	parentTask := &models.Task{ProjectID: "default", Title: "Parent Task", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"}
+	if err := repo.Create(ctx, parentTask); err != nil {
+		t.Fatalf("Create parent task: %v", err)
+	}
+
+	// Create a normal backlog task and a blocked backlog task
+	normalTask := &models.Task{ProjectID: "default", Title: "Normal Backlog", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"}
+	blockedTask := &models.Task{ProjectID: "default", Title: "Blocked Child", Category: models.CategoryBacklog, Status: models.StatusBlocked, Prompt: "waiting", ParentTaskID: &parentTask.ID}
+	if err := repo.Create(ctx, normalTask); err != nil {
+		t.Fatalf("Create normal task: %v", err)
+	}
+	if err := repo.Create(ctx, blockedTask); err != nil {
+		t.Fatalf("Create blocked task: %v", err)
+	}
+
+	count, err := repo.ActivateAllBacklog(ctx, "default")
+	if err != nil {
+		t.Fatalf("ActivateAllBacklog: %v", err)
+	}
+	// Only the normal task should be activated; blocked task stays in backlog
+	if count != 1 {
+		t.Errorf("expected 1 task activated (skipping blocked), got %d", count)
+	}
+
+	// Verify blocked child is still in backlog with blocked status
+	bt, _ := repo.GetByID(ctx, blockedTask.ID)
+	if bt == nil {
+		t.Fatal("blocked task not found after ActivateAllBacklog")
+	}
+	if bt.Category != models.CategoryBacklog {
+		t.Errorf("expected blocked child category=backlog, got %s", bt.Category)
+	}
+	if bt.Status != models.StatusBlocked {
+		t.Errorf("expected blocked child status=blocked, got %s", bt.Status)
+	}
+}
+
 func TestTaskRepo_ReorderTask_MoveDown(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)

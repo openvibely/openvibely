@@ -59,8 +59,8 @@ func filterRunningTasks(tasks []models.Task) []models.Task {
 func filterPendingTasks(tasks []models.Task) []models.Task {
 	var pending []models.Task
 	for _, task := range tasks {
-		// Include pending/queued tasks AND completed/failed tasks (transitional state before auto-move to Complete)
-		if task.Status == models.StatusPending || task.Status == models.StatusQueued || task.Status == models.StatusCompleted || task.Status == models.StatusFailed {
+		// Include pending/queued/blocked tasks AND completed/failed tasks (transitional state before auto-move to Complete)
+		if task.Status == models.StatusPending || task.Status == models.StatusQueued || task.Status == models.StatusCompleted || task.Status == models.StatusFailed || task.Status == models.StatusBlocked {
 			pending = append(pending, task)
 		}
 	}
@@ -70,7 +70,7 @@ func filterPendingTasks(tasks []models.Task) []models.Task {
 func countActiveDisplayedTasks(tasks []models.Task) int {
 	count := 0
 	for _, task := range tasks {
-		if task.Status == models.StatusRunning || task.Status == models.StatusPending || task.Status == models.StatusQueued {
+		if task.Status == models.StatusRunning || task.Status == models.StatusPending || task.Status == models.StatusQueued || task.Status == models.StatusBlocked {
 			count++
 		}
 	}

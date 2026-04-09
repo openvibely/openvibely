@@ -1,6 +1,9 @@
 package prompt
 
-import "strings"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // AgentSystemPrompt is the shared system prompt for all agentic code execution,
 // modeled after the Claude CLI's built-in system prompt. Used by both the CLI
@@ -65,9 +68,19 @@ const AgentSystemPrompt = `You are an expert software engineer acting as a codin
 // BuildAgentSystemPrompt constructs the full system prompt for agentic execution.
 // It combines the shared agent system prompt with optional project-specific
 // instructions (e.g. CLAUDE.md content) and additional context.
-func BuildAgentSystemPrompt(projectInstructions string) string {
+func BuildAgentSystemPrompt(projectInstructions string, workDir ...string) string {
 	var sb strings.Builder
 	sb.WriteString(AgentSystemPrompt)
+
+	worktreePath := ""
+	if len(workDir) > 0 {
+		worktreePath = strings.TrimSpace(workDir[0])
+	}
+	if worktreeContext := BuildWorktreeContextSentence(worktreePath); worktreeContext != "" {
+		sb.WriteString("\n# Worktree Context\n\n")
+		sb.WriteString(worktreeContext)
+		sb.WriteString("\n")
+	}
 
 	if projectInstructions != "" {
 		sb.WriteString("\n# Project Instructions\n\n")
@@ -76,5 +89,39 @@ func BuildAgentSystemPrompt(projectInstructions string) string {
 		sb.WriteString("\n")
 	}
 
+	return sb.String()
+}
+
+// BuildWorktreeContextSentence returns the canonical worktree orientation
+// sentence used across API and CLI prompt paths.
+func BuildWorktreeContextSentence(workDir string) string {
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		return ""
+	}
+	clean := filepath.Clean(workDir)
+	parent := filepath.Base(filepath.Dir(clean))
+	base := filepath.Base(clean)
+	if parent != ".worktrees" || !strings.HasPrefix(base, "task_") {
+		return ""
+	}
+	return "You are operating in an isolated git worktree at " + workDir + "."
+}
+
+// AppendWorktreeContextPrompt appends explicit worktree context to an existing
+// system prompt when a non-empty workDir is available.
+func AppendWorktreeContextPrompt(systemPrompt, workDir string) string {
+	worktreeContext := BuildWorktreeContextSentence(workDir)
+	if worktreeContext == "" {
+		return systemPrompt
+	}
+
+	var sb strings.Builder
+	sb.WriteString(systemPrompt)
+	if !strings.HasSuffix(systemPrompt, "\n") {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\n")
+	sb.WriteString(worktreeContext)
 	return sb.String()
 }

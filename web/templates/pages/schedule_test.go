@@ -1,7 +1,10 @@
 package pages
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1168,5 +1171,38 @@ func TestBuildTaskOccurrenceMap_MixedScheduleTypes(t *testing.T) {
 		if !found {
 			t.Errorf("Scheduled task %s not found in occurrence map", taskID)
 		}
+	}
+}
+
+func TestScheduleContent_RunAtFieldClickablePickerAffordance(t *testing.T) {
+	currentProject := &models.Project{ID: "project-1", Name: "Project 1"}
+
+	var buf bytes.Buffer
+	err := ScheduleContent(currentProject, nil, 0, nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, `data-run-at-picker-container`) {
+		t.Fatal("expected run-at picker container hook in schedule create dialog")
+	}
+	if !strings.Contains(output, `onclick="openScheduleRunAtPicker(this, event)"`) {
+		t.Fatal("expected run-at container click handler in schedule create dialog")
+	}
+	if !strings.Contains(output, `data-run-at-picker`) {
+		t.Fatal("expected run-at picker input hook in schedule create dialog")
+	}
+	if !strings.Contains(output, `class="input input-bordered cursor-pointer"`) {
+		t.Fatal("expected pointer cursor affordance on schedule create run-at input")
+	}
+	if !strings.Contains(output, `if (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;`) {
+		t.Fatal("expected run-at picker open behavior to be scoped to clicks on the datetime input")
+	}
+	if !strings.Contains(output, `function openScheduleRunAtPicker(container, event)`) {
+		t.Fatal("expected shared run-at picker open helper in schedule dialog script")
+	}
+	if !strings.Contains(output, `if (typeof pickerInput.showPicker === 'function')`) {
+		t.Fatal("expected showPicker-based open behavior with fallback focus")
 	}
 }

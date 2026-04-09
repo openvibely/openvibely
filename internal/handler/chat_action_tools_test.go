@@ -7,6 +7,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/service"
 )
 
 func TestSupportsChatActionTools(t *testing.T) {
@@ -68,6 +69,47 @@ func TestBuildToolMarker_WithBody(t *testing.T) {
 	}
 	if !strings.Contains(got, `"title":"Fix login"`) {
 		t.Fatalf("expected normalized JSON body, got %q", got)
+	}
+}
+
+func TestBuildToolMarker_ChainConfigPreserved(t *testing.T) {
+	// Simulate the exact JSON a model sends when using create_task tool with chain config
+	input := json.RawMessage(`{"title":"Compute 1+1","prompt":"Compute 1+1 and save to file","category":"active","chain":{"enabled":true,"trigger":"on_completion","child_title":"Compute x+1 from parent output","child_prompt_prefix":"Read x from result.txt and compute x+1","child_category":"active"}}`)
+
+	marker, err := buildToolMarker("CREATE_TASK", input, true)
+	if err != nil {
+		t.Fatalf("buildToolMarker error: %v", err)
+	}
+
+	// Verify marker wrapping
+	if !strings.Contains(marker, "[CREATE_TASK]") || !strings.Contains(marker, "[/CREATE_TASK]") {
+		t.Fatalf("missing marker wrapper: %q", marker)
+	}
+
+	// Parse it back via the same path as processChatTaskCreations
+	tasks := service.ParseTaskCreations(marker)
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task from roundtrip, got %d", len(tasks))
+	}
+
+	req := tasks[0]
+	if req.Chain == nil {
+		t.Fatal("chain config lost in buildToolMarker → ParseTaskCreations roundtrip")
+	}
+	if !req.Chain.Enabled {
+		t.Error("chain.enabled should be true after roundtrip")
+	}
+	if req.Chain.Trigger != "on_completion" {
+		t.Errorf("chain.trigger = %q after roundtrip", req.Chain.Trigger)
+	}
+	if req.Chain.ChildTitle != "Compute x+1 from parent output" {
+		t.Errorf("chain.child_title = %q after roundtrip", req.Chain.ChildTitle)
+	}
+	if req.Chain.ChildPromptPrefix != "Read x from result.txt and compute x+1" {
+		t.Errorf("chain.child_prompt_prefix lost in roundtrip")
+	}
+	if req.Chain.ChildCategory != "active" {
+		t.Errorf("chain.child_category = %q after roundtrip", req.Chain.ChildCategory)
 	}
 }
 

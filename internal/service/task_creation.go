@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -173,6 +174,17 @@ func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreation
 			failed = append(failed, fmt.Sprintf("- \"%s\": %v", req.Title, err))
 		} else {
 			log.Printf("[task-creation] created task %q id=%s category=%s agent=%v chain=%v selection=%s", req.Title, task.ID, category, task.AgentID, req.Chain != nil && req.Chain.Enabled, selectionInfo)
+
+			// Pre-create blocked child for visibility when chain is configured
+			if req.Chain != nil && req.Chain.Enabled {
+				blockedChild := llmworkflow.BuildBlockedChild(*task, req.Chain)
+				if childErr := taskSvc.Create(ctx, blockedChild); childErr != nil {
+					log.Printf("[task-creation] error pre-creating blocked child for %q: %v", req.Title, childErr)
+				} else {
+					log.Printf("[task-creation] pre-created blocked child id=%s for parent=%s", blockedChild.ID, task.ID)
+				}
+			}
+
 			createdTasks = append(createdTasks, *task)
 			line := fmt.Sprintf("- \"%s\" (%s) [TASK_ID:%s]", req.Title, category, task.ID)
 			// Auto-selection info logged server-side but not shown to user to reduce clutter
@@ -322,6 +334,27 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 				log.Printf("[task-edit] error setting chain config for task %s: %v", req.ID, err)
 			} else {
 				changes = append(changes, "chain_config")
+
+				// Manage blocked child for visibility (same as UI UpdateTaskChainConfig path)
+				if taskSvc != nil && taskSvc.repo != nil {
+					if req.Chain.Enabled {
+						existing, _ := taskSvc.repo.FindBlockedChildByParent(ctx, task.ID)
+						if existing == nil {
+							blockedChild := llmworkflow.BuildBlockedChild(*task, req.Chain)
+							if childErr := taskSvc.Create(ctx, blockedChild); childErr != nil {
+								log.Printf("[task-edit] error pre-creating blocked child for task %s: %v", req.ID, childErr)
+							} else {
+								log.Printf("[task-edit] pre-created blocked child id=%s for parent=%s", blockedChild.ID, task.ID)
+							}
+						}
+					} else {
+						if delErr := taskSvc.repo.DeleteBlockedChildrenByParent(ctx, task.ID); delErr != nil {
+							log.Printf("[task-edit] error deleting blocked children for task %s: %v", req.ID, delErr)
+						} else {
+							log.Printf("[task-edit] removed blocked children for parent=%s (chain disabled)", task.ID)
+						}
+					}
+				}
 			}
 		}
 
