@@ -291,6 +291,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 ## Git Lineage for Chained Tasks
 
 - **Worker dependency gating**: `dispatchNext()` must skip chained tasks (with `parent_task_id`) whose parent is non-terminal. Do not dispatch child before parent completes or the child will run without parent edits
+- **Chain category default must inherit parent**: when chain config `child_category` is empty (`Same as parent`), child creation must copy `parentTask.Category`. Never default empty `child_category` to `backlog`, or on-completion children may not auto-run
 - **Lineage resolution order**: `BaseCommitSHA` (preferred, SHA-based so parent branch cleanup doesn't break) > `BaseBranch` (metadata/fallback) > `MergeTargetBranch` > global/default branch. Never default chained children to main if valid parent lineage exists
 - **Branch cleanup must check descendants**: before deleting a parent branch, call `HasNonTerminalDescendants()` — skip deletion if active children/grandchildren exist
 - **Lineage capture is atomic with child creation**: set `base_branch`, `base_commit_sha`, `lineage_depth` in the same `TriggerTaskChain` call path, before returning from create. Never create a chained child without capturing parent lineage first

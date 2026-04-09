@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
@@ -113,6 +114,88 @@ func TestLLMService_TriggerTaskChain(t *testing.T) {
 	expectedPrompt := "Here's the plan:\n1. Design the API\n2. Implement the backend\n3. Add tests"
 	if childTask.Prompt != expectedPrompt {
 		t.Errorf("Expected child task prompt=%q, got %q", expectedPrompt, childTask.Prompt)
+	}
+}
+
+func TestLLMService_TriggerTaskChain_DefaultsChildCategoryToParentAndAutoSubmits(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	broadcaster := events.NewBroadcaster()
+	taskRepo := repository.NewTaskRepo(db, broadcaster)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	workerSvc := NewWorkerService(nil, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	llmSvc.taskSvc = taskSvc
+
+	project := &models.Project{Name: "Test", Description: "Test"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("Create project failed: %v", err)
+	}
+
+	parentTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Chain math tasks: compute 1+1 then compute x+1",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusPending,
+		Prompt:    "Compute 1+1",
+	}
+	chainConfig := &models.ChainConfiguration{
+		Enabled:       true,
+		Trigger:       "on_completion",
+		ChildTitle:    "Compute x+1 using parent output",
+		ChildCategory: "", // Same as parent
+	}
+	if err := parentTask.SetChainConfig(chainConfig); err != nil {
+		t.Fatalf("SetChainConfig failed: %v", err)
+	}
+	if err := taskRepo.Create(ctx, parentTask); err != nil {
+		t.Fatalf("Create parent task failed: %v", err)
+	}
+
+	if err := llmSvc.triggerTaskChain(ctx, *parentTask, "x=2\n[STATUS: SUCCESS]"); err != nil {
+		t.Fatalf("triggerTaskChain failed: %v", err)
+	}
+
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("ListByProject failed: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("Expected 2 tasks, got %d", len(tasks))
+	}
+
+	var childTask *models.Task
+	for _, task := range tasks {
+		if task.ParentTaskID != nil && *task.ParentTaskID == parentTask.ID {
+			childTask = &task
+			break
+		}
+	}
+	if childTask == nil {
+		t.Fatalf("Child task not found")
+	}
+
+	if childTask.Category != models.CategoryActive {
+		t.Fatalf("Expected child category to inherit active parent, got %s", childTask.Category)
+	}
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != childTask.ID {
+			t.Fatalf("Expected submitted task id=%s, got %s", childTask.ID, submitted.ID)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("Expected child task auto-submission to worker pool")
 	}
 }
 

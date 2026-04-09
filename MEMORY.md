@@ -90,6 +90,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - **Lineage resolution priority**: parent worktree branch HEAD → parent merge target/default branch HEAD
 - **Worktree setup uses lineage**: `SetupWorktree` creates child branch from `BaseCommitSHA` (preferred) > `BaseBranch` > `MergeTargetBranch` > default branch. Chained children inherit parent code changes via Git lineage
 - **Worker dependency gating**: `dispatchNext()` skips chained tasks whose parent is non-terminal (pending/queued/running). Re-checked on subsequent dispatch loops
+- **Child category inheritance for chains**: when `child_category` is empty (`Same as parent`), chained child tasks inherit the parent category (including `active`) instead of defaulting to backlog
 - **Branch cleanup safety**: `CleanupWorktree` checks `HasNonTerminalDescendants()` before deleting a branch; skips deletion if active descendants exist
 - **Non-chained tasks unaffected**: standalone tasks dispatch immediately, lineage fields default to empty/zero
 

@@ -124,10 +124,17 @@ func (s *Service) TriggerTaskChain(ctx context.Context, parentTask models.Task, 
 		}
 	}
 
+	resolvedChildCategory := parentTask.Category
+	categorySource := "parent"
+	if config.ChildCategory != "" {
+		resolvedChildCategory = models.TaskCategory(config.ChildCategory)
+		categorySource = "config"
+	}
+
 	childTask := &models.Task{
 		ProjectID:     parentTask.ProjectID,
 		Title:         childTitle,
-		Category:      models.CategoryBacklog,
+		Category:      resolvedChildCategory,
 		Priority:      parentTask.Priority,
 		Status:        models.StatusPending,
 		Prompt:        childPrompt,
@@ -138,16 +145,12 @@ func (s *Service) TriggerTaskChain(ctx context.Context, parentTask models.Task, 
 		BaseCommitSHA: baseCommitSHA,
 		LineageDepth:  parentLineageDepth + 1,
 	}
-
-	if config.ChildCategory != "" {
-		childTask.Category = models.TaskCategory(config.ChildCategory)
-	}
 	if config.ChildAgentID != "" {
 		childTask.AgentID = &config.ChildAgentID
 	}
 
-	log.Printf("[agent-svc] triggerTaskChain creating child task title=%q category=%s parent=%s lineage_depth=%d base_branch=%s base_sha=%s",
-		childTask.Title, childTask.Category, parentTask.ID, childTask.LineageDepth, childTask.BaseBranch, childTask.BaseCommitSHA)
+	log.Printf("[agent-svc] triggerTaskChain creating child task title=%q category=%s category_source=%s parent=%s lineage_depth=%d base_branch=%s base_sha=%s",
+		childTask.Title, childTask.Category, categorySource, parentTask.ID, childTask.LineageDepth, childTask.BaseBranch, childTask.BaseCommitSHA)
 
 	if err := s.taskCreator.Create(ctx, childTask); err != nil {
 		log.Printf("[agent-svc] triggerTaskChain error creating child task: %v", err)
