@@ -2596,6 +2596,73 @@ func TestSidebar_ProjectSelectorSingleBorderAndFocusVisible(t *testing.T) {
 	}
 }
 
+func TestSidebar_LightModeBackgroundAndNavReadability(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	pages := []string{
+		"/tasks",
+		"/chat",
+		"/schedule",
+		"/models",
+		"/analytics",
+		"/alerts",
+		"/upcoming",
+		"/history",
+		"/insights",
+	}
+
+		requiredSnippets := []string{
+			`id="sidebar"`,
+			`class="sidebar-aside bg-base-100`,
+			`id="project-selector"`,
+			`--ov-l-bg: #FAFAFA;`,
+			`--ov-l-surface: #F5F5F5;`,
+			`[data-theme="light"] .sidebar-aside {`,
+			`background-color: #FAFAFA;`,
+			`border-color: var(--ov-l-border);`,
+		`[data-theme="light"] .menu-title span {`,
+		`color: var(--ov-l-text);`,
+		`[data-theme="light"] .menu a,`,
+		`color: var(--ov-l-text-strong);`,
+		`[data-theme="light"] .menu a:hover,`,
+		`background-color: var(--ov-l-surface-hover);`,
+		`[data-theme="light"] .menu a svg,`,
+		`color: var(--ov-l-text-muted);`,
+		`[data-theme="light"] .bg-base-100 {`,
+		`background-color: var(--ov-l-bg);`,
+		`[data-theme="light"] .bg-base-200 {`,
+		`[data-theme="light"] .stats {`,
+		`background-color: var(--ov-l-bg);`,
+		`[data-theme="light"] .hover\:border-primary:hover {`,
+		`border-color: oklch(var(--p));`,
+		`[data-theme="light"] .hover\:border-primary\/40:hover {`,
+		`border-color: oklch(var(--p) / 0.4);`,
+		`[data-theme="light"] .chat-input-container {`,
+		`background-color: #FFFFFF;`,
+		`[data-theme="light"] .chat-bubble-user-msg,`,
+		`[data-theme="light"] .sidebar-divider hr {`,
+		`border-color: var(--ov-l-border-contrast);`,
+	}
+
+	for _, path := range pages {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			body := rec.Body.String()
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200 for %s, got %d", path, rec.Code)
+			}
+			for _, snippet := range requiredSnippets {
+				if !strings.Contains(body, snippet) {
+					t.Fatalf("%s missing required sidebar styling/structure snippet: %s", path, snippet)
+				}
+			}
+		})
+	}
+}
+
 func TestSidebar_AlertsGroupedUnderSystem(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 

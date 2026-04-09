@@ -448,13 +448,16 @@ func TestHandler_TaskThread_LightModeToolCallContrastStyles(t *testing.T) {
 	if !strings.Contains(body, `function _loadThreadContent(taskId)`) {
 		t.Fatal("expected thread lazy-load helper in task detail response")
 	}
+	if !strings.Contains(body, `--ov-link-color: #7480ff;`) {
+		t.Error("expected shared link color token for thread/chat link styling")
+	}
 	if !strings.Contains(body, `[data-theme="light"] .stream-tool-summary .tool-name-secondary`) {
 		t.Error("expected light-theme tool secondary text style in thread view response")
 	}
 	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body {`) {
 		t.Error("expected light-theme tool outer body style in thread view response")
 	}
-	if !strings.Contains(body, `border-color: transparent;`) {
+	if !strings.Contains(body, `border: none;`) {
 		t.Error("expected light-theme tool outer body to blend without border emphasis")
 	}
 	if !strings.Contains(body, `background: transparent;`) {
@@ -478,8 +481,8 @@ func TestHandler_TaskThread_LightModeToolCallContrastStyles(t *testing.T) {
 	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-content pre`) {
 		t.Error("expected light-theme tool inner content style in thread view response")
 	}
-	if !strings.Contains(body, `border: 1px solid var(--ov-l-border);`) {
-		t.Error("expected light-theme tool inner content to retain bordered card styling")
+	if !strings.Contains(body, `border: none;`) {
+		t.Error("expected light-theme tool inner content to render without border emphasis")
 	}
 	if !strings.Contains(body, `border-radius: 5px;`) {
 		t.Error("expected light-theme tool inner content to retain rounded corners")
@@ -489,6 +492,15 @@ func TestHandler_TaskThread_LightModeToolCallContrastStyles(t *testing.T) {
 	}
 	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-content pre`) {
 		t.Error("expected light-theme tool body content color style in thread view response")
+	}
+	if !strings.Contains(body, `.chat-markdown a {`) {
+		t.Error("expected shared markdown link styling in thread view response")
+	}
+	if !strings.Contains(body, `.chat-markdown a:visited {`) {
+		t.Error("expected markdown visited-link styling in thread view response")
+	}
+	if !strings.Contains(body, `.chat-markdown a:focus-visible {`) {
+		t.Error("expected markdown focus-visible link styling in thread view response")
 	}
 }
 

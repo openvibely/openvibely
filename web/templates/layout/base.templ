@@ -34,9 +34,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				   Without this, HTMX swaps cause all newly-inserted .btn elements
 				   to play the pop animation simultaneously. The :active click
 				   animation uses 0s duration separately, so click feedback is preserved. */
-				:root {
-					--animation-btn: 0;
-				}
+					:root {
+						--animation-btn: 0;
+						--ov-link-color: #7480ff;
+						--ov-link-color-hover: #6673ff;
+						--ov-link-color-active: #5966f2;
+						--ov-link-color-visited: #7480ff;
+						--ov-link-focus-ring: rgba(116, 128, 255, 0.45);
+						--ov-link-decoration: rgba(116, 128, 255, 0.85);
+					}
 					/* Canonical "Default" badge styling used across major settings pages. */
 					.ov-badge-default {
 						background-color: hsl(var(--p));
@@ -51,22 +57,31 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					/* Task create-result row styles (chat/tool-output cards). */
 					.ov-task-result-link {
-						color: hsl(var(--p));
+						color: var(--ov-link-color);
 						font-weight: 500;
 						text-decoration-line: underline;
 						text-decoration-thickness: 1px;
 						text-underline-offset: 0.14em;
-						text-decoration-color: hsl(var(--p) / 0.85);
+						text-decoration-color: var(--ov-link-decoration);
 						transition: text-decoration-color 0.15s ease, color 0.15s ease;
 					}
+					.ov-task-result-link:visited {
+						color: var(--ov-link-color-visited);
+						text-decoration-color: var(--ov-link-decoration);
+					}
 					.ov-task-result-link:hover {
-						text-decoration-color: hsl(var(--p));
+						color: var(--ov-link-color-hover);
+						text-decoration-color: var(--ov-link-color-hover);
+					}
+					.ov-task-result-link:active {
+						color: var(--ov-link-color-active);
+						text-decoration-color: var(--ov-link-color-active);
 					}
 					.ov-task-result-link:focus-visible {
-						outline: 2px solid hsl(var(--p) / 0.45);
+						outline: 2px solid var(--ov-link-focus-ring);
 						outline-offset: 2px;
 						border-radius: 0.25rem;
-						text-decoration-color: hsl(var(--p));
+						text-decoration-color: var(--ov-link-color-hover);
 					}
 					.ov-task-result-link--tool {
 						text-decoration-line: underline;
@@ -100,7 +115,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						color: hsl(var(--bc) / 0.4);
 					}
 					[data-theme="light"] .ov-task-result-link {
-						text-decoration-color: hsl(var(--p) / 0.7);
+						text-decoration-color: rgba(116, 128, 255, 0.72);
 					}
 					[data-theme="light"] .ov-task-result-start-btn {
 						color: hsl(var(--p));
@@ -600,8 +615,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					--er: 0.68 0.15 26;
 
 					/* Light 2026 semantic aliases — indigo/purple accent palette. */
-					--ov-l-bg: #FFFFFF;
-					--ov-l-surface: #F8F8F8;
+					--ov-l-bg: #FAFAFA;
+					--ov-l-surface: #F5F5F5;
 					--ov-l-surface-hover: #F2F2F2;
 					--ov-l-surface-active: #E8E8E8;
 					--ov-l-border: #E5E5E5;
@@ -611,7 +626,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					--ov-l-text-strong: #1F1F1F;
 					--ov-l-text-muted: #616161;
 					--ov-l-text-dim: #767676;
-					--ov-l-accent: #5B47CD;
+					--ov-l-accent: #7480ff;
 					--ov-l-accent-hover: #4F3CB8;
 					--ov-l-accent-soft: #DDD6FE;
 					--ov-l-accent-soft-strong: #C4B5FD7A;
@@ -633,10 +648,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					background-color: var(--ov-l-surface);
 					border-bottom: 1px solid var(--ov-l-border);
 				}
+				[data-theme="light"] .bg-base-100 {
+					background-color: var(--ov-l-bg);
+				}
+				[data-theme="light"] .bg-base-200 {
+					background-color: var(--ov-l-bg);
+				}
 
 				/* --- Sidebar --- */
 				[data-theme="light"] .sidebar-aside {
-					background-color: var(--ov-l-surface);
+					background-color: #FAFAFA;
 					border-color: var(--ov-l-border);
 				}
 				[data-theme="light"] .menu-title span {
@@ -667,6 +688,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					background-color: var(--ov-l-bg);
 					border-color: var(--ov-l-border);
 					box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
+				}
+				[data-theme="light"] .hover\:border-primary:hover {
+					border-color: oklch(var(--p));
+				}
+				[data-theme="light"] .hover\:border-primary\/40:hover {
+					border-color: oklch(var(--p) / 0.4);
 				}
 				[data-theme="light"] .card .font-medium,
 				[data-theme="light"] .card a.font-medium {
@@ -838,11 +865,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				/* --- Chat bubbles --- */
 				[data-theme="light"] .chat-bubble-user-msg,
 				[data-theme="light"] .chat-bubble-assistant-msg {
-					--chat-user-bg: var(--ov-l-bg);
+					--chat-user-bg: #FFFFFF;
 					--chat-user-border: var(--ov-l-border);
-					--chat-assistant-bg: var(--ov-l-bg);
+					--chat-assistant-bg: #FFFFFF;
 					--chat-assistant-border: var(--ov-l-border);
-					background-color: var(--ov-l-bg);
+					background-color: #FFFFFF;
 					color: var(--ov-l-text-strong);
 					border: 1px solid var(--ov-l-border);
 					box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03);
@@ -860,7 +887,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 				/* Light mode chat input */
 				[data-theme="light"] .chat-input-container {
-					background-color: var(--ov-l-bg);
+					background-color: #FFFFFF;
 					border: 1px solid var(--ov-l-border);
 					box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
 				}
@@ -879,7 +906,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					opacity: 0.72;
 				}
 				[data-theme="light"] .stream-tool-body {
-					border-color: transparent;
+					border: none;
 					background: transparent;
 				}
 				[data-theme="light"] .stream-tool-body-row {
@@ -895,7 +922,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 				[data-theme="light"] .stream-tool-body-content pre {
 					background: var(--ov-l-surface);
-					border: 1px solid var(--ov-l-border);
+					border: none;
 					border-radius: 5px;
 				}
 				[data-theme="light"] .stream-tool-body-content,
@@ -949,6 +976,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				/* --- Alert and stat cards --- */
+				[data-theme="light"] .stats {
+					background-color: var(--ov-l-bg);
+					border-color: var(--ov-l-border);
+				}
 				[data-theme="light"] .stat {
 					border-color: var(--ov-l-border);
 				}
@@ -1068,11 +1099,31 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					border: none;
 					border-top: 1px solid hsl(var(--bc) / 0.1);
 				}
-				.chat-markdown a {
-					color: hsl(var(--p));
-					text-decoration: underline;
-					text-underline-offset: 2px;
-				}
+					.chat-markdown a {
+						color: var(--ov-link-color);
+						text-decoration: underline;
+						text-underline-offset: 2px;
+						text-decoration-color: var(--ov-link-decoration);
+						transition: color 0.15s ease, text-decoration-color 0.15s ease;
+					}
+					.chat-markdown a:visited {
+						color: var(--ov-link-color-visited);
+						text-decoration-color: var(--ov-link-decoration);
+					}
+					.chat-markdown a:hover {
+						color: var(--ov-link-color-hover);
+						text-decoration-color: var(--ov-link-color-hover);
+					}
+					.chat-markdown a:active {
+						color: var(--ov-link-color-active);
+						text-decoration-color: var(--ov-link-color-active);
+					}
+					.chat-markdown a:focus-visible {
+						outline: 2px solid var(--ov-link-focus-ring);
+						outline-offset: 2px;
+						border-radius: 0.2rem;
+						text-decoration-color: var(--ov-link-color-hover);
+					}
 				.chat-markdown strong { font-weight: 600; }
 				.chat-markdown table {
 					border-collapse: collapse;

@@ -341,8 +341,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var link = document.createElement('a');
 							link.href = '/tasks/' + taskId;
 							link.className = inToolOutput
-								? 'text-success underline decoration-2 underline-offset-2 hover:decoration-2 cursor-pointer font-medium'
-								: 'text-success hover:underline cursor-pointer font-medium';
+								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
+								: 'ov-task-result-link cursor-pointer';
 							link.textContent = '"' + taskTitle + '"';
 						link.onclick = function(e) {
 							e.preventDefault();

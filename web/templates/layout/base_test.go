@@ -150,26 +150,41 @@ func TestLightTheme_UsesLightModernTokens(t *testing.T) {
 	}
 	html := buf.String()
 
-	expected := []string{
-		"--ov-l-accent: #5B47CD;",
-		"--ov-l-surface: #F8F8F8;",
-		"--ov-l-border: #E5E5E5;",
-		"--ov-l-text: #3B3B3B;",
-		"[data-theme=\"light\"] body,",
-		"[data-theme=\"light\"] .drawer-content {",
-		"background-color: var(--ov-l-surface);",
-		"[data-theme=\"light\"] #main-content {",
-		"background-color: var(--ov-l-surface);",
-		"[data-theme=\"light\"] .btn-primary {",
-		"background-color: var(--ov-l-accent);",
-		"[data-theme=\"light\"] .sidebar-aside {",
-		"[data-theme=\"light\"] .card {",
-		"[data-theme=\"light\"] .chat-bubble-user-msg,",
-	}
+		expected := []string{
+			"--ov-l-accent: #7480ff;",
+			"--ov-l-bg: #FAFAFA;",
+			"--ov-l-surface: #F5F5F5;",
+			"--ov-l-border: #E5E5E5;",
+			"--ov-l-text: #3B3B3B;",
+			"[data-theme=\"light\"] body,",
+			"[data-theme=\"light\"] .drawer-content {",
+			"background-color: var(--ov-l-surface);",
+			"[data-theme=\"light\"] #main-content {",
+			"background-color: var(--ov-l-surface);",
+			"[data-theme=\"light\"] .btn-primary {",
+			"background-color: var(--ov-l-accent);",
+			"[data-theme=\"light\"] .sidebar-aside {",
+			"background-color: #FAFAFA;",
+			"[data-theme=\"light\"] .card {",
+			"[data-theme=\"light\"] .hover\\:border-primary:hover {",
+			"border-color: oklch(var(--p));",
+			"[data-theme=\"light\"] .hover\\:border-primary\\/40:hover {",
+			"border-color: oklch(var(--p) / 0.4);",
+			"[data-theme=\"light\"] .chat-input-container {",
+			"background-color: #FFFFFF;",
+			"[data-theme=\"light\"] .bg-base-100 {",
+			"background-color: var(--ov-l-bg);",
+		"[data-theme=\"light\"] .bg-base-200 {",
+		"[data-theme=\"light\"] .stats {",
+		"background-color: var(--ov-l-bg);",
+		"[data-theme=\"light\"] .chat-bubble-user-msg,",		}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
 			t.Errorf("expected light theme fragment %q to be present", fragment)
 		}
+	}
+	if strings.Contains(html, `[data-theme="light"] .card:hover {`) {
+		t.Error("unexpected global light card hover border rule; only explicit hover:border-primary* cards should get purple border")
 	}
 }
 
