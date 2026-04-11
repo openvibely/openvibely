@@ -80,6 +80,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - For async list/state refreshes, guard against out-of-order responses (request token/sequence checks) so older responses cannot overwrite newer user actions.
 - For polling-driven HTMX morph updates, make post-swap DOM processing incremental and content-signature based; avoid full-container reprocessing on every poll when content is unchanged.
 - For high-frequency streaming UI updates (for example SSE token/tool chunks), batch DOM re-renders with `requestAnimationFrame` and force a final flush on completion to avoid main-thread stalls that make updates appear stuck.
+- For streaming text sanitizers/parsers that hold a trailing lookahead buffer, flush only at UTF-8 rune boundaries (not arbitrary byte offsets) so multi-byte punctuation/emoji are not split across SSE chunks.
 - For dirty-input preservation during polling, treat successful submit/update as an explicit state transition: temporarily suppress dirty-state restoration around the request lifecycle so accepted values do not bounce back into warning/edited styling.
 - For polled chat/thread forms, scope polling to genuinely active states (for example `running`/`queued`), and persist unsent drafts by entity key so periodic swaps cannot erase in-progress user input.
 - For draft-preserving HTMX forms, treat successful non-empty submit swaps as an explicit "clear" transition in `beforeSwap`/`afterRequest` handling, so restore logic does not rehydrate text that was just intentionally submitted.

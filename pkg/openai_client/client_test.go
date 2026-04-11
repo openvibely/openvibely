@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestRefreshToken(t *testing.T) {
@@ -388,6 +389,31 @@ func TestSend_StreamingSanitizesPseudoToolText(t *testing.T) {
 	}
 	if !strings.Contains(resp.Text, "[Using tool: Glob | .]") {
 		t.Fatalf("response text missing tool marker: %q", resp.Text)
+	}
+}
+
+func TestOpenAIStreamSanitizer_DoesNotSplitUTF8Runes(t *testing.T) {
+	var emitted []string
+	sanitizer := newOpenAIStreamSanitizer(func(text string) {
+		emitted = append(emitted, text)
+	})
+
+	delta := strings.Repeat("a", 7) + "I\u2019" + "ve" + strings.Repeat("x", 28)
+	sanitizer.Write(delta)
+	sanitizer.Flush()
+
+	if len(emitted) < 2 {
+		t.Fatalf("expected sanitizer to emit multiple chunks, got %d", len(emitted))
+	}
+	for i, chunk := range emitted {
+		if !utf8.ValidString(chunk) {
+			t.Fatalf("chunk %d is invalid UTF-8: %q", i, chunk)
+		}
+	}
+
+	got := strings.Join(emitted, "")
+	if got != delta {
+		t.Fatalf("joined output mismatch: got %q, want %q", got, delta)
 	}
 }
 

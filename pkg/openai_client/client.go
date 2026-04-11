@@ -854,6 +854,10 @@ func (s *openAIStreamSanitizer) drain(final bool) {
 				break
 			}
 			flushLen := len(current) - openAIStreamSanitizerTail
+			flushLen = openAIUTF8SafePrefixLen(current, flushLen)
+			if flushLen <= 0 {
+				break
+			}
 			s.emit(current[:flushLen])
 			current = current[flushLen:]
 			break
@@ -890,6 +894,21 @@ func (s *openAIStreamSanitizer) drain(final bool) {
 	}
 
 	s.pending.WriteString(current)
+}
+
+// openAIUTF8SafePrefixLen returns the largest prefix length <= n that does not
+// split a UTF-8 encoded rune.
+func openAIUTF8SafePrefixLen(s string, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	if n >= len(s) {
+		return len(s)
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return n
 }
 
 func openAINextToolSyntaxIndex(s string) int {

@@ -288,6 +288,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - The tab visibility manager closes and recreates SSE on hide/show; the `onopen` handler that refreshes chat content must pass the current project and target `#chat-page-root` only. On reconnect, skip forced `/chat` outerHTML refresh while a chat stream bubble is actively in progress; refreshing mid-stream can replace the live bubble with partial persisted output and hide plan-complete CTA state until later fallback events.
 - When leaving chat via `#main-content` swap, explicitly unregister `chat-live` SSE to prevent stale reconnect side effects
 - Per-execution chat stream EventSources (`/events/chat/:exec_id`) must be globally tracked (by exec ID) and force-closed on `#chat-page-root` / `#main-content` swaps. Without this, reconnect outerHTML swaps can leak old streams and exhaust the browser’s per-host connection slots.
+- OpenAI stream sanitizer must flush text on UTF-8 rune boundaries only. Byte-length tail slicing (for marker lookahead) can split `’`/emoji bytes across SSE events (`I\xe2` + `\x80\x99ve`) and browsers render that as `I���ve`.
 
 ## Chat Bubble Styling
 
