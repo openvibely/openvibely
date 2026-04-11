@@ -391,16 +391,15 @@ templ analyticsContent(currentProject *models.Project) {
 							return;
 						}
 
-						container.innerHTML = data.map((task, idx) => `
-							<div class="flex justify-between items-center py-2 border-b border-base-300">
-								<div>
-									<span class="font-mono text-sm opacity-50">${idx + 1}.</span>
-									<span class="ml-2">${task.TaskTitle || 'Unknown'}</span>
+							container.innerHTML = data.map((task, idx) => `
+								<div class="flex items-center justify-between gap-3 py-2 border-b border-base-300">
+									<div class="flex-1 min-w-0 pr-2">
+										<span class="font-mono text-sm opacity-50">${idx + 1}.</span>
+										<span class="ml-2 break-words">${task.TaskTitle || 'Unknown'}</span>
+									</div>
+									<span class="badge badge-primary shrink-0 inline-flex items-center justify-center whitespace-nowrap h-auto min-h-6 px-3 py-1 leading-none text-center">${task.ExecutionCount || 0} runs</span>
 								</div>
-								<span class="badge badge-primary">${task.ExecutionCount || 0} runs</span>
-							</div>
-						`).join('');
-						} catch (e) { console.error('loadMostFrequentTasks:', e); }
+							`).join('');						} catch (e) { console.error('loadMostFrequentTasks:', e); }
 					}
 
 					// Load Failed Task Patterns

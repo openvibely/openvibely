@@ -2232,6 +2232,8 @@ func TestHandler_Analytics_FullPage(t *testing.T) {
 	assertContains(t, rec, `data-project-id="`+project.ID+`"`)
 	assertContains(t, rec, "dataset.projectId")
 	assertNotContains(t, rec, "templ.JSONString")
+	assertContains(t, rec, "flex items-center justify-between gap-3")
+	assertContains(t, rec, "badge badge-primary shrink-0 inline-flex items-center justify-center whitespace-nowrap h-auto min-h-6 px-3 py-1 leading-none text-center")
 }
 
 func TestHandler_Analytics_ExecutionTimeDisplayedInMinutes(t *testing.T) {
