@@ -1464,6 +1464,9 @@ func TestHandler_ViewSchedule_NewTaskDialogRepeatIntervalControls(t *testing.T) 
 	if !strings.Contains(body, `id="sched-repeat-interval-container"`) {
 		t.Fatal("expected schedule create dialog to render repeat interval container")
 	}
+	if strings.Contains(body, `id="sched-repeat-interval-container" style="display: none;"`) {
+		t.Fatal("expected schedule create dialog default repeat interval row to be visible for Daily repeat")
+	}
 	if !strings.Contains(body, `id="sched-repeat-interval-input"`) {
 		t.Fatal("expected schedule create dialog to render repeat interval input")
 	}
@@ -1475,6 +1478,15 @@ func TestHandler_ViewSchedule_NewTaskDialogRepeatIntervalControls(t *testing.T) 
 	}
 	if !strings.Contains(body, `Repeat interval must be a whole number of at least 1`) {
 		t.Fatal("expected schedule create dialog interval validation message")
+	}
+	if !strings.Contains(body, `<option value="daily" selected>Daily</option>`) {
+		t.Fatal("expected schedule create dialog default repeat selection to be Daily")
+	}
+	if !strings.Contains(body, `repeatTypeSelect.value = 'daily';`) {
+		t.Fatal("expected schedule create dialog reset behavior to restore repeat type to Daily")
+	}
+	if !strings.Contains(body, `class="grid grid-cols-1 gap-3 md:grid-cols-2"`) {
+		t.Fatal("expected schedule configuration controls to use responsive balanced grid layout")
 	}
 }
 

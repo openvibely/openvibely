@@ -83,6 +83,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - **Project limit changes must trigger dispatch**: `UpdateProjectWorkerLimit` handler must call `workerSvc.DispatchNext()` after updating the DB — otherwise queued tasks won't start until an unrelated event (task completion, scheduler tick). Global limit changes already do this via `Resize()` → `dispatchNext()`.
 - **Drag-and-drop reschedule**: don't reset task status; auto-adjust past times to next future occurrence via `schedule.ComputeNextRun(now)`
 - **Scheduler must skip completed/failed `RepeatOnce` schedules** — prevents unintended re-execution on drag/drop reorg
+- **Schedule create default parity**: when `/schedule` create dialog default `Repeat` is changed, update all three surfaces together: select `selected` option in template, `openNewScheduledTaskModal()` reset value, and server-side task-create fallback when `repeat_type` is missing. Mismatches here silently persist the wrong repeat type.
 
 ## Chat vs Task Worker Separation (Critical)
 

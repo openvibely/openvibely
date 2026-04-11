@@ -214,9 +214,9 @@ func (h *Handler) CreateTask(c echo.Context) error {
 					RepeatInterval: repeatInterval,
 					Enabled:        true,
 				}
-				if sched.RepeatType == "" {
-					sched.RepeatType = models.RepeatOnce
-				}
+					if sched.RepeatType == "" {
+						sched.RepeatType = models.RepeatDaily
+					}
 				// For recurring schedules with a past RunAt, compute the next future occurrence immediately
 				if sched.RepeatType != models.RepeatOnce && !runAt.After(time.Now().UTC()) {
 					nextRun := sched.ComputeNextRun(time.Now().UTC())

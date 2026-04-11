@@ -222,6 +222,55 @@ func TestHandler_CreateTask_FromSchedulePage_WithRepeatInterval(t *testing.T) {
 	}
 }
 
+func TestHandler_CreateTask_FromSchedulePage_DefaultsRepeatTypeToDailyWhenMissing(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	form := url.Values{}
+	form.Add("title", "Scheduled Task Without Repeat Type")
+	form.Add("prompt", "Use default repeat type")
+	form.Add("category", "scheduled")
+	form.Add("priority", "2")
+	form.Add("run_at", "2026-03-15T10:00")
+	form.Add("repeat_interval", "1")
+
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default&from=schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	tasks, err := h.taskSvc.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("failed to list tasks: %v", err)
+	}
+	var found *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Scheduled Task Without Repeat Type" {
+			found = &tasks[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected scheduled task to be created")
+	}
+
+	schedules, err := h.scheduleRepo.ListByTask(ctx, found.ID)
+	if err != nil {
+		t.Fatalf("failed to list schedules: %v", err)
+	}
+	if len(schedules) == 0 {
+		t.Fatal("expected a schedule to be created for the task")
+	}
+	if schedules[0].RepeatType != models.RepeatDaily {
+		t.Errorf("expected repeat type daily default, got %s", schedules[0].RepeatType)
+	}
+}
+
 func TestHandler_CreateTask_FromSchedulePage_NotInKanbanBoard(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
