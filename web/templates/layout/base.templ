@@ -1298,12 +1298,44 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					});
 				}
+				window.escapeHTMLForChat = function(value) {
+					if (!value) return '';
+					return String(value)
+						.replace(/&/g, '&amp;')
+						.replace(/</g, '&lt;')
+						.replace(/>/g, '&gt;')
+						.replace(/"/g, '&quot;')
+						.replace(/'/g, '&#39;');
+				};
+				// Escape raw HTML-like tags from model output before markdown parsing.
+				// Preserve fenced and inline code sections so code rendering remains intact.
+				window.escapeRawHTMLForMarkdown = function(text) {
+					if (!text) return text;
+					var placeholders = [];
+					var markerPrefix = '\u0000OVMDHTML';
+					function stash(match) {
+						var idx = placeholders.push(match) - 1;
+						return markerPrefix + idx + '\u0000';
+					}
+					var protectedText = text.replace(/```[\s\S]*?```/g, stash);
+					protectedText = protectedText.replace(/`[^`\n]*`/g, stash);
+					protectedText = protectedText.replace(/<\/?[A-Za-z][A-Za-z0-9:_-]*(?:\s+[^<>]*?)?>/g, function(tag) {
+						return window.escapeHTMLForChat(tag);
+					});
+					protectedText = protectedText.replace(new RegExp(markerPrefix + '(\\d+)\\u0000', 'g'), function(_, idx) {
+						var i = parseInt(idx, 10);
+						if (Number.isNaN(i) || i < 0 || i >= placeholders.length) return '';
+						return placeholders[i];
+					});
+					return protectedText;
+				};
 				// Render markdown to HTML safely for chat messages
 				window.renderChatMarkdown = function(text) {
 					if (!text || !window.marked) return text;
 					try {
+						var escapedText = window.escapeRawHTMLForMarkdown(text);
 						// marked.parse returns HTML string
-						var html = marked.parse(text);
+						var html = marked.parse(escapedText);
 						// Basic XSS sanitization: strip script tags, event handlers
 						html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
 						html = html.replace(/\bon\w+\s*=\s*"[^"]*"/gi, '');

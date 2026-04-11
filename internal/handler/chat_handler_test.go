@@ -3277,6 +3277,35 @@ func TestHandler_Chat_PlanCompletionPrompt_ModeOrchestrateSuppresses(t *testing.
 		"mode check must precede marker check — orchestrate mode hides prompt before scanning content")
 }
 
+func TestHandler_Chat_RenderChatMarkdown_EscapesRawHTMLLikeTags(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// Regression guard: chat markdown rendering must escape raw HTML-like tags
+	// (e.g. malformed <div>/<button>/<function_calls> blocks) before marked.parse.
+	assert.Contains(t, body, "window.escapeRawHTMLForMarkdown = function(text)")
+	assert.Contains(t, body, "var escapedText = window.escapeRawHTMLForMarkdown(text);")
+	assert.Contains(t, body, "var html = marked.parse(escapedText);")
+}
+
 func TestHandler_Chat_PlanCompletionCTA_ServerRenderedPersistence(t *testing.T) {
 	// Verify that when the latest completed execution output contains <proposed_plan>,
 	// the server renders data-has-plan-completion="true" on the CTA div.

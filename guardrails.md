@@ -298,6 +298,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Depth via drop shadow only. Arrow pointers: set border vars to `transparent`
 - Task-create result links/buttons rendered from `convertTaskLinksInMessage` must use shared semantic classes (`ov-task-result-link`, `ov-task-result-start-btn`) rather than ad-hoc utility strings. Keep link underline subtle (`1px` thickness with tuned offset) and preserve explicit hover/focus/active/disabled styles across light/dark themes.
 - All links rendered in chat/thread markdown and tool-call card content must route through the shared link styling token (`--ov-link-color`, currently `#7480ff`) in `layout/base.templ`; do not introduce one-off `text-success`/`text-primary` link classes in task marker conversion helpers (`[TASK_ID]`/`[TASK_EDITED]`).
+- Chat/thread markdown rendering must not pass raw model text directly into `marked.parse` when it may contain HTML/template fragments. Escape raw HTML-like tags first (while preserving fenced/inline code) so malformed model output cannot break bubble DOM/layout.
 
 ## Git Lineage for Chained Tasks
 
