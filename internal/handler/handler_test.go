@@ -1504,19 +1504,26 @@ func TestHandler_ViewSchedule_WeekNavigation(t *testing.T) {
 	rec := htmxGet(e, base)
 	assertCode(t, rec, http.StatusOK)
 	assertNotContains(t, rec, "Future Task")
-	assertContains(t, rec, "Previous Week")
-	assertContains(t, rec, "Next Week")
+	assertContains(t, rec, "Previous week")  // chevron aria-label
+	assertContains(t, rec, "Next week")      // chevron aria-label
 
-	// Week +2 should show the task
+	// Week +2 should show the task and enabled Today button
 	rec = htmxGet(e, base+"&week=2")
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, "Future Task")
-	assertContains(t, rec, "This Week")
+	assertContains(t, rec, "Today")
+	// Today button should NOT be disabled when off current week
+	assertNotContains(t, rec, `class="btn btn-sm btn-outline btn-disabled"`)
 
-	// Week -1 should show "This Week" button
+	// Week -1 should show enabled Today button
 	rec = htmxGet(e, base+"&week=-1")
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, "This Week")
+	assertContains(t, rec, "Today")
+
+	// Current week should show disabled Today button
+	rec = htmxGet(e, base)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "btn-disabled")
 
 	// HTMX request returns exactly one schedule-content div
 	rec = htmxGet(e, base+"&week=1")

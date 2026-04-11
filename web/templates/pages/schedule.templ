@@ -395,46 +395,57 @@ templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWit
 
 templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig) {
 	<div id="schedule-content" class="flex flex-col h-full">
-		<div class="mb-4 flex-shrink-0">
-			<div class="flex justify-between items-center mb-2">
-				<div>
-					<h2 class="text-2xl font-bold">Schedule</h2>
-					<p class="text-xs font-semibold">{ formatWeekRange(weekData.WeekDays) }</p>
-				</div>
-				<div class="flex gap-2">
+		<!-- Header: Row 1 – Title + New Task button -->
+		<div class="flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto">
+			<div class="flex justify-between items-center mb-3">
+				<h2 class="text-2xl font-bold">Schedule</h2>
+				<button class="btn btn-sm btn-primary" onclick="openNewScheduledTaskModal()">
+					<span class="hidden sm:inline">+ New Scheduled Task</span>
+					<span class="sm:hidden">+ New</span>
+				</button>
+			</div>
+			<!-- Header: Row 2 – Week navigation controls -->
+			<div class="flex items-center gap-3">
+				<button
+					if weekOffset == 0 {
+						disabled
+					}
+					hx-get={ fmt.Sprintf("/schedule?project_id=%s", projectID(currentProject)) }
+					hx-target="#schedule-content"
+					hx-swap="outerHTML show:none swap:0ms"
+					hx-push-url="true"
+					class={ "btn btn-sm btn-outline", templ.KV("btn-disabled", weekOffset == 0) }
+					aria-label="Go to current week"
+				>
+					Today
+				</button>
+				<div class="flex items-center">
 					<button
 						hx-get={ fmt.Sprintf("/schedule?project_id=%s&week=%d", projectID(currentProject), weekOffset-1) }
 						hx-target="#schedule-content"
 						hx-swap="outerHTML show:none swap:0ms"
 						hx-push-url="true"
-						class="btn btn-sm btn-outline"
+						class="btn btn-sm btn-ghost px-2"
+						aria-label="Previous week"
 					>
-						← Previous Week
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+						</svg>
 					</button>
-					if weekOffset != 0 {
-						<button
-							hx-get={ fmt.Sprintf("/schedule?project_id=%s", projectID(currentProject)) }
-							hx-target="#schedule-content"
-							hx-swap="outerHTML show:none swap:0ms"
-							hx-push-url="true"
-							class="btn btn-sm btn-primary"
-						>
-							This Week
-						</button>
-					}
 					<button
 						hx-get={ fmt.Sprintf("/schedule?project_id=%s&week=%d", projectID(currentProject), weekOffset+1) }
 						hx-target="#schedule-content"
 						hx-swap="outerHTML show:none swap:0ms"
 						hx-push-url="true"
-						class="btn btn-sm btn-outline"
+						class="btn btn-sm btn-ghost px-2"
+						aria-label="Next week"
 					>
-						Next Week →
-					</button>
-					<button class="btn btn-sm btn-primary" onclick="openNewScheduledTaskModal()">
-						+ New Scheduled Task
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+						</svg>
 					</button>
 				</div>
+				<span class="text-base font-semibold opacity-80 select-none">{ formatWeekRange(weekData.WeekDays) }</span>
 			</div>
 		</div>
 
