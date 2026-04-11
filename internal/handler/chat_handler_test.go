@@ -3276,3 +3276,448 @@ func TestHandler_Chat_PlanCompletionPrompt_ModeOrchestrateSuppresses(t *testing.
 	assert.Less(t, modeCheckIdx, markerCheckIdx,
 		"mode check must precede marker check — orchestrate mode hides prompt before scanning content")
 }
+
+func TestHandler_Chat_PlanCompletionCTA_ServerRenderedPersistence(t *testing.T) {
+	// Verify that when the latest completed execution output contains <proposed_plan>,
+	// the server renders data-has-plan-completion="true" on the CTA div.
+	// This ensures the CTA state survives page refresh and navigation.
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	// Create a completed chat execution with <proposed_plan> in output
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Chat: Plan request",
+		Prompt:    "Create a plan for refactoring",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryChat,
+		AgentID:   &agent.ID,
+	}
+	err = h.taskRepo.Create(ctx, task)
+	require.NoError(t, err)
+
+	exec := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "Create a plan for refactoring",
+	}
+	err = h.execRepo.Create(ctx, exec)
+	require.NoError(t, err)
+
+	planOutput := "Here is my analysis:\n\n<proposed_plan>\n1. Refactor the module\n2. Add tests\n</proposed_plan>\n\nThis plan addresses the key concerns."
+	err = h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, planOutput, "", 100, 500)
+	require.NoError(t, err)
+
+	// Load the chat page — simulates page refresh
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// The CTA div must have data-has-plan-completion="true"
+	assert.Contains(t, body, `data-has-plan-completion="true"`,
+		"server must render data-has-plan-completion=true when latest exec has <proposed_plan>")
+
+	// The data-raw-content attribute must contain the proposed_plan marker
+	assert.Contains(t, body, "&lt;proposed_plan&gt;",
+		"data-raw-content must contain HTML-escaped <proposed_plan> marker")
+
+	// The evaluator must check data-has-plan-completion as server-side fallback
+	assert.Contains(t, body, `getAttribute('data-has-plan-completion')`,
+		"evaluator must check server-rendered plan completion attribute")
+}
+
+func TestHandler_Chat_PlanCompletionCTA_ServerRenderedFalseWithoutPlan(t *testing.T) {
+	// Verify that when the latest completed execution does NOT contain <proposed_plan>,
+	// the server renders data-has-plan-completion="false".
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	// Create a completed chat execution WITHOUT <proposed_plan>
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Chat: Regular question",
+		Prompt:    "What is Go?",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryChat,
+		AgentID:   &agent.ID,
+	}
+	err = h.taskRepo.Create(ctx, task)
+	require.NoError(t, err)
+
+	exec := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "What is Go?",
+	}
+	err = h.execRepo.Create(ctx, exec)
+	require.NoError(t, err)
+
+	err = h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "Go is a programming language.", "", 50, 200)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// CTA div must have data-has-plan-completion="false" (check on the actual HTML element)
+	assert.Contains(t, body, `id="chat-plan-complete-prompt" class="hidden mb-3 alert bg-base-200/60 border border-base-content/10" data-has-plan-completion="false"`,
+		"server must render data-has-plan-completion=false when latest exec has no plan")
+}
+
+func TestHandler_Chat_PlanCompletionCTA_SubsequentNonPlanOverrides(t *testing.T) {
+	// After a plan completion, if the user sends another message and gets a
+	// non-plan response, the CTA should not appear on refresh.
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	// First turn: plan completion
+	task1 := &models.Task{
+		ProjectID: "default",
+		Title:     "Chat: Plan",
+		Prompt:    "Plan it",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryChat,
+		AgentID:   &agent.ID,
+	}
+	err = h.taskRepo.Create(ctx, task1)
+	require.NoError(t, err)
+
+	exec1 := &models.Execution{
+		TaskID:        task1.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "Plan it",
+	}
+	err = h.execRepo.Create(ctx, exec1)
+	require.NoError(t, err)
+	err = h.execRepo.Complete(ctx, exec1.ID, models.ExecCompleted,
+		"<proposed_plan>\n1. Do stuff\n</proposed_plan>", "", 100, 500)
+	require.NoError(t, err)
+
+	// Second turn: non-plan response (e.g., user asked a follow-up in orchestrate mode)
+	task2 := &models.Task{
+		ProjectID: "default",
+		Title:     "Chat: Follow-up",
+		Prompt:    "Do step 1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryChat,
+		AgentID:   &agent.ID,
+	}
+	err = h.taskRepo.Create(ctx, task2)
+	require.NoError(t, err)
+
+	exec2 := &models.Execution{
+		TaskID:        task2.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "Do step 1",
+	}
+	err = h.execRepo.Create(ctx, exec2)
+	require.NoError(t, err)
+	err = h.execRepo.Complete(ctx, exec2.ID, models.ExecCompleted,
+		"I completed step 1 successfully.", "", 80, 400)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// Latest exec doesn't have plan, so CTA should be false (check on the actual HTML element)
+	assert.Contains(t, body, `id="chat-plan-complete-prompt" class="hidden mb-3 alert bg-base-200/60 border border-base-content/10" data-has-plan-completion="false"`,
+		"server must report false when latest completed exec has no plan — must not carry forward stale plan completion")
+}
+
+func TestHandler_Chat_PlanCompletionCTA_EmptyHistory(t *testing.T) {
+	// With no chat history, data-has-plan-completion must be "false".
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	assert.Contains(t, body, `data-has-plan-completion="false"`,
+		"empty history must render data-has-plan-completion=false")
+}
+
+func TestHandler_Chat_PlanCompletionCTA_ClearHistoryResetsFlag(t *testing.T) {
+	// Clearing chat history must reset data-has-plan-completion to false.
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	// Create a plan completion
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Chat: Plan",
+		Prompt:    "Plan it",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryChat,
+		AgentID:   &agent.ID,
+	}
+	err = h.taskRepo.Create(ctx, task)
+	require.NoError(t, err)
+
+	exec := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "Plan it",
+	}
+	err = h.execRepo.Create(ctx, exec)
+	require.NoError(t, err)
+	err = h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted,
+		"<proposed_plan>\nSteps here\n</proposed_plan>", "", 100, 500)
+	require.NoError(t, err)
+
+	// Verify plan completion shows before clear
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `data-has-plan-completion="true"`)
+
+	// Clear chat history
+	clearReq := httptest.NewRequest(http.MethodDelete, "/chat/history?project_id=default", nil)
+	clearReq.Header.Set("HX-Request", "true")
+	clearRec := httptest.NewRecorder()
+	e.ServeHTTP(clearRec, clearReq)
+	require.Equal(t, http.StatusOK, clearRec.Code)
+	clearBody := clearRec.Body.String()
+
+	assert.Contains(t, clearBody, `data-has-plan-completion="false"`,
+		"clear history must render data-has-plan-completion=false")
+}
+
+func TestHandler_Chat_PlanCompletionCTA_HTMXNavigation(t *testing.T) {
+	// Verify CTA state is correct on HTMX navigation (returns ChatContent, not full page)
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	// Create a plan completion
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Chat: Plan",
+		Prompt:    "Plan it",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryChat,
+		AgentID:   &agent.ID,
+	}
+	err = h.taskRepo.Create(ctx, task)
+	require.NoError(t, err)
+
+	exec := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "Plan it",
+	}
+	err = h.execRepo.Create(ctx, exec)
+	require.NoError(t, err)
+	err = h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted,
+		"Analysis:\n<proposed_plan>\nRefactor module A\n</proposed_plan>", "", 100, 500)
+	require.NoError(t, err)
+
+	// HTMX navigation request (simulates sidebar click to chat)
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// HTMX response must also carry the plan completion flag
+	assert.Contains(t, body, `data-has-plan-completion="true"`,
+		"HTMX navigation must also render server-side plan completion state")
+}
+
+func TestHandler_Chat_PlanCompletionCTA_HideClearsServerAttribute(t *testing.T) {
+	// Verify that hidePlanCompletionPrompt clears data-has-plan-completion
+	// so dismissed CTA doesn't reappear on refocus/reconnect.
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	err := llmConfigRepo.Create(ctx, agent)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	body := rec.Body.String()
+
+	// hidePlanCompletionPrompt must remove data-has-plan-completion
+	assert.Contains(t, body, "removeAttribute('data-has-plan-completion')",
+		"hidePlanCompletionPrompt must clear server-rendered plan completion attribute")
+}
+
+func Test_chatHistoryHasPlanCompletion(t *testing.T) {
+	tests := []struct {
+		name    string
+		history []models.Execution
+		want    bool
+	}{
+		{
+			name:    "empty history",
+			history: []models.Execution{},
+			want:    false,
+		},
+		{
+			name: "latest completed has proposed_plan",
+			history: []models.Execution{
+				{Status: models.ExecCompleted, Output: "Hello"},
+				{Status: models.ExecCompleted, Output: "<proposed_plan>\n1. Do X\n</proposed_plan>"},
+			},
+			want: true,
+		},
+		{
+			name: "latest completed has no proposed_plan",
+			history: []models.Execution{
+				{Status: models.ExecCompleted, Output: "<proposed_plan>\n1. Do X\n</proposed_plan>"},
+				{Status: models.ExecCompleted, Output: "Done with step 1"},
+			},
+			want: false,
+		},
+		{
+			name: "latest is running, previous has plan",
+			history: []models.Execution{
+				{Status: models.ExecCompleted, Output: "<proposed_plan>\nPlan\n</proposed_plan>"},
+				{Status: models.ExecRunning, Output: "still working..."},
+			},
+			want: true,
+		},
+		{
+			name: "latest is running with empty output, previous has plan",
+			history: []models.Execution{
+				{Status: models.ExecCompleted, Output: "<proposed_plan>\nPlan\n</proposed_plan>"},
+				{Status: models.ExecRunning, Output: ""},
+			},
+			want: true,
+		},
+		{
+			name: "only running executions",
+			history: []models.Execution{
+				{Status: models.ExecRunning, Output: "<proposed_plan>\nPlan\n</proposed_plan>"},
+			},
+			want: false,
+		},
+		{
+			name: "completed with empty output",
+			history: []models.Execution{
+				{Status: models.ExecCompleted, Output: ""},
+			},
+			want: false,
+		},
+		{
+			name: "plan tag at start",
+			history: []models.Execution{
+				{Status: models.ExecCompleted, Output: "<proposed_plan>\nSteps\n</proposed_plan>"},
+			},
+			want: true,
+		},
+		{
+			name: "plan tag surrounded by text",
+			history: []models.Execution{
+				{Status: models.ExecCompleted, Output: "Analysis:\n\n<proposed_plan>\nDo A\n</proposed_plan>\n\nSummary."},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := chatHistoryHasPlanCompletion(tt.history)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}

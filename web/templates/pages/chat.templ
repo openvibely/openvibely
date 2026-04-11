@@ -6,15 +6,22 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
+func planCompleteDataAttr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
 // Chat renders the full chat page with sidebar
-templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment) {
+templ Chat(projects []models.Project, currentProjectID string, agents []models.LLMConfig, chatHistory []models.Execution, chatAttachments map[string][]models.ChatAttachment, latestPlanComplete bool) {
 	@layout.Base("Chat", projects, currentProjectID) {
-		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments)
+		@ChatContent(agents, chatHistory, currentProjectID, chatAttachments, latestPlanComplete)
 	}
 }
 
 // ChatContent renders just the chat content (for HTMX)
-templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment) {
+templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, latestPlanComplete bool) {
 	<div id="chat-page-root" class="h-full flex flex-col" data-project-id={ currentProjectID }>
 		<div class="mb-4 flex items-center justify-between">
 			<div>
@@ -68,7 +75,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			}
 		</div>
 
-		<div id="chat-plan-complete-prompt" class="hidden mb-3 alert bg-base-200/60 border border-base-content/10">
+		<div id="chat-plan-complete-prompt" class="hidden mb-3 alert bg-base-200/60 border border-base-content/10" data-has-plan-completion={ planCompleteDataAttr(latestPlanComplete) }>
 			<div class="w-full flex flex-wrap items-center justify-between gap-3">
 				<div>
 					<div class="font-medium text-sm">Plan complete.</div>
@@ -405,6 +412,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				var prompt = document.getElementById('chat-plan-complete-prompt');
 				if (!prompt) return;
 				prompt.classList.add('hidden');
+				prompt.removeAttribute('data-has-plan-completion');
 			};
 
 			window.showPlanCompletionPrompt = function() {
@@ -495,6 +503,17 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				if (text && window.planModeHasProposedPlan(text)) {
 					window.showPlanCompletionPrompt();
 					return;
+				}
+
+				// Server-side plan completion: check the server-rendered attribute on the
+				// CTA element. When the latest completed execution contains a proposed_plan
+				// block, the server sets this attribute. Survives refresh and navigation.
+				if (!fromCompletedEvent) {
+					var prompt = document.getElementById('chat-plan-complete-prompt');
+					if (prompt && prompt.getAttribute('data-has-plan-completion') === 'true') {
+						window.showPlanCompletionPrompt();
+						return;
+					}
 				}
 
 				// Reconnect/hydration scans can transiently return empty text before DOM settles.

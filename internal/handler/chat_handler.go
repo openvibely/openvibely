@@ -52,13 +52,15 @@ func (h *Handler) Chat(c echo.Context) error {
 		chatAttachmentsByExec = make(map[string][]models.ChatAttachment)
 	}
 
+	latestPlanComplete := chatHistoryHasPlanCompletion(chatHistory)
+
 	// For HTMX requests, return just the chat content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec))
+		return render(c, http.StatusOK, pages.ChatContent(agents, chatHistory, currentProjectID, chatAttachmentsByExec, latestPlanComplete))
 	}
 
 	projects, _ := h.projectSvc.List(c.Request().Context())
-	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec))
+	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, latestPlanComplete))
 }
 
 func (h *Handler) ChatSend(c echo.Context) error {
@@ -370,7 +372,20 @@ func (h *Handler) ClearChat(c echo.Context) error {
 	}
 
 	// Return empty chat content
-	return render(c, http.StatusOK, pages.ChatContent(agents, []models.Execution{}, projectID, make(map[string][]models.ChatAttachment)))
+	return render(c, http.StatusOK, pages.ChatContent(agents, []models.Execution{}, projectID, make(map[string][]models.ChatAttachment), false))
+}
+
+// chatHistoryHasPlanCompletion checks if the latest completed assistant response
+// in the chat history contains a <proposed_plan> block, indicating a plan-mode
+// completion that should show the "Switch to Orchestrate" CTA.
+func chatHistoryHasPlanCompletion(history []models.Execution) bool {
+	for i := len(history) - 1; i >= 0; i-- {
+		exec := history[i]
+		if exec.Status == models.ExecCompleted && exec.Output != "" {
+			return strings.Contains(exec.Output, "<proposed_plan>")
+		}
+	}
+	return false
 }
 
 func min(a, b int) int {
