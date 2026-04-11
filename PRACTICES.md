@@ -74,6 +74,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - When matching cross-theme component hierarchy, keep wrapper-vs-inner emphasis consistent between themes (for example transparent outer tool wrapper with only inner IN/OUT blocks surfaced) rather than restyling one theme independently.
 - For recurring semantic chips/badges (for example `Default`), define and reuse a shared style token/class instead of per-page color classes so visual semantics stay consistent across pages and themes.
 - For multi-column boards, keep column/dropzone container constraints (padding, border, overflow, flex sizing) intentionally aligned unless visual differences are explicit; subtle class drift causes cross-column card width misalignment.
+- For icon-only card actions (for example delete `X`), keep cross-theme resting-state parity and put visual emphasis in interaction states (hover/focus/active) instead of theme-specific default fills.
 - For async button actions, use explicit in-progress state (`...ing` label + spinner), disable conflicting actions while requests are in flight, and always restore state in `finally`.
 - When feature-flagging UI actions, pair template-level visibility gating with server-side enforcement for the same interaction path (for example request marker/source fields) to prevent hidden-action access via crafted requests.
 - For async list/state refreshes, guard against out-of-order responses (request token/sequence checks) so older responses cannot overwrite newer user actions.

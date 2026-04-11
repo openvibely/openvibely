@@ -2734,6 +2734,48 @@ func TestSidebar_LightModeBackgroundAndNavReadability(t *testing.T) {
 	}
 }
 
+func TestTasks_DeleteButton_LightMode_NoDefaultCircularBackground(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	createTask(t, h, "default", "Delete Backlog", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusPending
+	})
+	createTask(t, h, "default", "Delete Active", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusPending
+	})
+	createTask(t, h, "default", "Delete Completed", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	required := []string{
+		`class="btn btn-circle btn-ghost btn-xs absolute top-2 right-2 z-10"`,
+		`[data-theme="light"] .card .btn-circle.btn-ghost {`,
+		`background-color: transparent;`,
+		`[data-theme="light"] .card .btn-circle.btn-ghost:hover {`,
+		`background-color: #F8514922;`,
+	}
+	for _, snippet := range required {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("/tasks missing expected delete button snippet: %s", snippet)
+		}
+	}
+
+	if strings.Contains(body, `background-color: #0000000D;`) {
+		t.Fatal("light-mode delete X button should not have a default circular background fill")
+	}
+}
+
 func TestSidebar_AlertsGroupedUnderSystem(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 
