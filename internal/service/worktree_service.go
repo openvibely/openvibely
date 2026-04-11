@@ -387,6 +387,17 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 	// Update merge status to pending
 	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
 
+	if mergeType == "ff" {
+		updated, updateErr := ws.ensureBranchUpToDateForFastForward(ctx, task, repoDir, targetBranch)
+		if updateErr != nil {
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			return &MergeResult{ErrorMessage: updateErr.Error()}, fmt.Errorf("preparing fast-forward merge: %w", updateErr)
+		}
+		if updated != nil {
+			return updated, nil
+		}
+	}
+
 	// Checkout target branch in the main repo
 	checkoutCmd := exec.Command("git", "checkout", targetBranch)
 	checkoutCmd.Dir = repoDir
@@ -420,8 +431,12 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 				ErrorMessage:  string(mergeOut),
 			}, nil
 		}
+		mergeErrMsg := strings.TrimSpace(string(mergeOut))
+		if mergeType == "ff" && strings.Contains(strings.ToLower(mergeErrMsg), "not possible to fast-forward") {
+			mergeErrMsg = fmt.Sprintf("fast-forward merge requires branch update from %s. The app attempted to auto-rebase when possible. If this task has no worktree path or still failed, open the task worktree and rebase onto %s, then retry", targetBranch, targetBranch)
+		}
 		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
-		return &MergeResult{ErrorMessage: string(mergeOut)}, fmt.Errorf("merge failed: %w", mergeErr)
+		return &MergeResult{ErrorMessage: mergeErrMsg}, fmt.Errorf("merge failed: %w", mergeErr)
 	}
 
 	// For squash merge, we need to commit
@@ -444,6 +459,44 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 		Success:     true,
 		MergeCommit: strings.TrimSpace(string(hashOut)),
 	}, nil
+}
+
+func (ws *WorktreeService) ensureBranchUpToDateForFastForward(ctx context.Context, task *models.Task, repoDir string, targetBranch string) (*MergeResult, error) {
+	if task.WorktreePath == "" {
+		return nil, nil
+	}
+
+	branchBehindCmd := exec.Command("git", "merge-base", "--is-ancestor", targetBranch, task.WorktreeBranch)
+	branchBehindCmd.Dir = repoDir
+	if err := branchBehindCmd.Run(); err == nil {
+		return nil, nil
+	}
+
+	rebaseCmd := exec.Command("git", "rebase", targetBranch)
+	rebaseCmd.Dir = task.WorktreePath
+	rebaseOut, rebaseErr := rebaseCmd.CombinedOutput()
+	if rebaseErr != nil {
+		conflictFiles := detectConflicts(task.WorktreePath)
+		if len(conflictFiles) > 0 {
+			_ = AbortRebase(task.WorktreePath)
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
+			return &MergeResult{
+				Success:       false,
+				ConflictFiles: conflictFiles,
+				ErrorMessage:  fmt.Sprintf("Local fast-forward merge requires updating branch from %s. Auto-rebase encountered conflicts; rebase was aborted. Resolve conflicts in worktree and retry merge.", targetBranch),
+			}, nil
+		}
+		return nil, fmt.Errorf("auto-rebase task branch onto %s failed: %s", targetBranch, strings.TrimSpace(string(rebaseOut)))
+	}
+
+	return nil, nil
+}
+
+func AbortRebase(repoDir string) error {
+	cmd := exec.Command("git", "rebase", "--abort")
+	cmd.Dir = repoDir
+	_, err := cmd.CombinedOutput()
+	return err
 }
 
 // detectConflicts returns a list of files with merge conflicts.

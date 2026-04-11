@@ -788,6 +788,201 @@ func TestMergeBranch_FastForward(t *testing.T) {
 	}
 }
 
+func TestMergeBranch_FastForward_SequentialMergesAutoRebaseSecondTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	taskA := &models.Task{
+		ProjectID:         "default",
+		Title:             "Sequential Merge Task A",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, taskA); err != nil {
+		t.Fatal(err)
+	}
+	wtPathA, branchA, err := ws.SetupWorktree(ctx, taskA, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskA.WorktreePath = wtPathA
+	taskA.WorktreeBranch = branchA
+	if err := os.WriteFile(filepath.Join(wtPathA, "task_a.txt"), []byte("task a\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPathA, "task a commit"); err != nil {
+		t.Fatal(err)
+	}
+
+	taskB := &models.Task{
+		ProjectID:         "default",
+		Title:             "Sequential Merge Task B",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, taskB); err != nil {
+		t.Fatal(err)
+	}
+	wtPathB, branchB, err := ws.SetupWorktree(ctx, taskB, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskB.WorktreePath = wtPathB
+	taskB.WorktreeBranch = branchB
+	if err := os.WriteFile(filepath.Join(wtPathB, "task_b.txt"), []byte("task b\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPathB, "task b commit"); err != nil {
+		t.Fatal(err)
+	}
+
+	resultA, err := ws.MergeBranch(ctx, taskA, repoDir, "ff")
+	if err != nil {
+		t.Fatalf("MergeBranch task A ff: %v", err)
+	}
+	if !resultA.Success {
+		t.Fatalf("expected task A ff merge success: %s", resultA.ErrorMessage)
+	}
+
+	resultB, err := ws.MergeBranch(ctx, taskB, repoDir, "ff")
+	if err != nil {
+		t.Fatalf("MergeBranch task B ff: %v", err)
+	}
+	if !resultB.Success {
+		t.Fatalf("expected task B ff merge success after auto-rebase, got: %s", resultB.ErrorMessage)
+	}
+
+	if _, err := os.Stat(filepath.Join(repoDir, "task_a.txt")); os.IsNotExist(err) {
+		t.Fatal("expected task_a.txt to exist after sequential merge")
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "task_b.txt")); os.IsNotExist(err) {
+		t.Fatal("expected task_b.txt to exist after sequential merge")
+	}
+}
+
+func TestMergeBranch_FastForward_SequentialMergesRebaseConflictPreserved(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	sharedFile := filepath.Join(repoDir, "shared.txt")
+	if err := os.WriteFile(sharedFile, []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "add", "shared.txt")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add shared file: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-m", "add shared file")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit shared file: %v\n%s", err, out)
+	}
+
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	taskA := &models.Task{
+		ProjectID:         "default",
+		Title:             "Sequential Conflict Task A",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, taskA); err != nil {
+		t.Fatal(err)
+	}
+	wtPathA, branchA, err := ws.SetupWorktree(ctx, taskA, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskA.WorktreePath = wtPathA
+	taskA.WorktreeBranch = branchA
+	if err := os.WriteFile(filepath.Join(wtPathA, "shared.txt"), []byte("task-a-change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPathA, "task a shared update"); err != nil {
+		t.Fatal(err)
+	}
+
+	taskB := &models.Task{
+		ProjectID:         "default",
+		Title:             "Sequential Conflict Task B",
+		Category:          models.CategoryActive,
+		Status:            models.StatusPending,
+		MergeTargetBranch: defaultBranch,
+	}
+	if err := taskRepo.Create(ctx, taskB); err != nil {
+		t.Fatal(err)
+	}
+	wtPathB, branchB, err := ws.SetupWorktree(ctx, taskB, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskB.WorktreePath = wtPathB
+	taskB.WorktreeBranch = branchB
+	if err := os.WriteFile(filepath.Join(wtPathB, "shared.txt"), []byte("task-b-change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPathB, "task b shared update"); err != nil {
+		t.Fatal(err)
+	}
+
+	resultA, err := ws.MergeBranch(ctx, taskA, repoDir, "ff")
+	if err != nil {
+		t.Fatalf("MergeBranch task A ff: %v", err)
+	}
+	if !resultA.Success {
+		t.Fatalf("expected task A ff merge success: %s", resultA.ErrorMessage)
+	}
+
+	resultB, err := ws.MergeBranch(ctx, taskB, repoDir, "ff")
+	if err != nil {
+		t.Fatalf("expected conflict result without hard error, got: %v", err)
+	}
+	if resultB.Success {
+		t.Fatalf("expected task B ff merge conflict after auto-rebase attempt")
+	}
+	if len(resultB.ConflictFiles) == 0 {
+		t.Fatalf("expected conflict files for task B rebase conflict")
+	}
+	if !strings.Contains(strings.ToLower(resultB.ErrorMessage), "auto-rebase") {
+		t.Fatalf("expected conflict message to mention auto-rebase, got %q", resultB.ErrorMessage)
+	}
+
+	updatedTaskB, err := taskRepo.GetByID(ctx, taskB.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedTaskB.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("expected merge status conflict for task B, got %q", updatedTaskB.MergeStatus)
+	}
+
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = wtPathB
+	statusOut, err := statusCmd.Output()
+	if err != nil {
+		t.Fatalf("git status in task B worktree: %v", err)
+	}
+	if strings.Contains(string(statusOut), "UU ") {
+		t.Fatalf("expected task B worktree conflicts to be aborted after failed auto-rebase, got: %s", string(statusOut))
+	}
+}
+
 func TestMergeBranch_Squash(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

@@ -89,6 +89,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - For cross-page toast feedback from HTMX handlers, prefer app-scoped `HX-Trigger` events bridged centrally in the base layout over page-local listeners.
 - For toast actions (for example “Open Models”), pass structured toast metadata (`link_url`, `link_text`) and let the shared toast renderer build click behavior; avoid passing inline HTML in toast messages.
 - For HTMX actions that can end in non-terminal states (for example merge conflicts with a refreshed panel), emit explicit toast triggers for those outcomes instead of relying only on visual fragment updates.
+- For local Git workflows that support `ff-only`, account for moving target branches between sequential task merges: automatically refresh/rebase stale task branches before fast-forward checks, and preserve hard conflict outcomes (with clear recovery messaging) when rebases truly conflict.
 - For modal forms that perform remote integration steps (for example project GitHub clone/re-clone), prefer HTMX no-swap submits and report failures via `openvibelyToast` instead of raw error payload swaps.
 - For HTMX-re-rendered pages that must rebind global listeners, explicitly remove old handler references before adding new ones, and shut down tab-scoped SSE connections on container swaps/navigation.
 - For SSE lifecycle hygiene, pair global EventSource registration with explicit unregister-on-close in all completion/error paths so connection tracking reflects only active streams.
