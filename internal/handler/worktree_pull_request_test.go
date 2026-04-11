@@ -181,3 +181,48 @@ func TestHandler_GetTaskChanges_ShowsMergeOptionsWhenFlagEnabled(t *testing.T) {
 		t.Fatalf("expected GitHub section header in actions dropdown, body=%s", body)
 	}
 }
+
+func TestHandler_GetTaskChanges_ShowsMergeOptionsForFailedMergedTask(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.SetTaskChangesMergeOptionsEnabled(true)
+	ctx := context.Background()
+
+	repoPath := t.TempDir()
+	project := &models.Project{Name: "Failed Merged Project", RepoPath: repoPath, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Failed merged task",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusFailed,
+		WorktreePath:      "",
+		WorktreeBranch:    "task/failed-merged",
+		MergeTargetBranch: "main",
+		MergeStatus:       models.MergeStatusMerged,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+
+	if err := h.GetTaskChanges(c); err != nil {
+		t.Fatalf("GetTaskChanges failed: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Merge commit") {
+		t.Fatalf("expected merge options to be rendered for failed merged task, body=%s", body)
+	}
+	if !strings.Contains(body, "Local") {
+		t.Fatalf("expected Local section header for failed merged task, body=%s", body)
+	}
+}

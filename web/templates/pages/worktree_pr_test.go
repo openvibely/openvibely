@@ -100,7 +100,12 @@ func TestTaskChangesWorktreeContent_LocalAndGitHubSections(t *testing.T) {
 }
 
 func TestTaskChangesWorktreeContent_MergedStatusHidesLocalSection(t *testing.T) {
-	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusMerged}
+	task := &models.Task{
+		ID:             "task-1",
+		WorktreeBranch: "task/feature",
+		MergeStatus:    models.MergeStatusMerged,
+		Status:         models.StatusCompleted,
+	}
 	var buf bytes.Buffer
 	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, true).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
@@ -113,6 +118,26 @@ func TestTaskChangesWorktreeContent_MergedStatusHidesLocalSection(t *testing.T) 
 	// GitHub section should still render
 	if !strings.Contains(out, "GitHub") {
 		t.Fatal("expected GitHub section header when already merged")
+	}
+}
+
+func TestTaskChangesWorktreeContent_FailedMergedStatusShowsLocalSection(t *testing.T) {
+	task := &models.Task{
+		ID:             "task-1",
+		WorktreeBranch: "task/feature",
+		MergeStatus:    models.MergeStatusMerged,
+		Status:         models.StatusFailed,
+	}
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, true).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "/worktree/merge") {
+		t.Fatal("expected merge endpoint actions for failed task even when merge_status is merged")
+	}
+	if !strings.Contains(out, "Local") {
+		t.Fatal("expected Local section header for failed merged task")
 	}
 }
 

@@ -397,7 +397,7 @@ func TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats 
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if showMergeOptions && task.MergeStatus != models.MergeStatusMerged {
+			if showMergeOptions && (task.MergeStatus != models.MergeStatusMerged || task.Status == models.StatusFailed) {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<li class=\"menu-title\"><span>Local</span></li><li><button hx-post=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err

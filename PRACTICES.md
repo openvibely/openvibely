@@ -77,6 +77,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - For icon-only card actions (for example delete `X`), keep cross-theme resting-state parity and put visual emphasis in interaction states (hover/focus/active) instead of theme-specific default fills.
 - For async button actions, use explicit in-progress state (`...ing` label + spinner), disable conflicting actions while requests are in flight, and always restore state in `finally`.
 - When feature-flagging UI actions, pair template-level visibility gating with server-side enforcement for the same interaction path (for example request marker/source fields) to prevent hidden-action access via crafted requests.
+- For task-action visibility that depends on task lifecycle + git state, avoid using a single metadata field in isolation; preserve recovery actions in failed states even when merge metadata suggests a prior merge.
 - For async list/state refreshes, guard against out-of-order responses (request token/sequence checks) so older responses cannot overwrite newer user actions.
 - For polling-driven HTMX morph updates, make post-swap DOM processing incremental and content-signature based; avoid full-container reprocessing on every poll when content is unchanged.
 - For high-frequency streaming UI updates (for example SSE token/tool chunks), batch DOM re-renders with `requestAnimationFrame` and force a final flush on completion to avoid main-thread stalls that make updates appear stuck.
