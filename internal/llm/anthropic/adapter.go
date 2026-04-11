@@ -66,6 +66,10 @@ func mapBuiltInToolName(name string) string {
 		return "Glob"
 	case "grep_search":
 		return "Grep"
+	case "web_search", "web_search_20250305", "web_search_20260209":
+		return "WebSearch"
+	case "web_fetch", "web_fetch_20250910", "web_fetch_20260209", "web_fetch_20260309":
+		return "WebFetch"
 	default:
 		return ""
 	}
@@ -89,7 +93,9 @@ func agentAllowsBuiltInTool(agentDef *models.Agent, toolName string) bool {
 
 func planModeAllowsReadOnlyTool(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "read_file", "list_files", "grep_search":
+	case "read_file", "list_files", "grep_search",
+		"web_search", "web_search_20250305", "web_search_20260209",
+		"web_fetch", "web_fetch_20250910", "web_fetch_20260209", "web_fetch_20260309": // provider-native search is read-only
 		return true
 	default:
 		return false
@@ -222,6 +228,21 @@ func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, isTa
 		return base
 	}
 	return base + "\n\n" + llmprompt.ChatActionToolModeInstructions + "\nAvailable action tools: " + strings.Join(names, ", ")
+}
+
+func shouldSkipDefaultToolsForChatMode(isTaskFollowup bool, chatMode models.ChatMode, rt *llmcontracts.RuntimeTools) bool {
+	// In orchestrate chat with runtime action tools, advertise only runtime tools.
+	// Local coding tools are blocked by filter in this mode, so exposing them
+	// causes pointless "tool not allowed" turns.
+	return !isTaskFollowup && chatMode == models.ChatModeOrchestrate && rt != nil && len(rt.Definitions) > 0
+}
+
+func shouldPreferAnthropicProviderWeb(prompt string) bool {
+	p := strings.ToLower(strings.TrimSpace(prompt))
+	if p == "" {
+		return false
+	}
+	return strings.Contains(p, "http://") || strings.Contains(p, "https://")
 }
 
 func buildAnthropicRuntime(ctx context.Context, workDir string, agentDef *models.Agent) ([]anthropicclient.ToolDefinition, func(context.Context, string, json.RawMessage) (string, bool, error), func(string) bool, func()) {
@@ -357,18 +378,23 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	}
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
+	preferProviderWeb := shouldPreferAnthropicProviderWeb(prompt)
+	effectiveDisableTools := disableTools
+	skipDefaultTools := preferProviderWeb
 
 	opts := &anthropicclient.AgenticOptions{
-		Model:          agent.Model,
-		MaxTokens:      agenticMaxTokens(agent.MaxTokens),
-		System:         llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
-		WorkDir:        workDir,
-		Attachments:    mcAttachments,
-		DisableTools:   disableTools,
-		AutoCompaction: true,
-		ExtraTools:     extraTools,
-		ToolExecutor:   toolExecutor,
-		ToolFilter:     toolFilter,
+		Model:            agent.Model,
+		MaxTokens:        agenticMaxTokens(agent.MaxTokens),
+		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
+		WorkDir:          workDir,
+		Attachments:      mcAttachments,
+		DisableTools:     effectiveDisableTools,
+		SkipDefaultTools: skipDefaultTools,
+		AutoCompaction:   true,
+		WebSearchEnabled: true,
+		ExtraTools:       extraTools,
+		ToolExecutor:     toolExecutor,
+		ToolFilter:       toolFilter,
 	}
 
 	resp, err := client.SendAgentic(ctx, fullPrompt, opts)
@@ -411,20 +437,29 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = composeRuntimeToolFilter(toolFilter, rt, isTaskFollowup, chatMode)
+	skipDefaultTools := shouldSkipDefaultToolsForChatMode(isTaskFollowup, chatMode, rt)
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
+	preferProviderWeb := shouldPreferAnthropicProviderWeb(message)
+	if preferProviderWeb {
+		// URL prompts should use provider web tools and avoid local defaults.
+		disableTools = false
+		skipDefaultTools = true
+	}
 	chatInThinking := false
 	opts := &anthropicclient.AgenticOptions{
-		Model:          agent.Model,
-		MaxTokens:      agenticMaxTokens(agent.MaxTokens),
-		EnableThinking: true,
-		DisableTools:   disableTools,
-		System:         systemPromptStr,
-		WorkDir:        workDir,
-		Attachments:    mcAttachments,
-		AutoCompaction: true,
-		ExtraTools:     extraTools,
-		ToolExecutor:   toolExecutor,
-		ToolFilter:     toolFilter,
+		Model:            agent.Model,
+		MaxTokens:        agenticMaxTokens(agent.MaxTokens),
+		EnableThinking:   true,
+		DisableTools:     disableTools,
+		SkipDefaultTools: skipDefaultTools,
+		System:           systemPromptStr,
+		WorkDir:          workDir,
+		Attachments:      mcAttachments,
+		AutoCompaction:   true,
+		WebSearchEnabled: true,
+		ExtraTools:       extraTools,
+		ToolExecutor:     toolExecutor,
+		ToolFilter:       toolFilter,
 		OnThinking: func(text string) {
 			if !chatInThinking {
 				chatInThinking = true
@@ -483,6 +518,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	}
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
+	preferProviderWeb := shouldPreferAnthropicProviderWeb(prompt)
 
 	mcAttachments, err := convertAttachments(attachments)
 	if err != nil {
@@ -494,16 +530,18 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	inThinking := false
 	opts := &anthropicclient.AgenticOptions{
-		Model:          agent.Model,
-		MaxTokens:      agenticMaxTokens(agent.MaxTokens),
-		EnableThinking: true,
-		System:         llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
-		WorkDir:        workDir,
-		Attachments:    mcAttachments,
-		AutoCompaction: true,
-		ExtraTools:     extraTools,
-		ToolExecutor:   toolExecutor,
-		ToolFilter:     toolFilter,
+		Model:            agent.Model,
+		MaxTokens:        agenticMaxTokens(agent.MaxTokens),
+		EnableThinking:   true,
+		SkipDefaultTools: preferProviderWeb,
+		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
+		WorkDir:          workDir,
+		Attachments:      mcAttachments,
+		AutoCompaction:   true,
+		WebSearchEnabled: true,
+		ExtraTools:       extraTools,
+		ToolExecutor:     toolExecutor,
+		ToolFilter:       toolFilter,
 		OnThinking: func(text string) {
 			if !inThinking {
 				inThinking = true
@@ -677,6 +715,14 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 		}
 		if p, ok := m["pattern"].(string); ok {
 			return p
+		}
+	case "web_search", "web_search_20250305", "web_search_20260209", "WebSearch":
+		if q, ok := m["query"].(string); ok {
+			return truncateToolSecondary(q, 140)
+		}
+	case "web_fetch", "web_fetch_20250910", "web_fetch_20260209", "web_fetch_20260309", "WebFetch":
+		if u, ok := m["url"].(string); ok {
+			return truncateToolSecondary(u, 140)
 		}
 	}
 	return ""

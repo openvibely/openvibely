@@ -308,6 +308,48 @@ func TestCleanChatOutputForDisplay_PreservesSummaries(t *testing.T) {
 	}
 }
 
+func TestCleanChatOutput_StripsProposedPlanWrapperTags(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "strips proposed_plan wrappers and keeps body",
+			input:    "Here is the plan:\n<proposed_plan>\n1. Do X\n2. Do Y\n</proposed_plan>",
+			expected: "Here is the plan:\n\n1. Do X\n2. Do Y",
+		},
+		{
+			name:     "does not strip normal angle-bracket text",
+			input:    "User typed literal text: <custom_tag>keep me</custom_tag>",
+			expected: "User typed literal text: <custom_tag>keep me</custom_tag>",
+		},
+		{
+			name:     "case-insensitive wrapper stripping",
+			input:    "<Proposed_Plan>Step A</Proposed_Plan>",
+			expected: "Step A",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CleanChatOutput(tt.input)
+			if got != tt.expected {
+				t.Errorf("CleanChatOutput() =\n%q\nwant:\n%q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCleanChatOutputForDisplay_StripsProposedPlanWrapperTags(t *testing.T) {
+	input := "Analysis:\n<proposed_plan>\n- Step 1\n- Step 2\n</proposed_plan>\nDone."
+	expected := "Analysis:\n\n- Step 1\n- Step 2\n\nDone."
+	got := CleanChatOutputForDisplay(input)
+	if got != expected {
+		t.Errorf("CleanChatOutputForDisplay() =\n%q\nwant:\n%q", got, expected)
+	}
+}
+
 func TestCleanChatOutput_StillStripsSummaries(t *testing.T) {
 	input := "Here.\n[PROJECT_INFO]\n\n---\nProject Info:\n- **Name:** openvibely"
 	got := CleanChatOutput(input)

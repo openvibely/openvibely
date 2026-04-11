@@ -26,6 +26,7 @@ func ExtractMarker(output, prefix string) (string, bool) {
 var (
 	reCleanStatus            = regexp.MustCompile(`\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*)?\]`)
 	reCleanTool              = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
+	reCleanProposedPlanTag   = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
 	reCleanThinking          = regexp.MustCompile(`(?s)\[Thinking\].*?\[/Thinking\]`)
 	reCleanToolResult        = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\]\n.*?\[/Tool\]\n?`)
 	reCleanToolResultLegacy  = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\n]*\]\n?`)
@@ -141,6 +142,7 @@ func doCleanChatOutput(output string, stripSummaries bool) string {
 	// Remove markers using pre-compiled regexes (see package-level vars)
 	result = reCleanStatus.ReplaceAllString(result, "")
 	result = reCleanTool.ReplaceAllString(result, "")
+	result = reCleanProposedPlanTag.ReplaceAllString(result, "")
 	result = reCleanToolResult.ReplaceAllString(result, "")
 	result = reCleanToolResultLegacy.ReplaceAllString(result, "")
 	result = reCleanProtocolArtifact.ReplaceAllString(result, "")

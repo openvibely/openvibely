@@ -1549,7 +1549,9 @@ templ ChatAutoScrollScript() {
 			// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
-				'bash': 'Bash', 'grep_search': 'Grep', 'list_files': 'List Files'
+				'bash': 'Bash', 'grep_search': 'Grep', 'list_files': 'List Files',
+				'web_search': 'Web Search', 'web_fetch': 'Web Fetch',
+				'code_execution': 'Code Execution', 'bash_code_execution': 'Bash Code Execution'
 			};
 			// Normalize provider-specific tool aliases to canonical IDs so
 			// [Using tool: X] can be linked with [Tool X done] across providers.
@@ -1561,7 +1563,14 @@ templ ChatAutoScrollScript() {
 				'Grep': 'grep_search',
 				'Glob': 'list_files',
 				'List Files': 'list_files',
-				'Search': 'grep_search'
+				'Search': 'grep_search',
+				'WebSearch': 'web_search',
+				'WebFetch': 'web_fetch',
+				'web_search_20250305': 'web_search',
+				'web_search_20260209': 'web_search',
+				'web_fetch_20250910': 'web_fetch',
+				'web_fetch_20260209': 'web_fetch',
+				'web_fetch_20260309': 'web_fetch'
 			};
 			function normalizeToolName(raw) {
 				if (!raw) return raw;
@@ -1919,6 +1928,7 @@ templ ChatAutoScrollScript() {
 			text = text.replace(/\[SWITCH_PROJECT\][\s\S]*?\[\/SWITCH_PROJECT\]/g, '');
 			text = text.replace(/\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*?)?\]/g, '');
 			text = text.replace(/\[Using tool:\s*[^\]]+\]/g, '');
+			text = text.replace(/<\/?\s*proposed_plan\s*>/gi, '');
 			text = text.replace(/\[Tool\s+\S+\s+(?:done|error)\]\n[\s\S]*?\n\[\/Tool\]\n?/g, '');
 			text = text.replace(/\[Tool\s+\S+\s+(?:done|error):[^\n]*\]\n?/g, '');
 			// Strip protocol artifact lines (e.g. multi_tool_use.parallel fragments
@@ -2109,11 +2119,12 @@ var (
 	reEditTask    = regexp.MustCompile(`(?s)\[EDIT_TASK\].*?\[/EDIT_TASK\]`)
 	reExecTasks   = regexp.MustCompile(`(?s)\[EXECUTE_TASKS\].*?\[/EXECUTE_TASKS\]`)
 	reStatus      = regexp.MustCompile(`\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*?)?\]`)
-	reUsingTool   = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
-	reToolBlock   = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\]\n?[\s\S]*?\n?\[/Tool\]\n?`)
-	reToolDone    = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]]*\](?:\n)?`)
-	reProtocolArt = regexp.MustCompile(`(?m)^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$`)
-	reThinking    = regexp.MustCompile(`(?s)\n?\[Thinking\][\s\S]*?(?:\[/Thinking\]\n?|$)`)
+	reUsingTool     = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
+	reProposedPlan  = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
+	reToolBlock     = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\]\n?[\s\S]*?\n?\[/Tool\]\n?`)
+	reToolDone      = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]]*\](?:\n)?`)
+	reProtocolArt   = regexp.MustCompile(`(?m)^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$`)
+	reThinking      = regexp.MustCompile(`(?s)\n?\[Thinking\][\s\S]*?(?:\[/Thinking\]\n?|$)`)
 	reExcessLines = regexp.MustCompile(`\n{3,}`)
 )
 
@@ -2127,6 +2138,7 @@ func CleanDisplayContent(text string) string {
 	text = reExecTasks.ReplaceAllString(text, "")
 	text = reStatus.ReplaceAllString(text, "")
 	text = reUsingTool.ReplaceAllString(text, "")
+	text = reProposedPlan.ReplaceAllString(text, "")
 	text = reToolBlock.ReplaceAllString(text, "")
 	text = reToolDone.ReplaceAllString(text, "")
 	text = reProtocolArt.ReplaceAllString(text, "")

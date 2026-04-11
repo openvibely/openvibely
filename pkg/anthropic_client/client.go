@@ -94,13 +94,13 @@ type multimodalRequest struct {
 
 // MessagesResponse is returned from the Messages API.
 type MessagesResponse struct {
-	ID      string `json:"id"`
-	Type    string `json:"type"`
-	Role    string `json:"role"`
-	Model   string `json:"model"`
-	Content []ContentBlock `json:"content"`
-	StopReason string `json:"stop_reason"`
-	Usage      Usage  `json:"usage"`
+	ID         string         `json:"id"`
+	Type       string         `json:"type"`
+	Role       string         `json:"role"`
+	Model      string         `json:"model"`
+	Content    []ContentBlock `json:"content"`
+	StopReason string         `json:"stop_reason"`
+	Usage      Usage          `json:"usage"`
 }
 
 // ContentBlock is a content block in a response.
@@ -119,12 +119,12 @@ type usageCacheRead struct {
 
 // Usage tracks token usage for a response.
 type Usage struct {
-	InputTokens         int                `json:"input_tokens"`
-	OutputTokens        int                `json:"output_tokens"`
-	CacheCreationInputTokens int           `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens int               `json:"cache_read_input_tokens"`
-	CacheCreation       usageCacheCreation `json:"cache_creation,omitempty"`
-	CacheRead           usageCacheRead     `json:"cache_read,omitempty"`
+	InputTokens              int                `json:"input_tokens"`
+	OutputTokens             int                `json:"output_tokens"`
+	CacheCreationInputTokens int                `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int                `json:"cache_read_input_tokens"`
+	CacheCreation            usageCacheCreation `json:"cache_creation,omitempty"`
+	CacheRead                usageCacheRead     `json:"cache_read,omitempty"`
 }
 
 // StreamEvent represents a server-sent event from the streaming API.
@@ -325,6 +325,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 			httpReq.Header.Set("x-api-key", c.auth.APIKey)
 		} else {
 			httpReq.Header.Set("Authorization", "Bearer "+c.auth.Token)
+			httpReq.Header.Set("x-app", "cli")
 			httpReq.Header.Set("anthropic-beta", strings.Join([]string{
 				"claude-code-20250219", OAuthBetaHeader, "prompt-caching-scope-2026-01-05",
 			}, ","))

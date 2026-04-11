@@ -31,6 +31,8 @@ Return only the summary text.`
 	openAIEffectiveContextPercent   = 95
 	// Mirrors Codex truncation policy defaults in models_cache.json.
 	openAIToolOutputTokenLimitDefault = 10000
+	// OpenAI native web search tool type for the Responses API.
+	openAIWebSearchToolType = "web_search"
 )
 
 // AgenticOptions configures an agentic send with tool use.
@@ -67,6 +69,11 @@ type AgenticOptions struct {
 	ToolExecutor func(ctx context.Context, name string, input json.RawMessage) (string, bool, error)
 	// ToolFilter can deny tool execution by name at runtime.
 	ToolFilter func(name string) bool
+
+	// WebSearchEnabled adds the provider-native web search tool to the request
+	// when the model supports it. The search is executed server-side by OpenAI;
+	// no local tool execution is needed.
+	WebSearchEnabled bool
 
 	// Callbacks for real-time output
 	OnText       func(text string)                              // called for each text delta
@@ -970,6 +977,18 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 		payload["tools"] = tools
 	}
 
+	// Add provider-native web search tool when enabled and model supports it.
+	// This is a native provider tool (not a function tool) executed server-side.
+	if opts.WebSearchEnabled && openAIModelSupportsWebSearch(opts.Model) {
+		existing, _ := payload["tools"].([]ToolDefinition)
+		rawTools := make([]any, 0, len(existing)+1)
+		for _, t := range existing {
+			rawTools = append(rawTools, t)
+		}
+		rawTools = append(rawTools, map[string]any{"type": openAIWebSearchToolType})
+		payload["tools"] = rawTools
+	}
+
 	// Enable automatic context truncation so the model can keep working when
 	// the conversation grows beyond the context window. Without this (default
 	// is "disabled"), the model fills context with tool results (file reads)
@@ -1024,11 +1043,15 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 		return nil, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed)
 	}
 
-	return c.parseAgenticStream(resp.Body, opts.OnText, opts.OnThinking)
+	return c.parseAgenticStreamWithToolCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
 }
 
 // parseAgenticStream parses a streaming response, handling text deltas and function calls.
 func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThinking func(string)) (*agenticTurnResult, error) {
+	return c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, nil, nil)
+}
+
+func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func(string), onThinking func(string), onToolUse func(string, json.RawMessage), onToolResult func(string, string, bool)) (*agenticTurnResult, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
 
@@ -1045,6 +1068,8 @@ func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThink
 		args   strings.Builder
 	}
 	fnCalls := make(map[int]*fnCallState)
+	// bool value indicates whether the emitted tool-use had display detail.
+	providerNativeToolUseEmitted := make(map[string]bool)
 
 	sanitizer := newOpenAIStreamSanitizer(func(text string) {
 		textBuilder.WriteString(text)
@@ -1116,6 +1141,24 @@ func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThink
 						callID: stringFromAny(item["call_id"]),
 						name:   stringFromAny(item["name"]),
 					}
+				} else if isProviderNativeOutputItem(itemType) {
+					// Provider-native tool items can carry query/url details on
+					// the .added event and only status on .done; surface use details
+					// as soon as we see them.
+					if evt, ok := providerNativeToolEventFromOutputItem(item); ok {
+						if !evt.hasDisplayDetail {
+							// Wait for .done when .added is detail-less so we don't
+							// lock in an empty secondary label.
+							continue
+						}
+						key := providerNativeOutputItemKey(item, idx)
+						if onToolUse != nil {
+							if _, seen := providerNativeToolUseEmitted[key]; !seen {
+								onToolUse(evt.name, evt.input)
+								providerNativeToolUseEmitted[key] = evt.hasDisplayDetail
+							}
+						}
+					}
 				}
 			}
 
@@ -1144,6 +1187,25 @@ func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThink
 						if text := openAIReasoningTextFromItem(item); text != "" {
 							onThinking(text)
 							sawThinking = true
+						}
+					}
+				default:
+					// Provider-native output items (web_search_call, etc.) are
+					// round-tripped but not locally executed.
+					if isProviderNativeOutputItem(itemType) {
+						result.outputItems = append(result.outputItems, item)
+						if evt, ok := providerNativeToolEventFromOutputItem(item); ok {
+							key := providerNativeOutputItemKey(item, intFromAny(ev["output_index"]))
+							if onToolUse != nil {
+								emittedWithDetail, seen := providerNativeToolUseEmitted[key]
+								if !seen || (!emittedWithDetail && evt.hasDisplayDetail) {
+									onToolUse(evt.name, evt.input)
+									providerNativeToolUseEmitted[key] = evt.hasDisplayDetail
+								}
+							}
+							if onToolResult != nil && evt.hasResult {
+								onToolResult(evt.name, evt.output, evt.isError)
+							}
 						}
 					}
 				}
@@ -1198,4 +1260,112 @@ func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThink
 	}
 
 	return result, nil
+}
+
+type providerNativeToolEvent struct {
+	name             string
+	input            json.RawMessage
+	output           string
+	hasResult        bool
+	isError          bool
+	hasDisplayDetail bool
+}
+
+func providerNativeToolEventFromOutputItem(item map[string]any) (providerNativeToolEvent, bool) {
+	itemType := strings.ToLower(strings.TrimSpace(stringFromAny(item["type"])))
+	switch itemType {
+	case "web_search_call", "tool_search_call":
+		input := map[string]any{}
+		query := strings.TrimSpace(openAIExtractWebSearchQuery(item))
+		if query != "" {
+			input["query"] = query
+		}
+		url := strings.TrimSpace(openAIExtractWebSearchURL(item))
+		if url != "" {
+			input["url"] = url
+		}
+		pattern := strings.TrimSpace(stringFromAny(item["pattern"]))
+
+		var sourceCount int
+		if action, ok := item["action"].(map[string]any); ok {
+			actionType := strings.TrimSpace(stringFromAny(action["type"]))
+			if actionType != "" {
+				input["action"] = actionType
+			}
+			if url := strings.TrimSpace(stringFromAny(action["url"])); url != "" {
+				input["url"] = url
+			}
+			if p := strings.TrimSpace(stringFromAny(action["pattern"])); p != "" {
+				pattern = p
+				input["pattern"] = p
+			}
+			if sources, ok := action["sources"].([]any); ok {
+				sourceCount = len(sources)
+			}
+		}
+		if pattern != "" {
+			input["pattern"] = pattern
+		}
+
+		inputJSON := json.RawMessage(`{}`)
+		if len(input) > 0 {
+			if b, err := json.Marshal(input); err == nil {
+				inputJSON = b
+			}
+		}
+
+		status := strings.ToLower(strings.TrimSpace(stringFromAny(item["status"])))
+		if status == "" {
+			status = "completed"
+		}
+		isError := strings.Contains(status, "error") || strings.Contains(status, "fail")
+		output := "status: " + status
+		if sourceCount > 0 {
+			output += fmt.Sprintf(", sources: %d", sourceCount)
+		}
+
+		return providerNativeToolEvent{
+			name:             "web_search",
+			input:            inputJSON,
+			output:           output,
+			hasResult:        true,
+			isError:          isError,
+			hasDisplayDetail: query != "" || url != "" || pattern != "",
+		}, true
+	default:
+		return providerNativeToolEvent{}, false
+	}
+}
+
+func providerNativeOutputItemKey(item map[string]any, outputIndex int) string {
+	if id := strings.TrimSpace(stringFromAny(item["id"])); id != "" {
+		return id
+	}
+	typ := strings.ToLower(strings.TrimSpace(stringFromAny(item["type"])))
+	if outputIndex >= 0 {
+		return fmt.Sprintf("%s:%d", typ, outputIndex)
+	}
+	return typ
+}
+
+// openAIModelSupportsWebSearch returns true if the model supports the native
+// web_search tool. Based on models_cache.json supports_search_tool
+// field; gpt-5.2+ families support it.
+func openAIModelSupportsWebSearch(model string) bool {
+	m := strings.ToLower(strings.TrimSpace(model))
+	return strings.HasPrefix(m, "gpt-5.4") ||
+		strings.HasPrefix(m, "gpt-5.3") ||
+		strings.HasPrefix(m, "gpt-5.2")
+}
+
+// isProviderNativeOutputItem returns true if the output item type is a
+// provider-executed tool result that should be round-tripped in the
+// conversation but not locally executed.
+func isProviderNativeOutputItem(itemType string) bool {
+	switch strings.ToLower(strings.TrimSpace(itemType)) {
+	case "web_search_call", "tool_search_call":
+		return true
+	default:
+		return false
+	}
 }

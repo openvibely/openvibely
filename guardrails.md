@@ -49,6 +49,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 
 - ChatGPT OAuth `/responses/compact` does **not** accept `store`; only regular `/responses` requests should send `store=false`
 - If logs show `unknown_parameter: 'store'` on compaction, remove `store` from the compaction payload builder (`pkg/openai_client/agentic.go`)
+- ChatGPT OAuth codex `/responses` rejects legacy web-search tool type `web_search_preview`; use `{"type":"web_search"}` for provider-native search.
 - Keep compaction instructions separate from normal turn system instructions. Do not reuse full task/system prompt for `/responses/compact`; use dedicated compaction prompt text (default compaction prompt or explicit `CompactionPrompt` override) to avoid re-triggering bootstrap file-read directives after compaction.
 - After `/responses/compact`, preserve the compacted output returned by the API; avoid extra client-side re-summarization/re-trimming that can drop task state and cause bootstrap restarts.
 
@@ -103,6 +104,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Plan-to-orchestrate switch action should be one-click: switch mode and auto-submit a handoff message to start implementation without requiring a second manual send
 - Plan-to-orchestrate handoff message should request a single active task for the first plan step and explicitly avoid bulk starting other existing tasks
 - Plan-complete CTA visibility must be resilient to refresh/poll: recover by scanning latest assistant history in chat mode `plan`, not only from live stream completion callbacks. Server-side detection via `chatHistoryHasPlanCompletion()` renders `data-has-plan-completion` attribute on the CTA div; JS evaluator checks this as authoritative fallback when ephemeral JS state is unavailable (page refresh, HTMX navigation). `hidePlanCompletionPrompt()` must clear this attribute to prevent re-show after dismiss.
+- Plan wrapper tags are internal metadata: strip `<proposed_plan>` / `</proposed_plan>` from user-visible chat/thread rendering while preserving inner plan text and keeping raw stored output available for plan-completion detection.
 - Plan-completion prompt must use the centralized `evaluatePlanCompletionPrompt` evaluator from all completion paths (per-exec done, chat_response_done fallback, stream error/onerror, page hydration). Never show mid-stream — check `_chatStreamInProgress` flag. Latest-message semantics: history scan must return the newest completed assistant bubble text and NOT continue to older bubbles. Stream error/onerror handlers must clear `_chatStreamInProgress` and re-evaluate (for non-thread chat context only) so the flag doesn't stay stuck true after failures. `chat_response_done` must reconcile the live assistant bubble from `completed_output` before evaluating prompt visibility; otherwise final streamed tails can be persisted but missing in live UI until refresh.
 - `currentChatModeValue` must prefer visible selector state (select element) over hidden input to avoid stale mode mismatches after programmatic mode changes
 - `/chat` mode-selector hydration must trigger `evaluatePlanCompletionPrompt()` after persisted mode restore (localStorage) and on selector change. Mark the selector as hydration-gated (`data-hydrated`) and have `currentChatModeValue()` fallback to persisted mode before hydration completes; otherwise focus-return HTMX refreshes can briefly evaluate in default `orchestrate` mode, hide `Switch to Orchestrate`, and never re-show until manual refresh.
@@ -342,6 +344,25 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Keep Echo path params (`:id`) and Swagger router params (`{id}`) aligned exactly; mismatches silently create stale/missing OpenAPI paths.
 - Preserve `internal/handler/swagger_test.go` route/spec parity test coverage so stale endpoints or missing annotations are caught before merge.
 - When updating loader markup used by chat/thread running placeholders, keep tests aligned with shared `ov-loading-dots` classes; stale `loading loading-dots` markup can fail unrelated handler suites.
+
+## Provider-Native Web Search
+
+- Server tools (`server_tool_use`) on Anthropic and provider-native output items (`web_search_call`) on OpenAI must NEVER be routed through local `ExecuteTool`. They are provider-executed.
+- Anthropic `agenticRequest.Tools` is `[]ToolDefinition`, but provider web tools must be direct versioned tool types (for example `{"type":"web_search_20260209","name":"web_search"}` / `{"type":"web_fetch_20260209","name":"web_fetch"}`), not `{"type":"server_tool","name":"..."}` wrappers. Use `rawTools json.RawMessage` + custom `MarshalJSON` to mix tool shapes.
+- When stop_reason is `tool_use` but all tool_use blocks are `server_tool_use` (no local tool_use), do NOT add a user tool_result message — just continue the loop. Adding empty tool results causes API errors.
+- Anthropic provider-side tool loops may return `stop_reason="pause_turn"` (server iteration cap). Treat this as continuation, not completion: send another request with the same conversation state and no extra user message.
+- Preserve provider-managed `*_tool_result` blocks in Anthropic assistant history (for example `code_execution_tool_result`), not only web-specific result types; dropping them causes invalid-request errors about missing corresponding tool-result blocks on later turns.
+- Preserve provider tool-result `content` as raw JSON when replaying Anthropic assistant blocks (especially `code_execution_tool_result`); do not stringify object payloads, or the API returns invalid-shape errors (`RequestCodeExecutionToolResultError`).
+- Do not gate provider tool-use/result callback emission on `stop_reason=="tool_use"` only. Anthropic may include provider tool blocks on `end_turn`; callbacks must still fire so chat/thread UI shows tool cards.
+- Do not emit Anthropic provider tool callbacks only in a post-turn pass. Emit from stream parsing (`content_block_stop`) so tool cards stay in chronological order relative to streamed summary text.
+- For URL prompts with provider web tools enabled, if Anthropic returns `code_execution`/`bash_code_execution` `too_many_requests` and no web tool activity in that turn, force exactly one follow-up steering turn to `web_fetch`/`web_search` rather than accepting a memory-only fallback answer.
+- Do not set Anthropic `tool_choice.name=web_fetch` for tool versions that are not direct-callable by the model; API returns `invalid_request_error` stating web_fetch only allows calls from `code_execution_20260120`.
+- Do not append implementation-specific provider web-routing prose to Anthropic system prompts in production paths; this guidance can leak into visible assistant reasoning/text and differs from Claude Code behavior.
+- For Anthropic prompts that include explicit URLs, do not advertise default local execution tools (`bash`, file editors) in that turn; use provider-web-preferred tool policy so the model cannot switch to `curl` after provider-side code-execution rate limits.
+- Anthropic OAuth API calls should include `x-app: cli` along with OAuth beta headers and `?beta=true`; mismatched OAuth request shape can cause provider behavior drift from Claude Code.
+- In orchestrate chat mode with runtime action tools enabled, do not also advertise default local coding tools. Those local tools are filtered/blocked in orchestrate mode and exposing them causes unnecessary failed tool turns.
+- Web search tools are read-only: add them to `planModeAllowsReadOnlyTool` in both adapters.
+- OpenAI web search model gating is in `openAIModelSupportsWebSearch()` — update when new model families support it.
 
 ## Repo Workflow
 

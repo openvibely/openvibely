@@ -57,6 +57,8 @@ func mapBuiltInToolName(name string) string {
 		return "Glob"
 	case "grep_search":
 		return "Grep"
+	case "web_search", "web_search_preview":
+		return "WebSearch"
 	default:
 		return ""
 	}
@@ -80,7 +82,8 @@ func agentAllowsBuiltInTool(agentDef *models.Agent, toolName string) bool {
 
 func planModeAllowsReadOnlyTool(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "read_file", "list_files", "grep_search":
+	case "read_file", "list_files", "grep_search",
+		"web_search", "web_search_preview": // web search is read-only
 		return true
 	default:
 		return false
@@ -372,6 +375,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 		ReasoningEffort:  reasoningEffort(agent.ReasoningEffort),
 		ReasoningSummary: "auto",
 		AutoCompaction:   true,
+		WebSearchEnabled: true,
 		WorkDir:          effectiveWorkDir,
 		Attachments:      oaAttachments,
 		ExtraTools:       extraTools,
@@ -476,6 +480,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 		ReasoningEffort:  reasoningEffort(agent.ReasoningEffort),
 		ReasoningSummary: "auto",
 		AutoCompaction:   true,
+		WebSearchEnabled: true,
 		DisableTools:     disableTools,
 		WorkDir:          effectiveWorkDir,
 		Attachments:      oaAttachments,
@@ -821,6 +826,62 @@ func toolSecondaryInfo(name string, input json.RawMessage) string {
 		if p, ok := m["pattern"].(string); ok {
 			return p
 		}
+	case "web_search", "web_search_preview":
+		if detail := webSearchSecondaryFromInput(m); detail != "" {
+			return truncateToolSecondary(detail, 140)
+		}
+	}
+	return ""
+}
+
+func webSearchSecondaryFromInput(m map[string]interface{}) string {
+	getString := func(key string) string {
+		v, _ := m[key].(string)
+		return strings.TrimSpace(v)
+	}
+
+	query := getString("query")
+	if query != "" {
+		return query
+	}
+
+	url := getString("url")
+	pattern := getString("pattern")
+
+	action := strings.ToLower(getString("action"))
+	if action == "" {
+		if actionMap, ok := m["action"].(map[string]interface{}); ok {
+			if t, ok := actionMap["type"].(string); ok {
+				action = strings.ToLower(strings.TrimSpace(t))
+			}
+		}
+	}
+
+	switch action {
+	case "findinpage", "find_in_page":
+		if pattern != "" && url != "" {
+			return "'" + pattern + "' in " + url
+		}
+		if pattern != "" {
+			return "'" + pattern + "'"
+		}
+		if url != "" {
+			return url
+		}
+	case "openpage", "open_page":
+		if url != "" {
+			return url
+		}
+	}
+
+	if pattern != "" && url != "" {
+		return "'" + pattern + "' in " + url
+	}
+	if pattern != "" {
+		return "'" + pattern + "'"
+	}
+	if url != "" {
+		return url
 	}
 	return ""
 }

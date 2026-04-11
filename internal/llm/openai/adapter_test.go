@@ -42,6 +42,38 @@ func TestToolSecondaryInfo_LongGrepPreservesLaterPatternContext(t *testing.T) {
 	}
 }
 
+func TestToolSecondaryInfo_WebSearchUsesURLFallback(t *testing.T) {
+	input := map[string]any{
+		"url": "https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts",
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	got := toolSecondaryInfo("web_search", raw)
+	if !strings.Contains(got, "crunchydata.com/blog/postgres-is-out-of-disk") {
+		t.Fatalf("expected web_search secondary to include url, got %q", got)
+	}
+}
+
+func TestToolSecondaryInfo_WebSearchFindInPageDetail(t *testing.T) {
+	input := map[string]any{
+		"action":  "findInPage",
+		"pattern": "WAL files",
+		"url":     "https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts",
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	got := toolSecondaryInfo("web_search", raw)
+	if !strings.Contains(got, "'WAL files' in https://www.crunchydata.com/blog/") {
+		t.Fatalf("expected find-in-page detail, got %q", got)
+	}
+}
+
 func TestApplyOpenAIOAuthSystemPrompt_OAuthAppendsWorkingSection(t *testing.T) {
 	agent := models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}
 	base := "base system prompt"

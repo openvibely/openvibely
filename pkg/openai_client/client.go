@@ -613,6 +613,9 @@ func openAIOutputItemMarkers(item map[string]any, callNames map[string]string) [
 		if query := openAIExtractWebSearchQuery(item); query != "" {
 			return []string{openAIFormatUsingToolMarker("web_search", query)}
 		}
+		if url := openAIExtractWebSearchURL(item); url != "" {
+			return []string{openAIFormatUsingToolMarker("web_search", url)}
+		}
 		return []string{openAIFormatUsingToolMarker("web_search", "")}
 	default:
 		return nil
@@ -620,11 +623,50 @@ func openAIOutputItemMarkers(item map[string]any, callNames map[string]string) [
 }
 
 func openAIExtractWebSearchQuery(item map[string]any) string {
+	if q := strings.TrimSpace(stringFromAny(item["query"])); q != "" {
+		return q
+	}
 	action, ok := item["action"].(map[string]any)
 	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(stringFromAny(action["query"]))
+	if q := strings.TrimSpace(stringFromAny(action["query"])); q != "" {
+		return q
+	}
+	if q := strings.TrimSpace(stringFromAny(action["search_query"])); q != "" {
+		return q
+	}
+	return ""
+}
+
+func openAIExtractWebSearchURL(item map[string]any) string {
+	if u := strings.TrimSpace(stringFromAny(item["url"])); u != "" {
+		return u
+	}
+	if action, ok := item["action"].(map[string]any); ok {
+		if u := strings.TrimSpace(stringFromAny(action["url"])); u != "" {
+			return u
+		}
+		if sources, ok := action["sources"].([]any); ok {
+			for _, src := range sources {
+				if m, ok := src.(map[string]any); ok {
+					if u := strings.TrimSpace(stringFromAny(m["url"])); u != "" {
+						return u
+					}
+				}
+			}
+		}
+	}
+	if results, ok := item["results"].([]any); ok {
+		for _, res := range results {
+			if m, ok := res.(map[string]any); ok {
+				if u := strings.TrimSpace(stringFromAny(m["url"])); u != "" {
+					return u
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func openAILocalShellCommand(item map[string]any) string {
@@ -775,7 +817,7 @@ func openAICanonicalToolName(name string) string {
 		return "Glob"
 	case "grep_search", "grep":
 		return "Grep"
-	case "web_search", "web_search_call":
+	case "web_search", "web_search_preview", "web_search_call":
 		return "WebSearch"
 	default:
 		if strings.TrimSpace(name) == "" {

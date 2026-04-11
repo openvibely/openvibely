@@ -2124,3 +2124,488 @@ func TestSendAgentic_DisableToolsWithExtraTools(t *testing.T) {
 		t.Errorf("Text = %q", resp.Text)
 	}
 }
+
+func TestOpenAIModelSupportsWebSearch(t *testing.T) {
+	tests := []struct {
+		model    string
+		expected bool
+	}{
+		{"gpt-5.4", true},
+		{"gpt-5.4-mini", true},
+		{"GPT-5.4", true},
+		{"gpt-5.3-codex", true},
+		{"gpt-5.3", true},
+		{"gpt-5.2", true},
+		{"gpt-5.2-mini", true},
+		{"gpt-4o", false},
+		{"gpt-4o-mini", false},
+		{"gpt-4.1", false},
+		{"o3", false},
+		{"o3-mini", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		got := openAIModelSupportsWebSearch(tt.model)
+		if got != tt.expected {
+			t.Errorf("openAIModelSupportsWebSearch(%q) = %v, want %v", tt.model, got, tt.expected)
+		}
+	}
+}
+
+func TestIsProviderNativeOutputItem(t *testing.T) {
+	tests := []struct {
+		itemType string
+		expected bool
+	}{
+		{"web_search_call", true},
+		{"tool_search_call", true},
+		{"Web_Search_Call", true},
+		{"function_call", false},
+		{"message", false},
+		{"reasoning", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		got := isProviderNativeOutputItem(tt.itemType)
+		if got != tt.expected {
+			t.Errorf("isProviderNativeOutputItem(%q) = %v, want %v", tt.itemType, got, tt.expected)
+		}
+	}
+}
+
+func TestSendAgentic_WebSearchToolIncluded(t *testing.T) {
+	// Verify that web_search is added to the tools payload
+	// when WebSearchEnabled=true and model supports it.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]interface{}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Errorf("unmarshal: %v", err)
+		}
+		tools, ok := reqBody["tools"].([]interface{})
+		if !ok {
+			t.Fatal("expected tools array in request")
+		}
+		// Should have default tools + web_search
+		foundWebSearch := false
+		for _, tool := range tools {
+			toolMap, ok := tool.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if toolMap["type"] == openAIWebSearchToolType {
+				foundWebSearch = true
+			}
+		}
+		if !foundWebSearch {
+			t.Errorf("expected %q tool in request, not found", openAIWebSearchToolType)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"Found it.\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("sk-test")
+	resp, err := client.SendAgentic(context.Background(), "search for Go docs", &AgenticOptions{
+		Model:            "gpt-5.3-codex",
+		WebSearchEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "Found it." {
+		t.Errorf("Text = %q, want %q", resp.Text, "Found it.")
+	}
+}
+
+func TestSendAgentic_WebSearchNotIncludedForUnsupportedModel(t *testing.T) {
+	// Verify that web_search is NOT added when the model doesn't support it.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]interface{}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Errorf("unmarshal: %v", err)
+		}
+		tools, ok := reqBody["tools"].([]interface{})
+		if !ok {
+			// No tools array is also fine for unsupported model
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"Done.\"}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"model\":\"gpt-4o\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n",
+			))
+			return
+		}
+		for _, tool := range tools {
+			toolMap, ok := tool.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if toolMap["type"] == openAIWebSearchToolType {
+				t.Errorf("%q should NOT be in request for unsupported model", openAIWebSearchToolType)
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"Done.\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"model\":\"gpt-4o\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("sk-test")
+	_, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model:            "gpt-4o",
+		WebSearchEnabled: true, // enabled, but model doesn't support it
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+}
+
+func TestSendAgentic_WebSearchToolIncluded_OAuthPath(t *testing.T) {
+	// Regression: ChatGPT OAuth codex endpoint rejects legacy
+	// "web_search_preview", so ensure we send "web_search".
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]interface{}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Errorf("unmarshal: %v", err)
+		}
+		tools, ok := reqBody["tools"].([]interface{})
+		if !ok {
+			t.Fatal("expected tools array in request")
+		}
+		foundWebSearch := false
+		foundLegacy := false
+		for _, tool := range tools {
+			toolMap, ok := tool.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if toolMap["type"] == openAIWebSearchToolType {
+				foundWebSearch = true
+			}
+			if toolMap["type"] == "web_search_preview" {
+				foundLegacy = true
+			}
+		}
+		if !foundWebSearch {
+			t.Errorf("expected %q tool in request, not found", openAIWebSearchToolType)
+		}
+		if foundLegacy {
+			t.Error("did not expect legacy web_search_preview tool type on OAuth path")
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"Done.\"}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"model\":\"gpt-5.3-codex\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldChatGPTBaseURL := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
+
+	client := NewWithOAuthToken("oauth-token", "refresh-token", time.Now().Add(2*time.Hour).UnixMilli(), "acct_123")
+	resp, err := client.SendAgentic(context.Background(), "search for go docs", &AgenticOptions{
+		Model:            "gpt-5.3-codex",
+		WebSearchEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if resp.Text != "Done." {
+		t.Errorf("Text = %q, want %q", resp.Text, "Done.")
+	}
+}
+
+func TestParseAgenticStream_WebSearchCall(t *testing.T) {
+	// Simulate a stream with a web_search_call output item.
+	stream := buildSSE([]string{
+		`{"type":"response.output_text.delta","delta":"Let me search for that."}`,
+		`{"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_1","status":"completed","results":[{"title":"Go Docs","url":"https://go.dev/doc","snippet":"Official Go documentation"}]}}`,
+		`{"type":"response.output_text.delta","delta":" Here's what I found."}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":20,"output_tokens":15}}}`,
+	})
+
+	client := &Client{auth: &StoredAuth{APIKey: "test"}}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// web_search_call should be in outputItems but NOT in toolCalls
+	if len(result.toolCalls) != 0 {
+		t.Errorf("expected 0 tool calls, got %d (web search should not create tool calls)", len(result.toolCalls))
+	}
+
+	// Should have the web_search_call in outputItems
+	foundWebSearch := false
+	for _, item := range result.outputItems {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if stringFromAny(m["type"]) == "web_search_call" {
+			foundWebSearch = true
+			break
+		}
+	}
+	if !foundWebSearch {
+		t.Error("expected web_search_call in outputItems")
+	}
+}
+
+func TestParseAgenticStream_WebSearchWithFunctionCall(t *testing.T) {
+	// Verify that web_search_call items coexist with function_call items.
+	stream := buildSSE([]string{
+		`{"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_1","status":"completed","results":[]}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call_1","name":"read_file"}}`,
+		`{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{\"file_path\":\"main.go\"}"}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":10,"output_tokens":8}}}`,
+	})
+
+	client := &Client{auth: &StoredAuth{APIKey: "test"}}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should have 1 function_call tool call
+	if len(result.toolCalls) != 1 {
+		t.Errorf("expected 1 tool call, got %d", len(result.toolCalls))
+	}
+	if result.toolCalls[0].Name != "read_file" {
+		t.Errorf("tool call name = %q, want read_file", result.toolCalls[0].Name)
+	}
+
+	// Should have both items in outputItems
+	webSearchCount := 0
+	functionCallCount := 0
+	for _, item := range result.outputItems {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch stringFromAny(m["type"]) {
+		case "web_search_call":
+			webSearchCount++
+		case "function_call":
+			functionCallCount++
+		}
+	}
+	if webSearchCount != 1 {
+		t.Errorf("expected 1 web_search_call in outputItems, got %d", webSearchCount)
+	}
+	if functionCallCount != 1 {
+		t.Errorf("expected 1 function_call in outputItems, got %d", functionCallCount)
+	}
+}
+
+func TestParseAgenticStream_WebSearchCallEmitsToolCallbacks(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"golang context cancellation","sources":[{"url":"https://go.dev"}]}}}`,
+		`{"type":"response.output_text.delta","delta":"Found useful results."}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":11,"output_tokens":7}}}`,
+	})
+
+	var (
+		toolUseCount    int
+		toolResultCount int
+		useName         string
+		useInput        json.RawMessage
+		resultName      string
+		resultOutput    string
+		resultIsError   bool
+	)
+
+	client := &Client{auth: &StoredAuth{APIKey: "test"}}
+	result, err := client.parseAgenticStreamWithToolCallbacks(
+		strings.NewReader(stream),
+		nil,
+		nil,
+		func(name string, input json.RawMessage) {
+			toolUseCount++
+			useName = name
+			useInput = append(json.RawMessage{}, input...)
+		},
+		func(name string, output string, isError bool) {
+			toolResultCount++
+			resultName = name
+			resultOutput = output
+			resultIsError = isError
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.toolCalls) != 0 {
+		t.Fatalf("expected 0 local tool calls for provider-native web search, got %d", len(result.toolCalls))
+	}
+	if toolUseCount != 1 {
+		t.Fatalf("toolUseCount = %d, want 1", toolUseCount)
+	}
+	if toolResultCount != 1 {
+		t.Fatalf("toolResultCount = %d, want 1", toolResultCount)
+	}
+	if useName != "web_search" {
+		t.Errorf("useName = %q, want web_search", useName)
+	}
+	if resultName != "web_search" {
+		t.Errorf("resultName = %q, want web_search", resultName)
+	}
+	if resultIsError {
+		t.Error("resultIsError = true, want false")
+	}
+	if !strings.Contains(resultOutput, "status: completed") {
+		t.Errorf("resultOutput = %q, expected status marker", resultOutput)
+	}
+
+	var inputMap map[string]any
+	if err := json.Unmarshal(useInput, &inputMap); err != nil {
+		t.Fatalf("unmarshal useInput: %v", err)
+	}
+	if inputMap["query"] != "golang context cancellation" {
+		t.Errorf("query = %v, want %q", inputMap["query"], "golang context cancellation")
+	}
+}
+
+func TestParseAgenticStream_WebSearchCallUsesAddedDetailsForToolUse(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress","action":{"type":"search","query":"summarize crunchydata wal recovery","sources":[{"url":"https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts"}]}}}`,
+		`{"type":"response.output_item.done","item":{"type":"web_search_call","id":"ws_1","status":"completed"}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":12,"output_tokens":4}}}`,
+	})
+
+	var (
+		toolUseCount    int
+		toolResultCount int
+		useInput        json.RawMessage
+		resultOutput    string
+	)
+
+	client := &Client{auth: &StoredAuth{APIKey: "test"}}
+	_, err := client.parseAgenticStreamWithToolCallbacks(
+		strings.NewReader(stream),
+		nil,
+		nil,
+		func(_ string, input json.RawMessage) {
+			toolUseCount++
+			useInput = append(json.RawMessage{}, input...)
+		},
+		func(_ string, output string, _ bool) {
+			toolResultCount++
+			resultOutput = output
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if toolUseCount != 1 {
+		t.Fatalf("toolUseCount = %d, want 1", toolUseCount)
+	}
+	if toolResultCount != 1 {
+		t.Fatalf("toolResultCount = %d, want 1", toolResultCount)
+	}
+
+	var inputMap map[string]any
+	if err := json.Unmarshal(useInput, &inputMap); err != nil {
+		t.Fatalf("unmarshal useInput: %v", err)
+	}
+	if inputMap["query"] != "summarize crunchydata wal recovery" {
+		t.Errorf("query = %v, want %q", inputMap["query"], "summarize crunchydata wal recovery")
+	}
+	if inputMap["url"] != "https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts" {
+		t.Errorf("url = %v", inputMap["url"])
+	}
+	if !strings.Contains(resultOutput, "status: completed") {
+		t.Errorf("resultOutput = %q, expected status marker", resultOutput)
+	}
+	if strings.Contains(resultOutput, "url=") || strings.Contains(resultOutput, "query=") {
+		t.Errorf("resultOutput should not include serialized detail tuples: %q", resultOutput)
+	}
+}
+
+func TestParseAgenticStream_WebSearchCallUsesDoneDetailsWhenAddedIsSparse(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_2","status":"in_progress","action":{"type":"search"}}}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_2","status":"completed","action":{"type":"search","query":"openvibely web search url display"}}}`,
+		`{"type":"response.completed","response":{"id":"resp_2","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":9,"output_tokens":3}}}`,
+	})
+
+	var (
+		toolUseCount int
+		useInput     json.RawMessage
+	)
+
+	client := &Client{auth: &StoredAuth{APIKey: "test"}}
+	_, err := client.parseAgenticStreamWithToolCallbacks(
+		strings.NewReader(stream),
+		nil,
+		nil,
+		func(_ string, input json.RawMessage) {
+			toolUseCount++
+			useInput = append(json.RawMessage{}, input...)
+		},
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if toolUseCount != 1 {
+		t.Fatalf("toolUseCount = %d, want 1", toolUseCount)
+	}
+
+	var inputMap map[string]any
+	if err := json.Unmarshal(useInput, &inputMap); err != nil {
+		t.Fatalf("unmarshal useInput: %v", err)
+	}
+	if inputMap["query"] != "openvibely web search url display" {
+		t.Errorf("query = %v", inputMap["query"])
+	}
+}
+
+func TestLegacyToolCallsUnaffectedByWebSearch(t *testing.T) {
+	// Regression test: ensure normal function call behavior is unaffected
+	// when WebSearchEnabled is false.
+	stream := buildSSE([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"bash"}}`,
+		`{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"bash","arguments":"{\"command\":\"echo hello\"}"}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-4o","usage":{"input_tokens":5,"output_tokens":3}}}`,
+	})
+
+	client := &Client{auth: &StoredAuth{APIKey: "test"}}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.toolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.toolCalls))
+	}
+	if result.toolCalls[0].Name != "bash" {
+		t.Errorf("name = %q, want bash", result.toolCalls[0].Name)
+	}
+	if result.toolCalls[0].Arguments != `{"command":"echo hello"}` {
+		t.Errorf("args = %q", result.toolCalls[0].Arguments)
+	}
+}

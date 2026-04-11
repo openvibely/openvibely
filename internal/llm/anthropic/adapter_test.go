@@ -90,3 +90,55 @@ func TestComposeRuntimeToolFilter_PlanBlocksActionToolsAndMutations(t *testing.T
 		t.Fatalf("expected mutating tools to be blocked in plan mode")
 	}
 }
+
+func TestShouldSkipDefaultToolsForChatMode(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{Name: "create_task"},
+		},
+	}
+
+	if !shouldSkipDefaultToolsForChatMode(false, models.ChatModeOrchestrate, rt) {
+		t.Fatalf("expected default tools to be skipped for orchestrate chat with runtime action tools")
+	}
+	if shouldSkipDefaultToolsForChatMode(true, models.ChatModeOrchestrate, rt) {
+		t.Fatalf("did not expect skip for task follow-up mode")
+	}
+	if shouldSkipDefaultToolsForChatMode(false, models.ChatModePlan, rt) {
+		t.Fatalf("did not expect skip for plan mode")
+	}
+	if shouldSkipDefaultToolsForChatMode(false, models.ChatModeOrchestrate, nil) {
+		t.Fatalf("did not expect skip without runtime tools")
+	}
+}
+
+func TestShouldPreferAnthropicProviderWeb(t *testing.T) {
+	tests := []struct {
+		name   string
+		prompt string
+		want   bool
+	}{
+		{
+			name:   "url summarize prompt",
+			prompt: "summarize this blog https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts",
+			want:   true,
+		},
+		{
+			name:   "url coding prompt",
+			prompt: "implement oauth flow from https://example.com/spec and update internal handler code",
+			want:   true,
+		},
+		{
+			name:   "no url",
+			prompt: "summarize what we changed in this repository",
+			want:   false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldPreferAnthropicProviderWeb(tc.prompt); got != tc.want {
+				t.Fatalf("shouldPreferAnthropicProviderWeb(%q) = %v, want %v", tc.prompt, got, tc.want)
+			}
+		})
+	}
+}

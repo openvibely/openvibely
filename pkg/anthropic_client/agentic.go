@@ -18,6 +18,14 @@ import (
 // DefaultCompactionThreshold is the default input token count that triggers compaction.
 const DefaultCompactionThreshold = 150000
 
+const (
+	// Prefer the direct-call web tool versions for URL retrieval flows.
+	// Newer web tool versions can route through provider code_execution,
+	// which may hit per-turn tool budgets and cause fetch failures.
+	anthropicWebSearchToolType = "web_search_20250305"
+	anthropicWebFetchToolType  = "web_fetch_20250910"
+)
+
 // AgenticOptions configures an agentic send with tool use.
 type AgenticOptions struct {
 	Model        string
@@ -26,6 +34,9 @@ type AgenticOptions struct {
 	WorkDir      string // working directory for tool execution
 	MaxTurns     int    // max agentic loop iterations (default 25)
 	DisableTools bool   // when true, no tools are sent (chat orchestrator mode)
+	// SkipDefaultTools suppresses built-in local tools while still allowing
+	// ExtraTools (for example runtime action tools) to be sent.
+	SkipDefaultTools bool
 
 	// EnableThinking enables extended thinking (reasoning before responding).
 	// When true with BudgetTokens=0, uses adaptive thinking on supported models
@@ -57,6 +68,11 @@ type AgenticOptions struct {
 	ToolExecutor func(ctx context.Context, name string, input json.RawMessage) (string, bool, error)
 	// ToolFilter can deny tool execution by name at runtime.
 	ToolFilter func(name string) bool
+
+	// WebSearchEnabled adds Anthropic server-side web search and web fetch
+	// tools to the request. These are executed server-side by Anthropic;
+	// no local tool execution is needed.
+	WebSearchEnabled bool
 
 	// Callbacks for real-time output
 	OnText       func(text string)                              // called for each text delta
@@ -96,7 +112,7 @@ type agenticBlock struct {
 	Name      string          `json:"name,omitempty"`        // tool_use
 	Input     json.RawMessage `json:"input,omitempty"`       // tool_use
 	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_result
-	Content   string          `json:"content,omitempty"`     // tool_result
+	Content   json.RawMessage `json:"content,omitempty"`     // tool_result/provider tool result
 	IsError   bool            `json:"is_error,omitempty"`    // tool_result
 }
 
@@ -155,6 +171,38 @@ type agenticRequest struct {
 	System            []systemBlock            `json:"system,omitempty"`
 	Thinking          *thinkingConfig          `json:"thinking,omitempty"`
 	ContextManagement *contextManagementConfig `json:"context_management,omitempty"`
+	// rawTools overrides Tools when set. Used when the tools array contains
+	// mixed types (e.g. client tools + server tools for web search).
+	rawTools json.RawMessage
+}
+
+// MarshalJSON implements custom JSON marshaling to support mixed tool types.
+// When rawTools is set, it is used instead of the typed Tools slice.
+func (r agenticRequest) MarshalJSON() ([]byte, error) {
+	type Alias agenticRequest
+	if r.rawTools != nil {
+		// Build a map from the struct, then replace tools with raw JSON.
+		a := Alias(r)
+		a.Tools = nil
+		base, err := json.Marshal(a)
+		if err != nil {
+			return nil, err
+		}
+		// Insert rawTools into the JSON object.
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(base, &m); err != nil {
+			return nil, err
+		}
+		m["tools"] = r.rawTools
+		return json.Marshal(m)
+	}
+	return json.Marshal(Alias(r))
+}
+
+// serverToolDef is a provider-executed server tool definition.
+type serverToolDef struct {
+	Type string `json:"type"` // e.g. "web_search_20260209"
+	Name string `json:"name,omitempty"`
 }
 
 // agenticAPIResponse is the non-streaming API response with tool use support.
@@ -192,7 +240,9 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	var tools []ToolDefinition
 	if !opts.DisableTools {
-		tools = DefaultTools()
+		if !opts.SkipDefaultTools {
+			tools = DefaultTools()
+		}
 		if len(opts.ExtraTools) > 0 {
 			tools = append(tools, opts.ExtraTools...)
 		}
@@ -217,6 +267,8 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
+	initialPromptHasURL := strings.Contains(strings.ToLower(prompt), "http://") || strings.Contains(strings.ToLower(prompt), "https://")
+	forcedProviderWebFallback := false
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		// Send request (streaming)
@@ -273,15 +325,44 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			Content: resp.contentBlocks,
 		})
 
-		// Collect text blocks
+		// Collect text blocks for this turn. We append to allText unless we
+		// decide to force a provider web fallback retry for URL prompts.
+		turnText := ""
 		for _, block := range resp.contentBlocks {
 			if block.Type == "text" && block.Text != "" {
-				allText.WriteString(block.Text)
+				turnText += block.Text
 			}
 		}
 
-		// If not a tool use stop, we're done
-		if resp.stopReason != "tool_use" {
+		// Provider tool callbacks are emitted in stream-order by the parser.
+		hasServerToolResults := false
+		for _, block := range resp.contentBlocks {
+			if isAnthropicProviderToolResultBlockType(block.Type) {
+				hasServerToolResults = true
+				break
+			}
+		}
+
+		// If this is not a tool-related continuation stop, we're done.
+		// "pause_turn" is used by provider-side tool loops (for example web search)
+		// and must continue with another request using the same conversation.
+		if resp.stopReason != "tool_use" && resp.stopReason != "pause_turn" {
+			// For URL-oriented prompts, if provider code-execution is rate-limited
+			// and no web tool activity happened this turn, force one follow-up turn
+			// steering the model to web_fetch/web_search instead of giving up.
+			if opts.WebSearchEnabled && initialPromptHasURL && !forcedProviderWebFallback &&
+				anthropicTurnHasCodeExecutionTooManyRequests(resp.contentBlocks) &&
+				!anthropicTurnHasWebToolActivity(resp.contentBlocks) {
+				forcedProviderWebFallback = true
+				messages = append(messages, agenticMessage{
+					Role: "user",
+					Content: "Provider note: code_execution tools are rate-limited in this turn. " +
+						"Use web_fetch (or web_search then web_fetch) to retrieve the requested URL now. " +
+						"Do not answer from memory.",
+				})
+				continue
+			}
+			allText.WriteString(turnText)
 			// If max_tokens was hit, log a warning — the response may be truncated
 			if resp.stopReason == "max_tokens" {
 				log.Printf("[anthropicclient] turn %d hit max_tokens limit, response may be truncated", turn+1)
@@ -289,11 +370,14 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			break
 		}
 
-		// Execute tools and collect results (initialize as empty slice, not nil,
+		// Execute local tools and collect results (initialize as empty slice, not nil,
 		// since nil marshals as JSON null and the API requires an array).
 		toolUseBlocks := make([]agenticBlock, 0, len(resp.contentBlocks))
 		for _, block := range resp.contentBlocks {
 			if block.Type != "tool_use" {
+				continue
+			}
+			if isAnthropicProviderNativeToolName(block.Name) {
 				continue
 			}
 			if opts.OnToolUse != nil {
@@ -318,16 +402,32 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			toolResults = append(toolResults, agenticBlock{
 				Type:      "tool_result",
 				ToolUseID: exec.block.ID,
-				Content:   exec.output,
+				Content:   anthropicStringContentRaw(exec.output),
 				IsError:   exec.isError,
 			})
 		}
 
-		// Safety: if stop_reason was tool_use but we found no tool_use blocks,
-		// break to avoid an infinite loop sending empty tool results.
-		if len(toolResults) == 0 {
+		// For server-side pause_turn, continue the loop by re-sending the same
+		// conversation context (no extra user message required).
+		if resp.stopReason == "pause_turn" {
+			allText.WriteString(turnText)
+			continue
+		}
+
+		// Safety: if stop_reason was tool_use but we found no tool_use blocks
+		// AND no server tool results, break to avoid an infinite loop.
+		if len(toolResults) == 0 && !hasServerToolResults {
+			allText.WriteString(turnText)
 			log.Printf("[anthropicclient] stop_reason=tool_use but no tool_use blocks found, breaking")
 			break
+		}
+
+		// When only server tools were used (no local tool results), the server
+		// tool results are already in the assistant contentBlocks. Continue the
+		// loop without adding a user tool_result message.
+		if len(toolResults) == 0 && hasServerToolResults {
+			allText.WriteString(turnText)
+			continue
 		}
 
 		// Add tool results as user message
@@ -335,6 +435,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			Role:    "user",
 			Content: toolResults,
 		})
+		allText.WriteString(turnText)
 	}
 
 	result.Text = allText.String()
@@ -344,6 +445,234 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
 
 	return result, nil
+}
+
+func isAnthropicProviderNativeToolName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "web_search",
+		"web_search_20250305", "web_search_20260209",
+		"web_fetch",
+		"web_fetch_20250910", "web_fetch_20260209", "web_fetch_20260309":
+		return true
+	default:
+		return false
+	}
+}
+
+func isAnthropicProviderToolResultBlockType(blockType string) bool {
+	t := strings.ToLower(strings.TrimSpace(blockType))
+	if t == "" {
+		return false
+	}
+	// Provider-managed tool results use "<tool_name>_tool_result" block types
+	// (for example web_fetch_tool_result, code_execution_tool_result).
+	return strings.HasSuffix(t, "_tool_result") && t != "tool_result"
+}
+
+func anthropicProviderToolResultName(block agenticBlock) string {
+	name := strings.TrimSpace(block.Name)
+	if name != "" {
+		return name
+	}
+	t := strings.ToLower(strings.TrimSpace(block.Type))
+	switch t {
+	case "web_search_tool_result":
+		return "web_search"
+	case "web_fetch_tool_result":
+		return "web_fetch"
+	}
+	if strings.HasSuffix(t, "_tool_result") {
+		return strings.TrimSuffix(t, "_tool_result")
+	}
+	return ""
+}
+
+func anthropicStringContentRaw(s string) json.RawMessage {
+	b, err := json.Marshal(s)
+	if err != nil {
+		// json.Marshal on string should never fail; keep a quoted fallback.
+		return json.RawMessage(`""`)
+	}
+	return json.RawMessage(b)
+}
+
+func anthropicBlockContentString(content json.RawMessage) string {
+	raw := bytes.TrimSpace(content)
+	if len(raw) == 0 {
+		return ""
+	}
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		return asString
+	}
+	return string(raw)
+}
+
+func providerToolEventKey(toolUseID, name string) string {
+	toolUseID = strings.TrimSpace(toolUseID)
+	if toolUseID != "" {
+		return "id:" + toolUseID
+	}
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return ""
+	}
+	return "name:" + name
+}
+
+func inferProviderToolUseInput(name string, content json.RawMessage) json.RawMessage {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if len(bytes.TrimSpace(content)) == 0 {
+		return json.RawMessage(`{}`)
+	}
+
+	var generic interface{}
+	if err := json.Unmarshal(content, &generic); err != nil {
+		return json.RawMessage(`{}`)
+	}
+
+	switch name {
+	case "web_fetch":
+		if url, ok := findNestedStringField(generic, "url"); ok {
+			return rawJSONMapWithString("url", url)
+		}
+	case "web_search":
+		if q, ok := findNestedStringField(generic, "query"); ok {
+			return rawJSONMapWithString("query", q)
+		}
+	}
+	return json.RawMessage(`{}`)
+}
+
+func findNestedStringField(value interface{}, key string) (string, bool) {
+	switch v := value.(type) {
+	case map[string]interface{}:
+		if s, ok := v[key].(string); ok && strings.TrimSpace(s) != "" {
+			return s, true
+		}
+		for _, child := range v {
+			if s, ok := findNestedStringField(child, key); ok {
+				return s, true
+			}
+		}
+	case []interface{}:
+		for _, child := range v {
+			if s, ok := findNestedStringField(child, key); ok {
+				return s, true
+			}
+		}
+	}
+	return "", false
+}
+
+func rawJSONMapWithString(key, value string) json.RawMessage {
+	b, err := json.Marshal(map[string]string{key: value})
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return json.RawMessage(b)
+}
+
+func inferProviderResultToolName(content json.RawMessage) string {
+	raw := bytes.TrimSpace(content)
+	if len(raw) == 0 {
+		return ""
+	}
+
+	var generic interface{}
+	if err := json.Unmarshal(raw, &generic); err != nil {
+		return ""
+	}
+
+	typ, ok := findNestedStringField(generic, "type")
+	if !ok {
+		return ""
+	}
+	typ = strings.ToLower(strings.TrimSpace(typ))
+	if typ == "" {
+		return ""
+	}
+
+	switch {
+	case strings.HasPrefix(typ, "web_fetch"):
+		return "web_fetch"
+	case strings.HasPrefix(typ, "web_search"):
+		return "web_search"
+	case strings.HasPrefix(typ, "code_execution"):
+		return "code_execution"
+	case strings.HasSuffix(typ, "_result"):
+		return strings.TrimSuffix(typ, "_result")
+	default:
+		return ""
+	}
+}
+
+func isAnthropicCodeExecutionToolName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "code_execution",
+		"code_execution_20250522", "code_execution_20250825", "code_execution_20260120",
+		"bash_code_execution":
+		return true
+	default:
+		return false
+	}
+}
+
+func anthropicTurnHasWebToolActivity(blocks []agenticBlock) bool {
+	for _, block := range blocks {
+		name := strings.TrimSpace(block.Name)
+		switch block.Type {
+		case "tool_use", "server_tool_use", "server_tool_result":
+			if name == "" && block.Type == "server_tool_result" {
+				name = inferProviderResultToolName(block.Content)
+			}
+			if isAnthropicProviderNativeToolName(name) {
+				return true
+			}
+		default:
+			if !isAnthropicProviderToolResultBlockType(block.Type) {
+				continue
+			}
+			name = anthropicProviderToolResultName(block)
+			if name == "" {
+				name = inferProviderResultToolName(block.Content)
+			}
+			if isAnthropicProviderNativeToolName(name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func anthropicTurnHasCodeExecutionTooManyRequests(blocks []agenticBlock) bool {
+	for _, block := range blocks {
+		if !(block.Type == "server_tool_result" || isAnthropicProviderToolResultBlockType(block.Type)) {
+			continue
+		}
+		name := strings.TrimSpace(block.Name)
+		if name == "" {
+			name = anthropicProviderToolResultName(block)
+		}
+		if name == "" {
+			name = inferProviderResultToolName(block.Content)
+		}
+		rawLower := bytes.ToLower(bytes.TrimSpace(block.Content))
+		if len(rawLower) == 0 {
+			continue
+		}
+
+		isCodeExec := isAnthropicCodeExecutionToolName(name) ||
+			bytes.Contains(rawLower, []byte("code_execution")) ||
+			bytes.Contains(rawLower, []byte("bash_code_execution"))
+		if !isCodeExec {
+			continue
+		}
+		if bytes.Contains(rawLower, []byte("too_many_requests")) {
+			return true
+		}
+	}
+	return false
 }
 
 type anthropicToolExecutionResult struct {
@@ -474,6 +803,30 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 		Stream:    true,
 		System:    sysBlocks,
 	}
+
+	// Add provider-native web tools when web search is enabled.
+	// Anthropic expects direct versioned tool types in the tools array, not a
+	// "server_tool" wrapper. Because client tools and provider tools have
+	// different shapes, build a mixed raw tools array.
+	if opts.WebSearchEnabled {
+		serverTools := []serverToolDef{
+			{Type: anthropicWebSearchToolType, Name: "web_search"},
+			{Type: anthropicWebFetchToolType, Name: "web_fetch"},
+		}
+		mixed := make([]any, 0, len(tools)+len(serverTools))
+		for _, t := range tools {
+			mixed = append(mixed, t)
+		}
+		for _, st := range serverTools {
+			mixed = append(mixed, st)
+		}
+		raw, err := json.Marshal(mixed)
+		if err == nil {
+			req.rawTools = raw
+			req.Tools = nil // rawTools takes precedence
+		}
+	}
+
 	if opts.EnableThinking {
 		if opts.BudgetTokens > 0 {
 			// Fixed budget: use "enabled" with explicit budget_tokens
@@ -564,6 +917,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 			httpReq.Header.Set("x-api-key", c.auth.APIKey)
 		} else {
 			httpReq.Header.Set("Authorization", "Bearer "+c.auth.Token)
+			httpReq.Header.Set("x-app", "cli")
 		}
 		return httpReq, nil
 	}
@@ -587,17 +941,31 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	return c.parseAgenticStream(resp.Body, opts.OnText, opts.OnThinking)
+	return c.parseAgenticStreamWithCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
 }
 
 // parseAgenticStream parses a streaming response, handling text, tool_use, and compaction blocks.
 func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThinking func(string)) (*turnResult, error) {
+	return c.parseAgenticStreamWithCallbacks(body, onText, onThinking, nil, nil)
+}
+
+// parseAgenticStreamWithCallbacks parses a streaming response, handling text,
+// tool use, and compaction blocks while optionally emitting tool callbacks.
+func (c *Client) parseAgenticStreamWithCallbacks(
+	body io.Reader,
+	onText func(string),
+	onThinking func(string),
+	onToolUse func(string, json.RawMessage),
+	onToolResult func(string, string, bool),
+) (*turnResult, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
 	result := &turnResult{
 		contentBlocks: make([]agenticBlock, 0), // must be non-nil: nil marshals as JSON null
 	}
+	seenProviderToolUses := make(map[string]struct{})
+	providerToolNamesByID := make(map[string]string)
 
 	// Track content blocks being built
 	type blockState struct {
@@ -608,6 +976,7 @@ func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThink
 		id            string          // for tool_use
 		name          string          // for tool_use
 		inputJSON     strings.Builder // for tool_use (accumulated partial JSON)
+		content       strings.Builder // for provider tool result blocks
 		inToolCallTag bool            // true when inside <tool_call>...</tool_call> in text
 		tagBuf        strings.Builder // buffer for detecting partial <tool_call> tags
 		compaction    strings.Builder // for compaction blocks
@@ -654,20 +1023,33 @@ func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThink
 		case "content_block_start":
 			if event.ContentBlock != nil {
 				var cb struct {
-					Type    string  `json:"type"`
-					ID      string  `json:"id,omitempty"`
-					Name    string  `json:"name,omitempty"`
-					Content *string `json:"content,omitempty"` // compaction blocks may have initial content
+					Type      string          `json:"type"`
+					ID        string          `json:"id,omitempty"`
+					ToolUseID string          `json:"tool_use_id,omitempty"`
+					Name      string          `json:"name,omitempty"`
+					Content   json.RawMessage `json:"content,omitempty"`
 				}
 				if err := json.Unmarshal(event.ContentBlock, &cb); err == nil {
+					blockID := cb.ID
+					if blockID == "" {
+						blockID = cb.ToolUseID
+					}
 					bs := &blockState{
 						typ:  cb.Type,
-						id:   cb.ID,
+						id:   blockID,
 						name: cb.Name,
 					}
-					// Compaction blocks may have content in the start event
-					if cb.Type == "compaction" && cb.Content != nil {
-						bs.compaction.WriteString(*cb.Content)
+					// Compaction and provider tool result blocks may include content
+					// in the start event.
+					if len(cb.Content) > 0 && string(cb.Content) != "null" {
+						if cb.Type == "compaction" {
+							var summary string
+							if err := json.Unmarshal(cb.Content, &summary); err == nil {
+								bs.compaction.WriteString(summary)
+							}
+						} else if cb.Type == "server_tool_result" || isAnthropicProviderToolResultBlockType(cb.Type) {
+							bs.content.Write(cb.Content)
+						}
 					}
 					blocks[event.Index] = bs
 				}
@@ -773,12 +1155,75 @@ func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThink
 					Text: cleanedText,
 				})
 			case "tool_use":
+				inputRaw := json.RawMessage(bs.inputJSON.String())
 				result.contentBlocks = append(result.contentBlocks, agenticBlock{
 					Type:  "tool_use",
 					ID:    bs.id,
 					Name:  bs.name,
-					Input: json.RawMessage(bs.inputJSON.String()),
+					Input: inputRaw,
 				})
+				// Some provider-native tools surface as regular tool_use blocks.
+				if isAnthropicProviderNativeToolName(bs.name) {
+					key := providerToolEventKey(bs.id, bs.name)
+					if key != "" {
+						seenProviderToolUses[key] = struct{}{}
+					}
+					if id := strings.TrimSpace(bs.id); id != "" {
+						providerToolNamesByID[id] = strings.TrimSpace(bs.name)
+					}
+					if onToolUse != nil {
+						onToolUse(bs.name, inputRaw)
+					}
+				}
+			case "server_tool_use":
+				// Provider-executed server tool (web search, web fetch).
+				// Treated like tool_use for round-tripping and UI, but the
+				// provider handles execution — no local ExecuteTool call.
+				inputRaw := json.RawMessage(bs.inputJSON.String())
+				result.contentBlocks = append(result.contentBlocks, agenticBlock{
+					Type:  "server_tool_use",
+					ID:    bs.id,
+					Name:  bs.name,
+					Input: inputRaw,
+				})
+				key := providerToolEventKey(bs.id, bs.name)
+				if key != "" {
+					seenProviderToolUses[key] = struct{}{}
+				}
+				if id := strings.TrimSpace(bs.id); id != "" {
+					providerToolNamesByID[id] = strings.TrimSpace(bs.name)
+				}
+				if onToolUse != nil {
+					onToolUse(bs.name, inputRaw)
+				}
+			case "server_tool_result":
+				// Result from a provider-executed server tool. Round-tripped
+				// in the conversation alongside server_tool_use blocks.
+				content := anthropicProviderResultContentRaw(bs.text.String(), bs.content.String())
+				blockName := strings.TrimSpace(bs.name) // preserve provider block shape
+				effectiveName := blockName
+				if effectiveName == "" {
+					effectiveName = strings.TrimSpace(providerToolNamesByID[strings.TrimSpace(bs.id)])
+				}
+				if effectiveName == "" {
+					effectiveName = inferProviderResultToolName(content)
+				}
+				result.contentBlocks = append(result.contentBlocks, agenticBlock{
+					Type:      "server_tool_result",
+					Name:      blockName,
+					ToolUseID: bs.id,
+					Content:   content,
+				})
+				key := providerToolEventKey(bs.id, effectiveName)
+				if onToolUse != nil && key != "" {
+					if _, ok := seenProviderToolUses[key]; !ok {
+						onToolUse(effectiveName, inferProviderToolUseInput(effectiveName, content))
+						seenProviderToolUses[key] = struct{}{}
+					}
+				}
+				if onToolResult != nil {
+					onToolResult(effectiveName, anthropicBlockContentString(content), false)
+				}
 			case "compaction":
 				summary := bs.compaction.String()
 				if summary != "" {
@@ -789,6 +1234,37 @@ func (c *Client) parseAgenticStream(body io.Reader, onText func(string), onThink
 				}
 				// Compaction blocks are NOT added to contentBlocks — they are
 				// tracked separately and round-tripped as user message content.
+			default:
+				// Newer provider tool result block types (for example
+				// web_fetch_tool_result) should still be surfaced so agentic loop
+				// flow can continue without treating them as missing results.
+				if isAnthropicProviderToolResultBlockType(bs.typ) {
+					content := anthropicProviderResultContentRaw(bs.text.String(), bs.content.String())
+					blockName := strings.TrimSpace(bs.name) // preserve provider block shape
+					effectiveName := anthropicProviderToolResultName(agenticBlock{Type: bs.typ, Name: blockName})
+					if effectiveName == "" {
+						effectiveName = strings.TrimSpace(providerToolNamesByID[strings.TrimSpace(bs.id)])
+					}
+					if effectiveName == "" {
+						effectiveName = inferProviderResultToolName(content)
+					}
+					result.contentBlocks = append(result.contentBlocks, agenticBlock{
+						Type:      bs.typ,
+						Name:      blockName,
+						ToolUseID: bs.id,
+						Content:   content,
+					})
+					key := providerToolEventKey(bs.id, effectiveName)
+					if onToolUse != nil && key != "" {
+						if _, ok := seenProviderToolUses[key]; !ok {
+							onToolUse(effectiveName, inferProviderToolUseInput(effectiveName, content))
+							seenProviderToolUses[key] = struct{}{}
+						}
+					}
+					if onToolResult != nil {
+						onToolResult(effectiveName, anthropicBlockContentString(content), false)
+					}
+				}
 			}
 
 		case "message_delta":
@@ -821,4 +1297,16 @@ var reToolCallBlock = regexp.MustCompile(`(?s)<tool_call>.*?</tool_call>\s*`)
 // stripToolCallTags removes <tool_call>...</tool_call> XML blocks from text.
 func stripToolCallTags(s string) string {
 	return strings.TrimSpace(reToolCallBlock.ReplaceAllString(s, ""))
+}
+
+func anthropicProviderResultContentRaw(textValue, rawValue string) json.RawMessage {
+	text := strings.TrimSpace(textValue)
+	if text != "" {
+		return anthropicStringContentRaw(text)
+	}
+	raw := strings.TrimSpace(rawValue)
+	if raw == "" {
+		return nil
+	}
+	return json.RawMessage(raw)
 }

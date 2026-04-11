@@ -160,7 +160,7 @@ func TestAgenticBlockMarshal(t *testing.T) {
 	block := agenticBlock{
 		Type:      "tool_result",
 		ToolUseID: "toolu_abc",
-		Content:   "file contents here",
+		Content:   anthropicStringContentRaw("file contents here"),
 	}
 
 	data, err := json.Marshal(block)
@@ -233,7 +233,7 @@ func TestAgenticMessageMarshal(t *testing.T) {
 		msg := agenticMessage{
 			Role: "user",
 			Content: []agenticBlock{
-				{Type: "tool_result", ToolUseID: "toolu_1", Content: "result"},
+				{Type: "tool_result", ToolUseID: "toolu_1", Content: anthropicStringContentRaw("result")},
 			},
 		}
 		data, err := json.Marshal(msg)
@@ -880,6 +880,285 @@ func TestSendAgentic_NoCompactionWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_OAuthSetsXAppHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "beta=true" {
+			t.Fatalf("raw query = %q, want beta=true", r.URL.RawQuery)
+		}
+		if got := r.Header.Get("x-app"); got != "cli" {
+			t.Fatalf("x-app header = %q, want cli", got)
+		}
+		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
+			t.Fatalf("authorization header = %q, want Bearer token", got)
+		}
+		betaHeader := r.Header.Get("anthropic-beta")
+		if !strings.Contains(betaHeader, "claude-code-20250219") || !strings.Contains(betaHeader, OAuthBetaHeader) {
+			t.Fatalf("anthropic-beta header missing oauth betas: %q", betaHeader)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":10}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithOAuthToken("oauth-token", "refresh-token", time.Now().Add(24*time.Hour).UnixMilli())
+	resp, err := client.SendAgentic(context.Background(), "hello", &AgenticOptions{
+		Model:          "claude-sonnet-4-20250514",
+		MaxTokens:      1024,
+		MaxTurns:       1,
+		AutoCompaction: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp.Text, "ok") {
+		t.Fatalf("response text = %q, want %q", resp.Text, "ok")
+	}
+}
+
+func TestSendAgentic_PauseTurnContinuesServerToolLoop(t *testing.T) {
+	var turnCount int32
+	var toolUseCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turn := int(atomic.AddInt32(&turnCount, 1))
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]interface{}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+
+		// On the second turn, the assistant pause_turn response must be present in
+		// conversation history so the provider can resume server-side tool work.
+		if turn == 2 {
+			msgs, ok := reqBody["messages"].([]interface{})
+			if !ok || len(msgs) < 2 {
+				t.Fatalf("turn 2 expected >=2 messages, got %#v", reqBody["messages"])
+			}
+			last, ok := msgs[len(msgs)-1].(map[string]interface{})
+			if !ok {
+				t.Fatalf("turn 2 last message type mismatch: %#v", msgs[len(msgs)-1])
+			}
+			if role, _ := last["role"].(string); role != "assistant" {
+				t.Fatalf("turn 2 last role = %q, want assistant", role)
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		if turn == 1 {
+			events := []string{
+				`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":20}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Searching the web..."}}`,
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"content_block_start","index":1,"content_block":{"type":"server_tool_use","id":"stu_1","name":"web_search"}}`,
+				`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"n8n readme\"}"}}`,
+				`{"type":"content_block_stop","index":1}`,
+				`{"type":"message_delta","delta":{"stop_reason":"pause_turn"},"usage":{"output_tokens":8}}`,
+				`{"type":"message_stop"}`,
+			}
+			for _, evt := range events {
+				fmt.Fprintf(w, "data: %s\n\n", evt)
+			}
+			return
+		}
+
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":12}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"n8n is a workflow automation tool."}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithAPIKey("test-key")
+	resp, err := client.SendAgentic(context.Background(), "summarize n8n readme", &AgenticOptions{
+		Model:            "claude-sonnet-4-20250514",
+		MaxTokens:        2048,
+		MaxTurns:         5,
+		DisableTools:     true,
+		WebSearchEnabled: true,
+		OnToolUse: func(name string, _ json.RawMessage) {
+			if name == "web_search" {
+				atomic.AddInt32(&toolUseCount, 1)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := atomic.LoadInt32(&turnCount); got != 2 {
+		t.Fatalf("turnCount = %d, want 2", got)
+	}
+	if !strings.Contains(resp.Text, "n8n is a workflow automation tool.") {
+		t.Fatalf("response text = %q, expected final resumed response text", resp.Text)
+	}
+	if got := atomic.LoadInt32(&toolUseCount); got == 0 {
+		t.Fatal("expected server web_search tool-use callback during pause_turn flow")
+	}
+}
+
+func TestSendAgentic_PauseTurnPreservesCodeExecutionToolResult(t *testing.T) {
+	var turnCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turn := int(atomic.AddInt32(&turnCount, 1))
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]interface{}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+
+		// On turn 3, prior assistant messages must include the provider-side
+		// code_execution_tool_result block; otherwise Anthropic rejects with:
+		// "...code_execution tool use ... without a corresponding
+		// code_execution_tool_result block".
+		if turn == 3 {
+			msgs, ok := reqBody["messages"].([]interface{})
+			if !ok || len(msgs) < 3 {
+				t.Fatalf("turn 3 expected >=3 messages, got %#v", reqBody["messages"])
+			}
+
+			foundCodeExecutionResult := false
+			for _, msgAny := range msgs {
+				msg, ok := msgAny.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				role, _ := msg["role"].(string)
+				if role != "assistant" {
+					continue
+				}
+				blocks, ok := msg["content"].([]interface{})
+				if !ok {
+					continue
+				}
+				for _, blockAny := range blocks {
+					block, ok := blockAny.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					if typ, _ := block["type"].(string); typ == "code_execution_tool_result" {
+						if gotID, _ := block["tool_use_id"].(string); gotID != "srvtoolu_1" {
+							t.Fatalf("code_execution_tool_result tool_use_id = %q, want srvtoolu_1", gotID)
+						}
+						if _, hasName := block["name"]; hasName {
+							t.Fatal("code_execution_tool_result must not include name when round-tripped")
+						}
+						contentObj, ok := block["content"].(map[string]interface{})
+						if !ok {
+							t.Fatalf("code_execution_tool_result content type = %T, want object", block["content"])
+						}
+						if gotStdout, _ := contentObj["stdout"].(string); gotStdout != "2\n" {
+							t.Fatalf("code_execution_tool_result content.stdout = %q, want %q", gotStdout, "2\n")
+						}
+						foundCodeExecutionResult = true
+					}
+				}
+			}
+			if !foundCodeExecutionResult {
+				t.Fatal("turn 3 request missing code_execution_tool_result block in assistant history")
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		switch turn {
+		case 1:
+			events := []string{
+				`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":30}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srvtoolu_1","name":"code_execution"}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"code\":\"print(1+1)\"}"}}`,
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"message_delta","delta":{"stop_reason":"pause_turn"},"usage":{"output_tokens":7}}`,
+				`{"type":"message_stop"}`,
+			}
+			for _, evt := range events {
+				fmt.Fprintf(w, "data: %s\n\n", evt)
+			}
+		case 2:
+			events := []string{
+				`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":20}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"code_execution_tool_result","tool_use_id":"srvtoolu_1","content":{"stdout":"2\n","stderr":""}}}`,
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"content_block_start","index":1,"content_block":{"type":"server_tool_use","id":"srvtoolu_2","name":"web_search"}}`,
+				`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"n8n\"}"}}`,
+				`{"type":"content_block_stop","index":1}`,
+				`{"type":"message_delta","delta":{"stop_reason":"pause_turn"},"usage":{"output_tokens":9}}`,
+				`{"type":"message_stop"}`,
+			}
+			for _, evt := range events {
+				fmt.Fprintf(w, "data: %s\n\n", evt)
+			}
+		default:
+			events := []string{
+				`{"type":"message_start","message":{"id":"msg_3","model":"claude-sonnet-4-20250514","usage":{"input_tokens":15}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+				`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Here is the README summary."}}`,
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}`,
+				`{"type":"message_stop"}`,
+			}
+			for _, evt := range events {
+				fmt.Fprintf(w, "data: %s\n\n", evt)
+			}
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithAPIKey("test-key")
+	resp, err := client.SendAgentic(context.Background(), "summarize n8n readme", &AgenticOptions{
+		Model:            "claude-sonnet-4-20250514",
+		MaxTokens:        2048,
+		MaxTurns:         5,
+		DisableTools:     true,
+		WebSearchEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := atomic.LoadInt32(&turnCount); got != 3 {
+		t.Fatalf("turnCount = %d, want 3", got)
+	}
+	if !strings.Contains(resp.Text, "Here is the README summary.") {
+		t.Fatalf("response text = %q, expected resumed final response text", resp.Text)
+	}
+}
+
 func TestSendAgentic_ReadOnlyToolUsesExecuteInParallel(t *testing.T) {
 	turnCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1450,5 +1729,633 @@ func TestDoWithRetry_SkipsRetryOnLongRetryAfter(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Errorf("expected 1 attempt (skip retry on long Retry-After), got %d", attempts)
+	}
+}
+
+func TestAgenticRequestMarshalJSON_WithRawTools(t *testing.T) {
+	// Verify that rawTools overrides Tools in JSON output.
+	clientTools := []ToolDefinition{
+		{Name: "read_file", Description: "Read a file", InputSchema: json.RawMessage(`{"type":"object"}`)},
+	}
+	serverTools := []serverToolDef{
+		{Type: anthropicWebSearchToolType, Name: "web_search"},
+		{Type: anthropicWebFetchToolType, Name: "web_fetch"},
+	}
+	mixed := make([]any, 0, len(clientTools)+len(serverTools))
+	for _, t2 := range clientTools {
+		mixed = append(mixed, t2)
+	}
+	for _, st := range serverTools {
+		mixed = append(mixed, st)
+	}
+	rawBytes, err := json.Marshal(mixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := agenticRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 4096,
+		Messages:  []agenticMessage{{Role: "user", Content: "hello"}},
+		rawTools:  rawBytes,
+		Stream:    true,
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+
+	// Check tools array
+	var tools []map[string]interface{}
+	if err := json.Unmarshal(m["tools"], &tools); err != nil {
+		t.Fatalf("unmarshal tools: %v", err)
+	}
+
+	if len(tools) != 3 {
+		t.Fatalf("expected 3 tools, got %d", len(tools))
+	}
+
+	// First should be client tool
+	if tools[0]["name"] != "read_file" {
+		t.Errorf("tools[0].name = %v, want read_file", tools[0]["name"])
+	}
+	// Second should be provider-native web_search tool
+	if tools[1]["type"] != anthropicWebSearchToolType {
+		t.Errorf("tools[1].type = %v, want %s", tools[1]["type"], anthropicWebSearchToolType)
+	}
+	if tools[1]["name"] != "web_search" {
+		t.Errorf("tools[1].name = %v, want web_search", tools[1]["name"])
+	}
+	// Third should be provider-native web_fetch tool
+	if tools[2]["type"] != anthropicWebFetchToolType {
+		t.Errorf("tools[2].type = %v, want %s", tools[2]["type"], anthropicWebFetchToolType)
+	}
+	if tools[2]["name"] != "web_fetch" {
+		t.Errorf("tools[2].name = %v, want web_fetch", tools[2]["name"])
+	}
+}
+
+func TestAgenticRequestMarshalJSON_WithoutRawTools(t *testing.T) {
+	// Verify that normal serialization works when rawTools is nil.
+	req := agenticRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 4096,
+		Messages:  []agenticMessage{{Role: "user", Content: "hello"}},
+		Tools: []ToolDefinition{
+			{Name: "bash", Description: "Run bash", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		},
+		Stream: true,
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+
+	tools, ok := m["tools"].([]interface{})
+	if !ok {
+		t.Fatal("expected tools array")
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	tool := tools[0].(map[string]interface{})
+	if tool["name"] != "bash" {
+		t.Errorf("tools[0].name = %v, want bash", tool["name"])
+	}
+}
+
+func TestSendAgentic_SkipDefaultToolsUsesOnlyExtraTools(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req map[string]interface{}
+		if err := json.Unmarshal(body, &req); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+
+		toolsVal, ok := req["tools"].([]interface{})
+		if !ok {
+			t.Fatalf("expected tools array, got %#v", req["tools"])
+		}
+		if len(toolsVal) != 1 {
+			t.Fatalf("expected 1 tool (runtime only), got %d", len(toolsVal))
+		}
+		tool0, ok := toolsVal[0].(map[string]interface{})
+		if !ok {
+			t.Fatalf("tools[0] type mismatch: %#v", toolsVal[0])
+		}
+		if got, _ := tool0["name"].(string); got != "create_task" {
+			t.Fatalf("tools[0].name = %q, want create_task", got)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":12}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithAPIKey("test-key")
+	resp, err := client.SendAgentic(context.Background(), "run action", &AgenticOptions{
+		Model:            "claude-sonnet-4-20250514",
+		MaxTokens:        2048,
+		DisableTools:     false,
+		SkipDefaultTools: true,
+		ExtraTools: []ToolDefinition{
+			{
+				Name:        "create_task",
+				Description: "Create a task",
+				InputSchema: json.RawMessage(`{"type":"object"}`),
+			},
+		},
+		WebSearchEnabled: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(resp.Text, "ok") {
+		t.Fatalf("response text = %q, want %q", resp.Text, "ok")
+	}
+}
+
+func TestSendAgentic_ProviderToolResultWithoutToolUseStillEmitsToolUseCallback(t *testing.T) {
+	var toolUseCount int32
+	var toolResultCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":20}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"web_fetch_tool_result","tool_use_id":"stu_1","content":{"type":"web_fetch_result","url":"https://example.com","title":"Example"}}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Summary text."}}`,
+			`{"type":"content_block_stop","index":1}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithAPIKey("test-key")
+	resp, err := client.SendAgentic(context.Background(), "summarize", &AgenticOptions{
+		Model:            "claude-sonnet-4-20250514",
+		MaxTokens:        2048,
+		DisableTools:     true,
+		WebSearchEnabled: true,
+		OnToolUse: func(name string, input json.RawMessage) {
+			if name != "web_fetch" {
+				t.Fatalf("tool use name = %q, want web_fetch", name)
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(input, &payload); err != nil {
+				t.Fatalf("tool use input unmarshal: %v", err)
+			}
+			if payload["url"] != "https://example.com" {
+				t.Fatalf("tool use input url = %q, want https://example.com", payload["url"])
+			}
+			atomic.AddInt32(&toolUseCount, 1)
+		},
+		OnToolResult: func(name string, output string, isError bool) {
+			if isError {
+				t.Fatalf("unexpected tool result error for %s", name)
+			}
+			if name != "web_fetch" {
+				t.Fatalf("tool result name = %q, want web_fetch", name)
+			}
+			if !strings.Contains(output, "web_fetch_result") {
+				t.Fatalf("tool result output = %q, expected web_fetch_result payload", output)
+			}
+			atomic.AddInt32(&toolResultCount, 1)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(&toolUseCount); got != 1 {
+		t.Fatalf("toolUseCount = %d, want 1", got)
+	}
+	if got := atomic.LoadInt32(&toolResultCount); got != 1 {
+		t.Fatalf("toolResultCount = %d, want 1", got)
+	}
+	if !strings.Contains(resp.Text, "Summary text.") {
+		t.Fatalf("response text = %q, want summary text", resp.Text)
+	}
+}
+
+func TestSendAgentic_ProviderToolCallbacksStreamBeforeText(t *testing.T) {
+	var callbackOrder []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":24}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"stu_1","name":"web_fetch"}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"url\":\"https://example.com\"}"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"web_fetch_tool_result","tool_use_id":"stu_1","name":"web_fetch","content":{"type":"web_fetch_result","url":"https://example.com","title":"Example"}}}`,
+			`{"type":"content_block_stop","index":1}`,
+			`{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Summary text."}}`,
+			`{"type":"content_block_stop","index":2}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithAPIKey("test-key")
+	resp, err := client.SendAgentic(context.Background(), "summarize", &AgenticOptions{
+		Model:            "claude-sonnet-4-20250514",
+		MaxTokens:        2048,
+		DisableTools:     true,
+		WebSearchEnabled: true,
+		OnToolUse: func(name string, _ json.RawMessage) {
+			callbackOrder = append(callbackOrder, "tool_use:"+name)
+		},
+		OnToolResult: func(name string, _ string, isError bool) {
+			if isError {
+				t.Fatalf("unexpected tool error for %s", name)
+			}
+			callbackOrder = append(callbackOrder, "tool_result:"+name)
+		},
+		OnText: func(text string) {
+			if strings.TrimSpace(text) == "" {
+				return
+			}
+			callbackOrder = append(callbackOrder, "text")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(resp.Text, "Summary text.") {
+		t.Fatalf("response text = %q, want summary text", resp.Text)
+	}
+
+	toolUseIndex := -1
+	toolResultIndex := -1
+	textIndex := -1
+	for i, item := range callbackOrder {
+		if toolUseIndex == -1 && strings.HasPrefix(item, "tool_use:") {
+			toolUseIndex = i
+			continue
+		}
+		if toolResultIndex == -1 && strings.HasPrefix(item, "tool_result:") {
+			toolResultIndex = i
+			continue
+		}
+		if textIndex == -1 && item == "text" {
+			textIndex = i
+		}
+	}
+
+	if toolUseIndex == -1 || toolResultIndex == -1 || textIndex == -1 {
+		t.Fatalf("missing callbacks, order=%v", callbackOrder)
+	}
+	if !(toolUseIndex < toolResultIndex && toolResultIndex < textIndex) {
+		t.Fatalf("callback order=%v, want tool_use -> tool_result -> text", callbackOrder)
+	}
+}
+
+func TestSendAgentic_URLPromptCodeExecRateLimitForcesProviderWebRetry(t *testing.T) {
+	var turnCount int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		turn := int(atomic.AddInt32(&turnCount, 1))
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]interface{}
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+
+		if turn == 2 {
+			msgs, ok := reqBody["messages"].([]interface{})
+			if !ok || len(msgs) < 2 {
+				t.Fatalf("turn 2 expected >=2 messages, got %#v", reqBody["messages"])
+			}
+			lastMsg, ok := msgs[len(msgs)-1].(map[string]interface{})
+			if !ok {
+				t.Fatalf("turn 2 last message mismatch: %#v", msgs[len(msgs)-1])
+			}
+			if role, _ := lastMsg["role"].(string); role != "user" {
+				t.Fatalf("turn 2 last role = %q, want user", role)
+			}
+			content, _ := lastMsg["content"].(string)
+			if !strings.Contains(content, "Use web_fetch") {
+				t.Fatalf("turn 2 steering message missing web_fetch guidance, got %q", content)
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		if turn == 1 {
+			events := []string{
+				`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":22}}}`,
+				`{"type":"content_block_start","index":0,"content_block":{"type":"code_execution_tool_result","tool_use_id":"srvtoolu_1","name":"code_execution","content":{"type":"code_execution_tool_result_error","error_code":"too_many_requests"}}}`,
+				`{"type":"content_block_stop","index":0}`,
+				`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+				`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"I cannot fetch this right now."}}`,
+				`{"type":"content_block_stop","index":1}`,
+				`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":8}}`,
+				`{"type":"message_stop"}`,
+			}
+			for _, evt := range events {
+				fmt.Fprintf(w, "data: %s\n\n", evt)
+			}
+			return
+		}
+
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":12}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"stu_1","name":"web_fetch"}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"url\":\"https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts\"}"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"web_fetch_tool_result","tool_use_id":"stu_1","name":"web_fetch","content":{"type":"web_fetch_result","url":"https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts"}}}`,
+			`{"type":"content_block_stop","index":1}`,
+			`{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Recovered summary from web fetch."}}`,
+			`{"type":"content_block_stop","index":2}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":11}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := AnthropicAPIHost
+	AnthropicAPIHost = server.URL
+	defer func() { AnthropicAPIHost = origHost }()
+
+	client := NewWithAPIKey("test-key")
+	resp, err := client.SendAgentic(context.Background(), "summarize this blog https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts", &AgenticOptions{
+		Model:            "claude-sonnet-4-20250514",
+		MaxTokens:        2048,
+		MaxTurns:         5,
+		DisableTools:     true,
+		WebSearchEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := atomic.LoadInt32(&turnCount); got != 2 {
+		t.Fatalf("turnCount = %d, want 2", got)
+	}
+	if strings.Contains(resp.Text, "I cannot fetch this right now.") {
+		t.Fatalf("response text should skip fallback-failed turn text, got %q", resp.Text)
+	}
+	if !strings.Contains(resp.Text, "Recovered summary from web fetch.") {
+		t.Fatalf("response text = %q, want forced web-fetch summary", resp.Text)
+	}
+}
+
+func TestParseAgenticStream_ServerToolUse(t *testing.T) {
+	// Simulate a stream with server_tool_use (web search) content blocks.
+	stream := buildSSE([]string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":15}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"stu_1","name":"web_search_20250305"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\":"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"Go documentation\"}"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Here are the results."}}`,
+		`{"type":"content_block_stop","index":1}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}`,
+		`{"type":"message_stop"}`,
+	})
+
+	client := &Client{}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.contentBlocks) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(result.contentBlocks))
+	}
+
+	// First block should be server_tool_use
+	block := result.contentBlocks[0]
+	if block.Type != "server_tool_use" {
+		t.Errorf("block[0].type = %q, want server_tool_use", block.Type)
+	}
+	if block.Name != "web_search_20250305" {
+		t.Errorf("block[0].name = %q, want web_search_20250305", block.Name)
+	}
+	if block.ID != "stu_1" {
+		t.Errorf("block[0].id = %q, want stu_1", block.ID)
+	}
+	// Verify input was accumulated
+	var input map[string]string
+	if err := json.Unmarshal(block.Input, &input); err != nil {
+		t.Fatalf("unmarshal input: %v", err)
+	}
+	if input["query"] != "Go documentation" {
+		t.Errorf("input.query = %q, want %q", input["query"], "Go documentation")
+	}
+
+	// Second block should be text
+	if result.contentBlocks[1].Type != "text" {
+		t.Errorf("block[1].type = %q, want text", result.contentBlocks[1].Type)
+	}
+	if result.contentBlocks[1].Text != "Here are the results." {
+		t.Errorf("block[1].text = %q", result.contentBlocks[1].Text)
+	}
+}
+
+func TestParseAgenticStream_ServerToolUseNotInToolCalls(t *testing.T) {
+	// Verify that server_tool_use blocks are NOT treated as local tool calls.
+	stream := buildSSE([]string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":10}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"stu_1","name":"web_search_20250305"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"test\"}"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tu_1","name":"read_file"}}`,
+		`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"file_path\":\"main.go\"}"}}`,
+		`{"type":"content_block_stop","index":1}`,
+		`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":8}}`,
+		`{"type":"message_stop"}`,
+	})
+
+	client := &Client{}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.contentBlocks) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(result.contentBlocks))
+	}
+
+	// First should be server_tool_use
+	if result.contentBlocks[0].Type != "server_tool_use" {
+		t.Errorf("block[0].type = %q, want server_tool_use", result.contentBlocks[0].Type)
+	}
+	// Second should be regular tool_use
+	if result.contentBlocks[1].Type != "tool_use" {
+		t.Errorf("block[1].type = %q, want tool_use", result.contentBlocks[1].Type)
+	}
+	if result.contentBlocks[1].Name != "read_file" {
+		t.Errorf("block[1].name = %q, want read_file", result.contentBlocks[1].Name)
+	}
+}
+
+func TestParseAgenticStream_WebFetchToolResultBlock(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":12}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"stu_1","name":"web_fetch"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"url\":\"https://example.com\"}"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"web_fetch_tool_result","tool_use_id":"stu_1","name":"web_fetch","content":{"type":"web_fetch_result","url":"https://example.com"}}}`,
+		`{"type":"content_block_stop","index":1}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":6}}`,
+		`{"type":"message_stop"}`,
+	})
+
+	client := &Client{}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.contentBlocks) != 2 {
+		t.Fatalf("expected 2 content blocks, got %d", len(result.contentBlocks))
+	}
+	if result.contentBlocks[1].Type != "web_fetch_tool_result" {
+		t.Errorf("block[1].type = %q, want web_fetch_tool_result", result.contentBlocks[1].Type)
+	}
+	if result.contentBlocks[1].ToolUseID != "stu_1" {
+		t.Errorf("block[1].tool_use_id = %q, want stu_1", result.contentBlocks[1].ToolUseID)
+	}
+	if !strings.Contains(string(result.contentBlocks[1].Content), "web_fetch_result") {
+		t.Errorf("block[1].content = %q, want serialized web_fetch_result payload", string(result.contentBlocks[1].Content))
+	}
+}
+
+func TestIsAnthropicProviderNativeToolName(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"web_search", true},
+		{"web_search_20250305", true},
+		{"web_search_20260209", true},
+		{"web_fetch", true},
+		{"web_fetch_20250910", true},
+		{"web_fetch_20260209", true},
+		{"web_fetch_20260309", true},
+		{"read_file", false},
+		{"bash", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := isAnthropicProviderNativeToolName(tc.name); got != tc.want {
+			t.Errorf("isAnthropicProviderNativeToolName(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestIsAnthropicProviderToolResultBlockType(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"web_search_tool_result", true},
+		{"web_fetch_tool_result", true},
+		{"code_execution_tool_result", true},
+		{"server_tool_result", true},
+		{"tool_result", false},
+		{"tool_use", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := isAnthropicProviderToolResultBlockType(tc.name); got != tc.want {
+			t.Errorf("isAnthropicProviderToolResultBlockType(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestLegacyAnthropicToolCallsUnaffected(t *testing.T) {
+	// Regression test: verify normal tool_use behavior works without web search.
+	stream := buildSSE([]string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":10}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tu_1","name":"bash"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"command\":"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"echo hello\"}"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":6}}`,
+		`{"type":"message_stop"}`,
+	})
+
+	client := &Client{}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(result.contentBlocks) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(result.contentBlocks))
+	}
+	block := result.contentBlocks[0]
+	if block.Type != "tool_use" {
+		t.Errorf("type = %q, want tool_use", block.Type)
+	}
+	if block.Name != "bash" {
+		t.Errorf("name = %q, want bash", block.Name)
+	}
+	var input map[string]string
+	if err := json.Unmarshal(block.Input, &input); err != nil {
+		t.Fatalf("unmarshal input: %v", err)
+	}
+	if input["command"] != "echo hello" {
+		t.Errorf("command = %q, want %q", input["command"], "echo hello")
+	}
+	if result.stopReason != "tool_use" {
+		t.Errorf("stopReason = %q, want tool_use", result.stopReason)
 	}
 }

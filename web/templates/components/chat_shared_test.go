@@ -454,6 +454,16 @@ func TestCleanDisplayContent_ToolMarkers(t *testing.T) {
 			expected: "This is a normal response with no markers.",
 		},
 		{
+			name:     "strips proposed_plan wrappers and keeps content",
+			input:    "Plan:\n<proposed_plan>\nStep one\nStep two\n</proposed_plan>\nDone.",
+			expected: "Plan:\n\nStep one\nStep two\n\nDone.",
+		},
+		{
+			name:     "does not strip arbitrary angle-bracket tags",
+			input:    "Keep literal tag text: <custom_tag>hello</custom_tag>",
+			expected: "Keep literal tag text: <custom_tag>hello</custom_tag>",
+		},
+		{
 			name:     "strips CREATE_TASK blocks",
 			input:    "Creating.\n[CREATE_TASK]\n{\"title\":\"test\"}\n[/CREATE_TASK]\nDone.",
 			expected: "Creating.\n\nDone.",
@@ -848,6 +858,19 @@ func TestCleanActionMarkers_StripsProtocolArtifacts(t *testing.T) {
 	// cleanActionMarkers must include multi_tool_use protocol artifact pattern
 	if !strings.Contains(content, "multi_tool_use\\.\\S+") {
 		t.Error("cleanActionMarkers should strip multi_tool_use protocol artifact lines")
+	}
+}
+
+func TestCleanActionMarkers_StripsProposedPlanWrappersOnly(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatAutoScrollScript().Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, "text = text.replace(/<\\/?\\s*proposed_plan\\s*>/gi, '')") {
+		t.Fatal("cleanActionMarkers should strip <proposed_plan> wrappers")
 	}
 }
 
