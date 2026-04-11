@@ -60,6 +60,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - For integration cards (like Channels providers), model explicit connection states in UI (`Not Configured`/`Not Connected`/`Connected`) and wire actions with HTMX refresh headers for partial reload safety.
 - For integration surfaces, separate discovery from management: use an Add dialog/list for available providers and show full cards only for providers already added/configured.
 - For integration settings forms, keep persisted runtime toggles (for example notification on/off) round-trippable in UI state so opening/saving a config modal does not unintentionally reset operator choices.
+- For cross-page card kebab menus, keep destructive action semantics consistent (`Delete` copy + shared destructive class such as `text-error` + confirmation affordance) and cover them with UI-contract tests.
 - For HTMX forms, use explicit `method="post"` and return the appropriate fragment/container for consistent UI refresh.
 - When deprecating a feature, remove all UI entry points and route handlers in the same change, and add regression tests that assert both control absence and endpoint inaccessibility.
 - When changing default landing routes, implement it as an explicit redirect (for example `/` -> `/chat`) and keep previous pages reachable on explicit paths (for example `/dashboard`) to avoid breaking deep links and existing navigation habits.

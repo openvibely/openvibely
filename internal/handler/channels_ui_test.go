@@ -288,6 +288,86 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 	}
 }
 
+func TestChannelsPageTelegramMenuShowsDeleteAndNoChannelMenuUsesRemove(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	h.SetGitHubService(&fakeGitHubService{
+		statusFn: func(ctx context.Context) (service.GitHubConnectionStatus, error) {
+			return service.GitHubConnectionStatus{Configured: true, Connected: true, AuthMode: service.GitHubAuthModePAT}, nil
+		},
+	})
+	h.SetSlackService(&fakeSlackService{
+		statusFn: func(ctx context.Context) (service.SlackConnectionStatus, error) {
+			return service.SlackConnectionStatus{Configured: true, Connected: true}, nil
+		},
+	})
+	if err := h.settingsRepo.Set(context.Background(), "telegram_bot_token", "test-token"); err != nil {
+		t.Fatalf("failed to seed telegram token: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	for _, channelType := range []string{"github", "slack", "telegram"} {
+		card := cardSectionByType(body, channelType)
+		if card == "" {
+			t.Fatalf("expected %s card to render", channelType)
+		}
+		if !strings.Contains(card, "Delete") {
+			t.Fatalf("expected %s card menu to contain Delete action", channelType)
+		}
+		if strings.Contains(card, "Remove") {
+			t.Fatalf("did not expect %s card menu to contain Remove action", channelType)
+		}
+	}
+	if strings.Contains(body, ">Remove<") {
+		t.Fatal("did not expect any channels card action to render Remove")
+	}
+}
+
+func TestChannelsPageDeleteActionsUseDestructiveStyleAndConfirm(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	h.SetGitHubService(&fakeGitHubService{
+		statusFn: func(ctx context.Context) (service.GitHubConnectionStatus, error) {
+			return service.GitHubConnectionStatus{Configured: true, Connected: true, AuthMode: service.GitHubAuthModePAT}, nil
+		},
+	})
+	h.SetSlackService(&fakeSlackService{
+		statusFn: func(ctx context.Context) (service.SlackConnectionStatus, error) {
+			return service.SlackConnectionStatus{Configured: true, Connected: true}, nil
+		},
+	})
+	if err := h.settingsRepo.Set(context.Background(), "telegram_bot_token", "test-token"); err != nil {
+		t.Fatalf("failed to seed telegram token: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	for _, channelType := range []string{"github", "slack", "telegram"} {
+		card := cardSectionByType(body, channelType)
+		if !strings.Contains(card, "class=\"text-error\"") {
+			t.Fatalf("expected %s delete action to use text-error class", channelType)
+		}
+		if !strings.Contains(card, "hx-confirm=\"Delete this ") {
+			t.Fatalf("expected %s delete action to include confirmation", channelType)
+		}
+	}
+}
+
 func TestChannelsPagePasswordToggleButtonStaysFixedOnActive(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 

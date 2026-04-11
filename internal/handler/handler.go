@@ -375,6 +375,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/channels", h.handleChannels)
 	e.POST("/channels/telegram", h.handleTelegramSave)
 	e.POST("/channels/telegram/test", h.handleTelegramTest)
+	e.POST("/channels/telegram/remove", h.handleTelegramRemove)
 	e.POST("/channels/telegram/send-responses", h.handleTelegramSendResponses)
 	e.POST("/channels/github/configure", h.handleGitHubConfigure)
 	e.GET("/channels/github/connect", h.handleGitHubConnect)

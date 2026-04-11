@@ -182,7 +182,8 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Forms with HTMX: always specify `method="post"`
 - `hx-on::after-request`: always check `event.detail.successful` before clearing inputs
 - Project `Repository Path` folder pickers must not use upload-oriented action labels (`Upload`). Keep folder-selection wording (`Choose Folder`/`Select Folder`) and use native picker intent messaging (selection, not upload).
-- Channels integration UX should not render provider cards by default when not added; keep provider discovery in the Add Channel chooser and show kebab edit/remove on active cards.
+- Channels integration UX should not render provider cards by default when not added; keep provider discovery in the Add Channel chooser and show kebab edit/delete on active cards.
+- Channels card destructive kebab actions must stay consistent with Models/Personality/Agents patterns: label `Delete` (never `Remove`), `text-error` styling, and `hx-confirm` confirmation copy for each provider.
 - Channels integration toggles (for example `*_send_responses`) must render from persisted settings state; do not hardcode checked defaults in templates or saves can silently re-enable disabled notifications.
 - In grouped dropdown menus that mix section headers (`menu-title`) and actions, keep every actionable row on a shared leading-slot pattern (for example a spinner/placeholder span) so labels remain consistently indented across sections/themes.
 - Slack bot-token source is explicit (`oauth` vs `manual`). Do not overload one setting key for both modes; keep OAuth token and manual override token separate so switching modes does not accidentally wipe a working OAuth connection.

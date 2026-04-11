@@ -154,10 +154,12 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 									<li>
 										<button
 											type="button"
+											class="text-error"
 											hx-post="/channels/github/remove"
 											hx-swap="none"
+											hx-confirm="Delete this GitHub channel configuration?"
 										>
-											Remove
+											Delete
 										</button>
 									</li>
 								</ul>
@@ -239,10 +241,12 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 									<li>
 										<button
 											type="button"
+											class="text-error"
 											hx-post="/channels/slack/remove"
 											hx-swap="none"
+											hx-confirm="Delete this Slack channel configuration?"
 										>
-											Remove
+											Delete
 										</button>
 									</li>
 								</ul>
@@ -318,6 +322,17 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 											hx-swap="innerHTML"
 										>
 											Test Connection
+										</button>
+									</li>
+									<li>
+										<button
+											type="button"
+											class="text-error"
+											hx-post="/channels/telegram/remove"
+											hx-swap="none"
+											hx-confirm="Delete this Telegram channel configuration?"
+										>
+											Delete
 										</button>
 									</li>
 								</ul>

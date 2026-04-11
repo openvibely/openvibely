@@ -109,3 +109,65 @@ func TestHandleTelegramSaveNonHTMXRedirectsToChannels(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "", token)
 }
+
+func TestHandleTelegramRemoveHTMXRefreshesChannelsAndClearsSettings(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	require.NoError(t, h.settingsRepo.Set(context.Background(), "telegram_bot_token", "test-token"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), "telegram_send_responses", "true"))
+
+	h.telegramService = &service.TelegramService{}
+
+	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/remove", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "true", rec.Header().Get("HX-Refresh"))
+	assert.Empty(t, rec.Header().Get("Location"))
+
+	token, err := h.settingsRepo.Get(context.Background(), "telegram_bot_token")
+	require.NoError(t, err)
+	assert.Equal(t, "", token)
+	sendResponses, err := h.settingsRepo.Get(context.Background(), "telegram_send_responses")
+	require.NoError(t, err)
+	assert.Equal(t, "", sendResponses)
+}
+
+func TestHandleTelegramRemoveNonHTMXRedirectsToChannelsAndClearsSettings(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	require.NoError(t, h.settingsRepo.Set(context.Background(), "telegram_bot_token", "test-token"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), "telegram_send_responses", "true"))
+
+	h.telegramService = &service.TelegramService{}
+
+	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/remove", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/channels", rec.Header().Get("Location"))
+
+	token, err := h.settingsRepo.Get(context.Background(), "telegram_bot_token")
+	require.NoError(t, err)
+	assert.Equal(t, "", token)
+	sendResponses, err := h.settingsRepo.Get(context.Background(), "telegram_send_responses")
+	require.NoError(t, err)
+	assert.Equal(t, "", sendResponses)
+}
+
+func TestHandleTelegramRemoveMissingSettingsRepoReturnsError(t *testing.T) {
+	e := echo.New()
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/remove", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.handleTelegramRemove(c)
+	require.Error(t, err)
+
+	httpErr, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusInternalServerError, httpErr.Code)
+}

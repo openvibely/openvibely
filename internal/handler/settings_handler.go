@@ -276,6 +276,23 @@ func (h *Handler) handleTelegramSendResponses(c echo.Context) error {
 	return c.String(http.StatusOK, "Setting saved")
 }
 
+func (h *Handler) handleTelegramRemove(c echo.Context) error {
+	if h.settingsRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
+	}
+	if h.telegramService != nil && h.telegramService.IsRunning() {
+		h.telegramService.Stop()
+	}
+	_ = h.settingsRepo.Set(c.Request().Context(), "telegram_bot_token", "")
+	_ = h.settingsRepo.Set(c.Request().Context(), "telegram_send_responses", "")
+
+	if isHTMX(c) {
+		c.Response().Header().Set("HX-Refresh", "true")
+		return c.NoContent(http.StatusOK)
+	}
+	return c.Redirect(http.StatusSeeOther, "/channels")
+}
+
 func (h *Handler) handleGitHubConnect(c echo.Context) error {
 	if h.githubSvc == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "GitHub integration is not configured")
