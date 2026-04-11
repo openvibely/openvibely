@@ -405,7 +405,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				</button>
 			</div>
 			<!-- Header: Row 2 – Week navigation controls -->
-			<div class="flex items-center gap-3">
+			<div class="flex items-center gap-2 opacity-60">
 				<button
 					if weekOffset == 0 {
 						disabled
@@ -414,21 +414,21 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					hx-target="#schedule-content"
 					hx-swap="outerHTML show:none swap:0ms"
 					hx-push-url="true"
-					class={ "btn btn-sm btn-outline", templ.KV("btn-disabled", weekOffset == 0) }
+					class={ "btn btn-xs btn-ghost", templ.KV("btn-disabled", weekOffset == 0) }
 					aria-label="Go to current week"
 				>
 					Today
 				</button>
-				<div class="flex items-center">
+				<div class="flex items-center gap-0">
 					<button
 						hx-get={ fmt.Sprintf("/schedule?project_id=%s&week=%d", projectID(currentProject), weekOffset-1) }
 						hx-target="#schedule-content"
 						hx-swap="outerHTML show:none swap:0ms"
 						hx-push-url="true"
-						class="btn btn-sm btn-ghost px-2"
+						class="btn btn-xs btn-ghost px-1"
 						aria-label="Previous week"
 					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
 						</svg>
 					</button>
@@ -437,15 +437,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						hx-target="#schedule-content"
 						hx-swap="outerHTML show:none swap:0ms"
 						hx-push-url="true"
-						class="btn btn-sm btn-ghost px-2"
+						class="btn btn-xs btn-ghost px-1"
 						aria-label="Next week"
 					>
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+						<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
 						</svg>
 					</button>
 				</div>
-				<span class="text-base font-semibold opacity-80 select-none">{ formatWeekRange(weekData.WeekDays) }</span>
+				<span class="text-sm select-none">{ formatWeekRange(weekData.WeekDays) }</span>
 			</div>
 		</div>
 

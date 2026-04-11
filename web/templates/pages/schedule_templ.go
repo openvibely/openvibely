@@ -488,11 +488,11 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"schedule-content\" class=\"flex flex-col h-full\"><!-- Header: Row 1 – Title + New Task button --><div class=\"flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto\"><div class=\"flex justify-between items-center mb-3\"><h2 class=\"text-2xl font-bold\">Schedule</h2><button class=\"btn btn-sm btn-primary\" onclick=\"openNewScheduledTaskModal()\"><span class=\"hidden sm:inline\">+ New Scheduled Task</span> <span class=\"sm:hidden\">+ New</span></button></div><!-- Header: Row 2 – Week navigation controls --><div class=\"flex items-center gap-3\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"schedule-content\" class=\"flex flex-col h-full\"><!-- Header: Row 1 – Title + New Task button --><div class=\"flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto\"><div class=\"flex justify-between items-center mb-3\"><h2 class=\"text-2xl font-bold\">Schedule</h2><button class=\"btn btn-sm btn-primary\" onclick=\"openNewScheduledTaskModal()\"><span class=\"hidden sm:inline\">+ New Scheduled Task</span> <span class=\"sm:hidden\">+ New</span></button></div><!-- Header: Row 2 – Week navigation controls --><div class=\"flex items-center gap-2 opacity-60\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var5 = []any{"btn btn-sm btn-outline", templ.KV("btn-disabled", weekOffset == 0)}
+		var templ_7745c5c3_Var5 = []any{"btn btn-xs btn-ghost", templ.KV("btn-disabled", weekOffset == 0)}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var5...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -533,7 +533,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" aria-label=\"Go to current week\">Today</button><div class=\"flex items-center\"><button hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" aria-label=\"Go to current week\">Today</button><div class=\"flex items-center gap-0\"><button hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -546,7 +546,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" hx-target=\"#schedule-content\" hx-swap=\"outerHTML show:none swap:0ms\" hx-push-url=\"true\" class=\"btn btn-sm btn-ghost px-2\" aria-label=\"Previous week\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 19l-7-7 7-7\"></path></svg></button> <button hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\" hx-target=\"#schedule-content\" hx-swap=\"outerHTML show:none swap:0ms\" hx-push-url=\"true\" class=\"btn btn-xs btn-ghost px-1\" aria-label=\"Previous week\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 19l-7-7 7-7\"></path></svg></button> <button hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -559,14 +559,14 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" hx-target=\"#schedule-content\" hx-swap=\"outerHTML show:none swap:0ms\" hx-push-url=\"true\" class=\"btn btn-sm btn-ghost px-2\" aria-label=\"Next week\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-5 w-5\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5l7 7-7 7\"></path></svg></button></div><span class=\"text-base font-semibold opacity-80 select-none\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" hx-target=\"#schedule-content\" hx-swap=\"outerHTML show:none swap:0ms\" hx-push-url=\"true\" class=\"btn btn-xs btn-ghost px-1\" aria-label=\"Next week\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5l7 7-7 7\"></path></svg></button></div><span class=\"text-sm select-none\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(formatWeekRange(weekData.WeekDays))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 448, Col: 101}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/schedule.templ`, Line: 448, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
