@@ -98,63 +98,104 @@ After startup:
 
 Set environment variables directly or place them in `.env` (loaded by `start.sh`).
 
-### Core Runtime
+### Runtime and Project Setup
 
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `3001` | HTTP port |
-| `DATABASE_PATH` | `./openvibely.db` | SQLite file path |
-| `ENVIRONMENT` | `development` | Runtime environment |
-| `PROJECT_REPO_ROOT` | `./repos` | Managed clone root for GitHub URL projects |
-| `OPENVIBELY_PLUGIN_ROOT` | app-local default | Plugin root override |
+| Variable | Purpose | Allowed values | Default behavior (from code) | Examples (local / VPS-public) |
+|---|---|---|---|---|
+| `PORT` | HTTP listen port | Any valid TCP port string | `3001` (`internal/config/config.go`; Docker image overrides to `3001`) | `3001` \| `8080` |
+| `DATABASE_PATH` | SQLite database file path | Filesystem path | `./openvibely.db` | `./openvibely.db` \| `/var/lib/openvibely/openvibely.db` |
+| `DATABASE_URL` | Reserved config field (currently loaded but not used by server startup) | String | Empty (`""`) when unset | unset \| unset |
+| `ENVIRONMENT` | Runtime environment label | Free-form string | `development` (`start.sh` also defaults to `development`; Docker image sets `production`) | `development` \| `production` |
+| `PROJECT_REPO_ROOT` | Managed clone root for GitHub URL projects | Filesystem path | `./repos` | `./repos` \| `/var/lib/openvibely/repos` |
+| `OPENVIBELY_PLUGIN_ROOT` | App-local plugin root override | Filesystem path (absolute or relative) | Unset = app-local plugin root (`.openvibely/plugins` under runtime base) | `./.openvibely/plugins` \| `/var/lib/openvibely/plugins` |
+| `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` | Enables Local Path source mode in project setup | `1,true,yes,on,0,false,no,off` | Unset/invalid = `false`; `start.sh` exports `true` unless overridden in `.env` | `true` \| `false` |
+| `OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS` | Shows merge options in task `Changes` tab | `1,true,yes,on,0,false,no,off` | Unset/invalid = `false`; `start.sh` exports `true` unless overridden in `.env` | `true` \| `false` |
+| `OPENVIBELY_CODEX_REASONING_EFFORT` | Fallback reasoning effort for Codex requests when model config does not set one | `low`, `medium`, `high`, `xhigh` | If unset/invalid, defaults to `high` | `high` \| `medium` |
 
-### Feature Flags
+### OAuth and Deployment Variables
 
-| Variable | Default | Description |
-|---|---|---|
-| `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` | `true` via `start.sh`; otherwise `false` | Enables local-path project source mode |
-| `OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS` | `true` via `start.sh`; otherwise `false` | Shows merge options in task `Changes` tab |
-| `APP_BASE_URL` | unset | Public base URL for hosted deployments (for OAuth callback URL generation), for example `https://dubee.org` |
-| `OAUTH_REDIRECT_MODE` | `auto` | OAuth callback strategy: `auto` (uses hosted callbacks when `APP_BASE_URL` is set), `hosted` (force hosted callbacks), `localhost_manual` (force localhost redirect URIs and complete by pasting callback URL in UI) |
-| `ANTHROPIC_OAUTH_CLIENT_ID` | unset | Optional Anthropic hosted OAuth client ID override (in `auto/hosted` mode only); falls back to built-in client |
-| `ANTHROPIC_OAUTH_CLIENT_SECRET` | unset | Optional Anthropic hosted OAuth client secret |
-| `ANTHROPIC_OAUTH_AUTHORIZE_URL` | `https://claude.ai/oauth/authorize` | Optional Anthropic hosted OAuth authorize endpoint override |
-| `ANTHROPIC_OAUTH_TOKEN_URL` | `https://platform.claude.com/v1/oauth/token` | Optional Anthropic hosted OAuth token endpoint override |
-| `ANTHROPIC_OAUTH_SCOPES` | built-in default | Optional Anthropic hosted OAuth scope override |
-| `OPENAI_OAUTH_CLIENT_ID` | unset | Optional OpenAI hosted OAuth client ID override (in `auto/hosted` mode only); falls back to built-in Codex client |
-| `OPENAI_OAUTH_CLIENT_SECRET` | unset | Optional OpenAI hosted OAuth client secret |
-| `OPENAI_OAUTH_AUTHORIZE_URL` | `https://auth.openai.com/oauth/authorize` | Optional OpenAI hosted OAuth authorize endpoint override |
-| `OPENAI_OAUTH_TOKEN_URL` | `https://auth.openai.com/oauth/token` | Optional OpenAI hosted OAuth token endpoint override |
-| `OPENAI_OAUTH_SCOPES` | built-in default | Optional OpenAI hosted OAuth scope override |
+| Variable | Purpose | Allowed values | Default behavior (from code) | Examples (local / VPS-public) |
+|---|---|---|---|---|
+| `APP_BASE_URL` | External origin used for absolute callback/redirect URLs | Absolute `http://` or `https://` URL, no query/fragment/userinfo | Unset/invalid -> ignored; app falls back to forwarded/request host. OAuth `auto` then uses localhost mode when no valid base URL is available | unset \| `https://app.example.com` |
+| `OAUTH_REDIRECT_MODE` | OAuth callback strategy | `auto`, `hosted`, `localhost_manual` | Unset/invalid -> `auto`; invalid values are logged and treated as `auto`; `hosted` without `APP_BASE_URL` returns `400` on OAuth initiate | `localhost_manual` or `auto` \| `auto` or `hosted` |
+| `ANTHROPIC_OAUTH_CLIENT_ID` | Hosted Anthropic OAuth client ID override | String | Used only for hosted callback mode; fallback is built-in Anthropic client ID | unset \| `your_anthropic_client_id` |
+| `ANTHROPIC_OAUTH_CLIENT_SECRET` | Hosted Anthropic OAuth client secret override | String | Used only for hosted callback mode; default empty | unset \| `your_anthropic_client_secret` |
+| `ANTHROPIC_OAUTH_AUTHORIZE_URL` | Anthropic authorize endpoint override | URL string | `https://claude.ai/oauth/authorize` | unset \| `https://claude.ai/oauth/authorize` |
+| `ANTHROPIC_OAUTH_TOKEN_URL` | Anthropic token endpoint override | URL string | `https://platform.claude.com/v1/oauth/token` | unset \| `https://platform.claude.com/v1/oauth/token` |
+| `ANTHROPIC_OAUTH_SCOPES` | Anthropic scopes override | Space-delimited scope string | `user:profile user:inference user:sessions:claude_code user:mcp_servers` | unset \| provider-specific scopes |
+| `OPENAI_OAUTH_CLIENT_ID` | Hosted OpenAI OAuth client ID override | String | Used only for hosted callback mode; fallback is built-in Codex client ID | unset \| `your_openai_client_id` |
+| `OPENAI_OAUTH_CLIENT_SECRET` | Hosted OpenAI OAuth client secret override | String | Used only for hosted callback mode; default empty | unset \| `your_openai_client_secret` |
+| `OPENAI_OAUTH_AUTHORIZE_URL` | OpenAI authorize endpoint override | URL string | `https://auth.openai.com/oauth/authorize` | unset \| `https://auth.openai.com/oauth/authorize` |
+| `OPENAI_OAUTH_TOKEN_URL` | OpenAI token endpoint override | URL string | `https://auth.openai.com/oauth/token` | unset \| `https://auth.openai.com/oauth/token` |
+| `OPENAI_OAUTH_SCOPES` | OpenAI scopes override | Space-delimited scope string | `openid profile email offline_access api.connectors.read api.connectors.invoke` | unset \| provider-specific scopes |
 
-### Integration/Provider Variables
+OAuth callback mode behavior summary:
+- `auto`: uses hosted callbacks only when `APP_BASE_URL` resolves to a valid absolute URL; otherwise uses localhost callback flow.
+- `hosted`: always uses hosted callbacks and requires `APP_BASE_URL`.
+- `localhost_manual`: always uses localhost redirect URIs and expects manual callback URL paste in UI.
 
-| Variable | Description |
-|---|---|
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
-| `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` | GitHub App mode settings |
-| `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN` | Slack OAuth/Socket/manual token settings |
+### Integration and Provider Bootstrap Variables
 
-### Git/GitHub Clone Settings
+| Variable | Purpose | Allowed values | Default behavior (from code) | Examples (local / VPS-public) |
+|---|---|---|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API key convenience input (also used as vision fallback when no vision-capable model is configured) | String | Empty by default | `sk-ant-...` \| secret via env/vault |
+| `TELEGRAM_BOT_TOKEN` | Bootstraps Telegram bot token | String | Empty by default; if empty, app can use token saved in Settings DB | unset \| `123456:ABC-DEF...` |
+| `GITHUB_APP_ID` | GitHub App auth bootstrap | String | Empty by default | unset \| `123456` |
+| `GITHUB_APP_SLUG` | GitHub App slug bootstrap | String | Empty by default | unset \| `your-github-app` |
+| `GITHUB_APP_PRIVATE_KEY` | GitHub App private key bootstrap | PEM string | Empty by default | unset \| `-----BEGIN RSA PRIVATE KEY-----...` |
+| `SLACK_CLIENT_ID` | Slack OAuth client ID bootstrap | String | Empty by default | unset \| `1234567890.1234567890` |
+| `SLACK_CLIENT_SECRET` | Slack OAuth client secret bootstrap | String | Empty by default | unset \| `your_slack_client_secret` |
+| `SLACK_APP_TOKEN` | Slack Socket Mode app token bootstrap | String | Empty by default | unset \| `xapp-...` |
+| `SLACK_BOT_TOKEN` | Slack manual bot token override bootstrap | String | Empty by default; when set, startup stores override token and marks token source as manual | unset \| `xoxb-...` |
 
-Git operations (cloning GitHub repositories) automatically detect and use the system's SSL CA bundle from standard OS locations. **If no valid CA bundle is found, SSL verification is automatically disabled** to prevent clone failures (with a warning logged).
+### Git/GitHub Clone SSL Variables
 
-To explicitly configure SSL behavior:
+Git operations (especially GitHub clone/fetch paths) auto-detect system CA bundles. If no valid CA bundle is found, OpenVibely falls back to `GIT_SSL_NO_VERIFY=true` and logs a warning.
 
-| Variable | Description |
-|---|---|
-| `GIT_SSL_CAINFO` | Path to SSL CA certificate bundle file (e.g., `/etc/ssl/certs/ca-certificates.crt`) |
-| `SSL_CERT_FILE` | Alternative SSL certificate file path |
-| `GIT_SSL_NO_VERIFY` | Set to `true` to explicitly disable SSL verification, or `false` to enforce it |
+| Variable | Purpose | Allowed values | Default behavior (from code) | Examples (local / VPS-public) |
+|---|---|---|---|---|
+| `GIT_SSL_CAINFO` | Explicit CA bundle path for git TLS verification | Filesystem path | If set in environment, it is respected and auto-detection is skipped | `/etc/ssl/certs/ca-certificates.crt` \| `/etc/ssl/certs/ca-certificates.crt` |
+| `SSL_CERT_FILE` | Alternate certificate file path recognized by git/TLS tooling | Filesystem path | If present, auto-detection is skipped | unset \| `/etc/ssl/certs/ca-bundle.crt` |
+| `GIT_SSL_NO_VERIFY` | Explicit TLS verification override for git | `true`/`false` (string) | If unset and no CA bundle is found, app appends `GIT_SSL_NO_VERIFY=true` as last resort | unset \| `false` (preferred) |
 
 Auto-detected CA bundle locations by OS:
 - Debian/Ubuntu/Alpine: `/etc/ssl/certs/ca-certificates.crt`
 - RHEL/CentOS: `/etc/pki/tls/certs/ca-bundle.crt`
 - OpenSUSE: `/etc/ssl/ca-bundle.pem`
+- OpenBSD (if present): `/etc/ssl/cert.pem`
 - FreeBSD: `/usr/local/share/certs/ca-root-nss.crt`
 
-**Note**: The automatic fallback to `GIT_SSL_NO_VERIFY=true` is a pragmatic default for self-hosted deployments where misconfigured Git/SSL can block cloning. For production use with sensitive repositories, ensure a valid CA bundle is available or set `GIT_SSL_CAINFO` explicitly.
+### OAuth Callback Troubleshooting
+
+If OAuth opens or returns to `localhost` on a remote deployment:
+
+1. Set `APP_BASE_URL` to your public app origin (for example `https://app.example.com`).
+2. Leave `OAUTH_REDIRECT_MODE=auto` (recommended) or set `OAUTH_REDIRECT_MODE=hosted`.
+3. If you set `hosted`, ensure `APP_BASE_URL` is set and valid, otherwise `/models/:id/oauth/initiate` fails with `OAUTH_REDIRECT_MODE=hosted requires APP_BASE_URL`.
+4. For OpenAI hosted callbacks, ensure your OAuth app allows `<APP_BASE_URL>/auth/callback`; for Anthropic hosted callbacks, allow `<APP_BASE_URL>/callback`.
+5. If you intentionally want localhost callback URIs on a remote box, set `OAUTH_REDIRECT_MODE=localhost_manual` and finish by pasting the callback URL in the Models UI.
+6. If `APP_BASE_URL` includes query, fragment, userinfo, or non-http(s), it is treated as invalid and ignored; fix it to an absolute `http(s)` origin.
+
+Minimal deployment examples:
+
+```bash
+# Local development (default localhost callback behavior)
+PORT=3001
+DATABASE_PATH=./openvibely.db
+# APP_BASE_URL unset
+OAUTH_REDIRECT_MODE=auto
+
+# VPS/public hostname (hosted OAuth callbacks)
+PORT=8080
+DATABASE_PATH=/var/lib/openvibely/openvibely.db
+APP_BASE_URL=https://app.example.com
+OAUTH_REDIRECT_MODE=auto
+# Optional hosted OAuth client overrides:
+# OPENAI_OAUTH_CLIENT_ID=...
+# ANTHROPIC_OAUTH_CLIENT_ID=...
+```
+
+**Security note**: The `GIT_SSL_NO_VERIFY=true` fallback is intended to keep self-hosted setups usable when CA bundles are missing. For production with sensitive repositories, install a valid CA bundle and set `GIT_SSL_CAINFO` explicitly.
 
 ## UI User Guides
 
