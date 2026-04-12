@@ -165,10 +165,21 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		agents, _ = h.agentRepo.List(c.Request().Context())
 	}
 
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, resolvedProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, webhooks, agents))
+	webhookAgents := map[string][]models.WebhookEndpointAgent{}
+	if h.webhookRepo != nil {
+		for _, wh := range webhooks {
+			list, err := h.webhookRepo.GetEndpointAgents(c.Request().Context(), wh.ID)
+			if err != nil {
+				continue
+			}
+			webhookAgents[wh.ID] = list
+		}
 	}
-	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, webhooks, agents))
+
+	if isHTMX(c) {
+		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, resolvedProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, webhooks, agents, webhookAgents))
+	}
+	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, webhooks, agents, webhookAgents))
 }
 
 // handleAppSettings renders the application settings page (personality, etc.)

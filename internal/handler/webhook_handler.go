@@ -305,7 +305,7 @@ func (h *Handler) HandleWebhookCreate(c echo.Context) error {
 	}
 
 	// Save agent assignments
-	agentIDs := parseAgentIDList(c.FormValue("agent_ids"))
+	agentIDs := parseWebhookAgentIDs(c)
 	if len(agentIDs) > 0 {
 		_ = h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, agentIDs)
 	}
@@ -346,7 +346,7 @@ func (h *Handler) HandleWebhookUpdate(c echo.Context) error {
 	}
 
 	// Update agent assignments
-	agentIDs := parseAgentIDList(c.FormValue("agent_ids"))
+	agentIDs := parseWebhookAgentIDs(c)
 	_ = h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, agentIDs)
 
 	if isHTMX(c) {
@@ -447,12 +447,35 @@ func (h *Handler) HandleWebhookTest(c echo.Context) error {
 	return c.JSON(http.StatusAccepted, map[string]string{"task_id": task.ID})
 }
 
+func parseWebhookAgentIDs(c echo.Context) []string {
+	params, err := c.FormParams()
+	if err != nil {
+		return parseAgentIDList(c.FormValue("agent_ids"))
+	}
+	values := params["agent_ids"]
+	if len(values) == 0 {
+		return parseAgentIDList(c.FormValue("agent_ids"))
+	}
+	var result []string
+	seen := map[string]struct{}{}
+	for _, raw := range values {
+		for _, id := range parseAgentIDList(raw) {
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
 func parseAgentIDList(val string) []string {
 	if val == "" {
 		return nil
 	}
 	parts := strings.Split(val, ",")
-	var result []string
+	result := make([]string, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
 		if p != "" {

@@ -184,6 +184,10 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - Title/prompt support template variables: `{{event_type}}`, `{{summary}}`, `{{name}}`.
 - CRUD routes: `POST /channels/webhooks`, `PUT /channels/webhooks/:id`, `DELETE /channels/webhooks/:id`, `POST /channels/webhooks/:id/rotate-secret`, `POST /channels/webhooks/:id/test`.
 - Channels page renders one card per webhook endpoint with Edit/Rotate Secret/Test/Delete actions. "Webhook" appears in Add Channel menu alongside GitHub/Slack/Telegram.
+- Webhook cards no longer render raw inbound endpoint URL text; cards expose a `Copy URL` action that copies the absolute inbound endpoint URL with toast success/failure feedback.
+- Webhook card status row now shows only badge state (`Active` / `Disabled`) and uses the same badge class ordering/treatment as other channel cards (`badge badge-sm badge-success` parity with `Connected`).
+- Webhook modal no longer exposes `Title Template` / `Prompt Template` fields in UI; backend request handling remains backward-compatible with these optional form keys.
+- Webhook modal agent assignment uses a multi-select `Agents` dropdown populated from current project agents; legacy free-text comma-separated input and "Available agents" helper list are removed.
 - `TaskOriginWebhook = "webhook"` constant in `models/webhook.go`.
 - Future: true multi-agent execution runtime can read `task_agent_assignments` to run multiple agents per task.
 

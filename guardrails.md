@@ -381,6 +381,9 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - `HandleWebhookInbound` must nil-guard `h.taskRepo` before creating tasks. If missing, return `500 {"error":"internal error"}`; do not dereference and panic.
 - Repo test helpers in `webhook_repo_test.go` use `createWebhookTestProject`/`createWebhookTestAgent` prefix to avoid name collisions with `alert_repo_test.go` helpers in same package.
 - Template `settings.templ` passes `webhooks []models.WebhookEndpoint, agents []models.Agent` to all three template functions (SettingsPage, SettingsContent, settingsContent).
+- Webhook cards must never render raw endpoint URL text (`/webhooks/inbound/...`) in visible card content; only expose copy actions that build/copy the full absolute URL.
+- Keep webhook card badge styling in class-order parity with other channel badges (`badge badge-sm badge-success` for active/connected semantics).
+- Do not reintroduce webhook modal `Title Template` / `Prompt Template` inputs or legacy free-text `Agents (comma-separated IDs)` + available-agents helper list; webhook agent assignment UI must remain dropdown/multi-select based.
 
 ## Repo Workflow
 

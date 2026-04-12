@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -36,11 +37,13 @@ func TestSettingsContent_RendersSlackMenuCardAndModal(t *testing.T) {
 		true,
 		true,
 		true,
-		true,
-		false,
-		false,
-		true,
-	).Render(context.Background(), &buf)
+			true,
+			false,
+			false,
+			true,
+			nil,
+			nil,
+		).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}

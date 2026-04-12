@@ -1,7 +1,9 @@
 package pages
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -76,18 +78,46 @@ func telegramChannelStatusText(isBotRunning bool) string {
 	return "Not Running"
 }
 
-templ SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, sendResponses bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent) {
+func selectedWebhookAgentIDs(webhooks []models.WebhookEndpoint, webhookAgents map[string][]models.WebhookEndpointAgent, webhookID string) string {
+	agents := webhookAgents[webhookID]
+	if len(agents) == 0 {
+		return ""
+	}
+	ids := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		ids = append(ids, agent.AgentDefinitionID)
+	}
+	return strings.Join(ids, ",")
+}
+
+func agentsJSON(agents []models.Agent) string {
+	type agentData struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	data := make([]agentData, len(agents))
+	for i, agent := range agents {
+		data[i] = agentData{ID: agent.ID, Name: agent.Name}
+	}
+	b, err := json.Marshal(data)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
+}
+
+templ SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, sendResponses bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent) {
 	@layout.Base("Channels", projects, currentProjectID) {
-		@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, webhooks, agents)
+		@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, webhooks, agents, webhookAgents)
 	}
 }
 
 // SettingsContent renders just the settings content for HTMX requests
-templ SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent) {
-	@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, webhooks, agents)
+templ SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent) {
+	@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, currentProjectID, sendResponses, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, webhooks, agents, webhookAgents)
 }
 
-templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent) {
+templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, currentProjectID string, sendResponses bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent) {
 	<div id="channels-container" data-search-container>
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Channels</h2>
@@ -383,9 +413,8 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						data-webhook-token={ wh.PathToken }
 						data-webhook-secret={ wh.Secret }
 						data-webhook-system={ wh.SystemInstructions }
-						data-webhook-title-template={ wh.TitleTemplate }
-						data-webhook-prompt-template={ wh.PromptTemplate }
 						data-webhook-default-priority={ fmt.Sprintf("%d", wh.DefaultPriority) }
+						data-webhook-agent-ids={ selectedWebhookAgentIDs(webhooks, webhookAgents, wh.ID) }
 					onclick={ templ.ComponentScript{Call: fmt.Sprintf("openWebhookEditModal('%s')", wh.ID)} }
 				>
 				<div class="card-body relative">
@@ -437,22 +466,17 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
 								</svg>
 								{ wh.Name }
-							</h3>
-							<p class="text-sm opacity-60 mt-1">
-								if wh.Enabled {
-									<span class="badge badge-success badge-xs mr-1">Active</span>
-								} else {
-									<span class="badge badge-ghost badge-xs mr-1">Disabled</span>
-								}
-								Inbound webhook endpoint
-							</p>
-							<div class="mt-2">
-								<div class="text-xs opacity-60 mb-1">URL</div>
-								<div class="flex items-start gap-2">
-									<code class="text-xs bg-base-200 px-2 py-1 rounded break-all flex-1" id={ "webhook-url-card-" + wh.ID }>{ "/webhooks/inbound/" + wh.PathToken }</code>
-									<button type="button" class="btn btn-xs" onclick={ templ.ComponentScript{Call: fmt.Sprintf("copyWebhookRelativeUrl('webhook-url-card-%s', this)", wh.ID)} }>Copy</button>
+								</h3>
+								<div class="mt-2 flex items-center gap-2">
+									if wh.Enabled {
+										<span class="badge badge-sm badge-success">Active</span>
+									} else {
+										<span class="badge badge-sm badge-ghost">Disabled</span>
+									}
 								</div>
-							</div>
+								<div class="mt-2" onclick="event.stopPropagation()">
+									<button type="button" class="btn btn-xs" onclick={ templ.ComponentScript{Call: fmt.Sprintf("copyWebhookEndpointUrl('%s', this)", wh.ID)} }>Copy URL</button>
+								</div>
 							<div id={ "webhook-test-" + wh.ID } class="mt-2"></div>
 						</div>
 					</div>
@@ -884,93 +908,126 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 
 		<!-- Webhook Configuration Modal -->
 		<dialog id="webhook_modal" class="modal">
-			<div class="modal-box w-11/12 max-w-2xl">
-				<form method="dialog">
-					<button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
-				</form>
-				<h3 class="font-bold text-lg mb-4" id="webhook_modal_title">Add Webhook</h3>
-				<form id="webhook_form" hx-post={ "/channels/webhooks?project_id=" + currentProjectID } hx-swap="none" data-project-id={ currentProjectID }>
+			<div class="modal-box max-w-4xl p-0 overflow-hidden">
+				<div class="px-6 pt-6 pb-2">
+					<h3 id="webhook_modal_title" class="font-bold text-lg">Add Webhook</h3>
+				</div>
+				<form id="webhook_form" hx-post={ "/channels/webhooks?project_id=" + currentProjectID } hx-swap="none" data-project-id={ currentProjectID } class="flex flex-col h-[78vh]">
 					<input type="hidden" name="project_id" value={ currentProjectID }/>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">Name</span></label>
-						<input type="text" id="webhook_name" name="name" class="input input-bordered w-full" placeholder="e.g. PagerDuty Alerts" required/>
+					<div class="px-6 pb-3 border-b border-base-300">
+						<div role="tablist" class="tabs tabs-bordered tabs-sm w-full overflow-x-auto flex-nowrap">
+							<button type="button" role="tab" class="tab tab-active" data-webhook-section-tab="config" aria-selected="true" onclick="setWebhookSection('config')">Webhook Config</button>
+							<button type="button" role="tab" class="tab" data-webhook-section-tab="agents" aria-selected="false" onclick="setWebhookSection('agents')">Agents</button>
+						</div>
 					</div>
-					<div class="form-control mb-3">
-						<label class="label cursor-pointer justify-start gap-2">
-							<input type="checkbox" id="webhook_enabled" name="enabled" value="true" class="toggle toggle-primary" checked/>
-							<span class="label-text">Enabled</span>
-						</label>
-					</div>
-						<div class="form-control mb-3" id="webhook_url_row" style="display:none">
-							<label class="label"><span class="label-text">Webhook URL</span></label>
-							<div class="join w-full">
-								<div class="text-sm font-mono bg-base-200 p-2 rounded-l break-all join-item flex-1" id="webhook_url_display">
-									(Save first to generate URL)
+
+					<div class="flex-1 min-h-0 px-6 py-3">
+						<div data-webhook-section-panel="config" class="h-full overflow-y-auto pr-1">
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Name</span></label>
+								<input type="text" id="webhook_name" name="name" class="input input-bordered w-full" placeholder="e.g. PagerDuty Alerts" required/>
+							</div>
+							<div class="form-control mb-3">
+								<label class="label cursor-pointer justify-start gap-2">
+									<input type="checkbox" id="webhook_enabled" name="enabled" value="true" class="toggle toggle-primary" checked/>
+									<span class="label-text">Enabled</span>
+								</label>
+							</div>
+							<div class="form-control mb-3" id="webhook_url_row" style="display:none">
+								<label class="label"><span class="label-text">Webhook URL</span></label>
+								<div class="join w-full">
+									<div class="text-sm font-mono bg-base-200 p-2 rounded-l break-all join-item flex-1" id="webhook_url_display">
+										(Save first to generate URL)
+									</div>
+									<button type="button" class="btn btn-sm join-item" id="webhook_url_copy_btn" onclick="copyWebhookAbsoluteUrl('webhook_url_display', this)">Copy</button>
 								</div>
-								<button type="button" class="btn btn-sm join-item" id="webhook_url_copy_btn" onclick="copyWebhookAbsoluteUrl('webhook_url_display', this)">Copy</button>
+							</div>
+							<div class="form-control mb-3" id="webhook_secret_row" style="display:none">
+								<label class="label"><span class="label-text">Secret</span></label>
+								<div class="relative">
+									<input
+										type="password"
+										id="webhook_secret_display"
+										class="input input-bordered w-full pr-10 font-mono text-sm"
+										readonly
+										placeholder="(Secret is set on creation)"
+									/>
+									<button
+										type="button"
+										class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2"
+										onclick="togglePasswordVisibility('webhook_secret_display', this)"
+										tabindex="-1"
+										aria-label="Toggle secret visibility"
+									>
+										<svg class="eye-open h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+										</svg>
+										<svg class="eye-closed h-4 w-4 hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
+										</svg>
+									</button>
+								</div>
+							</div>
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">System Instructions</span></label>
+								<textarea id="webhook_system_instructions" name="system_instructions" class="textarea textarea-bordered w-full h-20" placeholder="Optional system context for the agent..."></textarea>
+							</div>
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Default Priority</span></label>
+								<select id="webhook_default_priority" name="default_priority" class="select select-bordered w-full">
+									<option value="0">Urgent (0)</option>
+									<option value="1">High (1)</option>
+									<option value="2" selected>Medium (2)</option>
+									<option value="3">Low (3)</option>
+									<option value="4">Backlog (4)</option>
+								</select>
 							</div>
 						</div>
-					<div class="form-control mb-3" id="webhook_secret_row" style="display:none">
-						<label class="label"><span class="label-text">Secret</span></label>
-						<div class="text-sm font-mono bg-base-200 p-2 rounded break-all" id="webhook_secret_display">
-							(Secret is set on creation)
+
+						<div data-webhook-section-panel="agents" class="h-full overflow-y-auto pr-1 hidden">
+							<div class="space-y-3">
+								<div class="border border-base-300 rounded-lg p-3">
+									<div class="flex items-center justify-between mb-2">
+										<p class="text-sm font-medium">Agents</p>
+										<p id="webhook_agent_selected_count" class="text-xs opacity-60">No agents selected</p>
+									</div>
+									<div class="mb-2">
+										<input
+											type="text"
+											id="webhook_agent_search_input"
+											class="input input-bordered input-sm w-full"
+											placeholder="Search agents by name"
+											oninput="renderWebhookAgentList()"
+										/>
+									</div>
+									<div id="webhook_agent_list" class="space-y-2 max-h-[500px] overflow-auto"></div>
+								</div>
+							</div>
 						</div>
 					</div>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">System Instructions</span></label>
-						<textarea id="webhook_system_instructions" name="system_instructions" class="textarea textarea-bordered w-full h-20" placeholder="Optional system context for the agent..."></textarea>
-					</div>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">Title Template</span></label>
-						<input type="text" id="webhook_title_template" name="title_template" class="input input-bordered w-full" placeholder="e.g. {{name}}: {{event_type}} - {{summary}}"/>
-						<label class="label"><span class="label-text-alt">Available: {"{{name}}"}, {"{{event_type}}"}, {"{{summary}}"}</span></label>
-					</div>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">Prompt Template</span></label>
-						<textarea id="webhook_prompt_template" name="prompt_template" class="textarea textarea-bordered w-full h-20" placeholder="Optional prompt template. Raw JSON payload is always appended."></textarea>
-					</div>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">Default Priority</span></label>
-						<select id="webhook_default_priority" name="default_priority" class="select select-bordered w-full">
-							<option value="0">Urgent (0)</option>
-							<option value="1">High (1)</option>
-							<option value="2" selected>Medium (2)</option>
-							<option value="3">Low (3)</option>
-							<option value="4">Backlog (4)</option>
-						</select>
-					</div>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">Agents (comma-separated IDs)</span></label>
-						<input type="text" id="webhook_agent_ids" name="agent_ids" class="input input-bordered w-full" placeholder="agent-id-1, agent-id-2"/>
-						<label class="label">
-							<span class="label-text-alt">
-								Available:
-								for i, agent := range agents {
-									if i > 0 {
-										{ ", " }
-									}
-									<code class="text-xs bg-base-200 px-1 rounded">{ agent.ID }</code>
-									<span class="text-xs opacity-60">({ agent.Name })</span>
-								}
-							</span>
-						</label>
-					</div>
-					<div class="modal-action">
-						<button type="button" class="btn" onclick="closeWebhookModal()">Cancel</button>
-						<button type="submit" class="btn btn-primary">Save Webhook</button>
+					<input type="hidden" id="webhook_agent_ids_hidden" name="agent_ids"/>
+
+					<div class="modal-action mt-0 sticky bottom-0 z-10 border-t border-base-300 bg-base-100 px-6 py-3">
+						<form method="dialog" class="inline">
+							<button type="button" class="btn" onclick="closeWebhookModal()">Cancel</button>
+						</form>
+						<button type="submit" class="btn btn-primary" onclick="serializeWebhookAgentData()">Save Webhook</button>
 					</div>
 				</form>
 			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button>close</button>
-			</form>
-		</dialog>
+		<form method="dialog" class="modal-backdrop">
+			<button>close</button>
+		</form>
+	</dialog>
 
-		<style>
-			.dropdown-content {
-				display: none;
-			}
-			.dropdown-content.show {
+	<!-- Webhook available agents data for JavaScript -->
+	<div id="webhook_agents_data" data-agents={ agentsJSON(agents) } style="display:none"></div>
+
+	<style>
+		.dropdown-content {
+			display: none;
+		}			.dropdown-content.show {
 				display: block;
 			}
 			/* Keep password toggle button fixed inside input across press/focus states */
@@ -985,6 +1042,116 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 		</style>
 
 		<script>
+			// Webhook agent state
+			let webhookAvailableAgents = [];
+			let selectedWebhookAgentIDs = [];
+			let activeWebhookSection = 'config';
+
+			function setWebhookSection(sectionName) {
+				const sectionNameMap = {
+					config: 'config',
+					agents: 'agents'
+				};
+				const nextSection = sectionNameMap[sectionName] || 'config';
+				activeWebhookSection = nextSection;
+				document.querySelectorAll('[data-webhook-section-tab]').forEach(tab => {
+					const isActive = tab.dataset.webhookSectionTab === nextSection;
+					tab.classList.toggle('tab-active', isActive);
+					tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+				});
+				document.querySelectorAll('[data-webhook-section-panel]').forEach(panel => {
+					panel.classList.toggle('hidden', panel.dataset.webhookSectionPanel !== nextSection);
+				});
+			}
+
+			function renderWebhookAgentList() {
+				const root = document.getElementById('webhook_agent_list');
+				if (!root) return;
+
+				const searchTerm = (document.getElementById('webhook_agent_search_input')?.value || '').toLowerCase();
+				const filteredAgents = webhookAvailableAgents.filter(agent => {
+					if (!searchTerm) return true;
+					return (agent.name || '').toLowerCase().includes(searchTerm) ||
+						(agent.id || '').toLowerCase().includes(searchTerm);
+				});
+
+				let html = '';
+				if (filteredAgents.length === 0) {
+					html = '<p class="text-xs opacity-60 py-2">No agents found.</p>';
+				} else {
+					html = filteredAgents.map(agent => {
+						const checked = selectedWebhookAgentIDs.includes(agent.id) ? 'checked' : '';
+						return `
+							<div class="border border-base-300 rounded-lg px-3 py-2 mb-2">
+								<div class="flex items-center justify-between gap-3">
+									<div class="flex items-center gap-2 min-w-0 flex-1">
+										<span class="font-medium text-sm truncate" title="${escapeHtml(agent.id)}">${escapeHtml(agent.name)}</span>
+										<span class="text-[11px] opacity-60 truncate">${escapeHtml(agent.id)}</span>
+									</div>
+									<input
+										type="checkbox"
+										class="toggle toggle-sm toggle-primary webhook-agent-checkbox"
+										value="${escapeHtml(agent.id)}"
+										aria-label="Enable ${escapeHtml(agent.name)}"
+										${checked}
+										onchange="refreshSelectedWebhookAgentsFromDOM()"
+									/>
+								</div>
+							</div>`;
+					}).join('');
+				}
+
+				root.innerHTML = html;
+				renderWebhookSelectedAgentCount();
+			}
+
+			function refreshSelectedWebhookAgentsFromDOM() {
+				const checkboxes = document.querySelectorAll('.webhook-agent-checkbox');
+				selectedWebhookAgentIDs = Array.from(checkboxes)
+					.filter(cb => cb.checked)
+					.map(cb => cb.value);
+				renderWebhookSelectedAgentCount();
+			}
+
+			function renderWebhookSelectedAgentCount() {
+				const countEl = document.getElementById('webhook_agent_selected_count');
+				if (!countEl) return;
+				const count = selectedWebhookAgentIDs.length;
+				if (count === 0) {
+					countEl.textContent = 'No agents selected';
+				} else if (count === 1) {
+					countEl.textContent = '1 agent selected';
+				} else {
+					countEl.textContent = count + ' agents selected';
+				}
+			}
+
+			function serializeWebhookAgentData() {
+				// Collect selected agent IDs from toggles and put into hidden field
+				const hiddenField = document.getElementById('webhook_agent_ids_hidden');
+				if (hiddenField) {
+					hiddenField.value = selectedWebhookAgentIDs.join(',');
+				}
+			}
+
+		function escapeHtml(text) {
+			const div = document.createElement('div');
+			div.textContent = text || '';
+			return div.innerHTML;
+		}
+
+		function initializeWebhookAgents() {
+			if (webhookAvailableAgents.length > 0) return; // Already initialized
+			const dataEl = document.getElementById('webhook_agents_data');
+			if (!dataEl) return;
+			try {
+				const agentsJSON = dataEl.getAttribute('data-agents');
+				webhookAvailableAgents = JSON.parse(agentsJSON || '[]');
+			} catch (e) {
+				console.error('Failed to parse webhook agents data:', e);
+				webhookAvailableAgents = [];
+			}
+		}
 			function togglePasswordVisibility(inputId, button) {
 				const input = document.getElementById(inputId);
 				const eyeOpen = button.querySelector('.eye-open');
@@ -1054,16 +1221,20 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					document.getElementById('webhook_name').value = '';
 					document.getElementById('webhook_enabled').checked = true;
 					document.getElementById('webhook_system_instructions').value = '';
-					document.getElementById('webhook_title_template').value = '';
-					document.getElementById('webhook_prompt_template').value = '';
 					document.getElementById('webhook_default_priority').value = '2';
-					document.getElementById('webhook_agent_ids').value = '';
 					document.getElementById('webhook_url_display').textContent = '(Save first to generate URL)';
-					document.getElementById('webhook_secret_display').textContent = '(Secret is set on creation)';
+					document.getElementById('webhook_secret_display').value = '';
 					var secretRow = document.getElementById('webhook_secret_row');
 					if (secretRow) secretRow.style.display = 'none';
 					var urlRow = document.getElementById('webhook_url_row');
 					if (urlRow) urlRow.style.display = 'none';
+					
+					// Initialize webhook agents from page data
+					initializeWebhookAgents();
+					selectedWebhookAgentIDs = [];
+					renderWebhookAgentList();
+					setWebhookSection('config');
+					
 					htmx.process(form);
 					modal.showModal();
 				}
@@ -1081,46 +1252,118 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						document.getElementById('webhook_name').value = card.getAttribute('data-webhook-name') || '';
 						document.getElementById('webhook_enabled').checked = (card.getAttribute('data-webhook-enabled') || '') === 'true';
 						document.getElementById('webhook_system_instructions').value = card.getAttribute('data-webhook-system') || '';
-						document.getElementById('webhook_title_template').value = card.getAttribute('data-webhook-title-template') || '';
-						document.getElementById('webhook_prompt_template').value = card.getAttribute('data-webhook-prompt-template') || '';
 						document.getElementById('webhook_default_priority').value = card.getAttribute('data-webhook-default-priority') || '2';
-						document.getElementById('webhook_secret_display').textContent = card.getAttribute('data-webhook-secret') || '(Not available)';
+						document.getElementById('webhook_secret_display').value = card.getAttribute('data-webhook-secret') || '';
 						var token = card.getAttribute('data-webhook-token') || '';
 						document.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Not available)';
+						
+						// Load selected agents from card data
+						var agentIDsCSV = card.getAttribute('data-webhook-agent-ids') || '';
+						selectedWebhookAgentIDs = agentIDsCSV.split(',').map(id => id.trim()).filter(id => id !== '');
 					}
 					var secretRow = document.getElementById('webhook_secret_row');
 					if (secretRow) secretRow.style.display = '';
 					var urlRow = document.getElementById('webhook_url_row');
 					if (urlRow) urlRow.style.display = '';
+					
+					// Initialize webhook agents and render
+					initializeWebhookAgents();
+					renderWebhookAgentList();
+					setWebhookSection('config');
+					
 					htmx.process(form);
 					modal.showModal();
 				}
 
-				function copyWebhookRelativeUrl(elementId, button) {
-					var el = document.getElementById(elementId);
-					if (!el) return;
-					var rel = (el.textContent || '').trim();
-					if (!rel) return;
-					var abs = window.location.origin + rel;
-					navigator.clipboard.writeText(abs).then(function() {
-						if (!button) return;
-						var original = button.textContent;
-						button.textContent = 'Copied';
-						setTimeout(function() { button.textContent = original; }, 1000);
-					});
+				function writeToClipboardWithFeedback(text, button, successMessage, failureMessage) {
+						if (!text) {
+							if (window.showToast) window.showToast(failureMessage || 'Nothing to copy', 'failed');
+							return;
+						}
+
+						function onCopySuccess() {
+							if (button) {
+								var original = button.textContent;
+								button.textContent = 'Copied';
+								setTimeout(function() { button.textContent = original; }, 1000);
+							}
+							if (window.showToast) window.showToast(successMessage || 'Copied to clipboard', 'completed');
+						}
+
+						function onCopyFailure() {
+							if (window.showToast) window.showToast(failureMessage || 'Failed to copy to clipboard', 'failed');
+						}
+
+						if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+							navigator.clipboard.writeText(text).then(onCopySuccess).catch(function() {
+								var textarea = document.createElement('textarea');
+								textarea.value = text;
+								textarea.setAttribute('readonly', '');
+								textarea.style.position = 'fixed';
+								textarea.style.opacity = '0';
+								document.body.appendChild(textarea);
+								textarea.select();
+								textarea.setSelectionRange(0, textarea.value.length);
+								try {
+									if (document.execCommand('copy')) {
+										onCopySuccess();
+									} else {
+										onCopyFailure();
+									}
+								} catch (e) {
+									onCopyFailure();
+								} finally {
+									document.body.removeChild(textarea);
+								}
+							});
+							return;
+						}
+
+						var fallbackTextarea = document.createElement('textarea');
+						fallbackTextarea.value = text;
+						fallbackTextarea.setAttribute('readonly', '');
+						fallbackTextarea.style.position = 'fixed';
+						fallbackTextarea.style.opacity = '0';
+						document.body.appendChild(fallbackTextarea);
+						fallbackTextarea.select();
+						fallbackTextarea.setSelectionRange(0, fallbackTextarea.value.length);
+						try {
+							if (document.execCommand('copy')) {
+								onCopySuccess();
+							} else {
+								onCopyFailure();
+							}
+						} catch (e) {
+							onCopyFailure();
+						} finally {
+							document.body.removeChild(fallbackTextarea);
+						}
+					}
+
+				function copyWebhookEndpointUrl(webhookID, button) {
+					var card = document.querySelector('[data-webhook-id="' + webhookID + '"]');
+					if (!card) {
+						if (window.showToast) window.showToast('Webhook URL not available', 'failed');
+						return;
+					}
+					var token = (card.getAttribute('data-webhook-token') || '').trim();
+					if (!token) {
+						if (window.showToast) window.showToast('Webhook URL not available', 'failed');
+						return;
+					}
+					var url = window.location.origin + '/webhooks/inbound/' + token;
+					writeToClipboardWithFeedback(url, button, 'Webhook URL copied', 'Failed to copy webhook URL');
 				}
 
 				function copyWebhookAbsoluteUrl(elementId, button) {
 					var el = document.getElementById(elementId);
 					if (!el) return;
 					var val = (el.textContent || '').trim();
-					if (!val || val.indexOf('(Save first') === 0 || val.indexOf('(Not available') === 0) return;
-					navigator.clipboard.writeText(val).then(function() {
-						if (!button) return;
-						var original = button.textContent;
-						button.textContent = 'Copied';
-						setTimeout(function() { button.textContent = original; }, 1000);
-					});
+					if (!val || val.indexOf('(Save first') === 0 || val.indexOf('(Not available') === 0) {
+						if (window.showToast) window.showToast('Webhook URL not available', 'failed');
+						return;
+					}
+					writeToClipboardWithFeedback(val, button, 'Webhook URL copied', 'Failed to copy webhook URL');
 				}
 
 				function closeWebhookModal() {
@@ -1242,14 +1485,22 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					}
 				}
 				// Close webhook modal after successful save
-				var rp = event.detail.pathInfo.requestPath || '';
-				if (rp.startsWith('/channels/webhooks') && event.detail.successful) {
-					var whModal = document.getElementById('webhook_modal');
-					if (whModal && whModal.open) {
-						whModal.close();
+					var rp = event.detail.pathInfo.requestPath || '';
+					if (rp.startsWith('/channels/webhooks') && event.detail.successful) {
+						var whModal = document.getElementById('webhook_modal');
+						if (whModal && whModal.open) {
+							whModal.close();
+						}
 					}
-				}
-			});
+				});
+
+				document.body.addEventListener('htmx:configRequest', function(event) {
+					if (!event || !event.detail || !event.detail.path) return;
+					if (event.detail.path.indexOf('/channels/webhooks') !== 0) return;
+					var params = event.detail.parameters || {};
+					params.agent_ids = selectedWebhookAgentIDsCSV('webhook_agent_ids');
+					event.detail.parameters = params;
+				});
 
 			setTimeout(function() {
 				const modeSelect = document.getElementById('github_auth_mode');

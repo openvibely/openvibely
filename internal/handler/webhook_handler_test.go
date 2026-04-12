@@ -348,11 +348,14 @@ func TestWebhookInbound_TaskAgentAssignmentsPersisted(t *testing.T) {
 func TestWebhookCRUD_CreateViaForm(t *testing.T) {
 	wtc := newWebhookTestContext(t)
 	project := wtc.CreateProject().WithName("WH CRUD").Build()
+	agent1 := wtc.createAgent(t, "Agent One")
+	agent2 := wtc.createAgent(t, "Agent Two")
 
 	form := url.Values{
 		"name":                {"My Webhook"},
 		"system_instructions": {"You handle alerts"},
 		"default_priority":    {"1"},
+		"agent_ids":           {agent1.ID, agent2.ID},
 	}
 	req := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -369,6 +372,16 @@ func TestWebhookCRUD_CreateViaForm(t *testing.T) {
 	}
 	if webhooks[0].Name != "My Webhook" {
 		t.Errorf("name = %q, want My Webhook", webhooks[0].Name)
+	}
+	assigned, err := wtc.webhookRepo.GetEndpointAgents(context.Background(), webhooks[0].ID)
+	if err != nil {
+		t.Fatalf("GetEndpointAgents: %v", err)
+	}
+	if len(assigned) != 2 {
+		t.Fatalf("expected 2 assigned agents, got %d", len(assigned))
+	}
+	if assigned[0].AgentDefinitionID != agent1.ID || assigned[1].AgentDefinitionID != agent2.ID {
+		t.Fatalf("unexpected agent assignment order: %#v", assigned)
 	}
 }
 
@@ -481,6 +494,8 @@ func TestChannelsUI_WebhookCardsRender(t *testing.T) {
 
 	_ = wtc.createEndpoint(t, project.ID, "My Alert Hook", true)
 	_ = wtc.createEndpoint(t, project.ID, "Deploy Hook", false)
+	agent1 := wtc.createAgent(t, "Webhook Agent One")
+	agent2 := wtc.createAgent(t, "Webhook Agent Two")
 
 	rec := wtc.HTMX().Get("/channels?project_id=" + project.ID).Execute()
 	wtc.Assert(rec).StatusCode(http.StatusOK)
@@ -492,6 +507,114 @@ func TestChannelsUI_WebhookCardsRender(t *testing.T) {
 	if !strings.Contains(body, "Deploy Hook") {
 		t.Error("expected 'Deploy Hook' webhook card")
 	}
+
+	activeCard := webhookCardSectionByName(body, "My Alert Hook")
+	if activeCard == "" {
+		t.Fatal("expected webhook card section for 'My Alert Hook'")
+	}
+	disabledCard := webhookCardSectionByName(body, "Deploy Hook")
+	if disabledCard == "" {
+		t.Fatal("expected webhook card section for 'Deploy Hook'")
+	}
+
+	if strings.Contains(activeCard, "Inbound webhook endpoint") || strings.Contains(disabledCard, "Inbound webhook endpoint") {
+		t.Error("did not expect legacy inbound webhook endpoint text on webhook cards")
+	}
+	if strings.Contains(activeCard, "/webhooks/inbound/") || strings.Contains(disabledCard, "/webhooks/inbound/") {
+		t.Error("did not expect raw webhook endpoint URL text rendered on webhook cards")
+	}
+	if !strings.Contains(activeCard, ">Copy URL<") || !strings.Contains(disabledCard, ">Copy URL<") {
+		t.Error("expected Copy URL button on webhook cards")
+	}
+	if !strings.Contains(activeCard, "badge badge-sm badge-success\">Active") {
+		t.Error("expected webhook active badge to match shared channel badge style")
+	}
+	if strings.Contains(activeCard, "Active Inbound webhook endpoint") || strings.Contains(disabledCard, "Active Inbound webhook endpoint") {
+		t.Error("did not expect legacy active webhook status row text")
+	}
+
+	if strings.Contains(body, "Title Template") {
+		t.Error("did not expect webhook title template field in webhook modal")
+	}
+	if strings.Contains(body, "Prompt Template") {
+		t.Error("did not expect webhook prompt template field in webhook modal")
+	}
+	if strings.Contains(body, "Agents (comma-separated IDs)") {
+		t.Error("did not expect legacy webhook comma-separated agents input")
+	}
+	if strings.Contains(body, `Available: <code`) {
+		t.Error("did not expect legacy available agents helper list in webhook modal")
+	}
+	if !strings.Contains(body, `data-webhook-section-tab="config"`) {
+		t.Error("expected webhook config tab")
+	}
+	if !strings.Contains(body, `data-webhook-section-tab="agents"`) {
+		t.Error("expected webhook agents tab")
+	}
+	if !strings.Contains(body, `data-webhook-section-panel="config"`) {
+		t.Error("expected webhook config panel")
+	}
+	if !strings.Contains(body, `data-webhook-section-panel="agents"`) {
+		t.Error("expected webhook agents panel")
+	}
+	if !strings.Contains(body, `id="webhook_agent_search_input"`) {
+		t.Error("expected webhook agents search input")
+	}
+	if !strings.Contains(body, `id="webhook_agent_list"`) {
+		t.Error("expected webhook agents list container")
+	}
+	if !strings.Contains(body, `id="webhook_agent_ids_hidden"`) {
+		t.Error("expected hidden field for agent IDs")
+	}
+	if !strings.Contains(body, "copyWebhookEndpointUrl") {
+		t.Error("expected webhook card copy action handler to be wired")
+	}
+	if !strings.Contains(body, "initializeWebhookAgents") {
+		t.Error("expected webhook agent initialization function")
+	}
+	if !strings.Contains(body, "renderWebhookAgentList") {
+		t.Error("expected webhook agent list rendering function")
+	}
+	if !strings.Contains(body, "setWebhookSection") {
+		t.Error("expected webhook tab switching function")
+	}
+	// Check that agents are available in the JavaScript initialization (look for the agent names/IDs in the init function)
+	if !strings.Contains(body, "webhookAvailableAgents") {
+		t.Error("expected webhookAvailableAgents array initialization")
+	}
+	// The agents should be in the initializeWebhookAgents function as JSON
+	// Look for agent1.ID or agent1.Name in JSON format
+	agent1Found := strings.Contains(body, `"`+agent1.ID+`"`) || strings.Contains(body, agent1.Name)
+	agent2Found := strings.Contains(body, `"`+agent2.ID+`"`) || strings.Contains(body, agent2.Name)
+	if !agent1Found {
+		t.Errorf("expected first agent (%s / %s) to be in webhook agents initialization", agent1.ID, agent1.Name)
+	}
+	if !agent2Found {
+		t.Errorf("expected second agent (%s / %s) to be in webhook agents initialization", agent2.ID, agent2.Name)
+	}
+}
+
+func webhookCardSectionByName(body, webhookName string) string {
+	marker := `data-webhook-name="` + webhookName + `"`
+	start := strings.Index(body, marker)
+	if start == -1 {
+		return ""
+	}
+
+	end := len(body)
+	if next := strings.Index(body[start+len(marker):], `data-webhook-name="`); next >= 0 {
+		end = start + len(marker) + next
+	}
+	if sectionBoundary := strings.Index(body[start:], "<!-- Coming Soon Section -->"); sectionBoundary >= 0 {
+		boundary := start + sectionBoundary
+		if boundary < end {
+			end = boundary
+		}
+	}
+	if end <= start {
+		return ""
+	}
+	return body[start:end]
 }
 
 func TestWebhookCreate_ShowsOnChannelsPage(t *testing.T) {

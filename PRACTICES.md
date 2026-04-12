@@ -72,6 +72,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - Run `templ generate` after modifying `.templ` files.
 - For shared UI primitive class renames (for example chat/thread loading indicators), update both template/component tests and handler HTML assertions in the same change to keep UI-contract tests aligned.
 - For integration cards (like Channels providers), model explicit connection states in UI (`Not Configured`/`Not Connected`/`Connected`) and wire actions with HTMX refresh headers for partial reload safety.
+- For integration endpoints/secrets shown in card UIs, avoid rendering full raw endpoint values inline by default; prefer explicit copy actions with consistent toast/button feedback and a clipboard fallback path when `navigator.clipboard` is unavailable.
 - For integration surfaces, separate discovery from management: use an Add dialog/list for available providers and show full cards only for providers already added/configured.
 - For integration settings forms, keep persisted runtime toggles (for example notification on/off) round-trippable in UI state so opening/saving a config modal does not unintentionally reset operator choices.
 - For cross-page card kebab menus, keep destructive action semantics consistent (`Delete` copy + shared destructive class such as `text-error` + confirmation affordance) and cover them with UI-contract tests.
