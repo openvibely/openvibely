@@ -180,7 +180,7 @@ func TestEnsureGitSSLConfig(t *testing.T) {
 			t.Logf("No CA bundle found, falling back to GIT_SSL_NO_VERIFY")
 		}
 	})
-	
+
 	t.Run("respects existing GIT_SSL_NO_VERIFY in env", func(t *testing.T) {
 		env := []string{"GIT_SSL_NO_VERIFY=false"}
 		result := ensureGitSSLConfig(env)
@@ -189,6 +189,26 @@ func TestEnsureGitSSLConfig(t *testing.T) {
 		}
 		if result[0] != "GIT_SSL_NO_VERIFY=false" {
 			t.Fatalf("expected GIT_SSL_NO_VERIFY preserved")
+		}
+	})
+}
+
+func TestFormatGitHubAPIError(t *testing.T) {
+	t.Run("formats message and nested errors", func(t *testing.T) {
+		body := []byte(`{"message":"Validation Failed","errors":[{"resource":"PullRequest","field":"head","code":"invalid","message":"A pull request already exists for openvibely:task/x."}]}`)
+		got := formatGitHubAPIError(body)
+		if !strings.Contains(got, "Validation Failed") {
+			t.Fatalf("expected top-level message, got %q", got)
+		}
+		if !strings.Contains(got, "A pull request already exists") {
+			t.Fatalf("expected nested error detail, got %q", got)
+		}
+	})
+
+	t.Run("falls back to raw body when not json", func(t *testing.T) {
+		got := formatGitHubAPIError([]byte("plain-text-error"))
+		if got != "plain-text-error" {
+			t.Fatalf("expected raw body fallback, got %q", got)
 		}
 	})
 }

@@ -790,6 +790,10 @@ func (s *GitHubService) doGitHubJSON(req *http.Request, target any) error {
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		detail := formatGitHubAPIError(body)
+		if detail != "" {
+			return fmt.Errorf("github API request failed (%d): %s", resp.StatusCode, detail)
+		}
 		return fmt.Errorf("github API request failed (%d)", resp.StatusCode)
 	}
 	if target == nil {
@@ -799,6 +803,60 @@ func (s *GitHubService) doGitHubJSON(req *http.Request, target any) error {
 		return err
 	}
 	return nil
+}
+
+func formatGitHubAPIError(body []byte) string {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return ""
+	}
+
+	var payload struct {
+		Message          string `json:"message"`
+		DocumentationURL string `json:"documentation_url"`
+		Errors           []struct {
+			Message  string `json:"message"`
+			Resource string `json:"resource"`
+			Field    string `json:"field"`
+			Code     string `json:"code"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(body, &payload); err == nil {
+		parts := make([]string, 0, 1+len(payload.Errors))
+		if msg := strings.TrimSpace(payload.Message); msg != "" {
+			parts = append(parts, msg)
+		}
+		for _, item := range payload.Errors {
+			detail := strings.TrimSpace(item.Message)
+			if detail == "" {
+				bits := make([]string, 0, 3)
+				if resource := strings.TrimSpace(item.Resource); resource != "" {
+					bits = append(bits, resource)
+				}
+				if field := strings.TrimSpace(item.Field); field != "" {
+					bits = append(bits, field)
+				}
+				if code := strings.TrimSpace(item.Code); code != "" {
+					bits = append(bits, code)
+				}
+				detail = strings.TrimSpace(strings.Join(bits, " "))
+			}
+			if detail != "" {
+				parts = append(parts, detail)
+			}
+		}
+		if len(parts) > 0 {
+			return strings.Join(parts, "; ")
+		}
+		if doc := strings.TrimSpace(payload.DocumentationURL); doc != "" {
+			return doc
+		}
+	}
+
+	if len(trimmed) > 300 {
+		return trimmed[:300] + "..."
+	}
+	return trimmed
 }
 
 func (s *GitHubService) generateAppJWT(ctx context.Context) (string, error) {

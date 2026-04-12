@@ -339,6 +339,16 @@ func CommitWorktreeChanges(worktreePath string, message string) error {
 		return nil // no changes
 	}
 
+	// Ensure git config is set (required for commits)
+	// First check if config exists, if not set fallback bot identity
+	checkConfigCmd := exec.Command("git", "config", "user.email")
+	checkConfigCmd.Dir = worktreePath
+	if out, _ := checkConfigCmd.Output(); len(strings.TrimSpace(string(out))) == 0 {
+		// No user.email configured, set defaults
+		exec.Command("git", "-C", worktreePath, "config", "user.email", "bot@openvibely.ai").Run()
+		exec.Command("git", "-C", worktreePath, "config", "user.name", "OpenVibely Bot").Run()
+	}
+
 	// Stage all changes
 	addCmd := exec.Command("git", "add", "-A")
 	addCmd.Dir = worktreePath

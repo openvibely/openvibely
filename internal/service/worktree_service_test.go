@@ -493,6 +493,79 @@ func TestCommitWorktreeChanges(t *testing.T) {
 	}
 }
 
+func TestCommitWorktreeChanges_AutoConfigSetup(t *testing.T) {
+	// Create repo WITHOUT git config (simulating VPS scenario)
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init failed: %v\n%s", err, out)
+	}
+
+	// Create initial file and commit using explicit config
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = dir
+	cmd.Run()
+	cmd = exec.Command("git", "-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "-m", "initial")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("initial commit failed: %v\n%s", err, out)
+	}
+
+	// Verify no local user.email is configured in repo
+	cmd = exec.Command("git", "config", "--local", "user.email")
+	cmd.Dir = dir
+	out, _ := cmd.Output()
+	hasLocalConfig := len(strings.TrimSpace(string(out))) > 0
+
+	// Make a change and commit - should succeed even without local config
+	if err := os.WriteFile(filepath.Join(dir, "new.txt"), []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(dir, "auto config test"); err != nil {
+		t.Fatalf("CommitWorktreeChanges failed (should auto-set config if needed): %v", err)
+	}
+
+	// If there was no local config before, verify bot config was auto-set
+	if !hasLocalConfig {
+		cmd = exec.Command("git", "config", "--local", "user.email")
+		cmd.Dir = dir
+		out, _ := cmd.Output()
+		email := strings.TrimSpace(string(out))
+		// If local config was set, it should be the bot email
+		// If it's empty, that's ok too (means global config was used)
+		if email != "" && email != "bot@openvibely.ai" {
+			t.Errorf("expected bot@openvibely.ai or empty (using global) in local config, got: %s", email)
+		}
+
+		// Verify the effective config (local or global) allowed the commit
+		cmd = exec.Command("git", "config", "user.email")
+		cmd.Dir = dir
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		effectiveEmail := strings.TrimSpace(string(out))
+		if effectiveEmail == "" {
+			t.Error("expected some user.email configured (local or global)")
+		}
+	}
+
+	// Verify commit was made
+	cmd = exec.Command("git", "log", "--oneline", "-1")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "auto config test") {
+		t.Errorf("expected commit in log, got: %s", string(out))
+	}
+}
+
 func TestWorktreeDiff(t *testing.T) {
 	repoDir := createTestGitRepo(t)
 	defaultBranch := GetCurrentBranch(repoDir)

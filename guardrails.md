@@ -339,6 +339,8 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 
 - Enforce one PR per task via `task_pull_requests.task_id` uniqueness and always check persisted task PR first before calling remote PR create APIs
 - PR creation must support legacy projects with empty `repo_url`: fall back to parsing `git remote get-url origin` from local repo path before failing
+- `CreateTaskPullRequest` handler must NEVER use `echo.NewHTTPError()` for error returns — HTMX silently drops non-2xx responses and users see nothing. Use `setHTMXToast()` + `c.NoContent(204)` for all error paths so failures are always surfaced via toast. For success/existing-PR paths, use `setHTMXToast()` + `h.GetTaskChanges(c)` (200 with content swap + toast)
+- Git commit failures must be surfaced to users, not silently ignored — `CommitWorktreeChanges` auto-configures git identity (bot@openvibely.ai) if missing to prevent commit failures on VPS deployments without global git config. Handler must NOT ignore `CommitWorktreeChanges` errors.
 
 ## Telegram Project Commands
 

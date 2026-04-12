@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
@@ -112,48 +113,60 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	taskID := c.Param("taskId")
 	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		setHTMXToast(c, "Task not found", "failed")
+		return c.NoContent(http.StatusNoContent)
 	}
 	if task.WorktreeBranch == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "task has no worktree branch")
+		setHTMXToast(c, "Task has no worktree branch", "failed")
+		return c.NoContent(http.StatusNoContent)
 	}
 	if h.githubSvc == nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "GitHub integration is not configured")
+		setHTMXToastWithLink(c, "GitHub integration is not configured", "failed", "/channels", "Open Channels")
+		return c.NoContent(http.StatusNoContent)
 	}
 	if h.taskPullRequestRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "task pull request repository not available")
+		setHTMXToast(c, "Task pull request repository not available", "failed")
+		return c.NoContent(http.StatusNoContent)
 	}
 
 	project, err := h.projectRepo.GetByID(c.Request().Context(), task.ProjectID)
 	if err != nil || project == nil || project.RepoPath == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project has no repo path")
+		setHTMXToast(c, "Project has no repository path configured", "failed")
+		return c.NoContent(http.StatusNoContent)
 	}
 
 	existingPR, err := h.taskPullRequestRepo.GetByTaskID(c.Request().Context(), taskID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check existing pull request")
+		setHTMXToast(c, "Failed to check existing pull request", "failed")
+		return c.NoContent(http.StatusNoContent)
 	}
 	if existingPR != nil {
-		c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"refreshChanges": true, "showToast": {"message": "GitHub PR already exists (#%d)", "type": "success", "taskId": "%s"}}`, existingPR.PRNumber, task.ID))
+		setHTMXToast(c, fmt.Sprintf("GitHub PR already exists (#%d)", existingPR.PRNumber), "success")
 		return h.GetTaskChanges(c)
 	}
 
 	repoRef, err := h.githubSvc.ResolveRepo(c.Request().Context(), project.RepoURL, project.RepoPath)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("failed to resolve repository: %v", err))
+		setHTMXToast(c, fmt.Sprintf("Failed to resolve repository: %v", err), "failed")
+		return c.NoContent(http.StatusNoContent)
 	}
 
 	if task.WorktreePath != "" {
-		_ = service.CommitWorktreeChanges(task.WorktreePath, fmt.Sprintf("Task updates: %s", task.Title))
+		if err := service.CommitWorktreeChanges(task.WorktreePath, fmt.Sprintf("Task updates: %s", task.Title)); err != nil {
+			setHTMXToast(c, fmt.Sprintf("Failed to commit changes: %v", err), "failed")
+			return c.NoContent(http.StatusNoContent)
+		}
 	}
 
 	if err := h.githubSvc.PushBranch(c.Request().Context(), project.RepoPath, task.WorktreePath, task.WorktreeBranch, repoRef); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("failed to push branch: %v", err))
+		setHTMXToast(c, fmt.Sprintf("Failed to push branch: %v", err), "failed")
+		return c.NoContent(http.StatusNoContent)
 	}
 
 	foundPR, err := h.githubSvc.FindPullRequestByBranch(c.Request().Context(), repoRef, task.WorktreeBranch)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("failed to find pull request: %v", err))
+		setHTMXToast(c, fmt.Sprintf("Failed to find pull request: %v", err), "failed")
+		return c.NoContent(http.StatusNoContent)
 	}
 
 	targetBranch := task.MergeTargetBranch
@@ -175,7 +188,18 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 			Draft: false,
 		})
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("failed to create pull request: %v", err))
+			if strings.Contains(strings.ToLower(err.Error()), "pull request already exists") {
+				retryPR, findErr := h.githubSvc.FindPullRequestByBranch(c.Request().Context(), repoRef, task.WorktreeBranch)
+				if findErr == nil && retryPR != nil {
+					pr = retryPR
+				} else {
+					setHTMXToast(c, fmt.Sprintf("Failed to create pull request: %v", err), "failed")
+					return c.NoContent(http.StatusNoContent)
+				}
+			} else {
+				setHTMXToast(c, fmt.Sprintf("Failed to create pull request: %v", err), "failed")
+				return c.NoContent(http.StatusNoContent)
+			}
 		}
 	}
 
@@ -186,10 +210,11 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		PRState:  pr.State,
 	}
 	if err := h.taskPullRequestRepo.Upsert(c.Request().Context(), record); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save pull request")
+		setHTMXToast(c, "Failed to save pull request record", "failed")
+		return c.NoContent(http.StatusNoContent)
 	}
 
-	c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"refreshChanges": true, "showToast": {"message": "GitHub PR created (#%d)", "type": "success", "taskId": "%s"}}`, pr.Number, task.ID))
+	setHTMXToast(c, fmt.Sprintf("GitHub PR created (#%d)", pr.Number), "success")
 	return h.GetTaskChanges(c)
 }
 
