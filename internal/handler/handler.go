@@ -53,6 +53,7 @@ type Handler struct {
 	localRepoPathEnabled           *bool
 	taskChangesMergeOptionsEnabled *bool
 	projectFolderPicker            ProjectFolderPicker
+	webhookRepo                    *repository.WebhookRepo
 }
 
 type ProjectFolderPicker func(ctx context.Context) (path string, canceled bool, err error)
@@ -206,6 +207,11 @@ func (h *Handler) SetTaskChangesMergeOptionsEnabled(enabled bool) {
 
 func (h *Handler) SetProjectFolderPicker(picker ProjectFolderPicker) {
 	h.projectFolderPicker = picker
+}
+
+// SetWebhookRepo sets the webhook endpoint repository for inbound webhook management.
+func (h *Handler) SetWebhookRepo(repo *repository.WebhookRepo) {
+	h.webhookRepo = repo
 }
 
 // getCurrentProjectID resolves the current project ID from the query param.
@@ -408,6 +414,16 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/channels/slack/authorized-users", h.ListSlackAuthorizedUsers)
 	e.POST("/channels/slack/authorized-users", h.AddSlackAuthorizedUser)
 	e.DELETE("/channels/slack/authorized-users/:id", h.RemoveSlackAuthorizedUser)
+
+	// Webhooks
+	e.POST("/channels/webhooks", h.HandleWebhookCreate)
+	e.PUT("/channels/webhooks/:id", h.HandleWebhookUpdate)
+	e.DELETE("/channels/webhooks/:id", h.HandleWebhookDelete)
+	e.POST("/channels/webhooks/:id/rotate-secret", h.HandleWebhookRotateSecret)
+	e.POST("/channels/webhooks/:id/test", h.HandleWebhookTest)
+
+	// Inbound webhook endpoint (generic, no auth middleware)
+	e.POST("/webhooks/inbound/:pathToken", h.HandleWebhookInbound)
 
 	// Git Worktree
 	e.GET("/tasks/:taskId/worktree", h.GetTaskWorktreeInfo)

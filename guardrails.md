@@ -364,6 +364,18 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Web search tools are read-only: add them to `planModeAllowsReadOnlyTool` in both adapters.
 - OpenAI web search model gating is in `openAIModelSupportsWebSearch()` — update when new model families support it.
 
+## Webhook System
+
+- Webhook endpoints use `path_token` (UNIQUE) for inbound routing and `secret` for auth. Both are auto-generated on create.
+- Inbound webhook auth supports two methods: `X-Webhook-Secret` header (constant-time compare) and `X-Hub-Signature-256` (HMAC-SHA256). If secret is set and no valid auth header is provided, returns 401.
+- Each webhook call creates exactly ONE task — never fan-out to multiple tasks.
+- Primary agent for task execution = first agent in the endpoint's ordered agent list (`webhook_endpoint_agents.position=0`). All agents are also persisted in `task_agent_assignments` for future multi-agent support.
+- Webhook task `created_via` must be set to `models.TaskOriginWebhook` ("webhook"), not "web" or other origins.
+- `WebhookRepo` uses setter pattern (`SetWebhookRepo`) on Handler, not constructor injection.
+- `HandleWebhookInbound` must nil-guard `h.taskRepo` before creating tasks. If missing, return `500 {"error":"internal error"}`; do not dereference and panic.
+- Repo test helpers in `webhook_repo_test.go` use `createWebhookTestProject`/`createWebhookTestAgent` prefix to avoid name collisions with `alert_repo_test.go` helpers in same package.
+- Template `settings.templ` passes `webhooks []models.WebhookEndpoint, agents []models.Agent` to all three template functions (SettingsPage, SettingsContent, settingsContent).
+
 ## Repo Workflow
 
 - For simple docs-only file creation, create directly — no build/test needed

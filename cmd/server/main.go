@@ -161,6 +161,7 @@ func main() {
 
 	settingsRepo := repository.NewSettingsRepo(db)
 	taskPullRequestRepo := repository.NewTaskPullRequestRepo(db)
+	webhookRepo := repository.NewWebhookRepo(db)
 
 	// Seed Slack settings from env when provided (useful for bootstrapping local setup).
 	if cfg.SlackClientID != "" {
@@ -353,6 +354,7 @@ func main() {
 	h.SetTaskPullRequestRepo(taskPullRequestRepo)
 	h.SetGitHubService(githubSvc)
 	h.SetSlackService(slackSvc)
+	h.SetWebhookRepo(webhookRepo)
 	h.SetLocalRepoPathEnabled(cfg.EnableLocalRepoPath)
 	h.SetTaskChangesMergeOptionsEnabled(cfg.EnableTaskChangesMergeOptions)
 	llmSvc.SetAgentRepo(agentRepo)

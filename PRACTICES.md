@@ -36,6 +36,7 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - `repository`: raw SQL access with context-aware calls
 - `service`: orchestration and business logic
 - `handler`: HTTP parsing/rendering and response shaping
+- For handlers that rely on setter-injected dependencies (optional repos/services), validate required dependencies at handler entry and return controlled HTTP errors instead of allowing nil-pointer panics.
 - `templates`: server-rendered UI structure
 - When introducing behavior modes (for example planning vs execution), propagate mode through typed request contracts and enforce behavior in provider/tool policy layers, not only in prompt text
 - For chat action execution, prefer request-scoped runtime tool injection (contract/context + adapter tool wiring) over parsing textual action markers from assistant output

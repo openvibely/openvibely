@@ -834,6 +834,50 @@ func TestLLMService_ExecuteTaskWithAgent_AllowsCompletionWithoutCodeChanges(t *t
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_WebhookOriginSkipsTaskCreationMarkers(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	ctx := context.Background()
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, attachmentRepo)
+
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = `[CREATE_TASK]{"title":"Unexpected child","prompt":"should not be created"}[/CREATE_TASK]`
+	mock.TextOnly = mock.Response
+	mock.Tokens = 9
+	svc.SetLLMCaller(mock)
+
+	parent := &models.Task{
+		ProjectID:  "default",
+		Title:      "Webhook Parent",
+		Category:   models.CategoryActive,
+		Status:     models.StatusPending,
+		CreatedVia: models.TaskOriginWebhook,
+		Prompt:     "Handle webhook payload",
+		AgentID:    &agent.ID,
+	}
+	if err := taskRepo.Create(ctx, parent); err != nil {
+		t.Fatalf("failed to create parent task: %v", err)
+	}
+
+	if _, err := svc.ExecuteTaskWithAgent(ctx, *parent, *agent); err != nil {
+		t.Fatalf("ExecuteTaskWithAgent returned error: %v", err)
+	}
+
+	tasks, err := taskRepo.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatalf("ListByProject failed: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected exactly 1 task (no fan-out), got %d", len(tasks))
+	}
+}
+
 func TestLLMService_FailedTaskMovedToCompletedCategory(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)

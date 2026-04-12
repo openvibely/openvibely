@@ -171,6 +171,21 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 - Legacy dedicated endpoints (`/events/tasks`, `/events/chat/live`, `/events/filechanges`) were removed; shared live updates now route through `/events/live`.
 - All SSE broadcasters still enforce `MaxSubscribers` limits.
 
+## Webhook Channels
+
+- Generic inbound webhook system: multiple webhook endpoints per project, each with unique `path_token` and `secret`.
+- Tables: `webhook_endpoints` (project-scoped config), `webhook_endpoint_agents` (ordered agent selection per endpoint), `task_agent_assignments` (future multi-agent per task).
+- Migration: `070_webhook_endpoints.sql`. Model: `internal/models/webhook.go`. Repo: `internal/repository/webhook_repo.go`. Handler: `internal/handler/webhook_handler.go`.
+- Inbound route: `POST /webhooks/inbound/:pathToken`. Auth: `X-Webhook-Secret` (constant-time compare) or `X-Hub-Signature-256` (HMAC-SHA256). Body limit: 1MB.
+- Inbound webhook handler now guards missing task repository dependency (`h.taskRepo == nil`) and returns `500 {"error":"internal error"}` instead of risking a nil-pointer panic when webhook wiring is incomplete.
+- Each webhook call creates exactly ONE task with `category=active`, `status=pending`, `created_via=webhook`. Primary agent = first selected endpoint agent. All selected agents persisted in `task_agent_assignments` for future multi-agent runtime.
+- Payload is normalized (extracts `event_type`, `summary` from common field names) and embedded in task prompt as structured block with raw JSON.
+- Title/prompt support template variables: `{{event_type}}`, `{{summary}}`, `{{name}}`.
+- CRUD routes: `POST /channels/webhooks`, `PUT /channels/webhooks/:id`, `DELETE /channels/webhooks/:id`, `POST /channels/webhooks/:id/rotate-secret`, `POST /channels/webhooks/:id/test`.
+- Channels page renders one card per webhook endpoint with Edit/Rotate Secret/Test/Delete actions. "Webhook" appears in Add Channel menu alongside GitHub/Slack/Telegram.
+- `TaskOriginWebhook = "webhook"` constant in `models/webhook.go`.
+- Future: true multi-agent execution runtime can read `task_agent_assignments` to run multiple agents per task.
+
 ## GitHub Integration
 
 - GitHub integration is now auth-mode aware: default/recommended mode is Personal Access Token (`github_auth_mode=pat`) for local/self-hosted OSS installs, with GitHub App as explicit Advanced mode (`github_auth_mode=app`) for cloud deployments.

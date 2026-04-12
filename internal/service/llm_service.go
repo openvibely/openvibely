@@ -456,14 +456,20 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 	// should not kill the task. The model uses [STATUS: FAILED | reason] to explicitly
 	// report task failure when it determines the task cannot be completed.
 
-	// Process task creation markers from the agent's output
+	// Process task creation markers from the agent's output.
+	// Webhook-created tasks must remain one-task-per-webhook-call, so do not
+	// allow marker-driven fan-out during their execution.
 	if s.taskSvc != nil {
-		taskRequests := ParseTaskCreations(output)
-		if len(taskRequests) > 0 {
-			log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s found %d task creation requests", task.ID, len(taskRequests))
-			summary := ExecuteTaskCreations(ctx, taskRequests, task.ProjectID, s.taskSvc)
-			if summary != "" {
-				output += summary
+		if task.CreatedVia == models.TaskOriginWebhook {
+			log.Printf("[agent-svc] ExecuteTaskWithAgent skipping marker task creation for webhook-origin task=%s", task.ID)
+		} else {
+			taskRequests := ParseTaskCreations(output)
+			if len(taskRequests) > 0 {
+				log.Printf("[agent-svc] ExecuteTaskWithAgent task=%s found %d task creation requests", task.ID, len(taskRequests))
+				summary := ExecuteTaskCreations(ctx, taskRequests, task.ProjectID, s.taskSvc)
+				if summary != "" {
+					output += summary
+				}
 			}
 		}
 	}
