@@ -134,3 +134,61 @@ func TestGitAuthEnvForRepo_PATMode(t *testing.T) {
 		t.Fatalf("expected Basic header, got %q", headerVal)
 	}
 }
+
+func TestEnsureGitSSLConfig(t *testing.T) {
+	t.Run("already configured with GIT_SSL_CAINFO", func(t *testing.T) {
+		env := []string{"GIT_SSL_CAINFO=/custom/ca.pem", "OTHER=value"}
+		result := ensureGitSSLConfig(env)
+		if len(result) != 2 {
+			t.Fatalf("expected env unchanged when GIT_SSL_CAINFO already set, got %d items", len(result))
+		}
+		if result[0] != "GIT_SSL_CAINFO=/custom/ca.pem" {
+			t.Fatalf("expected GIT_SSL_CAINFO preserved")
+		}
+	})
+
+	t.Run("already configured with SSL_CERT_FILE", func(t *testing.T) {
+		env := []string{"SSL_CERT_FILE=/custom/cert.pem"}
+		result := ensureGitSSLConfig(env)
+		if len(result) != 1 {
+			t.Fatalf("expected env unchanged when SSL_CERT_FILE already set")
+		}
+	})
+
+	t.Run("adds CA bundle if found or falls back to no-verify", func(t *testing.T) {
+		env := []string{"PATH=/usr/bin"}
+		result := ensureGitSSLConfig(env)
+		// Should either add GIT_SSL_CAINFO or GIT_SSL_NO_VERIFY
+		// We can't predict which CA bundle exists on the test system
+		foundCAInfo := false
+		foundNoVerify := false
+		for _, e := range result {
+			if strings.HasPrefix(e, "GIT_SSL_CAINFO=") {
+				foundCAInfo = true
+			}
+			if strings.HasPrefix(e, "GIT_SSL_NO_VERIFY=") {
+				foundNoVerify = true
+			}
+		}
+		// One of them must be set
+		if !foundCAInfo && !foundNoVerify {
+			t.Fatal("expected either GIT_SSL_CAINFO or GIT_SSL_NO_VERIFY to be set")
+		}
+		if foundCAInfo {
+			t.Logf("CA bundle found and configured: %v", result)
+		} else {
+			t.Logf("No CA bundle found, falling back to GIT_SSL_NO_VERIFY")
+		}
+	})
+	
+	t.Run("respects existing GIT_SSL_NO_VERIFY in env", func(t *testing.T) {
+		env := []string{"GIT_SSL_NO_VERIFY=false"}
+		result := ensureGitSSLConfig(env)
+		if len(result) != 1 {
+			t.Fatalf("expected env unchanged when GIT_SSL_NO_VERIFY already set")
+		}
+		if result[0] != "GIT_SSL_NO_VERIFY=false" {
+			t.Fatalf("expected GIT_SSL_NO_VERIFY preserved")
+		}
+	})
+}

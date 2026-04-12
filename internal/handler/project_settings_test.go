@@ -495,7 +495,7 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 		}
 	})
 
-	t.Run("edit legacy local project keeps local hidden controls", func(t *testing.T) {
+	t.Run("edit legacy local project shows source selector with github option", func(t *testing.T) {
 		project := &models.Project{
 			Name:        "Legacy Local",
 			Description: "legacy",
@@ -516,14 +516,186 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 			t.Fatalf("EditProjectDialog failed: %v", err)
 		}
 		body := rec.Body.String()
-		if strings.Contains(body, `<option value="local"`) {
-			t.Fatal("edit dialog should not render Local Path option when local mode is disabled")
+		// Should show a repo source selector (not locked to local)
+		if !strings.Contains(body, `<option value="github"`) {
+			t.Fatal("edit dialog for legacy local project should offer GitHub URL option when local mode is disabled")
 		}
+		if !strings.Contains(body, `<option value="local"`) {
+			t.Fatal("edit dialog for legacy local project should keep Local Path option as current selection")
+		}
+		// Should NOT show Choose Folder (local editing is disabled)
 		if strings.Contains(body, "Choose Folder") {
 			t.Fatal("edit dialog should not render Choose Folder button when local mode is disabled")
 		}
-		if !strings.Contains(body, "Local-path editing is disabled in this environment.") {
-			t.Fatal("edit dialog should explain legacy local behavior when local mode is disabled")
+		// Should show the current local path as read-only
+		if !strings.Contains(body, "/tmp/legacy") {
+			t.Fatal("edit dialog should display existing local path")
+		}
+		// Should have GitHub URL input (hidden initially)
+		if !strings.Contains(body, `id="edit-project-repo-url"`) {
+			t.Fatal("edit dialog should contain GitHub URL input for switching")
+		}
+		// Should have guidance about switching
+		if !strings.Contains(body, "Switch to GitHub URL") {
+			t.Fatal("edit dialog should explain GitHub URL switching option")
+		}
+	})
+
+	t.Run("edit github project shows github url when local disabled", func(t *testing.T) {
+		project := &models.Project{
+			Name:        "GitHub Project",
+			Description: "github",
+			RepoPath:    "/repos/github-project",
+			RepoURL:     "https://github.com/owner/repo",
+		}
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatalf("failed to create project: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/projects/"+project.ID+"/edit", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+
+		if err := h.EditProjectDialog(c); err != nil {
+			t.Fatalf("EditProjectDialog failed: %v", err)
+		}
+		body := rec.Body.String()
+		// Should show GitHub URL input directly (no selector needed)
+		if !strings.Contains(body, `value="https://github.com/owner/repo"`) {
+			t.Fatal("edit dialog should pre-fill existing GitHub URL")
+		}
+		// Should NOT have a local path option
+		if strings.Contains(body, `<option value="local"`) {
+			t.Fatal("edit dialog for github project should not show local path option when local mode is disabled")
+		}
+	})
+}
+
+// TestUpdateProject_SwitchLocalToGitHub_LocalDisabled tests that a legacy local project
+// can be switched to GitHub URL source even when local repo path mode is disabled.
+func TestUpdateProject_SwitchLocalToGitHub_LocalDisabled(t *testing.T) {
+	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "false")
+
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectSvc := service.NewProjectService(projectRepo)
+
+	e := echo.New()
+	h := New(
+		projectSvc,
+		nil, // taskSvc
+		nil, // llmSvc
+		nil, // workerSvc
+		nil, // schedulerSvc
+		nil, // alertSvc
+		nil, // upcomingSvc
+		nil, // workflowSvc
+		nil, // collisionSvc
+		nil, // insightsSvc
+		nil, // architectSvc
+		nil, // backlogSvc
+		nil, // autonomousTriggerSvc
+		nil, // trendSvc
+		nil, // templateSvc
+		nil, // patternSvc
+		llmConfigRepo,
+		nil, // taskRepo
+		nil, // scheduleRepo
+		nil, // execRepo
+		nil, // workerRepo
+		nil, // attachmentRepo
+		nil, // chatAttachmentRepo
+		nil, // projectRepo
+		nil, // settingsRepo
+		nil, // broadcaster
+		nil, // telegramSvc
+	)
+
+	// A legacy local project can submit repo_source=local and preserve local path
+	t.Run("legacy local project preserves local path on save", func(t *testing.T) {
+		project := &models.Project{
+			Name:     "Legacy Local Save",
+			RepoPath: "/tmp/legacy-save",
+		}
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatalf("failed to create project: %v", err)
+		}
+
+		form := url.Values{}
+		form.Set("name", "Legacy Local Save Updated")
+		form.Set("description", "updated")
+		form.Set("repo_source", "local")
+		form.Set("repo_path", "/tmp/legacy-save")
+
+		req := httptest.NewRequest(http.MethodPut, "/projects/"+project.ID, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+
+		if err := h.UpdateProject(c); err != nil {
+			t.Fatalf("UpdateProject failed: %v", err)
+		}
+
+		updated, err := projectRepo.GetByID(ctx, project.ID)
+		if err != nil {
+			t.Fatalf("failed to get updated project: %v", err)
+		}
+		if updated.RepoPath != "/tmp/legacy-save" {
+			t.Errorf("expected preserved RepoPath, got %q", updated.RepoPath)
+		}
+		if updated.RepoURL != "" {
+			t.Errorf("expected empty RepoURL, got %q", updated.RepoURL)
+		}
+	})
+
+	// Switching to github requires a github service; without it we get an error,
+	// but the handler should NOT reject the request for the source switch itself.
+	t.Run("switch to github source accepted by handler", func(t *testing.T) {
+		project := &models.Project{
+			Name:     "Switch To GitHub",
+			RepoPath: "/tmp/switch-to-github",
+		}
+		if err := projectSvc.Create(ctx, project); err != nil {
+			t.Fatalf("failed to create project: %v", err)
+		}
+
+		form := url.Values{}
+		form.Set("name", "Switch To GitHub")
+		form.Set("description", "switching")
+		form.Set("repo_source", "github")
+		form.Set("repo_url", "https://github.com/owner/repo")
+
+		req := httptest.NewRequest(http.MethodPut, "/projects/"+project.ID, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(project.ID)
+
+		// This should fail because githubSvc is nil, but the failure should be
+		// "GitHub integration is not configured", NOT "Local repository paths are disabled"
+		err := h.UpdateProject(c)
+		_ = err // HTMX path returns via toast, check response
+		body := rec.Body.String()
+		_ = body
+		// The handler should reach the github clone path (not the local-disabled rejection).
+		// With nil githubSvc it returns a toast error about GitHub integration, not about local paths.
+		// Check that we didn't get the local-disabled error
+		toastHeader := rec.Header().Get("HX-Trigger")
+		if strings.Contains(toastHeader, "Local repository paths are disabled") {
+			t.Fatal("handler should not reject github source switch with local-disabled error")
+		}
+		if !strings.Contains(toastHeader, "GitHub integration is not configured") {
+			t.Fatalf("expected GitHub integration error, got HX-Trigger: %s", toastHeader)
 		}
 	})
 }

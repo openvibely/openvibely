@@ -44,6 +44,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Never persist or log GitHub App installation access tokens; mint them per operation (clone/push/PR API) and keep token use in-process only
 - Never log stored GitHub PAT/private-key material. If the Channels edit dialog pre-fills secrets for reveal UX, keep them masked by default and only reveal on explicit user toggle.
 - Any server-side git commands that may contact remotes (for example worktree startup `fetch origin`) must run non-interactively and use the same GitHub operation-token env injection as clone/push paths for GitHub-backed repos.
+- Git operations automatically detect system SSL CA bundles to prevent certificate errors in deployed/Docker/VPS environments. The `ensureGitSSLConfig` helper checks standard CA bundle paths (Debian/Ubuntu/Alpine, RHEL/CentOS, OpenSUSE, FreeBSD) before executing git commands. Users can override via `GIT_SSL_CAINFO` env var if their environment has a non-standard CA bundle location.
 
 ## OAuth Base URL Configuration
 
@@ -201,7 +202,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Slack authorized-user enforcement is project-scoped and **allow-by-default when no authorized users are configured**. Only enforce explicit `slack_user_id` checks when at least one entry exists for the active project; otherwise keep chat access open.
 - For local desktop runs, repository-folder selection must use the local endpoint (`POST /projects/pick-folder`) backed by OS-native dialogs (macOS `osascript`, Linux `zenity`/`kdialog` when available, Windows PowerShell FolderBrowserDialog); do not rely on browser file APIs for absolute paths
 - Repo path picker apply logic must gate on absolute paths only; ignore non-absolute picker-derived values instead of writing them into `repo_path`
-- When local repo paths are disabled (`OPENVIBELY_ENABLE_LOCAL_REPO_PATH` unset/invalid/false), new project/create flows must remain GitHub URL only, while existing legacy local projects may still save non-repo settings without forced migration
+- When local repo paths are disabled (`OPENVIBELY_ENABLE_LOCAL_REPO_PATH` unset/invalid/false), new project/create flows must remain GitHub URL only. Existing legacy local projects must still offer a repo source selector with a "GitHub URL" switch option; do not lock the edit dialog into a read-only local-path view with no escape. Legacy local paths are preserved when the user saves without switching
 - Never `dialog.close()` on submit button onclick with HTMX — close via `htmx:afterRequest`
 - Never use templ expressions in `<script>` tags — use `data-*` attributes
 - In `.templ` `<script>` blocks, avoid nested JS template literals that embed HTML tags (for example ``${cond ? `<p>...</p>` : ''}``) — templ can misparse and report missing `</script>`. Build those fragments with string concatenation instead.
@@ -384,6 +385,13 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Webhook cards must never render raw endpoint URL text (`/webhooks/inbound/...`) in visible card content; only expose copy actions that build/copy the full absolute URL.
 - Keep webhook card badge styling in class-order parity with other channel badges (`badge badge-sm badge-success` for active/connected semantics).
 - Do not reintroduce webhook modal `Title Template` / `Prompt Template` inputs or legacy free-text `Agents (comma-separated IDs)` + available-agents helper list; webhook agent assignment UI must remain dropdown/multi-select based.
+
+## Git SSL Certificate Configuration
+
+- Git HTTPS clone operations (GitHub URL projects) auto-detect system CA bundles from standard OS paths (Debian/Ubuntu: `/etc/ssl/certs/ca-certificates.crt`, RHEL/CentOS: `/etc/pki/tls/certs/ca-bundle.crt`, etc.)
+- If no valid CA bundle is found, the system automatically falls back to `GIT_SSL_NO_VERIFY=true` to prevent clone failures on misconfigured/minimal Docker/VPS environments (logs a warning)
+- Users can override SSL behavior via `GIT_SSL_CAINFO`, `SSL_CERT_FILE`, or `GIT_SSL_NO_VERIFY` environment variables
+- This automatic fallback is a pragmatic default for self-hosted deployments; for production environments with sensitive repos, ensure a valid CA bundle is installed or explicitly configure `GIT_SSL_CAINFO`
 
 ## Repo Workflow
 

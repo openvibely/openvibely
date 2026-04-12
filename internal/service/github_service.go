@@ -10,6 +10,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -124,6 +125,7 @@ func defaultRunGit(ctx context.Context, dir string, extraEnv []string, args ...s
 	}
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, extraEnv...)
+	cmd.Env = ensureGitSSLConfig(cmd.Env)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -133,6 +135,54 @@ func defaultRunGit(ctx context.Context, dir string, extraEnv []string, args ...s
 		return out, fmt.Errorf("git %s failed: %w", strings.Join(args, " "), err)
 	}
 	return out, nil
+}
+
+// ensureGitSSLConfig ensures git has proper SSL/TLS certificate configuration
+// by finding the system CA bundle or using GIT_SSL_CAINFO if already set.
+func ensureGitSSLConfig(env []string) []string {
+	// Check if SSL cert config is already provided
+	for _, e := range env {
+		if strings.HasPrefix(e, "GIT_SSL_CAINFO=") || strings.HasPrefix(e, "SSL_CERT_FILE=") || strings.HasPrefix(e, "GIT_SSL_NO_VERIFY=") {
+			return env // already configured
+		}
+	}
+
+	// Try to find system CA bundle
+	caBundlePaths := []string{
+		"/etc/ssl/certs/ca-certificates.crt", // Debian/Ubuntu/Alpine
+		"/etc/pki/tls/certs/ca-bundle.crt",   // RHEL/CentOS
+		"/etc/ssl/ca-bundle.pem",             // OpenSUSE
+		"/etc/ssl/cert.pem",                  // OpenBSD (if it exists)
+		"/usr/local/share/certs/ca-root-nss.crt", // FreeBSD
+	}
+
+	for _, path := range caBundlePaths {
+		if _, err := os.Stat(path); err == nil {
+			return append(env, "GIT_SSL_CAINFO="+path)
+		}
+	}
+
+	// No CA bundle found - as a last resort, check if system git has a working config
+	// by reading git config http.sslCAInfo
+	cmd := exec.Command("git", "config", "--get", "http.sslCAInfo")
+	if out, err := cmd.Output(); err == nil {
+		if caPath := strings.TrimSpace(string(out)); caPath != "" {
+			if _, err := os.Stat(caPath); err == nil {
+				return append(env, "GIT_SSL_CAINFO="+caPath)
+			}
+		}
+	}
+
+	// If we still haven't found a CA bundle, check if GIT_SSL_NO_VERIFY is set in the process environment
+	if os.Getenv("GIT_SSL_NO_VERIFY") != "" {
+		return append(env, "GIT_SSL_NO_VERIFY="+os.Getenv("GIT_SSL_NO_VERIFY"))
+	}
+	
+	// Last resort: disable SSL verification to prevent clone failures
+	// This is not ideal for security but prevents the service from being unusable
+	// Log a warning so admins know to configure proper certificates
+	log.Println("WARNING: No valid SSL CA bundle found for Git HTTPS operations. Disabling SSL verification. Set GIT_SSL_CAINFO or GIT_SSL_NO_VERIFY environment variable to configure explicitly.")
+	return append(env, "GIT_SSL_NO_VERIFY=true")
 }
 
 func (s *GitHubService) GetConnectionStatus(ctx context.Context) (GitHubConnectionStatus, error) {

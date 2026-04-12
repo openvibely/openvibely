@@ -61,17 +61,17 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 							<option value="local" if projectRepoSource(project) == "local" { selected }>Local Path</option>
 							<option value="github" if projectRepoSource(project) == "github" { selected }>GitHub URL</option>
 						</select>
+					} else if projectRepoSource(project) == "github" {
+						<input type="hidden" id="edit-project-repo-source" name="repo_source" value="github"/>
+						<div class="text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2">GitHub URL</div>
 					} else {
-						if projectRepoSource(project) == "github" {
-							<input type="hidden" id="edit-project-repo-source" name="repo_source" value="github"/>
-							<div class="text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2">GitHub URL</div>
-						} else {
-							<input type="hidden" id="edit-project-repo-source" name="repo_source" value="local"/>
-							<div class="text-sm text-base-content/70 bg-base-200 rounded-lg px-3 py-2">Local Path (existing project)</div>
-							<label class="label">
-								<span class="label-text-alt text-warning">Local-path editing is disabled in this environment. Existing local path will be preserved when saving.</span>
-							</label>
-						}
+						<select id="edit-project-repo-source" name="repo_source" class="select select-bordered">
+							<option value="local" selected>Local Path (existing)</option>
+							<option value="github">GitHub URL</option>
+						</select>
+						<label class="label">
+							<span class="label-text-alt opacity-70">Switch to GitHub URL to configure a remote repository, or keep the existing local path.</span>
+						</label>
 					}
 				</div>
 				if localRepoPathEnabled {
@@ -103,11 +103,15 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					</div>
 				} else {
 					<input type="hidden" name="repo_path" value={ project.RepoPath }/>
-					<input type="hidden" name="repo_url" value={ project.RepoURL }/>
-					<div class="form-control mb-3">
-						<label class="label"><span class="label-text">Repository Path (legacy local)</span></label>
+					<div id="edit-project-local-fields" class="form-control mb-3">
+						<label class="label"><span class="label-text">Repository Path (current local)</span></label>
 						<input type="text" class="input input-bordered" value={ project.RepoPath } readonly/>
-						<label class="label"><span class="label-text-alt opacity-70">This existing local path stays unchanged on save in this environment.</span></label>
+						<label class="label"><span class="label-text-alt opacity-70">This existing local path stays unchanged on save. Switch to GitHub URL above to configure a remote repository.</span></label>
+					</div>
+					<div id="edit-project-github-fields" class="form-control mb-3 hidden">
+						<label class="label"><span class="label-text">GitHub URL</span></label>
+						<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
+						<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage.</span></label>
 					</div>
 				}
 				<div class="form-control mb-3">
@@ -284,11 +288,13 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 			}
 
 			function updateRepoSourceFields() {
-				if (!repoSourceSelect || !localFields || !githubFields || !localRepoPathEnabled) return;
+				if (!repoSourceSelect || !localFields || !githubFields) return;
 				var source = repoSourceSelect.value === 'github' ? 'github' : 'local';
 				localFields.classList.toggle('hidden', source !== 'local');
 				githubFields.classList.toggle('hidden', source !== 'github');
-				if (input) input.required = (source === 'local');
+				if (localRepoPathEnabled) {
+					if (input) input.required = (source === 'local');
+				}
 				if (githubInput) githubInput.required = (source === 'github');
 				if (pickerFeedback) pickerFeedback.classList.add('hidden');
 			}
@@ -299,7 +305,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 				});
 			}
 
-			if (repoSourceSelect && localRepoPathEnabled) {
+			if (repoSourceSelect) {
 				repoSourceSelect.addEventListener('change', updateRepoSourceFields);
 				updateRepoSourceFields();
 			}

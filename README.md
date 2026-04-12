@@ -136,6 +136,26 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` | GitHub App mode settings |
 | `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, `SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN` | Slack OAuth/Socket/manual token settings |
 
+### Git/GitHub Clone Settings
+
+Git operations (cloning GitHub repositories) automatically detect and use the system's SSL CA bundle from standard OS locations. **If no valid CA bundle is found, SSL verification is automatically disabled** to prevent clone failures (with a warning logged).
+
+To explicitly configure SSL behavior:
+
+| Variable | Description |
+|---|---|
+| `GIT_SSL_CAINFO` | Path to SSL CA certificate bundle file (e.g., `/etc/ssl/certs/ca-certificates.crt`) |
+| `SSL_CERT_FILE` | Alternative SSL certificate file path |
+| `GIT_SSL_NO_VERIFY` | Set to `true` to explicitly disable SSL verification, or `false` to enforce it |
+
+Auto-detected CA bundle locations by OS:
+- Debian/Ubuntu/Alpine: `/etc/ssl/certs/ca-certificates.crt`
+- RHEL/CentOS: `/etc/pki/tls/certs/ca-bundle.crt`
+- OpenSUSE: `/etc/ssl/ca-bundle.pem`
+- FreeBSD: `/usr/local/share/certs/ca-root-nss.crt`
+
+**Note**: The automatic fallback to `GIT_SSL_NO_VERIFY=true` is a pragmatic default for self-hosted deployments where misconfigured Git/SSL can block cloning. For production use with sensitive repositories, ensure a valid CA bundle is available or set `GIT_SSL_CAINFO` explicitly.
+
 ## UI User Guides
 
 User-facing guides live in [`docs/user-guides.md`](./docs/user-guides.md), including:
