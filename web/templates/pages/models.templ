@@ -2,6 +2,8 @@ package pages
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -81,6 +83,10 @@ func maskedSecret(secret string) string {
 	return ""
 }
 
+func showOAuthLocalhostFallback() bool {
+	return strings.EqualFold(strings.TrimSpace(os.Getenv("OAUTH_REDIRECT_MODE")), "localhost_manual")
+}
+
 templ providerIcon(provider models.LLMProvider) {
 	if provider == models.ProviderAnthropic {
 		<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
@@ -112,15 +118,27 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 		</div>
 		@CardSearchInput("models", "Search models...")
 
-		if len(agents) == 0 {
-			<div class="text-center py-12">
-				<p class="opacity-50 mb-4">No models configured yet. Add one to start executing tasks.</p>
-				<button class="btn btn-primary" onclick="openNewModelModal()">
-					Configure Model
-				</button>
-			</div>
-		} else {
-			<div class="grid gap-4">
+				if len(agents) == 0 {
+					<div class="text-center py-12">
+						<p class="opacity-50 mb-4">No models configured yet. Add one to start executing tasks.</p>
+						<button class="btn btn-primary" onclick="openNewModelModal()">
+							Configure Model
+						</button>
+					</div>
+				} else {
+					if showOAuthLocalhostFallback() {
+						<div class="alert mb-4">
+							<div class="flex-1">
+								<div class="font-semibold">OAuth localhost fallback</div>
+								<p class="text-sm opacity-80 mt-1">If OAuth redirects to a failed localhost URL, copy that full URL and paste it here to finish connection.</p>
+								<div class="mt-3 flex gap-2">
+									<input id="oauth_manual_callback_url" type="text" class="input input-bordered w-full" placeholder="http://localhost:1455/auth/callback?code=...&state=..." onclick="event.stopPropagation()"/>
+									<button class="btn btn-sm btn-primary" type="button" onclick="event.stopPropagation(); submitOAuthManualComplete()">Complete OAuth</button>
+								</div>
+							</div>
+						</div>
+					}
+				<div class="grid gap-4">
 				for _, agent := range agents {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -515,21 +533,55 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 		</style>
 
 		<script>
-			function togglePasswordVisibility(inputId, button) {
-				const input = document.getElementById(inputId);
-				const eyeOpen = button.querySelector('.eye-open');
-				const eyeClosed = button.querySelector('.eye-closed');
-				
-				if (input.type === 'password') {
-					input.type = 'text';
-					eyeOpen.classList.add('hidden');
-					eyeClosed.classList.remove('hidden');
-				} else {
-					input.type = 'password';
-					eyeOpen.classList.remove('hidden');
-					eyeClosed.classList.add('hidden');
+				function togglePasswordVisibility(inputId, button) {
+					const input = document.getElementById(inputId);
+					const eyeOpen = button.querySelector('.eye-open');
+					const eyeClosed = button.querySelector('.eye-closed');
+					
+					if (input.type === 'password') {
+						input.type = 'text';
+						eyeOpen.classList.add('hidden');
+						eyeClosed.classList.remove('hidden');
+					} else {
+						input.type = 'password';
+						eyeOpen.classList.remove('hidden');
+						eyeClosed.classList.add('hidden');
+					}
 				}
-			}
+
+				function submitOAuthManualComplete() {
+					var input = document.getElementById('oauth_manual_callback_url');
+					if (!input) return;
+					var callbackUrl = (input.value || '').trim();
+					if (!callbackUrl) {
+						if (window.showToast) window.showToast('Paste a localhost callback URL first', 'failed');
+						return;
+					}
+
+					fetch('/models/oauth/manual-complete', {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							'HX-Request': 'true'
+						},
+						body: JSON.stringify({ callback_url: callbackUrl })
+					}).then(function(resp) {
+						if (!resp.ok) {
+							return resp.json().then(function(data) {
+								throw new Error((data && data.error) || 'OAuth completion failed');
+							}).catch(function() {
+								throw new Error('OAuth completion failed');
+							});
+						}
+						return resp.json();
+					}).then(function() {
+						if (window.showToast) window.showToast('OAuth connected', 'completed');
+						input.value = '';
+						window.location.reload();
+					}).catch(function(err) {
+						if (window.showToast) window.showToast(err.message || 'OAuth completion failed', 'failed');
+					});
+				}
 
 			var reasoningEffortOptions = {
 				low: 'Low',

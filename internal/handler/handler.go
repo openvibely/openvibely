@@ -356,9 +356,12 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/models/:id/set-default", h.SetDefaultModel)
 	e.DELETE("/models/:id", h.DeleteModel)
 
-	// OAuth for Claude Max models
+	// OAuth for model providers
 	e.GET("/models/:id/oauth/initiate", h.OAuthInitiate)
-	e.GET("/models/oauth/callback", h.OAuthCallback)
+	e.POST("/models/oauth/manual-complete", h.OAuthManualComplete)
+	e.GET("/callback", h.OAuthCallback)             // Anthropic public-mode callback
+	e.GET("/auth/callback", h.OAuthCallback)        // OpenAI public-mode callback
+	e.GET("/models/oauth/callback", h.OAuthCallback) // Legacy/fallback
 	e.GET("/models/:id/oauth/status", h.OAuthStatus)
 
 	// Worker settings

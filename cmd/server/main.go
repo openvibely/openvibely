@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -63,6 +64,9 @@ import (
 
 func main() {
 	cfg := config.Load()
+	if err := config.ValidateAppBaseURL(os.Getenv("APP_BASE_URL")); err != nil {
+		log.Printf("warning: %v", err)
+	}
 
 	// Database
 	db, err := database.New(cfg.DatabasePath)
@@ -81,6 +85,39 @@ func main() {
 	projectRepo := repository.NewProjectRepo(db)
 	taskRepo := repository.NewTaskRepo(db, broadcaster)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	if modelsList, listErr := llmConfigRepo.List(context.Background()); listErr != nil {
+		log.Printf("warning: unable to check OAuth model configuration for APP_BASE_URL validation: %v", listErr)
+	} else {
+		hasOAuth := false
+		hasOAuthAnthropic := false
+		hasOAuthOpenAI := false
+		for _, modelCfg := range modelsList {
+			if !modelCfg.IsOAuth() {
+				continue
+			}
+			hasOAuth = true
+			if modelCfg.Provider == models.ProviderAnthropic {
+				hasOAuthAnthropic = true
+			}
+			if modelCfg.Provider == models.ProviderOpenAI {
+				hasOAuthOpenAI = true
+			}
+		}
+
+			if cfg.AppBaseURL == "" {
+				if hasOAuth {
+					log.Printf("warning: APP_BASE_URL is not set while OAuth models are configured; hosted OAuth callbacks will use localhost. Set APP_BASE_URL to your public host (example: https://dubee.org).")
+				}
+			} else {
+				log.Printf("app base url configured for OAuth callbacks: %s", cfg.AppBaseURL)
+				if hasOAuthAnthropic && strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_CLIENT_ID")) == "" {
+					log.Printf("warning: ANTHROPIC_OAUTH_CLIENT_ID not set; hosted Anthropic OAuth will use built-in client and may be rejected by provider redirect policy.")
+				}
+				if hasOAuthOpenAI && strings.TrimSpace(os.Getenv("OPENAI_OAUTH_CLIENT_ID")) == "" {
+					log.Printf("warning: OPENAI_OAUTH_CLIENT_ID not set; hosted OpenAI OAuth will use built-in client and may be rejected by provider redirect policy.")
+				}
+			}
+	}
 	execRepo := repository.NewExecutionRepo(db)
 	scheduleRepo := repository.NewScheduleRepo(db)
 	workerRepo := repository.NewWorkerRepo(db)

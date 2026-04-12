@@ -14,6 +14,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -37,6 +39,11 @@ const (
 	openAIOAuthScope = "openid profile email offline_access api.connectors.read api.connectors.invoke"
 	openAIOriginator = "codex_cli_rs"
 	openAIOAuthPort  = 1455
+
+	oauthRedirectModeAuto            = "auto"
+	oauthRedirectModeHosted          = "hosted"
+	oauthRedirectModeLocalhostManual = "localhost_manual"
+	anthropicManualOAuthPort         = 53692
 )
 
 // oauthPendingFlow stores the PKCE verifier and model config ID for an in-progress OAuth flow.
@@ -99,23 +106,50 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "OAuth is only available for OAuth-configured models")
 	}
 
-	// Resolve OAuth endpoints based on provider
+	redirectMode := resolveOAuthRedirectMode()
+	publicBaseURL := resolveConfiguredAppBaseURL()
+	if redirectMode == oauthRedirectModeHosted && publicBaseURL == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "OAUTH_REDIRECT_MODE=hosted requires APP_BASE_URL")
+	}
+	usePublicCallback := shouldUsePublicOAuthCallback(redirectMode, publicBaseURL)
+	useLocalManualMode := isLocalManualOAuthMode(redirectMode)
+
+	// Resolve OAuth endpoints and credentials based on provider + callback mode.
 	var authURL, clientID, clientSecret, tokenEndpoint, scope string
 	if agent.Provider == models.ProviderOpenAI {
-		// OpenAI subscription OAuth mirrors Codex CLI defaults.
-		// Ignore per-model OAuth endpoint/client fields to avoid stale UI-configured values
-		// breaking the built-in subscription flow.
-		authURL = openAIOAuthAuthorizeURL
-		clientID = openAIOAuthClientID
-		clientSecret = ""
-		tokenEndpoint = openAIOAuthTokenURL
-		scope = openAIOAuthScope
+		if usePublicCallback {
+			// Hosted mode prefers explicit hosted OAuth settings, but falls back to
+			// built-in Codex CLI defaults to avoid hard-failing configured deployments.
+			authURL = firstNonEmpty(strings.TrimSpace(agent.OAuthAuthorizeURL), strings.TrimSpace(os.Getenv("OPENAI_OAUTH_AUTHORIZE_URL")), openAIOAuthAuthorizeURL)
+			tokenEndpoint = firstNonEmpty(strings.TrimSpace(agent.OAuthTokenURL), strings.TrimSpace(os.Getenv("OPENAI_OAUTH_TOKEN_URL")), openAIOAuthTokenURL)
+			clientID = firstNonEmpty(strings.TrimSpace(agent.OAuthClientID), strings.TrimSpace(os.Getenv("OPENAI_OAUTH_CLIENT_ID")), openAIOAuthClientID)
+			clientSecret = firstNonEmpty(strings.TrimSpace(agent.OAuthClientSecret), strings.TrimSpace(os.Getenv("OPENAI_OAUTH_CLIENT_SECRET")))
+			scope = firstNonEmpty(strings.TrimSpace(agent.OAuthScopes), strings.TrimSpace(os.Getenv("OPENAI_OAUTH_SCOPES")), openAIOAuthScope)
+		} else {
+			// Local/localhost-manual mode mirrors Codex CLI defaults (localhost:1455/auth/callback).
+			authURL = openAIOAuthAuthorizeURL
+			clientID = openAIOAuthClientID
+			clientSecret = ""
+			tokenEndpoint = openAIOAuthTokenURL
+			scope = openAIOAuthScope
+		}
 	} else {
-		// Claude Max uses hardcoded Anthropic endpoints
-		authURL = oauthAuthorizeURL
-		clientID = oauthClientID
-		tokenEndpoint = oauthTokenURL
-		scope = oauthScope
+		if usePublicCallback {
+			// Hosted mode prefers explicit Anthropic OAuth settings, but falls back to
+			// built-in defaults so APP_BASE_URL alone does not hard-break OAuth start.
+			authURL = firstNonEmpty(strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_AUTHORIZE_URL")), oauthAuthorizeURL)
+			tokenEndpoint = firstNonEmpty(strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_TOKEN_URL")), oauthTokenURL)
+			clientID = firstNonEmpty(strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_CLIENT_ID")), oauthClientID)
+			clientSecret = firstNonEmpty(strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_CLIENT_SECRET")))
+			scope = firstNonEmpty(strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_SCOPES")), oauthScope)
+		} else {
+			// Local/localhost-manual mode uses built-in Claude Max client defaults.
+			authURL = oauthAuthorizeURL
+			clientID = oauthClientID
+			clientSecret = ""
+			tokenEndpoint = oauthTokenURL
+			scope = oauthScope
+		}
 	}
 
 	// Generate PKCE verifier and challenge
@@ -135,23 +169,60 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	// Cancel any previous callback server for this config before starting a new one.
 	shutdownPreviousOAuthServer(id)
 
-	// Start local callback listener.
-	// Anthropic supports dynamic localhost ports; OpenAI/Codex uses fixed localhost:1455.
-	listener, err := startOAuthCallbackListener(agent.Provider)
-	if err != nil {
-		log.Printf("[handler] OAuthInitiate listener error: %v", err)
-		if agent.Provider == models.ProviderOpenAI {
-			return echo.NewHTTPError(http.StatusConflict, fmt.Sprintf("failed to start callback listener on localhost:%d (it may already be in use)", openAIOAuthPort))
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start callback listener")
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
+	modelsURL := buildAbsoluteURL(c, "/models")
+	// Redirect paths must match what the OAuth providers accept for their
+	// registered client IDs:
+	//   Anthropic: /callback   (matches http://localhost:<port>/callback pattern)
+	//   OpenAI:    /auth/callback (matches Codex CLI's http://localhost:1455/auth/callback)
 	redirectPath := "/callback"
-	// OpenAI OAuth uses /auth/callback in Codex CLI; matching this avoids provider-side flow errors.
 	if agent.Provider == models.ProviderOpenAI {
 		redirectPath = "/auth/callback"
 	}
-	redirectURI := fmt.Sprintf("http://localhost:%d%s", port, redirectPath)
+
+	redirectURI := ""
+	if usePublicCallback {
+		redirectURI = strings.TrimRight(publicBaseURL, "/") + redirectPath
+	} else {
+		localPath := "/callback"
+		if agent.Provider == models.ProviderOpenAI {
+			localPath = "/auth/callback"
+		}
+
+		if useLocalManualMode {
+			port := anthropicManualOAuthPort
+			if agent.Provider == models.ProviderOpenAI {
+				port = openAIOAuthPort
+			}
+			redirectURI = fmt.Sprintf("http://localhost:%d%s", port, localPath)
+		} else {
+			// Start local callback listener.
+			// Anthropic supports dynamic localhost ports; OpenAI/Codex uses fixed localhost:1455.
+			listener, err := startOAuthCallbackListener(agent.Provider)
+			if err != nil {
+				log.Printf("[handler] OAuthInitiate listener error: %v", err)
+				if agent.Provider == models.ProviderOpenAI {
+					return echo.NewHTTPError(http.StatusConflict, fmt.Sprintf("failed to start callback listener on localhost:%d (it may already be in use)", openAIOAuthPort))
+				}
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to start callback listener")
+			}
+			port := listener.Addr().(*net.TCPAddr).Port
+			redirectURI = fmt.Sprintf("http://localhost:%d%s", port, localPath)
+
+			// Start temporary callback server in background with timeout context.
+			// The server auto-shuts down after handling one request, on timeout, or
+			// when a new OAuth flow is initiated for the same config.
+			serverCtx, serverCancel := context.WithTimeout(context.Background(), oauthServerTimeout)
+			serverID := state // reuse the unique state token as server ID
+			oauthServersMu.Lock()
+			oauthServers[id] = &oauthRunningServer{ConfigID: id, ServerID: serverID, Cancel: serverCancel}
+			oauthServersMu.Unlock()
+			go func() {
+				h.startOAuthCallbackServer(serverCtx, serverCancel, listener, modelsURL, id)
+				// Clean up tracking after the server exits.
+				untrackOAuthServer(id, serverID)
+			}()
+		}
+	}
 
 	// Store flow details
 	oauthFlowsMu.Lock()
@@ -174,27 +245,10 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	}
 	oauthFlowsMu.Unlock()
 
-	// Determine the main app URL to redirect to after callback
-	scheme := "http"
-	if c.Request().TLS != nil {
-		scheme = "https"
+	portForLog := 0
+	if u, parseErr := url.Parse(redirectURI); parseErr == nil {
+		portForLog = parsePortOrDefault(u, agent.Provider)
 	}
-	mainAppHost := c.Request().Host
-	modelsURL := fmt.Sprintf("%s://%s/models", scheme, mainAppHost)
-
-	// Start temporary callback server in background with timeout context.
-	// The server auto-shuts down after handling one request, on timeout, or
-	// when a new OAuth flow is initiated for the same config.
-	serverCtx, serverCancel := context.WithTimeout(context.Background(), oauthServerTimeout)
-	serverID := state // reuse the unique state token as server ID
-	oauthServersMu.Lock()
-	oauthServers[id] = &oauthRunningServer{ConfigID: id, ServerID: serverID, Cancel: serverCancel}
-	oauthServersMu.Unlock()
-	go func() {
-		h.startOAuthCallbackServer(serverCtx, serverCancel, listener, modelsURL, id)
-		// Clean up tracking after the server exits.
-		untrackOAuthServer(id, serverID)
-	}()
 
 	// Build the authorization URL
 	authURLFull := authURL +
@@ -216,7 +270,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 		authURLFull += "&originator=" + url.QueryEscape(openAIOriginator)
 	}
 
-	log.Printf("[handler] OAuthInitiate redirecting to OAuth for config=%s provider=%s port=%d", id, agent.Provider, port)
+	log.Printf("[handler] OAuthInitiate redirecting to OAuth for config=%s provider=%s callback=%s port=%d public_callback=%t", id, agent.Provider, redirectURI, portForLog, usePublicCallback)
 	return c.Redirect(http.StatusTemporaryRedirect, authURLFull)
 }
 
@@ -239,130 +293,9 @@ func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.C
 	}
 
 	handleCallback := func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			go shutdown("callback_handled")
-		}()
-
-		// Check for OAuth errors
-		if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
-			errDesc := r.URL.Query().Get("error_description")
-			if errDesc == "" {
-				errDesc = oauthErr
-			}
-			log.Printf("[handler] OAuthCallback error: %s - %s", oauthErr, errDesc)
-			fmt.Fprintf(w, `<html><body>
-				<h2>OAuth Failed</h2>
-				<p>%s</p>
-				<p><a href="%s">Return to Models</a></p>
-			</body></html>`, errDesc, modelsURL)
-			return
-		}
-
-		state := r.URL.Query().Get("state")
-		code := r.URL.Query().Get("code")
-
-		if state == "" || code == "" {
-			fmt.Fprintf(w, `<html><body>
-				<h2>Invalid Callback</h2>
-				<p>Missing state or code parameter.</p>
-				<p><a href="%s">Return to Models</a></p>
-			</body></html>`, modelsURL)
-			return
-		}
-
-		// Look up the pending flow
-		oauthFlowsMu.Lock()
-		flow, ok := oauthFlows[state]
-		if ok {
-			delete(oauthFlows, state)
-		}
-		oauthFlowsMu.Unlock()
-
-		if !ok {
-			log.Printf("[handler] OAuthCallback state not found or expired")
-			fmt.Fprintf(w, `<html><body>
-				<h2>Session Expired</h2>
-				<p>The OAuth session has expired. Please try again.</p>
-				<p><a href="%s">Return to Models</a></p>
-			</body></html>`, modelsURL)
-			return
-		}
-
-		// Exchange authorization code for tokens
-		tokenBody, contentType := buildTokenExchangeBody(flow, code, state)
-		tokenReq, _ := http.NewRequest("POST", flow.TokenURL, bytes.NewReader(tokenBody))
-		tokenReq.Header.Set("Content-Type", contentType)
-		if flow.Provider == models.ProviderAnthropic {
-			tokenReq.Header.Set("anthropic-version", anthropicAPIVersion)
-		}
-
-		tokenResp, err := http.DefaultClient.Do(tokenReq)
-		if err != nil {
-			log.Printf("[handler] OAuthCallback token exchange request error: %v", err)
-			fmt.Fprintf(w, `<html><body>
-				<h2>Token Exchange Failed</h2>
-				<p>Could not connect to OAuth provider: %s</p>
-				<p><a href="%s">Return to Models</a></p>
-			</body></html>`, err.Error(), modelsURL)
-			return
-		}
-		defer tokenResp.Body.Close()
-
-		if tokenResp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(tokenResp.Body)
-			log.Printf("[handler] OAuthCallback token exchange failed %d: %s", tokenResp.StatusCode, string(body))
-			fmt.Fprintf(w, `<html><body>
-				<h2>Token Exchange Failed</h2>
-				<p>OAuth provider returned status %d</p>
-				<p><a href="%s">Return to Models</a></p>
-			</body></html>`, tokenResp.StatusCode, modelsURL)
-			return
-		}
-
-		var tokenResult struct {
-			IDToken      string `json:"id_token"`
-			AccessToken  string `json:"access_token"`
-			RefreshToken string `json:"refresh_token"`
-			ExpiresIn    int64  `json:"expires_in"`
-		}
-		if err := json.NewDecoder(tokenResp.Body).Decode(&tokenResult); err != nil {
-			log.Printf("[handler] OAuthCallback decode token error: %v", err)
-			fmt.Fprintf(w, `<html><body>
-				<h2>Token Exchange Failed</h2>
-				<p>Could not parse token response.</p>
-				<p><a href="%s">Return to Models</a></p>
-			</body></html>`, modelsURL)
-			return
-		}
-
-		expiresAt := resolveOAuthExpiryAt(tokenResult.ExpiresIn)
-		openAIAccountID := ""
-		if flow.Provider == models.ProviderOpenAI {
-			openAIAccountID = extractOpenAIAccountIDFromIDToken(tokenResult.IDToken)
-		}
-
-		// Update the model config with OAuth tokens
-		bgCtx := context.Background()
-		var saveErr error
-		if openAIAccountID != "" {
-			saveErr = h.llmConfigRepo.UpdateOAuthTokens(bgCtx, flow.ConfigID, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID)
-		} else {
-			saveErr = h.llmConfigRepo.UpdateOAuthTokens(bgCtx, flow.ConfigID, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt)
-		}
-		if saveErr != nil {
-			log.Printf("[handler] OAuthCallback save tokens error: %v", saveErr)
-			fmt.Fprintf(w, `<html><body>
-				<h2>Save Failed</h2>
-				<p>Could not save OAuth tokens.</p>
-				<p><a href="%s">Return to Models</a></p>
-			</body></html>`, modelsURL)
-			return
-		}
-
-		log.Printf("[handler] OAuthCallback success config=%s expires=%s", flow.ConfigID, time.UnixMilli(expiresAt).Format(time.RFC3339))
-
-		// Redirect browser back to models page
-		http.Redirect(w, r, modelsURL, http.StatusTemporaryRedirect)
+		h.handleOAuthCallbackResponse(w, r, modelsURL, func() {
+			shutdown("callback_handled")
+		})
 	}
 
 	mux.HandleFunc("/callback", handleCallback)
@@ -388,15 +321,182 @@ func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.C
 	log.Printf("[handler] OAuth callback server stopped config=%s", configID)
 }
 
-// OAuthCallback is kept as a no-op fallback. The actual callback is handled by the
-// temporary localhost server started in OAuthInitiate.
+// OAuthCallback handles OAuth provider callbacks for both hosted and localhost flows.
 // GET /models/oauth/callback
 func (h *Handler) OAuthCallback(c echo.Context) error {
-	return c.HTML(http.StatusOK, `<html><body>
-		<h2>OAuth Callback</h2>
-		<p>This endpoint is handled by the temporary callback server. If you see this, the flow may have timed out.</p>
-		<p><a href="/models">Return to Models</a></p>
-	</body></html>`)
+	modelsURL := buildAbsoluteURL(c, "/models")
+	h.handleOAuthCallbackResponse(c.Response().Writer, c.Request(), modelsURL, nil)
+	return nil
+}
+
+// OAuthManualComplete finishes an OAuth flow by accepting a pasted localhost callback URL
+// and replaying code/state through the same server-side completion logic.
+// POST /models/oauth/manual-complete
+func (h *Handler) OAuthManualComplete(c echo.Context) error {
+	var req struct {
+		CallbackURL string `json:"callback_url"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid JSON payload"})
+	}
+	callbackURL := strings.TrimSpace(req.CallbackURL)
+	if callbackURL == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "callback_url is required"})
+	}
+
+	u, err := url.Parse(callbackURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "callback_url must be an absolute URL"})
+	}
+
+	values := u.Query()
+	state := values.Get("state")
+	code := values.Get("code")
+	if state == "" || code == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "callback_url must include code and state"})
+	}
+
+	if oauthErr := values.Get("error"); oauthErr != "" {
+		errDesc := values.Get("error_description")
+		if errDesc == "" {
+			errDesc = oauthErr
+		}
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": errDesc})
+	}
+
+	oauthFlowsMu.Lock()
+	flow, ok := oauthFlows[state]
+	if ok {
+		delete(oauthFlows, state)
+	}
+	oauthFlowsMu.Unlock()
+	if !ok {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "oauth session expired or invalid state"})
+	}
+
+	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
+	if err != nil {
+		log.Printf("[handler] OAuthManualComplete exchange/save error: %v", err)
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "token exchange failed"})
+	}
+	log.Printf("[handler] OAuthManualComplete success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
+	return c.JSON(http.StatusOK, map[string]string{"status": "connected"})
+}
+
+func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Request, modelsURL string, onDone func()) {
+	if onDone != nil {
+		defer func() {
+			go onDone()
+		}()
+	}
+
+	if oauthErr := r.URL.Query().Get("error"); oauthErr != "" {
+		errDesc := r.URL.Query().Get("error_description")
+		if errDesc == "" {
+			errDesc = oauthErr
+		}
+		log.Printf("[handler] OAuthCallback error: %s - %s", oauthErr, errDesc)
+		fmt.Fprintf(w, `<html><body>
+			<h2>OAuth Failed</h2>
+			<p>%s</p>
+			<p><a href="%s">Return to Models</a></p>
+		</body></html>`, errDesc, modelsURL)
+		return
+	}
+
+	state := r.URL.Query().Get("state")
+	code := r.URL.Query().Get("code")
+	if state == "" || code == "" {
+		fmt.Fprintf(w, `<html><body>
+			<h2>Invalid Callback</h2>
+			<p>Missing state or code parameter.</p>
+			<p><a href="%s">Return to Models</a></p>
+		</body></html>`, modelsURL)
+		return
+	}
+
+	oauthFlowsMu.Lock()
+	flow, ok := oauthFlows[state]
+	if ok {
+		delete(oauthFlows, state)
+	}
+	oauthFlowsMu.Unlock()
+
+	if !ok {
+		log.Printf("[handler] OAuthCallback state not found or expired")
+		fmt.Fprintf(w, `<html><body>
+			<h2>Session Expired</h2>
+			<p>The OAuth session has expired. Please try again.</p>
+			<p><a href="%s">Return to Models</a></p>
+		</body></html>`, modelsURL)
+		return
+	}
+
+	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
+	if err != nil {
+		log.Printf("[handler] OAuthCallback exchange/save error: %v", err)
+		fmt.Fprintf(w, `<html><body>
+			<h2>Token Exchange Failed</h2>
+			<p>Could not complete OAuth exchange.</p>
+			<p><a href="%s">Return to Models</a></p>
+		</body></html>`, modelsURL)
+		return
+	}
+
+	log.Printf("[handler] OAuthCallback success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
+	http.Redirect(w, r, modelsURL, http.StatusTemporaryRedirect)
+}
+
+func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, state string) (int64, error) {
+	tokenBody, contentType := buildTokenExchangeBody(flow, code, state)
+	tokenReq, err := http.NewRequest("POST", flow.TokenURL, bytes.NewReader(tokenBody))
+	if err != nil {
+		return 0, err
+	}
+	tokenReq.Header.Set("Content-Type", contentType)
+	if flow.Provider == models.ProviderAnthropic {
+		tokenReq.Header.Set("anthropic-version", anthropicAPIVersion)
+	}
+
+	tokenResp, err := http.DefaultClient.Do(tokenReq)
+	if err != nil {
+		return 0, err
+	}
+	defer tokenResp.Body.Close()
+
+	if tokenResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(tokenResp.Body)
+		return 0, fmt.Errorf("provider returned status %d: %s", tokenResp.StatusCode, string(body))
+	}
+
+	var tokenResult struct {
+		IDToken      string `json:"id_token"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int64  `json:"expires_in"`
+	}
+	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenResult); err != nil {
+		return 0, err
+	}
+
+	expiresAt := resolveOAuthExpiryAt(tokenResult.ExpiresIn)
+	openAIAccountID := ""
+	if flow.Provider == models.ProviderOpenAI {
+		openAIAccountID = extractOpenAIAccountIDFromIDToken(tokenResult.IDToken)
+	}
+
+	bgCtx := context.Background()
+	if openAIAccountID != "" {
+		if err := h.llmConfigRepo.UpdateOAuthTokens(bgCtx, flow.ConfigID, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID); err != nil {
+			return 0, err
+		}
+	} else {
+		if err := h.llmConfigRepo.UpdateOAuthTokens(bgCtx, flow.ConfigID, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt); err != nil {
+			return 0, err
+		}
+	}
+
+	return expiresAt, nil
 }
 
 // OAuthStatus returns the OAuth status for a model config.
@@ -506,6 +606,32 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func resolveOAuthRedirectMode() string {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("OAUTH_REDIRECT_MODE")))
+	switch mode {
+	case "", oauthRedirectModeAuto:
+		return oauthRedirectModeAuto
+	case oauthRedirectModeHosted:
+		return oauthRedirectModeHosted
+	case oauthRedirectModeLocalhostManual:
+		return oauthRedirectModeLocalhostManual
+	default:
+		log.Printf("[handler] invalid OAUTH_REDIRECT_MODE=%q; defaulting to %s", mode, oauthRedirectModeAuto)
+		return oauthRedirectModeAuto
+	}
+}
+
+func shouldUsePublicOAuthCallback(redirectMode, publicBaseURL string) bool {
+	if redirectMode == oauthRedirectModeLocalhostManual {
+		return false
+	}
+	return publicBaseURL != ""
+}
+
+func isLocalManualOAuthMode(redirectMode string) bool {
+	return redirectMode == oauthRedirectModeLocalhostManual
+}
+
 func resolveOAuthExpiryAt(expiresInSeconds int64) int64 {
 	if expiresInSeconds > 0 {
 		return time.Now().UnixMilli() + expiresInSeconds*1000
@@ -577,4 +703,22 @@ func cancelOpenAIOAuthCallbackServer() error {
 	}
 	defer resp.Body.Close()
 	return nil
+}
+
+func parsePortOrDefault(u *url.URL, provider models.LLMProvider) int {
+	if u == nil {
+		if provider == models.ProviderOpenAI {
+			return openAIOAuthPort
+		}
+		return 80
+	}
+	if p := u.Port(); p != "" {
+		if parsed, err := net.LookupPort("tcp", p); err == nil {
+			return parsed
+		}
+	}
+	if u.Scheme == "https" {
+		return 443
+	}
+	return 80
 }

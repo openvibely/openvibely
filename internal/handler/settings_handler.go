@@ -3,9 +3,11 @@ package handler
 import (
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -593,6 +595,10 @@ func (h *Handler) handleSlackTest(c echo.Context) error {
 }
 
 func buildAbsoluteURL(c echo.Context, path string) string {
+	if base := resolveConfiguredAppBaseURL(); base != "" {
+		return strings.TrimRight(base, "/") + path
+	}
+
 	req := c.Request()
 	scheme := req.Header.Get("X-Forwarded-Proto")
 	if scheme == "" {
@@ -608,6 +614,10 @@ func buildAbsoluteURL(c echo.Context, path string) string {
 	}
 	base := (&url.URL{Scheme: scheme, Host: host, Path: path}).String()
 	return base
+}
+
+func resolveConfiguredAppBaseURL() string {
+	return config.ResolveAppBaseURL(os.Getenv("APP_BASE_URL"))
 }
 
 func templateEscape(s string) string {

@@ -1,24 +1,27 @@
 package config
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"strings"
 )
 
 type Config struct {
-	Port                string
-	DatabasePath        string
-	DatabaseURL         string
-	AnthropicKey        string
-	TelegramToken       string
-	Environment         string
-	GitHubAppID         string
-	GitHubAppSlug       string
-	GitHubAppPrivateKey string
-	SlackClientID       string
-	SlackClientSecret   string
-	SlackAppToken       string
-	SlackBotToken       string
+	Port                          string
+	DatabasePath                  string
+	DatabaseURL                   string
+	AnthropicKey                  string
+	TelegramToken                 string
+	Environment                   string
+	GitHubAppID                   string
+	GitHubAppSlug                 string
+	GitHubAppPrivateKey           string
+	SlackClientID                 string
+	SlackClientSecret             string
+	SlackAppToken                 string
+	SlackBotToken                 string
+	AppBaseURL                    string
 	ProjectRepoRoot               string
 	EnableLocalRepoPath           bool
 	EnableTaskChangesMergeOptions bool
@@ -37,8 +40,9 @@ func Load() *Config {
 		GitHubAppPrivateKey: getEnv("GITHUB_APP_PRIVATE_KEY", ""),
 		SlackClientID:       getEnv("SLACK_CLIENT_ID", ""),
 		SlackClientSecret:   getEnv("SLACK_CLIENT_SECRET", ""),
-		SlackAppToken:       getEnv("SLACK_APP_TOKEN", ""),
-		SlackBotToken:       getEnv("SLACK_BOT_TOKEN", ""),
+		SlackAppToken:                 getEnv("SLACK_APP_TOKEN", ""),
+		SlackBotToken:                 getEnv("SLACK_BOT_TOKEN", ""),
+		AppBaseURL:                    ResolveAppBaseURL(getEnv("APP_BASE_URL", "")),
 		ProjectRepoRoot:               getEnv("PROJECT_REPO_ROOT", "./repos"),
 		EnableLocalRepoPath:           ResolveEnableLocalRepoPath(os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH")),
 		EnableTaskChangesMergeOptions: ResolveEnableTaskChangesMergeOptions(os.Getenv("OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS")),
@@ -81,4 +85,40 @@ func parseEnvBool(value string) (bool, bool) {
 	default:
 		return false, false
 	}
+}
+
+// ResolveAppBaseURL normalizes APP_BASE_URL for absolute URL use.
+// Invalid values return empty string so callers can fall back to request-derived URLs.
+func ResolveAppBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || u.Host == "" {
+		return ""
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return ""
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return ""
+	}
+
+	u.Path = strings.TrimSuffix(u.Path, "/")
+	return u.String()
+}
+
+// ValidateAppBaseURL returns a detailed error for invalid APP_BASE_URL values.
+func ValidateAppBaseURL(raw string) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	normalized := ResolveAppBaseURL(trimmed)
+	if normalized == "" {
+		return fmt.Errorf("APP_BASE_URL must be an absolute http(s) URL without query/fragment/userinfo, got %q", trimmed)
+	}
+	return nil
 }

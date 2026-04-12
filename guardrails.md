@@ -45,6 +45,12 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Never log stored GitHub PAT/private-key material. If the Channels edit dialog pre-fills secrets for reveal UX, keep them masked by default and only reveal on explicit user toggle.
 - Any server-side git commands that may contact remotes (for example worktree startup `fetch origin`) must run non-interactively and use the same GitHub operation-token env injection as clone/push paths for GitHub-backed repos.
 
+## OAuth Base URL Configuration
+
+- For hosted/VPS deployments, set `APP_BASE_URL` to the externally reachable app origin (for example `https://dubee.org`)
+- Do not leave `APP_BASE_URL` unset in hosted environments when using model OAuth flows; unset falls back to localhost callback mode for local development
+- `APP_BASE_URL` must be absolute `http(s)` URL without query/fragment/userinfo (normalized by `config.ResolveAppBaseURL`)
+
 ## OpenAI OAuth Endpoint Shape
 
 - ChatGPT OAuth `/responses/compact` does **not** accept `store`; only regular `/responses` requests should send `store=false`

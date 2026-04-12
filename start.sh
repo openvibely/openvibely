@@ -91,7 +91,7 @@ templ generate
 # Build
 log "Building..."
 mkdir -p "$BIN_DIR"
-go build -o "$BINARY" ./cmd/server
+go build -ldflags="-s -w" -o "$BINARY" ./cmd/server
 
 # Load .env if it exists
 if [ -f "$SCRIPT_DIR/.env" ]; then
@@ -109,9 +109,28 @@ fi
 
 export PORT DATABASE_PATH ENVIRONMENT OPENVIBELY_ENABLE_LOCAL_REPO_PATH OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS
 
+# APP_BASE_URL controls hosted OAuth callback URLs.
+# Leave unset for local development (uses localhost callback listeners).
+# Set to your public URL for hosted callbacks, e.g.:
+#   APP_BASE_URL=https://dubee.org
+# Optional: force localhost callbacks even on VPS and finish via manual paste:
+#   OAUTH_REDIRECT_MODE=localhost_manual
+# Other valid values: auto (default), hosted
+if [ -n "${APP_BASE_URL:-}" ]; then
+    export APP_BASE_URL
+fi
+if [ -n "${OAUTH_REDIRECT_MODE:-}" ]; then
+    export OAUTH_REDIRECT_MODE
+fi
+
 mkdir -p "$LOG_DIR"
 
 log "Starting OpenVibely on http://localhost:$PORT"
+if [ -n "${APP_BASE_URL:-}" ]; then
+    log "App base URL: $APP_BASE_URL (OAuth callbacks use public host)"
+else
+    log "App base URL: not set (OAuth callbacks use localhost)"
+fi
 log "Database: $DATABASE_PATH"
 log "Logs: $LOG_FILE"
 log "Press Ctrl+C to stop"

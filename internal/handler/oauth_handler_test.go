@@ -29,10 +29,11 @@ func stopOpenAIOAuthCallbackServerForTest(t *testing.T) {
 }
 
 func TestHandler_OAuthInitiate(t *testing.T) {
+	t.Setenv("APP_BASE_URL", "")
+
 	t.Run("starts oauth flow for claude max", func(t *testing.T) {
 		h, e, llmConfigRepo := setupTestHandler(t)
 
-		// Create an OAuth-enabled Claude Max model
 		model := &models.LLMConfig{
 			Name:            "Test Claude OAuth",
 			Provider:        models.ProviderAnthropic,
@@ -55,7 +56,6 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		err = h.OAuthInitiate(c)
 		require.NoError(t, err)
 
-		// Should redirect to OAuth provider
 		require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
 		location := rec.Header().Get("Location")
 		require.Contains(t, location, "https://claude.ai/oauth/authorize")
@@ -66,7 +66,7 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		require.Contains(t, location, "code_challenge=")
 		require.Contains(t, location, "redirect_uri=http%3A%2F%2Flocalhost%3A")
 		require.Contains(t, location, "user%3Ainference")
-		require.Contains(t, location, "code=true") // Claude Max specific parameter
+		require.Contains(t, location, "code=true")
 	})
 
 	t.Run("starts oauth flow for openai", func(t *testing.T) {
@@ -74,8 +74,6 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		defer stopOpenAIOAuthCallbackServerForTest(t)
 
 		h, e, llmConfigRepo := setupTestHandler(t)
-
-		// Create an OAuth-enabled OpenAI model (custom OAuth fields should be ignored).
 		model := &models.LLMConfig{
 			Name:              "Test OpenAI OAuth",
 			Provider:          models.ProviderOpenAI,
@@ -102,7 +100,6 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		err = h.OAuthInitiate(c)
 		require.NoError(t, err)
 
-		// Should redirect to OAuth provider
 		require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
 		location := rec.Header().Get("Location")
 		require.Contains(t, location, "https://auth.openai.com/oauth/authorize")
@@ -115,13 +112,11 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		require.Contains(t, location, "%2Fauth%2Fcallback")
 		require.Contains(t, location, "scope=openid+profile+email+offline_access+api.connectors.read+api.connectors.invoke")
 		require.Contains(t, location, "originator="+openAIOriginator)
-		require.NotContains(t, location, "code=true") // OpenAI doesn't use this parameter
+		require.NotContains(t, location, "code=true")
 	})
 
 	t.Run("returns error for non-oauth model", func(t *testing.T) {
 		h, e, llmConfigRepo := setupTestHandler(t)
-
-		// Create a CLI model (non-OAuth)
 		model := &models.LLMConfig{
 			Name:            "Test Claude CLI",
 			Provider:        models.ProviderAnthropic,
@@ -133,13 +128,12 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		}
 		err := llmConfigRepo.Create(context.Background(), model)
 		require.NoError(t, err)
-		modelID := model.ID
 
-		req := httptest.NewRequest(http.MethodGet, "/models/"+modelID+"/oauth/initiate", nil)
+		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("id")
-		c.SetParamValues(modelID)
+		c.SetParamValues(model.ID)
 
 		err = h.OAuthInitiate(c)
 		require.Error(t, err)
@@ -150,7 +144,6 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 
 	t.Run("returns error for non-existent model", func(t *testing.T) {
 		h, e, _ := setupTestHandler(t)
-
 		req := httptest.NewRequest(http.MethodGet, "/models/nonexistent/oauth/initiate", nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
@@ -169,8 +162,6 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		defer stopOpenAIOAuthCallbackServerForTest(t)
 
 		h, e, llmConfigRepo := setupTestHandler(t)
-
-		// Create an OAuth-enabled OpenAI model without OAuth endpoint/client config.
 		model := &models.LLMConfig{
 			Name:        "Test OpenAI OAuth Incomplete",
 			Provider:    models.ProviderOpenAI,
@@ -181,13 +172,12 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		}
 		err := llmConfigRepo.Create(context.Background(), model)
 		require.NoError(t, err)
-		modelID := model.ID
 
-		req := httptest.NewRequest(http.MethodGet, "/models/"+modelID+"/oauth/initiate", nil)
+		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("id")
-		c.SetParamValues(modelID)
+		c.SetParamValues(model.ID)
 
 		err = h.OAuthInitiate(c)
 		require.NoError(t, err)
@@ -205,13 +195,10 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 
 	t.Run("stores flow state correctly", func(t *testing.T) {
 		h, e, llmConfigRepo := setupTestHandler(t)
-
-		// Clear any existing flows
 		oauthFlowsMu.Lock()
 		oauthFlows = make(map[string]*oauthPendingFlow)
 		oauthFlowsMu.Unlock()
 
-		// Create an OAuth-enabled Claude Max model
 		model := &models.LLMConfig{
 			Name:            "Test Claude OAuth",
 			Provider:        models.ProviderAnthropic,
@@ -223,18 +210,16 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		}
 		err := llmConfigRepo.Create(context.Background(), model)
 		require.NoError(t, err)
-		modelID := model.ID
 
-		req := httptest.NewRequest(http.MethodGet, "/models/"+modelID+"/oauth/initiate", nil)
+		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("id")
-		c.SetParamValues(modelID)
+		c.SetParamValues(model.ID)
 
 		err = h.OAuthInitiate(c)
 		require.NoError(t, err)
 
-		// Extract state from redirect URL
 		location := rec.Header().Get("Location")
 		stateStart := strings.Index(location, "state=") + 6
 		stateEnd := strings.Index(location[stateStart:], "&")
@@ -243,14 +228,13 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		}
 		state := location[stateStart : stateStart+stateEnd]
 
-		// Verify flow was stored
 		oauthFlowsMu.Lock()
 		flow, exists := oauthFlows[state]
 		oauthFlowsMu.Unlock()
 
 		require.True(t, exists)
 		require.NotNil(t, flow)
-		require.Equal(t, modelID, flow.ConfigID)
+		require.Equal(t, model.ID, flow.ConfigID)
 		require.Equal(t, state, flow.State)
 		require.NotEmpty(t, flow.Verifier)
 		require.Contains(t, flow.RedirectURI, "http://localhost:")
@@ -259,6 +243,265 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		require.Equal(t, oauthClientID, flow.ClientID)
 		require.Equal(t, oauthTokenURL, flow.TokenURL)
 		require.WithinDuration(t, time.Now(), flow.CreatedAt, 5*time.Second)
+	})
+
+		t.Run("uses built-in anthropic client when hosted client id is not provided", func(t *testing.T) {
+			t.Setenv("APP_BASE_URL", "https://dubee.org")
+			t.Setenv("ANTHROPIC_OAUTH_CLIENT_ID", "")
+			h, e, llmConfigRepo := setupTestHandler(t)
+			model := &models.LLMConfig{
+				Name:            "Hosted Anthropic OAuth",
+				Provider:        models.ProviderAnthropic,
+				AuthMethod:      models.AuthMethodOAuth,
+				Model:           "claude-3.5-sonnet",
+				Temperature:     0.7,
+				ReasoningEffort: "medium",
+				MaxTokens:       4096,
+			}
+			err := llmConfigRepo.Create(context.Background(), model)
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(model.ID)
+
+			err = h.OAuthInitiate(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+			location := rec.Header().Get("Location")
+			require.Contains(t, location, "client_id="+url.QueryEscape(oauthClientID))
+			require.Contains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Fcallback")
+			require.NotContains(t, location, "localhost")
+		})
+
+		t.Run("forces localhost redirects in localhost_manual mode", func(t *testing.T) {
+			t.Setenv("APP_BASE_URL", "https://dubee.org")
+			t.Setenv("OAUTH_REDIRECT_MODE", "localhost_manual")
+			h, e, llmConfigRepo := setupTestHandler(t)
+			model := &models.LLMConfig{
+				Name:       "Manual Mode Anthropic OAuth",
+				Provider:   models.ProviderAnthropic,
+				AuthMethod: models.AuthMethodOAuth,
+				Model:      "claude-3.5-sonnet",
+			}
+			err := llmConfigRepo.Create(context.Background(), model)
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(model.ID)
+
+			err = h.OAuthInitiate(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+			location := rec.Header().Get("Location")
+			require.Contains(t, location, "redirect_uri=http%3A%2F%2Flocalhost%3A53692%2Fcallback")
+			require.NotContains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Fcallback")
+		})
+
+	t.Run("uses explicit anthropic hosted oauth client in APP_BASE_URL mode", func(t *testing.T) {
+		t.Setenv("APP_BASE_URL", "https://dubee.org")
+		t.Setenv("ANTHROPIC_OAUTH_CLIENT_ID", "anthropic-hosted-client")
+		h, e, llmConfigRepo := setupTestHandler(t)
+		model := &models.LLMConfig{
+			Name:            "Hosted Anthropic OAuth",
+			Provider:        models.ProviderAnthropic,
+			AuthMethod:      models.AuthMethodOAuth,
+			Model:           "claude-3.5-sonnet",
+			Temperature:     0.7,
+			ReasoningEffort: "medium",
+			MaxTokens:       4096,
+		}
+		err := llmConfigRepo.Create(context.Background(), model)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(model.ID)
+
+		err = h.OAuthInitiate(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+		location := rec.Header().Get("Location")
+		require.Contains(t, location, "client_id=anthropic-hosted-client")
+		require.Contains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Fcallback")
+		require.NotContains(t, location, "localhost")
+	})
+
+		t.Run("uses built-in openai client when hosted client id is not provided", func(t *testing.T) {
+			t.Setenv("APP_BASE_URL", "https://dubee.org")
+			t.Setenv("OPENAI_OAUTH_CLIENT_ID", "")
+			h, e, llmConfigRepo := setupTestHandler(t)
+			model := &models.LLMConfig{
+				Name:        "Hosted OpenAI OAuth",
+				Provider:    models.ProviderOpenAI,
+				AuthMethod:  models.AuthMethodOAuth,
+				Model:       "gpt-4",
+				Temperature: 0.7,
+				MaxTokens:   4096,
+			}
+			err := llmConfigRepo.Create(context.Background(), model)
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(model.ID)
+
+			err = h.OAuthInitiate(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+			location := rec.Header().Get("Location")
+			require.Contains(t, location, "client_id="+url.QueryEscape(openAIOAuthClientID))
+			require.Contains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Fauth%2Fcallback")
+			require.NotContains(t, location, "localhost")
+		})
+
+		t.Run("uses explicit openai hosted oauth client from model config in APP_BASE_URL mode", func(t *testing.T) {
+			t.Setenv("APP_BASE_URL", "https://dubee.org")
+			h, e, llmConfigRepo := setupTestHandler(t)
+			model := &models.LLMConfig{
+				Name:              "Hosted OpenAI OAuth",
+				Provider:          models.ProviderOpenAI,
+				AuthMethod:        models.AuthMethodOAuth,
+				Model:             "gpt-4",
+				Temperature:       0.7,
+				MaxTokens:         4096,
+				OAuthClientID:     "openai-hosted-client",
+				OAuthClientSecret: "openai-hosted-secret",
+				OAuthAuthorizeURL: "https://auth.openai.com/oauth/authorize",
+				OAuthTokenURL:     "https://auth.openai.com/oauth/token",
+				OAuthScopes:       "openid profile email offline_access api.connectors.read api.connectors.invoke",
+			}
+			err := llmConfigRepo.Create(context.Background(), model)
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(model.ID)
+
+			err = h.OAuthInitiate(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+			location := rec.Header().Get("Location")
+			require.Contains(t, location, "client_id=openai-hosted-client")
+			require.Contains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Fauth%2Fcallback")
+			require.NotContains(t, location, "localhost")
+		})
+
+		t.Run("uses localhost redirect in localhost_manual mode for openai", func(t *testing.T) {
+			t.Setenv("APP_BASE_URL", "https://dubee.org")
+			t.Setenv("OAUTH_REDIRECT_MODE", "localhost_manual")
+			h, e, llmConfigRepo := setupTestHandler(t)
+			model := &models.LLMConfig{
+				Name:       "Manual Mode OpenAI OAuth",
+				Provider:   models.ProviderOpenAI,
+				AuthMethod: models.AuthMethodOAuth,
+				Model:      "gpt-4",
+			}
+			err := llmConfigRepo.Create(context.Background(), model)
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(model.ID)
+
+			err = h.OAuthInitiate(c)
+			require.NoError(t, err)
+			require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+			location := rec.Header().Get("Location")
+			require.Contains(t, location, "redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback")
+			require.NotContains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Fauth%2Fcallback")
+		})
+}
+
+func TestHandler_OAuthManualComplete(t *testing.T) {
+	t.Run("completes oauth flow from pasted localhost callback url", func(t *testing.T) {
+		h, e, llmConfigRepo := setupTestHandler(t)
+
+		model := &models.LLMConfig{
+			Name:       "Manual Complete OpenAI",
+			Provider:   models.ProviderOpenAI,
+			AuthMethod: models.AuthMethodOAuth,
+			Model:      "gpt-4",
+		}
+		err := llmConfigRepo.Create(context.Background(), model)
+		require.NoError(t, err)
+
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "POST", r.Method)
+			require.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"access_token":  "manual-access-token",
+				"refresh_token": "manual-refresh-token",
+				"expires_in":    3600,
+			})
+		}))
+		defer tokenServer.Close()
+
+		testState := "manual-openai-state"
+		oauthFlowsMu.Lock()
+		oauthFlows[testState] = &oauthPendingFlow{
+			ConfigID:    model.ID,
+			Verifier:    "manual-verifier",
+			State:       testState,
+			RedirectURI: "http://localhost:1455/auth/callback",
+			CreatedAt:   time.Now(),
+			Provider:    models.ProviderOpenAI,
+			ClientID:    openAIOAuthClientID,
+			TokenURL:    tokenServer.URL,
+		}
+		oauthFlowsMu.Unlock()
+
+		body := `{"callback_url":"http://localhost:1455/auth/callback?code=manual-code&state=` + testState + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/models/oauth/manual-complete", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Contains(t, rec.Body.String(), `"status":"connected"`)
+
+		updatedModel, err := h.llmConfigRepo.GetByID(context.Background(), model.ID)
+		require.NoError(t, err)
+		require.Equal(t, "manual-access-token", updatedModel.OAuthAccessToken)
+		require.Equal(t, "manual-refresh-token", updatedModel.OAuthRefreshToken)
+	})
+
+	t.Run("returns error for missing code or state", func(t *testing.T) {
+		_, e, _ := setupTestHandler(t)
+		body := `{"callback_url":"http://localhost:1455/auth/callback?code=only-code"}`
+		req := httptest.NewRequest(http.MethodPost, "/models/oauth/manual-complete", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.Contains(t, rec.Body.String(), "code and state")
+	})
+
+	t.Run("returns error for expired state", func(t *testing.T) {
+		_, e, _ := setupTestHandler(t)
+		body := `{"callback_url":"http://localhost:1455/auth/callback?code=manual-code&state=missing"}`
+		req := httptest.NewRequest(http.MethodPost, "/models/oauth/manual-complete", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusBadRequest, rec.Code)
+		require.Contains(t, rec.Body.String(), "expired")
 	})
 }
 
@@ -423,19 +666,72 @@ func TestHandler_OAuthStatus(t *testing.T) {
 }
 
 func TestHandler_OAuthCallback(t *testing.T) {
-	t.Run("returns fallback HTML", func(t *testing.T) {
+	t.Run("returns session expired when callback has unknown state", func(t *testing.T) {
 		h, e, _ := setupTestHandler(t)
 
-		req := httptest.NewRequest(http.MethodGet, "/models/oauth/callback", nil)
+		req := httptest.NewRequest(http.MethodGet, "/models/oauth/callback?code=test&state=missing", nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 
 		err := h.OAuthCallback(c)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, rec.Code)
-		require.Contains(t, rec.Body.String(), "OAuth Callback")
-		require.Contains(t, rec.Body.String(), "This endpoint is handled by the temporary callback server")
+		require.Contains(t, rec.Body.String(), "Session Expired")
 		require.Contains(t, rec.Body.String(), "Return to Models")
+	})
+
+	t.Run("handles hosted callback via /auth/callback route", func(t *testing.T) {
+		t.Setenv("APP_BASE_URL", "https://dubee.org")
+		h, e, llmConfigRepo := setupTestHandler(t)
+
+		model := &models.LLMConfig{
+			Name:        "Hosted Callback OpenAI",
+			Provider:    models.ProviderOpenAI,
+			AuthMethod:  models.AuthMethodOAuth,
+			Model:       "gpt-4",
+			Temperature: 0.7,
+			MaxTokens:   4096,
+		}
+		err := llmConfigRepo.Create(context.Background(), model)
+		require.NoError(t, err)
+
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			require.Equal(t, "POST", r.Method)
+			require.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"access_token":  "hosted-access-token",
+				"refresh_token": "hosted-refresh-token",
+				"expires_in":    3600,
+			})
+		}))
+		defer tokenServer.Close()
+
+		testState := "hosted-openai-state"
+		oauthFlowsMu.Lock()
+		oauthFlows[testState] = &oauthPendingFlow{
+			ConfigID:    model.ID,
+			Verifier:    "verifier-hosted",
+			State:       testState,
+			RedirectURI: "https://dubee.org/auth/callback",
+			CreatedAt:   time.Now(),
+			Provider:    models.ProviderOpenAI,
+			ClientID:    openAIOAuthClientID,
+			TokenURL:    tokenServer.URL,
+		}
+		oauthFlowsMu.Unlock()
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=hosted-code&state="+testState, nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+		require.Contains(t, rec.Header().Get("Location"), "/models")
+
+		updatedModel, err := h.llmConfigRepo.GetByID(context.Background(), model.ID)
+		require.NoError(t, err)
+		require.Equal(t, "hosted-access-token", updatedModel.OAuthAccessToken)
+		require.Equal(t, "hosted-refresh-token", updatedModel.OAuthRefreshToken)
 	})
 }
 
@@ -941,6 +1237,18 @@ func Test_resolveOAuthExpiryAt(t *testing.T) {
 	})
 }
 
+func Test_buildAbsoluteURL_UsesConfiguredAppBaseURL(t *testing.T) {
+	t.Setenv("APP_BASE_URL", "https://dubee.org")
+	_, e, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/models", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	url := buildAbsoluteURL(c, "/models")
+	require.Equal(t, "https://dubee.org/models", url)
+}
+
 func Test_firstNonEmpty(t *testing.T) {
 	t.Run("returns first non-empty string", func(t *testing.T) {
 		result := firstNonEmpty("", "", "third", "fourth")
@@ -960,6 +1268,26 @@ func Test_firstNonEmpty(t *testing.T) {
 	t.Run("returns empty for no arguments", func(t *testing.T) {
 		result := firstNonEmpty()
 		require.Equal(t, "", result)
+	})
+}
+
+func Test_parsePortOrDefault(t *testing.T) {
+	t.Run("parses explicit port", func(t *testing.T) {
+		u, err := url.Parse("https://dubee.org:4443/auth/callback")
+		require.NoError(t, err)
+		require.Equal(t, 4443, parsePortOrDefault(u, models.ProviderOpenAI))
+	})
+
+	t.Run("uses https default port", func(t *testing.T) {
+		u, err := url.Parse("https://dubee.org/auth/callback")
+		require.NoError(t, err)
+		require.Equal(t, 443, parsePortOrDefault(u, models.ProviderAnthropic))
+	})
+
+	t.Run("uses http default port", func(t *testing.T) {
+		u, err := url.Parse("http://dubee.org/auth/callback")
+		require.NoError(t, err)
+		require.Equal(t, 80, parsePortOrDefault(u, models.ProviderOpenAI))
 	})
 }
 

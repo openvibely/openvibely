@@ -63,6 +63,26 @@ OAuth-based models show connection status on cards:
 
 Use `Connect with OAuth` / `Re-authorize` from the model card.
 
+### Hosted/VPS OAuth Setup
+
+For remote deployments (for example `https://dubee.org`), set `APP_BASE_URL` in your environment.
+
+- Example: `APP_BASE_URL=https://dubee.org`
+- Do not set this to `localhost` on hosted servers.
+- If `APP_BASE_URL` is not set, OAuth defaults to localhost callback mode (intended for local development).
+
+Hosted callback paths in normal hosted mode:
+- Anthropic: `/callback`
+- OpenAI: `/auth/callback`
+
+If provider OAuth apps only accept localhost redirect URIs, use manual localhost mode on VPS:
+- Set `OAUTH_REDIRECT_MODE=localhost_manual`
+- Start OAuth from `/models`
+- After provider redirects to failed localhost URL, copy that full URL
+- Paste it into the "OAuth localhost fallback" box on `/models` and click `Complete OAuth`
+
+This mode keeps localhost redirect URIs provider-compatible while still completing token exchange on the VPS.
+
 ## Worker Pool Settings Per Model
 
 In the model modal:

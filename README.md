@@ -114,6 +114,18 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 |---|---|---|
 | `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` | `true` via `start.sh`; otherwise `false` | Enables local-path project source mode |
 | `OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS` | `true` via `start.sh`; otherwise `false` | Shows merge options in task `Changes` tab |
+| `APP_BASE_URL` | unset | Public base URL for hosted deployments (for OAuth callback URL generation), for example `https://dubee.org` |
+| `OAUTH_REDIRECT_MODE` | `auto` | OAuth callback strategy: `auto` (uses hosted callbacks when `APP_BASE_URL` is set), `hosted` (force hosted callbacks), `localhost_manual` (force localhost redirect URIs and complete by pasting callback URL in UI) |
+| `ANTHROPIC_OAUTH_CLIENT_ID` | unset | Optional Anthropic hosted OAuth client ID override (in `auto/hosted` mode only); falls back to built-in client |
+| `ANTHROPIC_OAUTH_CLIENT_SECRET` | unset | Optional Anthropic hosted OAuth client secret |
+| `ANTHROPIC_OAUTH_AUTHORIZE_URL` | `https://claude.ai/oauth/authorize` | Optional Anthropic hosted OAuth authorize endpoint override |
+| `ANTHROPIC_OAUTH_TOKEN_URL` | `https://platform.claude.com/v1/oauth/token` | Optional Anthropic hosted OAuth token endpoint override |
+| `ANTHROPIC_OAUTH_SCOPES` | built-in default | Optional Anthropic hosted OAuth scope override |
+| `OPENAI_OAUTH_CLIENT_ID` | unset | Optional OpenAI hosted OAuth client ID override (in `auto/hosted` mode only); falls back to built-in Codex client |
+| `OPENAI_OAUTH_CLIENT_SECRET` | unset | Optional OpenAI hosted OAuth client secret |
+| `OPENAI_OAUTH_AUTHORIZE_URL` | `https://auth.openai.com/oauth/authorize` | Optional OpenAI hosted OAuth authorize endpoint override |
+| `OPENAI_OAUTH_TOKEN_URL` | `https://auth.openai.com/oauth/token` | Optional OpenAI hosted OAuth token endpoint override |
+| `OPENAI_OAUTH_SCOPES` | built-in default | Optional OpenAI hosted OAuth scope override |
 
 ### Integration/Provider Variables
 

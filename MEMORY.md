@@ -112,6 +112,7 @@ All provider logic isolated in adapter packages: `internal/llm/openai`, `interna
 
 - **Active tasks** auto-submit to the worker pool on creation or when moved to Active category
 - **Model default invariant**: first created model is auto-defaulted when no models exist; deleting a default model auto-promotes another remaining model to default; deleting the last model is allowed (empty-model state).
+- **OAuth callback base URL**: model OAuth initiate/callback now resolves absolute app URLs through shared `buildAbsoluteURL()` (`APP_BASE_URL` first, then forwarded/request host fallback). Hosted deployments should set `APP_BASE_URL` (e.g. `https://dubee.org`) so Anthropic/OpenAI OAuth redirects stay on the public hostname. When unset, OAuth keeps localhost callback-server mode for local development.
 - **No-model execution guardrails**: task actions that transition to execution (`POST /tasks`, category moves to Active, batch category moves to Active, `POST /tasks/:id/run`) and chat send (`POST /chat/send`) now block when zero models are configured, emit a single `openvibelyToast`, and include a direct `Open Models` link action.
 - **RunTask idempotency guard**: `/tasks/{id}/run` now uses an atomic guarded pending update (`status NOT IN ('running','queued')`) and only submits when that update succeeds, so duplicate run requests cannot downgrade running work back to pending
 - **Scheduled tasks** triggered by background scheduler when `next_run <= now`

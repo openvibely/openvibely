@@ -188,6 +188,27 @@ func TestChannelsSlackConnectRedirect(t *testing.T) {
 	}
 }
 
+func TestChannelsSlackConnectRedirect_UsesAppBaseURL(t *testing.T) {
+	t.Setenv("APP_BASE_URL", "https://dubee.org")
+	h, e, _ := setupTestHandler(t)
+	h.SetSlackService(&fakeSlackService{
+		connectURLFn: func(ctx context.Context, redirectURI string) (string, error) {
+			if redirectURI != "https://dubee.org/channels/slack/callback" {
+				t.Fatalf("expected APP_BASE_URL redirect URI, got %q", redirectURI)
+			}
+			return "https://slack.com/oauth/v2/authorize?client_id=abc", nil
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/channels/slack/connect", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("expected status 307, got %d", rec.Code)
+	}
+}
+
 func TestChannelsSlackCallbackDisconnectAndRemove(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	var callbackCalled bool
