@@ -1,0 +1,20 @@
+# Build artifacts
+bin/
+*.db
+*.db-wal
+*.db-shm
+
+# Runtime data
+logs/
+uploads/
+repos/
+.worktrees/
+.openvibely/
+
+# Development
+.git
+.air.toml
+*.md
+!go.mod
+!go.sum
+LICENSE
