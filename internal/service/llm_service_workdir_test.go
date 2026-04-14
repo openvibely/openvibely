@@ -169,7 +169,7 @@ func TestLLMService_ExecuteTaskWithAgent_UsesProjectRepoPathAsWorkDir(t *testing
 
 	project := &models.Project{
 		Name:     "Chrome Plugin",
-		RepoPath: "/Users/dubee/go/src/github.com/openvibely/chrome-plugin",
+		RepoPath: t.TempDir(),
 	}
 	if err := projectRepo.Create(ctx, project); err != nil {
 		t.Fatalf("failed to create project: %v", err)
@@ -218,7 +218,7 @@ func TestLLMService_CallClaudeCLI_SetsWorkDir(t *testing.T) {
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(mock)
 
-	projectDir := "/tmp/test-workdir-claude"
+	projectDir := t.TempDir()
 	project := &models.Project{
 		Name:     "Test Project",
 		RepoPath: projectDir,
@@ -313,7 +313,7 @@ func TestLLMService_CallCodexCLI_SetsWorkDir(t *testing.T) {
 	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
 	svc.SetLLMCaller(mock)
 
-	projectDir := "/tmp/test-workdir-codex"
+	projectDir := t.TempDir()
 	project := &models.Project{
 		Name:     "Codex WorkDir Project",
 		RepoPath: projectDir,

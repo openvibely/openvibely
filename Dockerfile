@@ -116,6 +116,7 @@ COPY --from=builder /tmp /tmp
 
 ENV PORT=3001 \
     DATABASE_PATH=/data/openvibely.db \
+    PROJECT_REPO_ROOT=/data/repos \
     ENVIRONMENT=production \
     GIT_EXEC_PATH=/usr/libexec/git-core \
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -123,5 +124,7 @@ ENV PORT=3001 \
 EXPOSE 3001
 
 VOLUME ["/data"]
+
+WORKDIR /data
 
 ENTRYPOINT ["/openvibely"]

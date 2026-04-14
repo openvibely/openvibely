@@ -257,6 +257,22 @@ func (s *LLMService) ExecuteTaskWithAgent(ctx context.Context, task models.Task,
 		if projErr != nil {
 			log.Printf("[agent-svc] ExecuteTaskWithAgent error getting project for workDir: %v", projErr)
 		} else if project != nil && project.RepoPath != "" {
+			if _, statErr := os.Stat(project.RepoPath); os.IsNotExist(statErr) {
+				errMsg := fmt.Sprintf("project repo path %q does not exist on disk", project.RepoPath)
+				if project.RepoURL != "" {
+					errMsg += fmt.Sprintf(" (cloned from %s). This typically happens after a container restart when PROJECT_REPO_ROOT is not on a persistent volume. Re-clone the project or fix your volume mounts.", project.RepoURL)
+				} else {
+					errMsg += ". Ensure the local repo path is mounted into the container."
+				}
+				log.Printf("[agent-svc] ExecuteTaskWithAgent ERROR: %s", errMsg)
+				if completeErr := s.execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); completeErr != nil {
+					log.Printf("[agent-svc] ExecuteTaskWithAgent error completing execution after missing repo: %v", completeErr)
+				}
+				if statusErr := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusFailed); statusErr != nil {
+					log.Printf("[agent-svc] ExecuteTaskWithAgent error updating task status after missing repo: %v", statusErr)
+				}
+				return exec, fmt.Errorf("repo path missing: %s", errMsg)
+			}
 			repoDir = project.RepoPath
 			workDir = project.RepoPath
 			log.Printf("[agent-svc] ExecuteTaskWithAgent using project workDir=%s", workDir)

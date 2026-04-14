@@ -293,6 +293,11 @@ func main() {
 		log.Println("telegram bot disabled (no token configured)")
 	}
 
+	// Validate project repo paths exist on disk (catches ephemeral path loss after container restart)
+	if missing := projectSvc.ValidateRepoPaths(context.Background()); len(missing) > 0 {
+		log.Printf("WARNING: %d project(s) have missing repo paths — tasks using these projects will fail until repos are restored. Ensure PROJECT_REPO_ROOT is on a persistent volume (e.g. /data/repos).", len(missing))
+	}
+
 	// Reset any tasks orphaned in 'running' state from a previous crash
 	if count, err := taskRepo.ResetOrphanedRunning(context.Background()); err != nil {
 		log.Printf("warning: failed to reset orphaned running tasks: %v", err)

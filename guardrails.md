@@ -389,6 +389,14 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Keep webhook card badge styling in class-order parity with other channel badges (`badge badge-sm badge-success` for active/connected semantics).
 - Do not reintroduce webhook modal `Title Template` / `Prompt Template` inputs or legacy free-text `Agents (comma-separated IDs)` + available-agents helper list; webhook agent assignment UI must remain dropdown/multi-select based.
 
+## Docker/Container Persistence
+
+- In containerized deployments, ALL mutable runtime state (DB, cloned repos, worktrees, uploads, plugins) must reside under the persistent volume mount (`/data`). The Dockerfile sets `WORKDIR /data` and `PROJECT_REPO_ROOT=/data/repos` to ensure this.
+- Never default `PROJECT_REPO_ROOT` to a relative path like `./repos` without ensuring the working directory is under a persistent volume. In Docker with `WORKDIR /`, `./repos` resolves to `/repos` which is ephemeral and lost on container restart.
+- Task execution now validates that `project.RepoPath` exists on disk before proceeding. Missing repo paths fail the task with an actionable error message instead of silently proceeding with no working directory.
+- Startup validation (`ProjectService.ValidateRepoPaths`) logs warnings for all projects with missing repo paths. This catches persistence issues immediately on container restart.
+- Test fixtures that set `project.RepoPath` to non-existent directories must use `t.TempDir()` to create real directories, since `ExecuteTaskWithAgent` now validates path existence.
+
 ## Git SSL Certificate Configuration
 
 - Git HTTPS clone operations (GitHub URL projects) auto-detect system CA bundles from standard OS paths (Debian/Ubuntu: `/etc/ssl/certs/ca-certificates.crt`, RHEL/CentOS: `/etc/pki/tls/certs/ca-bundle.crt`, etc.)
