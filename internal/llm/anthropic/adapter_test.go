@@ -112,32 +112,60 @@ func TestShouldSkipDefaultToolsForChatMode(t *testing.T) {
 	}
 }
 
-func TestShouldPreferAnthropicProviderWeb(t *testing.T) {
+func TestResolveChatToolPolicy(t *testing.T) {
+	rt := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{
+			{Name: "create_task"},
+		},
+	}
+
 	tests := []struct {
 		name   string
-		prompt string
-		want   bool
+		follow bool
+		mode   models.ChatMode
+		rt     *llmcontracts.RuntimeTools
+		wantD  bool
+		wantS  bool
 	}{
 		{
-			name:   "url summarize prompt",
-			prompt: "summarize this blog https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts",
-			want:   true,
+			name:   "orchestrate without runtime tools disables function tools",
+			follow: false,
+			mode:   models.ChatModeOrchestrate,
+			rt:     nil,
+			wantD:  true,
+			wantS:  false,
 		},
 		{
-			name:   "url coding prompt",
-			prompt: "implement oauth flow from https://example.com/spec and update internal handler code",
-			want:   true,
+			name:   "orchestrate with runtime tools skips defaults without disabling tools",
+			follow: false,
+			mode:   models.ChatModeOrchestrate,
+			rt:     rt,
+			wantD:  false,
+			wantS:  true,
 		},
 		{
-			name:   "no url",
-			prompt: "summarize what we changed in this repository",
-			want:   false,
+			name:   "plan mode keeps tools enabled and defaults visible",
+			follow: false,
+			mode:   models.ChatModePlan,
+			rt:     rt,
+			wantD:  false,
+			wantS:  false,
+		},
+		{
+			name:   "task follow-up keeps tools enabled and defaults visible",
+			follow: true,
+			mode:   models.ChatModeOrchestrate,
+			rt:     rt,
+			wantD:  false,
+			wantS:  false,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := shouldPreferAnthropicProviderWeb(tc.prompt); got != tc.want {
-				t.Fatalf("shouldPreferAnthropicProviderWeb(%q) = %v, want %v", tc.prompt, got, tc.want)
+			gotDisable, gotSkip := resolveChatToolPolicy(tc.follow, tc.mode, tc.rt)
+			if gotDisable != tc.wantD || gotSkip != tc.wantS {
+				t.Fatalf("resolveChatToolPolicy(follow=%v, mode=%s, rt_nil=%v) = (disable=%v, skip=%v), want (disable=%v, skip=%v)",
+					tc.follow, tc.mode, tc.rt == nil, gotDisable, gotSkip, tc.wantD, tc.wantS)
 			}
 		})
 	}

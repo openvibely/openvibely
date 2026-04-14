@@ -52,10 +52,10 @@ Keep `PRACTICES.md` free of feature-specific runbooks, endpoint-level behavior, 
 - For provider-managed tool-result payloads that include structured `content`, preserve/forward the original JSON shape instead of coercing to strings, so replayed assistant history remains schema-valid across turns.
 - For streamed tool-card UX, emit tool-use/tool-result callbacks based on observed content blocks, not only continuation stop reasons; provider tools can complete in the same `end_turn`.
 - For stream-parsed provider tool events, emit callbacks when each content block closes (`content_block_stop`) rather than in a post-turn pass, so tool cards render in chronological order relative to streamed text.
-- For provider tool-budget/rate-limit interruptions on URL retrieval tasks, prefer a bounded automatic recovery turn that steers to dedicated web tools (`web_fetch`/`web_search`) instead of finalizing a best-effort memory summary.
-- For Anthropic web-tool forcing, do not set `tool_choice.name=web_fetch` on tool versions that are not model-direct-callable; this yields immediate 400 errors. Prefer direct-call tool versions and steering turns instead.
+- For provider tool-budget/rate-limit interruptions on URL retrieval tasks, keep tool routing model-driven rather than injecting forced follow-up steering turns.
+- For Anthropic web-tool forcing, do not set `tool_choice.name=web_fetch` on tool versions that are not model-direct-callable; this yields immediate 400 errors.
 - Prefer enforcing provider web-tool routing through runtime/tool-loop behavior over injecting long routing prose into system prompts, to reduce instruction leakage into visible responses.
-- For prompts containing explicit URLs, prefer toolset policy shaping (suppress default local coding tools and rely on provider web tools) over post-hoc tool-error handling; preventing `bash` detours up front yields behavior closer to Claude's web-tool flow.
+- Do not infer task/thread tool policy from URL presence alone. Keep task execution and task follow-up tool availability mode-driven (local coding tools remain available).
 - For OAuth provider integrations, keep request envelope/header parity with the first-party client (endpoint query, beta headers, and required app attribution headers) to avoid subtle tool/runtime behavior differences.
 - For hosted OAuth flows, resolve callback/redirect absolute URLs from explicit deployment config first (for example `APP_BASE_URL`) and only fall back to request-derived host data for local/default behavior.
 - In mode-gated chat surfaces, align advertised tools with executable tools: if a mode filters local tools out, do not include those tools in the request definitions.

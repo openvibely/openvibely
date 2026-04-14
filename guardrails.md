@@ -64,6 +64,7 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 
 - For API task execution/follow-up paths (OpenAI + Anthropic), include explicit worktree orientation in system prompts when `workDir` is set: `You are operating in an isolated git worktree at <path>.`
 - Do not rely on prompt text alone for isolation; keep executor/tool-level workdir confinement in place.
+- Do not set Anthropic `SkipDefaultTools` from raw URL substring detection in task execution or task-thread follow-ups. Keep task/thread tool policy mode-driven; URL-driven web-tool routing belongs only in narrow provider-recovery logic.
 
 ## SQLite
 
@@ -364,10 +365,10 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - Preserve provider tool-result `content` as raw JSON when replaying Anthropic assistant blocks (especially `code_execution_tool_result`); do not stringify object payloads, or the API returns invalid-shape errors (`RequestCodeExecutionToolResultError`).
 - Do not gate provider tool-use/result callback emission on `stop_reason=="tool_use"` only. Anthropic may include provider tool blocks on `end_turn`; callbacks must still fire so chat/thread UI shows tool cards.
 - Do not emit Anthropic provider tool callbacks only in a post-turn pass. Emit from stream parsing (`content_block_stop`) so tool cards stay in chronological order relative to streamed summary text.
-- For URL prompts with provider web tools enabled, if Anthropic returns `code_execution`/`bash_code_execution` `too_many_requests` and no web tool activity in that turn, force exactly one follow-up steering turn to `web_fetch`/`web_search` rather than accepting a memory-only fallback answer.
+- Do not inject forced provider-note steering turns for URL prompts after Anthropic `code_execution`/`bash_code_execution` `too_many_requests`; keep tool routing model-driven.
 - Do not set Anthropic `tool_choice.name=web_fetch` for tool versions that are not direct-callable by the model; API returns `invalid_request_error` stating web_fetch only allows calls from `code_execution_20260120`.
 - Do not append implementation-specific provider web-routing prose to Anthropic system prompts in production paths; this guidance can leak into visible assistant reasoning/text and differs from Claude Code behavior.
-- For Anthropic prompts that include explicit URLs, do not advertise default local execution tools (`bash`, file editors) in that turn; use provider-web-preferred tool policy so the model cannot switch to `curl` after provider-side code-execution rate limits.
+- For Anthropic task execution and task-thread follow-ups, keep default local execution tools available even when prompts include explicit URLs; do not shape tool availability from URL substrings.
 - Anthropic OAuth API calls should include `x-app: cli` along with OAuth beta headers and `?beta=true`; mismatched OAuth request shape can cause provider behavior drift from Claude Code.
 - In orchestrate chat mode with runtime action tools enabled, do not also advertise default local coding tools. Those local tools are filtered/blocked in orchestrate mode and exposing them causes unnecessary failed tool turns.
 - Web search tools are read-only: add them to `planModeAllowsReadOnlyTool` in both adapters.

@@ -2059,66 +2059,26 @@ func TestSendAgentic_ProviderToolCallbacksStreamBeforeText(t *testing.T) {
 	}
 }
 
-func TestSendAgentic_URLPromptCodeExecRateLimitForcesProviderWebRetry(t *testing.T) {
+func TestSendAgentic_URLPromptCodeExecRateLimitDoesNotForceProviderWebRetry(t *testing.T) {
 	var turnCount int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		turn := int(atomic.AddInt32(&turnCount, 1))
-		body, _ := io.ReadAll(r.Body)
-		var reqBody map[string]interface{}
-		if err := json.Unmarshal(body, &reqBody); err != nil {
-			t.Fatalf("unmarshal request: %v", err)
-		}
-
-		if turn == 2 {
-			msgs, ok := reqBody["messages"].([]interface{})
-			if !ok || len(msgs) < 2 {
-				t.Fatalf("turn 2 expected >=2 messages, got %#v", reqBody["messages"])
-			}
-			lastMsg, ok := msgs[len(msgs)-1].(map[string]interface{})
-			if !ok {
-				t.Fatalf("turn 2 last message mismatch: %#v", msgs[len(msgs)-1])
-			}
-			if role, _ := lastMsg["role"].(string); role != "user" {
-				t.Fatalf("turn 2 last role = %q, want user", role)
-			}
-			content, _ := lastMsg["content"].(string)
-			if !strings.Contains(content, "Use web_fetch") {
-				t.Fatalf("turn 2 steering message missing web_fetch guidance, got %q", content)
-			}
+		if turn > 1 {
+			t.Fatalf("unexpected extra turn %d; no forced provider-web retry should be injected", turn)
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 
-		if turn == 1 {
-			events := []string{
-				`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":22}}}`,
-				`{"type":"content_block_start","index":0,"content_block":{"type":"code_execution_tool_result","tool_use_id":"srvtoolu_1","name":"code_execution","content":{"type":"code_execution_tool_result_error","error_code":"too_many_requests"}}}`,
-				`{"type":"content_block_stop","index":0}`,
-				`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
-				`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"I cannot fetch this right now."}}`,
-				`{"type":"content_block_stop","index":1}`,
-				`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":8}}`,
-				`{"type":"message_stop"}`,
-			}
-			for _, evt := range events {
-				fmt.Fprintf(w, "data: %s\n\n", evt)
-			}
-			return
-		}
-
 		events := []string{
-			`{"type":"message_start","message":{"id":"msg_2","model":"claude-sonnet-4-20250514","usage":{"input_tokens":12}}}`,
-			`{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"stu_1","name":"web_fetch"}}`,
-			`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"url\":\"https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts\"}"}}`,
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-sonnet-4-20250514","usage":{"input_tokens":22}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"code_execution_tool_result","tool_use_id":"srvtoolu_1","name":"code_execution","content":{"type":"code_execution_tool_result_error","error_code":"too_many_requests"}}}`,
 			`{"type":"content_block_stop","index":0}`,
-			`{"type":"content_block_start","index":1,"content_block":{"type":"web_fetch_tool_result","tool_use_id":"stu_1","name":"web_fetch","content":{"type":"web_fetch_result","url":"https://www.crunchydata.com/blog/postgres-is-out-of-disk-and-how-to-recover-the-dos-and-donts"}}}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"I cannot fetch this right now."}}`,
 			`{"type":"content_block_stop","index":1}`,
-			`{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`,
-			`{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Recovered summary from web fetch."}}`,
-			`{"type":"content_block_stop","index":2}`,
-			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":11}}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":8}}`,
 			`{"type":"message_stop"}`,
 		}
 		for _, evt := range events {
@@ -2143,14 +2103,11 @@ func TestSendAgentic_URLPromptCodeExecRateLimitForcesProviderWebRetry(t *testing
 		t.Fatal(err)
 	}
 
-	if got := atomic.LoadInt32(&turnCount); got != 2 {
-		t.Fatalf("turnCount = %d, want 2", got)
+	if got := atomic.LoadInt32(&turnCount); got != 1 {
+		t.Fatalf("turnCount = %d, want 1", got)
 	}
-	if strings.Contains(resp.Text, "I cannot fetch this right now.") {
-		t.Fatalf("response text should skip fallback-failed turn text, got %q", resp.Text)
-	}
-	if !strings.Contains(resp.Text, "Recovered summary from web fetch.") {
-		t.Fatalf("response text = %q, want forced web-fetch summary", resp.Text)
+	if !strings.Contains(resp.Text, "I cannot fetch this right now.") {
+		t.Fatalf("response text = %q, want first-turn text without forced retry", resp.Text)
 	}
 }
 

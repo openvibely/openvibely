@@ -237,12 +237,10 @@ func shouldSkipDefaultToolsForChatMode(isTaskFollowup bool, chatMode models.Chat
 	return !isTaskFollowup && chatMode == models.ChatModeOrchestrate && rt != nil && len(rt.Definitions) > 0
 }
 
-func shouldPreferAnthropicProviderWeb(prompt string) bool {
-	p := strings.ToLower(strings.TrimSpace(prompt))
-	if p == "" {
-		return false
-	}
-	return strings.Contains(p, "http://") || strings.Contains(p, "https://")
+func resolveChatToolPolicy(isTaskFollowup bool, chatMode models.ChatMode, rt *llmcontracts.RuntimeTools) (disableTools bool, skipDefaultTools bool) {
+	skipDefaultTools = shouldSkipDefaultToolsForChatMode(isTaskFollowup, chatMode, rt)
+	disableTools = !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
+	return disableTools, skipDefaultTools
 }
 
 func buildAnthropicRuntime(ctx context.Context, workDir string, agentDef *models.Agent) ([]anthropicclient.ToolDefinition, func(context.Context, string, json.RawMessage) (string, bool, error), func(string) bool, func()) {
@@ -378,18 +376,14 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	}
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
-	preferProviderWeb := shouldPreferAnthropicProviderWeb(prompt)
-	effectiveDisableTools := disableTools
-	skipDefaultTools := preferProviderWeb
-
 	opts := &anthropicclient.AgenticOptions{
 		Model:            agent.Model,
 		MaxTokens:        agenticMaxTokens(agent.MaxTokens),
 		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
 		WorkDir:          workDir,
 		Attachments:      mcAttachments,
-		DisableTools:     effectiveDisableTools,
-		SkipDefaultTools: skipDefaultTools,
+		DisableTools:     disableTools,
+		SkipDefaultTools: false,
 		AutoCompaction:   true,
 		WebSearchEnabled: true,
 		ExtraTools:       extraTools,
@@ -437,14 +431,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = composeRuntimeToolFilter(toolFilter, rt, isTaskFollowup, chatMode)
-	skipDefaultTools := shouldSkipDefaultToolsForChatMode(isTaskFollowup, chatMode, rt)
-	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
-	preferProviderWeb := shouldPreferAnthropicProviderWeb(message)
-	if preferProviderWeb {
-		// URL prompts should use provider web tools and avoid local defaults.
-		disableTools = false
-		skipDefaultTools = true
-	}
+	disableTools, skipDefaultTools := resolveChatToolPolicy(isTaskFollowup, chatMode, rt)
 	chatInThinking := false
 	opts := &anthropicclient.AgenticOptions{
 		Model:            agent.Model,
@@ -518,8 +505,6 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	}
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
-	preferProviderWeb := shouldPreferAnthropicProviderWeb(prompt)
-
 	mcAttachments, err := convertAttachments(attachments)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("convert attachments: %w", err)
@@ -533,7 +518,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		Model:            agent.Model,
 		MaxTokens:        agenticMaxTokens(agent.MaxTokens),
 		EnableThinking:   true,
-		SkipDefaultTools: preferProviderWeb,
+		SkipDefaultTools: false,
 		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
 		WorkDir:          workDir,
 		Attachments:      mcAttachments,

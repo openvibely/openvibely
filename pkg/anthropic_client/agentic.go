@@ -267,8 +267,6 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
-	initialPromptHasURL := strings.Contains(strings.ToLower(prompt), "http://") || strings.Contains(strings.ToLower(prompt), "https://")
-	forcedProviderWebFallback := false
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		// Send request (streaming)
@@ -325,8 +323,7 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 			Content: resp.contentBlocks,
 		})
 
-		// Collect text blocks for this turn. We append to allText unless we
-		// decide to force a provider web fallback retry for URL prompts.
+		// Collect text blocks for this turn.
 		turnText := ""
 		for _, block := range resp.contentBlocks {
 			if block.Type == "text" && block.Text != "" {
@@ -347,21 +344,6 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 		// "pause_turn" is used by provider-side tool loops (for example web search)
 		// and must continue with another request using the same conversation.
 		if resp.stopReason != "tool_use" && resp.stopReason != "pause_turn" {
-			// For URL-oriented prompts, if provider code-execution is rate-limited
-			// and no web tool activity happened this turn, force one follow-up turn
-			// steering the model to web_fetch/web_search instead of giving up.
-			if opts.WebSearchEnabled && initialPromptHasURL && !forcedProviderWebFallback &&
-				anthropicTurnHasCodeExecutionTooManyRequests(resp.contentBlocks) &&
-				!anthropicTurnHasWebToolActivity(resp.contentBlocks) {
-				forcedProviderWebFallback = true
-				messages = append(messages, agenticMessage{
-					Role: "user",
-					Content: "Provider note: code_execution tools are rate-limited in this turn. " +
-						"Use web_fetch (or web_search then web_fetch) to retrieve the requested URL now. " +
-						"Do not answer from memory.",
-				})
-				continue
-			}
 			allText.WriteString(turnText)
 			// If max_tokens was hit, log a warning — the response may be truncated
 			if resp.stopReason == "max_tokens" {
