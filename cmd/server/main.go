@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/openvibely/openvibely/internal/agentplugins"
+	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/events"
@@ -67,6 +68,16 @@ func main() {
 	if err := config.ValidateAppBaseURL(os.Getenv("APP_BASE_URL")); err != nil {
 		log.Printf("warning: %v", err)
 	}
+	authCfg := auth.Config{
+		Enabled:       cfg.AuthEnabled,
+		Username:      cfg.AuthUsername,
+		Password:      cfg.AuthPassword,
+		SessionSecret: cfg.AuthSessionSecret,
+		SessionTTL:    cfg.AuthSessionTTL,
+	}
+	if err := authCfg.Validate(); err != nil {
+		log.Fatalf("invalid auth configuration: %v", err)
+	}
 
 	// Database
 	db, err := database.New(cfg.DatabasePath)
@@ -104,19 +115,19 @@ func main() {
 			}
 		}
 
-			if cfg.AppBaseURL == "" {
-				if hasOAuth {
-					log.Printf("warning: APP_BASE_URL is not set while OAuth models are configured; hosted OAuth callbacks will use localhost. Set APP_BASE_URL to your public host (example: https://dubee.org).")
-				}
-			} else {
-				log.Printf("app base url configured for OAuth callbacks: %s", cfg.AppBaseURL)
-				if hasOAuthAnthropic && strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_CLIENT_ID")) == "" {
-					log.Printf("warning: ANTHROPIC_OAUTH_CLIENT_ID not set; hosted Anthropic OAuth will use built-in client and may be rejected by provider redirect policy.")
-				}
-				if hasOAuthOpenAI && strings.TrimSpace(os.Getenv("OPENAI_OAUTH_CLIENT_ID")) == "" {
-					log.Printf("warning: OPENAI_OAUTH_CLIENT_ID not set; hosted OpenAI OAuth will use built-in client and may be rejected by provider redirect policy.")
-				}
+		if cfg.AppBaseURL == "" {
+			if hasOAuth {
+				log.Printf("warning: APP_BASE_URL is not set while OAuth models are configured; hosted OAuth callbacks will use localhost. Set APP_BASE_URL to your public host (example: https://dubee.org).")
 			}
+		} else {
+			log.Printf("app base url configured for OAuth callbacks: %s", cfg.AppBaseURL)
+			if hasOAuthAnthropic && strings.TrimSpace(os.Getenv("ANTHROPIC_OAUTH_CLIENT_ID")) == "" {
+				log.Printf("warning: ANTHROPIC_OAUTH_CLIENT_ID not set; hosted Anthropic OAuth will use built-in client and may be rejected by provider redirect policy.")
+			}
+			if hasOAuthOpenAI && strings.TrimSpace(os.Getenv("OPENAI_OAUTH_CLIENT_ID")) == "" {
+				log.Printf("warning: OPENAI_OAUTH_CLIENT_ID not set; hosted OpenAI OAuth will use built-in client and may be rejected by provider redirect policy.")
+			}
+		}
 	}
 	execRepo := repository.NewExecutionRepo(db)
 	scheduleRepo := repository.NewScheduleRepo(db)
@@ -399,6 +410,8 @@ func main() {
 	h.SetWebhookRepo(webhookRepo)
 	h.SetLocalRepoPathEnabled(cfg.EnableLocalRepoPath)
 	h.SetTaskChangesMergeOptionsEnabled(cfg.EnableTaskChangesMergeOptions)
+	h.SetAuthConfig(authCfg)
+	e.Use(h.AuthMiddleware())
 	llmSvc.SetAgentRepo(agentRepo)
 	llmSvc.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	llmSvc.SetSlackService(slackSvc)

@@ -224,3 +224,73 @@ func TestSidebar_CollapseToggleAccessibilityAndA11ySync(t *testing.T) {
 		}
 	}
 }
+
+func TestSidebar_UserAreaAndThemeToggleCoexist(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+	html := buf.String()
+
+	if !strings.Contains(html, `id="sidebar-auth-user"`) {
+		t.Fatal("sidebar must include auth user area")
+	}
+	if !strings.Contains(html, `id="sidebar-user-menu-trigger"`) {
+		t.Fatal("sidebar auth area must include a user-menu trigger")
+	}
+	if !strings.Contains(html, `id="sidebar-user-menu"`) {
+		t.Fatal("sidebar auth area must include a user-menu dropdown")
+	}
+	if !strings.Contains(html, `aria-haspopup="menu"`) {
+		t.Fatal("sidebar user trigger must declare menu popup semantics")
+	}
+	if !strings.Contains(html, `class="text-sm"`) || !strings.Contains(html, `>Logout</button>`) {
+		t.Fatal("sidebar user menu must include logout as a menu item")
+	}
+	if strings.Contains(html, `class="btn btn-ghost btn-xs">Logout</button>`) {
+		t.Fatal("sidebar should not render standalone always-visible logout button")
+	}
+	if !strings.Contains(html, `action="/logout"`) {
+		t.Fatal("sidebar user menus must preserve logout form action")
+	}
+	if !strings.Contains(html, `theme-toggle-pill`) {
+		t.Fatal("sidebar must keep theme toggle in footer")
+	}
+	if !strings.Contains(html, `id="sidebar-auth-user-collapsed"`) {
+		t.Fatal("sidebar must include collapsed auth user presentation")
+	}
+}
+
+func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+	html := buf.String()
+
+	required := []string{
+		`sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-between gap-2`,
+		`id="sidebar-user-menu-trigger"`,
+		`class="sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case"`,
+		`id="sidebar-user-menu-trigger-collapsed"`,
+		`class="sidebar-user-collapsed-trigger btn btn-ghost btn-square"`,
+		`class="text-sm" role="menuitem">Logout</button>`,
+		`aria-label="Open user menu"`,
+		`.sidebar-theme-toggle-container {`,
+		`min-height: 3.25rem;`,
+		`align-items: center;`,
+		`.sidebar-user-trigger {`,
+		`min-height: 24px !important;`,
+		`.sidebar-collapsed .sidebar-auth-collapsed {`,
+		`align-items: center;`,
+	}
+	for _, snippet := range required {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("sidebar footer alignment/accessibility marker missing: %s", snippet)
+		}
+	}
+}

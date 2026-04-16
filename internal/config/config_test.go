@@ -94,3 +94,49 @@ func TestValidateAppBaseURL(t *testing.T) {
 		t.Fatalf("expected APP_BASE_URL in validation error, got %q", err)
 	}
 }
+
+func TestResolveAuthEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		explicit string
+		username string
+		password string
+		want     bool
+	}{
+		{name: "explicit true", explicit: "true", want: true},
+		{name: "explicit false", explicit: "false", username: "u", password: "p", want: false},
+		{name: "inferred true from credentials", username: "u", password: "p", want: true},
+		{name: "inferred false missing password", username: "u", password: "", want: false},
+		{name: "inferred false missing username", username: "", password: "p", want: false},
+		{name: "invalid explicit falls back to inference", explicit: "maybe", username: "u", password: "p", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveAuthEnabled(tt.explicit, tt.username, tt.password); got != tt.want {
+				t.Fatalf("ResolveAuthEnabled(%q,%q,%q)=%v want %v", tt.explicit, tt.username, tt.password, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveAuthSessionTTL(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty defaults", raw: "", want: "24h0m0s"},
+		{name: "valid hours", raw: "48h", want: "48h0m0s"},
+		{name: "valid minutes", raw: "30m", want: "30m0s"},
+		{name: "invalid defaults", raw: "abc", want: "24h0m0s"},
+		{name: "non-positive defaults", raw: "0s", want: "24h0m0s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveAuthSessionTTL(tt.raw).String(); got != tt.want {
+				t.Fatalf("ResolveAuthSessionTTL(%q)=%q want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}

@@ -3,8 +3,11 @@ package handler
 import (
 	"context"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -54,6 +57,11 @@ type Handler struct {
 	taskChangesMergeOptionsEnabled *bool
 	projectFolderPicker            ProjectFolderPicker
 	webhookRepo                    *repository.WebhookRepo
+	authCfg                        *auth.Config
+
+	loginFailuresMu     sync.Mutex
+	loginFailureTimes   []time.Time
+	loginLockedUntil    time.Time
 }
 
 type ProjectFolderPicker func(ctx context.Context) (path string, canceled bool, err error)
@@ -263,6 +271,12 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Swagger API documentation
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
+	// Authentication
+	e.GET("/login", h.AuthLoginPage)
+	e.POST("/login", h.AuthLogin)
+	e.POST("/logout", h.AuthLogout)
+	e.GET("/auth/me", h.AuthMe)
+
 	// Dashboard
 	e.GET("/", h.Home)
 	e.GET("/dashboard", h.Dashboard)
@@ -359,8 +373,8 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// OAuth for model providers
 	e.GET("/models/:id/oauth/initiate", h.OAuthInitiate)
 	e.POST("/models/oauth/manual-complete", h.OAuthManualComplete)
-	e.GET("/callback", h.OAuthCallback)             // Anthropic public-mode callback
-	e.GET("/auth/callback", h.OAuthCallback)        // OpenAI public-mode callback
+	e.GET("/callback", h.OAuthCallback)              // Anthropic public-mode callback
+	e.GET("/auth/callback", h.OAuthCallback)         // OpenAI public-mode callback
 	e.GET("/models/oauth/callback", h.OAuthCallback) // Legacy/fallback
 	e.GET("/models/:id/oauth/status", h.OAuthStatus)
 

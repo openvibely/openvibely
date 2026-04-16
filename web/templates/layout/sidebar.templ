@@ -597,10 +597,54 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			</ul>
 		</div>
 
-		<!-- Theme toggle pinned to bottom of sidebar -->
-		<div class="sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end">
+		<!-- Footer: user info + theme toggle pinned to bottom of sidebar -->
+		<div class="sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-between gap-2">
+			<div id="sidebar-auth-user" class="hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed">
+				<div class="dropdown dropdown-top w-full">
+					<button
+						id="sidebar-user-menu-trigger"
+						type="button"
+						class="sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case"
+						aria-haspopup="menu"
+						aria-label="Open user menu"
+					>
+						<div class="avatar placeholder">
+							<div class="bg-base-300 text-base-content rounded-full w-6 flex items-center justify-center">
+								<span id="sidebar-auth-avatar" class="text-xs font-semibold leading-none">U</span>
+							</div>
+						</div>
+						<div id="sidebar-auth-name" class="text-xs font-medium truncate leading-none">User</div>
+					</button>
+					<ul id="sidebar-user-menu" tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-44 z-[120] border border-base-300" role="menu" aria-label="User menu">
+						<li role="none">
+							<form method="POST" action="/logout" class="w-full" role="none">
+								<button type="submit" class="text-sm" role="menuitem">Logout</button>
+							</form>
+						</li>
+					</ul>
+				</div>
+			</div>
+			<div id="sidebar-auth-user-collapsed" class="hidden sidebar-auth-collapsed dropdown dropdown-top dropdown-end">
+				<button
+					id="sidebar-user-menu-trigger-collapsed"
+					type="button"
+					class="sidebar-user-collapsed-trigger btn btn-ghost btn-square"
+					data-tip="User menu"
+					aria-haspopup="menu"
+					aria-label="Open user menu"
+				>
+					<span id="sidebar-auth-avatar-collapsed" class="text-xs font-semibold">U</span>
+				</button>
+				<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-40 z-[120] border border-base-300" role="menu" aria-label="User menu">
+					<li role="none">
+						<form method="POST" action="/logout" class="w-full" role="none">
+							<button type="submit" class="text-sm" role="menuitem">Logout</button>
+						</form>
+					</li>
+				</ul>
+			</div>
 			<!-- Theme toggle (expanded sidebar) -->
-			<label class="theme-toggle-pill sidebar-hide-collapsed" title="Toggle light/dark mode" onclick="window.toggleTheme()">
+			<label class="theme-toggle-pill self-center sidebar-hide-collapsed" title="Toggle light/dark mode" onclick="window.toggleTheme()">
 				<span class="theme-toggle-icon theme-toggle-sun">
 					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="11" height="11">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
@@ -637,6 +681,49 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			
 			.sidebar-theme-toggle-container {
 				flex-shrink: 0;
+				min-height: 3.25rem;
+				align-items: center;
+			}
+			.sidebar-user-trigger {
+				height: 24px !important;
+				min-height: 24px !important;
+				max-height: 24px !important;
+				display: flex !important;
+				align-items: center !important;
+				padding: 0 0.5rem !important;
+				padding-top: 0 !important;
+				padding-bottom: 0 !important;
+				margin: 0 !important;
+				border: 0 !important;
+				border-radius: 0.5rem;
+				line-height: 1 !important;
+				flex-shrink: 0;
+			}
+			.sidebar-user-trigger .avatar,
+			.sidebar-user-trigger #sidebar-auth-name {
+				margin: 0 !important;
+			}
+			.sidebar-user-trigger:hover,
+			.sidebar-user-collapsed-trigger:hover {
+				background-color: transparent !important;
+			}
+			.sidebar-user-trigger:focus-visible,
+			.sidebar-user-collapsed-trigger:focus-visible,
+			[data-theme="dark"] .sidebar-user-trigger:focus-visible,
+			[data-theme="dark"] .sidebar-user-collapsed-trigger:focus-visible {
+				box-shadow: 0 0 0 2px hsl(var(--bc) / 0.4);
+			}
+			.sidebar-user-collapsed-trigger {
+				width: 2rem;
+				height: 2rem;
+				min-height: 2rem;
+			}
+			.sidebar-auth-collapsed {
+				display: none;
+			}
+			.sidebar-collapsed .sidebar-auth-collapsed {
+				display: inline-flex;
+				align-items: center;
 			}
 			/* Project selector: keep single border in nav, avoid extra outer ring */
 			.sidebar-project-select,
@@ -750,20 +837,41 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 		<!-- New Project Dialog Container (loaded via HTMX) -->
 		<div id="new-project-container"></div>
-		<script>
-			(function() {
-				var btn = document.getElementById('new-project-btn');
-				if (!btn) return;
-				btn.addEventListener('click', function(e) {
-					e.preventDefault();
-					var container = document.getElementById('new-project-container');
-					htmx.ajax('GET', '/projects/new', {
-						target: container,
-						swap: 'innerHTML'
+			<script>
+				(function() {
+					fetch('/auth/me', { credentials: 'same-origin' })						.then(function(resp) {
+							if (!resp.ok) return null;
+							return resp.json();
+						})
+						.then(function(data) {
+							if (!data || !data.authenticated || !data.username) return;
+							var user = document.getElementById('sidebar-auth-user');
+							var userCollapsed = document.getElementById('sidebar-auth-user-collapsed');
+							var name = document.getElementById('sidebar-auth-name');
+							var avatar = document.getElementById('sidebar-auth-avatar');
+							var avatarCollapsed = document.getElementById('sidebar-auth-avatar-collapsed');
+							if (user) user.classList.remove('hidden');
+							if (userCollapsed) userCollapsed.classList.remove('hidden');
+							if (name) name.textContent = data.display || data.username;
+							var initial = ((data.display || data.username || 'U').trim().charAt(0) || 'U').toUpperCase();
+							if (avatar) avatar.textContent = initial;
+							if (avatarCollapsed) avatarCollapsed.textContent = initial;
+						})
+						.catch(function() {});
+				})();
+
+				(function() {
+					var btn = document.getElementById('new-project-btn');
+					if (!btn) return;
+					btn.addEventListener('click', function(e) {
+						e.preventDefault();
+						var container = document.getElementById('new-project-container');
+						htmx.ajax('GET', '/projects/new', {
+							target: container,
+							swap: 'innerHTML'
+						});
 					});
-				});
-			})();
-		</script>
+				})();		</script>
 
 		<!-- Project Settings Dialog Container (loaded via HTMX) -->
 		<div id="project-settings-container"></div>
