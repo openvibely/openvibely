@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -41,6 +40,7 @@ func TestSettingsContent_RendersSlackMenuCardAndModal(t *testing.T) {
 			false,
 			false,
 			true,
+			nil,
 			nil,
 			nil,
 		).Render(context.Background(), &buf)

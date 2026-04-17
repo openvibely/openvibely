@@ -13,7 +13,7 @@ func TestChatContent_PlanSwitchAutoSubmitsImplementationHandoff(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestChatContent_PlanCompletionPromptRestoresFromHistoryOnRefresh(t *testing
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestChatContent_PlanPromptRecoveryRunsForContainerOuterHTMLSwaps(t *testing
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestChatContent_PlanPromptButtonsUseDelegatedHandlers(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestChatContent_ClosesChatStreamEventSourcesOnSwapAndNavigation(t *testing.
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
-	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}).Render(context.Background(), &buf)
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render chat content: %v", err)
 	}

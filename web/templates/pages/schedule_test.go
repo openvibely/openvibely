@@ -1193,7 +1193,7 @@ func TestScheduleContent_RunAtFieldClickablePickerAffordance(t *testing.T) {
 	if !strings.Contains(output, `data-run-at-picker`) {
 		t.Fatal("expected run-at picker input hook in schedule create dialog")
 	}
-	if !strings.Contains(output, `class="input input-bordered cursor-pointer"`) {
+	if !strings.Contains(output, `class="input input-bordered cursor-pointer w-full"`) {
 		t.Fatal("expected pointer cursor affordance on schedule create run-at input")
 	}
 	if !strings.Contains(output, `if (event && event.target && !event.target.closest('input[data-run-at-picker]')) return;`) {
