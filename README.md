@@ -112,22 +112,46 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 | `OPENVIBELY_ENABLE_TASK_CHANGES_MERGE_OPTIONS` | Shows merge options in task `Changes` tab | `1,true,yes,on,0,false,no,off` | Unset/invalid = `false`; `start.sh` exports `true` unless overridden in `.env` | `true` \| `false` |
 | `OPENVIBELY_CODEX_REASONING_EFFORT` | Fallback reasoning effort for Codex requests when model config does not set one | `low`, `medium`, `high`, `xhigh` | If unset/invalid, defaults to `high` | `high` \| `medium` |
 
+### App Authentication (Built-in Login)
+
+| Variable | Purpose | Required? | Allowed values | Default behavior (from code) | Security notes | Example (safe placeholder) |
+|---|---|---|---|---|---|---|
+| `AUTH_ENABLED` | Explicitly enable/disable built-in login middleware | Optional (explicit toggle) | `1,true,yes,on,0,false,no,off` | If unset/invalid, inferred from credentials: enabled only when both `AUTH_USERNAME` and `AUTH_PASSWORD` are set | Prefer explicit `true`/`false` in production to avoid accidental enablement from partial env changes | `true` |
+| `AUTH_USERNAME` | Login username for built-in auth | Required when auth is enabled | String | Empty by default; if set with `AUTH_PASSWORD` and `AUTH_ENABLED` unset, auth is inferred enabled | Keep non-sensitive but unique; avoid obvious defaults like `admin` in internet-exposed deployments | `openvibely_admin` |
+| `AUTH_PASSWORD` | Login password for built-in auth | Required when auth is enabled | String | Empty by default | Treat as a secret; generate a long random password and store in secret manager/env file with restricted permissions | `__REPLACE_WITH_LONG_RANDOM_PASSWORD__` |
+| `AUTH_SESSION_SECRET` | HMAC signing secret for `ov_session` cookie tokens | Required when auth is enabled | String | Empty by default | Treat as high-sensitivity secret; use at least 32 random bytes. Rotating this invalidates existing login sessions | `__REPLACE_WITH_32+_BYTE_RANDOM_SECRET__` |
+| `AUTH_SESSION_TTL` | Session lifetime for signed auth cookies | Optional | Go duration string (`24h`, `12h`, `30m`) | `24h`; invalid/non-positive values fall back to `24h` | Keep long enough for usability but short enough for risk tolerance; avoid very short TTLs that cause frequent logouts | `24h` |
+
+Runtime enforcement from code:
+- If auth resolves enabled and `AUTH_USERNAME`/`AUTH_PASSWORD`/`AUTH_SESSION_SECRET` is missing, startup fails with `invalid auth configuration: ...`.
+- If `AUTH_ENABLED` is unset, setting both `AUTH_USERNAME` and `AUTH_PASSWORD` implicitly enables auth.
+
 ### OAuth and Deployment Variables
 
-| Variable | Purpose | Allowed values | Default behavior (from code) | Examples (local / VPS-public) |
-|---|---|---|---|---|
-| `APP_BASE_URL` | External origin used for absolute callback/redirect URLs | Absolute `http://` or `https://` URL, no query/fragment/userinfo | Unset/invalid -> ignored; app falls back to forwarded/request host. OAuth `auto` then uses localhost mode when no valid base URL is available | unset \| `https://app.example.com` |
-| `OAUTH_REDIRECT_MODE` | OAuth callback strategy | `auto`, `hosted`, `localhost_manual` | Unset/invalid -> `auto`; invalid values are logged and treated as `auto`; `hosted` without `APP_BASE_URL` returns `400` on OAuth initiate | `localhost_manual` or `auto` \| `auto` or `hosted` |
-| `ANTHROPIC_OAUTH_CLIENT_ID` | Hosted Anthropic OAuth client ID override | String | Used only for hosted callback mode; fallback is built-in Anthropic client ID | unset \| `your_anthropic_client_id` |
-| `ANTHROPIC_OAUTH_CLIENT_SECRET` | Hosted Anthropic OAuth client secret override | String | Used only for hosted callback mode; default empty | unset \| `your_anthropic_client_secret` |
-| `ANTHROPIC_OAUTH_AUTHORIZE_URL` | Anthropic authorize endpoint override | URL string | `https://claude.ai/oauth/authorize` | unset \| `https://claude.ai/oauth/authorize` |
-| `ANTHROPIC_OAUTH_TOKEN_URL` | Anthropic token endpoint override | URL string | `https://platform.claude.com/v1/oauth/token` | unset \| `https://platform.claude.com/v1/oauth/token` |
-| `ANTHROPIC_OAUTH_SCOPES` | Anthropic scopes override | Space-delimited scope string | `user:profile user:inference user:sessions:claude_code user:mcp_servers` | unset \| provider-specific scopes |
-| `OPENAI_OAUTH_CLIENT_ID` | Hosted OpenAI OAuth client ID override | String | Used only for hosted callback mode; fallback is built-in Codex client ID | unset \| `your_openai_client_id` |
-| `OPENAI_OAUTH_CLIENT_SECRET` | Hosted OpenAI OAuth client secret override | String | Used only for hosted callback mode; default empty | unset \| `your_openai_client_secret` |
-| `OPENAI_OAUTH_AUTHORIZE_URL` | OpenAI authorize endpoint override | URL string | `https://auth.openai.com/oauth/authorize` | unset \| `https://auth.openai.com/oauth/authorize` |
-| `OPENAI_OAUTH_TOKEN_URL` | OpenAI token endpoint override | URL string | `https://auth.openai.com/oauth/token` | unset \| `https://auth.openai.com/oauth/token` |
-| `OPENAI_OAUTH_SCOPES` | OpenAI scopes override | Space-delimited scope string | `openid profile email offline_access api.connectors.read api.connectors.invoke` | unset \| provider-specific scopes |
+| Variable | Purpose | Required? | Allowed values | Default behavior (from code) | Security notes | Examples (local / VPS-public) |
+|---|---|---|---|---|---|---|
+| `APP_BASE_URL` | External origin used for absolute callback/redirect URLs | Required for hosted OAuth mode | Absolute `http://` or `https://` URL, no query/fragment/userinfo | Unset/invalid -> ignored; app falls back to forwarded/request host. OAuth `auto` then uses localhost mode when no valid base URL is available | Not a secret, but must be accurate for OAuth redirects and reverse-proxy setups | unset \| `https://app.example.com` |
+| `OAUTH_REDIRECT_MODE` | OAuth callback strategy | Optional | `auto`, `hosted`, `localhost_manual` | Unset/invalid -> `auto`; invalid values are logged and treated as `auto`; `hosted` without `APP_BASE_URL` returns `400` on OAuth initiate | `hosted` is safest for public deployments with proper callback registration; `localhost_manual` is fallback for providers that only accept localhost redirect URIs | `localhost_manual` or `auto` \| `auto` or `hosted` |
+| `ANTHROPIC_OAUTH_CLIENT_ID` | Hosted Anthropic OAuth client ID override | Optional (hosted mode strongly recommended) | String | Used only for hosted callback mode; fallback is built-in Anthropic client ID | Client ID is not secret, but should match your registered OAuth app | unset \| `your_anthropic_client_id` |
+| `ANTHROPIC_OAUTH_CLIENT_SECRET` | Hosted Anthropic OAuth client secret override | Optional | String | Used only for hosted callback mode; default empty | Secret: store in env/secret manager, never in git | unset \| `__REPLACE_WITH_ANTHROPIC_OAUTH_CLIENT_SECRET__` |
+| `ANTHROPIC_OAUTH_AUTHORIZE_URL` | Anthropic authorize endpoint override | Optional | URL string | `https://claude.ai/oauth/authorize` | Not secret; override only for provider-compatible custom endpoints | unset \| `https://claude.ai/oauth/authorize` |
+| `ANTHROPIC_OAUTH_TOKEN_URL` | Anthropic token endpoint override | Optional | URL string | `https://platform.claude.com/v1/oauth/token` | Not secret; keep provider-accurate | unset \| `https://platform.claude.com/v1/oauth/token` |
+| `ANTHROPIC_OAUTH_SCOPES` | Anthropic scopes override | Optional | Space-delimited scope string | `user:profile user:inference user:sessions:claude_code user:mcp_servers` | Not secret; grant least privilege needed | unset \| provider-specific scopes |
+| `OPENAI_OAUTH_CLIENT_ID` | Hosted OpenAI OAuth client ID override | Optional (hosted mode strongly recommended) | String | Used only for hosted callback mode; fallback is built-in Codex client ID | Client ID is not secret, but should match your OAuth app | unset \| `your_openai_client_id` |
+| `OPENAI_OAUTH_CLIENT_SECRET` | Hosted OpenAI OAuth client secret override | Optional | String | Used only for hosted callback mode; default empty | Secret: store in env/secret manager, never in git | unset \| `__REPLACE_WITH_OPENAI_OAUTH_CLIENT_SECRET__` |
+| `OPENAI_OAUTH_AUTHORIZE_URL` | OpenAI authorize endpoint override | Optional | URL string | `https://auth.openai.com/oauth/authorize` | Not secret; override only when required | unset \| `https://auth.openai.com/oauth/authorize` |
+| `OPENAI_OAUTH_TOKEN_URL` | OpenAI token endpoint override | Optional | URL string | `https://auth.openai.com/oauth/token` | Not secret; keep provider-accurate | unset \| `https://auth.openai.com/oauth/token` |
+| `OPENAI_OAUTH_SCOPES` | OpenAI scopes override | Optional | Space-delimited scope string | `openid profile email offline_access api.connectors.read api.connectors.invoke` | Not secret; grant least privilege needed | unset \| provider-specific scopes |
+
+Auth-secret values should always be supplied as environment variables (or secret manager injection), not hardcoded in source, Compose YAML, or committed `.env` files.
+
+Keep `.env`/`*.env` files containing secrets out of git (for example via `.gitignore`) and restrict file permissions (for example `chmod 600`).
+
+Security recommendations for internet-facing deployments:
+- Always terminate TLS (HTTPS) at your reverse proxy/load balancer.
+- Use long random values for `AUTH_PASSWORD`, `AUTH_SESSION_SECRET`, and OAuth client secrets.
+- Rotate secrets periodically; expect active sessions to be invalidated after `AUTH_SESSION_SECRET` rotation.
+- Do not print secret values in logs, screenshots, CI output, or issue tickets.
 
 OAuth callback mode behavior summary:
 - `auto`: uses hosted callbacks only when `APP_BASE_URL` resolves to a valid absolute URL; otherwise uses localhost callback flow.
