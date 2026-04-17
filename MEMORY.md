@@ -20,9 +20,11 @@ OpenVibely is an open-source Go application for automated task scheduling and AI
 ## Project Structure
 
 ```
-cmd/server/main.go              # Entry point, wires everything
+cmd/server/main.go              # Web/VPS/Docker entrypoint
+cmd/desktop/main.go             # Wails desktop entrypoint
 internal/
-  config/config.go              # Env-based configuration
+  config/config.go              # Env-based configuration with runtime mode (server/desktop)
+  server/server.go              # Reusable backend bootstrap: Start(ctx, cfg) → Instance
   database/database.go          # SQLite connection + goose migrations
   database/migrations/*.sql     # SQL migrations
   models/                       # Plain Go structs
@@ -36,6 +38,15 @@ pkg/anthropic_client/           # Anthropic API client wrapper
 pkg/openai_client/              # OpenAI API client wrapper
 runbooks/                       # Operational runbooks
 ```
+
+## Dual-Mode Architecture (Server + Desktop)
+
+- **Shared backend**: `internal/server.Start(ctx, cfg)` wires the full backend and returns `*server.Instance` with bound address, base URL, and shutdown handle.
+- **Server mode** (`cmd/server`): `config.Load()` → `ModeServer`. Uses env-driven defaults (`PORT=3001`, `DATABASE_PATH=./openvibely.db`, `PROJECT_REPO_ROOT=./repos`). Waits for OS signal to shut down.
+- **Desktop mode** (`cmd/desktop`): `config.LoadWithMode(ModeDesktop)`. Defaults to OS app-data dirs for DB/repos/uploads, ephemeral port (`PORT=0`), and enables local repo paths. Wails WebView loads `inst.BaseURL`.
+- **Config precedence**: env vars always override mode defaults. Desktop users who set `DATABASE_PATH` in env get that path.
+- **OAuth by mode**: Desktop defaults to localhost callback flow (`APP_BASE_URL` unset). Server/VPS mode uses `APP_BASE_URL` for hosted callbacks.
+- **No code fork**: Both modes use 100% of the same backend code via `internal/server`.
 
 ## Provider Architecture
 

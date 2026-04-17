@@ -597,9 +597,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			</ul>
 		</div>
 
-		<!-- Footer: user info + theme toggle pinned to bottom of sidebar -->
-		<div class="sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-between gap-2">
-			<div id="sidebar-auth-user" class="hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed">
+			<!-- Footer: user info + theme toggle pinned to bottom of sidebar -->
+		<div class="sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2">
+			<div id="sidebar-auth-user" class="hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto">
 				<div class="dropdown dropdown-top w-full">
 					<button
 						id="sidebar-user-menu-trigger"
@@ -624,27 +624,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					</ul>
 				</div>
 			</div>
-			<div id="sidebar-auth-user-collapsed" class="hidden sidebar-auth-collapsed dropdown dropdown-top dropdown-end">
-				<button
-					id="sidebar-user-menu-trigger-collapsed"
-					type="button"
-					class="sidebar-user-collapsed-trigger btn btn-ghost btn-square"
-					data-tip="User menu"
-					aria-haspopup="menu"
-					aria-label="Open user menu"
-				>
-					<span id="sidebar-auth-avatar-collapsed" class="text-xs font-semibold">U</span>
-				</button>
-				<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-40 z-[120] border border-base-300" role="menu" aria-label="User menu">
-					<li role="none">
-						<form method="POST" action="/logout" class="w-full" role="none">
-							<button type="submit" class="text-sm" role="menuitem">Logout</button>
-						</form>
-					</li>
-				</ul>
-			</div>
-			<!-- Theme toggle (expanded sidebar) -->
-			<label class="theme-toggle-pill self-center sidebar-hide-collapsed" title="Toggle light/dark mode" onclick="window.toggleTheme()">
+			<label class="theme-toggle-pill sidebar-hide-collapsed" title="Toggle light/dark mode" onclick="window.toggleTheme()">
 				<span class="theme-toggle-icon theme-toggle-sun">
 					<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="11" height="11">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
@@ -657,7 +637,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				</span>
 				<span class="theme-toggle-thumb"></span>
 			</label>
-			<!-- Theme toggle (collapsed sidebar) -->
 			<a class="theme-toggle-collapsed-btn" data-tip="Toggle theme" onclick="window.toggleTheme(); return false;" href="#">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0 theme-collapsed-sun" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 					<path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
@@ -667,17 +646,16 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 				</svg>
 			</a>
 		</div>
-
 		<style>
 			/* Sidebar collapse toggle button */
 			.sidebar-toggle-btn {
 				opacity: 0.7;
 				transition: opacity 0.15s, background-color 0.15s;
 			}
-			.sidebar-toggle-btn:hover {
-				opacity: 1;
-				background-color: oklch(var(--b2));
-			}
+				.sidebar-toggle-btn:hover {
+					opacity: 1;
+					background-color: hsl(var(--b2));
+				}
 			
 			.sidebar-theme-toggle-container {
 				flex-shrink: 0;
@@ -703,102 +681,12 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			.sidebar-user-trigger #sidebar-auth-name {
 				margin: 0 !important;
 			}
-			.sidebar-user-trigger:hover,
-			.sidebar-user-collapsed-trigger:hover {
+			.sidebar-user-trigger:hover {
 				background-color: transparent !important;
 			}
 			.sidebar-user-trigger:focus-visible,
-			.sidebar-user-collapsed-trigger:focus-visible,
-			[data-theme="dark"] .sidebar-user-trigger:focus-visible,
-			[data-theme="dark"] .sidebar-user-collapsed-trigger:focus-visible {
+			[data-theme="dark"] .sidebar-user-trigger:focus-visible {
 				box-shadow: 0 0 0 2px hsl(var(--bc) / 0.4);
-			}
-			.sidebar-user-collapsed-trigger {
-				width: 2rem;
-				height: 2rem;
-				min-height: 2rem;
-			}
-			.sidebar-auth-collapsed {
-				display: none;
-			}
-			.sidebar-collapsed .sidebar-auth-collapsed {
-				display: inline-flex;
-				align-items: center;
-			}
-			/* Project selector: keep single border in nav, avoid extra outer ring */
-			.sidebar-project-select,
-			.sidebar-project-select:hover,
-			.sidebar-project-select:focus,
-			.sidebar-project-select:active {
-				outline: none;
-				box-shadow: none;
-				--tw-ring-shadow: 0 0 #0000;
-			}
-			.sidebar-project-select:focus-visible {
-				outline: none;
-				box-shadow: 0 0 0 2px hsl(var(--p) / 0.28);
-			}
-			[data-theme="dark"] .sidebar-project-select:focus-visible {
-				box-shadow: 0 0 0 2px hsl(var(--bc) / 0.35);
-			}
-			.theme-toggle-pill {
-				display: inline-flex;
-				align-items: center;
-				justify-content: space-between;
-				position: relative;
-				width: 46px;
-				height: 24px;
-				border-radius: 9999px;
-				background: oklch(var(--b3));
-				cursor: pointer;
-				padding: 0 4px;
-				transition: background 0.2s;
-				user-select: none;
-				flex-shrink: 0;
-			}
-			.theme-toggle-icon {
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				width: 16px;
-				height: 16px;
-				z-index: 1;
-				transition: opacity 0.2s, color 0.2s;
-			}
-			.theme-toggle-thumb {
-				position: absolute;
-				top: 3px;
-				width: 18px;
-				height: 18px;
-				border-radius: 50%;
-				background: oklch(var(--bc));
-				transition: transform 0.25s ease, left 0.25s ease, right 0.25s ease;
-				box-shadow: 0 1px 2px rgba(0,0,0,0.2);
-			}
-			/* Light mode: thumb on LEFT (sun side), sun visible and bright on left */
-			.theme-toggle-thumb {
-				left: 3px;
-			}
-			.theme-toggle-sun {
-				color: oklch(var(--p));
-				opacity: 1;
-			}
-			.theme-toggle-moon {
-				color: #9ca3af;
-				opacity: 0.5;
-			}
-			/* Dark mode: thumb slides RIGHT (moon side), moon visible and bright on right */
-			[data-theme="dark"] .theme-toggle-thumb {
-				left: auto;
-				right: 3px;
-			}
-			[data-theme="dark"] .theme-toggle-sun {
-				color: #9ca3af;
-				opacity: 0.5;
-			}
-			[data-theme="dark"] .theme-toggle-moon {
-				color: oklch(var(--p));
-				opacity: 1;
 			}
 			/* Collapsed-only theme toggle icon button */
 			.theme-toggle-collapsed-btn {
@@ -814,7 +702,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			}
 			.theme-toggle-collapsed-btn:hover {
 				opacity: 1;
-				background-color: oklch(var(--b3));
 			}
 			.sidebar-collapsed .theme-toggle-collapsed-btn {
 				display: flex;
@@ -832,6 +719,22 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			}
 			[data-theme="dark"] .theme-collapsed-moon {
 				display: block;
+			}
+			/* Project selector: keep single border in nav, avoid extra outer ring */
+			.sidebar-project-select,
+			.sidebar-project-select:hover,
+			.sidebar-project-select:focus,
+			.sidebar-project-select:active {
+				outline: none;
+				box-shadow: none;
+				--tw-ring-shadow: 0 0 #0000;
+			}
+			.sidebar-project-select:focus-visible {
+				outline: none;
+				box-shadow: 0 0 0 2px hsl(var(--p) / 0.28);
+			}
+			[data-theme="dark"] .sidebar-project-select:focus-visible {
+				box-shadow: 0 0 0 2px hsl(var(--bc) / 0.35);
 			}
 		</style>
 

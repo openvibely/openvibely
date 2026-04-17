@@ -1566,8 +1566,8 @@ func TestHandler_ViewSchedule_TimelineTracerUsesAccentColor(t *testing.T) {
 
 	assertContains(t, rec, `id="timeline-before"`)
 	assertContains(t, rec, `id="timeline-current"`)
-	if !strings.Contains(body, `border-top: 2px dashed var(--ov-link-color);`) {
-		t.Error("expected dashed timeline tracer to use shared accent token var(--ov-link-color)")
+	if !strings.Contains(body, `background: var(--ov-schedule-timeline-dash);`) {
+		t.Error("expected timeline tracer to use shared dash token var(--ov-schedule-timeline-dash)")
 	}
 	if c := strings.Count(body, `style="background-color: var(--ov-link-color);"`); c < 3 {
 		t.Errorf("expected timeline dots/line to use accent token var(--ov-link-color) in 3 elements, got %d", c)
@@ -2723,10 +2723,12 @@ func TestSidebar_LightModeBackgroundAndNavReadability(t *testing.T) {
 		`[data-theme="light"] .bg-base-200 {`,
 		`[data-theme="light"] .stats {`,
 		`background-color: var(--ov-l-bg);`,
-		`[data-theme="light"] .hover\:border-primary:hover {`,
-		`border-color: oklch(var(--p));`,
-		`[data-theme="light"] .hover\:border-primary\/40:hover {`,
-		`border-color: oklch(var(--p) / 0.4);`,
+		`[data-theme="light"] .hover\:border-primary:hover,`,
+		`[data-theme="light"] [class~="hover:border-primary"]:hover {`,
+		`border-color: #3f4981 !important;`,
+		`[data-theme="light"] .hover\:border-primary\/40:hover,`,
+		`[data-theme="light"] [class~="hover:border-primary/40"]:hover {`,
+		`border-color: rgba(63, 73, 129, 0.4) !important;`,
 		`[data-theme="light"] .chat-input-container {`,
 		`background-color: #FFFFFF;`,
 		`[data-theme="light"] .chat-bubble-user-msg,`,

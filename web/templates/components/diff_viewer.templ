@@ -1060,19 +1060,19 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 			.diff-line-num {
 				padding-right: 1.75rem;
 			}
-			.diff-add-comment-btn {
-				display: inline-flex;
-				align-items: center;
-				justify-content: center;
-				position: absolute;
-				right: 0.25rem;
-				top: 50%;
-				transform: translateY(-50%);
-				width: 18px;
-				height: 18px;
-				border-radius: 9999px;
-				background: oklch(0.6 0.15 250);
-				color: white;
+				.diff-add-comment-btn {
+					display: inline-flex;
+					align-items: center;
+					justify-content: center;
+					position: absolute;
+					right: 0.25rem;
+					top: 50%;
+					transform: translateY(-50%);
+					width: 18px;
+					height: 18px;
+					border-radius: 9999px;
+					background: #3b82f6;
+					color: white;
 				border: none;
 				cursor: pointer;
 				font-size: 14px;
@@ -1084,9 +1084,9 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				pointer-events: none;
 				transition: opacity 0.15s ease, background-color 0.15s ease;
 			}
-			.diff-add-comment-btn:hover {
-				background: oklch(0.5 0.18 250);
-			}
+				.diff-add-comment-btn:hover {
+					background: #2563eb;
+				}
 			.diff-review-line:hover .diff-add-comment-btn,
 			.diff-review-line-open .diff-add-comment-btn {
 				opacity: 1;
@@ -1125,14 +1125,14 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				background: transparent;
 				min-height: 2.25rem;
 			}
-			.review-inline-comment-bar {
-				position: absolute;
-				left: 0;
-				top: 0;
-				bottom: 0;
-				width: 4px;
-				background: oklch(0.72 0.17 94);
-			}
+				.review-inline-comment-bar {
+					position: absolute;
+					left: 0;
+					top: 0;
+					bottom: 0;
+					width: 4px;
+					background: #facc15;
+				}
 			.review-inline-comment-box .review-delete-btn {
 				position: absolute;
 				top: 0.25rem;

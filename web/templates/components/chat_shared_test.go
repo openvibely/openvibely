@@ -214,6 +214,25 @@ func TestChatAutoScrollScript_RehydratesAssistantRawContentViaStreamingRenderer(
 	}
 }
 
+func TestChatAutoScrollScript_ToolHeaderUsesTextNodesNotInnerHTML(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatAutoScrollScript().Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+
+	content := buf.String()
+	if strings.Contains(content, "header.innerHTML = headerHtml;") {
+		t.Fatal("tool header must not assign concatenated innerHTML from model/tool text")
+	}
+	if !strings.Contains(content, "nameSpan.textContent = dn;") {
+		t.Error("tool header should render tool name via textContent")
+	}
+	if !strings.Contains(content, "secondarySpan.textContent = seg.secondary;") {
+		t.Error("tool header should render tool secondary text via textContent")
+	}
+}
+
 func TestChatInputForm_SubmitButtonUsesRequestSubmit(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{
@@ -233,8 +252,38 @@ func TestChatInputForm_SubmitButtonUsesRequestSubmit(t *testing.T) {
 	if !strings.Contains(content, "submitBtn.addEventListener('click', function(e)") {
 		t.Fatal("chat input script must normalize submit button clicks")
 	}
-	if !strings.Contains(content, "form.requestSubmit(submitBtn);") {
-		t.Fatal("submit button clicks must use form.requestSubmit(submitBtn) to match Enter submission")
+	if !strings.Contains(content, "if (typeof form.requestSubmit === 'function')") {
+		t.Fatal("chat input script must feature-detect requestSubmit")
+	}
+	if !strings.Contains(content, "var submitEvent = new Event('submit', { bubbles: true, cancelable: true });") {
+		t.Fatal("chat input script must synthesize submit event when requestSubmit is unavailable")
+	}
+	if !strings.Contains(content, "form.dispatchEvent(submitEvent);") {
+		t.Fatal("chat input script must dispatch submit event fallback")
+	}
+}
+
+func TestChatInputForm_EnterKeyHasRequestSubmitFallback(t *testing.T) {
+	var buf bytes.Buffer
+	err := ChatInputForm(ChatInputFormConfig{
+		FormID:       "task-thread-form",
+		InputID:      "task-message-input",
+		PostEndpoint: "/tasks/task-1/thread",
+		TargetID:     "task-thread-messages",
+	}).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Failed to render ChatInputForm: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, "if (typeof form.requestSubmit === 'function')") {
+		t.Fatal("enter key path must feature-detect requestSubmit")
+	}
+	if !strings.Contains(content, "var submitEvent = new Event('submit', { bubbles: true, cancelable: true });") {
+		t.Fatal("enter key path must synthesize submit event when requestSubmit is unavailable")
+	}
+	if !strings.Contains(content, "form.dispatchEvent(submitEvent);") {
+		t.Fatal("enter key path must dispatch submit fallback")
 	}
 }
 

@@ -1,6 +1,9 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -138,5 +141,128 @@ func TestResolveAuthSessionTTL(t *testing.T) {
 				t.Fatalf("ResolveAuthSessionTTL(%q)=%q want %q", tt.raw, got, tt.want)
 			}
 		})
+	}
+}
+
+// --- Runtime mode tests ---
+
+func TestLoadWithMode_ServerDefaults(t *testing.T) {
+	// Clear env vars that would override defaults.
+	for _, k := range []string{"PORT", "DATABASE_PATH", "PROJECT_REPO_ROOT", "OPENVIBELY_ENABLE_LOCAL_REPO_PATH"} {
+		prev := os.Getenv(k)
+		os.Unsetenv(k)
+		defer os.Setenv(k, prev)
+	}
+
+	cfg := LoadWithMode(ModeServer)
+	if cfg.Mode != ModeServer {
+		t.Fatalf("expected mode server, got %s", cfg.Mode)
+	}
+	if cfg.Port != "3001" {
+		t.Fatalf("expected server default port 3001, got %s", cfg.Port)
+	}
+	if cfg.DatabasePath != "./openvibely.db" {
+		t.Fatalf("expected server default DB path, got %s", cfg.DatabasePath)
+	}
+	if cfg.ProjectRepoRoot != "./repos" {
+		t.Fatalf("expected server default repo root, got %s", cfg.ProjectRepoRoot)
+	}
+	if cfg.EnableLocalRepoPath {
+		t.Fatal("expected server default EnableLocalRepoPath=false")
+	}
+}
+
+func TestLoadWithMode_DesktopDefaults(t *testing.T) {
+	// Clear env vars that would override defaults.
+	for _, k := range []string{"PORT", "DATABASE_PATH", "PROJECT_REPO_ROOT", "OPENVIBELY_ENABLE_LOCAL_REPO_PATH"} {
+		prev := os.Getenv(k)
+		os.Unsetenv(k)
+		defer os.Setenv(k, prev)
+	}
+
+	cfg := LoadWithMode(ModeDesktop)
+	if cfg.Mode != ModeDesktop {
+		t.Fatalf("expected mode desktop, got %s", cfg.Mode)
+	}
+	if cfg.Port != "0" {
+		t.Fatalf("expected desktop default port 0 (ephemeral), got %s", cfg.Port)
+	}
+
+	// DB path should be inside OS app-data dir, not relative.
+	if cfg.DatabasePath == "./openvibely.db" {
+		t.Fatal("desktop mode should not use relative default DB path")
+	}
+	if !filepath.IsAbs(cfg.DatabasePath) {
+		t.Fatalf("expected absolute desktop DB path, got %s", cfg.DatabasePath)
+	}
+	if !strings.Contains(cfg.DatabasePath, "openvibely.db") {
+		t.Fatalf("expected 'openvibely.db' in path, got %s", cfg.DatabasePath)
+	}
+
+	// Repo root should also be inside app-data dir.
+	if cfg.ProjectRepoRoot == "./repos" {
+		t.Fatal("desktop mode should not use relative default repo root")
+	}
+
+	// Desktop mode enables local repo paths by default.
+	if !cfg.EnableLocalRepoPath {
+		t.Fatal("expected desktop default EnableLocalRepoPath=true")
+	}
+}
+
+func TestLoadWithMode_DesktopEnvOverrides(t *testing.T) {
+	// Env vars override desktop defaults.
+	os.Setenv("PORT", "9999")
+	os.Setenv("DATABASE_PATH", "/custom/path.db")
+	os.Setenv("PROJECT_REPO_ROOT", "/custom/repos")
+	os.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "false")
+	defer func() {
+		os.Unsetenv("PORT")
+		os.Unsetenv("DATABASE_PATH")
+		os.Unsetenv("PROJECT_REPO_ROOT")
+		os.Unsetenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH")
+	}()
+
+	cfg := LoadWithMode(ModeDesktop)
+	if cfg.Port != "9999" {
+		t.Fatalf("expected env override port 9999, got %s", cfg.Port)
+	}
+	if cfg.DatabasePath != "/custom/path.db" {
+		t.Fatalf("expected env override DB path, got %s", cfg.DatabasePath)
+	}
+	if cfg.ProjectRepoRoot != "/custom/repos" {
+		t.Fatalf("expected env override repo root, got %s", cfg.ProjectRepoRoot)
+	}
+	if cfg.EnableLocalRepoPath {
+		t.Fatal("expected env override EnableLocalRepoPath=false")
+	}
+}
+
+func TestDesktopDataDir(t *testing.T) {
+	dir := desktopDataDir()
+	if dir == "" {
+		t.Fatal("desktopDataDir returned empty string")
+	}
+	if !filepath.IsAbs(dir) {
+		t.Fatalf("expected absolute path, got %s", dir)
+	}
+
+	// Basic OS-specific path checks.
+	switch runtime.GOOS {
+	case "darwin":
+		if !strings.Contains(dir, "Library/Application Support") {
+			t.Fatalf("macOS data dir should be in Library/Application Support, got %s", dir)
+		}
+	case "linux":
+		if !strings.Contains(dir, ".local/share") && !strings.Contains(dir, os.Getenv("XDG_DATA_HOME")) {
+			t.Fatalf("linux data dir should be under XDG_DATA_HOME or ~/.local/share, got %s", dir)
+		}
+	}
+}
+
+func TestLoad_IsServerMode(t *testing.T) {
+	cfg := Load()
+	if cfg.Mode != ModeServer {
+		t.Fatalf("Load() should produce server mode, got %s", cfg.Mode)
 	}
 }

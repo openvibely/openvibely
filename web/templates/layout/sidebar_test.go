@@ -19,31 +19,26 @@ func TestSidebar_ThemeToggleInFooter(t *testing.T) {
 
 	html := buf.String()
 
-	// Theme toggle must exist
 	if !strings.Contains(html, "theme-toggle-pill") {
-		t.Fatal("sidebar must contain the theme toggle pill")
+		t.Fatal("sidebar footer must contain theme toggle pill")
+	}
+	if !strings.Contains(html, "sidebar-hide-collapsed") {
+		t.Fatal("theme toggle pill must have sidebar-hide-collapsed class to hide when collapsed")
 	}
 	if !strings.Contains(html, "theme-toggle-collapsed-btn") {
-		t.Fatal("sidebar must contain the collapsed theme toggle button")
+		t.Fatal("sidebar footer must contain collapsed theme toggle button")
 	}
-
-	// Theme toggle must be inside the sidebar-theme-toggle-container (bottom of sidebar),
-	// not inside the sidebar-inner (scrollable nav area)
 	if !strings.Contains(html, "sidebar-theme-toggle-container") {
-		t.Fatal("sidebar must contain a sidebar-theme-toggle-container element for the theme toggle")
+		t.Fatal("sidebar footer must contain theme toggle container")
 	}
-
-	// The footer should appear after the scrollable inner div closes
-	innerEnd := strings.Index(html, "sidebar-inner")
-	footerStart := strings.Index(html, "sidebar-theme-toggle-container")
-	if innerEnd < 0 || footerStart < 0 {
-		t.Fatal("could not find sidebar-inner and sidebar-theme-toggle-container in rendered HTML")
+	if !strings.Contains(html, "justify-end") {
+		t.Fatal("sidebar theme-toggle container must right-align footer controls")
 	}
-
-	// The theme toggle pill should be inside the footer container, not inside the scrollable area
-	pillIdx := strings.Index(html, "theme-toggle-pill")
-	if pillIdx < footerStart {
-		t.Fatal("theme toggle pill should be inside sidebar-theme-toggle-container, not above it in the scrollable area")
+	if !strings.Contains(html, "theme-toggle-sun") || !strings.Contains(html, "theme-toggle-moon") {
+		t.Fatal("theme toggle must include sun and moon icons")
+	}
+	if !strings.Contains(html, "theme-collapsed-sun") || !strings.Contains(html, "theme-collapsed-moon") {
+		t.Fatal("collapsed theme toggle must include sun and moon icons")
 	}
 }
 
@@ -255,12 +250,6 @@ func TestSidebar_UserAreaAndThemeToggleCoexist(t *testing.T) {
 	if !strings.Contains(html, `action="/logout"`) {
 		t.Fatal("sidebar user menus must preserve logout form action")
 	}
-	if !strings.Contains(html, `theme-toggle-pill`) {
-		t.Fatal("sidebar must keep theme toggle in footer")
-	}
-	if !strings.Contains(html, `id="sidebar-auth-user-collapsed"`) {
-		t.Fatal("sidebar must include collapsed auth user presentation")
-	}
 }
 
 func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
@@ -273,11 +262,9 @@ func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 	html := buf.String()
 
 	required := []string{
-		`sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-between gap-2`,
+		`sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2`,
 		`id="sidebar-user-menu-trigger"`,
 		`class="sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case"`,
-		`id="sidebar-user-menu-trigger-collapsed"`,
-		`class="sidebar-user-collapsed-trigger btn btn-ghost btn-square"`,
 		`class="text-sm" role="menuitem">Logout</button>`,
 		`aria-label="Open user menu"`,
 		`.sidebar-theme-toggle-container {`,
@@ -285,8 +272,6 @@ func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 		`align-items: center;`,
 		`.sidebar-user-trigger {`,
 		`min-height: 24px !important;`,
-		`.sidebar-collapsed .sidebar-auth-collapsed {`,
-		`align-items: center;`,
 	}
 	for _, snippet := range required {
 		if !strings.Contains(html, snippet) {

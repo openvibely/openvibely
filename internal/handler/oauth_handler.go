@@ -22,6 +22,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/pkg/browser"
 )
 
 const (
@@ -83,6 +84,10 @@ var (
 	// oauthServerTimeout controls how long a callback server waits before
 	// auto-shutting down. Exported as a var so tests can shorten it.
 	oauthServerTimeout = 10 * time.Minute
+
+	// openOAuthURL is overrideable in tests so OAuthInitiate doesn't launch
+	// a real browser during test runs.
+	openOAuthURL = browser.OpenURL
 )
 
 // OAuthInitiate starts the OAuth flow for a model config.
@@ -271,6 +276,20 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	}
 
 	log.Printf("[handler] OAuthInitiate redirecting to OAuth for config=%s provider=%s callback=%s port=%d public_callback=%t", id, agent.Provider, redirectURI, portForLog, usePublicCallback)
+
+	if c.QueryParam("external") == "1" {
+		if err := openOAuthURL(authURLFull); err != nil {
+			log.Printf("[handler] OAuthInitiate external browser open failed: %v", err)
+			return echo.NewHTTPError(http.StatusBadGateway, "failed to open system browser")
+		}
+		return c.HTML(http.StatusOK, fmt.Sprintf(`<html><body>
+			<h2>OAuth Opened</h2>
+			<p>Your system browser has been opened for OAuth authorization.</p>
+			<p>After authorizing, return to this app.</p>
+			<p><a href="%s">Return to Models</a></p>
+		</body></html>`, modelsURL))
+	}
+
 	return c.Redirect(http.StatusTemporaryRedirect, authURLFull)
 }
 

@@ -449,92 +449,96 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			</div>
 		</div>
 
-		<!-- Week Timeline View -->
-		<div id="schedule-timeline-container" class="bg-base-100 rounded-lg shadow-lg border border-base-300 overflow-x-auto flex-1 min-h-0 overflow-y-auto opacity-0">
-			<div class="min-w-[800px]">
-				<!-- Day Headers -->
-				<div class="grid bg-base-200 border-b border-base-300 sticky top-0 z-20" style="grid-template-columns: 60px repeat(7, 1fr);">
-					<div class="p-2 text-center font-semibold text-xs border-r border-base-300"></div>
-					for _, day := range weekData.WeekDays {
-						<div
-							class={
-								"p-2 text-center border-r border-base-300 last:border-r-0",
-								templ.KV("bg-indigo-900 bg-opacity-10", day.IsToday),
-							}
-						>
-							<div class={ "font-semibold text-xs", templ.KV("font-bold text-indigo-400", day.IsToday) }>
-								{ day.Date.Weekday().String()[:3] }
-							</div>
-							<div class="text-[10px] opacity-60">
-								{ fmt.Sprintf("%s %d", day.Date.Month().String()[:3], day.Date.Day()) }
-							</div>
-						</div>
-					}
-				</div>
-
-				<!-- Timeline Grid -->
-				<div class="relative">
-					for _, slot := range getTimeSlots() {
-						<div class="grid border-b border-base-300 last:border-b-0" style="grid-template-columns: 60px repeat(7, 1fr);">
-							<!-- Time Label -->
-							<div class="py-1 px-2 text-[10px] font-medium text-right border-r border-base-300 bg-base-200">
-								{ slot.Label }
-							</div>
-
-							<!-- Day Columns -->
-							for _, day := range weekData.WeekDays {
-								<div
-									class={
-										"p-0.5 min-h-[32px] min-w-0 border-r border-base-300 last:border-r-0 drop-zone",
-										templ.KV("bg-indigo-900 bg-opacity-5", day.IsToday),
-									}
-									data-date={ day.Date.Format("2006-01-02") }
-									data-hour={ fmt.Sprintf("%d", slot.Hour) }
-									ondragover="handleScheduleDragOver(event)"
-									ondrop="handleScheduleDrop(event)"
-									ondragleave="handleScheduleDragLeave(event)"
-								>
-									for _, occurrence := range getTasksForHour(weekData.TasksByDateTime, day.Date, slot.Hour) {
+						<!-- Week Timeline View -->
+						<div id="schedule-timeline-container" class="bg-base-100 rounded-lg shadow-lg overflow-x-auto flex-1 min-h-0 overflow-y-auto opacity-0" style="border: 1px solid var(--ov-schedule-grid-border);">
+							<div class="min-w-[800px]">
+								<!-- Day Headers -->
+								<div class="grid bg-base-200 sticky top-0 z-20" style="grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);">
+									<div class="p-2 text-center font-semibold text-xs" style="border-right: 1px solid var(--ov-schedule-grid-border);"></div>
+									for _, day := range weekData.WeekDays {
 										<div
-											class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-move transition-colors border-l-2 border-indigo-500 overflow-hidden"
-											title={ occurrence.Task.Task.Title }
-											draggable="true"
-											data-schedule-id={ getScheduleID(occurrence.Task) }
-											data-task-id={ occurrence.Task.Task.ID }
-											data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
-											onclick="openTaskDialog(this.dataset.taskId)"
-											ondragstart="handleScheduleDragStart(event)"
-										>
-											<div class="font-semibold truncate leading-tight">{ occurrence.Task.Task.Title }</div>
-											if occurrence.Task.Schedule != nil && occurrence.Task.Schedule.RepeatType.IsSubDaily() {
-												<div class="opacity-60 leading-tight">{ formatRepeatLabel(occurrence.Task.Schedule.RepeatType, occurrence.Task.Schedule.RepeatInterval) }</div>
-											} else {
-												<div class="opacity-60 leading-tight">{ formatTime(&occurrence.OccurrenceTime) }</div>
+											class={
+												"p-2 text-center last:border-r-0",
+												templ.KV("bg-indigo-900 bg-opacity-10", day.IsToday),
 											}
+											style="border-right: 1px solid var(--ov-schedule-grid-border);"
+										>
+											<div class={ "font-semibold text-xs", templ.KV("font-bold text-indigo-400", day.IsToday) }>
+												{ day.Date.Weekday().String()[:3] }
+											</div>
+											<div class="text-[10px] opacity-60">
+												{ fmt.Sprintf("%s %d", day.Date.Month().String()[:3], day.Date.Day()) }
+											</div>
 										</div>
 									}
 								</div>
-							}
-						</div>
-					}
-					<!-- Current Time Timeline Indicators -->
-					<!-- Line before current day (dashed) -->
-					<div id="timeline-before" class="absolute pointer-events-none hidden" style="left: 0; width: 100%; z-index: 10;">
-						<div class="h-0.5 w-full" style="border-top: 2px dashed var(--ov-link-color);"></div>
-					</div>
-					<!-- Current day timeline (solid with circles) -->
-					<div id="timeline-current" class="absolute pointer-events-none hidden" style="left: 0; width: 100%; z-index: 10;">
-						<div class="flex items-center h-full">
-							<div class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: var(--ov-link-color);"></div>
-							<div class="flex-1 h-0.5" style="background-color: var(--ov-link-color);"></div>
-							<div class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: var(--ov-link-color);"></div>
-						</div>
-					</div>
-				</div>
-			</div>
-		</div>
 
-		<!-- Legend -->
+								<!-- Timeline Grid -->
+								<div class="relative">
+									for _, slot := range getTimeSlots() {
+										<div class="grid schedule-grid-row last:border-b-0" style="grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);">
+											<!-- Time Label -->
+											<div class="py-1 px-2 text-[10px] font-medium text-right bg-base-200 schedule-time-label" style="border-right: 1px solid var(--ov-schedule-grid-border);">
+												{ slot.Label }
+											</div>
+											<!-- Day Columns -->
+											for _, day := range weekData.WeekDays {
+												<div
+													class={
+														"p-0.5 min-h-[32px] min-w-0 last:border-r-0 drop-zone",
+														templ.KV("bg-indigo-900 bg-opacity-5", day.IsToday),
+													}
+													data-date={ day.Date.Format("2006-01-02") }
+													data-hour={ fmt.Sprintf("%d", slot.Hour) }
+													style="border-right: 1px solid var(--ov-schedule-grid-border);"
+													ondragover="handleScheduleDragOver(event)"
+													ondrop="handleScheduleDrop(event)"
+													ondragleave="handleScheduleDragLeave(event)"
+												>
+													for _, occurrence := range getTasksForHour(weekData.TasksByDateTime, day.Date, slot.Hour) {
+														<div
+															class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-move transition-colors border-l-2 border-indigo-500 overflow-hidden"
+															title={ occurrence.Task.Task.Title }
+															draggable="true"
+															data-schedule-id={ getScheduleID(occurrence.Task) }
+															data-task-id={ occurrence.Task.Task.ID }
+															data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
+															onclick="openTaskDialog(this.dataset.taskId)"
+															ondragstart="handleScheduleDragStart(event)"
+														>
+															<div class="font-semibold truncate leading-tight">{ occurrence.Task.Task.Title }</div>
+															if occurrence.Task.Schedule != nil && occurrence.Task.Schedule.RepeatType.IsSubDaily() {
+																<div class="opacity-60 leading-tight">{ formatRepeatLabel(occurrence.Task.Schedule.RepeatType, occurrence.Task.Schedule.RepeatInterval) }</div>
+															} else {
+																<div class="opacity-60 leading-tight">{ formatTime(&occurrence.OccurrenceTime) }</div>
+															}
+														</div>
+													}
+												</div>
+											}
+										</div>
+									}
+
+									<!-- Current Time Timeline Indicators -->
+									<!-- Line before current day (dashed) -->
+									<div id="timeline-before" class="absolute pointer-events-none hidden" style="left: 0; width: 100%; z-index: 10;">
+										<div class="h-0.5 w-full" style="height: 2px; background: var(--ov-schedule-timeline-dash);"></div>
+									</div>
+
+									<!-- Current day timeline (solid with circles) -->
+									<div id="timeline-current" class="absolute pointer-events-none hidden" style="left: 0; width: 100%; z-index: 10;">
+										<div class="flex items-center h-full">
+											<div class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: var(--ov-link-color);"></div>
+											<div class="flex-1 h-0.5" style="background-color: var(--ov-link-color);"></div>
+											<div class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: var(--ov-link-color);"></div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						
+<!-- Legend -->
 		<div class="mt-2 flex gap-3 text-xs flex-shrink-0">
 			<div class="flex items-center gap-1.5">
 				<div class="w-3 h-3 rounded bg-indigo-600 bg-opacity-30 border-l-2 border-indigo-500"></div>
@@ -1094,7 +1098,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 
 				// Calculate actual column widths based on the grid
 				// Find the time column element to get its actual width
-				const timeColumn = document.querySelector('.grid.border-b .bg-base-200.border-r');
+				const timeColumn = document.querySelector('.schedule-grid-row .schedule-time-label');
 				if (!timeColumn) return;
 
 				const timeColumnRect = timeColumn.getBoundingClientRect();

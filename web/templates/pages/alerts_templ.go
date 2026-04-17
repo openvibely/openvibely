@@ -163,20 +163,20 @@ func alertsContent(alerts []models.Alert, currentProjectID string, unreadCount i
 				}
 			}
 			if len(alerts) > 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<li><a class=\"text-error\" hx-delete=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<li><a class=\"text-error\" href=\"#\" data-delete-url=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/alerts?project_id=%s", currentProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 53, Col: 76}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 54, Col: 83}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" hx-target=\"#alerts-container\" hx-swap=\"outerHTML\" hx-confirm=\"Delete all alerts? This action cannot be undone.\">Delete All Alerts</a></li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" onclick=\"return deleteAlertsFromDataset(this)\">Delete All Alerts</a></li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -215,7 +215,7 @@ func alertsContent(alerts []models.Alert, currentProjectID string, unreadCount i
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</div><!-- Task Detail Dialog Container --><script>\n\t\tfunction openAlertTaskDialog(taskId) {\n\t\t\thtmx.ajax('GET', '/tasks/' + taskId + '?tab=history&from=alerts', {\n\t\t\t\ttarget: '#main-content',\n\t\t\t\tswap: 'innerHTML'\n\t\t\t});\n\t\t\thistory.pushState({}, '', '/tasks/' + taskId + '?from=alerts');\n\t\t}\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</div><!-- Task Detail Dialog Container --><script>\n\t\tfunction openAlertTaskDialog(taskId) {\n\t\t\thtmx.ajax('GET', '/tasks/' + taskId + '?tab=history&from=alerts', {\n\t\t\t\ttarget: '#main-content',\n\t\t\t\tswap: 'innerHTML'\n\t\t\t});\n\t\t\thistory.pushState({}, '', '/tasks/' + taskId + '?from=alerts');\n\t\t}\n\n\t\tfunction deleteAlerts(url, target) {\n\t\t\tif (!url) return false;\n\t\t\thtmx.ajax('DELETE', url, {\n\t\t\t\ttarget: target || '#alerts-container',\n\t\t\t\tswap: 'outerHTML'\n\t\t\t});\n\t\t\treturn false;\n\t\t}\n\n\t\tfunction deleteAlertsFromDataset(el) {\n\t\t\tif (!el || !el.dataset) return false;\n\t\t\tvar url = el.dataset.deleteUrl || '';\n\t\t\treturn deleteAlerts(url, '#alerts-container');\n\t\t}\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -273,7 +273,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(alertSearchText(alert))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 106, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 119, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 		if templ_7745c5c3_Err != nil {
@@ -291,7 +291,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(*alert.TaskID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 108, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 121, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 			if templ_7745c5c3_Err != nil {
@@ -351,7 +351,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 132, Col: 20}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 145, Col: 20}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 		if templ_7745c5c3_Err != nil {
@@ -369,7 +369,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 135, Col: 92}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 148, Col: 92}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
@@ -387,7 +387,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 137, Col: 96}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 150, Col: 96}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 		if templ_7745c5c3_Err != nil {
@@ -405,7 +405,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/alerts/%s/read?project_id=%s", alert.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 144, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 157, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 			if templ_7745c5c3_Err != nil {
@@ -416,20 +416,20 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<button class=\"btn btn-ghost btn-xs text-error\" hx-delete=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<button class=\"btn btn-ghost btn-xs text-error\" data-delete-url=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/alerts/%s?project_id=%s", alert.ID, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 156, Col: 85}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 169, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" hx-target=\"#alerts-container\" hx-swap=\"outerHTML\" hx-confirm=\"Delete this alert?\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg></button></div></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" onclick=\"event.preventDefault(); event.stopPropagation(); return deleteAlertsFromDataset(this)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg></button></div></div></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -466,7 +466,7 @@ func AlertBadge(count int) templ.Component {
 			var templ_7745c5c3_Var21 string
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", count))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 173, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 184, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 			if templ_7745c5c3_Err != nil {

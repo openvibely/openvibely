@@ -865,11 +865,19 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			var dropOverlay = form.querySelector('[id$="-drop-overlay"]');
 			var clearBtn = form.querySelector('[data-clear-func]');
 			var clearFuncName = clearBtn ? clearBtn.getAttribute('data-clear-func') : (formId + 'ClearAttachments');
-			var agentSelect = form.querySelector('select[id$="-agent-select"]');
-			var agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;
-				var modeSelect = form.querySelector('select[id$="-mode-select"]');
-				var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
-				var submitBtn = form.querySelector('button[type="submit"]');
+				var agentSelect = form.querySelector('select[id$="-agent-select"]');
+				var agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;
+					var modeSelect = form.querySelector('select[id$="-mode-select"]');
+					var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
+					var submitBtn = form.querySelector('button[type="submit"]');
+					function safeSubmit() {
+						if (typeof form.requestSubmit === 'function') {
+							form.requestSubmit(submitBtn || undefined);
+							return;
+						}
+						var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+						form.dispatchEvent(submitEvent);
+					}
 
 			// Clear attachments function (registered on window for onclick handlers)
 			window[clearFuncName] = function() {
@@ -884,23 +892,23 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				clearBtn.onclick = function() { window[clearFuncName](); };
 			}
 
-				// Enter key submission
-				if (messageInput) {
-					messageInput.addEventListener('keydown', function(e) {
-						if (e.key === 'Enter' && !e.shiftKey) {
-							e.preventDefault();
-							form.requestSubmit(submitBtn || undefined);
-						}
-					});
-				}
+					// Enter key submission
+					if (messageInput) {
+						messageInput.addEventListener('keydown', function(e) {
+							if (e.key === 'Enter' && !e.shiftKey) {
+								e.preventDefault();
+								safeSubmit();
+							}
+						});
+					}
 
-				// Normalize send-button clicks to the same requestSubmit path as Enter.
-				if (submitBtn) {
-					submitBtn.addEventListener('click', function(e) {
-						e.preventDefault();
-						form.requestSubmit(submitBtn);
-					});
-				}
+					// Normalize send-button clicks to the same submit path as Enter.
+					if (submitBtn) {
+						submitBtn.addEventListener('click', function(e) {
+							e.preventDefault();
+							safeSubmit();
+						});
+					}
 
 			// Model selector -> hidden input sync + localStorage persistence
 			var projectIdInput = form.querySelector('input[name="_project_id"]');
@@ -1322,10 +1330,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					// Wait a moment for final transcript to be processed
 					setTimeout(function() {
 						// Submit the feedback if there's text
-						if (messageInput.value.trim()) {
-							form.requestSubmit();
-						}
-					}, 500);
+							if (messageInput.value.trim()) {
+								safeSubmit();
+							}					}, 500);
 				}
 
 				function stopListening() {
@@ -1848,20 +1855,30 @@ templ ChatAutoScrollScript() {
 					// Header: status icon or spinner, display name, secondary
 					var header = document.createElement('div');
 					header.className = 'stream-tool-summary';
-					var headerHtml = '';
 					if (seg.completed) {
-						headerHtml += (seg.resultStatus === 'error') ? errorSvg : checkSvg;
+						var iconTemplate = document.createElement('template');
+						iconTemplate.innerHTML = (seg.resultStatus === 'error') ? errorSvg : checkSvg;
+						if (iconTemplate.content && iconTemplate.content.firstChild) {
+							header.appendChild(iconTemplate.content.firstChild);
+						}
 					} else {
-						headerHtml += '<span class="loading loading-spinner tool-spinner"></span>';
+						var spinner = document.createElement('span');
+						spinner.className = 'loading loading-spinner tool-spinner';
+						header.appendChild(spinner);
 					}
 					var dn = toolDisplayName(seg.name);
-					headerHtml += '<span class="tool-name-text">' + dn + '</span>';
+					var nameSpan = document.createElement('span');
+					nameSpan.className = 'tool-name-text';
+					nameSpan.textContent = dn;
+					header.appendChild(nameSpan);
 					// Show secondary in header for file-based tools (filename), but NOT for bash/grep
 					// (those show their input in the IN row instead to avoid duplication)
 					if (seg.secondary && dn !== 'Bash' && dn !== 'Grep') {
-						headerHtml += '<span class="tool-name-secondary">' + seg.secondary + '</span>';
+						var secondarySpan = document.createElement('span');
+						secondarySpan.className = 'tool-name-secondary';
+						secondarySpan.textContent = seg.secondary;
+						header.appendChild(secondarySpan);
 					}
-					header.innerHTML = headerHtml;
 					wrap.appendChild(header);
 
 					// Body grid with IN/OUT rows

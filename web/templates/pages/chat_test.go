@@ -146,6 +146,42 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	}
 }
 
+func TestChatContent_KebabTriggerUsesLabelForDesktopWebviewCompatibility(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, `<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">`) {
+		t.Fatal("expected chat kebab trigger to use <label> for stable dropdown focus behavior")
+	}
+	if strings.Contains(content, `<button tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">`) {
+		t.Fatal("unexpected <button> dropdown trigger in chat header")
+	}
+}
+
+func TestChatContent_ClearChatDoesNotRequireConfirmation(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := ChatContent(agents, nil, "project-1", map[string][]models.ChatAttachment{}, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, `hx-delete="/chat/history?project_id=project-1"`) {
+		t.Fatal("expected clear chat action to issue hx-delete request")
+	}
+	if strings.Contains(content, `hx-confirm="Clear all chat history? This cannot be undone."`) {
+		t.Fatal("clear chat action should not require confirmation in desktop app")
+	}
+}
+
 func TestChatContent_ClosesChatStreamEventSourcesOnSwapAndNavigation(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 

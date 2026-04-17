@@ -1206,3 +1206,28 @@ func TestScheduleContent_RunAtFieldClickablePickerAffordance(t *testing.T) {
 		t.Fatal("expected showPicker-based open behavior with fallback focus")
 	}
 }
+
+// TestScheduleContent_ConsistentBorderStyling verifies that the schedule calendar
+// grid uses explicit schedule border tokens and a deterministic dash pattern.
+func TestScheduleContent_ConsistentBorderStyling(t *testing.T) {
+	currentProject := &models.Project{ID: "project-1", Name: "Project 1"}
+
+	var buf bytes.Buffer
+	err := ScheduleContent(currentProject, nil, 0, nil).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	output := buf.String()
+
+	if !strings.Contains(output, `var(--ov-schedule-grid-border)`) {
+		t.Fatal("expected schedule grid to use explicit --ov-schedule-grid-border token")
+	}
+
+	if !strings.Contains(output, `var(--ov-schedule-timeline-dash)`) {
+		t.Fatal("expected timeline to use explicit --ov-schedule-timeline-dash token")
+	}
+	if strings.Contains(output, `border-top: 2px dashed`) {
+		t.Fatal("timeline should not rely on browser-default dashed border rendering")
+	}
+}

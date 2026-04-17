@@ -55,6 +55,24 @@ func TestToastDismissalCleanup(t *testing.T) {
 		t.Error("openvibelyToast bridge must map link_url/link_text fields for clickable toast actions")
 	}
 
+	// Verify Wails runtime is loaded so desktop pages can call window.wails.OpenURL.
+	if !strings.Contains(html, `src="wails://wails/runtime.js"`) {
+		t.Error("base layout must load wails runtime script for desktop bridge APIs")
+	}
+	if !strings.Contains(html, `onload="window.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode()"`) {
+		t.Error("base layout wails runtime script must re-apply desktop runtime detection after load")
+	}
+
+	// Verify theme toggle is NOT present in top navbar (moved to sidebar footer).
+	if strings.Contains(html, "navbar-theme-toggle") {
+		t.Error("base layout navbar should not include theme toggle; toggle is rendered in sidebar footer")
+	}
+
+	// Navbar should be mobile-only to avoid desktop top-gap above page headers.
+	if !strings.Contains(html, "navbar bg-base-100 shadow-sm flex-shrink-0 lg:hidden") {
+		t.Error("base layout navbar must be mobile-only (lg:hidden)")
+	}
+
 	// Verify toast navigation closes open modal dialogs first so destination is visible.
 	if !strings.Contains(html, "function closeOpenModalsForToastNavigation()") {
 		t.Error("toast navigation must define closeOpenModalsForToastNavigation helper")
@@ -166,10 +184,12 @@ func TestLightTheme_UsesLightModernTokens(t *testing.T) {
 			"[data-theme=\"light\"] .sidebar-aside {",
 			"background-color: #FAFAFA;",
 			"[data-theme=\"light\"] .card {",
-			"[data-theme=\"light\"] .hover\\:border-primary:hover {",
-			"border-color: oklch(var(--p));",
-			"[data-theme=\"light\"] .hover\\:border-primary\\/40:hover {",
-			"border-color: oklch(var(--p) / 0.4);",
+			"[data-theme=\"light\"] .hover\\:border-primary:hover,",
+			"[data-theme=\"light\"] [class~=\"hover:border-primary\"]:hover {",
+			"border-color: #3f4981 !important;",
+			"[data-theme=\"light\"] .hover\\:border-primary\\/40:hover,",
+			"[data-theme=\"light\"] [class~=\"hover:border-primary/40\"]:hover {",
+			"border-color: rgba(63, 73, 129, 0.4) !important;",
 			"[data-theme=\"light\"] .chat-input-container {",
 			"background-color: #FFFFFF;",
 			"[data-theme=\"light\"] .bg-base-100 {",
@@ -229,11 +249,10 @@ func TestLoadingDots_UsesPrimaryThemeToken(t *testing.T) {
 	}
 	html := buf.String()
 
-	expected := []string{
-		".ov-loading-dots {",
-		"--ov-loading-dot-color: oklch(var(--p));",
-		"--ov-loading-dot-color-soft: oklch(var(--p) / 0.45);",
-		".ov-loading-dot {",
+		expected := []string{
+			".ov-loading-dots {",
+			"--ov-loading-dot-color: #646fe4;",
+			"--ov-loading-dot-color-soft: rgba(100, 111, 228, 0.45);",		".ov-loading-dot {",
 		"animation: ov-loading-dot-bounce 1s ease-in-out infinite, ov-loading-dot-color 1.6s linear infinite;",
 		"@keyframes ov-loading-dot-color {",
 		"background: var(--ov-loading-dot-color-soft);",
@@ -241,6 +260,141 @@ func TestLoadingDots_UsesPrimaryThemeToken(t *testing.T) {
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
 			t.Errorf("expected loading-dot style fragment %q to be present", fragment)
+		}
+	}
+}
+
+// TestDarkMode_ButtonHoverParity ensures dark-mode hover colors are explicitly
+// defined for all button variants so web and desktop match.
+func TestDarkMode_ButtonHoverParity(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	expected := []string{
+		"[data-theme=\"dark\"] .btn:hover {",
+		"[data-theme=\"dark\"] .btn-primary:hover {",
+		"[data-theme=\"dark\"] .btn-secondary:hover {",
+		"[data-theme=\"dark\"] .btn-accent:hover {",
+		"[data-theme=\"dark\"] .btn-info:hover {",
+		"[data-theme=\"dark\"] .btn-success:hover {",
+		"[data-theme=\"dark\"] .btn-warning:hover {",
+		"[data-theme=\"dark\"] .btn-error:hover {",
+		"[data-theme=\"dark\"] .btn-neutral:hover {",
+		"[data-theme=\"dark\"] .btn-ghost:hover {",
+		"[data-theme=\"dark\"] .btn-link:hover {",
+		"[data-theme=\"dark\"] .btn-outline:hover {",
+		"[data-theme=\"dark\"] .btn-outline.btn-primary:hover {",
+		"[data-theme=\"dark\"] .btn-outline.btn-secondary:hover {",
+		"[data-theme=\"dark\"] .btn-outline.btn-accent:hover {",
+		"[data-theme=\"dark\"] .btn-outline.btn-info:hover {",
+		"[data-theme=\"dark\"] .btn-outline.btn-success:hover {",
+		"[data-theme=\"dark\"] .btn-outline.btn-warning:hover {",
+		"[data-theme=\"dark\"] .btn-outline.btn-error:hover {",
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected dark-mode button hover parity fragment %q to be present", fragment)
+		}
+	}
+}
+
+// TestLightMode_ButtonHoverParity ensures light-mode hover colors are explicitly
+// defined for the same button variant matrix as dark mode.
+func TestLightMode_ButtonHoverParity(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	expected := []string{
+		"[data-theme=\"light\"] .btn:hover {",
+		"[data-theme=\"light\"] .btn-primary:hover {",
+		"[data-theme=\"light\"] .btn-secondary:hover {",
+		"[data-theme=\"light\"] .btn-accent:hover {",
+		"[data-theme=\"light\"] .btn-info:hover {",
+		"[data-theme=\"light\"] .btn-success:hover {",
+		"[data-theme=\"light\"] .btn-warning:hover {",
+		"[data-theme=\"light\"] .btn-error:hover {",
+		"[data-theme=\"light\"] .btn-neutral:hover {",
+		"[data-theme=\"light\"] .btn-ghost:hover {",
+		"[data-theme=\"light\"] .btn-link:hover {",
+		"[data-theme=\"light\"] .btn-outline:hover {",
+		"[data-theme=\"light\"] .btn-outline.btn-primary:hover {",
+		"[data-theme=\"light\"] .btn-outline.btn-secondary:hover {",
+		"[data-theme=\"light\"] .btn-outline.btn-accent:hover {",
+		"[data-theme=\"light\"] .btn-outline.btn-info:hover {",
+		"[data-theme=\"light\"] .btn-outline.btn-success:hover {",
+		"[data-theme=\"light\"] .btn-outline.btn-warning:hover {",
+		"[data-theme=\"light\"] .btn-outline.btn-error:hover {",
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected light-mode button hover parity fragment %q to be present", fragment)
+		}
+	}
+}
+
+// TestToggleSwitch_ColorParity ensures toggle checked/unchecked colors are
+// explicitly pinned for both themes to avoid WebKit fallback-to-black behavior.
+func TestToggleSwitch_ColorParity(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	expected := []string{
+		"[data-theme=\"light\"] .toggle {",
+		"--tglbg: #FFFFFF !important;",
+		"background-color: #E5E7EB !important;",
+		"border-color: #D1D5DB !important;",
+		"[data-theme=\"light\"] .toggle:checked,",
+		"background-color: #7480ff !important;",
+		"[data-theme=\"light\"] .toggle:hover {",
+		"[data-theme=\"light\"] .toggle:checked:hover,",
+		"[data-theme=\"dark\"] .toggle {",
+		"--tglbg: #1d232a !important;",
+		"background-color: #4B5563 !important;",
+		"[data-theme=\"dark\"] .toggle:checked,",
+		"background-color: #646fe4 !important;",
+		"[data-theme=\"dark\"] .toggle:focus,",
+		"[data-theme=\"dark\"] .toggle:focus-visible {",
+		"[data-theme=\"dark\"] .toggle:checked:focus,",
+		"[data-theme=\"dark\"] .toggle:checked:hover,",
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected toggle parity fragment %q to be present", fragment)
+		}
+	}
+}
+
+// TestCollapsedSidebar_NoHoverTooltipBoxes ensures collapsed sidebar icon hovers
+// do not render custom pseudo-element tooltip boxes next to SVGs.
+func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+		expected := []string{
+			".sidebar-aside.sidebar-collapsed [data-tip]::after {",
+			"content: none !important;",
+			"display: none !important;",
+			".sidebar-aside.sidebar-collapsed [data-tip]:hover::after {",
+			"opacity: 0 !important;",
+			".sidebar-aside .menu a:focus:not(:focus-visible),",
+			".sidebar-aside .menu summary:focus:not(:focus-visible) {",
+			"background-color: transparent !important;",
+		}
+	for _, fragment := range expected {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected collapsed-sidebar tooltip suppression fragment %q to be present", fragment)
 		}
 	}
 }

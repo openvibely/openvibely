@@ -260,7 +260,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(agent.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 145, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 146, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
@@ -273,7 +273,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 146, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 147, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -286,7 +286,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(string(agent.Provider))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 147, Col: 50}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 148, Col: 50}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -299,7 +299,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 148, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 149, Col: 36}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 				if templ_7745c5c3_Err != nil {
@@ -312,7 +312,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var10 string
 				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(modelSearchText(agent))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 150, Col: 47}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 151, Col: 47}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
@@ -325,7 +325,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(agent.ReasoningEffort)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 151, Col: 57}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 152, Col: 57}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 				if templ_7745c5c3_Err != nil {
@@ -338,7 +338,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", agent.MaxTokens))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 152, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 153, Col: 64}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 				if templ_7745c5c3_Err != nil {
@@ -351,7 +351,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%f", agent.Temperature))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 153, Col: 67}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 154, Col: 67}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
@@ -364,7 +364,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%t", agent.IsDefault))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 154, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 155, Col: 64}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
@@ -377,7 +377,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var15 string
 				templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(string(agent.AuthMethod))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 155, Col: 55}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 156, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 				if templ_7745c5c3_Err != nil {
@@ -390,7 +390,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var16 string
 				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", agent.MaxWorkers))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 156, Col: 66}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 157, Col: 66}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 				if templ_7745c5c3_Err != nil {
@@ -403,7 +403,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var17 string
 				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", agent.WorkerTimeout))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 157, Col: 72}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 158, Col: 72}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 				if templ_7745c5c3_Err != nil {
@@ -416,7 +416,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var18 string
 				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(agent.OAuthClientID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 158, Col: 54}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 159, Col: 54}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 				if templ_7745c5c3_Err != nil {
@@ -429,7 +429,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var19 string
 				templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(maskedSecret(agent.OAuthClientSecret))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 159, Col: 76}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 160, Col: 76}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 				if templ_7745c5c3_Err != nil {
@@ -442,7 +442,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var20 string
 				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(agent.OAuthAuthorizeURL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 160, Col: 62}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 161, Col: 62}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 				if templ_7745c5c3_Err != nil {
@@ -455,7 +455,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var21 string
 				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(agent.OAuthTokenURL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 161, Col: 54}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 162, Col: 54}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 				if templ_7745c5c3_Err != nil {
@@ -468,7 +468,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var22 string
 				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(agent.OAuthScopes)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 162, Col: 49}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 163, Col: 49}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 				if templ_7745c5c3_Err != nil {
@@ -481,7 +481,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var23 string
 				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(agent.OllamaBaseURL)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 163, Col: 54}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 164, Col: 54}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 				if templ_7745c5c3_Err != nil {
@@ -494,7 +494,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var24 string
 				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%t", agent.AutoStartTasks))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 164, Col: 75}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 165, Col: 75}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 				if templ_7745c5c3_Err != nil {
@@ -512,7 +512,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 					var templ_7745c5c3_Var25 string
 					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/models/%s/set-default", agent.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 185, Col: 70}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 186, Col: 70}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 					if templ_7745c5c3_Err != nil {
@@ -530,7 +530,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var26 string
 				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(agent.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 196, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 197, Col: 36}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 				if templ_7745c5c3_Err != nil {
@@ -543,7 +543,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var27 string
 				templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 197, Col: 40}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 198, Col: 40}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 				if templ_7745c5c3_Err != nil {
@@ -556,7 +556,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var28 string
 				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%t", agent.IsDefault))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 198, Col: 70}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 199, Col: 70}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 				if templ_7745c5c3_Err != nil {
@@ -573,7 +573,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var29 string
 				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 211, Col: 21}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 212, Col: 21}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 				if templ_7745c5c3_Err != nil {
@@ -602,7 +602,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 						var templ_7745c5c3_Var30 string
 						templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 219, Col: 50}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 220, Col: 50}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 						if templ_7745c5c3_Err != nil {
@@ -616,7 +616,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 						var templ_7745c5c3_Var31 string
 						templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 221, Col: 50}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 222, Col: 50}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 						if templ_7745c5c3_Err != nil {
@@ -630,7 +630,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 						var templ_7745c5c3_Var32 string
 						templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 223, Col: 46}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 224, Col: 46}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 						if templ_7745c5c3_Err != nil {
@@ -646,7 +646,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 						var templ_7745c5c3_Var33 string
 						templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 227, Col: 43}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 228, Col: 43}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 						if templ_7745c5c3_Err != nil {
@@ -660,7 +660,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 						var templ_7745c5c3_Var34 string
 						templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 229, Col: 47}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 230, Col: 47}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 						if templ_7745c5c3_Err != nil {
@@ -674,7 +674,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 						var templ_7745c5c3_Var35 string
 						templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 231, Col: 47}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 232, Col: 47}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 						if templ_7745c5c3_Err != nil {
@@ -689,7 +689,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 					var templ_7745c5c3_Var36 string
 					templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 234, Col: 32}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 235, Col: 32}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 					if templ_7745c5c3_Err != nil {
@@ -707,7 +707,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 						var templ_7745c5c3_Var37 string
 						templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(agent.OllamaBaseURL)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 236, Col: 66}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 237, Col: 66}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 						if templ_7745c5c3_Err != nil {
@@ -722,7 +722,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 					var templ_7745c5c3_Var38 string
 					templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(string(agent.Provider))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 239, Col: 34}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 240, Col: 34}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 					if templ_7745c5c3_Err != nil {
@@ -735,7 +735,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 					var templ_7745c5c3_Var39 string
 					templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Model)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 239, Col: 52}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 240, Col: 52}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 					if templ_7745c5c3_Err != nil {
@@ -749,7 +749,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 				var templ_7745c5c3_Var40 string
 				templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Max tokens: %d | Temperature: %.1f", agent.MaxTokens, agent.Temperature))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 243, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 244, Col: 96}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 				if templ_7745c5c3_Err != nil {
@@ -767,7 +767,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 					var templ_7745c5c3_Var41 string
 					templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(agent.ReasoningEffort)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 247, Col: 51}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 248, Col: 51}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 					if templ_7745c5c3_Err != nil {
@@ -808,7 +808,7 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 					var templ_7745c5c3_Var44 string
 					templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(oauthStatusText(agent))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 253, Col: 35}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 254, Col: 35}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 					if templ_7745c5c3_Err != nil {
@@ -826,153 +826,179 @@ func modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) t
 						var templ_7745c5c3_Var45 templ.SafeURL
 						templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 256, Col: 86}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 257, Col: 86}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\" class=\"btn btn-xs btn-outline\" onclick=\"event.stopPropagation()\">Connect with OAuth</a>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "\" data-oauth-path=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-					} else {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<a href=\"")
+						var templ_7745c5c3_Var46 string
+						templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID))
 						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						var templ_7745c5c3_Var46 templ.SafeURL
-						templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)))
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 260, Col: 86}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 257, Col: 157}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "\" class=\"btn btn-xs btn-ghost\" onclick=\"event.stopPropagation()\">Re-authorize</a>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "\" class=\"btn btn-xs btn-outline\" onclick=\"event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath)\">Connect with OAuth</a>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<a href=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var47 templ.SafeURL
+						templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 261, Col: 86}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "\" data-oauth-path=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var48 string
+						templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 261, Col: 157}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "\" class=\"btn btn-xs btn-ghost\" onclick=\"event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath)\">Re-authorize</a>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "</div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 				if agent.MaxWorkers > 0 {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "<div class=\"mt-2 flex items-center gap-2\"><span class=\"text-sm opacity-60\">Workers:</span> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "<div class=\"mt-2 flex items-center gap-2\"><span class=\"text-sm opacity-60\">Workers:</span> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var47 = []any{"badge badge-sm", templ.KV("badge-warning", modelWorkerRunning(modelWorkerStats, agent.ID) >= agent.MaxWorkers), templ.KV("badge-success", modelWorkerRunning(modelWorkerStats, agent.ID) > 0 && modelWorkerRunning(modelWorkerStats, agent.ID) < agent.MaxWorkers), templ.KV("badge-ghost", modelWorkerRunning(modelWorkerStats, agent.ID) == 0)}
-					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var47...)
+					var templ_7745c5c3_Var49 = []any{"badge badge-sm", templ.KV("badge-warning", modelWorkerRunning(modelWorkerStats, agent.ID) >= agent.MaxWorkers), templ.KV("badge-success", modelWorkerRunning(modelWorkerStats, agent.ID) > 0 && modelWorkerRunning(modelWorkerStats, agent.ID) < agent.MaxWorkers), templ.KV("badge-ghost", modelWorkerRunning(modelWorkerStats, agent.ID) == 0)}
+					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var49...)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<span class=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<span class=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var48 string
-					templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var47).String())
+					var templ_7745c5c3_Var50 string
+					templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var49).String())
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 1, Col: 0}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var49 string
-					templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %d active", modelWorkerRunning(modelWorkerStats, agent.ID), agent.MaxWorkers))
+					var templ_7745c5c3_Var51 string
+					templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %d active", modelWorkerRunning(modelWorkerStats, agent.ID), agent.MaxWorkers))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 270, Col: 108}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 271, Col: 108}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "</span> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "</span> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					if agent.WorkerTimeout > 0 {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<span class=\"text-xs opacity-50\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "<span class=\"text-xs opacity-50\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						var templ_7745c5c3_Var50 string
-						templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("timeout: %ds", agent.WorkerTimeout))
+						var templ_7745c5c3_Var52 string
+						templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("timeout: %ds", agent.WorkerTimeout))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 274, Col: 62}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 275, Col: 62}
 						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "</span>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "</span>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 68, "</div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "</div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 69, "</div></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "</div></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "<!-- Reassign Default Modal --><dialog id=\"reassign_default_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\"><h3 class=\"font-bold text-lg mb-2\">Reassign Default Model</h3><p class=\"text-sm opacity-70 mb-4\">You are deleting the default model. Please select a new default before proceeding.</p><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">New Default Model</span></label> <select id=\"reassign_default_select\" class=\"select select-bordered w-full\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "<!-- Reassign Default Modal --><dialog id=\"reassign_default_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\"><h3 class=\"font-bold text-lg mb-2\">Reassign Default Model</h3><p class=\"text-sm opacity-70 mb-4\">You are deleting the default model. Please select a new default before proceeding.</p><div class=\"form-control mb-4\"><label class=\"label\"><span class=\"label-text\">New Default Model</span></label> <select id=\"reassign_default_select\" class=\"select select-bordered w-full\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, agent := range agents {
 			if !agent.IsDefault {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<option value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "<option value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var51 string
-				templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(agent.ID)
+				var templ_7745c5c3_Var53 string
+				templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(agent.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 296, Col: 32}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 297, Col: 32}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "\">")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var52 string
-				templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 296, Col: 47}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 74, "</option>")
+				var templ_7745c5c3_Var54 string
+				templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/models.templ`, Line: 297, Col: 47}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "</option>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "</select></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"reassign_default_modal.close()\">Cancel</button> <button type=\"button\" class=\"btn btn-error\" onclick=\"confirmDeleteDefault()\">Delete &amp; Reassign</button></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Model Modal (for both create and edit) --><dialog id=\"new_model_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\"><h3 id=\"model_modal_title\" class=\"font-bold text-lg mb-4\">New Model Configuration</h3><form id=\"model_form\" method=\"post\" action=\"/agents\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"model_name\" name=\"name\" class=\"input input-bordered\" required placeholder=\"My Model\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Provider</span></label> <select name=\"provider\" id=\"model_provider\" class=\"select select-bordered\" onchange=\"toggleProviderFields()\"><option value=\"anthropic\">Anthropic</option> <option value=\"openai\">OpenAI</option> <option value=\"ollama\">Ollama</option></select></div><!-- Auth type selector for Anthropic --><div id=\"anthropic_auth_type_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Authentication</span></label> <select name=\"anthropic_auth_type\" id=\"model_anthropic_auth_type\" class=\"select select-bordered\" onchange=\"toggleAnthropicAuthFields()\"><option value=\"api_key\">API Key</option> <option value=\"oauth\">OAuth</option></select></div><!-- Auth type selector for OpenAI --><div id=\"openai_auth_type_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Authentication</span></label> <select name=\"openai_auth_type\" id=\"model_openai_auth_type\" class=\"select select-bordered\" onchange=\"toggleOpenAIAuthFields()\"><option value=\"api_key\">API Key</option> <option value=\"oauth\">OAuth</option></select></div><!-- Connection method selector for OpenAI OAuth --><div id=\"openai_connection_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_openai_connection_method\" class=\"select select-bordered\" onchange=\"toggleOpenAIConnectionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option> <option value=\"cli\">CLI (OAuth via terminal)</option></select></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model</span></label> <select name=\"model\" id=\"model_id\" class=\"select select-bordered\" onchange=\"handleModelChange()\"><option value=\"claude-sonnet-4-5-20250929\">Claude Sonnet 4.5</option> <option value=\"claude-haiku-4-5-20251001\">Claude Haiku 4.5</option> <option value=\"claude-opus-4-6\">Claude Opus 4.6</option></select></div><div id=\"reasoning_effort_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Reasoning Effort</span></label> <select name=\"reasoning_effort\" id=\"model_reasoning_effort\" class=\"select select-bordered\"></select> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Supported values depend on the selected model.</span></label></div><div id=\"api_key_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">API Key</span></label><div class=\"relative\"><input type=\"password\" id=\"model_api_key\" name=\"api_key\" class=\"input input-bordered pr-10\" placeholder=\"sk-ant-... (leave empty to keep existing)\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('model_api_key', this)\" tabindex=\"-1\" aria-label=\"Toggle API key visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div><!-- Connection method selector for Anthropic OAuth --><div id=\"auth_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_auth_method\" class=\"select select-bordered\" onchange=\"toggleSubscriptionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option> <option value=\"cli\">CLI (OAuth via terminal)</option></select></div><div id=\"subscription_info_cli\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via CLI</p><p class=\"text-sm\">Uses the <code>claude</code> CLI for authentication. Make sure you are logged in. No API key needed.</p></div></div></div><div id=\"subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via API</p><p class=\"text-sm\">Uses the Anthropic API directly via OAuth. After saving, click \"Connect with OAuth\" on the model card to authorize.</p></div></div></div><div id=\"subscription_info_codex\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Uses local Codex CLI</p><p class=\"text-sm\">No API key needed here. Ensure the <code>codex</code> command is installed and authenticated on this machine.</p></div></div></div><div id=\"openai_subscription_info_cli\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via CLI</p><p class=\"text-sm\">Uses the <code>codex</code> CLI for authentication. Make sure you are logged in. No API key needed.</p></div></div></div><div id=\"openai_subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via API</p><p class=\"text-sm\">Uses the OpenAI API directly via OAuth. After saving, click \"Connect with OAuth\" on the model card to authorize.</p></div></div></div><div id=\"ollama_info\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Local Ollama Instance</p><p class=\"text-sm\">Connects to your local Ollama server. Make sure Ollama is running with <code>ollama serve</code>.</p></div></div></div><div id=\"ollama_fields\" class=\"hidden\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Base URL</span></label> <input type=\"text\" id=\"model_ollama_base_url\" name=\"ollama_base_url\" class=\"input input-bordered\" placeholder=\"http://localhost:11434\" value=\"http://localhost:11434\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Default: http://localhost:11434</span></label></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Custom Model Name</span></label> <input type=\"text\" id=\"model_ollama_custom_model\" name=\"ollama_custom_model\" class=\"input input-bordered\" placeholder=\"e.g. llama3.1:8b, codellama:13b\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Enter any model name from <code>ollama list</code>, or select from common ones above</span></label></div></div><div id=\"openai_api_key_info\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OpenAI API Key</p><p class=\"text-sm\">Enter your OpenAI API key to make direct API calls.</p></div></div></div><div class=\"grid grid-cols-2 gap-3\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Max Tokens</span></label> <input type=\"number\" id=\"model_max_tokens\" name=\"max_tokens\" class=\"input input-bordered\" value=\"4096\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Temperature</span></label> <input type=\"number\" id=\"model_temperature\" name=\"temperature\" class=\"input input-bordered\" value=\"0\" step=\"0.1\" min=\"0\" max=\"1\"></div></div><div class=\"form-control mt-3\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"model_is_default\" name=\"is_default\" class=\"checkbox checkbox-sm\"> <span class=\"label-text\">Set as default model</span></label></div><div class=\"form-control mt-2\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"model_auto_start_tasks\" name=\"auto_start_tasks\" class=\"checkbox checkbox-sm\"> <span class=\"label-text\">Auto-start created tasks</span></label> <label class=\"label\"><span class=\"label-text-alt opacity-70\">When enabled, tasks created with this model automatically move to \"active\" status</span></label></div><div class=\"divider text-sm opacity-60 mt-4 mb-2\">Worker Pool</div><div class=\"grid grid-cols-2 gap-3\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Max Workers</span></label> <input type=\"number\" id=\"model_max_workers\" name=\"model_max_workers\" class=\"input input-bordered\" value=\"0\" min=\"0\" max=\"10\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">0 = use global pool</span></label></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Timeout (seconds)</span></label> <input type=\"number\" id=\"model_worker_timeout\" name=\"worker_timeout\" class=\"input input-bordered\" value=\"0\" min=\"0\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">0 = no override</span></label></div></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeModelModal()\">Cancel</button> <button type=\"submit\" id=\"model_submit_btn\" class=\"btn btn-primary\">Create</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><style>\n\t\t\t/* Prevent password toggle button from moving on click */\n\t\t\t.password-toggle-btn:active {\n\t\t\t\ttransform: translate(0.25rem, -50%) !important;\n\t\t\t}\n\t\t</style><script>\n\t\t\t\tfunction togglePasswordVisibility(inputId, button) {\n\t\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\t\t\n\t\t\t\t\tif (input.type === 'password') {\n\t\t\t\t\t\tinput.type = 'text';\n\t\t\t\t\t\teyeOpen.classList.add('hidden');\n\t\t\t\t\t\teyeClosed.classList.remove('hidden');\n\t\t\t\t\t} else {\n\t\t\t\t\t\tinput.type = 'password';\n\t\t\t\t\t\teyeOpen.classList.remove('hidden');\n\t\t\t\t\t\teyeClosed.classList.add('hidden');\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction submitOAuthManualComplete() {\n\t\t\t\t\tvar input = document.getElementById('oauth_manual_callback_url');\n\t\t\t\t\tif (!input) return;\n\t\t\t\t\tvar callbackUrl = (input.value || '').trim();\n\t\t\t\t\tif (!callbackUrl) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Paste a localhost callback URL first', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\n\t\t\t\t\tfetch('/models/oauth/manual-complete', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {\n\t\t\t\t\t\t\t'Content-Type': 'application/json',\n\t\t\t\t\t\t\t'HX-Request': 'true'\n\t\t\t\t\t\t},\n\t\t\t\t\t\tbody: JSON.stringify({ callback_url: callbackUrl })\n\t\t\t\t\t}).then(function(resp) {\n\t\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\t\treturn resp.json().then(function(data) {\n\t\t\t\t\t\t\t\tthrow new Error((data && data.error) || 'OAuth completion failed');\n\t\t\t\t\t\t\t}).catch(function() {\n\t\t\t\t\t\t\t\tthrow new Error('OAuth completion failed');\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn resp.json();\n\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\tif (window.showToast) window.showToast('OAuth connected', 'completed');\n\t\t\t\t\t\tinput.value = '';\n\t\t\t\t\t\twindow.location.reload();\n\t\t\t\t\t}).catch(function(err) {\n\t\t\t\t\t\tif (window.showToast) window.showToast(err.message || 'OAuth completion failed', 'failed');\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\tvar reasoningEffortOptions = {\n\t\t\t\tlow: 'Low',\n\t\t\t\tmedium: 'Medium',\n\t\t\t\thigh: 'High',\n\t\t\t\txhigh: 'XHigh'\n\t\t\t};\n\n\t\t\tvar modelOptionsByProvider = {\n\t\t\t\tanthropic: [\n\t\t\t\t\t{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', efforts: [] },\n\t\t\t\t\t{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', efforts: [] },\n\t\t\t\t\t{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', efforts: [] }\n\t\t\t\t],\n\t\t\t\topenai: [\n\t\t\t\t\t{ value: 'gpt-5.4', label: 'gpt-5.4', efforts: ['low', 'medium', 'high', 'xhigh'] },\n\t\t\t\t\t{ value: 'gpt-5.3-codex', label: 'gpt-5.3-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },\n\t\t\t\t\t{ value: 'gpt-5.2-codex', label: 'gpt-5.2-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },\n\t\t\t\t\t{ value: 'gpt-5.1-codex-max', label: 'gpt-5.1-codex-max', efforts: ['low', 'medium', 'high', 'xhigh'] },\n\t\t\t\t\t{ value: 'gpt-5.1-codex', label: 'gpt-5.1-codex', efforts: ['low', 'medium', 'high'] },\n\t\t\t\t\t{ value: 'gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini', efforts: ['low', 'medium', 'high'] },\n\t\t\t\t\t{ value: 'gpt-5-codex', label: 'gpt-5-codex', efforts: ['low', 'medium', 'high'] },\n\t\t\t\t\t{ value: 'gpt-5-codex-mini', label: 'gpt-5-codex-mini', efforts: ['low', 'medium', 'high'] }\n\t\t\t\t],\n\t\t\t\tollama: [\n\t\t\t\t\t{ value: 'llama3.1:8b', label: 'Llama 3.1 (8B)', efforts: [] },\n\t\t\t\t\t{ value: 'llama3.1:70b', label: 'Llama 3.1 (70B)', efforts: [] },\n\t\t\t\t\t{ value: 'llama3.2:3b', label: 'Llama 3.2 (3B)', efforts: [] },\n\t\t\t\t\t{ value: 'codellama:7b', label: 'Code Llama (7B)', efforts: [] },\n\t\t\t\t\t{ value: 'codellama:13b', label: 'Code Llama (13B)', efforts: [] },\n\t\t\t\t\t{ value: 'mistral:7b', label: 'Mistral (7B)', efforts: [] },\n\t\t\t\t\t{ value: 'deepseek-coder-v2:16b', label: 'DeepSeek Coder V2 (16B)', efforts: [] },\n\t\t\t\t\t{ value: 'qwen2.5-coder:7b', label: 'Qwen 2.5 Coder (7B)', efforts: [] },\n\t\t\t\t\t{ value: 'gemma2:9b', label: 'Gemma 2 (9B)', efforts: [] },\n\t\t\t\t\t{ value: 'phi3:14b', label: 'Phi-3 (14B)', efforts: [] }\n\t\t\t\t]\n\t\t\t};\n\n\t\t\tfunction selectedModelOption(provider, model) {\n\t\t\t\tvar options = modelOptionsByProvider[provider] || [];\n\t\t\t\tfor (var i = 0; i < options.length; i++) {\n\t\t\t\t\tif (options[i].value === model) {\n\t\t\t\t\t\treturn options[i];\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\treturn null;\n\t\t\t}\n\n\t\t\tfunction preferredReasoningEffort(supportedEfforts) {\n\t\t\t\tvar preferred = ['high', 'medium', 'low', 'xhigh'];\n\t\t\t\tfor (var i = 0; i < preferred.length; i++) {\n\t\t\t\t\tif (supportedEfforts.indexOf(preferred[i]) !== -1) {\n\t\t\t\t\t\treturn preferred[i];\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (supportedEfforts.length > 0) {\n\t\t\t\t\treturn supportedEfforts[0];\n\t\t\t\t}\n\t\t\t\treturn 'high';\n\t\t\t}\n\n\t\t\tfunction setReasoningEffortOptions(provider, model, selectedEffort) {\n\t\t\t\tvar reasoningField = document.getElementById('reasoning_effort_field');\n\t\t\t\tvar reasoningSelect = document.getElementById('model_reasoning_effort');\n\n\t\t\t\tif (provider !== 'openai') {\n\t\t\t\t\treasoningField.classList.add('hidden');\n\t\t\t\t\treasoningSelect.disabled = true;\n\t\t\t\t\treasoningSelect.innerHTML = '';\n\t\t\t\t\treturn;\n\t\t\t\t}\n\n\t\t\t\treasoningField.classList.remove('hidden');\n\t\t\t\treasoningSelect.disabled = false;\n\n\t\t\t\tvar modelOption = selectedModelOption(provider, model);\n\t\t\t\tvar supportedEfforts = ['low', 'medium', 'high'];\n\t\t\t\tif (modelOption && modelOption.efforts && modelOption.efforts.length > 0) {\n\t\t\t\t\tsupportedEfforts = modelOption.efforts;\n\t\t\t\t}\n\n\t\t\t\treasoningSelect.innerHTML = '';\n\t\t\t\tfor (var i = 0; i < supportedEfforts.length; i++) {\n\t\t\t\t\tvar effort = supportedEfforts[i];\n\t\t\t\t\tvar opt = document.createElement('option');\n\t\t\t\t\topt.value = effort;\n\t\t\t\t\topt.textContent = reasoningEffortOptions[effort] || effort;\n\t\t\t\t\treasoningSelect.appendChild(opt);\n\t\t\t\t}\n\n\t\t\t\tvar normalizedSelected = (selectedEffort || '').toLowerCase();\n\t\t\t\tif (normalizedSelected && supportedEfforts.indexOf(normalizedSelected) !== -1) {\n\t\t\t\t\treasoningSelect.value = normalizedSelected;\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\treasoningSelect.value = preferredReasoningEffort(supportedEfforts);\n\t\t\t}\n\n\t\t\tfunction setModelOptions(provider, selectedModel) {\n\t\t\t\tvar modelSelect = document.getElementById('model_id');\n\t\t\t\tvar options = modelOptionsByProvider[provider] || modelOptionsByProvider.anthropic;\n\n\t\t\t\tmodelSelect.innerHTML = '';\n\t\t\t\tvar hasSelected = false;\n\t\t\t\tfor (var i = 0; i < options.length; i++) {\n\t\t\t\t\tvar opt = document.createElement('option');\n\t\t\t\t\topt.value = options[i].value;\n\t\t\t\t\topt.textContent = options[i].label;\n\t\t\t\t\tif (selectedModel && selectedModel === options[i].value) {\n\t\t\t\t\t\thasSelected = true;\n\t\t\t\t\t}\n\t\t\t\t\tmodelSelect.appendChild(opt);\n\t\t\t\t}\n\n\t\t\t\tif (selectedModel && !hasSelected) {\n\t\t\t\t\tvar customOpt = document.createElement('option');\n\t\t\t\t\tcustomOpt.value = selectedModel;\n\t\t\t\t\tcustomOpt.textContent = selectedModel + ' (custom)';\n\t\t\t\t\tmodelSelect.appendChild(customOpt);\n\t\t\t\t}\n\n\t\t\t\tif (selectedModel) {\n\t\t\t\t\tmodelSelect.value = selectedModel;\n\t\t\t\t} else if (options.length > 0) {\n\t\t\t\t\tmodelSelect.value = options[0].value;\n\t\t\t\t}\n\n\t\t\t\treturn modelSelect.value;\n\t\t\t}\n\n\t\t\tfunction handleModelChange() {\n\t\t\t\tvar provider = document.getElementById('model_provider').value;\n\t\t\t\tvar model = document.getElementById('model_id').value;\n\t\t\t\tvar selectedEffort = document.getElementById('model_reasoning_effort').value;\n\t\t\t\tsetReasoningEffortOptions(provider, model, selectedEffort);\n\t\t\t}\n\n\t\t\t\tfunction hideAllInfoBoxes() {\n\t\t\t\t\tdocument.getElementById('subscription_info_cli').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('subscription_info_oauth').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('subscription_info_codex').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('ollama_info').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('ollama_fields').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('openai_api_key_info').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('openai_subscription_info_cli').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('openai_subscription_info_oauth').classList.add('hidden');\n\t\t\t\t}\n\n\t\t\tvar _deleteModelId = '';\n\n\t\t\tfunction deleteModel(button) {\n\t\t\t\tvar id = button.dataset.modelId;\n\t\t\t\tvar name = button.dataset.modelName;\n\t\t\t\tvar isDefault = button.dataset.modelIsDefault === 'true';\n\n\t\t\t\tif (isDefault) {\n\t\t\t\t\t// Check if there are other models to reassign to\n\t\t\t\t\tvar select = document.getElementById('reassign_default_select');\n\t\t\t\t\tif (!select || select.options.length === 0) {\n\t\t\t\t\t\tif (confirm('Delete default model \"' + name + '\"? This action cannot be undone.')) {\n\t\t\t\t\t\t\thtmx.ajax('DELETE', '/models/' + id, {\n\t\t\t\t\t\t\t\ttarget: '#models-container',\n\t\t\t\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t\t\t\t}).catch(function(xhr) {\n\t\t\t\t\t\t\t\tvar msg = 'Failed to delete model.';\n\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\tvar data = JSON.parse(xhr.responseText);\n\t\t\t\t\t\t\t\t\tif (data.message) msg = data.message;\n\t\t\t\t\t\t\t\t} catch(e) {}\n\t\t\t\t\t\t\t\talert(msg);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\t_deleteModelId = id;\n\t\t\t\t\treassign_default_modal.showModal();\n\t\t\t\t\treturn;\n\t\t\t\t}\n\n\t\t\t\tif (confirm('Delete model \"' + name + '\"? This action cannot be undone.')) {\n\t\t\t\t\thtmx.ajax('DELETE', '/models/' + id, {\n\t\t\t\t\t\ttarget: '#models-container',\n\t\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t\t}).catch(function(xhr) {\n\t\t\t\t\t\tvar msg = 'Failed to delete model.';\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tvar data = JSON.parse(xhr.responseText);\n\t\t\t\t\t\t\tif (data.message) msg = data.message;\n\t\t\t\t\t\t} catch(e) {}\n\t\t\t\t\t\talert(msg);\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction confirmDeleteDefault() {\n\t\t\t\tvar newDefaultId = document.getElementById('reassign_default_select').value;\n\t\t\t\tif (!newDefaultId) {\n\t\t\t\t\talert('Please select a new default model.');\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\treassign_default_modal.close();\n\t\t\t\thtmx.ajax('DELETE', '/models/' + _deleteModelId + '?new_default_id=' + newDefaultId, {\n\t\t\t\t\ttarget: '#models-container',\n\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t}).catch(function(xhr) {\n\t\t\t\t\tvar msg = 'Failed to delete model.';\n\t\t\t\t\ttry {\n\t\t\t\t\t\tvar data = JSON.parse(xhr.responseText);\n\t\t\t\t\t\tif (data.message) msg = data.message;\n\t\t\t\t\t} catch(e) {}\n\t\t\t\t\talert(msg);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction editModelFromData(button) {\n\t\t\t\tvar id = button.dataset.modelId;\n\t\t\t\tvar name = button.dataset.modelName;\n\t\t\t\tvar dbProvider = button.dataset.modelProvider;\n\t\t\t\tvar model = button.dataset.modelModel;\n\t\t\t\tvar reasoningEffort = button.dataset.modelReasoningEffort || '';\n\t\t\t\tvar maxTokens = parseInt(button.dataset.modelMaxTokens);\n\t\t\t\tvar temperature = parseFloat(button.dataset.modelTemperature);\n\t\t\t\tvar isDefault = button.dataset.modelIsDefault === 'true';\n\t\t\t\t\tvar authMethod = button.dataset.modelAuthMethod || 'cli';\n\t\t\t\t\tvar modelMaxWorkers = parseInt(button.dataset.modelMaxWorkers) || 0;\n\t\t\t\t\tvar workerTimeout = parseInt(button.dataset.modelWorkerTimeout) || 0;\n\t\t\t\t\tvar ollamaBaseUrl = button.dataset.modelOllamaBaseUrl || '';\n\t\t\t\t\tvar autoStartTasks = button.dataset.modelAutoStartTasks === 'true';\n\n\t\t\t\t// Map DB provider values to UI values\n\t\t\t\tvar uiProvider = dbProvider;\n\t\t\t\tvar anthropicAuthType = 'api_key';\n\t\t\t\tvar openaiAuthType = 'api_key';\n\t\t\t\tvar openaiConnectionMethod = 'oauth';\n\t\t\t\tif (dbProvider === 'anthropic') {\n\t\t\t\t\tuiProvider = 'anthropic';\n\t\t\t\t\tif (authMethod === 'api_key' || (authMethod === '' && !dbProvider)) {\n\t\t\t\t\t\tanthropicAuthType = 'api_key';\n\t\t\t\t\t} else {\n\t\t\t\t\t\tanthropicAuthType = 'oauth';\n\t\t\t\t\t}\n\t\t\t\t} else if (dbProvider === 'openai') {\n\t\t\t\t\tif (authMethod === 'api_key') {\n\t\t\t\t\t\topenaiAuthType = 'api_key';\n\t\t\t\t\t} else {\n\t\t\t\t\t\topenaiAuthType = 'oauth';\n\t\t\t\t\t\topenaiConnectionMethod = authMethod; // 'cli' or 'oauth'\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tvar form = document.getElementById('model_form');\n\t\t\t\tdocument.getElementById('model_modal_title').textContent = 'Edit Model Configuration';\n\t\t\t\tform.action = '';\n\t\t\t\tform.method = 'post';\n\t\t\t\tform.setAttribute('hx-put', '/models/' + id);\n\t\t\t\tform.setAttribute('hx-target', '#models-container');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\thtmx.process(form);\n\t\t\t\tdocument.getElementById('model_name').value = name;\n\t\t\t\tdocument.getElementById('model_provider').value = uiProvider;\n\t\t\t\tdocument.getElementById('model_anthropic_auth_type').value = anthropicAuthType;\n\t\t\t\tdocument.getElementById('model_openai_auth_type').value = openaiAuthType;\n\t\t\t\tdocument.getElementById('model_openai_connection_method').value = openaiConnectionMethod;\n\t\t\t\tdocument.getElementById('model_api_key').value = '';\n\t\t\t\tdocument.getElementById('model_api_key').placeholder = '(leave empty to keep existing)';\n\t\t\t\tdocument.getElementById('model_api_key').required = false;\n\t\t\t\tdocument.getElementById('model_max_tokens').value = maxTokens.toString();\n\t\t\t\tdocument.getElementById('model_temperature').value = temperature.toString();\n\t\t\t\tdocument.getElementById('model_is_default').checked = isDefault;\n\t\t\t\t\tdocument.getElementById('model_auth_method').value = authMethod;\n\t\t\t\t\tdocument.getElementById('model_max_workers').value = modelMaxWorkers.toString();\n\t\t\t\t\tdocument.getElementById('model_worker_timeout').value = workerTimeout.toString();\n\t\t\t\t\tdocument.getElementById('model_ollama_base_url').value = ollamaBaseUrl || 'http://localhost:11434';\n\t\t\t\t\tdocument.getElementById('model_ollama_custom_model').value = '';\n\t\t\t\t\tdocument.getElementById('model_auto_start_tasks').checked = autoStartTasks;\n\t\t\t\tdocument.getElementById('model_submit_btn').textContent = 'Save';\n\t\t\t\ttoggleProviderFields(model, reasoningEffort);\n\t\t\t\tnew_model_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction toggleProviderFields(selectedModel, selectedReasoningEffort) {\n\t\t\t\tvar provider = document.getElementById('model_provider').value;\n\t\t\t\tvar apiKeyField = document.getElementById('api_key_field');\n\t\t\t\tvar apiKeyInput = document.getElementById('model_api_key');\n\t\t\t\tvar anthropicAuthTypeField = document.getElementById('anthropic_auth_type_field');\n\t\t\t\tvar openaiAuthTypeField = document.getElementById('openai_auth_type_field');\n\t\t\t\tvar openaiConnectionMethodField = document.getElementById('openai_connection_method_field');\n\t\t\t\tvar authMethodField = document.getElementById('auth_method_field');\n\t\t\t\tvar ollamaInfo = document.getElementById('ollama_info');\n\n\t\t\t\thideAllInfoBoxes();\n\t\t\t\tvar activeModel = setModelOptions(provider, selectedModel);\n\n\t\t\t\tif (provider === 'anthropic') {\n\t\t\t\t\tanthropicAuthTypeField.classList.remove('hidden');\n\t\t\t\t\topenaiAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiConnectionMethodField.classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('model_openai_connection_method').disabled = true;\n\t\t\t\t\ttoggleAnthropicAuthFields();\n\t\t\t\t} else if (provider === 'openai') {\n\t\t\t\t\tanthropicAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiAuthTypeField.classList.remove('hidden');\n\t\t\t\t\tauthMethodField.classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('model_auth_method').disabled = true;\n\t\t\t\t\ttoggleOpenAIAuthFields();\n\t\t\t\t} else if (provider === 'ollama') {\n\t\t\t\t\tanthropicAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiConnectionMethodField.classList.add('hidden');\n\t\t\t\t\tauthMethodField.classList.add('hidden');\n\t\t\t\t\tapiKeyField.classList.add('hidden');\n\t\t\t\t\tapiKeyInput.required = false;\n\t\t\t\t\tollamaInfo.classList.remove('hidden');\n\t\t\t\t\tdocument.getElementById('ollama_fields').classList.remove('hidden');\n\t\t\t\t\tdocument.getElementById('model_auth_method').disabled = true;\n\t\t\t\t\tdocument.getElementById('model_openai_connection_method').disabled = true;\n\t\t\t\t} else {\n\t\t\t\t\tanthropicAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiConnectionMethodField.classList.add('hidden');\n\t\t\t\t\tauthMethodField.classList.add('hidden');\n\t\t\t\t\tapiKeyField.classList.remove('hidden');\n\t\t\t\t\tapiKeyInput.required = true;\n\t\t\t\t\tdocument.getElementById('model_auth_method').disabled = true;\n\t\t\t\t\tdocument.getElementById('model_openai_connection_method').disabled = true;\n\t\t\t\t}\n\t\t\t\tsetReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);\n\t\t\t}\n\n\t\t\tfunction toggleAnthropicAuthFields() {\n\t\t\t\tvar authType = document.getElementById('model_anthropic_auth_type').value;\n\t\t\t\tvar apiKeyField = document.getElementById('api_key_field');\n\t\t\t\tvar apiKeyInput = document.getElementById('model_api_key');\n\t\t\t\tvar authMethodField = document.getElementById('auth_method_field');\n\t\t\t\tvar authMethodSelect = document.getElementById('model_auth_method');\n\n\t\t\t\thideAllInfoBoxes();\n\n\t\t\t\tif (authType === 'api_key') {\n\t\t\t\t\tapiKeyField.classList.remove('hidden');\n\t\t\t\t\tapiKeyInput.required = true;\n\t\t\t\t\tauthMethodField.classList.add('hidden');\n\t\t\t\t\tauthMethodSelect.disabled = true;\n\t\t\t\t} else {\n\t\t\t\t\tapiKeyField.classList.add('hidden');\n\t\t\t\t\tapiKeyInput.required = false;\n\t\t\t\t\tauthMethodField.classList.remove('hidden');\n\t\t\t\t\tauthMethodSelect.disabled = false;\n\t\t\t\t\ttoggleSubscriptionMethodFields();\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction toggleSubscriptionMethodFields() {\n\t\t\t\tvar method = document.getElementById('model_auth_method').value;\n\t\t\t\tvar subscriptionInfoCli = document.getElementById('subscription_info_cli');\n\t\t\t\tvar subscriptionInfoOauth = document.getElementById('subscription_info_oauth');\n\t\t\t\tif (method === 'oauth') {\n\t\t\t\t\tsubscriptionInfoCli.classList.add('hidden');\n\t\t\t\t\tsubscriptionInfoOauth.classList.remove('hidden');\n\t\t\t\t} else {\n\t\t\t\t\tsubscriptionInfoCli.classList.remove('hidden');\n\t\t\t\t\tsubscriptionInfoOauth.classList.add('hidden');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction toggleOpenAIAuthFields() {\n\t\t\t\tvar authType = document.getElementById('model_openai_auth_type').value;\n\t\t\t\tvar apiKeyField = document.getElementById('api_key_field');\n\t\t\t\tvar apiKeyInput = document.getElementById('model_api_key');\n\t\t\t\tvar openaiConnectionMethodField = document.getElementById('openai_connection_method_field');\n\t\t\t\tvar openaiConnectionMethodSelect = document.getElementById('model_openai_connection_method');\n\n\t\t\t\thideAllInfoBoxes();\n\n\t\t\t\tif (authType === 'api_key') {\n\t\t\t\t\tapiKeyField.classList.remove('hidden');\n\t\t\t\t\tapiKeyInput.required = true;\n\t\t\t\t\topenaiConnectionMethodField.classList.add('hidden');\n\t\t\t\t\topenaiConnectionMethodSelect.disabled = true;\n\t\t\t\t\tdocument.getElementById('openai_api_key_info').classList.remove('hidden');\n\t\t\t\t} else {\n\t\t\t\t\t// subscription\n\t\t\t\t\tapiKeyField.classList.add('hidden');\n\t\t\t\t\tapiKeyInput.required = false;\n\t\t\t\t\topenaiConnectionMethodField.classList.remove('hidden');\n\t\t\t\t\topenaiConnectionMethodSelect.disabled = false;\n\t\t\t\t\ttoggleOpenAIConnectionMethodFields();\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t\tfunction toggleOpenAIConnectionMethodFields() {\n\t\t\t\t\tvar method = document.getElementById('model_openai_connection_method').value;\n\t\t\t\t\tvar subscriptionInfoCli = document.getElementById('openai_subscription_info_cli');\n\t\t\t\t\tvar subscriptionInfoOauth = document.getElementById('openai_subscription_info_oauth');\n\n\t\t\t\t\thideAllInfoBoxes();\n\n\t\t\t\t\tif (method === 'oauth') {\n\t\t\t\t\t\tsubscriptionInfoOauth.classList.remove('hidden');\n\t\t\t\t\t\tsubscriptionInfoCli.classList.add('hidden');\n\t\t\t\t\t} else {\n\t\t\t\t\t\t// cli\n\t\t\t\t\t\tsubscriptionInfoCli.classList.remove('hidden');\n\t\t\t\t\t\tsubscriptionInfoOauth.classList.add('hidden');\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\tfunction closeModelModal() {\n\t\t\t\tnew_model_modal.close();\n\t\t\t}\n\n\t\t\tfunction openNewModelModal() {\n\t\t\t\tvar form = document.getElementById('model_form');\n\t\t\t\tdocument.getElementById('model_modal_title').textContent = 'New Model Configuration';\n\t\t\t\tform.action = '';\n\t\t\t\tform.method = 'post';\n\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\tform.setAttribute('hx-post', '/models');\n\t\t\t\tform.setAttribute('hx-target', '#models-container');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\thtmx.process(form);\n\t\t\t\tdocument.getElementById('model_name').value = '';\n\t\t\t\tdocument.getElementById('model_provider').value = 'anthropic';\n\t\t\t\tdocument.getElementById('model_anthropic_auth_type').value = 'api_key';\n\t\t\t\tdocument.getElementById('model_openai_auth_type').value = 'api_key';\n\t\t\t\tdocument.getElementById('model_openai_connection_method').value = 'oauth';\n\t\t\t\tdocument.getElementById('model_api_key').value = '';\n\t\t\t\tdocument.getElementById('model_api_key').placeholder = 'sk-ant-...';\n\t\t\t\tdocument.getElementById('model_api_key').required = true;\n\t\t\t\tdocument.getElementById('model_max_tokens').value = '4096';\n\t\t\t\tdocument.getElementById('model_temperature').value = '0';\n\t\t\t\tdocument.getElementById('model_is_default').checked = false;\n\t\t\t\t\tdocument.getElementById('model_auth_method').value = 'oauth';\n\t\t\t\t\tdocument.getElementById('model_max_workers').value = '0';\n\t\t\t\t\tdocument.getElementById('model_worker_timeout').value = '0';\n\t\t\t\t\tdocument.getElementById('model_ollama_base_url').value = 'http://localhost:11434';\n\t\t\t\t\tdocument.getElementById('model_ollama_custom_model').value = '';\n\t\t\t\t\tdocument.getElementById('model_auto_start_tasks').checked = false;\n\t\t\t\tdocument.getElementById('model_submit_btn').textContent = 'Create';\n\t\t\t\ttoggleProviderFields('', '');\n\t\t\t\tnew_model_modal.showModal();\n\t\t\t}\n\t\t</script><script>\n\t\t\t// Close modal after successful HTMX form submission\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tif (event.detail.target && event.detail.target.id === 'models-container') {\n\t\t\t\t\tvar modal = document.getElementById('new_model_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t});\n\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "</select></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"reassign_default_modal.close()\">Cancel</button> <button type=\"button\" class=\"btn btn-error\" onclick=\"confirmDeleteDefault()\">Delete &amp; Reassign</button></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><!-- Model Modal (for both create and edit) --><dialog id=\"new_model_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\"><h3 id=\"model_modal_title\" class=\"font-bold text-lg mb-4\">New Model Configuration</h3><form id=\"model_form\" method=\"post\" action=\"/agents\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name</span></label> <input type=\"text\" id=\"model_name\" name=\"name\" class=\"input input-bordered\" required placeholder=\"My Model\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Provider</span></label> <select name=\"provider\" id=\"model_provider\" class=\"select select-bordered\" onchange=\"toggleProviderFields()\"><option value=\"anthropic\">Anthropic</option> <option value=\"openai\">OpenAI</option> <option value=\"ollama\">Ollama</option></select></div><!-- Auth type selector for Anthropic --><div id=\"anthropic_auth_type_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Authentication</span></label> <select name=\"anthropic_auth_type\" id=\"model_anthropic_auth_type\" class=\"select select-bordered\" onchange=\"toggleAnthropicAuthFields()\"><option value=\"api_key\">API Key</option> <option value=\"oauth\">OAuth</option></select></div><!-- Auth type selector for OpenAI --><div id=\"openai_auth_type_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Authentication</span></label> <select name=\"openai_auth_type\" id=\"model_openai_auth_type\" class=\"select select-bordered\" onchange=\"toggleOpenAIAuthFields()\"><option value=\"api_key\">API Key</option> <option value=\"oauth\">OAuth</option></select></div><!-- Connection method selector for OpenAI OAuth --><div id=\"openai_connection_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_openai_connection_method\" class=\"select select-bordered\" onchange=\"toggleOpenAIConnectionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option> <option value=\"cli\">CLI (OAuth via terminal)</option></select></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Model</span></label> <select name=\"model\" id=\"model_id\" class=\"select select-bordered\" onchange=\"handleModelChange()\"><option value=\"claude-sonnet-4-5-20250929\">Claude Sonnet 4.5</option> <option value=\"claude-haiku-4-5-20251001\">Claude Haiku 4.5</option> <option value=\"claude-opus-4-6\">Claude Opus 4.6</option></select></div><div id=\"reasoning_effort_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Reasoning Effort</span></label> <select name=\"reasoning_effort\" id=\"model_reasoning_effort\" class=\"select select-bordered\"></select> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Supported values depend on the selected model.</span></label></div><div id=\"api_key_field\" class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">API Key</span></label><div class=\"relative\"><input type=\"password\" id=\"model_api_key\" name=\"api_key\" class=\"input input-bordered pr-10\" placeholder=\"sk-ant-... (leave empty to keep existing)\"> <button type=\"button\" class=\"password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-1/2 -translate-y-1/2 h-8 min-h-0 px-2\" onclick=\"togglePasswordVisibility('model_api_key', this)\" tabindex=\"-1\" aria-label=\"Toggle API key visibility\"><svg class=\"eye-open h-4 w-4\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z\"></path></svg> <svg class=\"eye-closed h-4 w-4 hidden\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21\"></path></svg></button></div></div><!-- Connection method selector for Anthropic OAuth --><div id=\"auth_method_field\" class=\"form-control mb-3 hidden\"><label class=\"label\"><span class=\"label-text\">Connection Method</span></label> <select name=\"auth_method\" id=\"model_auth_method\" class=\"select select-bordered\" onchange=\"toggleSubscriptionMethodFields()\"><option value=\"oauth\">API (OAuth via web)</option> <option value=\"cli\">CLI (OAuth via terminal)</option></select></div><div id=\"subscription_info_cli\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via CLI</p><p class=\"text-sm\">Uses the <code>claude</code> CLI for authentication. Make sure you are logged in. No API key needed.</p></div></div></div><div id=\"subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via API</p><p class=\"text-sm\">Uses the Anthropic API directly via OAuth. After saving, click \"Connect with OAuth\" on the model card to authorize.</p></div></div></div><div id=\"subscription_info_codex\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Uses local Codex CLI</p><p class=\"text-sm\">No API key needed here. Ensure the <code>codex</code> command is installed and authenticated on this machine.</p></div></div></div><div id=\"openai_subscription_info_cli\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via CLI</p><p class=\"text-sm\">Uses the <code>codex</code> CLI for authentication. Make sure you are logged in. No API key needed.</p></div></div></div><div id=\"openai_subscription_info_oauth\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OAuth via API</p><p class=\"text-sm\">Uses the OpenAI API directly via OAuth. After saving, click \"Connect with OAuth\" on the model card to authorize.</p></div></div></div><div id=\"ollama_info\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">Local Ollama Instance</p><p class=\"text-sm\">Connects to your local Ollama server. Make sure Ollama is running with <code>ollama serve</code>.</p></div></div></div><div id=\"ollama_fields\" class=\"hidden\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Base URL</span></label> <input type=\"text\" id=\"model_ollama_base_url\" name=\"ollama_base_url\" class=\"input input-bordered\" placeholder=\"http://localhost:11434\" value=\"http://localhost:11434\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Default: http://localhost:11434</span></label></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Custom Model Name</span></label> <input type=\"text\" id=\"model_ollama_custom_model\" name=\"ollama_custom_model\" class=\"input input-bordered\" placeholder=\"e.g. llama3.1:8b, codellama:13b\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">Enter any model name from <code>ollama list</code>, or select from common ones above</span></label></div></div><div id=\"openai_api_key_info\" class=\"mb-3 hidden\"><div class=\"alert alert-info\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" class=\"stroke-current shrink-0 w-6 h-6\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z\"></path></svg><div><p class=\"font-semibold\">OpenAI API Key</p><p class=\"text-sm\">Enter your OpenAI API key to make direct API calls.</p></div></div></div><div class=\"grid grid-cols-2 gap-3\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Max Tokens</span></label> <input type=\"number\" id=\"model_max_tokens\" name=\"max_tokens\" class=\"input input-bordered\" value=\"4096\"></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Temperature</span></label> <input type=\"number\" id=\"model_temperature\" name=\"temperature\" class=\"input input-bordered\" value=\"0\" step=\"0.1\" min=\"0\" max=\"1\"></div></div><div class=\"form-control mt-3\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"model_is_default\" name=\"is_default\" class=\"checkbox checkbox-sm\"> <span class=\"label-text\">Set as default model</span></label></div><div class=\"form-control mt-2\"><label class=\"label cursor-pointer justify-start gap-2\"><input type=\"checkbox\" id=\"model_auto_start_tasks\" name=\"auto_start_tasks\" class=\"checkbox checkbox-sm\"> <span class=\"label-text\">Auto-start created tasks</span></label> <label class=\"label\"><span class=\"label-text-alt opacity-70\">When enabled, tasks created with this model automatically move to \"active\" status</span></label></div><div class=\"divider text-sm opacity-60 mt-4 mb-2\">Worker Pool</div><div class=\"grid grid-cols-2 gap-3\"><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Max Workers</span></label> <input type=\"number\" id=\"model_max_workers\" name=\"model_max_workers\" class=\"input input-bordered\" value=\"0\" min=\"0\" max=\"10\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">0 = use global pool</span></label></div><div class=\"form-control\"><label class=\"label\"><span class=\"label-text\">Timeout (seconds)</span></label> <input type=\"number\" id=\"model_worker_timeout\" name=\"worker_timeout\" class=\"input input-bordered\" value=\"0\" min=\"0\"> <label class=\"label\"><span class=\"label-text-alt opacity-70\">0 = no override</span></label></div></div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"closeModelModal()\">Cancel</button> <button type=\"submit\" id=\"model_submit_btn\" class=\"btn btn-primary\">Create</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><style>\n\t\t\t/* Prevent password toggle button from moving on click */\n\t\t\t.password-toggle-btn:active {\n\t\t\t\ttransform: translate(0.25rem, -50%) !important;\n\t\t\t}\n\t\t</style><script>\n\t\t\t\t\tfunction launchOAuthInSystemBrowser(path) {\n\t\t\t\t\t\tvar href = path || '';\n\t\t\t\t\t\tif (!href) return false;\n\t\t\t\t\t\tvar externalURL = href;\n\t\t\t\t\t\tif (externalURL.indexOf('?') === -1) {\n\t\t\t\t\t\t\texternalURL += '?external=1';\n\t\t\t\t\t\t} else if (externalURL.indexOf('external=') === -1) {\n\t\t\t\t\t\t\texternalURL += '&external=1';\n\t\t\t\t\t\t}\n\t\t\t\t\t\tfetch(externalURL, {\n\t\t\t\t\t\t\tmethod: 'GET',\n\t\t\t\t\t\t\theaders: {\n\t\t\t\t\t\t\t\t'X-Requested-With': 'XMLHttpRequest'\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}).then(function(resp) {\n\t\t\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\t\t\tthrow new Error('Failed to open OAuth in browser');\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\tif (window.showToast) window.showToast('Opened browser for OAuth', 'completed');\n\t\t\t\t\t\t}).catch(function(err) {\n\t\t\t\t\t\t\tif (window.showToast) window.showToast(err.message || 'Failed to open OAuth in browser', 'failed');\n\t\t\t\t\t\t});\n\t\t\t\t\t\treturn false;\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction togglePasswordVisibility(inputId, button) {\n\t\t\t\t\tconst input = document.getElementById(inputId);\n\t\t\t\t\tconst eyeOpen = button.querySelector('.eye-open');\n\t\t\t\t\tconst eyeClosed = button.querySelector('.eye-closed');\n\t\t\t\t\t\n\t\t\t\t\tif (input.type === 'password') {\n\t\t\t\t\t\tinput.type = 'text';\n\t\t\t\t\t\teyeOpen.classList.add('hidden');\n\t\t\t\t\t\teyeClosed.classList.remove('hidden');\n\t\t\t\t\t} else {\n\t\t\t\t\t\tinput.type = 'password';\n\t\t\t\t\t\teyeOpen.classList.remove('hidden');\n\t\t\t\t\t\teyeClosed.classList.add('hidden');\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction submitOAuthManualComplete() {\n\t\t\t\t\tvar input = document.getElementById('oauth_manual_callback_url');\n\t\t\t\t\tif (!input) return;\n\t\t\t\t\tvar callbackUrl = (input.value || '').trim();\n\t\t\t\t\tif (!callbackUrl) {\n\t\t\t\t\t\tif (window.showToast) window.showToast('Paste a localhost callback URL first', 'failed');\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\n\t\t\t\t\tfetch('/models/oauth/manual-complete', {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {\n\t\t\t\t\t\t\t'Content-Type': 'application/json',\n\t\t\t\t\t\t\t'HX-Request': 'true'\n\t\t\t\t\t\t},\n\t\t\t\t\t\tbody: JSON.stringify({ callback_url: callbackUrl })\n\t\t\t\t\t}).then(function(resp) {\n\t\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\t\treturn resp.json().then(function(data) {\n\t\t\t\t\t\t\t\tthrow new Error((data && data.error) || 'OAuth completion failed');\n\t\t\t\t\t\t\t}).catch(function() {\n\t\t\t\t\t\t\t\tthrow new Error('OAuth completion failed');\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn resp.json();\n\t\t\t\t\t}).then(function() {\n\t\t\t\t\t\tif (window.showToast) window.showToast('OAuth connected', 'completed');\n\t\t\t\t\t\tinput.value = '';\n\t\t\t\t\t\twindow.location.reload();\n\t\t\t\t\t}).catch(function(err) {\n\t\t\t\t\t\tif (window.showToast) window.showToast(err.message || 'OAuth completion failed', 'failed');\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\tvar reasoningEffortOptions = {\n\t\t\t\tlow: 'Low',\n\t\t\t\tmedium: 'Medium',\n\t\t\t\thigh: 'High',\n\t\t\t\txhigh: 'XHigh'\n\t\t\t};\n\n\t\t\tvar modelOptionsByProvider = {\n\t\t\t\tanthropic: [\n\t\t\t\t\t{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', efforts: [] },\n\t\t\t\t\t{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', efforts: [] },\n\t\t\t\t\t{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', efforts: [] }\n\t\t\t\t],\n\t\t\t\topenai: [\n\t\t\t\t\t{ value: 'gpt-5.4', label: 'gpt-5.4', efforts: ['low', 'medium', 'high', 'xhigh'] },\n\t\t\t\t\t{ value: 'gpt-5.3-codex', label: 'gpt-5.3-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },\n\t\t\t\t\t{ value: 'gpt-5.2-codex', label: 'gpt-5.2-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },\n\t\t\t\t\t{ value: 'gpt-5.1-codex-max', label: 'gpt-5.1-codex-max', efforts: ['low', 'medium', 'high', 'xhigh'] },\n\t\t\t\t\t{ value: 'gpt-5.1-codex', label: 'gpt-5.1-codex', efforts: ['low', 'medium', 'high'] },\n\t\t\t\t\t{ value: 'gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini', efforts: ['low', 'medium', 'high'] },\n\t\t\t\t\t{ value: 'gpt-5-codex', label: 'gpt-5-codex', efforts: ['low', 'medium', 'high'] },\n\t\t\t\t\t{ value: 'gpt-5-codex-mini', label: 'gpt-5-codex-mini', efforts: ['low', 'medium', 'high'] }\n\t\t\t\t],\n\t\t\t\tollama: [\n\t\t\t\t\t{ value: 'llama3.1:8b', label: 'Llama 3.1 (8B)', efforts: [] },\n\t\t\t\t\t{ value: 'llama3.1:70b', label: 'Llama 3.1 (70B)', efforts: [] },\n\t\t\t\t\t{ value: 'llama3.2:3b', label: 'Llama 3.2 (3B)', efforts: [] },\n\t\t\t\t\t{ value: 'codellama:7b', label: 'Code Llama (7B)', efforts: [] },\n\t\t\t\t\t{ value: 'codellama:13b', label: 'Code Llama (13B)', efforts: [] },\n\t\t\t\t\t{ value: 'mistral:7b', label: 'Mistral (7B)', efforts: [] },\n\t\t\t\t\t{ value: 'deepseek-coder-v2:16b', label: 'DeepSeek Coder V2 (16B)', efforts: [] },\n\t\t\t\t\t{ value: 'qwen2.5-coder:7b', label: 'Qwen 2.5 Coder (7B)', efforts: [] },\n\t\t\t\t\t{ value: 'gemma2:9b', label: 'Gemma 2 (9B)', efforts: [] },\n\t\t\t\t\t{ value: 'phi3:14b', label: 'Phi-3 (14B)', efforts: [] }\n\t\t\t\t]\n\t\t\t};\n\n\t\t\tfunction selectedModelOption(provider, model) {\n\t\t\t\tvar options = modelOptionsByProvider[provider] || [];\n\t\t\t\tfor (var i = 0; i < options.length; i++) {\n\t\t\t\t\tif (options[i].value === model) {\n\t\t\t\t\t\treturn options[i];\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\treturn null;\n\t\t\t}\n\n\t\t\tfunction preferredReasoningEffort(supportedEfforts) {\n\t\t\t\tvar preferred = ['high', 'medium', 'low', 'xhigh'];\n\t\t\t\tfor (var i = 0; i < preferred.length; i++) {\n\t\t\t\t\tif (supportedEfforts.indexOf(preferred[i]) !== -1) {\n\t\t\t\t\t\treturn preferred[i];\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (supportedEfforts.length > 0) {\n\t\t\t\t\treturn supportedEfforts[0];\n\t\t\t\t}\n\t\t\t\treturn 'high';\n\t\t\t}\n\n\t\t\tfunction setReasoningEffortOptions(provider, model, selectedEffort) {\n\t\t\t\tvar reasoningField = document.getElementById('reasoning_effort_field');\n\t\t\t\tvar reasoningSelect = document.getElementById('model_reasoning_effort');\n\n\t\t\t\tif (provider !== 'openai') {\n\t\t\t\t\treasoningField.classList.add('hidden');\n\t\t\t\t\treasoningSelect.disabled = true;\n\t\t\t\t\treasoningSelect.innerHTML = '';\n\t\t\t\t\treturn;\n\t\t\t\t}\n\n\t\t\t\treasoningField.classList.remove('hidden');\n\t\t\t\treasoningSelect.disabled = false;\n\n\t\t\t\tvar modelOption = selectedModelOption(provider, model);\n\t\t\t\tvar supportedEfforts = ['low', 'medium', 'high'];\n\t\t\t\tif (modelOption && modelOption.efforts && modelOption.efforts.length > 0) {\n\t\t\t\t\tsupportedEfforts = modelOption.efforts;\n\t\t\t\t}\n\n\t\t\t\treasoningSelect.innerHTML = '';\n\t\t\t\tfor (var i = 0; i < supportedEfforts.length; i++) {\n\t\t\t\t\tvar effort = supportedEfforts[i];\n\t\t\t\t\tvar opt = document.createElement('option');\n\t\t\t\t\topt.value = effort;\n\t\t\t\t\topt.textContent = reasoningEffortOptions[effort] || effort;\n\t\t\t\t\treasoningSelect.appendChild(opt);\n\t\t\t\t}\n\n\t\t\t\tvar normalizedSelected = (selectedEffort || '').toLowerCase();\n\t\t\t\tif (normalizedSelected && supportedEfforts.indexOf(normalizedSelected) !== -1) {\n\t\t\t\t\treasoningSelect.value = normalizedSelected;\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\treasoningSelect.value = preferredReasoningEffort(supportedEfforts);\n\t\t\t}\n\n\t\t\tfunction setModelOptions(provider, selectedModel) {\n\t\t\t\tvar modelSelect = document.getElementById('model_id');\n\t\t\t\tvar options = modelOptionsByProvider[provider] || modelOptionsByProvider.anthropic;\n\n\t\t\t\tmodelSelect.innerHTML = '';\n\t\t\t\tvar hasSelected = false;\n\t\t\t\tfor (var i = 0; i < options.length; i++) {\n\t\t\t\t\tvar opt = document.createElement('option');\n\t\t\t\t\topt.value = options[i].value;\n\t\t\t\t\topt.textContent = options[i].label;\n\t\t\t\t\tif (selectedModel && selectedModel === options[i].value) {\n\t\t\t\t\t\thasSelected = true;\n\t\t\t\t\t}\n\t\t\t\t\tmodelSelect.appendChild(opt);\n\t\t\t\t}\n\n\t\t\t\tif (selectedModel && !hasSelected) {\n\t\t\t\t\tvar customOpt = document.createElement('option');\n\t\t\t\t\tcustomOpt.value = selectedModel;\n\t\t\t\t\tcustomOpt.textContent = selectedModel + ' (custom)';\n\t\t\t\t\tmodelSelect.appendChild(customOpt);\n\t\t\t\t}\n\n\t\t\t\tif (selectedModel) {\n\t\t\t\t\tmodelSelect.value = selectedModel;\n\t\t\t\t} else if (options.length > 0) {\n\t\t\t\t\tmodelSelect.value = options[0].value;\n\t\t\t\t}\n\n\t\t\t\treturn modelSelect.value;\n\t\t\t}\n\n\t\t\tfunction handleModelChange() {\n\t\t\t\tvar provider = document.getElementById('model_provider').value;\n\t\t\t\tvar model = document.getElementById('model_id').value;\n\t\t\t\tvar selectedEffort = document.getElementById('model_reasoning_effort').value;\n\t\t\t\tsetReasoningEffortOptions(provider, model, selectedEffort);\n\t\t\t}\n\n\t\t\t\tfunction hideAllInfoBoxes() {\n\t\t\t\t\tdocument.getElementById('subscription_info_cli').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('subscription_info_oauth').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('subscription_info_codex').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('ollama_info').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('ollama_fields').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('openai_api_key_info').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('openai_subscription_info_cli').classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('openai_subscription_info_oauth').classList.add('hidden');\n\t\t\t\t}\n\n\t\t\tvar _deleteModelId = '';\n\n\t\t\tfunction deleteModel(button) {\n\t\t\t\tvar id = button.dataset.modelId;\n\t\t\t\tvar name = button.dataset.modelName;\n\t\t\t\tvar isDefault = button.dataset.modelIsDefault === 'true';\n\n\t\t\t\tif (isDefault) {\n\t\t\t\t\t// Check if there are other models to reassign to\n\t\t\t\t\tvar select = document.getElementById('reassign_default_select');\n\t\t\t\t\tif (!select || select.options.length === 0) {\n\t\t\t\t\t\tif (confirm('Delete default model \"' + name + '\"? This action cannot be undone.')) {\n\t\t\t\t\t\t\thtmx.ajax('DELETE', '/models/' + id, {\n\t\t\t\t\t\t\t\ttarget: '#models-container',\n\t\t\t\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t\t\t\t}).catch(function(xhr) {\n\t\t\t\t\t\t\t\tvar msg = 'Failed to delete model.';\n\t\t\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\t\t\tvar data = JSON.parse(xhr.responseText);\n\t\t\t\t\t\t\t\t\tif (data.message) msg = data.message;\n\t\t\t\t\t\t\t\t} catch(e) {}\n\t\t\t\t\t\t\t\talert(msg);\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\t_deleteModelId = id;\n\t\t\t\t\treassign_default_modal.showModal();\n\t\t\t\t\treturn;\n\t\t\t\t}\n\n\t\t\t\tif (confirm('Delete model \"' + name + '\"? This action cannot be undone.')) {\n\t\t\t\t\thtmx.ajax('DELETE', '/models/' + id, {\n\t\t\t\t\t\ttarget: '#models-container',\n\t\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t\t}).catch(function(xhr) {\n\t\t\t\t\t\tvar msg = 'Failed to delete model.';\n\t\t\t\t\t\ttry {\n\t\t\t\t\t\t\tvar data = JSON.parse(xhr.responseText);\n\t\t\t\t\t\t\tif (data.message) msg = data.message;\n\t\t\t\t\t\t} catch(e) {}\n\t\t\t\t\t\talert(msg);\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction confirmDeleteDefault() {\n\t\t\t\tvar newDefaultId = document.getElementById('reassign_default_select').value;\n\t\t\t\tif (!newDefaultId) {\n\t\t\t\t\talert('Please select a new default model.');\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\treassign_default_modal.close();\n\t\t\t\thtmx.ajax('DELETE', '/models/' + _deleteModelId + '?new_default_id=' + newDefaultId, {\n\t\t\t\t\ttarget: '#models-container',\n\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t}).catch(function(xhr) {\n\t\t\t\t\tvar msg = 'Failed to delete model.';\n\t\t\t\t\ttry {\n\t\t\t\t\t\tvar data = JSON.parse(xhr.responseText);\n\t\t\t\t\t\tif (data.message) msg = data.message;\n\t\t\t\t\t} catch(e) {}\n\t\t\t\t\talert(msg);\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction editModelFromData(button) {\n\t\t\t\tvar id = button.dataset.modelId;\n\t\t\t\tvar name = button.dataset.modelName;\n\t\t\t\tvar dbProvider = button.dataset.modelProvider;\n\t\t\t\tvar model = button.dataset.modelModel;\n\t\t\t\tvar reasoningEffort = button.dataset.modelReasoningEffort || '';\n\t\t\t\tvar maxTokens = parseInt(button.dataset.modelMaxTokens);\n\t\t\t\tvar temperature = parseFloat(button.dataset.modelTemperature);\n\t\t\t\tvar isDefault = button.dataset.modelIsDefault === 'true';\n\t\t\t\t\tvar authMethod = button.dataset.modelAuthMethod || 'cli';\n\t\t\t\t\tvar modelMaxWorkers = parseInt(button.dataset.modelMaxWorkers) || 0;\n\t\t\t\t\tvar workerTimeout = parseInt(button.dataset.modelWorkerTimeout) || 0;\n\t\t\t\t\tvar ollamaBaseUrl = button.dataset.modelOllamaBaseUrl || '';\n\t\t\t\t\tvar autoStartTasks = button.dataset.modelAutoStartTasks === 'true';\n\n\t\t\t\t// Map DB provider values to UI values\n\t\t\t\tvar uiProvider = dbProvider;\n\t\t\t\tvar anthropicAuthType = 'api_key';\n\t\t\t\tvar openaiAuthType = 'api_key';\n\t\t\t\tvar openaiConnectionMethod = 'oauth';\n\t\t\t\tif (dbProvider === 'anthropic') {\n\t\t\t\t\tuiProvider = 'anthropic';\n\t\t\t\t\tif (authMethod === 'api_key' || (authMethod === '' && !dbProvider)) {\n\t\t\t\t\t\tanthropicAuthType = 'api_key';\n\t\t\t\t\t} else {\n\t\t\t\t\t\tanthropicAuthType = 'oauth';\n\t\t\t\t\t}\n\t\t\t\t} else if (dbProvider === 'openai') {\n\t\t\t\t\tif (authMethod === 'api_key') {\n\t\t\t\t\t\topenaiAuthType = 'api_key';\n\t\t\t\t\t} else {\n\t\t\t\t\t\topenaiAuthType = 'oauth';\n\t\t\t\t\t\topenaiConnectionMethod = authMethod; // 'cli' or 'oauth'\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tvar form = document.getElementById('model_form');\n\t\t\t\tdocument.getElementById('model_modal_title').textContent = 'Edit Model Configuration';\n\t\t\t\tform.action = '';\n\t\t\t\tform.method = 'post';\n\t\t\t\tform.setAttribute('hx-put', '/models/' + id);\n\t\t\t\tform.setAttribute('hx-target', '#models-container');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\thtmx.process(form);\n\t\t\t\tdocument.getElementById('model_name').value = name;\n\t\t\t\tdocument.getElementById('model_provider').value = uiProvider;\n\t\t\t\tdocument.getElementById('model_anthropic_auth_type').value = anthropicAuthType;\n\t\t\t\tdocument.getElementById('model_openai_auth_type').value = openaiAuthType;\n\t\t\t\tdocument.getElementById('model_openai_connection_method').value = openaiConnectionMethod;\n\t\t\t\tdocument.getElementById('model_api_key').value = '';\n\t\t\t\tdocument.getElementById('model_api_key').placeholder = '(leave empty to keep existing)';\n\t\t\t\tdocument.getElementById('model_api_key').required = false;\n\t\t\t\tdocument.getElementById('model_max_tokens').value = maxTokens.toString();\n\t\t\t\tdocument.getElementById('model_temperature').value = temperature.toString();\n\t\t\t\tdocument.getElementById('model_is_default').checked = isDefault;\n\t\t\t\t\tdocument.getElementById('model_auth_method').value = authMethod;\n\t\t\t\t\tdocument.getElementById('model_max_workers').value = modelMaxWorkers.toString();\n\t\t\t\t\tdocument.getElementById('model_worker_timeout').value = workerTimeout.toString();\n\t\t\t\t\tdocument.getElementById('model_ollama_base_url').value = ollamaBaseUrl || 'http://localhost:11434';\n\t\t\t\t\tdocument.getElementById('model_ollama_custom_model').value = '';\n\t\t\t\t\tdocument.getElementById('model_auto_start_tasks').checked = autoStartTasks;\n\t\t\t\tdocument.getElementById('model_submit_btn').textContent = 'Save';\n\t\t\t\ttoggleProviderFields(model, reasoningEffort);\n\t\t\t\tnew_model_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction toggleProviderFields(selectedModel, selectedReasoningEffort) {\n\t\t\t\tvar provider = document.getElementById('model_provider').value;\n\t\t\t\tvar apiKeyField = document.getElementById('api_key_field');\n\t\t\t\tvar apiKeyInput = document.getElementById('model_api_key');\n\t\t\t\tvar anthropicAuthTypeField = document.getElementById('anthropic_auth_type_field');\n\t\t\t\tvar openaiAuthTypeField = document.getElementById('openai_auth_type_field');\n\t\t\t\tvar openaiConnectionMethodField = document.getElementById('openai_connection_method_field');\n\t\t\t\tvar authMethodField = document.getElementById('auth_method_field');\n\t\t\t\tvar ollamaInfo = document.getElementById('ollama_info');\n\n\t\t\t\thideAllInfoBoxes();\n\t\t\t\tvar activeModel = setModelOptions(provider, selectedModel);\n\n\t\t\t\tif (provider === 'anthropic') {\n\t\t\t\t\tanthropicAuthTypeField.classList.remove('hidden');\n\t\t\t\t\topenaiAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiConnectionMethodField.classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('model_openai_connection_method').disabled = true;\n\t\t\t\t\ttoggleAnthropicAuthFields();\n\t\t\t\t} else if (provider === 'openai') {\n\t\t\t\t\tanthropicAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiAuthTypeField.classList.remove('hidden');\n\t\t\t\t\tauthMethodField.classList.add('hidden');\n\t\t\t\t\tdocument.getElementById('model_auth_method').disabled = true;\n\t\t\t\t\ttoggleOpenAIAuthFields();\n\t\t\t\t} else if (provider === 'ollama') {\n\t\t\t\t\tanthropicAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiConnectionMethodField.classList.add('hidden');\n\t\t\t\t\tauthMethodField.classList.add('hidden');\n\t\t\t\t\tapiKeyField.classList.add('hidden');\n\t\t\t\t\tapiKeyInput.required = false;\n\t\t\t\t\tollamaInfo.classList.remove('hidden');\n\t\t\t\t\tdocument.getElementById('ollama_fields').classList.remove('hidden');\n\t\t\t\t\tdocument.getElementById('model_auth_method').disabled = true;\n\t\t\t\t\tdocument.getElementById('model_openai_connection_method').disabled = true;\n\t\t\t\t} else {\n\t\t\t\t\tanthropicAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiAuthTypeField.classList.add('hidden');\n\t\t\t\t\topenaiConnectionMethodField.classList.add('hidden');\n\t\t\t\t\tauthMethodField.classList.add('hidden');\n\t\t\t\t\tapiKeyField.classList.remove('hidden');\n\t\t\t\t\tapiKeyInput.required = true;\n\t\t\t\t\tdocument.getElementById('model_auth_method').disabled = true;\n\t\t\t\t\tdocument.getElementById('model_openai_connection_method').disabled = true;\n\t\t\t\t}\n\t\t\t\tsetReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);\n\t\t\t}\n\n\t\t\tfunction toggleAnthropicAuthFields() {\n\t\t\t\tvar authType = document.getElementById('model_anthropic_auth_type').value;\n\t\t\t\tvar apiKeyField = document.getElementById('api_key_field');\n\t\t\t\tvar apiKeyInput = document.getElementById('model_api_key');\n\t\t\t\tvar authMethodField = document.getElementById('auth_method_field');\n\t\t\t\tvar authMethodSelect = document.getElementById('model_auth_method');\n\n\t\t\t\thideAllInfoBoxes();\n\n\t\t\t\tif (authType === 'api_key') {\n\t\t\t\t\tapiKeyField.classList.remove('hidden');\n\t\t\t\t\tapiKeyInput.required = true;\n\t\t\t\t\tauthMethodField.classList.add('hidden');\n\t\t\t\t\tauthMethodSelect.disabled = true;\n\t\t\t\t} else {\n\t\t\t\t\tapiKeyField.classList.add('hidden');\n\t\t\t\t\tapiKeyInput.required = false;\n\t\t\t\t\tauthMethodField.classList.remove('hidden');\n\t\t\t\t\tauthMethodSelect.disabled = false;\n\t\t\t\t\ttoggleSubscriptionMethodFields();\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction toggleSubscriptionMethodFields() {\n\t\t\t\tvar method = document.getElementById('model_auth_method').value;\n\t\t\t\tvar subscriptionInfoCli = document.getElementById('subscription_info_cli');\n\t\t\t\tvar subscriptionInfoOauth = document.getElementById('subscription_info_oauth');\n\t\t\t\tif (method === 'oauth') {\n\t\t\t\t\tsubscriptionInfoCli.classList.add('hidden');\n\t\t\t\t\tsubscriptionInfoOauth.classList.remove('hidden');\n\t\t\t\t} else {\n\t\t\t\t\tsubscriptionInfoCli.classList.remove('hidden');\n\t\t\t\t\tsubscriptionInfoOauth.classList.add('hidden');\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tfunction toggleOpenAIAuthFields() {\n\t\t\t\tvar authType = document.getElementById('model_openai_auth_type').value;\n\t\t\t\tvar apiKeyField = document.getElementById('api_key_field');\n\t\t\t\tvar apiKeyInput = document.getElementById('model_api_key');\n\t\t\t\tvar openaiConnectionMethodField = document.getElementById('openai_connection_method_field');\n\t\t\t\tvar openaiConnectionMethodSelect = document.getElementById('model_openai_connection_method');\n\n\t\t\t\thideAllInfoBoxes();\n\n\t\t\t\tif (authType === 'api_key') {\n\t\t\t\t\tapiKeyField.classList.remove('hidden');\n\t\t\t\t\tapiKeyInput.required = true;\n\t\t\t\t\topenaiConnectionMethodField.classList.add('hidden');\n\t\t\t\t\topenaiConnectionMethodSelect.disabled = true;\n\t\t\t\t\tdocument.getElementById('openai_api_key_info').classList.remove('hidden');\n\t\t\t\t} else {\n\t\t\t\t\t// subscription\n\t\t\t\t\tapiKeyField.classList.add('hidden');\n\t\t\t\t\tapiKeyInput.required = false;\n\t\t\t\t\topenaiConnectionMethodField.classList.remove('hidden');\n\t\t\t\t\topenaiConnectionMethodSelect.disabled = false;\n\t\t\t\t\ttoggleOpenAIConnectionMethodFields();\n\t\t\t\t}\n\t\t\t}\n\n\t\t\t\tfunction toggleOpenAIConnectionMethodFields() {\n\t\t\t\t\tvar method = document.getElementById('model_openai_connection_method').value;\n\t\t\t\t\tvar subscriptionInfoCli = document.getElementById('openai_subscription_info_cli');\n\t\t\t\t\tvar subscriptionInfoOauth = document.getElementById('openai_subscription_info_oauth');\n\n\t\t\t\t\thideAllInfoBoxes();\n\n\t\t\t\t\tif (method === 'oauth') {\n\t\t\t\t\t\tsubscriptionInfoOauth.classList.remove('hidden');\n\t\t\t\t\t\tsubscriptionInfoCli.classList.add('hidden');\n\t\t\t\t\t} else {\n\t\t\t\t\t\t// cli\n\t\t\t\t\t\tsubscriptionInfoCli.classList.remove('hidden');\n\t\t\t\t\t\tsubscriptionInfoOauth.classList.add('hidden');\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\tfunction closeModelModal() {\n\t\t\t\tnew_model_modal.close();\n\t\t\t}\n\n\t\t\tfunction openNewModelModal() {\n\t\t\t\tvar form = document.getElementById('model_form');\n\t\t\t\tdocument.getElementById('model_modal_title').textContent = 'New Model Configuration';\n\t\t\t\tform.action = '';\n\t\t\t\tform.method = 'post';\n\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\tform.setAttribute('hx-post', '/models');\n\t\t\t\tform.setAttribute('hx-target', '#models-container');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\thtmx.process(form);\n\t\t\t\tdocument.getElementById('model_name').value = '';\n\t\t\t\tdocument.getElementById('model_provider').value = 'anthropic';\n\t\t\t\tdocument.getElementById('model_anthropic_auth_type').value = 'api_key';\n\t\t\t\tdocument.getElementById('model_openai_auth_type').value = 'api_key';\n\t\t\t\tdocument.getElementById('model_openai_connection_method').value = 'oauth';\n\t\t\t\tdocument.getElementById('model_api_key').value = '';\n\t\t\t\tdocument.getElementById('model_api_key').placeholder = 'sk-ant-...';\n\t\t\t\tdocument.getElementById('model_api_key').required = true;\n\t\t\t\tdocument.getElementById('model_max_tokens').value = '4096';\n\t\t\t\tdocument.getElementById('model_temperature').value = '0';\n\t\t\t\tdocument.getElementById('model_is_default').checked = false;\n\t\t\t\t\tdocument.getElementById('model_auth_method').value = 'oauth';\n\t\t\t\t\tdocument.getElementById('model_max_workers').value = '0';\n\t\t\t\t\tdocument.getElementById('model_worker_timeout').value = '0';\n\t\t\t\t\tdocument.getElementById('model_ollama_base_url').value = 'http://localhost:11434';\n\t\t\t\t\tdocument.getElementById('model_ollama_custom_model').value = '';\n\t\t\t\t\tdocument.getElementById('model_auto_start_tasks').checked = false;\n\t\t\t\tdocument.getElementById('model_submit_btn').textContent = 'Create';\n\t\t\t\ttoggleProviderFields('', '');\n\t\t\t\tnew_model_modal.showModal();\n\t\t\t}\n\t\t</script><script>\n\t\t\t// Close modal after successful HTMX form submission\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tif (event.detail.target && event.detail.target.id === 'models-container') {\n\t\t\t\t\tvar modal = document.getElementById('new_model_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t});\n\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

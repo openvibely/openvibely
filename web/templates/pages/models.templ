@@ -87,6 +87,7 @@ func showOAuthLocalhostFallback() bool {
 	return strings.EqualFold(strings.TrimSpace(os.Getenv("OAUTH_REDIRECT_MODE")), "localhost_manual")
 }
 
+
 templ providerIcon(provider models.LLMProvider) {
 	if provider == models.ProviderAnthropic {
 		<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="currentColor">
@@ -252,15 +253,15 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 										<span class={ "badge badge-sm", oauthStatusClass(agent) }>
 											{ oauthStatusText(agent) }
 										</span>
-										if !agent.HasValidOAuthToken() {
-											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } class="btn btn-xs btn-outline" onclick="event.stopPropagation()">
-												Connect with OAuth
-											</a>
-										} else {
-											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } class="btn btn-xs btn-ghost" onclick="event.stopPropagation()">
+									if !agent.HasValidOAuthToken() {
+											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } class="btn btn-xs btn-outline" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath)">
+											Connect with OAuth
+										</a>
+									} else {
+											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } class="btn btn-xs btn-ghost" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath)">
 												Re-authorize
 											</a>
-										}
+									}
 									</div>
 								}
 								if agent.MaxWorkers > 0 {
@@ -532,8 +533,33 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 			}
 		</style>
 
-		<script>
-				function togglePasswordVisibility(inputId, button) {
+			<script>
+					function launchOAuthInSystemBrowser(path) {
+						var href = path || '';
+						if (!href) return false;
+						var externalURL = href;
+						if (externalURL.indexOf('?') === -1) {
+							externalURL += '?external=1';
+						} else if (externalURL.indexOf('external=') === -1) {
+							externalURL += '&external=1';
+						}
+						fetch(externalURL, {
+							method: 'GET',
+							headers: {
+								'X-Requested-With': 'XMLHttpRequest'
+							}
+						}).then(function(resp) {
+							if (!resp.ok) {
+								throw new Error('Failed to open OAuth in browser');
+							}
+							if (window.showToast) window.showToast('Opened browser for OAuth', 'completed');
+						}).catch(function(err) {
+							if (window.showToast) window.showToast(err.message || 'Failed to open OAuth in browser', 'failed');
+						});
+						return false;
+					}
+
+					function togglePasswordVisibility(inputId, button) {
 					const input = document.getElementById(inputId);
 					const eyeOpen = button.querySelector('.eye-open');
 					const eyeClosed = button.querySelector('.eye-closed');

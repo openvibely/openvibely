@@ -19,6 +19,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						document.documentElement.setAttribute('data-theme', 'light');
 					}
 					// else: keep the default "dark" from HTML attribute
+					function detectDesktopRuntime() {
+						try {
+							if (typeof window === 'undefined') return false;
+							if (window.location && window.location.protocol === 'wails:') return true;
+							if (typeof window.runtime !== 'undefined') return true;
+							if (typeof window.go !== 'undefined') return true;
+							if (typeof window.__WAILS__ !== 'undefined') return true;
+							return false;
+						} catch (_) {
+							return false;
+						}
+					}
+					window.__ov_applyRuntimeMode = function() {
+						document.documentElement.setAttribute('data-runtime', detectDesktopRuntime() ? 'desktop' : 'web');
+					};
+					window.__ov_applyRuntimeMode();
 				})();
 			</script>
 			<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css"/>
@@ -29,6 +45,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<script src="https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js"></script>
 			<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github-dark.min.css"/>
 			<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+			<script src="wails://wails/runtime.js" onload="window.__ov_applyRuntimeMode && window.__ov_applyRuntimeMode()"></script>
 			<style>
 				/* Disable DaisyUI button-pop animation on initial render.
 				   Without this, HTMX swaps cause all newly-inserted .btn elements
@@ -42,7 +59,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						--ov-link-color-visited: #7480ff;
 						--ov-link-focus-ring: rgba(116, 128, 255, 0.45);
 						--ov-link-decoration: rgba(116, 128, 255, 0.85);
-					}
+					/* Schedule-specific tokens kept explicit for cross-WebView consistency. */
+						--ov-schedule-grid-border: #15191E;					--ov-schedule-timeline-dash: repeating-linear-gradient(
+						to right,
+						var(--ov-link-color) 0px,
+						var(--ov-link-color) 4px,
+						transparent 4px,
+						transparent 6px
+					);					}
 					/* Canonical "Default" badge styling used across major settings pages. */
 					.ov-badge-default {
 						background-color: hsl(var(--p));
@@ -128,6 +152,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					[data-theme="light"] .ov-task-result-start-btn:active:not(:disabled):not(.btn-disabled) {
 						background-color: hsl(var(--p) / 0.12);
+					}
+					[data-theme="light"] {
+						--ov-schedule-grid-border: hsl(var(--bc) / 0.16);
 					}
 					/* Theme toggle is intentionally immediate (no global transition choreography). */				/* Prevent layout shift when modal opens by reserving scrollbar space */
 				html {
@@ -275,8 +302,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				--ov-loading-dot-size: 0.36rem;
 				--ov-loading-dot-gap: 0.22rem;
 				--ov-loading-dot-bounce: 0.24rem;
-				--ov-loading-dot-color: oklch(var(--p));
-				--ov-loading-dot-color-soft: oklch(var(--p) / 0.45);
+				--ov-loading-dot-color: #646fe4;
+				--ov-loading-dot-color-soft: rgba(100, 111, 228, 0.45);
 				display: inline-flex;
 				align-items: flex-end;
 				gap: var(--ov-loading-dot-gap);
@@ -547,37 +574,77 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.sidebar-aside.sidebar-collapsed .sidebar-divider {
 					display: none;
 				}
-				/* Tooltip for collapsed sidebar items */
-				.sidebar-aside.sidebar-collapsed [data-tip] {
-					position: relative;
-				}
-				.sidebar-aside.sidebar-collapsed [data-tip]::after {
-					content: attr(data-tip);
-					position: absolute;
-					left: calc(100% + 4px);
-					top: 50%;
-					transform: translateY(-50%);
-					padding: 4px 10px;
-					background: hsl(var(--n));
-					color: hsl(var(--nc));
-					border-radius: 6px;
-					font-size: 0.75rem;
-					white-space: nowrap;
-					opacity: 0;
-					pointer-events: none;
-					transition: opacity 0.15s ease;
-					z-index: 100;
-					box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-				}
-				.sidebar-aside.sidebar-collapsed [data-tip]:hover::after {
-					opacity: 1;
-				}
-				/* Theme toggle in collapsed sidebar */
-				.sidebar-aside.sidebar-collapsed .theme-toggle-collapsed-btn {
-					display: flex;
-				}
-				/* Diff viewer styles */
-				.diff-table td {
+					/* Collapsed sidebar: disable custom hover tooltip boxes next to icons */
+					.sidebar-aside.sidebar-collapsed [data-tip] {
+						position: relative;
+					}
+					.sidebar-aside.sidebar-collapsed [data-tip]::after {
+						content: none !important;
+						display: none !important;
+						opacity: 0 !important;
+					}
+					.sidebar-aside.sidebar-collapsed [data-tip]:hover::after {
+						opacity: 0 !important;
+					}
+						/* Theme toggle shared styling */					.theme-toggle-pill {
+						display: inline-flex;
+						align-items: center;
+						justify-content: space-between;
+						position: relative;
+						width: 46px;
+						height: 24px;
+						border-radius: 9999px;
+						background: #3a4455;
+						cursor: pointer;
+						padding: 0 4px;
+						transition: background 0.2s;
+						user-select: none;
+						flex-shrink: 0;
+					}
+					.theme-toggle-icon {
+						display: flex;
+						align-items: center;
+						justify-content: center;
+						width: 16px;
+						height: 16px;
+						z-index: 1;
+						transition: opacity 0.2s, color 0.2s;
+					}
+					.theme-toggle-thumb {
+						position: absolute;
+						top: 3px;
+						width: 18px;
+						height: 18px;
+						border-radius: 50%;
+						background: #d5dbe6;
+						transition: transform 0.25s ease, left 0.25s ease, right 0.25s ease;
+						box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+					}
+					/* Light mode: thumb on LEFT (sun side), sun visible and bright on left */
+					.theme-toggle-thumb {
+						left: 3px;
+					}
+						.theme-toggle-sun {
+							color: #646fe4;
+							opacity: 1;
+						}					.theme-toggle-moon {
+						color: #9ca3af;
+						opacity: 0.5;
+					}
+					/* Dark mode: thumb slides RIGHT (moon side), moon visible and bright on right */
+					[data-theme="dark"] .theme-toggle-thumb {
+						left: auto;
+						right: 3px;
+					}
+					[data-theme="dark"] .theme-toggle-sun {
+						color: #9ca3af;
+						opacity: 0.5;
+					}
+					[data-theme="dark"] .theme-toggle-moon {
+						color: #646fe4;
+						opacity: 1;
+					}
+					/* Diff viewer styles */				.diff-table td {
 					padding-top: 1px;
 					padding-bottom: 1px;
 					vertical-align: top;
@@ -595,9 +662,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				/* ==============================
 				   Light mode: VS Code Light Modern (2026) inspired mapping
 				   ============================== */
-				[data-theme="light"] {
-					/* DaisyUI base variables (oklch); keep consistent structure for utilities. */
-					--b1: 1 0 0;
+					[data-theme="light"] {
+						/* DaisyUI base variables (oklch); keep consistent structure for utilities. */
+						--ov-schedule-grid-border: #E5E5E5;					--b1: 1 0 0;
 					--b2: 0.975 0 0;
 					--b3: 0.93 0.001 286.029;
 					--bc: 0.27 0.004 286;
@@ -670,11 +737,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					color: var(--ov-l-text-strong);
 					font-weight: 500;
 				}
-				[data-theme="light"] .menu a:hover,
-				[data-theme="light"] .menu summary:hover {
-					background-color: var(--ov-l-surface-hover);
-				}
-				[data-theme="light"] .menu a svg,
+					[data-theme="light"] .menu a:hover,
+					[data-theme="light"] .menu summary:hover {
+						background-color: var(--ov-l-surface-hover);
+					}
+					/* Prevent mouse-click focus from looking like a persistent active nav item (web parity with desktop). */
+					.sidebar-aside .menu a:focus:not(:focus-visible),
+					.sidebar-aside .menu summary:focus:not(:focus-visible) {
+						background-color: transparent !important;
+						outline: none !important;
+					}
+					[data-theme="light"] .menu a svg,
 				[data-theme="light"] .menu summary svg {
 					color: var(--ov-l-text-muted);
 				}
@@ -689,11 +762,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					border-color: var(--ov-l-border);
 					box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
 				}
-				[data-theme="light"] .hover\:border-primary:hover {
-					border-color: oklch(var(--p));
+				[data-theme="light"] .hover\:border-primary:hover,
+				[data-theme="light"] [class~="hover:border-primary"]:hover {
+					border-color: #3f4981 !important;
 				}
-				[data-theme="light"] .hover\:border-primary\/40:hover {
-					border-color: oklch(var(--p) / 0.4);
+				[data-theme="light"] .hover\:border-primary\/40:hover,
+				[data-theme="light"] [class~="hover:border-primary/40"]:hover {
+					border-color: rgba(63, 73, 129, 0.4) !important;
 				}
 				[data-theme="light"] .card .font-medium,
 				[data-theme="light"] .card a.font-medium {
@@ -760,30 +835,179 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					border-color: var(--ov-l-accent-soft);
 				}
 
-				/* --- Buttons --- */
-				[data-theme="light"] .btn-primary {
-					background-color: var(--ov-l-accent);
-					border-color: var(--ov-l-accent);
-					color: #FFFFFF;
-				}
-				[data-theme="light"] .btn-primary:hover {
-					background-color: var(--ov-l-accent-hover);
-					border-color: var(--ov-l-accent-hover);
-				}
-				[data-theme="light"] .btn-secondary {
-					background-color: var(--ov-l-surface-active);
-					border-color: var(--ov-l-border-contrast);
-					color: var(--ov-l-text);
-				}
-				[data-theme="light"] .btn-secondary:hover {
-					background-color: var(--ov-l-border-contrast);
-				}
-				[data-theme="light"] .btn-ghost {
-					color: var(--ov-l-text);
-				}
-				[data-theme="light"] .btn-ghost:hover {
-					background-color: var(--ov-l-surface-hover);
-				}
+					/* --- Buttons --- */
+					/* Dark-mode hover parity across web and desktop (deterministic, engine-agnostic). */
+					[data-theme="dark"] .btn:hover {
+						background-color: #2f3540 !important;
+						border-color: #2f3540 !important;
+					}
+					[data-theme="dark"] .btn-primary:hover {
+						background-color: #646fe4 !important;
+						border-color: #646fe4 !important;
+					}
+					[data-theme="dark"] .btn-secondary:hover {
+						background-color: #e63ab3 !important;
+						border-color: #e63ab3 !important;
+					}
+					[data-theme="dark"] .btn-accent:hover {
+						background-color: #00baa9 !important;
+						border-color: #00baa9 !important;
+					}
+					[data-theme="dark"] .btn-info:hover {
+						background-color: #00a1d8 !important;
+						border-color: #00a1d8 !important;
+					}
+					[data-theme="dark"] .btn-success:hover {
+						background-color: #00b682 !important;
+						border-color: #00b682 !important;
+					}
+					[data-theme="dark"] .btn-warning:hover {
+						background-color: #e6af29 !important;
+						border-color: #e6af29 !important;
+					}
+					[data-theme="dark"] .btn-error:hover {
+						background-color: #e66465 !important;
+						border-color: #e66465 !important;
+					}
+					[data-theme="dark"] .btn-neutral:hover {
+						background-color: #273140 !important;
+						border-color: #273140 !important;
+					}
+					[data-theme="dark"] .btn-ghost:hover {
+						background-color: rgba(255, 255, 255, 0.12) !important;
+						border-color: transparent !important;
+					}
+					[data-theme="dark"] .btn-link:hover {
+						background-color: transparent !important;
+						border-color: transparent !important;
+						text-decoration-line: underline;
+					}
+					[data-theme="dark"] .btn-outline:hover {
+						background-color: #c9d0db !important;
+						border-color: #c9d0db !important;
+						color: #1f2937 !important;
+					}
+					[data-theme="dark"] .btn-outline.btn-primary:hover {
+						background-color: #646fe4 !important;
+						border-color: #646fe4 !important;
+					}
+					[data-theme="dark"] .btn-outline.btn-secondary:hover {
+						background-color: #e63ab3 !important;
+						border-color: #e63ab3 !important;
+					}
+					[data-theme="dark"] .btn-outline.btn-accent:hover {
+						background-color: #00baa9 !important;
+						border-color: #00baa9 !important;
+					}
+					[data-theme="dark"] .btn-outline.btn-info:hover {
+						background-color: #00a1d8 !important;
+						border-color: #00a1d8 !important;
+					}
+					[data-theme="dark"] .btn-outline.btn-success:hover {
+						background-color: #00b682 !important;
+						border-color: #00b682 !important;
+					}
+					[data-theme="dark"] .btn-outline.btn-warning:hover {
+						background-color: #e6af29 !important;
+						border-color: #e6af29 !important;
+					}
+					[data-theme="dark"] .btn-outline.btn-error:hover {
+						background-color: #e66465 !important;
+						border-color: #e66465 !important;
+					}
+					/* Light-mode hover parity matrix (mirrors dark-mode coverage). */
+					[data-theme="light"] .btn:hover {
+						background-color: var(--ov-l-surface-hover);
+						border-color: var(--ov-l-border);
+					}
+					[data-theme="light"] .btn-primary {
+						background-color: var(--ov-l-accent);
+						border-color: var(--ov-l-accent);
+						color: #FFFFFF;
+					}
+					[data-theme="light"] .btn-primary:hover {
+						background-color: var(--ov-l-accent-hover);
+						border-color: var(--ov-l-accent-hover);
+					}
+					[data-theme="light"] .btn-secondary {
+						background-color: var(--ov-l-surface-active);
+						border-color: var(--ov-l-border-contrast);
+						color: var(--ov-l-text);
+					}
+					[data-theme="light"] .btn-secondary:hover {
+						background-color: var(--ov-l-border-contrast);
+						border-color: var(--ov-l-border-contrast);
+					}
+					[data-theme="light"] .btn-accent:hover {
+						background-color: var(--ov-l-accent-hover);
+						border-color: var(--ov-l-accent-hover);
+					}
+					[data-theme="light"] .btn-info:hover {
+						background-color: #2094f3;
+						border-color: #2094f3;
+					}
+					[data-theme="light"] .btn-success:hover {
+						background-color: #16a34a;
+						border-color: #16a34a;
+					}
+					[data-theme="light"] .btn-warning:hover {
+						background-color: #dbab0a;
+						border-color: #dbab0a;
+					}
+					[data-theme="light"] .btn-error:hover {
+						background-color: #e24949;
+						border-color: #e24949;
+					}
+					[data-theme="light"] .btn-neutral:hover {
+						background-color: #1f2937;
+						border-color: #1f2937;
+					}
+					[data-theme="light"] .btn-ghost {
+						color: var(--ov-l-text);
+					}
+					[data-theme="light"] .btn-ghost:hover {
+						background-color: var(--ov-l-surface-hover);
+						border-color: transparent;
+					}
+					[data-theme="light"] .btn-link:hover {
+						background-color: transparent;
+						border-color: transparent;
+						text-decoration-line: underline;
+					}
+					[data-theme="light"] .btn-outline:hover {
+						background-color: var(--ov-l-accent);
+						border-color: var(--ov-l-accent);
+						color: #FFFFFF;
+					}
+					[data-theme="light"] .btn-outline.btn-primary:hover {
+						background-color: var(--ov-l-accent-hover);
+						border-color: var(--ov-l-accent-hover);
+					}
+					[data-theme="light"] .btn-outline.btn-secondary:hover {
+						background-color: var(--ov-l-border-contrast);
+						border-color: var(--ov-l-border-contrast);
+						color: var(--ov-l-text);
+					}
+					[data-theme="light"] .btn-outline.btn-accent:hover {
+						background-color: var(--ov-l-accent-hover);
+						border-color: var(--ov-l-accent-hover);
+					}
+					[data-theme="light"] .btn-outline.btn-info:hover {
+						background-color: #2094f3;
+						border-color: #2094f3;
+					}
+					[data-theme="light"] .btn-outline.btn-success:hover {
+						background-color: #16a34a;
+						border-color: #16a34a;
+					}
+					[data-theme="light"] .btn-outline.btn-warning:hover {
+						background-color: #dbab0a;
+						border-color: #dbab0a;
+					}
+					[data-theme="light"] .btn-outline.btn-error:hover {
+						background-color: #e24949;
+						border-color: #e24949;
+					}
 				/* Close/delete X buttons on cards */
 					[data-theme="light"] .card .btn-circle.btn-ghost {
 						color: var(--ov-l-text-dim);
@@ -862,6 +1086,88 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					color: var(--ov-l-text);
 				}
 
+					/* --- Tabs --- */
+					[data-theme="light"] .tabs-bordered {
+						border-bottom-color: var(--ov-l-border) !important;
+					}
+					[data-theme="light"] .tab {
+						border-bottom-color: var(--ov-l-border) !important;
+					}
+					[data-theme="light"] .tab-active {
+						border-bottom-color: var(--ov-l-border-strong) !important;
+					}
+
+					/* --- Border colors (fix DaisyUI border classes resolving to black in WebKit) --- */
+					[data-theme="light"] .border,
+					[data-theme="light"] .border-base-100,
+					[data-theme="light"] .border-base-200,
+					[data-theme="light"] .border-base-300 {
+						border-color: var(--ov-l-border) !important;
+					}
+
+					/* --- Toggle switches (deterministic colors across Chromium/WebKit) --- */
+					[data-theme="light"] .toggle {
+						--tglbg: #FFFFFF !important;
+						background-color: #E5E7EB !important;
+						border-color: #D1D5DB !important;
+					}
+					[data-theme="light"] .toggle:checked,
+					[data-theme="light"] .toggle[aria-checked="true"] {
+						--tglbg: #FFFFFF !important;
+						background-color: #7480ff !important;
+						border-color: #7480ff !important;
+					}
+					[data-theme="light"] .toggle:hover {
+						background-color: #E5E7EB !important;
+						border-color: #D1D5DB !important;
+					}
+					[data-theme="light"] .toggle:checked:hover,
+					[data-theme="light"] .toggle[aria-checked="true"]:hover {
+						background-color: #7480ff !important;
+						border-color: #7480ff !important;
+					}
+					[data-theme="dark"] .toggle {
+						--tglbg: #1d232a !important;
+						background-color: #4B5563 !important;
+						border-color: #4B5563 !important;
+					}
+					[data-theme="dark"] .toggle:checked,
+					[data-theme="dark"] .toggle[aria-checked="true"] {
+						--tglbg: #1d232a !important;
+						background-color: #646fe4 !important;
+						border-color: #646fe4 !important;
+					}
+					[data-theme="dark"] .toggle:focus,
+					[data-theme="dark"] .toggle:focus-visible {
+						--tglbg: #1d232a !important;
+					}
+					[data-theme="dark"] .toggle:checked:focus,
+					[data-theme="dark"] .toggle[aria-checked="true"]:focus,
+					[data-theme="dark"] .toggle:checked:focus-visible,
+					[data-theme="dark"] .toggle[aria-checked="true"]:focus-visible {
+						--tglbg: #1d232a !important;
+					}
+					[data-theme="dark"] .toggle:hover {
+						background-color: #4B5563 !important;
+						border-color: #4B5563 !important;
+					}
+					[data-theme="dark"] .toggle:checked:hover,
+					[data-theme="dark"] .toggle[aria-checked="true"]:hover {
+						background-color: #646fe4 !important;
+						border-color: #646fe4 !important;
+					}
+
+				/* --- Remove focus outlines/borders from inputs/selects/textareas (but preserve toggle styling) --- */
+				input:not(.toggle):focus,
+				select:focus,
+				textarea:focus,
+				.input:focus,
+				.select:focus,
+				.textarea:focus {
+					outline: none !important;
+					box-shadow: none !important;
+				}
+
 				/* --- Chat bubbles --- */
 				[data-theme="light"] .chat-bubble-user-msg,
 				[data-theme="light"] .chat-bubble-assistant-msg {
@@ -936,6 +1242,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					color: var(--ov-l-error);
 				}
 
+					/* --- Tabs (dark mode) --- */
+					[data-theme="dark"] .tabs-bordered {
+						border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+					}
+					[data-theme="dark"] .tab {
+						border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+					}
+					[data-theme="dark"] .tab-active {
+						border-bottom-color: rgba(255, 255, 255, 0.3) !important;
+					}
 				/* --- Chat bubbles (dark mode) --- */
 				[data-theme="dark"] .chat-bubble-user-msg,
 				[data-theme="dark"] .chat-bubble-assistant-msg {
@@ -1004,6 +1320,26 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				/* --- Toast notifications --- */
 				[data-theme="light"] .toast-notification {
 					box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+				}
+				[data-theme="light"] .alert-success {
+					background-color: #d1fae5 !important;
+					color: #065f46 !important;
+					border-color: #6ee7b7 !important;
+				}
+				[data-theme="light"] .alert-error {
+					background-color: #fee2e2 !important;
+					color: #991b1b !important;
+					border-color: #fca5a5 !important;
+				}
+				[data-theme="light"] .alert-info {
+					background-color: #dbeafe !important;
+					color: #1e40af !important;
+					border-color: #93c5fd !important;
+				}
+				[data-theme="light"] .alert-warning {
+					background-color: #fef3c7 !important;
+					color: #92400e !important;
+					border-color: #fcd34d !important;
 				}
 
 				/* --- Markdown prose styling for chat messages --- */
@@ -1218,25 +1554,23 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					grid-template-columns: max-content 1fr;
 				}
 				.stream-tool-body-row {
-					grid-column: 1 / -1;
-					display: grid;
-					grid-template-columns: subgrid;
-					border-top: 0.5px solid hsl(var(--bc) / 0.1);
-					padding: 4px;
+					display: contents;
 				}
-				.stream-tool-body-row:first-child { border-top: none; }
 				.stream-tool-body-label {
-					grid-column: 1;
 					color: hsl(var(--bc) / 0.5);
 					text-align: left;
 					opacity: 0.5;
 					font-family: ui-monospace, SFMono-Regular, monospace;
 					padding: 4px 8px 4px 4px;
 					font-size: 0.85em;
+					border-top: 0.5px solid hsl(var(--bc) / 0.1);
+				}
+				.stream-tool-body-label:first-of-type {
+					border-top: none;
 				}
 				.stream-tool-body-content {
-					grid-column: 2;
 					margin: 0;
+					border-top: 0.5px solid hsl(var(--bc) / 0.1);
 					padding: 4px;
 					overflow-x: auto;
 					overflow-y: auto;
@@ -1245,6 +1579,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					min-width: 0;
 					scrollbar-width: thin;
 					scrollbar-color: hsl(var(--bc) / 0.3) transparent;
+				}
+				.stream-tool-body-content:first-of-type {
+					border-top: none;
 				}
 				.stream-tool-body-content::-webkit-scrollbar {
 					width: 6px;
@@ -1968,9 +2305,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<div class="drawer lg:drawer-open h-full">
 				<input id="sidebar-toggle" type="checkbox" class="drawer-toggle"/>
 				<div class="drawer-content flex flex-col h-full overflow-hidden">
-					<!-- Navbar -->
-					<div class="navbar bg-base-100 shadow-sm lg:hidden flex-shrink-0">
-						<div class="flex-none">
+					<!-- Navbar (mobile only) -->
+					<div class="navbar bg-base-100 shadow-sm flex-shrink-0 lg:hidden">
+						<div class="flex-none lg:hidden">
 							<label for="sidebar-toggle" class="btn btn-square btn-ghost">
 								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-6 h-6 stroke-current">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
@@ -1978,7 +2315,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							</label>
 						</div>
 						<div class="flex-1">
-							<span class="text-xl font-bold">OpenVibely</span>
+							<span class="text-xl font-bold lg:hidden">OpenVibely</span>
 						</div>
 					</div>
 					<!-- Main Content -->

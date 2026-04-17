@@ -242,14 +242,17 @@ curl -X POST http://localhost:3001/api/chat/message \
   -F "project_id=default"
 ```
 
-## Project Structure
+## Architecture: Shared Backend + Desktop Shell
+
+OpenVibely uses a single Go backend for both deployment modes:
 
 ```text
 cmd/
-  server/
-docs/
+  server/             # Web/VPS/Docker entrypoint
+  desktop/            # Wails desktop entrypoint
 internal/
-  config/
+  config/             # Runtime config (server vs desktop mode)
+  server/             # Reusable server bootstrap (Start → Instance)
   database/
   handler/
   llm/
@@ -262,6 +265,61 @@ start.sh
 web/templates/
 ```
 
+The `internal/server` package provides `Start(ctx, cfg) → (*Instance, error)` which wires the full backend (DB, repos, services, HTTP routes, workers, scheduler) and returns a running instance with its bound address and a shutdown handle.
+
+- `cmd/server` uses `config.Load()` (server mode) and waits for OS signals.
+- `cmd/desktop` uses `config.LoadWithMode(ModeDesktop)` which defaults to OS app-data directories for the DB, repos, and uploads, and binds to an ephemeral port. The Wails WebView loads the backend URL.
+
+Both modes share 100% of the backend code; no forking.
+
+## Running Modes
+
+### Web Server (local / VPS / Docker)
+
+```bash
+./start.sh          # Quick start
+make build && make run
+```
+
+Config is env-driven (`PORT`, `DATABASE_PATH`, `PROJECT_REPO_ROOT`, etc.).
+
+### Desktop App (Wails)
+
+```bash
+# Finder/Dock style app (no Terminal window)
+make package-desktop-macos
+open ./bin/OpenVibely.app
+
+# Optional: direct binary run (from shell, shows terminal logs)
+make build-desktop
+./bin/openvibely-desktop
+```
+
+`OpenVibely.app` is the true desktop-launch experience on macOS. Running the raw `openvibely-desktop` executable from a shell is useful for debugging logs, but it will attach to Terminal.
+
+Desktop mode defaults:
+
+| Setting | Desktop default | Env override |
+|---|---|---|
+| Port | `0` (ephemeral) | `PORT` |
+| DB path | `~/Library/Application Support/OpenVibely/openvibely.db` (macOS) | `DATABASE_PATH` |
+| Repo root | `~/Library/Application Support/OpenVibely/repos` (macOS) | `PROJECT_REPO_ROOT` |
+| Local repo paths | enabled | `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` |
+
+Paths are OS-specific: macOS uses `~/Library/Application Support/OpenVibely`, Linux uses `~/.local/share/openvibely`, Windows uses `%LOCALAPPDATA%\OpenVibely`.
+
+All env vars still work as overrides in desktop mode.
+
+### Docker
+
+VPS/Docker deployment is unchanged. See the `Dockerfile` and the Configuration section above.
+
+## OAuth by Mode
+
+- **Server mode (VPS)**: Set `APP_BASE_URL` to your public origin. OAuth callbacks route to your hostname.
+- **Desktop mode**: OAuth defaults to localhost callback flow. `APP_BASE_URL` is typically unset; the backend binds to `127.0.0.1` with an ephemeral port and OAuth providers redirect back to localhost.
+- **Troubleshooting**: If provider rejects localhost callbacks, set `OAUTH_REDIRECT_MODE=localhost_manual` and paste the callback URL manually.
+
 ## Development
 
 ```bash
@@ -273,6 +331,7 @@ Common targets:
 
 - `make dev`
 - `make build`
+- `make build-desktop`
 - `make templ`
 - `make swagger`
 - `make run`

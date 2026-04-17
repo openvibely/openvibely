@@ -51,6 +51,14 @@ Creating markdown files to summarize/document/explain your work is BANNED. This 
 - For hosted/VPS deployments, set `APP_BASE_URL` to the externally reachable app origin (for example `https://dubee.org`)
 - Do not leave `APP_BASE_URL` unset in hosted environments when using model OAuth flows; unset falls back to localhost callback mode for local development
 - `APP_BASE_URL` must be absolute `http(s)` URL without query/fragment/userinfo (normalized by `config.ResolveAppBaseURL`)
+- Desktop mode (`ModeDesktop`) leaves `APP_BASE_URL` unset by default — OAuth uses localhost callbacks. This is correct for desktop apps binding to `127.0.0.1`
+
+## Runtime Mode (Server vs Desktop)
+
+- Do not fork backend logic for desktop vs server. Both modes use `internal/server.Start(ctx, cfg)` and share 100% of backend code
+- Desktop mode defaults: ephemeral port (`0`), OS app-data directory for DB/repos, `EnableLocalRepoPath=true`. All overridable via env vars
+- `config.Load()` always returns `ModeServer`. Use `config.LoadWithMode(ModeDesktop)` only in `cmd/desktop`
+- Never hardcode mode checks deep in the backend; mode-specific behavior should be in config defaults and entrypoint wiring only
 
 ## OpenAI OAuth Endpoint Shape
 

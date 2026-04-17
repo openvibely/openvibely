@@ -124,15 +124,14 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 					<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d", len(tasks)) }</span>
 				}
 			</div>
-			if category == models.CategoryCompleted {
-				<div class="dropdown dropdown-end">
-					<button tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-						</svg>
-					</button>
-					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">
-						<li class="menu-title"><span>Sort By</span></li>
+				if category == models.CategoryCompleted {
+					<div class="dropdown dropdown-end">
+						<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+							</svg>
+						</label>
+						<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">						<li class="menu-title"><span>Sort By</span></li>
 						<li>
 							<a
 								hx-post={ fmt.Sprintf("/tasks/completed/sort?project_id=%s&sort=title_asc", projectID) }
@@ -231,15 +230,14 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 					</ul>
 				</div>
 			}
-			if category == models.CategoryBacklog {
-				<div class="dropdown dropdown-end">
-					<button tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
-						<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-						</svg>
-					</button>
-					<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">
-						<li class="menu-title"><span>Sort By</span></li>
+				if category == models.CategoryBacklog {
+					<div class="dropdown dropdown-end">
+						<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+							</svg>
+						</label>
+						<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">						<li class="menu-title"><span>Sort By</span></li>
 						<li>
 							<a
 								hx-post={ fmt.Sprintf("/tasks/backlog/sort?project_id=%s&sort=title_asc", projectID) }
