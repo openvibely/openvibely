@@ -13,7 +13,7 @@ dev:
 
 # Generate templ files (no global binary required)
 templ:
-	go run github.com/a-h/templ/cmd/templ@v0.3.977 generate
+	go run github.com/a-h/templ/cmd/templ@v0.3.1001 generate
 
 # Generate Swagger documentation (no global binary required)
 swagger:
