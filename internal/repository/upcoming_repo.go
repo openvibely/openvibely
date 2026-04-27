@@ -102,10 +102,10 @@ func (r *UpcomingRepo) ListUpcomingScheduledTasks(ctx context.Context, projectID
 // ListRecentExecutions returns executions completed within the given time range
 func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID string, since time.Time) ([]models.HistoryExecution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT e.id, e.task_id, e.agent_config_id, e.status, e.prompt_sent, e.output,
+		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output,
 			e.error_message, e.tokens_used, e.duration_ms, e.started_at, e.completed_at,
 			t.title as task_title,
-			COALESCE(ac.name, 'Unknown') as agent_name
+			COALESCE(ac.name, '') as agent_name
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 LEFT JOIN agent_configs ac ON ac.id = e.agent_config_id

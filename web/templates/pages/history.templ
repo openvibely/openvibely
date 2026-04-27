@@ -153,7 +153,11 @@ templ historyExecutionCard(de models.HistoryExecution, currentProjectID string) 
 					<span class="font-medium text-sm truncate">{ de.TaskTitle }</span>
 				</div>
 				<div class="flex items-center gap-3 flex-shrink-0">
-					<span class="text-xs opacity-50">{ de.AgentName }</span>
+					if de.AgentName != "" {
+						<span class="text-xs opacity-50">{ de.AgentName }</span>
+					} else {
+						<span class="text-xs opacity-50">No model config</span>
+					}
 					if de.Execution.DurationMs > 0 {
 						<span class="text-xs opacity-60 font-mono">{ formatDuration(de.Execution.DurationMs) }</span>
 					}
@@ -171,7 +175,6 @@ templ historyExecutionCard(de models.HistoryExecution, currentProjectID string) 
 		</div>
 	</div>
 }
-
 templ projectChangesSection(pc *models.ProjectChanges) {
 	<!-- Code Change Stats -->
 	<div class="stats shadow w-full mb-4 bg-base-100">

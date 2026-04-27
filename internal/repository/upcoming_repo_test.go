@@ -169,6 +169,59 @@ func TestUpcomingRepo_ListRecentExecutions(t *testing.T) {
 	}
 }
 
+func TestUpcomingRepo_ListRecentExecutions_NullAgentConfigID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	agentRepo := NewLLMConfigRepo(db)
+	execRepo := NewExecutionRepo(db)
+
+	project := createTestProject(t, projectRepo)
+	agent := createTestAgent(t, agentRepo)
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Historical Task",
+		Category:  models.CategoryCompleted,
+		Status:    models.StatusCompleted,
+		Prompt:    "Reflect on this",
+	}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("creating task: %v", err)
+	}
+
+	exec := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "Reflect on this",
+	}
+	if err := execRepo.Create(context.Background(), exec); err != nil {
+		t.Fatalf("creating execution: %v", err)
+	}
+	if err := execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, "Done", "", 0, 1000); err != nil {
+		t.Fatalf("completing execution: %v", err)
+	}
+	if err := agentRepo.Delete(context.Background(), agent.ID); err != nil {
+		t.Fatalf("deleting agent config: %v", err)
+	}
+
+	results, err := upcomingRepo.ListRecentExecutions(context.Background(), project.ID, time.Now().UTC().Add(-1*time.Hour))
+	if err != nil {
+		t.Fatalf("expected NULL agent_config_id to scan without error, got %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 execution, got %d", len(results))
+	}
+	if results[0].Execution.AgentConfigID != "" {
+		t.Fatalf("expected empty agent config ID fallback, got %q", results[0].Execution.AgentConfigID)
+	}
+	if results[0].AgentName != "" {
+		t.Fatalf("expected empty agent name for missing config, got %q", results[0].AgentName)
+	}
+}
+
 func TestUpcomingRepo_GetHistorySummary(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	upcomingRepo := NewUpcomingRepo(db)
