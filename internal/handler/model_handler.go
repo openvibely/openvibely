@@ -73,13 +73,9 @@ func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMet
 }
 
 func (h *Handler) CreateModel(c echo.Context) error {
-	maxTokens, _ := strconv.Atoi(c.FormValue("max_tokens"))
-	if maxTokens == 0 {
-		maxTokens = 4096
-	}
 	temp, _ := strconv.ParseFloat(c.FormValue("temperature"), 64)
 	isDefault := c.FormValue("is_default") == "on"
-	reasoningEffort := normalizeReasoningEffort(c.FormValue("reasoning_effort"))
+	reasoningEffort := c.FormValue("reasoning_effort")
 
 	provider, authMethod := resolveProviderAndAuth(
 		c.FormValue("provider"),
@@ -104,9 +100,8 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		Name:            c.FormValue("name"),
 		Provider:        provider,
 		Model:           c.FormValue("model"),
-		ReasoningEffort: reasoningEffort,
+		ReasoningEffort: normalizeProviderReasoningEffort(provider, reasoningEffort),
 		APIKey:          c.FormValue("api_key"),
-		MaxTokens:       maxTokens,
 		Temperature:     temp,
 		IsDefault:       isDefault,
 		AuthMethod:      authMethod,
@@ -135,12 +130,9 @@ func (h *Handler) CreateModel(c echo.Context) error {
 	}
 	if a.Provider == models.ProviderOpenAI {
 		a.Model = normalizeOpenAIModel(a.Model)
-	} else {
-		a.ReasoningEffort = ""
 	}
-
-	log.Printf("[handler] CreateModel name=%q provider=%s model=%s auth_method=%s max_tokens=%d temp=%.1f default=%v",
-		a.Name, a.Provider, a.Model, a.AuthMethod, a.MaxTokens, a.Temperature, a.IsDefault)
+	log.Printf("[handler] CreateModel name=%q provider=%s model=%s auth_method=%s temp=%.1f default=%v",
+		a.Name, a.Provider, a.Model, a.AuthMethod, a.Temperature, a.IsDefault)
 
 	if err := h.llmConfigRepo.Create(c.Request().Context(), a); err != nil {
 		log.Printf("[handler] CreateModel error: %v", err)
@@ -185,15 +177,12 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 	agent.AuthMethod = authMethod
 
 	agent.Model = c.FormValue("model")
-	agent.ReasoningEffort = normalizeReasoningEffort(c.FormValue("reasoning_effort"))
+	agent.ReasoningEffort = normalizeProviderReasoningEffort(provider, c.FormValue("reasoning_effort"))
 	if agent.Provider == models.ProviderOpenAI {
 		agent.Model = normalizeOpenAIModel(agent.Model)
 	}
 	if apiKey := c.FormValue("api_key"); apiKey != "" {
 		agent.APIKey = apiKey
-	}
-	if mt, err := strconv.Atoi(c.FormValue("max_tokens")); err == nil {
-		agent.MaxTokens = mt
 	}
 	if temp, err := strconv.ParseFloat(c.FormValue("temperature"), 64); err == nil {
 		agent.Temperature = temp
@@ -238,9 +227,6 @@ func (h *Handler) UpdateModel(c echo.Context) error {
 		}
 	} else {
 		agent.OllamaBaseURL = ""
-	}
-	if agent.Provider != models.ProviderOpenAI {
-		agent.ReasoningEffort = ""
 	}
 	if mw, err := strconv.Atoi(c.FormValue("model_max_workers")); err == nil {
 		if mw < 0 {
@@ -382,9 +368,29 @@ func (h *Handler) buildModelWorkerStats(agents []models.LLMConfig) map[string]in
 	return stats
 }
 
-func normalizeReasoningEffort(value string) string {
+func normalizeProviderReasoningEffort(provider models.LLMProvider, value string) string {
+	switch provider {
+	case models.ProviderOpenAI:
+		return normalizeOpenAIReasoningEffort(value)
+	case models.ProviderAnthropic:
+		return normalizeAnthropicEffort(value)
+	default:
+		return ""
+	}
+}
+
+func normalizeOpenAIReasoningEffort(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "low", "medium", "high", "xhigh":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return ""
+	}
+}
+
+func normalizeAnthropicEffort(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "low", "medium", "high", "max":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
 		return ""
@@ -421,8 +427,12 @@ func (h *Handler) ListOllamaAvailableModels(c echo.Context) error {
 
 func normalizeOpenAIModel(value string) string {
 	switch strings.TrimSpace(value) {
-	case "gpt-5.4",
+	case "gpt-5.5",
+		"gpt-5.5-pro",
+		"gpt-5.4",
+		"gpt-5.4-mini",
 		"gpt-5.3-codex",
+		"gpt-5.3-codex-spark",
 		"gpt-5.2-codex",
 		"gpt-5.1-codex-max",
 		"gpt-5.1-codex",
@@ -431,6 +441,6 @@ func normalizeOpenAIModel(value string) string {
 		"gpt-5-codex-mini":
 		return strings.TrimSpace(value)
 	default:
-		return "gpt-5.4"
+		return "gpt-5.5"
 	}
 }

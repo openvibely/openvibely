@@ -371,12 +371,38 @@ func TestParseAgenticStream_ToolCallTagAcrossDeltas(t *testing.T) {
 	}
 }
 
+func TestParseAgenticStream_DropsIncompleteThinkingBlock(t *testing.T) {
+	stream := buildSSE([]string{
+		`{"type":"message_start","message":{"id":"msg_1","model":"claude-opus-4-7","usage":{"input_tokens":10}}}`,
+		`{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}`,
+		`{"type":"content_block_stop","index":0}`,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
+		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Done."}}`,
+		`{"type":"content_block_stop","index":1}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":20}}`,
+		`{"type":"message_stop"}`,
+	})
+
+	client := &Client{}
+	result, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.contentBlocks) != 1 {
+		t.Fatalf("expected only complete text block, got %#v", result.contentBlocks)
+	}
+	if result.contentBlocks[0].Type != "text" || result.contentBlocks[0].Text != "Done." {
+		t.Fatalf("unexpected remaining block: %#v", result.contentBlocks[0])
+	}
+}
+
 func TestParseAgenticStream_ThinkingBlock(t *testing.T) {
 	stream := buildSSE([]string{
 		`{"type":"message_start","message":{"id":"msg_1","model":"claude-opus-4-6","usage":{"input_tokens":10}}}`,
 		`{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}`,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me think"}}`,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" about this."}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig_123"}}`,
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}`,
 		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Here is my answer."}}`,
@@ -404,6 +430,9 @@ func TestParseAgenticStream_ThinkingBlock(t *testing.T) {
 	}
 	if result.contentBlocks[0].Thinking != "Let me think about this." {
 		t.Errorf("block 0 thinking = %q, want %q", result.contentBlocks[0].Thinking, "Let me think about this.")
+	}
+	if result.contentBlocks[0].Signature != "sig_123" {
+		t.Errorf("block 0 signature = %q, want sig_123", result.contentBlocks[0].Signature)
 	}
 
 	// Second block: text

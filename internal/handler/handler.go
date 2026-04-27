@@ -366,6 +366,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/models", h.ListModels)
 	e.POST("/models", h.CreateModel)
 	e.GET("/models/ollama/available", h.ListOllamaAvailableModels)
+	e.POST("/models/:id", h.UpdateModel)
 	e.PUT("/models/:id", h.UpdateModel)
 	e.POST("/models/:id/set-default", h.SetDefaultModel)
 	e.DELETE("/models/:id", h.DeleteModel)

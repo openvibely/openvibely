@@ -99,9 +99,6 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	if agent.Temperature > 0 {
 		opts.Temperature = agent.Temperature
 	}
-	if agent.MaxTokens > 0 {
-		opts.NumPredict = agent.MaxTokens
-	}
 
 	userMsg := chatMessage{Role: "user", Content: prompt}
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
@@ -176,9 +173,6 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	opts := &options{}
 	if agent.Temperature > 0 {
 		opts.Temperature = agent.Temperature
-	}
-	if agent.MaxTokens > 0 {
-		opts.NumPredict = agent.MaxTokens
 	}
 
 	reqBody := chatRequest{
@@ -262,9 +256,6 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	opts := &options{}
 	if agent.Temperature > 0 {
 		opts.Temperature = agent.Temperature
-	}
-	if agent.MaxTokens > 0 {
-		opts.NumPredict = agent.MaxTokens
 	}
 
 	var messages []chatMessage

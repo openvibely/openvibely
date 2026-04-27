@@ -19,8 +19,7 @@ import (
 	mcpclient "github.com/openvibely/openvibely/pkg/mcp_client"
 )
 
-// minAgenticMaxTokens is the minimum max_tokens for agentic API calls.
-const minAgenticMaxTokens = 16384
+const anthropicAgenticOutputBudget = 16384
 
 // applyAgentToSystemPrompt prepends the agent definition's system prompt and
 // skill contents to the base system context string.
@@ -363,7 +362,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 
 // callDirect calls the Anthropic API using OAuth tokens.
 func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool) (string, int, error) {
-	log.Printf("[anthropic] callDirect model=%s max_tokens=%d workDir=%s attachments=%d disable_tools=%v", agent.Model, agent.MaxTokens, workDir, len(attachments), disableTools)
+	log.Printf("[anthropic] callDirect model=%s max_tokens=%d workDir=%s attachments=%d disable_tools=%v", agent.Model, anthropicAgenticOutputBudget, workDir, len(attachments), disableTools)
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -377,9 +376,9 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() + prompt
 	opts := &anthropicclient.AgenticOptions{
-		Model:            agent.Model,
-		MaxTokens:        agenticMaxTokens(agent.MaxTokens),
-		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
+		Model:        agent.Model,
+		MaxTokens:    anthropicAgenticOutputBudget,
+		BudgetTokens: anthropicThinkingBudgetTokens(agent.ReasoningEffort), System: llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
 		WorkDir:          workDir,
 		Attachments:      mcAttachments,
 		DisableTools:     disableTools,
@@ -434,9 +433,9 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	disableTools, skipDefaultTools := resolveChatToolPolicy(isTaskFollowup, chatMode, rt)
 	chatInThinking := false
 	opts := &anthropicclient.AgenticOptions{
-		Model:            agent.Model,
-		MaxTokens:        agenticMaxTokens(agent.MaxTokens),
-		EnableThinking:   true,
+		Model:        agent.Model,
+		MaxTokens:    anthropicAgenticOutputBudget,
+		BudgetTokens: anthropicThinkingBudgetTokens(agent.ReasoningEffort), EnableThinking: true,
 		DisableTools:     disableTools,
 		SkipDefaultTools: skipDefaultTools,
 		System:           systemPromptStr,
@@ -497,7 +496,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 
 // callStreaming calls the Anthropic API with streaming.
 func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool) (string, string, int, error) {
-	log.Printf("[anthropic] callStreaming model=%s max_tokens=%d exec=%s workDir=%s attachments=%d", agent.Model, agent.MaxTokens, execID, workDir, len(attachments))
+	log.Printf("[anthropic] callStreaming model=%s max_tokens=%d exec=%s workDir=%s attachments=%d", agent.Model, anthropicAgenticOutputBudget, execID, workDir, len(attachments))
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -515,9 +514,9 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	inThinking := false
 	opts := &anthropicclient.AgenticOptions{
-		Model:            agent.Model,
-		MaxTokens:        agenticMaxTokens(agent.MaxTokens),
-		EnableThinking:   true,
+		Model:        agent.Model,
+		MaxTokens:    anthropicAgenticOutputBudget,
+		BudgetTokens: anthropicThinkingBudgetTokens(agent.ReasoningEffort), EnableThinking: true,
 		SkipDefaultTools: false,
 		System:           llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),
 		WorkDir:          workDir,
@@ -657,12 +656,17 @@ func convertAttachments(attachments []models.Attachment) ([]*anthropicclient.Fil
 	return result, nil
 }
 
-// agenticMaxTokens returns the configured max_tokens with a floor for agentic work.
-func agenticMaxTokens(configured int) int {
-	if configured < minAgenticMaxTokens {
-		return minAgenticMaxTokens
+func anthropicThinkingBudgetTokens(effort string) int {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "low":
+		return 4096
+	case "medium":
+		return 8192
+	case "high", "max":
+		return anthropicAgenticOutputBudget * 8 / 10
+	default:
+		return 0
 	}
-	return configured
 }
 
 // stopReasonIfMaxTokens returns "max_tokens" if err is errMaxTokens, else empty string.

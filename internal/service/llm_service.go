@@ -790,8 +790,8 @@ func (s *LLMService) callLLM(ctx context.Context, prompt string, attachments []m
 }
 
 func (s *LLMService) callAnthropic(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig) (string, int, error) {
-	log.Printf("[agent-svc] callAnthropic model=%s max_tokens=%d temp=%.1f attachments=%d",
-		agent.Model, agent.MaxTokens, agent.Temperature, len(attachments))
+	log.Printf("[agent-svc] callAnthropic model=%s temp=%.1f attachments=%d",
+		agent.Model, agent.Temperature, len(attachments))
 
 	client := anthropicclient.NewWithAPIKey(agent.APIKey)
 
@@ -812,14 +812,9 @@ func (s *LLMService) callAnthropic(ctx context.Context, prompt string, attachmen
 		fullPrompt += attachmentInfo
 	}
 
-	maxTokens := agent.MaxTokens
-	if maxTokens == 0 {
-		maxTokens = 4096
-	}
-
 	resp, err := client.Send(ctx, fullPrompt, &anthropicclient.SendOptions{
 		Model:       agent.Model,
-		MaxTokens:   maxTokens,
+		MaxTokens:   anthropicDirectOutputBudget,
 		Attachments: mcAttachments,
 	})
 	if err != nil {
@@ -861,7 +856,7 @@ func (s *LLMService) callAnthropicChat(ctx context.Context, message string, atta
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan
 	opts := &anthropicclient.AgenticOptions{
 		Model:          agent.Model,
-		MaxTokens:      agenticMaxTokens(agent.MaxTokens),
+		MaxTokens:      anthropicAgenticOutputBudget,
 		EnableThinking: true,
 		DisableTools:   disableTools,
 		System:         systemPromptStr,
@@ -916,7 +911,7 @@ func (s *LLMService) callAnthropicChat(ctx context.Context, message string, atta
 }
 
 func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, pluginDirs []string, agentDef ...*models.Agent) (string, string, int, error) {
-	log.Printf("[agent-svc] callClaudeCLI model=%s max_tokens=%d attachments=%d workDir=%s", agent.Model, agent.MaxTokens, len(attachments), workDir)
+	log.Printf("[agent-svc] callClaudeCLI model=%s attachments=%d workDir=%s", agent.Model, len(attachments), workDir)
 
 	// SAFETY: Prevent accidental real CLI calls during tests
 	if isTestMode() {
@@ -968,6 +963,9 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 	}
 	if agent.Model != "" {
 		args = append(args, "--model", agent.Model)
+	}
+	if effort := claudeEffort(agent.ReasoningEffort); effort != "" {
+		args = append(args, "--effort", effort)
 	}
 	for _, dir := range pluginDirs {
 		dir = strings.TrimSpace(dir)
@@ -1162,6 +1160,9 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 	if agent.Model != "" {
 		args = append(args, "--model", agent.Model)
 	}
+	if effort := claudeEffort(agent.ReasoningEffort); effort != "" {
+		args = append(args, "--effort", effort)
+	}
 	if !(chatMode == models.ChatModePlan && !isTaskFollowup) {
 		for _, dir := range pluginDirs {
 			dir = strings.TrimSpace(dir)
@@ -1254,6 +1255,15 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 	return output, 0, nil
 }
 
+func claudeEffort(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "low", "medium", "high", "max":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return ""
+	}
+}
+
 func prependDirectNoToolsInstruction(prompt string) string {
 	prompt = strings.TrimSpace(prompt)
 	prefix := "IMPORTANT: Do not execute any tools, plugins, MCP actions, or shell commands for this request. Reply directly with plain text only."
@@ -1290,9 +1300,11 @@ func (s *LLMService) callClaudeCLISimple(ctx context.Context, prompt string, att
 	if agent.Model != "" {
 		args = append(args, "--model", agent.Model)
 	}
+	if effort := claudeEffort(agent.ReasoningEffort); effort != "" {
+		args = append(args, "--effort", effort)
+	}
 
 	log.Printf("[agent-svc] callClaudeCLISimple executing: claude %s (prompt via stdin)", strings.Join(args, " "))
-
 	cmd := exec.CommandContext(ctx, claudePath, args...)
 
 	// Set working directory to the project's repo path so the agent

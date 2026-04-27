@@ -11,17 +11,21 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-const CodexDefaultModel = "gpt-5.3-codex"
+const CodexDefaultModel = "gpt-5.5"
 
 var CodexSupportedReasoningEffortsByModel = map[string][]string{
-	"gpt-5.4":            {"low", "medium", "high", "xhigh"},
-	"gpt-5.3-codex":      {"low", "medium", "high", "xhigh"},
-	"gpt-5.2-codex":      {"low", "medium", "high", "xhigh"},
-	"gpt-5.1-codex-max":  {"low", "medium", "high", "xhigh"},
-	"gpt-5.1-codex":      {"low", "medium", "high"},
-	"gpt-5.1-codex-mini": {"low", "medium", "high"},
-	"gpt-5-codex":        {"low", "medium", "high"},
-	"gpt-5-codex-mini":   {"low", "medium", "high"},
+	"gpt-5.5":             {"low", "medium", "high", "xhigh"},
+	"gpt-5.5-pro":         {"low", "medium", "high", "xhigh"},
+	"gpt-5.4":             {"low", "medium", "high", "xhigh"},
+	"gpt-5.4-mini":        {"low", "medium", "high"},
+	"gpt-5.3-codex":       {"low", "medium", "high", "xhigh"},
+	"gpt-5.3-codex-spark": {"low", "medium", "high"},
+	"gpt-5.2-codex":       {"low", "medium", "high", "xhigh"},
+	"gpt-5.1-codex-max":   {"low", "medium", "high", "xhigh"},
+	"gpt-5.1-codex":       {"low", "medium", "high"},
+	"gpt-5.1-codex-mini":  {"low", "medium", "high"},
+	"gpt-5-codex":         {"low", "medium", "high"},
+	"gpt-5-codex-mini":    {"low", "medium", "high"},
 }
 
 func CodexModelOrDefault(model string) string {

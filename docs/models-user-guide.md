@@ -21,8 +21,41 @@ Why this matters:
    - `Provider` (`Anthropic`, `OpenAI`, or `Ollama`)
    - `Authentication` / `Connection Method` (provider-dependent)
    - `Model`
-   - Optional runtime settings (`Max Tokens`, `Temperature`, etc.)
+   - Optional runtime settings (`Temperature`, worker pool settings, etc.)
 4. Click `Create`.
+
+## Supported Models
+
+### Anthropic
+
+| Model | Effort Options | Notes |
+|---|---|---|
+| Claude Opus 4.7 (`claude-opus-4-7`) | low / medium / high / max | 128k max output, 1M context. |
+| Claude Sonnet 4.6 (`claude-sonnet-4-6`) | low / medium / high / max | 64k max output, 1M context. |
+| Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | low / medium / high / max | Legacy. |
+| Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | none | Legacy. |
+| Claude Opus 4.6 (`claude-opus-4-6`) | low / medium / high / max | Legacy. |
+
+### OpenAI (Codex)
+
+| Model | Reasoning Efforts | Notes |
+|---|---|---|
+| gpt-5.5 | low / medium / high / xhigh | Codex 5.5 frontier model. |
+| gpt-5.5-pro | low / medium / high / xhigh | Pro/Enterprise tier. |
+| gpt-5.4 | low / medium / high / xhigh | |
+| gpt-5.4-mini | low / medium / high | Smaller, faster variant. |
+| gpt-5.3-codex | low / medium / high / xhigh | Legacy. |
+| gpt-5.3-codex-spark | low / medium / high | Fast research preview. |
+| gpt-5.2-codex | low / medium / high / xhigh | Legacy. |
+| gpt-5.1-codex-max | low / medium / high / xhigh | Legacy. |
+| gpt-5.1-codex / mini | low / medium / high | Legacy. |
+| gpt-5-codex / mini | low / medium / high | Legacy. |
+
+### Output Token Caps
+
+Output token caps are not model configuration. Codex and Claude-style workflows primarily expose model and effort controls, so OpenVibely does not show or accept output-token settings in the model dialog.
+
+Where a low-level provider API still requires an output limit, OpenVibely chooses an internal runtime budget in the provider adapter. Existing saved `max_tokens` values are ignored by runtime code and retained only so older database rows remain readable.
 
 ## Provider-Specific Options
 
@@ -30,11 +63,13 @@ Why this matters:
 
 - Supports API key or OAuth-based flows.
 - OAuth can use API/web flow or CLI flow, depending on connection method.
+- `Claude Effort` matches the Claude Code extension's effort selector (`low`, `medium`, `high`, `max`). Blank/legacy saved configs keep the provider default behavior.
+- For Anthropic API/OAuth calls, `Claude Effort` is translated into an extended-thinking budget. For Claude CLI calls, the value is passed through as `--effort`.
 
 ### OpenAI
 
 - Auth options include API key and OAuth.
-- For supported models, `Reasoning Effort` is available.
+- For supported Codex models, `Codex Reasoning Effort` is available.
 
 ### Ollama
 

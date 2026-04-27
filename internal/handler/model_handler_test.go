@@ -1104,17 +1104,21 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		input string
 		want  string
 	}{
+		{"gpt-5.5", "gpt-5.5"},
+		{"gpt-5.5-pro", "gpt-5.5-pro"},
 		{"gpt-5.4", "gpt-5.4"},
+		{"gpt-5.4-mini", "gpt-5.4-mini"},
 		{"gpt-5.3-codex", "gpt-5.3-codex"},
+		{"gpt-5.3-codex-spark", "gpt-5.3-codex-spark"},
 		{"gpt-5.2-codex", "gpt-5.2-codex"},
 		{"gpt-5.1-codex-max", "gpt-5.1-codex-max"},
 		{"gpt-5.1-codex", "gpt-5.1-codex"},
 		{"gpt-5.1-codex-mini", "gpt-5.1-codex-mini"},
 		{"gpt-5-codex", "gpt-5-codex"},
 		{"gpt-5-codex-mini", "gpt-5-codex-mini"},
-		{"", "gpt-5.4"},              // empty defaults to latest
-		{"invalid-model", "gpt-5.4"}, // unknown defaults to latest
-		{"  gpt-5.4  ", "gpt-5.4"},   // whitespace trimmed
+		{"", "gpt-5.5"},              // empty defaults to latest
+		{"invalid-model", "gpt-5.5"}, // unknown defaults to latest
+		{"  gpt-5.5  ", "gpt-5.5"},   // whitespace trimmed
 	}
 
 	for _, tt := range tests {
@@ -1124,6 +1128,103 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 				t.Errorf("NormalizeOpenAIModelForTest(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeProviderReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider models.LLMProvider
+		input    string
+		want     string
+	}{
+		{"openai xhigh", models.ProviderOpenAI, "xhigh", "xhigh"},
+		{"openai rejects max", models.ProviderOpenAI, "max", ""},
+		{"anthropic max", models.ProviderAnthropic, "max", "max"},
+		{"anthropic rejects xhigh", models.ProviderAnthropic, "xhigh", ""},
+		{"ollama clears effort", models.ProviderOllama, "high", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeProviderReasoningEffort(tt.provider, tt.input); got != tt.want {
+				t.Fatalf("normalizeProviderReasoningEffort(%q, %q) = %q, want %q", tt.provider, tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCreateModel_IgnoresSubmittedMaxTokens(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	form := url.Values{}
+	form.Set("name", "No Token Config")
+	form.Set("provider", "openai")
+	form.Set("openai_auth_type", "api_key")
+	form.Set("model", "gpt-5.5")
+	form.Set("api_key", "sk-openai-55")
+	form.Set("temperature", "0")
+	form.Set("reasoning_effort", "medium")
+	form.Set("max_tokens", "99999")
+
+	rec := postForm(e, "/models", form)
+	assertCode(t, rec, http.StatusSeeOther)
+
+	configs, err := llmConfigRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list error: %v", err)
+	}
+
+	var found *models.LLMConfig
+	for i := range configs {
+		if configs[i].Name == "No Token Config" {
+			found = &configs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("created model not found")
+	}
+	if found.MaxTokens != 0 {
+		t.Errorf("max_tokens = %d, want 0 because model token caps are not configurable", found.MaxTokens)
+	}
+}
+
+func TestUpdateModel_IgnoresSubmittedMaxTokens(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:       "Old Token Config",
+		Provider:   models.ProviderOpenAI,
+		Model:      "gpt-5.5",
+		APIKey:     "sk-openai",
+		AuthMethod: models.AuthMethodAPIKey,
+		MaxTokens:  4096,
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create error: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Updated Token Config")
+	form.Set("provider", "openai")
+	form.Set("openai_auth_type", "api_key")
+	form.Set("model", "gpt-5.5")
+	form.Set("api_key", "sk-openai")
+	form.Set("temperature", "0")
+	form.Set("reasoning_effort", "high")
+	form.Set("max_tokens", "99999")
+
+	rec := htmxPut(e, "/models/"+agent.ID, form)
+	assertCode(t, rec, http.StatusOK)
+
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get updated error: %v", err)
+	}
+	if updated.MaxTokens != 4096 {
+		t.Errorf("max_tokens = %d, want existing legacy value preserved because submitted values are ignored", updated.MaxTokens)
 	}
 }
 

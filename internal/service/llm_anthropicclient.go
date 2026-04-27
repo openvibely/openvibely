@@ -11,18 +11,8 @@ import (
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
 
-// minAgenticMaxTokens is the minimum max_tokens for agentic API calls.
-// Agentic work (reading files, thinking, writing code) needs much more output
-// budget than simple completions. 16384 is a reasonable floor.
-const minAgenticMaxTokens = 16384
-
-// agenticMaxTokens returns the configured max_tokens with a floor for agentic work.
-func agenticMaxTokens(configured int) int {
-	if configured < minAgenticMaxTokens {
-		return minAgenticMaxTokens
-	}
-	return configured
-}
+const anthropicDirectOutputBudget = 4096
+const anthropicAgenticOutputBudget = 16384
 
 // errMaxTokens is returned when the API response was truncated due to max_tokens.
 var errMaxTokens = fmt.Errorf("response truncated: max_tokens limit reached (output budget exhausted before task completed)")

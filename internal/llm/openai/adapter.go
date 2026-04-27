@@ -22,6 +22,11 @@ import (
 // errMaxTokens is returned when the API response was truncated due to max output tokens.
 var errMaxTokens = fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)")
 
+const (
+	openAIDirectOutputBudget  = 4096
+	openAIAgenticOutputBudget = 16384
+)
+
 // isMaxTokensStopReason returns true if the stop reason indicates the response
 // was truncated due to hitting the output token limit.
 func isMaxTokensStopReason(reason string) bool {
@@ -288,7 +293,7 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 
 // CallDirect makes a non-streaming OpenAI API call.
 func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, disableTools bool) (string, llmcontracts.Usage, error) {
-	log.Printf("[openai-adapter] CallDirect model=%s max_tokens=%d attachments=%d auth_method=%s disable_tools=%v", agent.Model, agent.MaxTokens, len(attachments), agent.AuthMethod, disableTools)
+	log.Printf("[openai-adapter] CallDirect model=%s output_budget=%d attachments=%d auth_method=%s disable_tools=%v", agent.Model, openAIDirectOutputBudget, len(attachments), agent.AuthMethod, disableTools)
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -308,14 +313,9 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
-	maxTokens := agent.MaxTokens
-	if maxTokens == 0 {
-		maxTokens = 4096
-	}
-
 	resp, err := client.Send(ctx, fullPrompt, &openaiclient.SendOptions{
 		Model:               agent.Model,
-		MaxOutputTokens:     maxTokens,
+		MaxOutputTokens:     openAIDirectOutputBudget,
 		ReasoningEffort:     reasoningEffort(agent.ReasoningEffort),
 		DisableTools:        disableTools,
 		SuppressToolMarkers: disableTools,
@@ -332,7 +332,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 
 // CallStreaming makes a streaming OpenAI API call with tool use.
 func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string, projectInstructions string, agentDef *models.Agent) (string, string, llmcontracts.Usage, error) {
-	log.Printf("[openai-adapter] CallStreaming model=%s max_tokens=%d attachments=%d exec=%s auth_method=%s workDir=%s", agent.Model, agent.MaxTokens, len(attachments), execID, agent.AuthMethod, workDir)
+	log.Printf("[openai-adapter] CallStreaming model=%s output_budget=%d attachments=%d exec=%s auth_method=%s workDir=%s", agent.Model, openAIAgenticOutputBudget, len(attachments), execID, agent.AuthMethod, workDir)
 
 	client, err := a.getClient(ctx, agent)
 	if err != nil {
@@ -370,7 +370,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 
 	resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 		Model:            agent.Model,
-		MaxOutputTokens:  agenticMaxTokens(agent.MaxTokens),
+		MaxOutputTokens:  openAIAgenticOutputBudget,
 		System:           applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
 		ReasoningEffort:  reasoningEffort(agent.ReasoningEffort),
 		ReasoningSummary: "auto",
@@ -475,7 +475,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
 	resp, err := client.SendAgentic(ctx, message, &openaiclient.AgenticOptions{
 		Model:            agent.Model,
-		MaxOutputTokens:  agenticMaxTokens(agent.MaxTokens),
+		MaxOutputTokens:  openAIAgenticOutputBudget,
 		System:           systemPromptStr,
 		ReasoningEffort:  reasoningEffort(agent.ReasoningEffort),
 		ReasoningSummary: "auto",
@@ -580,7 +580,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
 		Model:           agent.Model,
-		MaxOutputTokens: agenticMaxTokens(agent.MaxTokens),
+		MaxOutputTokens: openAIAgenticOutputBudget,
 		System:          applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir), agent),
 		WorkDir:         effectiveWorkDir,
 		Attachments:     oaAttachments,
@@ -656,7 +656,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	disableTools := !isTaskFollowup && chatMode != models.ChatModePlan && rt == nil
 	resp, err := client.SendCompletions(ctx, message, &openaiclient.CompletionsOptions{
 		Model:           agent.Model,
-		MaxOutputTokens: agenticMaxTokens(agent.MaxTokens),
+		MaxOutputTokens: openAIAgenticOutputBudget,
 		System:          systemPromptStr,
 		DisableTools:    disableTools,
 		WorkDir:         effectiveWorkDir,
@@ -892,11 +892,4 @@ func truncateToolSecondary(value string, max int) string {
 		return value
 	}
 	return value[:max] + "…"
-}
-
-func agenticMaxTokens(maxTokens int) int {
-	if maxTokens == 0 {
-		return 16384
-	}
-	return maxTokens
 }

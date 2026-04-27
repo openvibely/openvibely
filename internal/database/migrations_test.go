@@ -260,6 +260,79 @@ func TestMigrations_GitHubRepoURLAndTaskPullRequests(t *testing.T) {
 	}
 }
 
+func TestMigration071_RebuildsAgentConfigsWithReferences(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatalf("failed to enable foreign keys: %v", err)
+	}
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("failed to set dialect: %v", err)
+	}
+	if err := goose.UpTo(db, ".", 70); err != nil {
+		t.Fatalf("failed to run migrations through 070: %v", err)
+	}
+
+	if _, err := db.Exec(`
+		INSERT INTO agent_configs (id, name, provider, model, is_default, auth_method)
+		VALUES ('agent-071', 'Agent 071', 'anthropic', 'claude-sonnet-4-5-20250929', 1, 'cli')
+	`); err != nil {
+		t.Fatalf("failed to insert agent config: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO projects (id, name, default_agent_config_id) VALUES ('project-071', 'Project 071', 'agent-071')`); err != nil {
+		t.Fatalf("failed to insert project: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO tasks (id, project_id, title, category, status, agent_id)
+		VALUES ('task-071', 'project-071', 'Task 071', 'active', 'pending', 'agent-071')
+	`); err != nil {
+		t.Fatalf("failed to insert task: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO executions (id, task_id, agent_config_id, status, started_at)
+		VALUES ('execution-071', 'task-071', 'agent-071', 'running', datetime('now'))
+	`); err != nil {
+		t.Fatalf("failed to insert execution: %v", err)
+	}
+
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("failed to run migration 071 with existing references: %v", err)
+	}
+
+	if _, err := db.Exec(`UPDATE agent_configs SET reasoning_effort = 'max' WHERE id = 'agent-071'`); err != nil {
+		t.Fatalf("expected migration 071 to allow reasoning_effort=max: %v", err)
+	}
+
+	var agentID, projectDefaultID, executionAgentID string
+	if err := db.QueryRow(`SELECT agent_id FROM tasks WHERE id = 'task-071'`).Scan(&agentID); err != nil {
+		t.Fatalf("failed to read task agent reference: %v", err)
+	}
+	if err := db.QueryRow(`SELECT default_agent_config_id FROM projects WHERE id = 'project-071'`).Scan(&projectDefaultID); err != nil {
+		t.Fatalf("failed to read project default agent reference: %v", err)
+	}
+	if err := db.QueryRow(`SELECT agent_config_id FROM executions WHERE id = 'execution-071'`).Scan(&executionAgentID); err != nil {
+		t.Fatalf("failed to read execution agent reference: %v", err)
+	}
+	for name, got := range map[string]string{
+		"task agent":             agentID,
+		"project default agent":  projectDefaultID,
+		"execution agent config": executionAgentID,
+	} {
+		if got != "agent-071" {
+			t.Fatalf("%s reference = %q, want agent-071", name, got)
+		}
+	}
+}
+
 func TestMain(m *testing.M) {
 	// Setup
 	code := m.Run()

@@ -24,7 +24,7 @@ import (
 
 const (
 	// DefaultModel is the fallback model when no model is provided.
-	DefaultModel = "gpt-5.3-codex"
+	DefaultModel = "gpt-5.5"
 
 	openAIOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 	// ChatGPT Codex backend requires this query parameter.

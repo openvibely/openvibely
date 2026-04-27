@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -576,7 +577,7 @@ func TestHandler_CreateModel_Normalization(t *testing.T) {
 		wantReasoning string
 	}{
 		{"openai_preserves_gpt54", "openai", "gpt-5.4", "xhigh", "gpt-5.4", "xhigh"},
-		{"openai_normalizes_unknown", "openai", "unknown-model", "high", "gpt-5.4", "high"},
+		{"openai_normalizes_unknown", "openai", "unknown-model", "high", "gpt-5.5", "high"},
 		{"non_openai_preserves", "anthropic", "claude-opus-4-6", "xhigh", "claude-opus-4-6", ""},
 	}
 	for _, tc := range cases {
@@ -911,6 +912,37 @@ func TestHandler_UpdateModel_HTMX(t *testing.T) {
 	}
 	if updated.Model != "claude-opus-4-6" {
 		t.Errorf("expected model 'claude-opus-4-6', got %q", updated.Model)
+	}
+}
+
+func TestHandler_UpdateModel_PostFallback(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	if err != nil || agent == nil {
+		t.Fatal("expected seeded default model")
+	}
+
+	form := url.Values{}
+	form.Set("name", "Renamed Via Post")
+	form.Set("provider", string(agent.Provider))
+	form.Set("model", agent.Model)
+	form.Set("max_tokens", strconv.Itoa(agent.MaxTokens))
+	form.Set("temperature", fmt.Sprintf("%.1f", agent.Temperature))
+
+	rec := postForm(e, "/models/"+agent.ID, form)
+	assertCode(t, rec, http.StatusSeeOther)
+
+	configs, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list configs: %v", err)
+	}
+	if len(configs) != 1 {
+		t.Fatalf("expected rename to update existing model, got %d configs", len(configs))
+	}
+	updated, _ := llmConfigRepo.GetByID(ctx, agent.ID)
+	if updated.Name != "Renamed Via Post" {
+		t.Fatalf("expected renamed model, got %q", updated.Name)
 	}
 }
 

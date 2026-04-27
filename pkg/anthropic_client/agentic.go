@@ -1118,12 +1118,19 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 			switch bs.typ {
 			case "thinking":
 				// Thinking blocks are passed through so they can be echoed
-				// back to the API in multi-turn conversations.
-				result.contentBlocks = append(result.contentBlocks, agenticBlock{
-					Type:      "thinking",
-					Thinking:  bs.thinking.String(),
-					Signature: bs.signature,
-				})
+				// back to the API in multi-turn conversations. Anthropic rejects
+				// incomplete echoed thinking blocks, and omitempty would serialize
+				// an empty thinking string as a block missing the required
+				// `thinking` field. Drop incomplete blocks instead of poisoning the
+				// next tool-continuation turn.
+				thinkingText := bs.thinking.String()
+				if strings.TrimSpace(thinkingText) != "" && strings.TrimSpace(bs.signature) != "" {
+					result.contentBlocks = append(result.contentBlocks, agenticBlock{
+						Type:      "thinking",
+						Thinking:  thinkingText,
+						Signature: bs.signature,
+					})
+				}
 			case "text":
 				// Flush any remaining buffered text that wasn't inside a tag
 				if onText != nil && bs.tagBuf.Len() > 0 && !bs.inToolCallTag {

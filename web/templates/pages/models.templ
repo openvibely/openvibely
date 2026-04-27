@@ -150,7 +150,6 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						data-search-card
 						data-search-text={ modelSearchText(agent) }
 						data-model-reasoning-effort={ agent.ReasoningEffort }
-						data-model-max-tokens={ fmt.Sprintf("%d", agent.MaxTokens) }
 						data-model-temperature={ fmt.Sprintf("%f", agent.Temperature) }
 						data-model-is-default={ fmt.Sprintf("%t", agent.IsDefault) }
 						data-model-auth-method={ string(agent.AuthMethod) }
@@ -241,7 +240,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									}
 								</p>
 								<p class="text-sm opacity-60">
-									{ fmt.Sprintf("Max tokens: %d | Temperature: %.1f", agent.MaxTokens, agent.Temperature) }
+									{ fmt.Sprintf("Temperature: %.1f", agent.Temperature) }
 								</p>
 								if agent.Provider == models.ProviderOpenAI && agent.ReasoningEffort != "" {
 									<p class="text-sm opacity-60">
@@ -313,8 +312,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 		<dialog id="new_model_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
 			<div class="modal-box">
 				<h3 id="model_modal_title" class="font-bold text-lg mb-4">New Model Configuration</h3>
-				<form id="model_form" method="post" action="/agents">
-					<div class="form-control mb-3">
+					<form id="model_form" method="post" action="/models">					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Name</span></label>
 						<input type="text" id="model_name" name="name" class="input input-bordered" required placeholder="My Model"/>
 					</div>
@@ -353,20 +351,21 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Model</span></label>
 						<select name="model" id="model_id" class="select select-bordered" onchange="handleModelChange()">
+							<option value="claude-opus-4-7">Claude Opus 4.7</option>
+							<option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
 							<option value="claude-sonnet-4-5-20250929">Claude Sonnet 4.5</option>
 							<option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
 							<option value="claude-opus-4-6">Claude Opus 4.6</option>
 						</select>
 					</div>
-					<div id="reasoning_effort_field" class="form-control mb-3 hidden">
-						<label class="label"><span class="label-text">Reasoning Effort</span></label>
-						<select name="reasoning_effort" id="model_reasoning_effort" class="select select-bordered"></select>
-						<label class="label">
-							<span class="label-text-alt opacity-70">Supported values depend on the selected model.</span>
-						</label>
-					</div>
-					<div id="api_key_field" class="form-control mb-3">
-						<label class="label"><span class="label-text">API Key</span></label>
+							<div id="reasoning_effort_field" class="form-control mb-3 hidden">
+								<label class="label"><span id="reasoning_effort_label" class="label-text">Effort</span></label>
+								<select name="reasoning_effort" id="model_reasoning_effort" class="select select-bordered"></select>
+								<label class="label">
+									<span id="reasoning_effort_help" class="label-text-alt opacity-70">Controls provider reasoning/thinking effort for supported models.</span>
+								</label>
+							</div>
+						<div id="api_key_field" class="form-control mb-3">						<label class="label"><span class="label-text">API Key</span></label>
 						<div class="relative">
 							<input type="password" id="model_api_key" name="api_key" class="input input-bordered pr-10" placeholder="sk-ant-... (leave empty to keep existing)"/>
 							<button
@@ -473,16 +472,13 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							</div>
 						</div>
 					</div>
-						<div class="grid grid-cols-2 gap-3">
-						<div class="form-control">
-							<label class="label"><span class="label-text">Max Tokens</span></label>
-							<input type="number" id="model_max_tokens" name="max_tokens" class="input input-bordered" value="4096"/>
-						</div>
 						<div class="form-control">
 							<label class="label"><span class="label-text">Temperature</span></label>
-							<input type="number" id="model_temperature" name="temperature" class="input input-bordered" value="0" step="0.1" min="0" max="1"/>
+							<input type="text" inputmode="decimal" pattern="[0-9]*.?[0-9]*" id="model_temperature" name="temperature" class="input input-bordered" value="0" placeholder="0–1"/>
+							<label class="label">
+								<span class="label-text-alt opacity-70">Optional. Leave default unless you know you need more randomness.</span>
+							</label>
 						</div>
-					</div>
 					<div class="form-control mt-3">
 						<label class="label cursor-pointer justify-start gap-2">
 							<input type="checkbox" id="model_is_default" name="is_default" class="checkbox checkbox-sm"/>
@@ -502,14 +498,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					<div class="grid grid-cols-2 gap-3">
 						<div class="form-control">
 							<label class="label"><span class="label-text">Max Workers</span></label>
-							<input type="number" id="model_max_workers" name="model_max_workers" class="input input-bordered" value="0" min="0" max="10"/>
+							<input type="text" inputmode="numeric" pattern="[0-9]*" id="model_max_workers" name="model_max_workers" class="input input-bordered" value="0" placeholder="0"/>
 							<label class="label">
 								<span class="label-text-alt opacity-70">0 = use global pool</span>
 							</label>
 						</div>
 						<div class="form-control">
 							<label class="label"><span class="label-text">Timeout (seconds)</span></label>
-							<input type="number" id="model_worker_timeout" name="worker_timeout" class="input input-bordered" value="0" min="0"/>
+							<input type="text" inputmode="numeric" pattern="[0-9]*" id="model_worker_timeout" name="worker_timeout" class="input input-bordered" value="0" placeholder="0"/>
 							<label class="label">
 								<span class="label-text-alt opacity-70">0 = no override</span>
 							</label>
@@ -609,22 +605,27 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					});
 				}
 
-			var reasoningEffortOptions = {
-				low: 'Low',
-				medium: 'Medium',
-				high: 'High',
-				xhigh: 'XHigh'
-			};
-
+				var reasoningEffortOptions = {
+					low: 'Low',
+					medium: 'Medium',
+					high: 'High',
+					xhigh: 'XHigh',
+					max: 'Max'
+				};
 			var modelOptionsByProvider = {
-				anthropic: [
-					{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', efforts: [] },
-					{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', efforts: [] },
-					{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', efforts: [] }
-				],
-				openai: [
+					anthropic: [
+						{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'max'] },
+						{ value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', efforts: ['low', 'medium', 'high', 'max'] },
+						{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', efforts: ['low', 'medium', 'high', 'max'] },
+						{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', efforts: [] },
+						{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', efforts: ['low', 'medium', 'high', 'max'] }
+					],				openai: [
+					{ value: 'gpt-5.5', label: 'gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'] },
+					{ value: 'gpt-5.5-pro', label: 'gpt-5.5-pro', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.4', label: 'gpt-5.4', efforts: ['low', 'medium', 'high', 'xhigh'] },
+					{ value: 'gpt-5.4-mini', label: 'gpt-5.4-mini', efforts: ['low', 'medium', 'high'] },
 					{ value: 'gpt-5.3-codex', label: 'gpt-5.3-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },
+					{ value: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark', efforts: ['low', 'medium', 'high'] },
 					{ value: 'gpt-5.2-codex', label: 'gpt-5.2-codex', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.1-codex-max', label: 'gpt-5.1-codex-max', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.1-codex', label: 'gpt-5.1-codex', efforts: ['low', 'medium', 'high'] },
@@ -656,9 +657,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				return null;
 			}
 
-			function preferredReasoningEffort(supportedEfforts) {
-				var preferred = ['high', 'medium', 'low', 'xhigh'];
-				for (var i = 0; i < preferred.length; i++) {
+				function preferredReasoningEffort(supportedEfforts) {
+					var preferred = ['medium', 'high', 'low', 'xhigh', 'max'];				for (var i = 0; i < preferred.length; i++) {
 					if (supportedEfforts.indexOf(preferred[i]) !== -1) {
 						return preferred[i];
 					}
@@ -669,28 +669,34 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				return 'high';
 			}
 
-			function setReasoningEffortOptions(provider, model, selectedEffort) {
-				var reasoningField = document.getElementById('reasoning_effort_field');
-				var reasoningSelect = document.getElementById('model_reasoning_effort');
+				function setReasoningEffortOptions(provider, model, selectedEffort) {
+					var reasoningField = document.getElementById('reasoning_effort_field');
+					var reasoningSelect = document.getElementById('model_reasoning_effort');
+					var reasoningLabel = document.getElementById('reasoning_effort_label');
+					var reasoningHelp = document.getElementById('reasoning_effort_help');
 
-				if (provider !== 'openai') {
-					reasoningField.classList.add('hidden');
-					reasoningSelect.disabled = true;
-					reasoningSelect.innerHTML = '';
-					return;
-				}
+					var modelOption = selectedModelOption(provider, model);
+					var supportedEfforts = [];
+					if (modelOption && modelOption.efforts && modelOption.efforts.length > 0) {
+						supportedEfforts = modelOption.efforts;
+					}
+					if (supportedEfforts.length === 0) {
+						reasoningField.classList.add('hidden');
+						reasoningSelect.disabled = true;
+						reasoningSelect.innerHTML = '';
+						return;
+					}
 
-				reasoningField.classList.remove('hidden');
-				reasoningSelect.disabled = false;
-
-				var modelOption = selectedModelOption(provider, model);
-				var supportedEfforts = ['low', 'medium', 'high'];
-				if (modelOption && modelOption.efforts && modelOption.efforts.length > 0) {
-					supportedEfforts = modelOption.efforts;
-				}
-
-				reasoningSelect.innerHTML = '';
-				for (var i = 0; i < supportedEfforts.length; i++) {
+					reasoningField.classList.remove('hidden');
+					reasoningSelect.disabled = false;
+					if (provider === 'anthropic') {
+						reasoningLabel.textContent = 'Claude Effort';
+						reasoningHelp.textContent = 'Matches Claude Code effort: low, medium, high, or max. Blank saved configs keep the provider default.';
+					} else {
+						reasoningLabel.textContent = 'Codex Reasoning Effort';
+						reasoningHelp.textContent = 'Matches Codex reasoning effort for supported OpenAI models.';
+					}
+					reasoningSelect.innerHTML = '';				for (var i = 0; i < supportedEfforts.length; i++) {
 					var effort = supportedEfforts[i];
 					var opt = document.createElement('option');
 					opt.value = effort;
@@ -738,15 +744,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				return modelSelect.value;
 			}
 
-			function handleModelChange() {
-				var provider = document.getElementById('model_provider').value;
-				var model = document.getElementById('model_id').value;
-				var selectedEffort = document.getElementById('model_reasoning_effort').value;
-				setReasoningEffortOptions(provider, model, selectedEffort);
-			}
+				function handleModelChange() {
+					var provider = document.getElementById('model_provider').value;
+					var model = document.getElementById('model_id').value;
+					var selectedEffort = document.getElementById('model_reasoning_effort').value;
+					setReasoningEffortOptions(provider, model, selectedEffort);
+				}
 
-				function hideAllInfoBoxes() {
-					document.getElementById('subscription_info_cli').classList.add('hidden');
+				function hideAllInfoBoxes() {					document.getElementById('subscription_info_cli').classList.add('hidden');
 					document.getElementById('subscription_info_oauth').classList.add('hidden');
 					document.getElementById('subscription_info_codex').classList.add('hidden');
 					document.getElementById('ollama_info').classList.add('hidden');
@@ -828,7 +833,6 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				var dbProvider = button.dataset.modelProvider;
 				var model = button.dataset.modelModel;
 				var reasoningEffort = button.dataset.modelReasoningEffort || '';
-				var maxTokens = parseInt(button.dataset.modelMaxTokens);
 				var temperature = parseFloat(button.dataset.modelTemperature);
 				var isDefault = button.dataset.modelIsDefault === 'true';
 					var authMethod = button.dataset.modelAuthMethod || 'cli';
@@ -858,23 +862,17 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					}
 				}
 
-				var form = document.getElementById('model_form');
-				document.getElementById('model_modal_title').textContent = 'Edit Model Configuration';
-				form.action = '';
-				form.method = 'post';
-				form.setAttribute('hx-put', '/models/' + id);
-				form.setAttribute('hx-target', '#models-container');
-				form.setAttribute('hx-swap', 'outerHTML');
-				htmx.process(form);
-				document.getElementById('model_name').value = name;
-				document.getElementById('model_provider').value = uiProvider;
+					var form = document.getElementById('model_form');
+					document.getElementById('model_modal_title').textContent = 'Edit Model Configuration';
+					form.action = '/models/' + id;
+					form.method = 'post';
+					form.dataset.mode = 'edit';					document.getElementById('model_name').value = name;				document.getElementById('model_provider').value = uiProvider;
 				document.getElementById('model_anthropic_auth_type').value = anthropicAuthType;
 				document.getElementById('model_openai_auth_type').value = openaiAuthType;
 				document.getElementById('model_openai_connection_method').value = openaiConnectionMethod;
 				document.getElementById('model_api_key').value = '';
 				document.getElementById('model_api_key').placeholder = '(leave empty to keep existing)';
 				document.getElementById('model_api_key').required = false;
-				document.getElementById('model_max_tokens').value = maxTokens.toString();
 				document.getElementById('model_temperature').value = temperature.toString();
 				document.getElementById('model_is_default').checked = isDefault;
 					document.getElementById('model_auth_method').value = authMethod;
@@ -934,11 +932,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_auth_method').disabled = true;
 					document.getElementById('model_openai_connection_method').disabled = true;
 				}
-				setReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);
-			}
+					setReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);
+				}
 
-			function toggleAnthropicAuthFields() {
-				var authType = document.getElementById('model_anthropic_auth_type').value;
+				function isEditingModelForm() {
+					return document.getElementById('model_form').dataset.mode === 'edit';
+				}
+
+				function toggleAnthropicAuthFields() {				var authType = document.getElementById('model_anthropic_auth_type').value;
 				var apiKeyField = document.getElementById('api_key_field');
 				var apiKeyInput = document.getElementById('model_api_key');
 				var authMethodField = document.getElementById('auth_method_field');
@@ -946,12 +947,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 
 				hideAllInfoBoxes();
 
-				if (authType === 'api_key') {
-					apiKeyField.classList.remove('hidden');
-					apiKeyInput.required = true;
-					authMethodField.classList.add('hidden');
-					authMethodSelect.disabled = true;
-				} else {
+					if (authType === 'api_key') {
+						apiKeyField.classList.remove('hidden');
+						apiKeyInput.required = !isEditingModelForm();
+						authMethodField.classList.add('hidden');
+						authMethodSelect.disabled = true;				} else {
 					apiKeyField.classList.add('hidden');
 					apiKeyInput.required = false;
 					authMethodField.classList.remove('hidden');
@@ -982,13 +982,12 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 
 				hideAllInfoBoxes();
 
-				if (authType === 'api_key') {
-					apiKeyField.classList.remove('hidden');
-					apiKeyInput.required = true;
-					openaiConnectionMethodField.classList.add('hidden');
-					openaiConnectionMethodSelect.disabled = true;
-					document.getElementById('openai_api_key_info').classList.remove('hidden');
-				} else {
+					if (authType === 'api_key') {
+						apiKeyField.classList.remove('hidden');
+						apiKeyInput.required = !isEditingModelForm();
+						openaiConnectionMethodField.classList.add('hidden');
+						openaiConnectionMethodSelect.disabled = true;
+						document.getElementById('openai_api_key_info').classList.remove('hidden');				} else {
 					// subscription
 					apiKeyField.classList.add('hidden');
 					apiKeyInput.required = false;
@@ -1015,29 +1014,23 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					}
 				}
 
-			function closeModelModal() {
-				new_model_modal.close();
-			}
+				function closeModelModal() {
+					new_model_modal.close();
+				}
 
-			function openNewModelModal() {
-				var form = document.getElementById('model_form');
-				document.getElementById('model_modal_title').textContent = 'New Model Configuration';
-				form.action = '';
-				form.method = 'post';
-				form.removeAttribute('hx-put');
-				form.setAttribute('hx-post', '/models');
-				form.setAttribute('hx-target', '#models-container');
-				form.setAttribute('hx-swap', 'outerHTML');
-				htmx.process(form);
-				document.getElementById('model_name').value = '';
-				document.getElementById('model_provider').value = 'anthropic';
+				function openNewModelModal() {
+					var form = document.getElementById('model_form');
+					document.getElementById('model_modal_title').textContent = 'New Model Configuration';
+					form.action = '/models';
+					form.method = 'post';
+					form.dataset.mode = 'create';
+					document.getElementById('model_name').value = '';				document.getElementById('model_provider').value = 'anthropic';
 				document.getElementById('model_anthropic_auth_type').value = 'api_key';
 				document.getElementById('model_openai_auth_type').value = 'api_key';
 				document.getElementById('model_openai_connection_method').value = 'oauth';
 				document.getElementById('model_api_key').value = '';
 				document.getElementById('model_api_key').placeholder = 'sk-ant-...';
 				document.getElementById('model_api_key').required = true;
-				document.getElementById('model_max_tokens').value = '4096';
 				document.getElementById('model_temperature').value = '0';
 				document.getElementById('model_is_default').checked = false;
 					document.getElementById('model_auth_method').value = 'oauth';

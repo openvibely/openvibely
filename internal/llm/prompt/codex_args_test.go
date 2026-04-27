@@ -93,7 +93,7 @@ func TestCodexExecArgs_DefaultsModelToCodexDefault(t *testing.T) {
 }
 
 func TestCodexModelOrDefault_UnsupportedFallsBackToDefault(t *testing.T) {
-	if got := CodexModelOrDefault("gpt-5.5"); got != CodexDefaultModel {
+	if got := CodexModelOrDefault("gpt-unknown-99"); got != CodexDefaultModel {
 		t.Fatalf("expected unsupported model to fallback to %q, got %q", CodexDefaultModel, got)
 	}
 }
