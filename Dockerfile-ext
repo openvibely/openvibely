@@ -78,7 +78,7 @@ RUN useradd -m -u 10001 -s /bin/bash openvibely \
       /home/openvibely/.config/containers \
       /home/openvibely/.local/share/containers/storage \
       /home/openvibely/go \
- && printf '[storage]\ndriver = "vfs"\nrunroot = "/tmp/containers-runroot"\ngraphroot = "/home/openvibely/.local/share/containers/storage"\n' \
+ && printf '[storage]\ndriver = "overlay"\nrunroot = "/tmp/containers-runroot"\ngraphroot = "/home/openvibely/.local/share/containers/storage"\n\n[storage.options.overlay]\nmount_program = "/usr/sbin/fuse-overlayfs"\nmountopt = "nodev"\n' \
       > /home/openvibely/.config/containers/storage.conf \
  && printf '[containers]\ndefault_ulimits = ["nofile=65536:65536"]\n\n[engine]\nruntime = "crun"\nevents_logger = "file"\n' \
       > /home/openvibely/.config/containers/containers.conf \
@@ -118,7 +118,7 @@ ENV PORT=3001 \
     HOME=/home/openvibely \
     GOPATH=/home/openvibely/go \
     XDG_RUNTIME_DIR=/tmp/openvibely-runtime \
-    STORAGE_DRIVER=vfs \
+    STORAGE_DRIVER=overlay \
     BUILDAH_ISOLATION=chroot \
     PATH=/home/openvibely/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
