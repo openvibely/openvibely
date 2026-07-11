@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -1813,3 +1814,302 @@ func TestReplaceBranchHeadDoesNotBypassFailedLease(t *testing.T) {
 		t.Fatalf("expected one guarded push attempt, got %d", pushes)
 	}
 }
+
+// newTreeTestGitHubService returns a service whose API base URL points at the
+// supplied test server so createGitHubTree exercises the real HTTP paths.
+func newTreeTestGitHubService(baseURL string) *GitHubService {
+	svc := NewGitHubService(nil, "", "", "", "")
+	svc.apiBaseURL = baseURL
+	return svc
+}
+
+// decodeBlobContent extracts the raw file content from a git/blobs request body.
+func decodeBlobContent(t *testing.T, body []byte) string {
+	t.Helper()
+	var payload struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decoding blob payload: %v", err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(payload.Content)
+	if err != nil {
+		t.Fatalf("decoding blob base64 content: %v", err)
+	}
+	return string(raw)
+}
+
+// decodeTreePayload returns the ordered tree entries from a git/trees request.
+func decodeTreePayload(t *testing.T, body []byte) []map[string]any {
+	t.Helper()
+	var payload struct {
+		BaseTree string           `json:"base_tree"`
+		Tree     []map[string]any `json:"tree"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decoding tree payload: %v", err)
+	}
+	return payload.Tree
+}
+
+func TestCreateGitHubTreeParallelBlobUploadsOverlapWithinBound(t *testing.T) {
+	const fileCount = 8
+	if githubTreeBlobUploadConcurrency < 2 {
+		t.Fatalf("test requires a concurrency bound of at least 2, got %d", githubTreeBlobUploadConcurrency)
+	}
+
+	var (
+		mu          sync.Mutex
+		inFlight    int
+		maxInFlight int
+		blobCount   int32
+		treeCount   int32
+		treeBody    []byte
+	)
+	// The gate deterministically proves overlap: the first `bound` blob
+	// requests all block until `bound` of them are simultaneously in-flight,
+	// so uploads must overlap. SetLimit guarantees the bound is never exceeded.
+	reached := make(chan struct{})
+	var reachedOnce sync.Once
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/git/blobs"):
+			atomic.AddInt32(&blobCount, 1)
+			content := decodeBlobContent(t, body)
+
+			mu.Lock()
+			inFlight++
+			if inFlight > maxInFlight {
+				maxInFlight = inFlight
+			}
+			cur := inFlight
+			mu.Unlock()
+
+			if cur >= githubTreeBlobUploadConcurrency {
+				reachedOnce.Do(func() { close(reached) })
+			}
+			select {
+			case <-reached:
+			case <-time.After(5 * time.Second):
+				t.Errorf("blob upload gate never reached the concurrency bound")
+			}
+
+			mu.Lock()
+			inFlight--
+			mu.Unlock()
+
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"sha":"blob-%s"}`, content)
+		case strings.HasSuffix(r.URL.Path, "/git/trees"):
+			atomic.AddInt32(&treeCount, 1)
+			treeBody = body
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"sha":"tree-sha"}`)
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	svc := newTreeTestGitHubService(server.URL)
+	changes := make([]githubBranchChange, fileCount)
+	for i := range changes {
+		changes[i] = githubBranchChange{
+			Path:    fmt.Sprintf("dir/file-%02d.txt", i),
+			Content: []byte(fmt.Sprintf("content-%02d", i)),
+			Mode:    "100644",
+		}
+	}
+
+	treeSHA, err := svc.createGitHubTree(context.Background(), "token", &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "base-tree", changes)
+	if err != nil {
+		t.Fatalf("createGitHubTree returned error: %v", err)
+	}
+	if treeSHA != "tree-sha" {
+		t.Fatalf("expected tree-sha, got %q", treeSHA)
+	}
+	if got := atomic.LoadInt32(&blobCount); got != fileCount {
+		t.Fatalf("expected %d blob requests, got %d", fileCount, got)
+	}
+	if got := atomic.LoadInt32(&treeCount); got != 1 {
+		t.Fatalf("expected exactly one tree request, got %d", got)
+	}
+
+	mu.Lock()
+	observed := maxInFlight
+	mu.Unlock()
+	if observed < 2 {
+		t.Fatalf("expected overlapping uploads (>=2), observed max in-flight %d", observed)
+	}
+	if observed > githubTreeBlobUploadConcurrency {
+		t.Fatalf("expected max in-flight <= bound %d, observed %d", githubTreeBlobUploadConcurrency, observed)
+	}
+
+	// Tree entries must preserve deterministic input ordering and map each blob
+	// SHA back to its originating path.
+	entries := decodeTreePayload(t, treeBody)
+	if len(entries) != fileCount {
+		t.Fatalf("expected %d tree entries, got %d", fileCount, len(entries))
+	}
+	for i, entry := range entries {
+		wantPath := fmt.Sprintf("dir/file-%02d.txt", i)
+		if entry["path"] != wantPath {
+			t.Fatalf("entry %d: expected path %q, got %q", i, wantPath, entry["path"])
+		}
+		wantSHA := fmt.Sprintf("blob-content-%02d", i)
+		if entry["sha"] != wantSHA {
+			t.Fatalf("entry %d (%s): expected sha %q, got %v", i, wantPath, wantSHA, entry["sha"])
+		}
+	}
+}
+
+func TestCreateGitHubTreeDeletionOnlyStartsNoBlobWorkers(t *testing.T) {
+	var (
+		blobCount int32
+		treeBody  []byte
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/git/blobs"):
+			atomic.AddInt32(&blobCount, 1)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"sha":"unexpected"}`)
+		case strings.HasSuffix(r.URL.Path, "/git/trees"):
+			treeBody = body
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"sha":"tree-sha"}`)
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	svc := newTreeTestGitHubService(server.URL)
+	changes := []githubBranchChange{
+		{Path: "a.txt", Mode: "100644", Delete: true},
+		{Path: "b.txt", Mode: "100644", Delete: true},
+		{Path: "c.txt", Mode: "100644", Delete: true},
+	}
+
+	treeSHA, err := svc.createGitHubTree(context.Background(), "token", &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "base-tree", changes)
+	if err != nil {
+		t.Fatalf("createGitHubTree returned error: %v", err)
+	}
+	if treeSHA != "tree-sha" {
+		t.Fatalf("expected tree-sha, got %q", treeSHA)
+	}
+	if got := atomic.LoadInt32(&blobCount); got != 0 {
+		t.Fatalf("expected zero blob requests for deletion-only changes, got %d", got)
+	}
+
+	entries := decodeTreePayload(t, treeBody)
+	if len(entries) != len(changes) {
+		t.Fatalf("expected %d tree entries, got %d", len(changes), len(entries))
+	}
+	for i, entry := range entries {
+		if entry["path"] != changes[i].Path {
+			t.Fatalf("entry %d: expected path %q, got %q", i, changes[i].Path, entry["path"])
+		}
+		if sha, ok := entry["sha"]; !ok || sha != nil {
+			t.Fatalf("entry %d (%s): expected nil sha for deletion, got %v (present=%v)", i, changes[i].Path, sha, ok)
+		}
+	}
+}
+
+func TestCreateGitHubTreeCancelsRemainingWorkOnBlobFailure(t *testing.T) {
+	var treeCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/git/blobs"):
+			content := decodeBlobContent(t, body)
+			if content == "boom" {
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprint(w, `{"message":"blob failure"}`)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"sha":"blob-%s"}`, content)
+		case strings.HasSuffix(r.URL.Path, "/git/trees"):
+			atomic.AddInt32(&treeCount, 1)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"sha":"tree-sha"}`)
+		default:
+			t.Errorf("unexpected request path: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	svc := newTreeTestGitHubService(server.URL)
+	changes := []githubBranchChange{
+		{Path: "ok-1.txt", Content: []byte("ok"), Mode: "100644"},
+		{Path: "broken/path.txt", Content: []byte("boom"), Mode: "100644"},
+		{Path: "ok-2.txt", Content: []byte("ok"), Mode: "100644"},
+	}
+
+	_, err := svc.createGitHubTree(context.Background(), "token", &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "base-tree", changes)
+	if err == nil {
+		t.Fatalf("expected error when a blob upload fails")
+	}
+	if !strings.Contains(err.Error(), "creating blob for broken/path.txt") {
+		t.Fatalf("expected path-specific blob error, got %v", err)
+	}
+	if got := atomic.LoadInt32(&treeCount); got != 0 {
+		t.Fatalf("expected tree creation to be skipped after blob failure, got %d tree requests", got)
+	}
+}
+
+// benchmarkCreateGitHubTree exercises createGitHubTree against a delayed mock so
+// the parallel upload path is measured for representative file counts.
+func benchmarkCreateGitHubTree(b *testing.B, fileCount int) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/git/blobs"):
+			// Small delay simulates network latency so bounded concurrency is
+			// exercised rather than instant local responses.
+			time.Sleep(time.Millisecond)
+			var payload struct {
+				Content string `json:"content"`
+			}
+			_ = json.Unmarshal(body, &payload)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintf(w, `{"sha":"blob-%s"}`, payload.Content)
+		case strings.HasSuffix(r.URL.Path, "/git/trees"):
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"sha":"tree-sha"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	svc := newTreeTestGitHubService(server.URL)
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+	changes := make([]githubBranchChange, fileCount)
+	for i := range changes {
+		changes[i] = githubBranchChange{
+			Path:    fmt.Sprintf("dir/file-%04d.txt", i),
+			Content: []byte(fmt.Sprintf("content-%04d", i)),
+			Mode:    "100644",
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := svc.createGitHubTree(context.Background(), "token", repo, "base-tree", changes); err != nil {
+			b.Fatalf("createGitHubTree returned error: %v", err)
+		}
+	}
+}
+
+func BenchmarkCreateGitHubTree10Files(b *testing.B)  { benchmarkCreateGitHubTree(b, 10) }
+func BenchmarkCreateGitHubTree50Files(b *testing.B)  { benchmarkCreateGitHubTree(b, 50) }
+func BenchmarkCreateGitHubTree200Files(b *testing.B) { benchmarkCreateGitHubTree(b, 200) }
