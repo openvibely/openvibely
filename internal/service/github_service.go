@@ -1414,13 +1414,8 @@ func (s *GitHubService) ListPullRequestFeedback(ctx context.Context, repo *GitHu
 
 func (s *GitHubService) listPullRequestIssueComments(ctx context.Context, token string, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), prNumber)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	raw, err := getPaginatedGitHubJSON[githubIssueCommentAPI](ctx, s, token, endpoint, "")
 	if err != nil {
-		return nil, err
-	}
-	s.applyGitHubHeaders(req, token)
-	var raw []githubIssueCommentAPI
-	if err := s.doGitHubJSON(req, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]GitHubPullRequestFeedback, 0, len(raw))
@@ -1432,13 +1427,8 @@ func (s *GitHubService) listPullRequestIssueComments(ctx context.Context, token 
 
 func (s *GitHubService) listPullRequestReviews(ctx context.Context, token string, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/reviews?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), prNumber)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	raw, err := getPaginatedGitHubJSON[githubPullRequestReviewAPI](ctx, s, token, endpoint, "")
 	if err != nil {
-		return nil, err
-	}
-	s.applyGitHubHeaders(req, token)
-	var raw []githubPullRequestReviewAPI
-	if err := s.doGitHubJSON(req, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]GitHubPullRequestFeedback, 0, len(raw))
@@ -1452,13 +1442,8 @@ func (s *GitHubService) listPullRequestReviews(ctx context.Context, token string
 
 func (s *GitHubService) listPullRequestReviewComments(ctx context.Context, token string, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error) {
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/comments?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), prNumber)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	raw, err := getPaginatedGitHubJSON[githubPullRequestReviewCommentAPI](ctx, s, token, endpoint, "")
 	if err != nil {
-		return nil, err
-	}
-	s.applyGitHubHeaders(req, token)
-	var raw []githubPullRequestReviewCommentAPI
-	if err := s.doGitHubJSON(req, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]GitHubPullRequestFeedback, 0, len(raw))
@@ -1622,14 +1607,8 @@ func (s *GitHubService) listAssignedIssuesWithToken(ctx context.Context, repo *G
 	query.Set("assignee", assignee)
 	query.Set("per_page", "100")
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues?%s", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), query.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	raw, err := getPaginatedGitHubJSON[githubIssueAPI](ctx, s, token, endpoint, "")
 	if err != nil {
-		return nil, err
-	}
-	s.applyGitHubHeaders(req, token)
-
-	var raw []githubIssueAPI
-	if err := s.doGitHubJSON(req, &raw); err != nil {
 		return nil, err
 	}
 
@@ -1657,15 +1636,8 @@ func (s *GitHubService) FindPullRequestForIssue(ctx context.Context, repo *GitHu
 	}
 
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/timeline?per_page=100", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), issueNumber)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	events, err := getPaginatedGitHubJSON[githubIssueTimelineEventAPI](ctx, s, token, endpoint, "application/vnd.github.mockingbird-preview+json")
 	if err != nil {
-		return nil, err
-	}
-	s.applyGitHubHeaders(req, token)
-	req.Header.Set("Accept", "application/vnd.github.mockingbird-preview+json")
-
-	var events []githubIssueTimelineEventAPI
-	if err := s.doGitHubJSON(req, &events); err != nil {
 		return nil, err
 	}
 
@@ -2152,6 +2124,92 @@ func isPathWithin(baseDir, candidate string) (bool, error) {
 	}
 	prefix := baseAbs + string(os.PathSeparator)
 	return strings.HasPrefix(candidateAbs, prefix), nil
+}
+
+func getPaginatedGitHubJSON[T any](ctx context.Context, s *GitHubService, bearerToken, endpoint, accept string) ([]T, error) {
+	var items []T
+	seen := make(map[string]struct{})
+	for next := endpoint; next != ""; {
+		if _, ok := seen[next]; ok {
+			return nil, fmt.Errorf("GitHub pagination Link cycle detected")
+		}
+		seen[next] = struct{}{}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, next, nil)
+		if err != nil {
+			return nil, err
+		}
+		s.applyGitHubHeaders(req, bearerToken)
+		if accept != "" {
+			req.Header.Set("Accept", accept)
+		}
+
+		resp, err := s.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			detail := formatGitHubAPIError(body)
+			if detail != "" {
+				return nil, fmt.Errorf("github API request failed (%d): %s", resp.StatusCode, detail)
+			}
+			return nil, fmt.Errorf("github API request failed (%d)", resp.StatusCode)
+		}
+
+		var page []T
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, err
+		}
+		items = append(items, page...)
+		next, err = nextGitHubPageURL(resp.Header.Get("Link"), req.URL)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+func nextGitHubPageURL(linkHeader string, base *url.URL) (string, error) {
+	for _, link := range strings.Split(linkHeader, ",") {
+		parts := strings.Split(link, ";")
+		if len(parts) < 2 {
+			continue
+		}
+		isNext := false
+		for _, param := range parts[1:] {
+			name, value, ok := strings.Cut(strings.TrimSpace(param), "=")
+			if ok && strings.EqualFold(name, "rel") {
+				for _, relation := range strings.Fields(strings.Trim(value, `"`)) {
+					if relation == "next" {
+						isNext = true
+						break
+					}
+				}
+			}
+		}
+		if !isNext {
+			continue
+		}
+		target := strings.TrimSpace(parts[0])
+		if len(target) < 2 || target[0] != '<' || target[len(target)-1] != '>' {
+			return "", fmt.Errorf("invalid GitHub pagination Link header")
+		}
+		next, err := url.Parse(target[1 : len(target)-1])
+		if err != nil {
+			return "", fmt.Errorf("invalid GitHub pagination Link header: %w", err)
+		}
+		resolved := base.ResolveReference(next)
+		if !strings.EqualFold(resolved.Scheme, base.Scheme) || !strings.EqualFold(resolved.Host, base.Host) {
+			return "", fmt.Errorf("GitHub pagination Link points to a different origin")
+		}
+		return resolved.String(), nil
+	}
+	return "", nil
 }
 
 func (s *GitHubService) applyGitHubHeaders(req *http.Request, bearerToken string) {
