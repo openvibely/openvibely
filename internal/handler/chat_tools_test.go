@@ -376,8 +376,11 @@ func TestProcessChatTaskCreations_PartialAttachmentFailureActivatesReadySibling(
 	if !strings.Contains(updated, "Attachment conversion failed") || !strings.Contains(updated, "affected tasks were left in Backlog") {
 		t.Fatalf("expected partial conversion failure summary, got %q", updated)
 	}
-	if strings.Contains(updated, "Ready sibling was left in Backlog") {
-		t.Fatalf("summary incorrectly describes successful task as affected: %q", updated)
+	if !strings.Contains(updated, `"Ready sibling" (active)`) {
+		t.Fatalf("summary should report successful sibling as active, got %q", updated)
+	}
+	if !strings.Contains(updated, `"Failed sibling" (backlog)`) {
+		t.Fatalf("summary should report failed sibling as backlog, got %q", updated)
 	}
 
 	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")

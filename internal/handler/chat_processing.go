@@ -2091,7 +2091,8 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 	h.applyChannelOriginToCreatedTasks(ctx, createdTasks, firstChannelReply(channelReply))
 
 	totalAttachmentsCopied, attachmentReadyByTask := h.copyAttachmentsToTasks(ctx, execID, createdTasks, chatAtts)
-	h.activateDeferredTasks(ctx, createdResults, deferredRequestIndexes, attachmentReadyByTask)
+	activatedTaskIDs := h.activateDeferredTasks(ctx, createdResults, deferredRequestIndexes, attachmentReadyByTask)
+	summary = summarizeActivatedTasks(summary, createdResults, activatedTaskIDs)
 	if len(attachmentReadyByTask) != len(createdTasks) {
 		applog.Infof("[handler] attachment lifecycle stage=activation-partial execution=%s ready=%d tasks=%d", execID, len(attachmentReadyByTask), len(createdTasks))
 		summary += "\nAttachment conversion failed; affected tasks were left in Backlog without broken attachment records."
@@ -2187,21 +2188,34 @@ func tasksFromCreationResults(results []service.TaskCreationResult) []models.Tas
 }
 
 // activateDeferredTasks activates only tasks whose exact originating request was deferred
-// and whose complete attachment batch is ready.
-func (h *Handler) activateDeferredTasks(ctx context.Context, createdResults []service.TaskCreationResult, deferredRequestIndexes map[int]bool, attachmentReadyByTask map[string]bool) {
-	if len(deferredRequestIndexes) == 0 {
-		return
-	}
-
+// and whose complete attachment batch is ready. It returns the IDs of tasks whose
+// activation succeeded.
+func (h *Handler) activateDeferredTasks(ctx context.Context, createdResults []service.TaskCreationResult, deferredRequestIndexes map[int]bool, attachmentReadyByTask map[string]bool) map[string]bool {
+	activatedTaskIDs := make(map[string]bool, len(deferredRequestIndexes))
 	for _, result := range createdResults {
 		if deferredRequestIndexes[result.RequestIndex] && attachmentReadyByTask[result.Task.ID] {
 			task := result.Task
 			applog.Infof("[handler] activateDeferredTasks activating request=%d task=%s %q", result.RequestIndex, task.ID, task.Title)
 			if err := h.taskSvc.UpdateCategory(ctx, task.ID, models.CategoryActive); err != nil {
 				applog.Infof("[handler] activateDeferredTasks error activating request=%d task=%s: %v", result.RequestIndex, task.ID, err)
+				continue
 			}
+			activatedTaskIDs[task.ID] = true
 		}
 	}
+	return activatedTaskIDs
+}
+
+func summarizeActivatedTasks(summary string, createdResults []service.TaskCreationResult, activatedTaskIDs map[string]bool) string {
+	for _, result := range createdResults {
+		if !activatedTaskIDs[result.Task.ID] {
+			continue
+		}
+		backlogLine := fmt.Sprintf("- \"%s\" (%s) [TASK_ID:%s]", result.Task.Title, models.CategoryBacklog, result.Task.ID)
+		activeLine := fmt.Sprintf("- \"%s\" (%s) [TASK_ID:%s]", result.Task.Title, models.CategoryActive, result.Task.ID)
+		summary = strings.Replace(summary, backlogLine, activeLine, 1)
+	}
+	return summary
 }
 
 // appendCreationSummary appends task creation summary and attachment info to output.
