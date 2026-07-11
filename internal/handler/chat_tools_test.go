@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -324,6 +325,112 @@ func TestProcessChatTaskCreations_UnicodeScreenshotConvertsAndExecutes(t *testin
 	}
 	if _, err := os.Stat(attachments[0].FilePath); err != nil {
 		t.Fatalf("converted attachment path is not loadable: %v", err)
+	}
+}
+
+func TestProcessChatTaskCreations_PartialAttachmentFailureActivatesReadySibling(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Partial Attachment Conversion Project")
+	modelConfig := createAgent(t, llmConfigRepo)
+	chatHostTask := createTask(t, h, project.ID, "partial conversion host", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+	})
+	exec := createExec(t, h, chatHostTask.ID, modelConfig.ID)
+
+	sourcePath := filepath.Join(t.TempDir(), "evidence.txt")
+	if err := os.WriteFile(sourcePath, []byte("complete attachment"), 0o644); err != nil {
+		t.Fatalf("write chat attachment: %v", err)
+	}
+	if err := h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    filepath.Base(sourcePath),
+		FilePath:    sourcePath,
+		MediaType:   "text/plain",
+		FileSize:    int64(len("complete attachment")),
+	}); err != nil {
+		t.Fatalf("create chat attachment: %v", err)
+	}
+
+	originalRename := renameAttachmentFile
+	renameCalls := 0
+	renameAttachmentFile = func(oldPath, newPath string) error {
+		renameCalls++
+		if renameCalls == 2 {
+			return errors.New("injected sibling publication failure")
+		}
+		return os.Rename(oldPath, newPath)
+	}
+	t.Cleanup(func() { renameAttachmentFile = originalRename })
+
+	output := `[CREATE_TASK]
+{"title":"Ready sibling","prompt":"Use the attachment","category":"active"}
+[/CREATE_TASK]
+[CREATE_TASK]
+{"title":"Failed sibling","prompt":"Use the attachment","category":"active"}
+[/CREATE_TASK]`
+	updated, copied := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*modelConfig})
+	if copied != 1 {
+		t.Fatalf("expected one successful attachment copy, got %d", copied)
+	}
+	if !strings.Contains(updated, "Attachment conversion failed") || !strings.Contains(updated, "affected tasks were left in Backlog") {
+		t.Fatalf("expected partial conversion failure summary, got %q", updated)
+	}
+	if strings.Contains(updated, "Ready sibling was left in Backlog") {
+		t.Fatalf("summary incorrectly describes successful task as affected: %q", updated)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list project tasks: %v", err)
+	}
+	var ready, failed *models.Task
+	for i := range tasks {
+		switch tasks[i].Title {
+		case "Ready sibling":
+			ready = &tasks[i]
+		case "Failed sibling":
+			failed = &tasks[i]
+		}
+	}
+	if ready == nil || failed == nil {
+		t.Fatalf("expected both created tasks, ready=%v failed=%v", ready, failed)
+	}
+	if ready.Category != models.CategoryActive {
+		t.Fatalf("successful sibling should activate, got %s", ready.Category)
+	}
+	if failed.Category != models.CategoryBacklog {
+		t.Fatalf("failed sibling should remain Backlog, got %s", failed.Category)
+	}
+
+	readyAttachments, err := h.attachmentRepo.ListByTask(ctx, ready.ID)
+	if err != nil {
+		t.Fatalf("list successful sibling attachments: %v", err)
+	}
+	if len(readyAttachments) != 1 {
+		t.Fatalf("successful sibling should have one complete attachment, got %#v", readyAttachments)
+	}
+	contents, err := os.ReadFile(readyAttachments[0].FilePath)
+	if err != nil {
+		t.Fatalf("read successful sibling attachment: %v", err)
+	}
+	if string(contents) != "complete attachment" {
+		t.Fatalf("successful sibling attachment is incomplete: %q", contents)
+	}
+
+	failedAttachments, err := h.attachmentRepo.ListByTask(ctx, failed.ID)
+	if err != nil {
+		t.Fatalf("list failed sibling attachments: %v", err)
+	}
+	if len(failedAttachments) != 0 {
+		t.Fatalf("failed sibling should have no attachment metadata, got %#v", failedAttachments)
+	}
+	failedFiles, err := os.ReadDir(filepath.Join(uploadsDir, "tasks", failed.ID))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("inspect failed sibling attachment directory: %v", err)
+	}
+	if len(failedFiles) != 0 {
+		t.Fatalf("failed sibling should have no partial attachment files, got %#v", failedFiles)
 	}
 }
 
