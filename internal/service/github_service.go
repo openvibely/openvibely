@@ -23,6 +23,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/repository"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -871,21 +872,48 @@ func (s *GitHubService) githubCommitTreeSHA(ctx context.Context, token string, r
 	return strings.TrimSpace(payload.Tree.SHA), nil
 }
 
+// githubTreeBlobUploadConcurrency bounds how many independent blob uploads run
+// in parallel during branch publication. It is intentionally conservative to
+// avoid overwhelming the GitHub API while still overlapping independent uploads.
+const githubTreeBlobUploadConcurrency = 4
+
 func (s *GitHubService) createGitHubTree(ctx context.Context, token string, repo *GitHubRepoRef, baseTreeSHA string, changes []githubBranchChange) (string, error) {
-	tree := make([]map[string]any, 0, len(changes))
-	for _, change := range changes {
+	// Preserve deterministic original ordering of the tree entries. Each blob
+	// SHA is written back into the entry at its original index, so parallel
+	// uploads never reorder the tree or misattribute a SHA to the wrong path.
+	tree := make([]map[string]any, len(changes))
+	blobIndexes := make([]int, 0, len(changes))
+	for i, change := range changes {
 		entry := map[string]any{"path": change.Path, "mode": change.Mode, "type": "blob"}
 		if change.Delete {
 			entry["sha"] = nil
 		} else {
-			blobSHA, err := s.createGitHubBlob(ctx, token, repo, change.Content)
-			if err != nil {
-				return "", fmt.Errorf("creating blob for %s: %w", change.Path, err)
-			}
-			entry["sha"] = blobSHA
+			blobIndexes = append(blobIndexes, i)
 		}
-		tree = append(tree, entry)
+		tree[i] = entry
 	}
+
+	// Deletion-only changes never start blob workers.
+	if len(blobIndexes) > 0 {
+		group, groupCtx := errgroup.WithContext(ctx)
+		group.SetLimit(githubTreeBlobUploadConcurrency)
+		for _, idx := range blobIndexes {
+			idx := idx
+			change := changes[idx]
+			group.Go(func() error {
+				blobSHA, err := s.createGitHubBlob(groupCtx, token, repo, change.Content)
+				if err != nil {
+					return fmt.Errorf("creating blob for %s: %w", change.Path, err)
+				}
+				tree[idx]["sha"] = blobSHA
+				return nil
+			})
+		}
+		if err := group.Wait(); err != nil {
+			return "", err
+		}
+	}
+
 	payload := map[string]any{"base_tree": baseTreeSHA, "tree": tree}
 	body, _ := json.Marshal(payload)
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/git/trees", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
