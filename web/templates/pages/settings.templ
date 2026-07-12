@@ -488,7 +488,12 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								</div>
 							</div>
 							<div class="pr-12">
-								<h3 class="font-bold flex items-center gap-2">Discord</h3>
+								<h3 class="font-bold flex items-center gap-2">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-icon="discord-brand">
+										<path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.516 13.78 13.78 0 0 0-.624 1.275 18.27 18.27 0 0 0-5.616 0 12.64 12.64 0 0 0-.632-1.275A19.74 19.74 0 0 0 3.677 4.37C.589 8.966-.247 13.45.171 17.87a19.9 19.9 0 0 0 5.993 3.03 14.24 14.24 0 0 0 1.28-2.083 12.78 12.78 0 0 1-2.017-.962c.169-.124.334-.252.493-.385a14.05 14.05 0 0 0 12.594 0c.161.133.326.261.493.385a12.78 12.78 0 0 1-2.017.962 14.2 14.2 0 0 0 1.28 2.083 19.9 19.9 0 0 0 5.993-3.03c.483-5.188-.826-9.681-3.18-13.688l-.77.188ZM8.02 15.331c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.333-.955 2.419-2.157 2.419Zm7.975 0c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.333-.946 2.419-2.157 2.419Z"/>
+									</svg>
+									Discord
+								</h3>
 								<p class="text-sm opacity-60">Chat with OpenVibely from Discord DMs and mentioned server channels.</p>
 								if len(discordAuthorizedUsers) > 0 {
 									<div class="mt-2 flex items-center gap-2">

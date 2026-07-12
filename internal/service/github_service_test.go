@@ -497,6 +497,153 @@ func TestDefaultGitHubSDLCLabelsDoNotUseProductPrefix(t *testing.T) {
 	}
 }
 
+func TestListPullRequestFeedbackTraversesAllPagesAndSortsMergedSources(t *testing.T) {
+	ctx := context.Background()
+	var server *httptest.Server
+	requests := map[string]int{}
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
+			t.Fatalf("expected configured PAT bearer auth, got %q", got)
+		}
+		if got := r.Header.Get("X-GitHub-Api-Version"); got != githubAPIVersionHeaderValue {
+			t.Fatalf("expected GitHub API version header, got %q", got)
+		}
+		page := r.URL.Query().Get("page")
+		key := r.URL.Path + ":" + page
+		requests[key]++
+		if page == "" {
+			w.Header().Set("Link", fmt.Sprintf("<%s%s?page=2&per_page=100>; rel=\"next\", <%s%s?page=2&per_page=100>; rel=\"last\"", server.URL, r.URL.Path, server.URL, r.URL.Path))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path + ":" + page {
+		case "/repos/openvibely/openvibely/issues/9/comments:":
+			_, _ = w.Write([]byte(`[{"id":101,"body":"issue page one","created_at":"2026-01-01T05:00:00Z"}]`))
+		case "/repos/openvibely/openvibely/issues/9/comments:2":
+			_, _ = w.Write([]byte(`[{"id":102,"body":"issue page two","created_at":"2026-01-01T01:00:00Z"}]`))
+		case "/repos/openvibely/openvibely/pulls/9/reviews:":
+			_, _ = w.Write([]byte(`[{"id":201,"body":" ","state":" ","submitted_at":"2026-01-01T02:00:00Z"}]`))
+		case "/repos/openvibely/openvibely/pulls/9/reviews:2":
+			_, _ = w.Write([]byte(`[{"id":202,"state":"APPROVED","submitted_at":"2026-01-01T04:00:00Z"}]`))
+		case "/repos/openvibely/openvibely/pulls/9/comments:":
+			_, _ = w.Write([]byte(`[{"id":301,"body":"review comment page one","created_at":"2026-01-01T03:00:00Z"}]`))
+		case "/repos/openvibely/openvibely/pulls/9/comments:2":
+			_, _ = w.Write([]byte(`[{"id":302,"body":"review comment page two","created_at":"2026-01-01T06:00:00Z"}]`))
+		default:
+			t.Fatalf("unexpected GitHub API request: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := newPATGitHubService(t, server.URL)
+	feedback, err := svc.ListPullRequestFeedback(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, 9)
+	if err != nil {
+		t.Fatalf("ListPullRequestFeedback: %v", err)
+	}
+	wantIDs := []string{"102", "301", "202", "101", "302"}
+	if len(feedback) != len(wantIDs) {
+		t.Fatalf("expected %d non-empty feedback items, got %d: %#v", len(wantIDs), len(feedback), feedback)
+	}
+	for i, wantID := range wantIDs {
+		if feedback[i].ID != wantID {
+			t.Fatalf("feedback[%d] ID = %q, want %q; feedback=%#v", i, feedback[i].ID, wantID, feedback)
+		}
+	}
+	for _, path := range []string{
+		"/repos/openvibely/openvibely/issues/9/comments",
+		"/repos/openvibely/openvibely/pulls/9/reviews",
+		"/repos/openvibely/openvibely/pulls/9/comments",
+	} {
+		if requests[path+":"] != 1 || requests[path+":2"] != 1 {
+			t.Fatalf("expected one request for both pages of %s, got %#v", path, requests)
+		}
+	}
+}
+
+func TestListAssignedIssuesTraversesAllPagesAndFiltersPullRequests(t *testing.T) {
+	ctx := context.Background()
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "" {
+			w.Header().Set("Link", fmt.Sprintf("<%s%s?page=2&per_page=100>; rel=\"next\"", server.URL, r.URL.Path))
+			_, _ = w.Write([]byte(`[{"number":1,"title":"page one issue"},{"number":2,"title":"page one PR","pull_request":{}}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"number":3,"title":"page two PR","pull_request":{}},{"number":4,"title":"page two issue"}]`))
+	}))
+	defer server.Close()
+
+	issues, err := newPATGitHubService(t, server.URL).ListAssignedIssues(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "dev-bot")
+	if err != nil {
+		t.Fatalf("ListAssignedIssues: %v", err)
+	}
+	if len(issues) != 2 || issues[0].Number != 1 || issues[1].Number != 4 {
+		t.Fatalf("expected non-PR issues from both pages, got %#v", issues)
+	}
+}
+
+func TestFindPullRequestForIssueFindsCrossReferenceOnSecondPage(t *testing.T) {
+	ctx := context.Background()
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "" {
+			w.Header().Set("Link", fmt.Sprintf("<%s%s?page=2&per_page=100>; rel=\"next\"", server.URL, r.URL.Path))
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"source":{"issue":{"number":42,"html_url":"https://github.com/openvibely/openvibely/pull/42","state":"open","pull_request":{}}}}]`))
+	}))
+	defer server.Close()
+
+	pr, err := newPATGitHubService(t, server.URL).FindPullRequestForIssue(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, 9)
+	if err != nil {
+		t.Fatalf("FindPullRequestForIssue: %v", err)
+	}
+	if pr == nil || pr.Number != 42 {
+		t.Fatalf("expected PR #42 from page two, got %#v", pr)
+	}
+}
+
+func TestPaginatedGitHubGetReturnsSecondPageAPIErrorWithoutPartialResults(t *testing.T) {
+	ctx := context.Background()
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("page") == "" {
+			w.Header().Set("Link", fmt.Sprintf("<%s%s?page=2&per_page=100>; rel=\"next\"", server.URL, r.URL.Path))
+			_, _ = w.Write([]byte(`[{"number":1,"title":"partial issue"}]`))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message":"page two exploded"}`))
+	}))
+	defer server.Close()
+
+	issues, err := newPATGitHubService(t, server.URL).ListAssignedIssues(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "dev-bot")
+	if err == nil || !strings.Contains(err.Error(), "page two exploded") {
+		t.Fatalf("expected decoded page-two API error, got issues=%#v err=%v", issues, err)
+	}
+	if issues != nil {
+		t.Fatalf("expected no partial results after page-two error, got %#v", issues)
+	}
+}
+
+func newPATGitHubService(t *testing.T, apiBaseURL string) *GitHubService {
+	t.Helper()
+	settingsRepo := repository.NewSettingsRepo(testutil.NewTestDB(t))
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set PAT: %v", err)
+	}
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = apiBaseURL
+	return svc
+}
+
 func TestListAssignedIssuesWithPullRequestsSkipsIssuesWithoutAssociatedPR(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)

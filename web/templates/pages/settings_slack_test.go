@@ -87,6 +87,115 @@ func TestSettingsContent_RendersSlackMenuCardAndModal(t *testing.T) {
 		t.Fatal("expected manual token fallback guidance in modal")
 	}
 }
+func TestSettingsContent_RendersDiscordCardIconAcrossGatewayStates(t *testing.T) {
+	tests := []struct {
+		name               string
+		status             service.DiscordConnectionStatus
+		expectGatewayBadge bool
+	}{
+		{
+			name:               "gateway running",
+			status:             service.DiscordConnectionStatus{Configured: true, Connected: true, Running: true},
+			expectGatewayBadge: true,
+		},
+		{
+			name:   "disconnected",
+			status: service.DiscordConnectionStatus{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := renderDiscordSettingsContent(t, tt.status)
+			cardStart := strings.Index(out, `data-channel-type="discord"`)
+			if cardStart < 0 {
+				t.Fatal("expected Discord channel card")
+			}
+			cardEnd := strings.Index(out[cardStart:], `data-channel-type="email"`)
+			if cardEnd < 0 {
+				cardEnd = len(out) - cardStart
+			}
+			discordCard := out[cardStart : cardStart+cardEnd]
+
+			for _, expected := range []string{
+				`class="font-bold flex items-center gap-2"`,
+				`class="h-5 w-5"`,
+				`fill="currentColor"`,
+				`aria-hidden="true"`,
+				`data-icon="discord-brand"`,
+			} {
+				if !strings.Contains(discordCard, expected) {
+					t.Fatalf("expected Discord card to contain %q", expected)
+				}
+			}
+
+			hasGatewayBadge := strings.Contains(discordCard, "Gateway running")
+			if hasGatewayBadge != tt.expectGatewayBadge {
+				t.Fatalf("Gateway running badge presence = %t, want %t", hasGatewayBadge, tt.expectGatewayBadge)
+			}
+		})
+	}
+}
+
+func renderDiscordSettingsContent(t *testing.T, status service.DiscordConnectionStatus) string {
+	t.Helper()
+
+	var buf bytes.Buffer
+	err := SettingsContent(
+		"",
+		false,
+		nil,
+		nil,
+		nil,
+		"default",
+		true,
+		true,
+		service.GitHubConnectionStatus{},
+		service.GitHubAuthModePAT,
+		"",
+		"",
+		"",
+		"",
+		false,
+		false,
+		service.SlackConnectionStatus{},
+		"",
+		"",
+		"",
+		"",
+		service.SlackBotTokenSourceOAuth,
+		false,
+		false,
+		false,
+		false,
+		false,
+		status,
+		"",
+		true,
+		service.EmailConnectionStatus{},
+		nil,
+		"",
+		true,
+		true,
+		false,
+		"60",
+		false,
+		false,
+		false,
+		true,
+		false,
+		nil,
+		nil,
+		nil,
+		nil,
+		false,
+	).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	return buf.String()
+}
+
 func TestSettingsContent_RendersSystemLevelInboundAuthorizationCopy(t *testing.T) {
 	var buf bytes.Buffer
 	err := SettingsContent(
