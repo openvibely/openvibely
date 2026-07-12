@@ -2014,17 +2014,19 @@ func TestCreateGitHubTreeParallelBlobUploadsOverlapWithinBound(t *testing.T) {
 		treeCount   int32
 		treeBody    []byte
 	)
-	// The gate deterministically proves overlap: the first `bound` blob
-	// requests all block until `bound` of them are simultaneously in-flight,
-	// so uploads must overlap. SetLimit guarantees the bound is never exceeded.
-	reached := make(chan struct{})
-	var reachedOnce sync.Once
+	// Hold every active worker until the test releases it. Once the configured
+	// number of requests has entered, all worker slots remain occupied, so a
+	// fifth request reaching the handler before release would violate the bound.
+	boundReached := make(chan struct{})
+	release := make(chan struct{})
+	fifthEntered := make(chan struct{})
+	var boundOnce, fifthOnce sync.Once
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/git/blobs"):
-			atomic.AddInt32(&blobCount, 1)
+			count := atomic.AddInt32(&blobCount, 1)
 			content := decodeBlobContent(t, body)
 
 			mu.Lock()
@@ -2032,17 +2034,16 @@ func TestCreateGitHubTreeParallelBlobUploadsOverlapWithinBound(t *testing.T) {
 			if inFlight > maxInFlight {
 				maxInFlight = inFlight
 			}
-			cur := inFlight
+			current := inFlight
 			mu.Unlock()
 
-			if cur >= githubTreeBlobUploadConcurrency {
-				reachedOnce.Do(func() { close(reached) })
+			if current == githubTreeBlobUploadConcurrency {
+				boundOnce.Do(func() { close(boundReached) })
 			}
-			select {
-			case <-reached:
-			case <-time.After(5 * time.Second):
-				t.Errorf("blob upload gate never reached the concurrency bound")
+			if count > int32(githubTreeBlobUploadConcurrency) {
+				fifthOnce.Do(func() { close(fifthEntered) })
 			}
+			<-release
 
 			mu.Lock()
 			inFlight--
@@ -2072,12 +2073,37 @@ func TestCreateGitHubTreeParallelBlobUploadsOverlapWithinBound(t *testing.T) {
 		}
 	}
 
-	treeSHA, err := svc.createGitHubTree(context.Background(), "token", &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "base-tree", changes)
-	if err != nil {
-		t.Fatalf("createGitHubTree returned error: %v", err)
+	type treeResult struct {
+		sha string
+		err error
 	}
-	if treeSHA != "tree-sha" {
-		t.Fatalf("expected tree-sha, got %q", treeSHA)
+	result := make(chan treeResult, 1)
+	go func() {
+		sha, err := svc.createGitHubTree(context.Background(), "token", &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "base-tree", changes)
+		result <- treeResult{sha: sha, err: err}
+	}()
+
+	select {
+	case <-boundReached:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("blob uploads never filled the configured worker bound")
+	}
+
+	select {
+	case <-fifthEntered:
+		close(release)
+		t.Fatalf("a fifth blob request entered while all %d worker slots were blocked", githubTreeBlobUploadConcurrency)
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+	}
+
+	created := <-result
+	if created.err != nil {
+		t.Fatalf("createGitHubTree returned error: %v", created.err)
+	}
+	if created.sha != "tree-sha" {
+		t.Fatalf("expected tree-sha, got %q", created.sha)
 	}
 	if got := atomic.LoadInt32(&blobCount); got != fileCount {
 		t.Fatalf("expected %d blob requests, got %d", fileCount, got)
@@ -2089,11 +2115,8 @@ func TestCreateGitHubTreeParallelBlobUploadsOverlapWithinBound(t *testing.T) {
 	mu.Lock()
 	observed := maxInFlight
 	mu.Unlock()
-	if observed < 2 {
-		t.Fatalf("expected overlapping uploads (>=2), observed max in-flight %d", observed)
-	}
-	if observed > githubTreeBlobUploadConcurrency {
-		t.Fatalf("expected max in-flight <= bound %d, observed %d", githubTreeBlobUploadConcurrency, observed)
+	if observed != githubTreeBlobUploadConcurrency {
+		t.Fatalf("expected max in-flight to equal bound %d, observed %d", githubTreeBlobUploadConcurrency, observed)
 	}
 
 	// Tree entries must preserve deterministic input ordering and map each blob
@@ -2170,19 +2193,42 @@ func TestCreateGitHubTreeDeletionOnlyStartsNoBlobWorkers(t *testing.T) {
 }
 
 func TestCreateGitHubTreeCancelsRemainingWorkOnBlobFailure(t *testing.T) {
-	var treeCount int32
+	var (
+		treeCount    int32
+		queuedCount  int32
+		blockedOnce  sync.Once
+		canceledOnce sync.Once
+	)
+	blockedStarted := make(chan struct{})
+	cancellationObserved := make(chan struct{})
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/git/blobs"):
 			content := decodeBlobContent(t, body)
-			if content == "boom" {
+			switch content {
+			case "blocked":
+				blockedOnce.Do(func() { close(blockedStarted) })
+				<-r.Context().Done()
+				canceledOnce.Do(func() { close(cancellationObserved) })
+			case "boom":
+				select {
+				case <-blockedStarted:
+				case <-time.After(5 * time.Second):
+					t.Error("blocked sibling request did not start")
+				}
 				w.WriteHeader(http.StatusInternalServerError)
 				fmt.Fprint(w, `{"message":"blob failure"}`)
-				return
+			case "queued":
+				atomic.AddInt32(&queuedCount, 1)
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"sha":"blob-queued"}`)
+			default:
+				// Keep the remaining initial workers active until the failure
+				// cancels their shared request context.
+				<-r.Context().Done()
 			}
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"sha":"blob-%s"}`, content)
 		case strings.HasSuffix(r.URL.Path, "/git/trees"):
 			atomic.AddInt32(&treeCount, 1)
 			w.Header().Set("Content-Type", "application/json")
@@ -2196,9 +2242,11 @@ func TestCreateGitHubTreeCancelsRemainingWorkOnBlobFailure(t *testing.T) {
 
 	svc := newTreeTestGitHubService(server.URL)
 	changes := []githubBranchChange{
-		{Path: "ok-1.txt", Content: []byte("ok"), Mode: "100644"},
+		{Path: "blocked.txt", Content: []byte("blocked"), Mode: "100644"},
 		{Path: "broken/path.txt", Content: []byte("boom"), Mode: "100644"},
-		{Path: "ok-2.txt", Content: []byte("ok"), Mode: "100644"},
+		{Path: "peer-1.txt", Content: []byte("peer-1"), Mode: "100644"},
+		{Path: "peer-2.txt", Content: []byte("peer-2"), Mode: "100644"},
+		{Path: "queued.txt", Content: []byte("queued"), Mode: "100644"},
 	}
 
 	_, err := svc.createGitHubTree(context.Background(), "token", &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "base-tree", changes)
@@ -2207,6 +2255,14 @@ func TestCreateGitHubTreeCancelsRemainingWorkOnBlobFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "creating blob for broken/path.txt") {
 		t.Fatalf("expected path-specific blob error, got %v", err)
+	}
+	select {
+	case <-cancellationObserved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("blocked sibling request did not observe context cancellation")
+	}
+	if got := atomic.LoadInt32(&queuedCount); got != 0 {
+		t.Fatalf("expected queued blob work not to reach the server after cancellation, got %d requests", got)
 	}
 	if got := atomic.LoadInt32(&treeCount); got != 0 {
 		t.Fatalf("expected tree creation to be skipped after blob failure, got %d tree requests", got)
