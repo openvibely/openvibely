@@ -1209,7 +1209,7 @@ func (h *Handler) StartPendingTaskThreadFollowup(ctx context.Context, taskID str
 		return false, err
 	}
 	if active {
-		return false, nil
+		return true, nil
 	}
 	queued, err := h.threadInputRepo.FindOldestQueuedForTask(ctx, taskID)
 	if err != nil {
@@ -1234,7 +1234,7 @@ func (h *Handler) RetryLatestFailedTaskThreadFollowup(ctx context.Context, taskI
 		return false, err
 	}
 	if active {
-		return false, nil
+		return true, nil
 	}
 	failed, err := h.execRepo.GetLatestFailedFollowupByTask(ctx, taskID)
 	if err != nil {

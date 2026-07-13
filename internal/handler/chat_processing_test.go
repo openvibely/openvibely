@@ -5329,6 +5329,87 @@ func TestFollowupNoChangesDoesNotResetMergeStatus(t *testing.T) {
 	}
 }
 
+func TestStartPendingTaskThreadFollowup_AlreadyActiveIsHandled(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Already Active Queued Followup Project")
+	task := createTask(t, h, project.ID, "Already Active Queued Followup Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusPending
+		task.AgentID = &agent.ID
+		task.Prompt = "original prompt"
+	})
+	require.NoError(t, h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued))
+	active := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+		exec.PromptSent = "queued follow-up"
+		exec.IsFollowup = true
+	})
+
+	handled, err := h.StartPendingTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.NoError(t, h.taskSvc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusQueued, updated.Status)
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	assert.Equal(t, active.ID, execs[0].ID)
+	select {
+	case submitted := <-h.workerSvc.Submitted():
+		t.Fatalf("original task was submitted while queued follow-up execution was active: %s", submitted.ID)
+	default:
+	}
+}
+
+func TestRetryLatestFailedTaskThreadFollowup_AlreadyActiveIsHandled(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Already Active Failed Followup Project")
+	task := createTask(t, h, project.ID, "Already Active Failed Followup Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusFailed
+		task.AgentID = &agent.ID
+		task.Prompt = "original prompt"
+	})
+	require.NoError(t, h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryActive))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued))
+	failed := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecFailed
+		exec.PromptSent = "failed follow-up"
+		exec.IsFollowup = true
+	})
+	active := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+		exec.PromptSent = failed.PromptSent
+		exec.IsFollowup = true
+	})
+
+	handled, err := h.RetryLatestFailedTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.NoError(t, h.taskSvc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusQueued, updated.Status)
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 2)
+	assert.Equal(t, active.ID, execs[1].ID)
+	select {
+	case submitted := <-h.workerSvc.Submitted():
+		t.Fatalf("original task was submitted while failed follow-up retry execution was active: %s", submitted.ID)
+	default:
+	}
+}
+
 func TestRetryLatestFailedTaskThreadFollowup_RoutesUnroutedSwarmChildRetry(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

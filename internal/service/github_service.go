@@ -1418,22 +1418,46 @@ func (s *GitHubService) ListPullRequestFeedback(ctx context.Context, repo *GitHu
 		return nil, err
 	}
 
+	type sourceResult struct {
+		index    int
+		feedback []GitHubPullRequestFeedback
+		err      error
+	}
+	feedbackCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	results := make(chan sourceResult, 3)
+	sources := []func(context.Context) ([]GitHubPullRequestFeedback, error){
+		func(ctx context.Context) ([]GitHubPullRequestFeedback, error) {
+			return s.listPullRequestIssueComments(ctx, token, repo, prNumber)
+		},
+		func(ctx context.Context) ([]GitHubPullRequestFeedback, error) {
+			return s.listPullRequestReviews(ctx, token, repo, prNumber)
+		},
+		func(ctx context.Context) ([]GitHubPullRequestFeedback, error) {
+			return s.listPullRequestReviewComments(ctx, token, repo, prNumber)
+		},
+	}
+	for index, source := range sources {
+		go func() {
+			feedback, err := source(feedbackCtx)
+			results <- sourceResult{index: index, feedback: feedback, err: err}
+		}()
+	}
+
+	feedbackBySource := make([][]GitHubPullRequestFeedback, len(sources))
+	for range sources {
+		result := <-results
+		if result.err != nil {
+			cancel()
+			return nil, result.err
+		}
+		feedbackBySource[result.index] = result.feedback
+	}
+
 	var feedback []GitHubPullRequestFeedback
-	issueComments, err := s.listPullRequestIssueComments(ctx, token, repo, prNumber)
-	if err != nil {
-		return nil, err
+	for _, sourceFeedback := range feedbackBySource {
+		feedback = append(feedback, sourceFeedback...)
 	}
-	feedback = append(feedback, issueComments...)
-	reviews, err := s.listPullRequestReviews(ctx, token, repo, prNumber)
-	if err != nil {
-		return nil, err
-	}
-	feedback = append(feedback, reviews...)
-	reviewComments, err := s.listPullRequestReviewComments(ctx, token, repo, prNumber)
-	if err != nil {
-		return nil, err
-	}
-	feedback = append(feedback, reviewComments...)
 	sort.SliceStable(feedback, func(i, j int) bool {
 		return feedback[i].CreatedAt.Before(feedback[j].CreatedAt)
 	})
