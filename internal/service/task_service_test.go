@@ -528,6 +528,31 @@ func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadFails(t
 	assert.Equal(t, models.StatusPending, got.Status)
 }
 
+func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenReloadContextIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Deferred activation cancelled reload",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusFailed,
+		Prompt:    "retry attachment processing",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc.updateCategoryTaskLoader = func(ctx context.Context, _ string) (*models.Task, error) {
+		cancel()
+		return nil, ctx.Err()
+	}
+
+	require.ErrorIs(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive), context.Canceled)
+	got, err := taskRepo.GetByID(context.Background(), task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.CategoryBacklog, got.Category)
+	assert.Equal(t, models.StatusFailed, got.Status)
+}
+
 func TestTaskService_UpdateCategory_QueuedFollowupRetryCreatesOneExecutionAfterActivationFailure(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
