@@ -2681,11 +2681,10 @@ func TestCopyChatAttachmentsToTask_NoAttachments(t *testing.T) {
 	assert.Empty(t, taskAttachments)
 }
 
-// TestCopyChatAttachmentsToTask_DeferredActivation verifies the fix for the race
-// condition where a task created from chat with category "active" would start
-// executing before attachments were copied. The fix creates the task as "backlog"
-// first, copies attachments, then activates it via UpdateCategory.
-func TestCopyChatAttachmentsToTask_DeferredActivation(t *testing.T) {
+// TestProcessChatTaskCreations_DeferredAttachmentActivationExactlyOnce verifies that
+// the production Chat creation path publishes attachments before activating and
+// submits the resulting task exactly once.
+func TestProcessChatTaskCreations_DeferredAttachmentActivationExactlyOnce(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -2732,55 +2731,29 @@ func TestCopyChatAttachmentsToTask_DeferredActivation(t *testing.T) {
 	}
 	require.NoError(t, h.chatAttachmentRepo.Create(ctx, chatAtt))
 
-	// Step 1: Simulate deferred creation — task originally wanted "active" but
-	// is created as "backlog" to prevent auto-submission before attachments are copied.
-	deferredTask := &models.Task{
-		ProjectID: projects[0].ID, Title: "Deferred active task",
-		Prompt: "update styling based on screenshot", Status: models.StatusPending,
-		Category: models.CategoryBacklog, // Temporarily backlog (was "active")
-		AgentID:  &agent.ID,
-	}
-	require.NoError(t, h.taskRepo.Create(ctx, deferredTask))
-
-	// Verify task is in backlog (not yet executing)
-	task, err := h.taskRepo.GetByID(ctx, deferredTask.ID)
+	output := `[CREATE_TASK]
+{"title":"Deferred active task","prompt":"update styling based on screenshot","category":"active","agent_id":"` + agent.ID + `"}
+[/CREATE_TASK]`
+	updatedOutput, copiedCount := h.processChatTaskCreations(ctx, exec.ID, projects[0].ID, output, []models.LLMConfig{*agent})
+	require.Equal(t, 1, copiedCount)
+	createdIDs := extractTaskIDsFromOutput(updatedOutput)
+	require.Len(t, createdIDs, 1)
+	deferredTask, err := h.taskRepo.GetByID(ctx, createdIDs[0])
 	require.NoError(t, err)
-	assert.Equal(t, models.CategoryBacklog, task.Category)
+	require.NotNil(t, deferredTask)
+	assert.Equal(t, models.CategoryActive, deferredTask.Category)
+	assert.Contains(t, updatedOutput, `"Deferred active task" (active)`)
 
-	// Step 2: Copy attachments while task is still in backlog
-	copiedCount, err := h.copyChatAttachmentsToTask(ctx, exec.ID, deferredTask.ID)
-	require.NoError(t, err)
-	assert.Equal(t, 1, copiedCount)
-
-	// Verify attachments were copied BEFORE activation
+	// The key invariant: publication and prompt updates are complete when the
+	// production creation path reports and submits the task as Active.
 	taskAttachments, err := h.attachmentRepo.ListByTask(ctx, deferredTask.ID)
 	require.NoError(t, err)
 	require.Len(t, taskAttachments, 1)
 	assert.Equal(t, "screenshot.png", taskAttachments[0].FileName)
-
-	// Verify the task prompt includes the attachment reference
-	task, err = h.taskRepo.GetByID(ctx, deferredTask.ID)
-	require.NoError(t, err)
-	assert.Contains(t, task.Prompt, "[Attached files from chat:")
-	assert.Contains(t, task.Prompt, "screenshot.png (path: ")
-
-	// Verify the file exists at the expected location
+	assert.Contains(t, deferredTask.Prompt, "[Attached files from chat:")
+	assert.Contains(t, deferredTask.Prompt, "screenshot.png (path: ")
 	taskDir := filepath.Join(tmpDir, "tasks", deferredTask.ID)
 	assert.FileExists(t, filepath.Join(taskDir, "screenshot.png"))
-
-	// Step 3: Now activate the task (this would trigger submission to worker pool)
-	err = h.taskSvc.UpdateCategory(ctx, deferredTask.ID, models.CategoryActive)
-	require.NoError(t, err)
-
-	// Verify task is now active with attachments already in place
-	task, err = h.taskRepo.GetByID(ctx, deferredTask.ID)
-	require.NoError(t, err)
-	assert.Equal(t, models.CategoryActive, task.Category)
-
-	// The key invariant: when the task starts executing, attachments are already there
-	taskAttachments, err = h.attachmentRepo.ListByTask(ctx, deferredTask.ID)
-	require.NoError(t, err)
-	assert.Len(t, taskAttachments, 1, "attachments should be present when task becomes active")
 	select {
 	case submitted := <-h.workerSvc.Submitted():
 		assert.Equal(t, deferredTask.ID, submitted.ID)

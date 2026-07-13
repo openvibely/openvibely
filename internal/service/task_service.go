@@ -24,6 +24,7 @@ type TaskService struct {
 	swarmSvc                          *SwarmService
 	queuedTaskThreadFollowupHook      func(context.Context, string) (bool, error)
 	failedTaskThreadFollowupRetryHook func(context.Context, string) (bool, error)
+	updateCategoryTaskLoader          func(context.Context, string) (*models.Task, error)
 }
 
 func NewTaskService(repo *repository.TaskRepo, attachmentRepo *repository.AttachmentRepo, workerSvc *WorkerService) *TaskService {
@@ -204,19 +205,6 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			return err
 		}
 	}
-	if err := s.repo.UpdateCategory(ctx, id, category); err != nil {
-		applog.Infof("[task-svc] UpdateCategory error: %v", err)
-		return err
-	}
-	task, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		applog.Infof("[task-svc] UpdateCategory error fetching task: %v", err)
-		return err
-	}
-	if task == nil {
-		return nil
-	}
-
 	rollbackActivation := func(activationErr error) error {
 		if previousTask == nil {
 			return activationErr
@@ -229,6 +217,22 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 		}
 		applog.Infof("[task-svc] UpdateCategory rolled back failed activation id=%s category=%s status=%s", id, previousTask.Category, previousTask.Status)
 		return activationErr
+	}
+	if err := s.repo.UpdateCategory(ctx, id, category); err != nil {
+		applog.Infof("[task-svc] UpdateCategory error: %v", err)
+		return err
+	}
+	taskLoader := s.repo.GetByID
+	if s.updateCategoryTaskLoader != nil {
+		taskLoader = s.updateCategoryTaskLoader
+	}
+	task, err := taskLoader(ctx, id)
+	if err != nil {
+		applog.Infof("[task-svc] UpdateCategory error fetching task: %v", err)
+		return rollbackActivation(err)
+	}
+	if task == nil {
+		return nil
 	}
 
 	// If moved AWAY from Active while running or queued, cancel the execution
