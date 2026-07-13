@@ -497,9 +497,183 @@ func TestDefaultGitHubSDLCLabelsDoNotUseProductPrefix(t *testing.T) {
 	}
 }
 
+func TestListPullRequestFeedbackFetchesSourcesConcurrentlyAndContinuesPagination(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var server *httptest.Server
+	var active atomic.Int32
+	var maxActive atomic.Int32
+	entered := make(chan string, 3)
+	releaseFirstPages := make(chan struct{})
+	otherFirstPagesDone := make(chan struct{}, 2)
+	secondPageEntered := make(chan struct{}, 1)
+
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		if page == "" {
+			current := active.Add(1)
+			defer active.Add(-1)
+			for {
+				maximum := maxActive.Load()
+				if current <= maximum || maxActive.CompareAndSwap(maximum, current) {
+					break
+				}
+			}
+			entered <- r.URL.Path
+			select {
+			case <-releaseFirstPages:
+			case <-r.Context().Done():
+				return
+			}
+			if r.URL.Path != "/repos/openvibely/openvibely/issues/17/comments" {
+				defer func() { otherFirstPagesDone <- struct{}{} }()
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path + ":" + page {
+		case "/repos/openvibely/openvibely/issues/17/comments:":
+			for range 2 {
+				<-otherFirstPagesDone
+			}
+			w.Header().Set("Link", fmt.Sprintf("<%s%s?page=2&per_page=100>; rel=\"next\"", server.URL, r.URL.Path))
+			_, _ = w.Write([]byte(`[{"id":101,"body":"page one","created_at":"2026-01-01T01:00:00Z"}]`))
+		case "/repos/openvibely/openvibely/issues/17/comments:2":
+			secondPageEntered <- struct{}{}
+			_, _ = w.Write([]byte(`[{"id":102,"body":"page two","created_at":"2026-01-01T04:00:00Z"}]`))
+		case "/repos/openvibely/openvibely/pulls/17/reviews:":
+			_, _ = w.Write([]byte(`[{"id":201,"state":"APPROVED","submitted_at":"2026-01-01T02:00:00Z"}]`))
+		case "/repos/openvibely/openvibely/pulls/17/comments:":
+			_, _ = w.Write([]byte(`[{"id":301,"body":"review comment","created_at":"2026-01-01T03:00:00Z"}]`))
+		default:
+			t.Errorf("unexpected GitHub API request: %s", r.URL.String())
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer func() {
+		cancel()
+		server.Close()
+	}()
+
+	type result struct {
+		feedback []GitHubPullRequestFeedback
+		err      error
+	}
+	resultCh := make(chan result, 1)
+	svc := newPATGitHubService(t, server.URL)
+	go func() {
+		feedback, err := svc.ListPullRequestFeedback(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, 17)
+		resultCh <- result{feedback: feedback, err: err}
+	}()
+
+	seen := make(map[string]bool, 3)
+	for len(seen) < 3 {
+		select {
+		case path := <-entered:
+			seen[path] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for all feedback sources to overlap; entered=%v max_concurrency=%d", seen, maxActive.Load())
+		}
+	}
+	if got := maxActive.Load(); got <= 1 || got > 3 {
+		t.Fatalf("maximum source concurrency = %d, want greater than one and no more than three", got)
+	}
+	close(releaseFirstPages)
+
+	select {
+	case <-secondPageEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("paginated feedback source did not continue to its second page")
+	}
+
+	select {
+	case got := <-resultCh:
+		if got.err != nil {
+			t.Fatalf("ListPullRequestFeedback: %v", got.err)
+		}
+		wantIDs := []string{"101", "201", "301", "102"}
+		if len(got.feedback) != len(wantIDs) {
+			t.Fatalf("feedback length = %d, want %d: %#v", len(got.feedback), len(wantIDs), got.feedback)
+		}
+		for i, wantID := range wantIDs {
+			if got.feedback[i].ID != wantID {
+				t.Fatalf("feedback[%d] ID = %q, want %q", i, got.feedback[i].ID, wantID)
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ListPullRequestFeedback did not return")
+	}
+}
+
+func TestListPullRequestFeedbackCancelsOutstandingSourcesOnError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	entered := make(chan string, 3)
+	returnError := make(chan struct{})
+	canceled := make(chan string, 2)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered <- r.URL.Path
+		if strings.HasSuffix(r.URL.Path, "/reviews") {
+			<-returnError
+			http.Error(w, `{"message":"reviews unavailable"}`, http.StatusInternalServerError)
+			return
+		}
+		<-r.Context().Done()
+		canceled <- r.URL.Path
+	}))
+	defer func() {
+		cancel()
+		server.Close()
+	}()
+
+	type result struct {
+		feedback []GitHubPullRequestFeedback
+		err      error
+	}
+	resultCh := make(chan result, 1)
+	svc := newPATGitHubService(t, server.URL)
+	go func() {
+		feedback, err := svc.ListPullRequestFeedback(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, 17)
+		resultCh <- result{feedback: feedback, err: err}
+	}()
+
+	seen := make(map[string]bool, 3)
+	for len(seen) < 3 {
+		select {
+		case path := <-entered:
+			seen[path] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for all feedback sources; entered=%v", seen)
+		}
+	}
+	close(returnError)
+
+	select {
+	case got := <-resultCh:
+		if got.err == nil || !strings.Contains(got.err.Error(), "reviews unavailable") {
+			t.Fatalf("expected reviews API error, got %v", got.err)
+		}
+		if got.feedback != nil {
+			t.Fatalf("expected no partial feedback, got %#v", got.feedback)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ListPullRequestFeedback did not return after source error")
+	}
+
+	canceledSources := make(map[string]bool, 2)
+	for len(canceledSources) < 2 {
+		select {
+		case path := <-canceled:
+			canceledSources[path] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("outstanding sources did not observe cancellation: %v", canceledSources)
+		}
+	}
+}
+
 func TestListPullRequestFeedbackTraversesAllPagesAndSortsMergedSources(t *testing.T) {
 	ctx := context.Background()
 	var server *httptest.Server
+	var requestsMu sync.Mutex
 	requests := map[string]int{}
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
@@ -510,7 +684,9 @@ func TestListPullRequestFeedbackTraversesAllPagesAndSortsMergedSources(t *testin
 		}
 		page := r.URL.Query().Get("page")
 		key := r.URL.Path + ":" + page
+		requestsMu.Lock()
 		requests[key]++
+		requestsMu.Unlock()
 		if page == "" {
 			w.Header().Set("Link", fmt.Sprintf("<%s%s?page=2&per_page=100>; rel=\"next\", <%s%s?page=2&per_page=100>; rel=\"last\"", server.URL, r.URL.Path, server.URL, r.URL.Path))
 		}
@@ -548,6 +724,8 @@ func TestListPullRequestFeedbackTraversesAllPagesAndSortsMergedSources(t *testin
 			t.Fatalf("feedback[%d] ID = %q, want %q; feedback=%#v", i, feedback[i].ID, wantID, feedback)
 		}
 	}
+	requestsMu.Lock()
+	defer requestsMu.Unlock()
 	for _, path := range []string{
 		"/repos/openvibely/openvibely/issues/9/comments",
 		"/repos/openvibely/openvibely/pulls/9/reviews",
