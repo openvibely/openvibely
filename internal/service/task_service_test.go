@@ -504,6 +504,82 @@ func TestTaskService_UpdateCategory_PromotesQueuedTaskThreadFollowupBeforeOrigin
 	}
 }
 
+func TestTaskService_UpdateCategory_RollsBackDeferredActivationWhenFollowupHookFails(t *testing.T) {
+	tests := []struct {
+		name    string
+		setHook func(*TaskService, func(context.Context, string) (bool, error))
+	}{
+		{
+			name: "queued follow-up",
+			setHook: func(svc *TaskService, hook func(context.Context, string) (bool, error)) {
+				svc.SetQueuedTaskThreadFollowupHook(hook)
+			},
+		},
+		{
+			name: "failed follow-up",
+			setHook: func(svc *TaskService, hook func(context.Context, string) (bool, error)) {
+				svc.SetFailedTaskThreadFollowupRetryHook(hook)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			db := testutil.NewTestDB(t)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			workerSvc := newTestWorkerService(t)
+			svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     "Deferred activation " + tt.name,
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusPending,
+				Prompt:    "process attachment",
+			}
+			require.NoError(t, taskRepo.Create(ctx, task))
+
+			calls := 0
+			tt.setHook(svc, func(context.Context, string) (bool, error) {
+				calls++
+				return true, assert.AnError
+			})
+
+			require.ErrorIs(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive), assert.AnError)
+			got, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			assert.Equal(t, models.CategoryBacklog, got.Category)
+			assert.Equal(t, models.StatusPending, got.Status)
+			select {
+			case submitted := <-workerSvc.Submitted():
+				t.Fatalf("task was submitted after failed activation: %s", submitted.ID)
+			default:
+			}
+
+			svc.SetQueuedTaskThreadFollowupHook(nil)
+			svc.SetFailedTaskThreadFollowupRetryHook(nil)
+			require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+			require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryActive))
+			assert.Equal(t, 1, calls)
+			got, err = taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			assert.Equal(t, models.CategoryActive, got.Category)
+			assert.Equal(t, models.StatusPending, got.Status)
+			select {
+			case submitted := <-workerSvc.Submitted():
+				assert.Equal(t, task.ID, submitted.ID)
+			case <-time.After(time.Second):
+				t.Fatal("task was not submitted after successful retry")
+			}
+			select {
+			case submitted := <-workerSvc.Submitted():
+				t.Fatalf("task was submitted more than once after retry: %s", submitted.ID)
+			default:
+			}
+		})
+	}
+}
+
 func TestTaskService_RunTask_PromotesQueuedTaskThreadFollowupBeforeOriginalPrompt(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

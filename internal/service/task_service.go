@@ -195,6 +195,15 @@ func (s *TaskService) Update(ctx context.Context, t *models.Task) error {
 
 func (s *TaskService) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
 	applog.Infof("[task-svc] UpdateCategory id=%s -> %s", id, category)
+	var previousTask *models.Task
+	if category == models.CategoryActive {
+		var err error
+		previousTask, err = s.repo.GetByID(ctx, id)
+		if err != nil {
+			applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
+			return err
+		}
+	}
 	if err := s.repo.UpdateCategory(ctx, id, category); err != nil {
 		applog.Infof("[task-svc] UpdateCategory error: %v", err)
 		return err
@@ -206,6 +215,20 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	}
 	if task == nil {
 		return nil
+	}
+
+	rollbackActivation := func(activationErr error) error {
+		if previousTask == nil {
+			return activationErr
+		}
+		if err := s.repo.UpdateCategory(ctx, id, previousTask.Category); err != nil {
+			return errors.Join(activationErr, fmt.Errorf("rolling back task category to %s: %w", previousTask.Category, err))
+		}
+		if err := s.repo.UpdateStatus(ctx, id, previousTask.Status); err != nil {
+			return errors.Join(activationErr, fmt.Errorf("rolling back task status to %s: %w", previousTask.Status, err))
+		}
+		applog.Infof("[task-svc] UpdateCategory rolled back failed activation id=%s category=%s status=%s", id, previousTask.Category, previousTask.Status)
+		return activationErr
 	}
 
 	// If moved AWAY from Active while running or queued, cancel the execution
@@ -245,7 +268,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			handled, err := s.queuedTaskThreadFollowupHook(ctx, id)
 			if err != nil {
 				applog.Infof("[task-svc] UpdateCategory queued task-thread follow-up promotion failed id=%s: %v", id, err)
-				return err
+				return rollbackActivation(err)
 			}
 			if handled {
 				applog.Infof("[task-svc] UpdateCategory promoted queued task-thread follow-up id=%s", id)
@@ -256,7 +279,7 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			handled, err := s.failedTaskThreadFollowupRetryHook(ctx, id)
 			if err != nil {
 				applog.Infof("[task-svc] UpdateCategory failed task-thread follow-up retry failed id=%s: %v", id, err)
-				return err
+				return rollbackActivation(err)
 			}
 			if handled {
 				applog.Infof("[task-svc] UpdateCategory retried failed task-thread follow-up id=%s", id)
@@ -264,9 +287,14 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 			}
 		}
 		applog.Infof("[task-svc] UpdateCategory resetting status to pending and activating id=%s (was %s)", id, task.Status)
-		s.repo.UpdateStatus(ctx, id, models.StatusPending)
+		if err := s.repo.UpdateStatus(ctx, id, models.StatusPending); err != nil {
+			return rollbackActivation(err)
+		}
 		task.Status = models.StatusPending
-		return s.submitActivatedTask(ctx, *task, "user")
+		if err := s.submitActivatedTask(ctx, *task, "user"); err != nil {
+			return rollbackActivation(err)
+		}
+		return nil
 	}
 	return nil
 }

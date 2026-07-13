@@ -2781,6 +2781,17 @@ func TestCopyChatAttachmentsToTask_DeferredActivation(t *testing.T) {
 	taskAttachments, err = h.attachmentRepo.ListByTask(ctx, deferredTask.ID)
 	require.NoError(t, err)
 	assert.Len(t, taskAttachments, 1, "attachments should be present when task becomes active")
+	select {
+	case submitted := <-h.workerSvc.Submitted():
+		assert.Equal(t, deferredTask.ID, submitted.ID)
+	case <-time.After(time.Second):
+		t.Fatal("activated attachment task was not submitted")
+	}
+	select {
+	case submitted := <-h.workerSvc.Submitted():
+		t.Fatalf("activated attachment task was submitted more than once: %s", submitted.ID)
+	default:
+	}
 }
 
 // TestHandler_Chat_FullPageVsHTMXPartial verifies that HTMX requests return partial content
