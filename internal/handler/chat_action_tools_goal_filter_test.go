@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFilterAssignedAgentRuntimeToolDefs_IncludesSendMessageByDefault(t *testing.T) {
@@ -70,6 +73,51 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 	if granted["report_task_goal_blocked"] {
 		t.Fatalf("ungranted blocked-report tool was exposed: %+v", granted)
 	}
+}
+
+func TestFilterTaskThreadRuntimeToolDefs_CreateNotificationDispatchUsesPersistedTaskContext(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Task Thread Notification Project")
+	task := createTask(t, h, project.ID, "Task Thread Notification Source", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusPending
+	})
+	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, false)
+	advertised := toolDefNameSet(defs)
+	require.True(t, advertised["create_notification"], "task-thread runtime must advertise create_notification")
+	capabilities := capabilityNameSet(filterTaskThreadCapabilitySummaries(
+		chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), nil, false,
+	))
+	require.True(t, capabilities["create_notification"], "task-thread capabilities must include create_notification")
+
+	runtime := h.buildChatActionToolRuntimeFromDefs(streamingResponseParams{
+		TaskID:         task.ID,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	}, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	output, handled, isErr, err := runtime.Executor(ctx, "create_notification", json.RawMessage(`{
+		"type":"task_thread_suggestion",
+		"title":"Follow-up suggestion",
+		"body":"Created from an ordinary task follow-up",
+		"idempotency_key":"task-thread-followup"
+	}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+
+	var result struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &result))
+	require.NotEmpty(t, result.Notification.ID)
+	stored, err := h.alertSvc.GetByID(ctx, project.ID, result.Notification.ID)
+	require.NoError(t, err)
+	require.Equal(t, project.ID, stored.ProjectID)
+	require.Equal(t, models.AlertDecisionPending, stored.DecisionState)
+	require.Equal(t, models.AlertProcessingUnclaimed, stored.ProcessingState)
+	require.NotNil(t, stored.SourceTaskID)
+	require.Equal(t, task.ID, *stored.SourceTaskID)
 }
 
 func TestFilterTaskThreadRuntimeToolDefs_HaveWebHandlers(t *testing.T) {
