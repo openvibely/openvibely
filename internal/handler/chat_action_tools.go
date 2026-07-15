@@ -197,7 +197,7 @@ func (h *Handler) chatActionExecutor(params streamingResponseParams, collector *
 
 func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) map[string]chatcontrol.RuntimeActionHandler {
 	alertHandlers := service.BuildAlertRuntimeActionHandlers(service.AlertRuntimeOptions{
-		ProjectID: params.ProjectID, CallerTaskID: params.TaskID, Source: "agent", AlertSvc: h.alertSvc,
+		ProjectID: params.ProjectID, CallerTaskID: params.TaskID, Source: "agent", AlertSvc: h.alertSvc, TaskRepo: h.taskRepo,
 	})
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
@@ -404,6 +404,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"list_alerts":                      alertHandlers["list_alerts"],
 		"get_alert":                        alertHandlers["get_alert"],
 		"create_alert":                     alertHandlers["create_alert"],
+		"create_notification":              alertHandlers["create_notification"],
 		"claim_alert":                      alertHandlers["claim_alert"],
 		"create_alert_implementation_task": alertHandlers["create_alert_implementation_task"],
 		"link_alert_implementation_task":   alertHandlers["link_alert_implementation_task"],

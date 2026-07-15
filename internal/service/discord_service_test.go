@@ -36,6 +36,36 @@ func newDiscordServiceForTest(t *testing.T) (*DiscordService, *sql.DB, *reposito
 	return svc, db, settingsRepo, projectRepo, taskRepo, discordAuthRepo, discordTaskContextRepo
 }
 
+func TestDiscordService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
+	svc, db, _, projectRepo, taskRepo, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Notification Lifecycle"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	caller := &models.Task{ProjectID: project.ID, Title: "Discord chat", Prompt: "process", Category: models.CategoryChat, Status: models.StatusPending, Priority: 2}
+	if err := taskRepo.Create(ctx, caller); err != nil {
+		t.Fatal(err)
+	}
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	svc.SetAlertService(alertSvc)
+	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Discord suggestion", Severity: models.SeverityInfo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := alertSvc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatal(err)
+	}
+	rt := svc.buildDiscordActionToolRuntimeForTask(project.ID, caller.ID, discordActionContext{ChannelID: "channel", UserID: "user"}, nil)
+	output, handled, isErr, err := rt.Executor(ctx, "claim_alert", json.RawMessage(`{"alert_id":"`+alert.ID+`"}`))
+	if err != nil || !handled || isErr {
+		t.Fatalf("claim_alert failed: output=%s handled=%v isErr=%v err=%v", output, handled, isErr, err)
+	}
+	if !strings.Contains(output, caller.ID) {
+		t.Fatalf("claim output %q does not contain persisted caller task %s", output, caller.ID)
+	}
+}
+
 func TestDiscordService_GetConnectionStatusRequiresRunningGateway(t *testing.T) {
 	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()

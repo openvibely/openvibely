@@ -174,6 +174,112 @@ func TestAlertService_PublishesEventOnCreate(t *testing.T) {
 	}
 }
 
+func TestAlertService_PublishesProjectScopedEventsForLifecycleMutations(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Lifecycle Events"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	caller := &models.Task{ProjectID: project.ID, Title: "Scanner", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	if err := taskRepo.Create(ctx, caller); err != nil {
+		t.Fatal(err)
+	}
+	broadcaster := events.NewBroadcaster()
+	sub, err := broadcaster.Subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer broadcaster.Unsubscribe(sub)
+	svc := NewAlertService(repository.NewAlertRepo(db), broadcaster)
+	alert, err := svc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Lifecycle", Severity: models.SeverityInfo})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectEvent := func() {
+		t.Helper()
+		select {
+		case event := <-sub:
+			if event.Type != events.AlertCreated || event.ProjectID != project.ID || event.AlertID != alert.ID {
+				t.Fatalf("unexpected alert invalidation event: %+v", event)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for lifecycle invalidation")
+		}
+	}
+	expectEvent() // creation
+
+	if err := svc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+	if _, err := svc.ClaimApproved(ctx, project.ID, alert.ID, caller.ID, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+	if err := svc.ReleaseClaim(ctx, project.ID, alert.ID, caller.ID); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+	if _, err := svc.ClaimApproved(ctx, project.ID, alert.ID, caller.ID, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+	implementation := &models.Task{ProjectID: project.ID, Title: "Implementation", Prompt: "implement", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	if err := taskRepo.Create(ctx, implementation); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.LinkImplementationTask(ctx, project.ID, alert.ID, caller.ID, implementation.ID); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+	if err := svc.MarkProcessing(ctx, project.ID, alert.ID, caller.ID, models.AlertProcessingCompleted, "done"); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+
+	failed, err := svc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Failure", Severity: models.SeverityInfo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alert = failed
+	expectEvent()
+	if err := svc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+	if _, err := svc.ClaimApproved(ctx, project.ID, alert.ID, caller.ID, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+	if err := svc.MarkProcessing(ctx, project.ID, alert.ID, caller.ID, models.AlertProcessingFailed, "retry"); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+
+	createdTaskAlert, err := svc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Atomic task", Severity: models.SeverityInfo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alert = createdTaskAlert
+	expectEvent()
+	if err := svc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+	if _, err := svc.ClaimApproved(ctx, project.ID, alert.ID, caller.ID, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+	if _, err := svc.CreateImplementationTask(ctx, project.ID, alert.ID, caller.ID, models.AlertImplementationTaskInput{Title: "Atomic implementation", Prompt: "implement", Priority: 2}); err != nil {
+		t.Fatal(err)
+	}
+	expectEvent()
+}
+
 func TestAlertService_DeleteAll(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	alertRepo := repository.NewAlertRepo(db)

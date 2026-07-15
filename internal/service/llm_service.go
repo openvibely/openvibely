@@ -269,6 +269,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		"delete_schedule":                  true,
 		"modify_schedule":                  true,
 		"create_alert":                     true,
+		"create_notification":              true,
 		"list_alerts":                      true,
 		"get_alert":                        true,
 		"claim_alert":                      true,

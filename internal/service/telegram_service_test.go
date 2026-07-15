@@ -26,6 +26,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTelegramService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Telegram Notification Lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Telegram chat", Prompt: "process", Category: models.CategoryChat, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Telegram suggestion", Severity: models.SeverityInfo})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved))
+
+	svc := &TelegramService{taskRepo: taskRepo, alertSvc: alertSvc}
+	rt := svc.buildTelegramActionToolRuntimeForTask(project.ID, caller.ID, 12345, 67890, nil)
+	output, handled, isErr, err := rt.Executor(ctx, "claim_alert", json.RawMessage(`{"alert_id":"`+alert.ID+`"}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, caller.ID)
+}
+
 func TestTelegramService_ParseTaskID(t *testing.T) {
 	tests := []struct {
 		name    string

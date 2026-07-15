@@ -663,8 +663,10 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 			s.sendMessage(ctx, chatID, "Queued. I'll send this after the current response finishes.")
 		},
 		FirstTurn: channelChatIngressFirstTurnOptions{
-			Task:              &models.Task{Title: fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)), CreatedVia: models.TaskOriginTelegram, TelegramChatID: chatID},
-			RuntimeTools:      s.buildTelegramActionToolRuntime(projectID, chatID, userID, nil),
+			Task: &models.Task{Title: fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)), CreatedVia: models.TaskOriginTelegram, TelegramChatID: chatID},
+			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
+				return s.buildTelegramActionToolRuntimeForTask(projectID, taskID, chatID, userID, nil)
+			},
 			ChannelChatRunner: s.channelChatRunner,
 			CompleteExecution: channelCompletionFunc("telegram", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 			LinkAttachments: func(ctx context.Context, execID string, atts []models.ChatAttachment) ([]models.ChatAttachment, error) {
@@ -1203,7 +1205,11 @@ func telegramStreamingDisplay(cleaned string, terminal bool) string {
 }
 
 func (s *TelegramService) buildTelegramActionToolRuntime(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	handlers := s.telegramActionHandlers(projectID, chatID, userID, collector)
+	return s.buildTelegramActionToolRuntimeForTask(projectID, "", chatID, userID, collector)
+}
+
+func (s *TelegramService) buildTelegramActionToolRuntimeForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
+	handlers := s.telegramActionHandlersForTask(projectID, callerTaskID, chatID, userID, collector)
 	return &llmcontracts.RuntimeTools{
 		Definitions: actionToolDefinitions(chatcontrol.SurfaceTelegram, true),
 		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceTelegram, handlers),
@@ -1211,6 +1217,10 @@ func (s *TelegramService) buildTelegramActionToolRuntime(projectID string, chatI
 }
 
 func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
+	return s.telegramActionHandlersForTask(projectID, "", chatID, userID, collector)
+}
+
+func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID:     projectID,
 		TaskSvc:       s.taskSvc,
@@ -1275,6 +1285,7 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             projectID,
+		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
 		LLMConfigRepo:         s.llmConfigRepo,

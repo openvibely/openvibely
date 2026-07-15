@@ -101,9 +101,10 @@ type channelChatIngressFirstTurnOptions struct {
 	ChatHistoryLimit  int
 
 	// RuntimeTools holds channel-specific runtime tools to pass to the handler
-	// runner. When non-nil, the handler uses these tools for the chat turn
-	// instead of rebuilding the generic handler runtime.
-	RuntimeTools *llmcontracts.RuntimeTools
+	// runner. RuntimeToolsForTask is preferred when tool handlers require the
+	// persisted channel chat task identity and is invoked only after task creation.
+	RuntimeTools        *llmcontracts.RuntimeTools
+	RuntimeToolsForTask func(taskID string) *llmcontracts.RuntimeTools
 
 	TaskRepo           *repository.TaskRepo
 	ExecRepo           *repository.ExecutionRepo
@@ -976,6 +977,10 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		}
 		return true, linkedAttachments
 	}
+	runtimeTools := opts.RuntimeTools
+	if opts.RuntimeToolsForTask != nil {
+		runtimeTools = opts.RuntimeToolsForTask(opts.Task.ID)
+	}
 	opts.ChannelChatRunner(context.Background(), ChannelChatRunRequest{
 		ExecID:              exec.ID,
 		TaskID:              opts.Task.ID,
@@ -989,7 +994,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		Surface:             opts.Surface,
 		InitialAckMessageID: initialAckID,
 		ReplyContext:        opts.ReplyContext,
-		RuntimeTools:        opts.RuntimeTools,
+		RuntimeTools:        runtimeTools,
 	})
 	return true, linkedAttachments
 }

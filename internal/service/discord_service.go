@@ -444,12 +444,14 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 		FirstTurn: channelChatIngressFirstTurnOptions{
 			Task:         &models.Task{Title: fmt.Sprintf("Discord %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginDiscord},
 			ReplyContext: ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID},
-			RuntimeTools: s.buildDiscordActionToolRuntime(projectID, discordActionContext{
-				ChannelID: msg.replyChannelID(),
-				ThreadID:  msg.ThreadID,
-				MessageID: msg.MessageID,
-				UserID:    msg.UserID,
-			}, nil),
+			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
+				return s.buildDiscordActionToolRuntimeForTask(projectID, taskID, discordActionContext{
+					ChannelID: msg.replyChannelID(),
+					ThreadID:  msg.ThreadID,
+					MessageID: msg.MessageID,
+					UserID:    msg.UserID,
+				}, nil)
+			},
 			ChannelChatRunner: s.channelChatRunner,
 			CreateTaskContext: func(ctx context.Context, taskID string) error {
 				if s.discordTaskContextRepo == nil {
@@ -667,7 +669,11 @@ func (s *DiscordService) getActiveProject(ctx context.Context, userID string) st
 }
 
 func (s *DiscordService) buildDiscordActionToolRuntime(projectID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	handlers := s.discordActionHandlers(projectID, actionCtx, collector)
+	return s.buildDiscordActionToolRuntimeForTask(projectID, "", actionCtx, collector)
+}
+
+func (s *DiscordService) buildDiscordActionToolRuntimeForTask(projectID, callerTaskID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
+	handlers := s.discordActionHandlersForTask(projectID, callerTaskID, actionCtx, collector)
 	return &llmcontracts.RuntimeTools{
 		Definitions: actionToolDefinitions(chatcontrol.SurfaceDiscord, true),
 		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord, handlers),
@@ -682,6 +688,10 @@ type discordActionContext struct {
 }
 
 func (s *DiscordService) discordActionHandlers(projectID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
+	return s.discordActionHandlersForTask(projectID, "", actionCtx, collector)
+}
+
+func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID:     projectID,
 		TaskSvc:       s.taskSvc,
@@ -725,6 +735,7 @@ func (s *DiscordService) discordActionHandlers(projectID string, actionCtx disco
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             projectID,
+		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
 		LLMConfigRepo:         s.llmConfigRepo,

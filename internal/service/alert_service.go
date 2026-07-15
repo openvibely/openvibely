@@ -28,6 +28,10 @@ func (s *AlertService) publish(a *models.Alert) {
 	s.broadcaster.Publish(events.TaskEvent{Type: events.AlertCreated, ProjectID: a.ProjectID, AlertID: a.ID})
 }
 
+func (s *AlertService) publishProjectAlert(projectID, alertID string) {
+	s.publish(&models.Alert{ProjectID: projectID, ID: alertID})
+}
+
 func (s *AlertService) Create(ctx context.Context, a *models.Alert) error {
 	if err := s.alertRepo.Create(ctx, a); err != nil {
 		return fmt.Errorf("creating alert: %w", err)
@@ -92,15 +96,27 @@ func (s *AlertService) CountUnread(ctx context.Context, projectID string) (int, 
 }
 
 func (s *AlertService) MarkRead(ctx context.Context, projectID, id string) error {
-	return s.alertRepo.MarkRead(ctx, projectID, id)
+	if err := s.alertRepo.MarkRead(ctx, projectID, id); err != nil {
+		return err
+	}
+	s.publishProjectAlert(projectID, id)
+	return nil
 }
 
 func (s *AlertService) MarkAllRead(ctx context.Context, projectID string) error {
-	return s.alertRepo.MarkAllRead(ctx, projectID)
+	if err := s.alertRepo.MarkAllRead(ctx, projectID); err != nil {
+		return err
+	}
+	s.publishProjectAlert(projectID, "")
+	return nil
 }
 
 func (s *AlertService) Delete(ctx context.Context, projectID, id string) error {
-	return s.alertRepo.Delete(ctx, projectID, id)
+	if err := s.alertRepo.Delete(ctx, projectID, id); err != nil {
+		return err
+	}
+	s.publishProjectAlert(projectID, id)
+	return nil
 }
 
 func (s *AlertService) DeleteAll(ctx context.Context, projectID string) error {
@@ -123,21 +139,43 @@ func (s *AlertService) SetDecision(ctx context.Context, projectID, id string, st
 }
 
 func (s *AlertService) ClaimApproved(ctx context.Context, projectID, id, claimant string, lease time.Duration) (*models.Alert, error) {
-	return s.alertRepo.ClaimApproved(ctx, projectID, id, claimant, lease)
+	a, err := s.alertRepo.ClaimApproved(ctx, projectID, id, claimant, lease)
+	if err != nil {
+		return nil, err
+	}
+	s.publish(a)
+	return a, nil
 }
 
 func (s *AlertService) ReleaseClaim(ctx context.Context, projectID, id, claimant string) error {
-	return s.alertRepo.ReleaseClaim(ctx, projectID, id, claimant)
+	if err := s.alertRepo.ReleaseClaim(ctx, projectID, id, claimant); err != nil {
+		return err
+	}
+	s.publishProjectAlert(projectID, id)
+	return nil
 }
 
 func (s *AlertService) LinkImplementationTask(ctx context.Context, projectID, id, claimant, taskID string) error {
-	return s.alertRepo.LinkImplementationTask(ctx, projectID, id, claimant, taskID)
+	if err := s.alertRepo.LinkImplementationTask(ctx, projectID, id, claimant, taskID); err != nil {
+		return err
+	}
+	s.publishProjectAlert(projectID, id)
+	return nil
 }
 
 func (s *AlertService) CreateImplementationTask(ctx context.Context, projectID, id, claimant string, input models.AlertImplementationTaskInput) (*models.Task, error) {
-	return s.alertRepo.CreateImplementationTask(ctx, projectID, id, claimant, input)
+	task, err := s.alertRepo.CreateImplementationTask(ctx, projectID, id, claimant, input)
+	if err != nil {
+		return nil, err
+	}
+	s.publishProjectAlert(projectID, id)
+	return task, nil
 }
 
 func (s *AlertService) MarkProcessing(ctx context.Context, projectID, id, claimant string, state models.AlertProcessingState, message string) error {
-	return s.alertRepo.MarkProcessing(ctx, projectID, id, claimant, state, message)
+	if err := s.alertRepo.MarkProcessing(ctx, projectID, id, claimant, state, message); err != nil {
+		return err
+	}
+	s.publishProjectAlert(projectID, id)
+	return nil
 }

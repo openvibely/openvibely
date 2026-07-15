@@ -428,6 +428,32 @@ func TestSlackService_RuntimeListAlertsTool_Handled(t *testing.T) {
 	require.Contains(t, output, `"notifications":[]`)
 }
 
+func TestSlackService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Slack Notification Lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Slack chat", Prompt: "process", Category: models.CategoryChat, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Slack suggestion", Severity: models.SeverityInfo})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved))
+
+	svc := &SlackService{taskRepo: taskRepo, alertSvc: alertSvc}
+	rt := svc.buildSlackActionToolRuntimeForTask(project.ID, caller.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", UserID: "U1"}, nil)
+	output, handled, isErr, err := rt.Executor(ctx, "claim_alert", json.RawMessage(`{"alert_id":"`+alert.ID+`"}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, caller.ID)
+	stored, err := alertSvc.GetByID(ctx, project.ID, alert.ID)
+	require.NoError(t, err)
+	require.Equal(t, caller.ID, stored.Claimant)
+}
+
 func TestSlackService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

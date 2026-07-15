@@ -497,6 +497,16 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "create_alert",
+		Description:  "Create a project-scoped operational alert.",
+		Domain:       DomainAlerts,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"},"message":{"type":"string"},"severity":{"type":"string","enum":["info","warning","error"]},"type":{"type":"string","enum":["custom","task_failed","task_needs_followup"]},"task_id":{"type":"string"}},"required":["title"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "create_notification",
 		Description:  "Create a project-scoped actionable notification for human review. Approval authorizes task creation only, not merge, release, or deployment.",
 		Domain:       DomainAlerts,
 		Access:       AccessWrite,

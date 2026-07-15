@@ -983,12 +983,14 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		FirstTurn: channelChatIngressFirstTurnOptions{
 			Task:         &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
 			ReplyContext: ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
-			RuntimeTools: s.buildSlackActionToolRuntime(projectID, slackActionContext{
-				TeamID:    msg.TeamID,
-				ChannelID: msg.ChannelID,
-				ThreadTS:  msg.ThreadTS,
-				UserID:    msg.UserID,
-			}, nil),
+			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
+				return s.buildSlackActionToolRuntimeForTask(projectID, taskID, slackActionContext{
+					TeamID:    msg.TeamID,
+					ChannelID: msg.ChannelID,
+					ThreadTS:  msg.ThreadTS,
+					UserID:    msg.UserID,
+				}, nil)
+			},
 			ChannelChatRunner: s.channelChatRunner,
 			CreateTaskContext: func(ctx context.Context, taskID string) error {
 				if s.slackTaskContextRepo == nil {
@@ -1030,7 +1032,11 @@ type slackActionContext struct {
 }
 
 func (s *SlackService) buildSlackActionToolRuntime(projectID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	handlers := s.slackActionHandlers(projectID, actionCtx, collector)
+	return s.buildSlackActionToolRuntimeForTask(projectID, "", actionCtx, collector)
+}
+
+func (s *SlackService) buildSlackActionToolRuntimeForTask(projectID, callerTaskID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
+	handlers := s.slackActionHandlersForTask(projectID, callerTaskID, actionCtx, collector)
 	return &llmcontracts.RuntimeTools{
 		Definitions: actionToolDefinitions(chatcontrol.SurfaceSlack, true),
 		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceSlack, handlers),
@@ -1038,6 +1044,10 @@ func (s *SlackService) buildSlackActionToolRuntime(projectID string, actionCtx s
 }
 
 func (s *SlackService) slackActionHandlers(projectID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
+	return s.slackActionHandlersForTask(projectID, "", actionCtx, collector)
+}
+
+func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID:     projectID,
 		TaskSvc:       s.taskSvc,
@@ -1089,6 +1099,7 @@ func (s *SlackService) slackActionHandlers(projectID string, actionCtx slackActi
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             projectID,
+		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
 		LLMConfigRepo:         s.llmConfigRepo,

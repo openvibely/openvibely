@@ -29,7 +29,8 @@ All list, detail, decision, read, delete, claim, and linkage operations enforce 
 
 The generic runtime surface includes:
 
-- `create_alert`: creates a pending actionable notification; project and source task are bound server-side. Optional `idempotency_key` is unique per project.
+- `create_alert`: preserves the existing operational-alert contract (`title` required; optional message, severity, operational type, and task ID).
+- `create_notification`: creates a pending actionable notification; project and source task are bound server-side. Optional `idempotency_key` is unique per project.
 - `list_alerts`: returns structured JSON in `created_at DESC, id DESC` order with `limit` (1-100), `offset`, and filters for project assertion, decision state, processing state, type, source, read state, and implementation-task linkage.
 - `get_alert`: returns one structured same-project notification for inspection.
 - `claim_alert`: atomically leases an approved notification to the executing persisted task. Unlinked stale claims and failed attempts can be retried.

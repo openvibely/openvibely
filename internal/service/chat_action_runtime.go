@@ -123,6 +123,7 @@ type AlertRuntimeOptions struct {
 	CallerTaskID string
 	Source       string
 	AlertSvc     *AlertService
+	TaskRepo     *repository.TaskRepo
 }
 
 type channelUtilityActionHandlerOptions struct {
@@ -490,7 +491,7 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		},
 	}
 	mergeChannelRuntimeActionHandlers(handlers, BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{
-		ProjectID: opts.ProjectID, CallerTaskID: opts.CallerTaskID, Source: "agent", AlertSvc: opts.AlertSvc,
+		ProjectID: opts.ProjectID, CallerTaskID: opts.CallerTaskID, Source: "agent", AlertSvc: opts.AlertSvc, TaskRepo: opts.TaskRepo,
 	}))
 	return handlers
 }
@@ -1026,6 +1027,49 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 	}
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"create_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req struct {
+				Title    string `json:"title"`
+				Message  string `json:"message"`
+				Severity string `json:"severity"`
+				Type     string `json:"type"`
+				TaskID   string `json:"task_id"`
+			}
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := requireService(); err != nil {
+				return "", err
+			}
+			req.Title = strings.TrimSpace(req.Title)
+			if req.Title == "" {
+				return "", fmt.Errorf("title is required")
+			}
+			severity, severityErr := channelAlertSeverity(req.Severity)
+			if severityErr != "" {
+				return "", fmt.Errorf("%s", severityErr)
+			}
+			alertType, typeErr := channelAlertType(req.Type)
+			if typeErr != "" {
+				return "", fmt.Errorf("%s", typeErr)
+			}
+			a := &models.Alert{ProjectID: opts.ProjectID, Scope: models.AlertScopeProject, Type: alertType,
+				Severity: severity, Title: req.Title, Message: req.Message, Source: strings.TrimSpace(opts.Source)}
+			if taskID := strings.TrimSpace(req.TaskID); taskID != "" {
+				if opts.TaskRepo == nil {
+					return "", fmt.Errorf("task repository not available")
+				}
+				task, err := opts.TaskRepo.GetByID(ctx, taskID)
+				if err != nil || task == nil || task.ProjectID != opts.ProjectID {
+					return "", fmt.Errorf("task_id %q is outside the caller's authorized project context", taskID)
+				}
+				a.TaskID = &taskID
+			}
+			if err := opts.AlertSvc.Create(ctx, a); err != nil {
+				return "", err
+			}
+			return resultJSON(map[string]any{"alert": a})
+		},
+		"create_notification": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req struct {
 				ProjectID      string         `json:"project_id"`
 				Type           string         `json:"type"`

@@ -173,7 +173,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	// Must NOT have write actions
 	mustNotContain(t, names, "create_task", "edit_task", "execute_tasks",
 		"set_personality", "schedule_task", "delete_schedule", "modify_schedule",
-		"create_alert", "delete_alert", "toggle_alert", "switch_project",
+		"create_alert", "create_notification", "delete_alert", "toggle_alert", "switch_project",
 		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 
 	// Must have read actions
@@ -313,7 +313,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"list_models", "list_agents",
 		"view_settings", "project_info",
 		"list_projects", "switch_project",
-		"list_alerts", "create_alert", "delete_alert", "toggle_alert",
+		"list_alerts", "create_alert", "create_notification", "delete_alert", "toggle_alert",
 		// new actions
 		"get_chat_mode", "set_chat_mode", "list_capabilities",
 		"get_alert", "get_model", "get_personality", "get_current_project",

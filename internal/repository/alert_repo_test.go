@@ -353,6 +353,69 @@ func TestAlertRepo_ClaimCreatesImplementationTaskIdempotently(t *testing.T) {
 	}
 }
 
+func TestAlertRepo_CompetingImplementationTaskCreationCreatesAtMostOneTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewAlertRepo(db)
+	projectRepo := NewProjectRepo(db)
+	project := createTestProject(t, projectRepo)
+	ctx := context.Background()
+	alert := &models.Alert{ProjectID: project.ID, Scope: models.AlertScopeProject, Type: "suggestion", Severity: models.SeverityInfo,
+		Title: "Concurrent implementation", DecisionState: models.AlertDecisionPending, ProcessingState: models.AlertProcessingUnclaimed}
+	if _, err := repo.CreateIdempotent(ctx, alert); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.ClaimApproved(ctx, project.ID, alert.ID, "scheduled-task", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+
+	const competitors = 8
+	var wg sync.WaitGroup
+	wg.Add(competitors)
+	ids := make(chan string, competitors)
+	errs := make(chan error, competitors)
+	for i := 0; i < competitors; i++ {
+		go func() {
+			defer wg.Done()
+			task, err := repo.CreateImplementationTask(ctx, project.ID, alert.ID, "scheduled-task", models.AlertImplementationTaskInput{
+				Title: "Implement once", Prompt: "implement the approved work", Priority: 2,
+			})
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- task.ID
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		t.Fatalf("competing implementation task creation failed: %v", err)
+	}
+	var implementationID string
+	for id := range ids {
+		if implementationID == "" {
+			implementationID = id
+		}
+		if id != implementationID {
+			t.Fatalf("competing calls returned different task IDs: %s and %s", implementationID, id)
+		}
+	}
+	if implementationID == "" {
+		t.Fatal("no implementation task returned")
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND title = ?`, project.ID, "Implement once").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("competing scans created %d implementation tasks, want 1", count)
+	}
+}
+
 func TestAlertRepo_DeleteAll(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	alertRepo := NewAlertRepo(db)
