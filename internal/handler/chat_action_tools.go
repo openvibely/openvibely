@@ -264,6 +264,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			updated := h.processChatTaskExecutions(ctx, params.ExecID, params.ProjectID, marker)
 			return toolSummaryFromMarker(marker, updated), nil
 		},
+		"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return service.ExecuteListTasksTool(ctx, h.taskRepo, params.ProjectID, input)
+		},
 		"view_task_thread": func(ctx context.Context, input json.RawMessage) (string, error) {
 			marker, err := buildToolMarker("VIEW_TASK_CHAT", input, true)
 			if err != nil {
@@ -1386,6 +1389,7 @@ func assignedAgentToolDenied(toolName string, agentDef *models.Agent) bool {
 
 func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 	allowed := map[string]bool{
+		"list_tasks":                           true,
 		"view_task_thread":                     true,
 		"send_to_task":                         true,
 		"send_message":                         true,

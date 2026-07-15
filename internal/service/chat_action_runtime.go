@@ -429,6 +429,9 @@ func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) 
 
 func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
 	return map[string]chatcontrol.RuntimeActionHandler{
+		"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return ExecuteListTasksTool(ctx, opts.TaskRepo, opts.ProjectID, input)
+		},
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return runChannelScheduleTask(ctx, opts, input), nil
 		},
