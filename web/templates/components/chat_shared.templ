@@ -444,7 +444,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							var lastRenderedSourceLength = 0;
 							var largeStreamRenderThreshold = 100 * 1024;
 							var largeStreamRenderInterval = 250;
-							function renderBufferedOutput(force) {
+							function renderBufferedOutput(force, yieldLarge) {
 							if (!window.renderStreamingContent) {
 							container.classList.remove('text-error/80', 'font-medium');
 								container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
@@ -482,10 +482,15 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								}
 								if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
 							}
-							var renderPromise = window.renderStreamingContent(container, renderText, !force);
+							var shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;
+							var renderPromise = window.renderStreamingContent(container, renderText, shouldYield);
 							if (renderPromise && typeof renderPromise.then === 'function') {
-								renderPromise.then(finishScheduledRender);
-								return;
+								return renderPromise.then(finishScheduledRender).catch(function(err) {
+									renderScheduled = false;
+									console.error('[chat] streaming render failed:', err);
+									if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
+									return false;
+								});
 							}
 							finishScheduledRender(true);
 							};
@@ -495,8 +500,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 									renderDelayTimer = null;
 								}
 								renderScheduled = false;
-								runRender();
-								return;
+								return runRender();
 							}
 							renderScheduled = true;
 							if (textBuffer.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {
@@ -511,7 +515,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					}
 						function flushBufferedOutput() {
 							if (renderScheduled || lastRenderedSourceLength !== textBuffer.length) {
-								renderBufferedOutput(true);
+								return renderBufferedOutput(true, false);
 							}
 						}
 						function finalizeEmptyTerminalBubble(status) {
@@ -526,8 +530,18 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 
 						var streamRetryCount = 0;
+						var streamRetryScheduled = false;
 						var streamTerminalHandled = false;
 						var eventSource = null;
+						function scheduleExecutionStreamRetry() {
+							if (streamRetryScheduled || streamRetryCount >= 5) return;
+							streamRetryScheduled = true;
+							streamRetryCount++;
+							setTimeout(function() {
+								streamRetryScheduled = false;
+								connectExecutionStream();
+							}, 150 * streamRetryCount);
+						}
 						function connectExecutionStream() {
 							var streamOffset = utf8ByteLength(textBuffer);
 							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
@@ -568,7 +582,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								streamTerminalHandled = true;
 								var terminalStatus = event && event.data ? event.data : 'completed';
 								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-								renderBufferedOutput(true);
+								function finishTerminalRender() {
 							finalizeEmptyTerminalBubble(terminalStatus);
 							// Hide streaming dots
 							if (streamingDots) streamingDots.classList.add('hidden');
@@ -608,7 +622,11 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 									}
 								});
 							}
-						}
+								}
+								}
+									var finalRender = renderBufferedOutput(true, true);
+								if (finalRender && typeof finalRender.then === 'function') finalRender.then(finishTerminalRender);
+								else finishTerminalRender();
 					});
 
 						eventSource.addEventListener('error', function(event) {
@@ -618,8 +636,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						removeThreadEventSource(eventSource);
 						removeChatEventSource(execId, eventSource);
 						if (retryableEarlyError) {
-							streamRetryCount++;
-							setTimeout(connectExecutionStream, 150 * streamRetryCount);
+							scheduleExecutionStreamRetry();
 							return;
 						}
 						if (streamTerminalHandled) return;
@@ -650,8 +667,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							removeThreadEventSource(eventSource);
 							removeChatEventSource(execId, eventSource);
 						if (textBuffer === '' && streamRetryCount < 5) {
-								streamRetryCount++;
-							setTimeout(connectExecutionStream, 150 * streamRetryCount);
+							scheduleExecutionStreamRetry();
 							return;
 						}
 						if (streamTerminalHandled) return;
@@ -853,15 +869,16 @@ templ _initThreadStreamingScript() {
 					}
 				}
 
-				var eventSource = null;
-					var streamRetryCount = 0;
+					var eventSource = null;
+						var streamRetryCount = 0;
+						var streamRetryScheduled = false;
 					var renderScheduled = false;
 					var renderDelayTimer = null;
 					var lastRenderFinishedAt = Date.now();
 					var lastRenderedSourceLength = cumulativeContent.length;
 					var largeStreamRenderThreshold = 100 * 1024;
 					var largeStreamRenderInterval = 250;
-				function renderCumulativeContent(force) {
+					function renderCumulativeContent(force, yieldLarge) {
 					if (!window.renderStreamingContent) {
 					container.classList.remove('text-error/80', 'font-medium');
 						container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
@@ -894,10 +911,15 @@ templ _initThreadStreamingScript() {
 							}
 							if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
 						}
-						var renderPromise = window.renderStreamingContent(container, renderText, !force);
+						var shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;
+						var renderPromise = window.renderStreamingContent(container, renderText, shouldYield);
 						if (renderPromise && typeof renderPromise.then === 'function') {
-							renderPromise.then(finishScheduledRender);
-							return;
+							return renderPromise.then(finishScheduledRender).catch(function(err) {
+								renderScheduled = false;
+								console.error('[thread] streaming render failed:', err);
+								if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
+								return false;
+							});
 						}
 						finishScheduledRender(true);
 					};
@@ -907,8 +929,7 @@ templ _initThreadStreamingScript() {
 							renderDelayTimer = null;
 						}
 						renderScheduled = false;
-						runRender();
-						return;
+						return runRender();
 					}
 					renderScheduled = true;
 					if (cumulativeContent.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {
@@ -923,7 +944,7 @@ templ _initThreadStreamingScript() {
 				}
 					function flushCumulativeContent() {
 						if (renderScheduled || lastRenderedSourceLength !== cumulativeContent.length) {
-							renderCumulativeContent(true);
+							return renderCumulativeContent(true, false);
 						}
 					}
 					function finalizeEmptyTerminalBubble(status) {
@@ -941,6 +962,15 @@ templ _initThreadStreamingScript() {
 						var idx = window._threadEventSources.indexOf(es);
 						if (idx >= 0) window._threadEventSources.splice(idx, 1);
 					}
+						function scheduleResumeExecutionStreamRetry() {
+							if (streamRetryScheduled || streamRetryCount >= 5) return;
+							streamRetryScheduled = true;
+							streamRetryCount++;
+							setTimeout(function() {
+								streamRetryScheduled = false;
+								connectResumeExecutionStream();
+							}, 150 * streamRetryCount);
+						}
 						var streamTerminalHandled = false;
 						function connectResumeExecutionStream() {
 							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
@@ -965,7 +995,7 @@ templ _initThreadStreamingScript() {
 								streamTerminalHandled = true;
 							var terminalStatus = event && event.data ? event.data : 'completed';
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-							renderCumulativeContent(true);
+							function finishTerminalRender() {
 						finalizeEmptyTerminalBubble(terminalStatus);
 					if (streamingDots) streamingDots.classList.add('hidden');
 					eventSource.close();
@@ -985,7 +1015,11 @@ templ _initThreadStreamingScript() {
 								if (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, true);
 							});
 						}
-					}
+							}
+							}
+								var finalRender = renderCumulativeContent(true, true);
+							if (finalRender && typeof finalRender.then === 'function') finalRender.then(finishTerminalRender);
+							else finishTerminalRender();
 				});
 
 					eventSource.addEventListener('error', function(event) {
@@ -994,8 +1028,7 @@ templ _initThreadStreamingScript() {
 					eventSource.close();
 					removeThreadEventSource(eventSource);
 					if (retryableEarlyError) {
-						streamRetryCount++;
-						setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
+						scheduleResumeExecutionStreamRetry();
 						return;
 					}
 					if (streamTerminalHandled) return;
@@ -1016,8 +1049,7 @@ templ _initThreadStreamingScript() {
 						eventSource.close();
 						removeThreadEventSource(eventSource);
 					if (cumulativeContent === '' && streamRetryCount < 5) {
-							streamRetryCount++;
-						setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
+						scheduleResumeExecutionStreamRetry();
 						return;
 					}
 					if (streamTerminalHandled) return;
@@ -3505,10 +3537,18 @@ templ ChatAutoScrollScript() {
 							resolve(false);
 							return;
 						}
-						var batchEnd = Math.min(segmentIndex + 12, segments.length);
-						while (segmentIndex < batchEnd) {
-							renderSegment(segments[segmentIndex], segmentIndex);
+						var batchStartedAt = window.performance && performance.now ? performance.now() : Date.now();
+						var batchBytes = 0;
+						var batchSegments = 0;
+						while (segmentIndex < segments.length) {
+							var segment = segments[segmentIndex];
+							var segmentBytes = (segment.content || segment.resultOutput || segment.secondary || '').length;
+							if (batchSegments > 0 && (batchSegments >= 12 || batchBytes + segmentBytes > 64 * 1024 ||
+								((window.performance && performance.now ? performance.now() : Date.now()) - batchStartedAt) >= 8)) break;
+							renderSegment(segment, segmentIndex);
 							segmentIndex++;
+							batchSegments++;
+							batchBytes += segmentBytes;
 						}
 						if (segmentIndex < segments.length) {
 							setTimeout(renderBatch, 0);

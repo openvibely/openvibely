@@ -3956,8 +3956,11 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 
 	assert.Contains(t, errBody, "event.data === 'execution not found'",
 		"streaming bubble error handler must retry early execution lookup races")
-	assert.Contains(t, errBody, "setTimeout(connectExecutionStream, 150 * streamRetryCount)",
+	assert.Contains(t, errBody, "scheduleExecutionStreamRetry()",
 		"streaming bubble error handler must reconnect before failing empty streams")
+	assert.Contains(t, body, "connectExecutionStream();")
+	assert.Contains(t, body, "}, 150 * streamRetryCount);",
+		"streaming bubble retry scheduler must reconnect with bounded backoff")
 	assert.Contains(t, errBody, "_chatStreamInProgress = false",
 		"streaming bubble error handler must clear _chatStreamInProgress for chat context")
 	assert.Contains(t, errBody, "evaluatePlanCompletionPrompt",
@@ -3972,7 +3975,7 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	}
 	oeBody := body[oeIdx:oeEnd]
 
-	assert.Contains(t, oeBody, "setTimeout(connectExecutionStream, 150 * streamRetryCount)",
+	assert.Contains(t, oeBody, "scheduleExecutionStreamRetry()",
 		"streaming bubble onerror must reconnect before failing empty streams")
 	assert.Contains(t, oeBody, "_chatStreamInProgress = false",
 		"streaming bubble onerror must clear _chatStreamInProgress for chat context")

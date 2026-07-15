@@ -2596,7 +2596,8 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 	}
 	for _, snippet := range []string{
 		"if (yieldBetweenBatches && textBuffer.length >= 100 * 1024)",
-		"var batchEnd = Math.min(segmentIndex + 12, segments.length)",
+		"batchSegments >= 12 || batchBytes + segmentBytes > 64 * 1024",
+		"- batchStartedAt) >= 8",
 		"setTimeout(renderBatch, 0)",
 		"if (container._streamRenderVersion !== renderVersion)",
 	} {
@@ -3371,7 +3372,7 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 		errEnd = len(content)
 	}
 	errBody := content[errIdx:errEnd]
-	if !strings.Contains(errBody, "event.data === 'execution not found'") || !strings.Contains(errBody, "setTimeout(connectExecutionStream, 150 * streamRetryCount)") {
+	if !strings.Contains(errBody, "event.data === 'execution not found'") || !strings.Contains(errBody, "scheduleExecutionStreamRetry()") {
 		t.Error("error handler must retry early execution lookup races before failing the stream")
 	}
 	if !strings.Contains(errBody, "_chatStreamInProgress = false") {
@@ -3391,7 +3392,7 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 		oeEnd = len(content)
 	}
 	oeBody := content[oeIdx:oeEnd]
-	if !strings.Contains(oeBody, "setTimeout(connectExecutionStream, 150 * streamRetryCount)") {
+	if !strings.Contains(oeBody, "scheduleExecutionStreamRetry()") {
 		t.Error("onerror handler must retry empty early stream failures before clearing chat streaming state")
 	}
 	if !strings.Contains(oeBody, "_chatStreamInProgress = false") {
@@ -3446,7 +3447,7 @@ func TestInitThreadStreaming_FindsStreamingDotsByID(t *testing.T) {
 	if !strings.Contains(content, "getAttribute('data-raw-content')") {
 		t.Error("_initThreadStreaming must check data-raw-content for content presence")
 	}
-	if !strings.Contains(content, "function connectResumeExecutionStream()") || !strings.Contains(content, "setTimeout(connectResumeExecutionStream, 150 * streamRetryCount)") {
+	if !strings.Contains(content, "function connectResumeExecutionStream()") || !strings.Contains(content, "scheduleResumeExecutionStreamRetry()") {
 		t.Error("_initThreadStreaming must retry early execution stream races for promoted/resumed rows")
 	}
 }
@@ -3567,12 +3568,12 @@ func TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth(t *testing.T) {
 		t.Fatalf("expected streaming renderers to snapshot shouldScroll before DOM render, found %d", count)
 	}
 	textScrollIdx := strings.Index(content, "var shouldScroll = !tracker || tracker.shouldAutoScroll();")
-	textRenderIdx := strings.Index(content, "window.renderStreamingContent(container, renderText, !force)")
+	textRenderIdx := strings.Index(content, "window.renderStreamingContent(container, renderText, shouldYield)")
 	if textScrollIdx == -1 || textRenderIdx == -1 || textScrollIdx > textRenderIdx {
 		t.Error("new-message streaming renderer must compute shouldScroll before renderStreamingContent")
 	}
 
-	resumeRenderIdx := strings.LastIndex(content, "window.renderStreamingContent(container, renderText, !force)")
+	resumeRenderIdx := strings.LastIndex(content, "window.renderStreamingContent(container, renderText, shouldYield)")
 	if resumeRenderIdx == -1 {
 		t.Fatal("resume streaming renderer must call renderStreamingContent")
 	}
