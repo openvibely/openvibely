@@ -226,6 +226,52 @@ func TestChatActionHandlers_CoverageWebAndAPI(t *testing.T) {
 	}
 }
 
+func TestListTasksRuntimeTool_WebAndAPIExecutableAndPlanExposed(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "List Tasks Handler Project")
+	target := createTask(t, h, project.ID, "Implement issue 25")
+	createTask(t, h, project.ID, "Unrelated handler task")
+
+	// Canonical registry exposes list_tasks read-only in both Plan and Orchestrate.
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
+			defs := chatcontrol.ToolDefsForContext(mode, surface, false)
+			found := false
+			for _, def := range defs {
+				if def.Name == "list_tasks" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected list_tasks definition for mode=%s surface=%s", mode, surface)
+			}
+		}
+	}
+
+	params := streamingResponseParams{ExecID: "exec-list-tasks", ProjectID: project.ID}
+	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
+		handlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, surface)
+		handler := handlers["list_tasks"]
+		if handler == nil {
+			t.Fatalf("list_tasks handler missing on surface=%s", surface)
+		}
+		out, err := handler(context.Background(), json.RawMessage(`{"query":"issue 25"}`))
+		if err != nil {
+			t.Fatalf("list_tasks handler failed on surface=%s: %v", surface, err)
+		}
+		if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, target.ID) {
+			t.Fatalf("expected list_tasks to return target id on surface=%s, got %s", surface, out)
+		}
+	}
+
+	// Plan-mode handler map still wires an executable handler (never handler_missing).
+	planHandlers := h.chatActionHandlers(params, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)
+	if planHandlers["list_tasks"] == nil {
+		t.Fatal("expected list_tasks handler in plan mode")
+	}
+}
+
 func TestCreateSwarmTaskRuntimeTool_StartFlagDoesNotDeferActiveSwarm(t *testing.T) {
 	h, _, _, _ := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "Deferred Swarm Tool Project")

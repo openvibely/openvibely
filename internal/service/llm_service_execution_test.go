@@ -4140,10 +4140,15 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
+	for _, name := range []string{"list_tasks", "create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}
+	}
+	if out, handled, isErr, err := rt.Executor(ctx, "list_tasks", []byte(`{"query":"scheduled github poller"}`)); !handled || isErr || err != nil {
+		t.Fatalf("expected list_tasks handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	} else if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, task.ID) {
+		t.Fatalf("expected list_tasks to discover the scheduled task, got %s", out)
 	}
 	out, handled, isErr, err := rt.Executor(ctx, "github_get_project_inbox", []byte(`{}`))
 	if !handled || isErr || err != nil {
@@ -4174,6 +4179,13 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	goal, err := goalSvc.GetGoal(ctx, implementationTask.ID)
 	if err != nil || goal == nil || goal.Objective != "Implement assigned GitHub issue #42 and open a GitHub PR." {
 		t.Fatalf("expected persisted goal for implementation task, goal=%#v err=%v out=%s", goal, err, out)
+	}
+	// Dev Inbox reconciliation: a subsequent run can discover the existing
+	// implementation task by GitHub issue number before creating a duplicate.
+	if out, handled, isErr, err := rt.Executor(ctx, "list_tasks", []byte(`{"query":"issue #42"}`)); !handled || isErr || err != nil {
+		t.Fatalf("expected list_tasks reconciliation handler handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	} else if !strings.Contains(out, implementationTask.ID) {
+		t.Fatalf("expected list_tasks to reconcile existing implementation task, got %s", out)
 	}
 
 	out, handled, isErr, err = rt.Executor(ctx, "create_task", []byte(`{"title":"GitHub Dev Inbox","prompt":"Poll assigned GitHub issues and create implementation tasks."}`))

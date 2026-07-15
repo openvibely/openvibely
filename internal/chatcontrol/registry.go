@@ -15,7 +15,7 @@
 //   - chat: set_chat_mode
 //
 // Chat read-only (plan + orchestrate):
-//   - tasks: view_task_thread
+//   - tasks: list_tasks, view_task_thread
 //   - projects: list_projects, project_info, get_current_project
 //   - models: list_models, get_model
 //   - agents: list_agents
@@ -198,6 +198,17 @@ var registry = []ActionDef{
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
 		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"min_priority":{"type":"integer","minimum":1,"maximum":4},"include_completed":{"type":"boolean"}},"additionalProperties":false}`),
+	},
+	{
+		Name:               "list_tasks",
+		Description:        "Discover tasks in the current project by partial title and/or optional category/status filters. Returns compact summaries (task ID, title, category, status, priority, updated time, parent/swarm role) with deterministic ordering and explicit limit/offset pagination. Read-only; excludes internal chat rows and never crosses projects. Use it to find an existing task's ID before create_task/edit_task/execute_tasks or to reconcile a GitHub issue by number/URL.",
+		Domain:             DomainTasks,
+		Access:             AccessRead,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       bothModes(),
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: false,
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Optional partial (case-insensitive substring) title match."},"category":{"type":"string","enum":["active","backlog","scheduled","completed"],"description":"Optional category filter. Internal chat rows are always excluded."},"status":{"type":"string","enum":["pending","queued","running","completed","failed","cancelled","blocked"],"description":"Optional task status filter."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Max results to return (default 20, capped at 50)."},"offset":{"type":"integer","minimum":0,"description":"Number of results to skip for pagination."}},"additionalProperties":false}`),
 	},
 	{
 		Name:               "view_task_thread",

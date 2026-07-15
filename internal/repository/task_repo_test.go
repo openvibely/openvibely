@@ -2329,3 +2329,130 @@ func TestTaskRepo_ListStaleQueuedTasks(t *testing.T) {
 		t.Errorf("expected stale task ID=%s, got %s", staleTask.ID, staleTasks[0].ID)
 	}
 }
+
+func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	// Second project for isolation checks.
+	project2 := &models.Project{Name: "Discovery Project 2"}
+	if err := projectRepo.Create(ctx, project2); err != nil {
+		t.Fatalf("Create project2: %v", err)
+	}
+
+	mk := func(projectID, title string, category models.TaskCategory, status models.TaskStatus) *models.Task {
+		task := &models.Task{ProjectID: projectID, Title: title, Category: category, Status: status, Prompt: "p"}
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create %q: %v", title, err)
+		}
+		if err := repo.UpdateStatus(ctx, task.ID, status); err != nil {
+			t.Fatalf("UpdateStatus %q: %v", title, err)
+		}
+		return task
+	}
+
+	exact := mk("default", "Deploy pipeline", models.CategoryActive, models.StatusPending)
+	mk("default", "Deploy pipeline docs", models.CategoryBacklog, models.StatusPending)
+	mk("default", "Refactor deploy hooks", models.CategoryActive, models.StatusRunning)
+	mk("default", "Unrelated cleanup", models.CategoryCompleted, models.StatusCompleted)
+	// Internal chat row must never appear in discovery.
+	mk("default", "Deploy pipeline chat", models.CategoryChat, models.StatusCompleted)
+	// Other project row must never appear.
+	mk(project2.ID, "Deploy pipeline elsewhere", models.CategoryActive, models.StatusPending)
+
+	// Partial title matching: substring "deploy" matches three non-chat rows in
+	// this project (chat + other-project rows excluded).
+	partial, partialTotal, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Query: "deploy"})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery partial query: %v", err)
+	}
+	if partialTotal != 3 || len(partial) != 3 {
+		t.Fatalf("expected 3 partial matches, got total=%d len=%d", partialTotal, len(partial))
+	}
+	for _, task := range partial {
+		if task.Category == models.CategoryChat {
+			t.Fatalf("chat row leaked into discovery: %q", task.Title)
+		}
+		if task.ProjectID != "default" {
+			t.Fatalf("cross-project row leaked: %q", task.ProjectID)
+		}
+	}
+
+	// Exact title query ranks the exact match ahead of prefix/contains matches.
+	tasks, total, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Query: "Deploy pipeline"})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery exact query: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected 2 matches for 'Deploy pipeline', got %d", total)
+	}
+	if len(tasks) == 0 || tasks[0].ID != exact.ID {
+		t.Fatalf("expected exact title match first, got %+v", tasks)
+	}
+
+	// Category filter.
+	activeTasks, activeTotal, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Category: string(models.CategoryActive)})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery category: %v", err)
+	}
+	if activeTotal != 2 || len(activeTasks) != 2 {
+		t.Fatalf("expected 2 active tasks, got total=%d len=%d", activeTotal, len(activeTasks))
+	}
+	for _, task := range activeTasks {
+		if task.Category != models.CategoryActive {
+			t.Fatalf("unexpected category %q", task.Category)
+		}
+	}
+
+	// Status filter.
+	runningTasks, runningTotal, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Status: string(models.StatusRunning)})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery status: %v", err)
+	}
+	if runningTotal != 1 || len(runningTasks) != 1 || runningTasks[0].Title != "Refactor deploy hooks" {
+		t.Fatalf("expected single running task, got total=%d len=%d", runningTotal, len(runningTasks))
+	}
+
+	// Deterministic ordering without query: updated_at DESC, id ASC.
+	all, allTotal, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery all: %v", err)
+	}
+	if allTotal != 4 {
+		t.Fatalf("expected 4 non-chat tasks, got %d", allTotal)
+	}
+	for i := 1; i < len(all); i++ {
+		prev, cur := all[i-1], all[i]
+		if cur.UpdatedAt.After(prev.UpdatedAt) {
+			t.Fatalf("results not ordered by updated_at DESC at index %d", i)
+		}
+		if cur.UpdatedAt.Equal(prev.UpdatedAt) && cur.ID < prev.ID {
+			t.Fatalf("ties not ordered by id ASC at index %d", i)
+		}
+	}
+
+	// Result bounds + pagination.
+	page1, page1Total, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Limit: 2, Offset: 0})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery page1: %v", err)
+	}
+	if page1Total != 4 || len(page1) != 2 {
+		t.Fatalf("expected page1 total=4 len=2, got total=%d len=%d", page1Total, len(page1))
+	}
+	page2, _, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery page2: %v", err)
+	}
+	if len(page2) != 2 {
+		t.Fatalf("expected page2 len=2, got %d", len(page2))
+	}
+	seen := map[string]bool{}
+	for _, task := range append(append([]models.Task{}, page1...), page2...) {
+		if seen[task.ID] {
+			t.Fatalf("pagination returned duplicate task %q", task.ID)
+		}
+		seen[task.ID] = true
+	}
+}
