@@ -489,6 +489,131 @@ if (renders !== 2 || appended[appended.length - 1].textContent.indexOf('Error: b
 	}
 }
 
+func TestChatBubbleStreamingFifthRetryIsNotFailedByDuplicateErrorCallback(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the streaming retry scheduler")
+	}
+	var buf bytes.Buffer
+	if err := ChatBubbleStreaming("assistant", "exec-id", "chat-messages", "", false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatBubbleStreaming: %v", err)
+	}
+	content := buf.String()
+	start := strings.LastIndex(content, `<script type="text/javascript">`)
+	end := strings.LastIndex(content, "</script>")
+	if start == -1 || end <= start {
+		t.Fatal("streaming script is missing")
+	}
+	source := content[start+len(`<script type="text/javascript">`) : end]
+	harness := `
+const timers = new Map(); let nextTimer = 1;
+global.requestAnimationFrame = fn => fn();
+global.setTimeout = (fn, delay) => { const id = nextTimer++; timers.set(id, { fn, delay }); return id; };
+global.clearTimeout = id => timers.delete(id);
+function classList() { return { add() {}, remove() {}, contains() { return false; } }; }
+const appended = [], sources = [];
+const container = {
+  attrs: { 'data-exec-id': 'exec-id', 'data-messages-container': 'chat-messages', 'data-pause-polling-target': '', 'data-is-thread': 'false' },
+  classList: classList(), getAttribute(name) { return this.attrs[name] || ''; }, setAttribute(name, value) { this.attrs[name] = value; },
+  appendChild(node) { appended.push(node); }, closest() { return null; }
+};
+const streamingDots = { classList: classList(), previousElementSibling: container };
+const thinking = { classList: classList() };
+global.document = {
+  currentScript: { previousElementSibling: streamingDots },
+  getElementById(id) { if (id === 'streaming-thinking-exec-id') return thinking; if (id === 'chat-messages') return {}; return null; },
+  createTextNode(text) { return { textContent: text }; }
+};
+class FakeEventSource {
+  constructor() { this.listeners = {}; sources.push(this); }
+  addEventListener(name, fn) { this.listeners[name] = fn; }
+  close() {}
+}
+global.EventSource = FakeEventSource;
+global.window = {
+  renderStreamingContent() {},
+  resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
+  registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {}
+};
+`
+	assertions := `
+for (let attempt = 0; attempt < 5; attempt++) {
+  const active = sources[sources.length - 1];
+  active.listeners.error({ data: 'execution not found' });
+  active.onerror({ data: 'execution not found' });
+  if (timers.size !== 1 || appended.length !== 0) process.exit(10 + attempt);
+  const entry = timers.entries().next().value;
+  timers.delete(entry[0]);
+  entry[1].fn();
+}
+if (sources.length !== 6 || appended.length !== 0) process.exit(20);
+const exhausted = sources[sources.length - 1];
+exhausted.listeners.error({ data: 'execution not found' });
+exhausted.onerror({ data: 'execution not found' });
+if (timers.size !== 0 || appended.length !== 1 || appended[0].textContent.indexOf('execution not found') === -1) process.exit(21);
+`
+	if output, err := exec.Command(node, "-e", harness+source+assertions).CombinedOutput(); err != nil {
+		t.Fatalf("fifth streaming retry was terminated by the duplicate error callback: %v\n%s", err, output)
+	}
+}
+
+func TestChatBubbleStreamingTerminalRenderRejectionFallsBackToCompleteText(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the terminal render fallback")
+	}
+	var buf bytes.Buffer
+	if err := ChatBubbleStreaming("assistant", "exec-id", "chat-messages", "", false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatBubbleStreaming: %v", err)
+	}
+	content := buf.String()
+	start := strings.LastIndex(content, `<script type="text/javascript">`)
+	end := strings.LastIndex(content, "</script>")
+	if start == -1 || end <= start {
+		t.Fatal("streaming script is missing")
+	}
+	source := content[start+len(`<script type="text/javascript">`) : end]
+	harness := `
+let renders = 0;
+global.requestAnimationFrame = fn => fn();
+function classList() { return { add() {}, remove() {}, contains() { return false; } }; }
+const container = {
+  attrs: { 'data-exec-id': 'exec-id', 'data-messages-container': 'chat-messages', 'data-pause-polling-target': '', 'data-is-thread': 'false' },
+  classList: classList(), getAttribute(name) { return this.attrs[name] || ''; }, setAttribute(name, value) { this.attrs[name] = value; },
+  appendChild() {}, closest() { return null; }, textContent: ''
+};
+const streamingDots = { classList: classList(), previousElementSibling: container };
+const thinking = { classList: classList() };
+global.document = {
+  currentScript: { previousElementSibling: streamingDots },
+  getElementById(id) { if (id === 'streaming-thinking-exec-id') return thinking; if (id === 'chat-messages') return {}; return null; },
+  createTextNode(text) { return { textContent: text }; }
+};
+class FakeEventSource {
+  constructor() { this.listeners = {}; global.source = this; this.closed = false; }
+  addEventListener(name, fn) { this.listeners[name] = fn; }
+  close() { this.closed = true; }
+}
+global.EventSource = FakeEventSource;
+global.window = {
+  renderStreamingContent() { renders++; return Promise.reject(new Error('renderer failed')); },
+  resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
+  registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {}
+};
+`
+	assertions := `
+source.onmessage({ data: 'complete final response' });
+source.listeners.done({ data: 'completed' });
+setImmediate(function() {
+  if (!source.closed || renders < 2) process.exit(30);
+  if (container.textContent !== 'complete final response' || container.attrs['data-raw-content'] !== 'complete final response') process.exit(31);
+});
+`
+	if output, err := exec.Command(node, "-e", harness+source+assertions).CombinedOutput(); err != nil {
+		t.Fatalf("terminal render rejection did not preserve the complete response: %v\n%s", err, output)
+	}
+}
+
 // TestChatBubbleStreamingResumeScrollBehavior verifies resume bubble uses data attributes
 // for deferred SSE initialization (EventSource created by _initThreadStreaming after morph).
 func TestChatBubbleStreamingResumeScrollBehavior(t *testing.T) {
@@ -2595,10 +2720,15 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 		t.Error("renderStreamingContent must not clear the live container before detached rendering completes")
 	}
 	for _, snippet := range []string{
-		"if (yieldBetweenBatches && textBuffer.length >= 100 * 1024)",
+		"var shouldYieldPreparation = yieldBetweenBatches && textBuffer.length >= 100 * 1024",
+		"var preparationPhases = [",
+		"setTimeout(runPreparationPhase, 0)",
 		"batchSegments >= 12 || batchBytes + segmentBytes > 64 * 1024",
 		"- batchStartedAt) >= 8",
 		"setTimeout(renderBatch, 0)",
+		"pendingLargeToolOutputs.push",
+		"output.offset + 64 * 1024",
+		"setTimeout(fillNextChunk, 0)",
 		"if (container._streamRenderVersion !== renderVersion)",
 	} {
 		if !strings.Contains(renderer, snippet) {
@@ -3792,8 +3922,9 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
 		"el.scrollTop = Number.MAX_SAFE_INTEGER",
 		"el.scrollTop = state.scrollTop",
-		"var hasOut = seg.resultOutput && seg.resultOutput.trim()",
-		"outPre.textContent = seg.resultOutput.trim()",
+		"var outputText = seg.resultOutput ? seg.resultOutput.trim() : ''",
+		"var hasOut = outputText !== ''",
+		"outPre.textContent = outputText",
 	}
 	for _, fragment := range required {
 		if !strings.Contains(content, fragment) {

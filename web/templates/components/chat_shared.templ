@@ -453,7 +453,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							if (!force && renderScheduled) return;
 							var runRender = function() {
 							var sourceLength = textBuffer.length;
-							var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
+							var renderText = textBuffer;
 							if (!force && sourceLength === lastRenderedSourceLength) return;
 						// Refresh tracker against the live messages element. If a morph
 						// swap replaced the container mid-stream, the old tracker would
@@ -465,7 +465,6 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
 					container.classList.remove('text-error/80', 'font-medium');
-							container.setAttribute('data-raw-content', renderText);
 							function finishScheduledRender(committed) {
 								if (committed === false) return;
 								renderScheduled = false;
@@ -485,11 +484,17 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							var shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;
 							var renderPromise = window.renderStreamingContent(container, renderText, shouldYield);
 							if (renderPromise && typeof renderPromise.then === 'function') {
-								return renderPromise.then(finishScheduledRender).catch(function(err) {
-									renderScheduled = false;
-									console.error('[chat] streaming render failed:', err);
-									if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
-									return false;
+					return renderPromise.then(finishScheduledRender).catch(function(err) {
+						renderScheduled = false;
+						console.error('[chat] streaming render failed:', err);
+						// Preserve the complete response even if the styled renderer fails.
+						var fallbackText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(renderText) : renderText;
+						container.textContent = fallbackText;
+						container.setAttribute('data-raw-content', fallbackText);
+						lastRenderedSourceLength = sourceLength;
+						lastRenderFinishedAt = Date.now();
+						if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
+						return true;
 								});
 							}
 							finishScheduledRender(true);
@@ -533,14 +538,16 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						var streamRetryScheduled = false;
 						var streamTerminalHandled = false;
 						var eventSource = null;
-						function scheduleExecutionStreamRetry() {
-							if (streamRetryScheduled || streamRetryCount >= 5) return;
-							streamRetryScheduled = true;
-							streamRetryCount++;
+				function scheduleExecutionStreamRetry() {
+					if (streamRetryScheduled) return true;
+					if (streamRetryCount >= 5) return false;
+					streamRetryScheduled = true;
+					streamRetryCount++;
 							setTimeout(function() {
 								streamRetryScheduled = false;
-								connectExecutionStream();
-							}, 150 * streamRetryCount);
+						connectExecutionStream();
+					}, 150 * streamRetryCount);
+					return true;
 						}
 						function connectExecutionStream() {
 							var streamOffset = utf8ByteLength(textBuffer);
@@ -630,14 +637,13 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 					});
 
 						eventSource.addEventListener('error', function(event) {
-							var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
+					var retryableEarlyError = textBuffer === '' && event.data === 'execution not found';
 							if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
 						eventSource.close();
 						removeThreadEventSource(eventSource);
 						removeChatEventSource(execId, eventSource);
-						if (retryableEarlyError) {
-							scheduleExecutionStreamRetry();
-							return;
+					if (retryableEarlyError && scheduleExecutionStreamRetry()) {
+						return;
 						}
 						if (streamTerminalHandled) return;
 						streamTerminalHandled = true;
@@ -666,9 +672,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							eventSource.close();
 							removeThreadEventSource(eventSource);
 							removeChatEventSource(execId, eventSource);
-						if (textBuffer === '' && streamRetryCount < 5) {
-							scheduleExecutionStreamRetry();
-							return;
+				if (textBuffer === '' && scheduleExecutionStreamRetry()) {
+					return;
 						}
 						if (streamTerminalHandled) return;
 						streamTerminalHandled = true;
@@ -887,7 +892,7 @@ templ _initThreadStreamingScript() {
 					if (!force && renderScheduled) return;
 						var runRender = function() {
 							var sourceLength = cumulativeContent.length;
-							var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
+							var renderText = cumulativeContent;
 							if (!force && sourceLength === lastRenderedSourceLength) return;
 						// Refresh tracker against the live messages element in case a
 						// morph swap replaced the container while streaming.
@@ -897,7 +902,6 @@ templ _initThreadStreamingScript() {
 						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
 					container.classList.remove('text-error/80', 'font-medium');
-						container.setAttribute('data-raw-content', renderText);
 						function finishScheduledRender(committed) {
 							if (committed === false) return;
 							renderScheduled = false;
@@ -914,11 +918,16 @@ templ _initThreadStreamingScript() {
 						var shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;
 						var renderPromise = window.renderStreamingContent(container, renderText, shouldYield);
 						if (renderPromise && typeof renderPromise.then === 'function') {
-							return renderPromise.then(finishScheduledRender).catch(function(err) {
-								renderScheduled = false;
-								console.error('[thread] streaming render failed:', err);
-								if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
-								return false;
+				return renderPromise.then(finishScheduledRender).catch(function(err) {
+					renderScheduled = false;
+					console.error('[thread] streaming render failed:', err);
+					var fallbackText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(renderText) : renderText;
+					container.textContent = fallbackText;
+					container.setAttribute('data-raw-content', fallbackText);
+					lastRenderedSourceLength = sourceLength;
+					lastRenderFinishedAt = Date.now();
+					if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
+					return true;
 							});
 						}
 						finishScheduledRender(true);
@@ -962,14 +971,16 @@ templ _initThreadStreamingScript() {
 						var idx = window._threadEventSources.indexOf(es);
 						if (idx >= 0) window._threadEventSources.splice(idx, 1);
 					}
-						function scheduleResumeExecutionStreamRetry() {
-							if (streamRetryScheduled || streamRetryCount >= 5) return;
+				function scheduleResumeExecutionStreamRetry() {
+					if (streamRetryScheduled) return true;
+					if (streamRetryCount >= 5) return false;
 							streamRetryScheduled = true;
 							streamRetryCount++;
 							setTimeout(function() {
 								streamRetryScheduled = false;
-								connectResumeExecutionStream();
-							}, 150 * streamRetryCount);
+						connectResumeExecutionStream();
+					}, 150 * streamRetryCount);
+					return true;
 						}
 						var streamTerminalHandled = false;
 						function connectResumeExecutionStream() {
@@ -1023,12 +1034,11 @@ templ _initThreadStreamingScript() {
 				});
 
 					eventSource.addEventListener('error', function(event) {
-						var retryableEarlyError = cumulativeContent === '' && event.data === 'execution not found' && streamRetryCount < 5;
+					var retryableEarlyError = cumulativeContent === '' && event.data === 'execution not found';
 						if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
 					eventSource.close();
 					removeThreadEventSource(eventSource);
-					if (retryableEarlyError) {
-						scheduleResumeExecutionStreamRetry();
+					if (retryableEarlyError && scheduleResumeExecutionStreamRetry()) {
 						return;
 					}
 					if (streamTerminalHandled) return;
@@ -1048,9 +1058,8 @@ templ _initThreadStreamingScript() {
 						console.error('EventSource failed:', error);
 						eventSource.close();
 						removeThreadEventSource(eventSource);
-					if (cumulativeContent === '' && streamRetryCount < 5) {
-						scheduleResumeExecutionStreamRetry();
-						return;
+				if (cumulativeContent === '' && scheduleResumeExecutionStreamRetry()) {
+					return;
 					}
 					if (streamTerminalHandled) return;
 					streamTerminalHandled = true;
@@ -3092,8 +3101,8 @@ templ ChatAutoScrollScript() {
 			window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches) {
 				var renderVersion = (container._streamRenderVersion || 0) + 1;
 				container._streamRenderVersion = renderVersion;
-				if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer || '');
-				if (window.stripFinalStatusControl) textBuffer = window.stripFinalStatusControl(textBuffer);
+				textBuffer = textBuffer || '';
+				var shouldYieldPreparation = yieldBetweenBatches && textBuffer.length >= 100 * 1024;
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
@@ -3134,73 +3143,84 @@ templ ChatAutoScrollScript() {
 				var toolResultBlockPattern = /\[Tool\s+(\S+)\s+(done|error)\](?:\r\n|\r|\n)?([\s\S]*?)(?:\r\n|\r|\n)?\[\/Tool\](?:\r\n|\r|\n)?/g;
 				var toolResultLegacyPattern = /\[Tool\s+(\S+)\s+(done|error):\s*([^\]\r\n]*)\](?:\r\n|\r|\n)?/g;
 
-			// Pre-strip protocol artifact lines (e.g. multi_tool_use.parallel fragments)
-			// before segment parsing so they don't appear as leaked text between tool cards
-				textBuffer = textBuffer.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
 				var allMatches = [];
 				var match;
-				var codeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
-
-				while ((match = thinkingPattern.exec(textBuffer)) !== null) {
-						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
-						thinkingPattern.lastIndex = match.index + 1;
-						continue;
-					}
-					allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
+				var codeRanges = [];
+				var segments = [];
+				function prepareText() {
+					if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer);
+					if (window.stripFinalStatusControl) textBuffer = window.stripFinalStatusControl(textBuffer);
+					// Strip protocol artifact lines before segment parsing so they do not
+					// appear as leaked text between tool cards.
+					textBuffer = textBuffer.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
 				}
-				while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
+				function prepareCodeRanges() {
+					codeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
+				}
+				function collectThinkingMatches() {
+					while ((match = thinkingPattern.exec(textBuffer)) !== null) {
 						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
-						toolUsingPattern.lastIndex = match.index + 1;
+							thinkingPattern.lastIndex = match.index + 1;
+							continue;
+						}
+						allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
+					}
+				}
+				function collectToolUsingMatches() {
+					while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
+						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
+							toolUsingPattern.lastIndex = match.index + 1;
 						continue;
 					}
 					var raw = match[1].trim();
 					var pipeIdx = raw.indexOf(' | ');
 					var toolName = pipeIdx >= 0 ? raw.substring(0, pipeIdx) : raw;
-					var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
-					allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
+						var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
+						allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
+					}
 				}
-				while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
+				function collectToolResultBlockMatches() {
+					while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
 						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
 						toolResultBlockPattern.lastIndex = match.index + 1;
 						continue;
+						}
+						allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
 					}
-					allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
 				}
-				while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
+				function collectLegacyToolResultMatches() {
+					while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
 						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
 						toolResultLegacyPattern.lastIndex = match.index + 1;
 						continue;
 					}
 					var dominated = allMatches.some(function(m) { return m.index <= match.index && m.index + m.length >= match.index + match[0].length; });
 					if (!dominated) {
-						allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+							allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+						}
 					}
 				}
-
-			allMatches.sort(function(a, b) { return a.index - b.index; });
-
-			var segments = [];
-			var lastIndex = 0;
-			allMatches.forEach(function(m) {
-					if (m.index < lastIndex) return;
-					if (m.index > lastIndex) {
-						segments.push({ type: 'text', content: textBuffer.substring(lastIndex, m.index) });
+				function buildSegments() {
+					allMatches.sort(function(a, b) { return a.index - b.index; });
+					var lastIndex = 0;
+					allMatches.forEach(function(m) {
+						if (m.index < lastIndex) return;
+						if (m.index > lastIndex) {
+							segments.push({ type: 'text', content: textBuffer.substring(lastIndex, m.index) });
+						}
+						segments.push(m);
+						lastIndex = m.index + m.length;
+					});
+					if (lastIndex < textBuffer.length) {
+						segments.push({ type: 'text', content: textBuffer.substring(lastIndex) });
 					}
-					segments.push(m);
-					lastIndex = m.index + m.length;
-				});
-			if (lastIndex < textBuffer.length) {
-					segments.push({ type: 'text', content: textBuffer.substring(lastIndex) });
 				}
-
-			// Assign stable per-render IDs and link each tool_result to the oldest
-			// unmatched preceding [Using tool:] of the same normalized name. Multiple
-			// adjacent Bash/tool calls of the same type must not pair by latest name
-			// match, or replay/live renders can swap their OUT blocks.
-			var toolUseQueues = {};
-			var toolRenderOrdinal = 0;
-			for (var si = 0; si < segments.length; si++) {
-					if (segments[si].type === 'using') {
+				function linkToolResults() {
+					// Assign stable IDs and link each result to the oldest unmatched use.
+					var toolUseQueues = {};
+					var toolRenderOrdinal = 0;
+					for (var si = 0; si < segments.length; si++) {
+						if (segments[si].type === 'using') {
 						var usingName = segments[si].normalizedName || segments[si].name;
 						segments[si].toolRenderID = 'tool-' + segments[si].index + '-' + toolRenderOrdinal++;
 						if (!toolUseQueues[usingName]) toolUseQueues[usingName] = [];
@@ -3216,20 +3236,33 @@ templ ChatAutoScrollScript() {
 							queue[sk].resultStatus = segments[si].status;
 							queue[sk].resultOutput = segments[si].output || '';
 							break;
+							}
 						}
 					}
-				}
-			// Mark tools as completed if anything follows them
-			for (var si = 0; si < segments.length; si++) {
-					if (segments[si].type !== 'using') continue;
+					// Mark tools as completed if anything follows them.
+					for (var si = 0; si < segments.length; si++) {
+						if (segments[si].type !== 'using') continue;
 					if (segments[si].resultLinked) { segments[si].completed = true; continue; }
 					for (var sj = si + 1; sj < segments.length; sj++) {
 						if (segments[sj].type !== 'text' || segments[sj].content.trim()) {
 							segments[si].completed = true;
 							break;
+							}
 						}
 					}
 				}
+				var preparationPhases = [
+					prepareText,
+					prepareCodeRanges,
+					collectThinkingMatches,
+					collectToolUsingMatches,
+					collectToolResultBlockMatches,
+					collectLegacyToolResultMatches,
+					buildSegments,
+					linkToolResults
+				];
+
+				function renderPreparedSegments() {
 
 			// Save open state of existing thinking sections before clearing.
 			// Uses both a local array (fast path for same-call re-renders) and a
@@ -3270,6 +3303,7 @@ templ ChatAutoScrollScript() {
 
 			var pendingText = '';
 			var pendingThinking = []; // accumulate consecutive thinking blocks
+			var pendingLargeToolOutputs = [];
 			function flushThinking() {
 				if (pendingThinking.length === 0) return;
 				// Merge all consecutive thinking blocks into one collapsible element
@@ -3342,7 +3376,8 @@ templ ChatAutoScrollScript() {
 					inContent = seg.secondary;
 				}
 
-				var hasOut = seg.resultOutput && seg.resultOutput.trim();
+				var outputText = seg.resultOutput ? seg.resultOutput.trim() : '';
+				var hasOut = outputText !== '';
 
 				if (!hasIn && !hasOut) return null;
 
@@ -3387,7 +3422,11 @@ templ ChatAutoScrollScript() {
 					outScroll.setAttribute('data-tool-row', 'out');
 					trackScrollPin(outScroll);
 					var outPre = document.createElement('pre');
-					outPre.textContent = seg.resultOutput.trim();
+					if (shouldYieldPreparation && outputText.length > 64 * 1024) {
+						pendingLargeToolOutputs.push({ node: outPre, text: outputText, offset: 0 });
+					} else {
+						outPre.textContent = outputText;
+					}
 					outScroll.appendChild(outPre);
 					outVal.appendChild(outScroll);
 					outRow.appendChild(outLbl);
@@ -3485,6 +3524,7 @@ templ ChatAutoScrollScript() {
 				flushThinking();
 				flushText();
 				container.classList.remove('whitespace-pre-wrap');
+				container.setAttribute('data-raw-content', textBuffer);
 				container.replaceChildren(renderFragment);
 
 			// Restore open state of thinking sections from before re-render
@@ -3529,7 +3569,26 @@ templ ChatAutoScrollScript() {
 				window.convertTaskEditLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);
 			}
 			}
-			if (yieldBetweenBatches && textBuffer.length >= 100 * 1024) {
+			function fillLargeToolOutputChunks(done) {
+				var outputIndex = 0;
+				function fillNextChunk() {
+					if (container._streamRenderVersion !== renderVersion) { done(false); return; }
+					while (outputIndex < pendingLargeToolOutputs.length) {
+						var output = pendingLargeToolOutputs[outputIndex];
+						var end = Math.min(output.offset + 64 * 1024, output.text.length);
+						output.node.appendChild(document.createTextNode(output.text.substring(output.offset, end)));
+						output.offset = end;
+						if (output.offset >= output.text.length) outputIndex++;
+						if (outputIndex < pendingLargeToolOutputs.length || output.offset < output.text.length) {
+							setTimeout(fillNextChunk, 0);
+							return;
+						}
+					}
+					done(true);
+				}
+				fillNextChunk();
+			}
+			if (shouldYieldPreparation) {
 				return new Promise(function(resolve) {
 					var segmentIndex = 0;
 					function renderBatch() {
@@ -3542,7 +3601,7 @@ templ ChatAutoScrollScript() {
 						var batchSegments = 0;
 						while (segmentIndex < segments.length) {
 							var segment = segments[segmentIndex];
-							var segmentBytes = (segment.content || segment.resultOutput || segment.secondary || '').length;
+							var segmentBytes = (segment.content || '').length + (segment.resultOutput || '').length + (segment.secondary || '').length;
 							if (batchSegments > 0 && (batchSegments >= 12 || batchBytes + segmentBytes > 64 * 1024 ||
 								((window.performance && performance.now ? performance.now() : Date.now()) - batchStartedAt) >= 8)) break;
 							renderSegment(segment, segmentIndex);
@@ -3554,8 +3613,11 @@ templ ChatAutoScrollScript() {
 							setTimeout(renderBatch, 0);
 							return;
 						}
-						finishRender();
-						resolve(true);
+						fillLargeToolOutputChunks(function(committed) {
+							if (!committed) { resolve(false); return; }
+							finishRender();
+							resolve(true);
+						});
 					}
 					renderBatch();
 				});
@@ -3564,6 +3626,32 @@ templ ChatAutoScrollScript() {
 				renderSegment(segments[renderIndex], renderIndex);
 			}
 			finishRender();
+			}
+			if (shouldYieldPreparation) {
+				return new Promise(function(resolve, reject) {
+					var preparationIndex = 0;
+					function runPreparationPhase() {
+						if (container._streamRenderVersion !== renderVersion) { resolve(false); return; }
+						try {
+							if (preparationIndex < preparationPhases.length) {
+								preparationPhases[preparationIndex++]();
+								setTimeout(runPreparationPhase, 0);
+								return;
+							}
+							var rendered = renderPreparedSegments();
+							if (rendered && typeof rendered.then === 'function') rendered.then(resolve, reject);
+							else resolve(rendered !== false);
+						} catch (err) {
+							reject(err);
+						}
+					}
+					setTimeout(runPreparationPhase, 0);
+				});
+			}
+			for (var preparationIndex = 0; preparationIndex < preparationPhases.length; preparationIndex++) {
+				preparationPhases[preparationIndex]();
+			}
+			return renderPreparedSegments();
 		};
 
 						// window.codeRanges and window.isInsideCode are installed by the base layout
