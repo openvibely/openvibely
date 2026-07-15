@@ -14,20 +14,47 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TZ: America/New_York
+      LINUX_DESKTOP_PACKAGES: >-
+        pkg-config
+        libgtk-4-dev
+        libwebkitgtk-6.0-dev
+        libglib2.0-dev
+        libsoup-3.0-dev
 
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
 
-      - name: Install Linux desktop dependencies
+      - name: Prepare Linux desktop dependency cache
+        id: linux-desktop-cache-key
+        shell: bash
         run: |
+          package_hash="$(printf '%s' "$LINUX_DESKTOP_PACKAGES" | sha256sum | cut -d' ' -f1)"
+          runner_image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}-${RUNNER_ARCH}"
+          echo "key=linux-desktop-apt-${runner_image}-${package_hash}" >> "$GITHUB_OUTPUT"
+
+          mkdir -p "$HOME/.cache/openvibely-apt/archives/partial"
+          sudo chown -R _apt:"$(id -gn)" "$HOME/.cache/openvibely-apt/archives"
+          sudo chmod 0775 "$HOME/.cache/openvibely-apt/archives" "$HOME/.cache/openvibely-apt/archives/partial"
+
+      - name: Restore Linux desktop dependency downloads
+        id: linux-desktop-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/openvibely-apt/archives/*.deb
+          key: ${{ steps.linux-desktop-cache-key.outputs.key }}
+
+      - name: Install Linux desktop dependencies
+        shell: bash
+        run: |
+          started_at=$SECONDS
+          read -r -a packages <<< "$LINUX_DESKTOP_PACKAGES"
           sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config \
-            libgtk-4-dev \
-            libwebkitgtk-6.0-dev \
-            libglib2.0-dev \
-            libsoup-3.0-dev
+          sudo apt-get \
+            -o Dir::Cache::archives="$HOME/.cache/openvibely-apt/archives" \
+            -o APT::Keep-Downloaded-Packages=true \
+            install -y "${packages[@]}"
+          echo "Linux desktop dependencies installed in $((SECONDS - started_at))s (cache hit: ${{ steps.linux-desktop-cache.outputs.cache-hit }})"
 
       - name: Set up Go
         uses: actions/setup-go@v5
