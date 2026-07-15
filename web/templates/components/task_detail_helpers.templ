@@ -354,7 +354,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 			PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
 		})
-		<!-- Shared auto-scroll and marker cleaning utilities -->
+		<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
 		@ChatAutoScrollScript()
 		@_initThreadStreamingScript()
 		@TaskThreadLiveEventsScript(task.ID)
@@ -468,7 +468,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 						// Keep global flag as fallback source of truth across partial re-inits.
 						window._taskThreadUserScrolledUp = preservedUserScrolledUp;
 					}
-					// Render streaming content markers and initialize SSE for any running executions.
+					// Render tool/thinking transcript controls and initialize SSE for any running executions.
 					// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.
 					var resumeContainers = document.querySelectorAll('[data-streaming-resume="true"]');
 					resumeContainers.forEach(function(c) {

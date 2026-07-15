@@ -14,6 +14,40 @@ func renderChatContentForTest(agents []models.LLMConfig, history []models.Execut
 	return ChatContent(agents, history, projectID, attachments, pending, latestPlanComplete, false, 30)
 }
 
+func TestChatContent_IncludesSharedTaskResultConverters(t *testing.T) {
+	var buf bytes.Buffer
+	if err := renderChatContentForTest(nil, []models.Execution{{
+		ID:         "exec-task-result",
+		Status:     models.ExecCompleted,
+		PromptSent: "Create task",
+		Output:     "- \"Created\" (backlog) [TASK_ID:task-1]\nExamples: `create\n[TASK_ID:coded/create]` and ``edit\n[TASK_EDITED:coded/edit]``\nUnmatched `` prefix; `later\n[TASK_ID:later/create]\n[TASK_EDITED:later/edit]`\nEscaped \\`- \"Escaped\" (backlog) [TASK_ID:escaped/create] escaped \\`\nEscaped \\``- \"Escaped edit\" (updated: title) [TASK_EDITED:escaped/edit]``\nUnicode fence:\n~~~text\n~~~\u202f\n- \"Unicode\" (backlog) [TASK_ID:unicode/create]\n- \"Unicode edit\" (updated: title) [TASK_EDITED:unicode/edit]\n~~~\nBare CR fence:\n```text\r- \"Bare CR\" (backlog) [TASK_ID:bare-cr/create]\r- \"Bare CR edit\" (updated: title) [TASK_EDITED:bare-cr/edit]\r```\nSame-line example: `[Tool grep_search done]coded[/Tool]`.\n[Using tool: grep_search]\n[Tool grep_search done]actual[/Tool]"}}, "project-1", nil, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+	for _, definition := range []string{
+		"window.convertTaskLinksInMessage = function(messageElement)",
+		"window.convertTaskEditLinksInMessage = function(messageElement)",
+	} {
+		if count := strings.Count(content, definition); count != 1 {
+			t.Fatalf("global Chat must include exactly one shared task-result converter %q, got %d", definition, count)
+		}
+	}
+	if !strings.Contains(content, "if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble)") {
+		t.Fatal("global Chat hydration must apply shared task-result conversion")
+	}
+	if count := strings.Count(content, "if (inCode && !inToolOutput) continue"); count != 2 {
+		t.Fatalf("global Chat shared converters must keep coded task-result examples inert, got %d guards", count)
+	}
+	if count := strings.Count(content, "(inToolOutput || inMarkdownFallback) && window.isInsideCode"); count != 2 {
+		t.Fatalf("global Chat fallback hydration must keep coded task-result examples inert, got %d raw-range guards", count)
+	}
+	for _, marker := range []string{"[TASK_ID:coded/create]", "[TASK_EDITED:coded/edit]", "[TASK_ID:later/create]", "[TASK_EDITED:later/edit]", "[TASK_ID:escaped/create]", "[TASK_EDITED:escaped/edit]", "[TASK_ID:unicode/create]", "[TASK_EDITED:unicode/edit]", "[TASK_ID:bare-cr/create]", "[TASK_EDITED:bare-cr/edit]", "`[Tool grep_search done]coded[/Tool]`", "[Tool grep_search done]actual[/Tool]"} {
+		if !strings.Contains(content, marker) {
+			t.Fatalf("global Chat hard-refresh output must retain multiline inline metadata %s until Markdown rendering", marker)
+		}
+	}
+}
+
 func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Very Long Agent Name That Should Not Push Send Button", Model: "very-long-model-name", Provider: models.ProviderAnthropic}}
 

@@ -127,68 +127,68 @@ func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
 	}
 }
 
-func TestBuildToolMarker_WithBody(t *testing.T) {
-	input := json.RawMessage(`{"title":"Fix login","prompt":"Investigate auth flow"}`)
-	got, err := buildToolMarker("CREATE_TASK", input, true)
-	if err != nil {
-		t.Fatalf("buildToolMarker error: %v", err)
-	}
-	if !strings.Contains(got, "[CREATE_TASK]") || !strings.Contains(got, "[/CREATE_TASK]") {
-		t.Fatalf("expected create task marker wrapper, got %q", got)
-	}
-	if !strings.Contains(got, `"title":"Fix login"`) {
-		t.Fatalf("expected normalized JSON body, got %q", got)
-	}
+func TestCreateTaskRuntimeToolDecodesTypedChainConfigDirectly(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Typed Create Task Project")
+	handler := h.chatActionHandlers(
+		streamingResponseParams{ExecID: "typed-create-exec", ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)["create_task"]
+
+	out, err := handler(ctx, json.RawMessage(`{
+		"title":"Typed chained task",
+		"prompt":"Create the parent directly",
+		"category":"backlog",
+		"chain":{
+			"enabled":true,
+			"trigger":"on_completion",
+			"child_title":"Typed child",
+			"child_prompt_prefix":"Continue from the parent",
+			"child_category":"active"
+		}
+	}`))
+	require.NoError(t, err)
+	ids := extractTaskIDsFromOutput(out)
+	require.Len(t, ids, 1)
+
+	created, err := h.taskRepo.GetByID(ctx, ids[0])
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	chain, err := created.ParseChainConfig()
+	require.NoError(t, err)
+	require.True(t, chain.Enabled)
+	require.Equal(t, "on_completion", chain.Trigger)
+	require.Equal(t, "Typed child", chain.ChildTitle)
+	require.Equal(t, "Continue from the parent", chain.ChildPromptPrefix)
+	require.Equal(t, "active", chain.ChildCategory)
 }
 
-func TestBuildToolMarker_ChainConfigPreserved(t *testing.T) {
-	// Simulate the exact JSON a model sends when using create_task tool with chain config
-	input := json.RawMessage(`{"title":"Compute 1+1","prompt":"Compute 1+1 and save to file","category":"active","chain":{"enabled":true,"trigger":"on_completion","child_title":"Compute x+1 from parent output","child_prompt_prefix":"Read x from result.txt and compute x+1","child_category":"active"}}`)
+func TestScheduleTaskRuntimeToolExecutesTypedRequest(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Typed Schedule Project")
+	task := createTask(t, h, project.ID, "Schedule directly")
+	handler := h.chatActionHandlers(
+		streamingResponseParams{ExecID: "typed-schedule-exec", ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)["schedule_task"]
 
-	marker, err := buildToolMarker("CREATE_TASK", input, true)
-	if err != nil {
-		t.Fatalf("buildToolMarker error: %v", err)
-	}
+	out, err := handler(ctx, json.RawMessage(`{"task_id":"`+task.ID+`","time":"09:30","repeat":"weekly","days":["mon","wed"]}`))
+	require.NoError(t, err)
+	require.Contains(t, out, "Scheduled task")
 
-	// Verify marker wrapping
-	if !strings.Contains(marker, "[CREATE_TASK]") || !strings.Contains(marker, "[/CREATE_TASK]") {
-		t.Fatalf("missing marker wrapper: %q", marker)
-	}
-
-	// Parse it back via the same path as processChatTaskCreations
-	tasks := service.ParseTaskCreations(marker)
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task from roundtrip, got %d", len(tasks))
-	}
-
-	req := tasks[0]
-	if req.Chain == nil {
-		t.Fatal("chain config lost in buildToolMarker → ParseTaskCreations roundtrip")
-	}
-	if !req.Chain.Enabled {
-		t.Error("chain.enabled should be true after roundtrip")
-	}
-	if req.Chain.Trigger != "on_completion" {
-		t.Errorf("chain.trigger = %q after roundtrip", req.Chain.Trigger)
-	}
-	if req.Chain.ChildTitle != "Compute x+1 from parent output" {
-		t.Errorf("chain.child_title = %q after roundtrip", req.Chain.ChildTitle)
-	}
-	if req.Chain.ChildPromptPrefix != "Read x from result.txt and compute x+1" {
-		t.Errorf("chain.child_prompt_prefix lost in roundtrip")
-	}
-	if req.Chain.ChildCategory != "active" {
-		t.Errorf("chain.child_category = %q after roundtrip", req.Chain.ChildCategory)
-	}
-}
-
-func TestToolSummaryFromMarker(t *testing.T) {
-	marker := "[LIST_PROJECTS]"
-	updated := marker + "\n\n---\nAvailable Projects:\n- **Default**"
-	got := toolSummaryFromMarker(marker, updated)
-	if !strings.Contains(got, "Available Projects") {
-		t.Fatalf("expected tool summary to keep appended output, got %q", got)
-	}
+	schedules, err := h.scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+	require.Equal(t, models.RepeatWeekly, schedules[0].RepeatType)
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
 }
 
 func TestChatActionSummaryCollector_AppendsCreatedAndEdited(t *testing.T) {
@@ -453,7 +453,7 @@ func TestCreateTaskRuntimeTool_OmittedCategoryAutoStartActivatesAfterAttachmentC
 
 // TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure is the regression
 // test for the phantom create_task bug: the runtime tool handler used to
-// always return (summary, nil), so even if processChatTaskCreations failed to
+// always return (summary, nil), so even if the direct task creation action failed to
 // persist any task (empty project context, malformed input, or DB error) the
 // model would receive isError=false and report a fake successful create_task
 // to the user. The fix returns an error when no [TASK_ID:...] markers appear

@@ -3,12 +3,125 @@ package layout
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	content := buf.String()
+	start := strings.Index(content, "window.configureChatMarked = function")
+	end := strings.Index(content, "// Add copy buttons")
+	if start == -1 || end == -1 || end <= start {
+		t.Fatal("base layout must define shared Markdown code ranges before the chat renderer")
+	}
+
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the rendered Markdown safety helpers")
+	}
+	protected := []string{
+		"`first\n<img src=x onerror=alert(1)>\nlast`",
+		"~~~html\n<img src=x onerror=alert(1)>\n~~~",
+		"`````html\n<img src=x onerror=alert(1)>\n`````",
+		"```html\r<img src=x onerror=alert(1)>\r```",
+		"~~~html\r<img src=x onerror=alert(1)>\r~~~~\t ",
+		"`````html\r<img src=x onerror=alert(1)>\r```\r``````   ",
+		"Unmatched `` prefix; `<img src=x onerror=alert(1)>`",
+		`\\` + "`<img src=x onerror=alert(1)>`",
+		"```html\n<img src=x onerror=alert(1)>\n```\u00a0\n<img src=y onerror=alert(2)>\n```",
+		"~~~html\n<img src=x onerror=alert(1)>\n~~~\u2003\n<img src=y onerror=alert(2)>\n~~~",
+		"`````html\n<img src=x onerror=alert(1)>\n`````\u202f\n<img src=y onerror=alert(2)>\n`````",
+	}
+	validClosers := map[string]string{
+		"backtick spaces and tabs": "```html\n<img src=x onerror=alert(1)>\n``` \t\n<img src=y onerror=alert(2)>",
+		"tilde spaces and tabs":    "~~~html\n<img src=x onerror=alert(1)>\n~~~~\t \n<img src=y onerror=alert(2)>",
+		"long fence spaces":        "`````html\n<img src=x onerror=alert(1)>\n``````   \n<img src=y onerror=alert(2)>",
+	}
+	malicious := []string{
+		`\` + "`<img src=x onerror=alert(1)>`",
+		`<img src=x onerror=alert(1)>`,
+		`<img src="x" onerror="alert(1)">`,
+		`<img src='x' onerror='alert(1)'>`,
+		`<img/onerror=alert(1)>`,
+		`<script>alert(1)</script>`,
+		`<a href="javascript:alert(1)">click</a>`,
+	}
+
+	script := "global.window = {};\n" +
+		"global.document = { createElement: function(tag) { if (tag !== 'template') throw new Error('unexpected element'); return { _html: '', content: { querySelectorAll: function() { return []; } }, set innerHTML(value) { this._html = value; }, get innerHTML() { return this._html; } }; } };\n" +
+		content[start:end] + "\n" +
+		"const dependencyPayload = '<img src=x onerror=alert(1)> plain & text';\n" +
+		"const dependencyMetadataPayload = 'Inline `- \"Coded create\" (backlog) [TASK_ID:coded/create]`\\nMultiline ``- \"Coded edit\" (updated: title)\\n[TASK_EDITED:coded/edit]``\\n```text\\n- \"Fenced create\" (backlog) [TASK_ID:coded/fence]\\n```\\n~~~text\\r- \"Bare CR fenced edit\" (updated: title) [TASK_EDITED:coded/cr]\\r~~~\\r- \"Real create\" (backlog) [TASK_ID:real/create]';\n" +
+		"const safeDependencyFallback = '<span data-chat-markdown-fallback=\"true\" style=\"white-space: pre-wrap\">&lt;img src=x onerror=alert(1)&gt; plain &amp; text</span>';\n" +
+		"const safeMetadataFallback = '<span data-chat-markdown-fallback=\"true\" style=\"white-space: pre-wrap\">' + window.escapeHTMLForChat(dependencyMetadataPayload) + '</span>';\n" +
+		"function assertDependencyFallback(exitCode) { const payloadRendered = window.renderChatMarkdown(dependencyPayload); const metadataRendered = window.renderChatMarkdown(dependencyMetadataPayload); if (payloadRendered !== safeDependencyFallback || metadataRendered !== safeMetadataFallback) { console.error('Marked dependency failed open', exitCode, JSON.stringify({ payloadRendered, metadataRendered })); process.exit(exitCode); } }\n" +
+		"assertDependencyFallback(5);\n" +
+		"window.marked = global.marked = { setOptions: function() {} };\n" +
+		"assertDependencyFallback(6);\n" +
+		"window.marked = global.marked = { parse: function(value) { return value; }, setOptions: function() { throw new Error('configuration failed'); } };\n" +
+		"assertDependencyFallback(9);\n" +
+		"window.marked = global.marked = { parse: function() { throw new Error('load failed'); }, setOptions: function() {} };\n" +
+		"assertDependencyFallback(7);\n" +
+		"let lateConfigured = false; window.marked = global.marked = { parse: function(value) { return '<p>' + value + '</p>'; }, setOptions: function(options) { lateConfigured = !!(options && options.gfm && options.breaks); } };\n" +
+		"const lateRendered = window.renderChatMarkdown('**late** <img src=x onerror=alert(1)>');\n" +
+		"if (!lateConfigured || lateRendered !== '<p>**late** &lt;img src=x onerror=alert(1)></p>' || lateRendered.indexOf('data-chat-markdown-fallback') !== -1) { console.error('late Marked was not configured safely', JSON.stringify({ lateConfigured, lateRendered })); process.exit(8); }\n" +
+		"window.marked = global.marked = { parse: function(value) { return value; }, setOptions: function() {} };\n" +
+		"const protectedCases = " + mustJSON(t, protected) + ";\n" +
+		"for (const value of protectedCases) { if (window.escapeRawHTMLForMarkdown(value) !== value) { console.error('changed protected', JSON.stringify(value), JSON.stringify(window.escapeRawHTMLForMarkdown(value))); process.exit(1); } }\n" +
+		"const validClosers = " + mustJSON(t, validClosers) + ";\n" +
+		"for (const [name, value] of Object.entries(validClosers)) { const escaped = window.escapeRawHTMLForMarkdown(value); if (escaped.indexOf('<img src=x') === -1 || escaped.indexOf('<img src=y') !== -1 || escaped.indexOf('&lt;img src=y') === -1) { console.error('valid closer mismatch', name, JSON.stringify(escaped)); process.exit(4); } }\n" +
+		"const maliciousCases = " + mustJSON(t, malicious) + ";\n" +
+		"for (const value of maliciousCases) { const escaped = window.escapeRawHTMLForMarkdown(value); if (/<\\/?(?:img|script|a)\\b/i.test(escaped) || /<img\\//i.test(escaped)) { console.error('raw tag survived', JSON.stringify(value), JSON.stringify(escaped)); process.exit(2); } const rendered = window.renderChatMarkdown(value); if (/<\\/?(?:img|script|a)\\b/i.test(rendered) || /<img\\//i.test(rendered)) { console.error('active tag survived', JSON.stringify(value), JSON.stringify(rendered)); process.exit(3); } }\n"
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("rendered Markdown safety helpers failed: %v\n%s", err, output)
+	}
+
+	generated, err := os.ReadFile("base_templ.go")
+	if err != nil {
+		t.Fatalf("read generated base template: %v", err)
+	}
+	for _, snippet := range []string{
+		"window.configureChatMarked = function()",
+		"typeof parser.parse !== 'function'",
+		"window._chatMarkedConfiguredFor === parser",
+		"if (!window.configureChatMarked || !window.configureChatMarked())",
+		"return window.renderChatMarkdownFallback(text)",
+		"window.escapeHTMLForChat = function(value)",
+		"window.renderChatMarkdownFallback = function(text)",
+		`data-chat-markdown-fallback=\"true\"`,
+		"window.markdownLineRanges = function(text)",
+		`if (text.charAt(end) === '\\r' && text.charAt(next) === '\\n') next++`,
+		"window.codeRanges = function(text)",
+		"/^[ \\\\t]*$/.test(line.substring(runEnd))",
+		"window.escapeRawHTMLForMarkdown = function(text)",
+		"window.sanitizeChatHTML = function(html)",
+		"/^on/i.test(attr.name)",
+		"javascript:|vbscript:|data:",
+	} {
+		if !strings.Contains(string(generated), snippet) {
+			t.Fatalf("generated base template missing Markdown safety snippet %q", snippet)
+		}
+	}
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JavaScript fixture: %v", err)
+	}
+	return string(encoded)
+}
 
 func TestToastCloseButtonIsAccessibleAndTopRightAligned(t *testing.T) {
 	var buf bytes.Buffer

@@ -1324,36 +1324,6 @@ func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID i
 	return nil
 }
 
-func (s *TelegramService) processViewThread(ctx context.Context, execID, projectID, output string) string {
-	viewRequests := ParseViewThread(output)
-	if len(viewRequests) == 0 {
-		return output
-	}
-
-	applog.Infof("[telegram] processViewThread exec=%s found %d view requests", execID, len(viewRequests))
-
-	for _, req := range viewRequests {
-		task, err := resolveChannelTaskReference(ctx, s.taskRepo, projectID, req.TaskID, req.Title)
-		if err != nil {
-			applog.Infof("[telegram] processViewThread error resolving task: %v", err)
-			output += fmt.Sprintf("\n\n---\nCould not find task: %v", err)
-			continue
-		}
-
-		executions, err := s.execRepo.ListByTaskChronological(ctx, task.ID)
-		if err != nil {
-			applog.Infof("[telegram] processViewThread error listing executions for task %s: %v", task.ID, err)
-			output += fmt.Sprintf("\n\n---\nError retrieving thread for task \"%s\": %v", task.Title, err)
-			continue
-		}
-
-		transcript := formatThreadTranscript(task, executions, req.Offset, req.Limit)
-		output += transcript
-	}
-
-	return output
-}
-
 // handleNaturalLanguageProjectCommand detects natural language project commands
 // (e.g. "list projects", "switch to project X") and handles them directly
 // without forwarding to the LLM. Returns the response string and true if handled.
@@ -1420,8 +1390,6 @@ func extractProjectSwitchTarget(lower string) string {
 	return ""
 }
 
-// processListProjects handles [LIST_PROJECTS] markers by returning all available projects.
-// processSwitchProject handles [SWITCH_PROJECT] markers by changing the user's active project.
 // selectDefaultAgent retrieves the default model or falls back to the first available.
 func (s *TelegramService) selectDefaultAgent(ctx context.Context) (*models.LLMConfig, error) {
 	agents, err := s.llmConfigRepo.List(ctx)

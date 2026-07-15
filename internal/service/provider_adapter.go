@@ -17,6 +17,7 @@ import (
 	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmretry "github.com/openvibely/openvibely/internal/llm/retry"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
@@ -57,11 +58,11 @@ func requestUsesChatStreaming(req llmcontracts.AgentRequest) bool {
 	if req.Operation != llmcontracts.OperationStreaming {
 		return false
 	}
-	mode := strings.TrimSpace(string(req.ChatMode))
-	if !req.Followup {
-		return mode == string(models.ChatModeOrchestrate) || mode == string(models.ChatModePlan)
+	if req.Followup {
+		return true
 	}
-	return len(req.ChatHistory) > 0 || strings.TrimSpace(req.ChatSystemContext) != ""
+	mode := strings.TrimSpace(string(req.ChatMode))
+	return mode == string(models.ChatModeOrchestrate) || mode == string(models.ChatModePlan)
 }
 
 func canonicalResult(output, textOnly string, usage llmcontracts.Usage, err error) (llmcontracts.AgentResult, error) {
@@ -166,7 +167,7 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 				output, tokens, err := a.svc.callAnthropicChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode)
 				return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
 			}
-			output, tokens, err := a.svc.callAnthropic(req.Ctx, req.Message, req.Attachments, req.Agent)
+			output, tokens, err := a.svc.callAnthropic(req.Ctx, llmprompt.ApplyTaskCreationToolMode(req.Message, nil), req.Attachments, req.Agent)
 			return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
 
 		case llmcontracts.OperationTask:
@@ -177,7 +178,7 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 				output, textOnly, tokens, err := a.svc.callClaudeCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.PluginDirs, rawAgentDef)
 				return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
 			}
-			output, tokens, err := a.svc.callAnthropic(req.Ctx, req.Message, req.Attachments, req.Agent)
+			output, tokens, err := a.svc.callAnthropic(req.Ctx, llmprompt.ApplyTaskCreationToolMode(req.Message, nil), req.Attachments, req.Agent)
 			return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
 		default:
 			return llmcontracts.AgentResult{}, fmt.Errorf("unsupported operation: %s", req.Operation)

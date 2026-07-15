@@ -9,13 +9,7 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 )
 
-// parseChatTaskCreations extracts task creation requests from AI chat output.
-// Delegates to the shared service.ParseTaskCreations.
-func parseChatTaskCreations(output string) []service.TaskCreationRequest {
-	return service.ParseTaskCreations(output)
-}
-
-// executeChatTaskCreations creates tasks from parsed requests and returns a summary.
+// executeChatTaskCreations creates tasks from typed action requests and returns a summary.
 // Delegates to the shared service.ExecuteTaskCreations.
 // If agents is provided, auto-selects an agent for each task based on prompt complexity.
 func executeChatTaskCreations(ctx context.Context, requests []service.TaskCreationRequest, projectID string, taskSvc *service.TaskService, agents ...[]models.LLMConfig) string {
@@ -23,13 +17,7 @@ func executeChatTaskCreations(ctx context.Context, requests []service.TaskCreati
 	return summary
 }
 
-// parseChatTaskEdits extracts task edit requests from AI chat output.
-// Delegates to the shared service.ParseTaskEdits.
-func parseChatTaskEdits(output string) []service.TaskEditRequest {
-	return service.ParseTaskEdits(output)
-}
-
-// executeChatTaskEdits applies task edits from parsed requests and returns a summary.
+// executeChatTaskEdits applies typed task-edit requests and returns a summary.
 // Delegates to the shared service.ExecuteTaskEdits with attachment support.
 func executeChatTaskEdits(ctx context.Context, requests []service.TaskEditRequest, projectID string, taskSvc *service.TaskService, attachmentRepo *repository.AttachmentRepo, uploadsDir string) string {
 	return service.ExecuteTaskEdits(ctx, requests, projectID, taskSvc, attachmentRepo, uploadsDir)
@@ -56,13 +44,7 @@ func buildScheduleContextString(tasks []models.Task, scheduleMap map[string][]mo
 	return service.BuildScheduleContextString(tasks, scheduleMap, now)
 }
 
-// parseChatTaskExecutions extracts task execution requests from AI chat output.
-// Delegates to the shared service.ParseTaskExecutions.
-func parseChatTaskExecutions(output string) []service.TaskExecutionRequest {
-	return service.ParseTaskExecutions(output)
-}
-
-// executeChatTaskExecutions executes tasks matching the parsed execution requests and returns a summary.
+// executeChatTaskExecutions executes tasks matching typed action requests and returns a summary.
 // Delegates to the shared service.ExecuteTaskExecutions.
 func executeChatTaskExecutions(ctx context.Context, requests []service.TaskExecutionRequest, projectID string, taskSvc *service.TaskService) string {
 	return service.ExecuteTaskExecutions(ctx, requests, projectID, taskSvc)
@@ -72,44 +54,4 @@ func executeChatTaskExecutions(ctx context.Context, requests []service.TaskExecu
 // so attachment activation remains tied to the originating request.
 func (h *Handler) executeChatTaskCreationsWithAttachments(ctx context.Context, requests []service.TaskCreationRequest, projectID string, executionID string, agents []models.LLMConfig) ([]service.TaskCreationResult, string) {
 	return service.ExecuteTaskCreationsWithIndexedReturn(ctx, requests, projectID, h.taskSvc, agents)
-}
-
-// parseViewThread extracts view thread requests from AI chat output.
-func parseViewThread(output string) []service.ViewThreadRequest {
-	return service.ParseViewThread(output)
-}
-
-// parseChatSendToTask extracts send-to-task requests from AI chat output.
-func parseChatSendToTask(output string) []service.SendToTaskRequest {
-	return service.ParseSendToTask(output)
-}
-
-// parseChatScheduleTask extracts schedule task requests from AI chat output.
-func parseChatScheduleTask(output string) []service.ScheduleTaskRequest {
-	return service.ParseScheduleTask(output)
-}
-
-// parseChatDeleteSchedule extracts delete schedule requests from AI chat output.
-func parseChatDeleteSchedule(output string) []service.DeleteScheduleRequest {
-	return service.ParseDeleteSchedule(output)
-}
-
-// parseChatModifySchedule extracts modify schedule requests from AI chat output.
-func parseChatModifySchedule(output string) []service.ModifyScheduleRequest {
-	return service.ParseModifySchedule(output)
-}
-
-// parseChatCreateAlert extracts create alert requests from AI chat output.
-func parseChatCreateAlert(output string) []service.CreateAlertRequest {
-	return service.ParseCreateAlert(output)
-}
-
-// parseChatDeleteAlert extracts delete alert requests from AI chat output.
-func parseChatDeleteAlert(output string) []service.DeleteAlertRequest {
-	return service.ParseDeleteAlert(output)
-}
-
-// parseChatToggleAlert extracts toggle alert requests from AI chat output.
-func parseChatToggleAlert(output string) []service.ToggleAlertRequest {
-	return service.ParseToggleAlert(output)
 }

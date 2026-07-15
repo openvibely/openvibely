@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -59,6 +60,45 @@ func TestExecutionRepo_CreateAndComplete(t *testing.T) {
 	}
 	if got.DurationMs != 500 {
 		t.Errorf("expected DurationMs=500, got %d", got.DurationMs)
+	}
+}
+
+func TestExecutionRepo_CompletePreservesCodedAliasesAndNormalizesRealAliases(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	agentRepo := NewLLMConfigRepo(db)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "Alias Persistence", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	agent, err := agentRepo.GetDefault(ctx)
+	if err != nil {
+		t.Fatalf("get default agent: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+
+	coded := "`\u003cthinking\u003ecoded\nthought\u003c/thinking\u003e`\n``[Using tool: bash\">\n\u003cparameter name=\"command\"\u003eecho coded\u003c/parameter\u003e\n\u003c/invoke\u003e``\n```text\n[Using tool: bash\"> \u003cparameter name=\"command\"\u003eecho fenced\u003c/parameter\u003e \u003c/invoke\u003e\n```\n~~~text\r\u003cthinking\u003ebare CR fenced\u003c/thinking\u003e\r~~~"
+	escapedReal := `Escaped \` + "`" + `<thinking>escaped real</thinking> escaped \` + "`"
+	output := "Unmatched ``` prefix; " + coded + "\n" + escapedReal + "\n\u003cthinking\u003ereal\u003c/thinking\u003e"
+	if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, output, "", 0, 1); err != nil {
+		t.Fatalf("complete execution: %v", err)
+	}
+
+	got, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if !strings.Contains(got.Output, coded) {
+		t.Fatalf("coded aliases changed during persistence:\n%q", got.Output)
+	}
+	if !strings.Contains(got.Output, "[Thinking]\nescaped real\n[/Thinking]") || !strings.Contains(got.Output, "[Thinking]\nreal\n[/Thinking]") {
+		t.Fatalf("real aliases were not normalized during persistence:\n%q", got.Output)
 	}
 }
 

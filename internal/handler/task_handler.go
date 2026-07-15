@@ -2043,7 +2043,6 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		ProjectID:         task.ProjectID,
 		ImageAttachments:  imageAttachments,
 		IsTaskFollowup:    true,
-		ProcessMarkers:    false,
 		InputOrigin:       models.TaskOriginWeb,
 		DeferHistoryLoad:  true,
 		AttachmentContext: attachmentContext,

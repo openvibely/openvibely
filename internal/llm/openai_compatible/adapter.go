@@ -116,8 +116,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(req.Attachments) +
-		req.Message +
-		"\n\n" + llmprompt.TaskCreationInstructions
+		req.Message
 	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, runtimeToolNames(rt))
 	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
@@ -174,12 +173,8 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	client.History = append(client.History, buildClientHistory(req.ChatHistory)...)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
-	if rt != nil && !req.Followup && req.ChatMode == models.ChatModeOrchestrate {
-		names := make([]string, 0, len(rt.Definitions))
-		for _, def := range rt.Definitions {
-			names = append(names, def.Name)
-		}
-		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, names)
+	if req.ChatMode == models.ChatModeOrchestrate {
+		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, runtimeToolNames(rt))
 	}
 	systemPrompt = llmprompt.AppendWorktreeContextPrompt(systemPrompt, workDir)
 
@@ -476,11 +471,11 @@ func requestUsesChatStreaming(req llmcontracts.AgentRequest) bool {
 	if req.Operation != llmcontracts.OperationStreaming {
 		return false
 	}
-	mode := strings.TrimSpace(string(req.ChatMode))
-	if !req.Followup {
-		return mode == string(models.ChatModeOrchestrate) || mode == string(models.ChatModePlan)
+	if req.Followup {
+		return true
 	}
-	return len(req.ChatHistory) > 0 || strings.TrimSpace(req.ChatSystemContext) != ""
+	mode := strings.TrimSpace(string(req.ChatMode))
+	return mode == string(models.ChatModeOrchestrate) || mode == string(models.ChatModePlan)
 }
 
 func effectiveWorkDir(workDir string) string {

@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -426,6 +427,105 @@ func TestLLMService_ExecuteTaskWithAgent_IgnoresStatusMarkerMentionInProse(t *te
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_IgnoresIncompleteStatusControl(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Incomplete Status Control", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Ignore incomplete status", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "complete the work", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "Work is complete.\n[STATUS: FAILED | incomplete control"
+	mock.TextOnly = mock.Response
+	svc.SetLLMCaller(mock)
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecCompleted || exec.ErrorMessage != "" {
+		t.Fatalf("expected incomplete control to remain inert, got %#v", exec)
+	}
+	stored, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("GetByID execution: %v", err)
+	}
+	if stored.Status != models.ExecCompleted || stored.ErrorMessage != "" || !strings.Contains(stored.Output, "[STATUS: FAILED | incomplete control") {
+		t.Fatalf("expected completed execution preserving incomplete control, got status=%s error=%q output=%q", stored.Status, stored.ErrorMessage, stored.Output)
+	}
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID task: %v", err)
+	}
+	if updatedTask.Status != models.StatusCompleted || updatedTask.Category != models.CategoryCompleted {
+		t.Fatalf("expected completed task, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_IgnoresExtraStatusReasonDelimiters(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output string
+	}{
+		{name: "failed", output: "Work is complete.\n[STATUS: FAILED | reason | extra]"},
+		{name: "followup", output: "Work is complete.\n[STATUS: NEEDS_FOLLOWUP | reason | extra]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			llmConfigRepo := repository.NewLLMConfigRepo(db)
+			execRepo := repository.NewExecutionRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			projectRepo := repository.NewProjectRepo(db)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			attachmentRepo := repository.NewAttachmentRepo(db)
+			agent := ensureDefaultAgent(t, llmConfigRepo)
+			project := &models.Project{Name: "Extra Status Delimiter " + tc.name, RepoPath: t.TempDir()}
+			if err := projectRepo.Create(ctx, project); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			task := &models.Task{ProjectID: project.ID, Title: "Ignore extra status delimiter", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "complete the work", AgentID: &agent.ID}
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+
+			svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+			mock := testutil.NewMockLLMCaller()
+			mock.Response = tc.output
+			mock.TextOnly = tc.output
+			svc.SetLLMCaller(mock)
+
+			exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+			if err != nil {
+				t.Fatalf("ExecuteTaskWithAgent: %v", err)
+			}
+			if exec == nil || exec.Status != models.ExecCompleted || exec.ErrorMessage != "" {
+				t.Fatalf("expected malformed control to remain inert, got %#v", exec)
+			}
+			stored, err := execRepo.GetByID(ctx, exec.ID)
+			if err != nil {
+				t.Fatalf("GetByID execution: %v", err)
+			}
+			if stored.Status != models.ExecCompleted || stored.ErrorMessage != "" || !strings.Contains(stored.Output, tc.output) {
+				t.Fatalf("expected completed execution preserving malformed control, got status=%s error=%q output=%q", stored.Status, stored.ErrorMessage, stored.Output)
+			}
+		})
+	}
+}
+
 func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompletionWithMultipleQueued(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -712,8 +812,8 @@ func TestLLMService_CallAgentDirectStreamingDetailed_BuildsChatContextFromNormal
 	if got[0].Content != "old prompt 02" {
 		t.Fatalf("expected oldest retained history after normalization, got %#v", got[0])
 	}
-	if strings.Contains(got[38].Content, "CREATE_TASK") || got[38].Content != "visible answer" {
-		t.Fatalf("expected cleaned historical assistant output, got %#v", got[38])
+	if got[38].Content != history[21].Output {
+		t.Fatalf("expected inert marker-looking historical output to be preserved, got %#v", got[38])
 	}
 	for _, msg := range got {
 		if msg.Content == "running output should be skipped" {
@@ -1795,7 +1895,7 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureSupportedAggregatorReceivesGrant
 	}
 }
 
-func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndProcessesMarkers(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLeavesMarkersInert(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	execRepo := repository.NewExecutionRepo(db)
@@ -1817,7 +1917,7 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndPro
 		}
 		providerRequests <- body
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Initial Ollama mixture child\",\"prompt\":\"Created through marker fallback.\"}\n[/CREATE_TASK]"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Initial Ollama mixture child\",\"prompt\":\"This marker-looking text must remain inert.\"}\n[/CREATE_TASK]"},"done":false}`)
 		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
 	}))
 	defer providerServer.Close()
@@ -1872,6 +1972,21 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndPro
 		if _, exists := providerRequest["tools"]; exists {
 			t.Fatalf("Ollama payload included runtime tools: %#v", providerRequest["tools"])
 		}
+		messages, _ := providerRequest["messages"].([]any)
+		foundLimitation := false
+		for _, raw := range messages {
+			message, _ := raw.(map[string]any)
+			content, _ := message["content"].(string)
+			if strings.Contains(content, llmprompt.ChatActionUnavailableInstructions) {
+				foundLimitation = true
+			}
+			if strings.Contains(content, "[CREATE_TASK]") {
+				t.Fatalf("Ollama initial-task prompt advertised a legacy marker: %q", content)
+			}
+		}
+		if !foundLimitation {
+			t.Fatalf("Ollama initial-task prompt omitted runtime-action limitation: %#v", messages)
+		}
 	default:
 		t.Fatal("expected concrete Ollama aggregator request")
 	}
@@ -1879,14 +1994,11 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndPro
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
-	foundChild := false
-	for _, created := range tasks {
-		if created.Title == "Initial Ollama mixture child" {
-			foundChild = true
-		}
+	if len(tasks) != 1 {
+		t.Fatalf("marker-looking Ollama output created a child task: %#v", tasks)
 	}
-	if !foundChild {
-		t.Fatalf("marker fallback did not create child task: %#v", tasks)
+	if strings.Contains(tasks[0].Title, "Initial Ollama mixture child") {
+		t.Fatalf("unexpected child task persisted from marker-looking output: %#v", tasks)
 	}
 }
 
@@ -1935,7 +2047,7 @@ func TestLLMService_ExecuteTaskWithAgent_RuntimeToolsSkipTaskCreationMarkers(t *
 	}
 }
 
-func TestLLMService_ExecuteTaskWithAgent_RuntimeIncapableProviderKeepsTaskCreationMarkers(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_RuntimeIncapableProviderLeavesTaskCreationMarkersInert(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	execRepo := repository.NewExecutionRepo(db)
@@ -1971,8 +2083,8 @@ func TestLLMService_ExecuteTaskWithAgent_RuntimeIncapableProviderKeepsTaskCreati
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
-	if len(tasks) != 2 {
-		t.Fatalf("expected runtime-incapable provider to keep marker fallback, got %d tasks: %#v", len(tasks), tasks)
+	if len(tasks) != 1 {
+		t.Fatalf("expected runtime-incapable provider marker text to remain inert, got %d tasks: %#v", len(tasks), tasks)
 	}
 }
 

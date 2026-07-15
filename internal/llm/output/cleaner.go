@@ -8,97 +8,102 @@ import (
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 )
 
-// ExtractMarker looks for a terminal marker like "[STATUS: FAILED | reason]" in the output.
-// Returns the reason text and whether the marker was found.
+// ExtractMarker looks for a complete terminal reason-bearing marker like
+// "[STATUS: FAILED | reason]" in the output. Returns the non-empty reason text
+// and whether the marker was found.
 //
-// Status markers are control syntax, so only a final standalone non-empty line is
-// accepted. Mentions in prose, examples, bullets, quotes, or code fences are not
-// terminal status reports.
+// Status markers are control syntax, so only a complete final standalone
+// non-empty line is accepted. Mentions in prose, malformed or incomplete forms,
+// examples, bullets, quotes, or code fences are not terminal status reports.
 func ExtractMarker(output, prefix string) (string, bool) {
-	line, ok := finalStandaloneLine(output)
+	line, _, ok := finalStandaloneLine(output)
 	if !ok || !strings.HasPrefix(line, prefix) {
 		return "", false
 	}
 
 	rest := line[len(prefix):]
 	end := strings.Index(rest, "]")
-	if end == -1 {
-		return strings.TrimSpace(rest), true
-	}
-	if strings.TrimSpace(rest[end+1:]) != "" {
+	if end == -1 || strings.TrimSpace(rest[end+1:]) != "" {
 		return "", false
 	}
-	return strings.TrimSpace(rest[:end]), true
+	reason := strings.TrimSpace(rest[:end])
+	if reason == "" || strings.Contains(reason, "|") {
+		return "", false
+	}
+	return reason, true
 }
 
-func finalStandaloneLine(output string) (string, bool) {
-	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+func finalStandaloneLine(output string) (string, int, bool) {
+	lines := llmtranscript.MarkdownLineRanges(output)
 	lastNonEmpty := -1
 	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.TrimSpace(lines[i]) != "" {
+		if strings.TrimSpace(output[lines[i].Start:lines[i].End]) != "" {
 			lastNonEmpty = i
 			break
 		}
 	}
 	if lastNonEmpty == -1 {
-		return "", false
+		return "", -1, false
 	}
 
-	if isInsideCodeFence(lines, lastNonEmpty) {
-		return "", false
+	sourceLine := lines[lastNonEmpty]
+	rawLine := output[sourceLine.Start:sourceLine.End]
+	line := strings.TrimSpace(rawLine)
+	markerStart := sourceLine.Start + strings.Index(rawLine, line)
+	if positionInAnyRange(markdownCodeRanges(output), markerStart) {
+		return "", -1, false
 	}
 
-	return strings.TrimSpace(lines[lastNonEmpty]), true
+	return line, lastNonEmpty, true
 }
 
-func isInsideCodeFence(lines []string, lineIndex int) bool {
-	inFence := false
-	for i := 0; i < lineIndex; i++ {
-		if isCodeFenceLine(lines[i]) {
-			inFence = !inFence
+// StripFinalStatusControl removes a complete canonical status control only when
+// it is the final standalone non-empty line. Marker-shaped prose, examples,
+// bullets, quotes, fenced content, and non-final lines remain visible.
+func StripFinalStatusControl(output string) string {
+	line, lastNonEmpty, ok := finalStandaloneLine(output)
+	if !ok || !isCanonicalStatusLine(line) {
+		return output
+	}
+	lines := llmtranscript.MarkdownLineRanges(output)
+	statusLine := lines[lastNonEmpty]
+	removeStart := statusLine.Start
+	removeEnd := statusLine.Next
+	if statusLine.End == len(output) && lastNonEmpty > 0 {
+		removeStart = lines[lastNonEmpty-1].End
+	}
+	if removeEnd > len(output) {
+		removeEnd = len(output)
+	}
+	return output[:removeStart] + output[removeEnd:]
+}
+
+func isCanonicalStatusLine(line string) bool {
+	if line == "[STATUS: SUCCESS]" {
+		return true
+	}
+	for _, prefix := range []string{"[STATUS: FAILED |", "[STATUS: NEEDS_FOLLOWUP |"} {
+		if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, "]") {
+			continue
 		}
+		reason := strings.TrimSpace(line[len(prefix) : len(line)-1])
+		return reason != "" && !strings.ContainsAny(reason, "]|")
 	}
-	return inFence
-}
-
-func isCodeFenceLine(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	return strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~")
+	return false
 }
 
 // Pre-compiled regexes for cleanChatOutput — compiled once at package init
 // instead of on every call for better performance.
 var (
-	reCleanStatus            = regexp.MustCompile(`\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*)?\]`)
-	reCleanTool              = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
-	reCleanProposedPlanTag   = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
-	reCleanThinking          = regexp.MustCompile(`(?s)\[Thinking\].*?\[/Thinking\]`)
-	reCleanToolResult        = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\]\n.*?\[/Tool\]\n?`)
-	reCleanToolResultLegacy  = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\n]*\]\n?`)
-	reCleanProtocolArtifact  = regexp.MustCompile(`(?m)^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$`)
-	reCleanCreate            = regexp.MustCompile(`(?s)\[CREATE_TASK\].*?\[/CREATE_TASK\]`)
-	reCleanEdit              = regexp.MustCompile(`(?s)\[EDIT_TASK\].*?\[/EDIT_TASK\]`)
-	reCleanExec              = regexp.MustCompile(`(?s)\[EXECUTE_TASKS\].*?\[/EXECUTE_TASKS\]`)
-	reCleanViewChat          = regexp.MustCompile(`(?s)\[VIEW_TASK_CHAT\].*?\[/VIEW_TASK_CHAT\]`)
-	reCleanSendTask          = regexp.MustCompile(`(?s)\[SEND_TO_TASK\].*?\[/SEND_TO_TASK\]`)
-	reCleanScheduleTask      = regexp.MustCompile(`(?s)\[SCHEDULE_TASK\].*?\[/SCHEDULE_TASK\]`)
-	reCleanDeleteSchedule    = regexp.MustCompile(`(?s)\[DELETE_SCHEDULE\].*?\[/DELETE_SCHEDULE\]`)
-	reCleanModifySchedule    = regexp.MustCompile(`(?s)\[MODIFY_SCHEDULE\].*?\[/MODIFY_SCHEDULE\]`)
-	reCleanListPersonalities = regexp.MustCompile(`\[LIST_PERSONALITIES\]`)
-	reCleanSetPersonality    = regexp.MustCompile(`(?s)\[SET_PERSONALITY\].*?\[/SET_PERSONALITY\]`)
-	reCleanListModels        = regexp.MustCompile(`\[LIST_MODELS\]`)
-	reCleanViewSettings      = regexp.MustCompile(`\[VIEW_SETTINGS\]`)
-	reCleanProjectInfo       = regexp.MustCompile(`\[PROJECT_INFO\]`)
-	reCleanListAgents        = regexp.MustCompile(`\[LIST_AGENTS\]`)
-	reCleanListAlerts        = regexp.MustCompile(`\[LIST_ALERTS\]`)
-	reCleanCreateAlert       = regexp.MustCompile(`(?s)\[CREATE_ALERT\].*?\[/CREATE_ALERT\]`)
-	reCleanDeleteAlert       = regexp.MustCompile(`(?s)\[DELETE_ALERT\].*?\[/DELETE_ALERT\]`)
-	reCleanToggleAlert       = regexp.MustCompile(`(?s)\[TOGGLE_ALERT\].*?\[/TOGGLE_ALERT\]`)
-	reCleanListProjects      = regexp.MustCompile(`\[LIST_PROJECTS\]`)
-	reCleanSwitchProject     = regexp.MustCompile(`(?s)\[SWITCH_PROJECT\].*?\[/SWITCH_PROJECT\]`)
-	reCleanSummary           = regexp.MustCompile(`(?s)\n---\n(?:Created \d+ task|Edited \d+ task|Failed to (?:create|edit) \d+ task|Task Execution Results|Thread Messages|Schedule Results|Schedule Delete Results|Schedule Modify Results|Available Personalities|Personality Settings|Configured Models|Model Settings|App Settings|Project Info|Alert Results|Alert Create Results|Alert Delete Results|Configured Agents|Alert Toggle Results|Available Projects|Project Switch Results|\*\*Thread history for task|Could not find task|Error retrieving thread for task).*`)
-	reCleanTaskID            = regexp.MustCompile(`\[TASK_ID:[^\]]+\]`)
-	reCleanEdited            = regexp.MustCompile(`\[TASK_EDITED:[^\]]+\]`)
+	reCleanTool             = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
+	reCleanProposedPlanTag  = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
+	reCleanThinking         = regexp.MustCompile(`(?s)\[Thinking\].*?\[/Thinking\]`)
+	reCleanToolResult       = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\](?:\r\n|\r|\n)?.*?(?:\r\n|\r|\n)?\[/Tool\](?:\r\n|\r|\n)?`)
+	reCleanToolResultLegacy = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]\r\n]*\](?:\r\n|\r|\n)?`)
+	reCleanProtocolArtifact = regexp.MustCompile(`(?m)(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)`)
+	reCleanSummary          = regexp.MustCompile(`(?s)(?:\r\n|\r|\n)---(?:\r\n|\r|\n)(?:Created \d+ task|Edited \d+ task|Failed to (?:create|edit) \d+ task|Task Execution Results|Thread Messages|Schedule Results|Schedule Delete Results|Schedule Modify Results|Available Personalities|Personality Settings|Configured Models|Model Settings|App Settings|Project Info|Alert Results|Alert Create Results|Alert Delete Results|Configured Agents|Alert Toggle Results|Available Projects|Project Switch Results|\*\*Thread history for task|Could not find task|Error retrieving thread for task).*`)
+	reCleanTaskID           = regexp.MustCompile(`\[TASK_ID:[^\]]+\]`)
+	reCleanEdited           = regexp.MustCompile(`\[TASK_EDITED:[^\]]+\]`)
 )
 
 // nonZeroExitCodeRe matches common patterns for non-zero exit codes in agent output.
@@ -124,10 +129,9 @@ func IsImageMediaType(mediaType string) bool {
 	return strings.HasPrefix(mediaType, "image/")
 }
 
-// CleanChatOutputForDisplay strips marker syntax from output but preserves
-// the summary/result sections appended by chat response post-processing.
-// Used for Telegram display where marker results (Project Info, task summaries, etc.)
-// should be visible to the user.
+// CleanChatOutputForDisplay strips internal transcript control syntax while
+// preserving historical summary/result sections that should remain user-visible on
+// channel surfaces.
 func CleanChatOutputForDisplay(output string) string {
 	return doCleanChatOutput(output, false)
 }
@@ -138,79 +142,156 @@ func CleanChatOutput(output string) string {
 	return doCleanChatOutput(output, true)
 }
 
-// replaceOutsideInlineCode applies re as a global replacement with repl but
-// skips any match that falls inside an inline code span (backtick-delimited).
-// This prevents marker patterns that appear as prose examples (e.g. inside
-// backticks) from being silently erased by the cleaner.
-func replaceOutsideInlineCode(s string, re *regexp.Regexp, repl string) string {
-	ranges := inlineCodeRanges(s)
-	matches := re.FindAllStringIndex(s, -1)
-	if len(matches) == 0 {
-		return s
-	}
+// ReplaceOutsideMarkdownCode applies re as a global replacement with repl but
+// skips matches whose control marker starts inside an inline code span or fenced
+// code block. This preserves literal transcript-control examples without allowing
+// a real control outside code to be shielded by overlapping later code.
+func ReplaceOutsideMarkdownCode(s string, re *regexp.Regexp, repl string) string {
+	return replaceOutsideMarkdownCode(s, re, repl, true)
+}
+
+// replaceMatchOutsideMarkdownCode applies re using the match start, rather than
+// the first control marker, to decide whether a whole structured block is code.
+func replaceMatchOutsideMarkdownCode(s string, re *regexp.Regexp, repl string) string {
+	return replaceOutsideMarkdownCode(s, re, repl, false)
+}
+
+func replaceOutsideMarkdownCode(s string, re *regexp.Regexp, repl string, locateControlMarker bool) string {
+	ranges := markdownCodeRanges(s)
 	var buf strings.Builder
-	prev := 0
-	for _, m := range matches {
-		start, end := m[0], m[1]
-		if matchInAnyRange(ranges, start, end) {
-			buf.WriteString(s[prev:end]) // keep the original text
-		} else {
-			buf.WriteString(s[prev:start])
-			buf.WriteString(repl)
+	previous := 0
+	searchAt := 0
+	for searchAt <= len(s) {
+		match := re.FindStringIndex(s[searchAt:])
+		if match == nil {
+			break
 		}
-		prev = end
+		start, end := searchAt+match[0], searchAt+match[1]
+		protectedAt := start
+		if locateControlMarker {
+			if markerOffset := strings.IndexByte(s[start:end], '['); markerOffset >= 0 {
+				protectedAt += markerOffset
+			}
+		}
+		if positionInAnyRange(ranges, protectedAt) {
+			// A protected match can span a later real control or structured block.
+			// Resume just after the protected start so overlapping real content is
+			// still discovered.
+			searchAt = protectedAt + 1
+			continue
+		}
+		buf.WriteString(s[previous:start])
+		if protectedAt > start && positionInAnyRange(ranges, start) {
+			buf.WriteString(s[start:protectedAt])
+		}
+		buf.WriteString(repl)
+		previous = end
+		searchAt = end
+		if end == start {
+			searchAt++
+		}
 	}
-	buf.WriteString(s[prev:])
+	buf.WriteString(s[previous:])
 	return buf.String()
 }
 
-// codeRange is a half-open byte interval [lo, hi) inside a string.
-type codeRange struct{ lo, hi int }
-
-// inlineCodeRanges returns the byte ranges of all inline code spans in s.
-// Only single-backtick spans that do not cross line boundaries are detected,
-// which covers the common prose-example case. Multi-backtick runs and code
-// fences are handled separately elsewhere.
-func inlineCodeRanges(s string) []codeRange {
-	var ranges []codeRange
-	offset := 0
-	for {
-		nl := strings.IndexByte(s[offset:], '\n')
-		var line string
-		if nl == -1 {
-			line = s[offset:]
-		} else {
-			line = s[offset : offset+nl]
+// DeduplicateTaskSummaries removes earlier real Created/Edited task summary
+// blocks while preserving literal summaries inside Markdown code. The final real
+// summary of each kind is retained for task-result link hydration.
+func DeduplicateTaskSummaries(text string) string {
+	for _, prefix := range []string{"Created ", "Edited "} {
+		lines := llmtranscript.MarkdownLineRanges(text)
+		ranges := markdownCodeRanges(text)
+		type summaryBlock struct {
+			start int
+			end   int
 		}
-		inCode := false
-		codeStart := 0
-		for i := 0; i < len(line); i++ {
-			if line[i] == '`' {
-				if !inCode {
-					inCode = true
-					codeStart = i
-				} else {
-					ranges = append(ranges, codeRange{offset + codeStart, offset + i + 1})
-					inCode = false
-				}
+		var blocks []summaryBlock
+		for i := 0; i+1 < len(lines); i++ {
+			delimiter := lines[i]
+			header := lines[i+1]
+			if text[delimiter.Start:delimiter.End] != "---" ||
+				!strings.HasPrefix(text[header.Start:header.End], prefix) ||
+				positionInAnyRange(ranges, delimiter.Start) {
+				continue
 			}
+
+			start := delimiter.Start
+			if i > 0 {
+				// Match the historical removal boundary at the line ending directly
+				// before the delimiter, preserving any earlier blank separator.
+				start = lines[i-1].End
+			}
+			end := min(header.Next, len(text))
+			for j := i + 2; j < len(lines); j++ {
+				line := lines[j]
+				if !strings.HasPrefix(text[line.Start:line.End], "- ") {
+					break
+				}
+				end = min(line.Next, len(text))
+			}
+			blocks = append(blocks, summaryBlock{start: start, end: end})
 		}
-		if nl == -1 {
-			break
+
+		for i := len(blocks) - 2; i >= 0; i-- {
+			text = text[:blocks[i].start] + text[blocks[i].end:]
 		}
-		offset += nl + 1
 	}
-	return ranges
+	return text
 }
 
-// matchInAnyRange reports whether the interval [start, end) overlaps any range.
-func matchInAnyRange(ranges []codeRange, start, end int) bool {
-	for _, r := range ranges {
-		if start < r.hi && end > r.lo {
-			return true
+// codeRange aliases the shared transcript Markdown range type so classification,
+// normalization, and cleanup all use the same inline/fence grammar.
+type codeRange = llmtranscript.MarkdownCodeRange
+
+func markdownCodeRanges(s string) []codeRange {
+	return llmtranscript.MarkdownCodeRanges(s)
+}
+
+func positionInAnyRange(ranges []codeRange, position int) bool {
+	return llmtranscript.PositionInMarkdownCode(ranges, position)
+}
+
+func cleanUnclosedThinkingBlocks(text string) string {
+	for {
+		lines := llmtranscript.MarkdownLineRanges(text)
+		openLine := -1
+		for i, line := range lines {
+			if text[line.Start:line.End] == "[Thinking]" {
+				openLine = i
+				break
+			}
 		}
+		if openLine == -1 {
+			return text
+		}
+
+		// Historical unclosed thinking ends at the first blank-line boundary
+		// followed by ordinary response text. Marker-only sections continue the
+		// internal block until a later blank boundary.
+		visibleStart := len(text)
+		sawBlank := false
+		for i := openLine + 1; i < len(lines); i++ {
+			line := lines[i]
+			content := text[line.Start:line.End]
+			if strings.TrimSpace(content) == "" {
+				sawBlank = true
+				continue
+			}
+			if !sawBlank {
+				continue
+			}
+			if strings.HasPrefix(content, "[Thinking]") || strings.HasPrefix(content, "[Using tool:") {
+				sawBlank = false
+				continue
+			}
+			visibleStart = line.Start
+			break
+		}
+
+		openStart := lines[openLine].Start
+		text = text[:openStart] + text[visibleStart:]
 	}
-	return false
 }
 
 // doCleanChatOutput is the shared implementation for cleaning chat output.
@@ -218,81 +299,54 @@ func matchInAnyRange(ranges []codeRange, start, end int) bool {
 // (used for LLM history context). When false, summaries are preserved (used for display).
 func doCleanChatOutput(output string, stripSummaries bool) string {
 	result := llmtranscript.NormalizeMarkers(output)
+	// Scope status handling against the original normalized message before any
+	// thinking/tool cleanup can make an earlier inert status line appear final.
+	result = StripFinalStatusControl(result)
+
+	// Shield Markdown code while applying the legacy thinking cleanup below. The
+	// unclosed-thinking heuristic predates Markdown-aware control replacement and
+	// splits on standalone [Thinking] lines, so fenced examples must be hidden from
+	// both that split and the closed-block regex, then restored verbatim.
+	type protectedCode struct {
+		token string
+		text  string
+	}
+	var protected []protectedCode
+	if ranges := markdownCodeRanges(result); len(ranges) > 0 {
+		var masked strings.Builder
+		previous := 0
+		for i, r := range ranges {
+			token := fmt.Sprintf("\x00openvibely-code-%d\x00", i)
+			masked.WriteString(result[previous:r.Start])
+			masked.WriteString(token)
+			protected = append(protected, protectedCode{token: token, text: result[r.Start:r.End]})
+			previous = r.End
+		}
+		masked.WriteString(result[previous:])
+		result = masked.String()
+	}
 
 	// Remove properly closed thinking blocks first (regex handles [Thinking]...[/Thinking])
 	result = reCleanThinking.ReplaceAllString(result, "")
 
 	// Handle remaining unclosed thinking blocks (legacy data where [/Thinking] is missing).
-	// Normalize leading [Thinking] so the split below always works.
-	if strings.HasPrefix(result, "[Thinking]\n") {
-		result = "\n" + result
-	}
-	parts := strings.Split(result, "\n[Thinking]\n")
-	if len(parts) > 1 {
-		var cleaned []string
-		cleaned = append(cleaned, parts[0])
-		for _, part := range parts[1:] {
-			// If there's a closing marker, take everything after it
-			if closingIdx := strings.Index(part, "[/Thinking]"); closingIdx != -1 {
-				after := part[closingIdx+len("[/Thinking]"):]
-				cleaned = append(cleaned, strings.TrimSpace(after))
-				continue
-			}
-			// No closing marker — heuristic: thinking ends at double-newline
-			// followed by non-marker text
-			idx := strings.Index(part, "\n\n")
-			for idx != -1 && idx+2 < len(part) {
-				rest := part[idx+2:]
-				if strings.HasPrefix(rest, "[Thinking]") || strings.HasPrefix(rest, "[Using tool:") {
-					nextIdx := strings.Index(rest, "\n\n")
-					if nextIdx != -1 {
-						idx = idx + 2 + nextIdx
-					} else {
-						idx = -1
-					}
-					continue
-				}
-				cleaned = append(cleaned, strings.TrimSpace(rest))
-				break
-			}
-		}
-		result = strings.Join(cleaned, "\n")
+	// Use CommonMark line boundaries so LF, CRLF, and bare CR behave identically
+	// without normalizing visible source bytes.
+	result = cleanUnclosedThinkingBlocks(result)
+	for _, code := range protected {
+		result = strings.ReplaceAll(result, code.token, code.text)
 	}
 
-	// Remove markers using pre-compiled regexes (see package-level vars).
-	// Status and tool-use markers are skipped inside inline code spans so that
-	// prose examples like `[STATUS: FAILED | reason]` are not silently erased.
-	result = replaceOutsideInlineCode(result, reCleanStatus, "")
-	result = replaceOutsideInlineCode(result, reCleanTool, "")
+	result = ReplaceOutsideMarkdownCode(result, reCleanTool, "")
 	result = reCleanProposedPlanTag.ReplaceAllString(result, "")
-	result = reCleanToolResult.ReplaceAllString(result, "")
-	result = reCleanToolResultLegacy.ReplaceAllString(result, "")
-	result = reCleanProtocolArtifact.ReplaceAllString(result, "")
-	result = reCleanCreate.ReplaceAllString(result, "")
-	result = reCleanEdit.ReplaceAllString(result, "")
-	result = reCleanExec.ReplaceAllString(result, "")
-	result = reCleanViewChat.ReplaceAllString(result, "")
-	result = reCleanSendTask.ReplaceAllString(result, "")
-	result = reCleanScheduleTask.ReplaceAllString(result, "")
-	result = reCleanDeleteSchedule.ReplaceAllString(result, "")
-	result = reCleanModifySchedule.ReplaceAllString(result, "")
-	result = reCleanListPersonalities.ReplaceAllString(result, "")
-	result = reCleanSetPersonality.ReplaceAllString(result, "")
-	result = reCleanListModels.ReplaceAllString(result, "")
-	result = reCleanViewSettings.ReplaceAllString(result, "")
-	result = reCleanProjectInfo.ReplaceAllString(result, "")
-	result = reCleanListAgents.ReplaceAllString(result, "")
-	result = reCleanListAlerts.ReplaceAllString(result, "")
-	result = reCleanCreateAlert.ReplaceAllString(result, "")
-	result = reCleanDeleteAlert.ReplaceAllString(result, "")
-	result = reCleanToggleAlert.ReplaceAllString(result, "")
-	result = reCleanListProjects.ReplaceAllString(result, "")
-	result = reCleanSwitchProject.ReplaceAllString(result, "")
+	result = ReplaceOutsideMarkdownCode(result, reCleanToolResult, "")
+	result = ReplaceOutsideMarkdownCode(result, reCleanToolResultLegacy, "")
+	result = reCleanProtocolArtifact.ReplaceAllString(result, "$1$2")
 	if stripSummaries {
-		result = reCleanSummary.ReplaceAllString(result, "")
+		result = replaceMatchOutsideMarkdownCode(result, reCleanSummary, "")
 	}
-	result = reCleanTaskID.ReplaceAllString(result, "")
-	result = reCleanEdited.ReplaceAllString(result, "")
+	result = ReplaceOutsideMarkdownCode(result, reCleanTaskID, "")
+	result = ReplaceOutsideMarkdownCode(result, reCleanEdited, "")
 
 	return strings.TrimSpace(result)
 }

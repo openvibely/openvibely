@@ -154,9 +154,8 @@ func (c *chatActionSummaryCollector) appendToOutput(output string) string {
 	return output + summary
 }
 
-// buildChatActionToolRuntime creates a RuntimeTools using the canonical registry.
-// Tool definitions come from chatcontrol.ToolDefsForContext; execution delegates
-// to the same marker-processing methods, keeping behavior identical.
+// buildChatActionToolRuntime creates request-scoped runtime tools using the
+// canonical registry and direct typed action handlers.
 func (h *Handler) buildChatActionToolRuntime(params streamingResponseParams, collector *chatActionSummaryCollector) *llmcontracts.RuntimeTools {
 	surface := chatcontrol.SurfaceWeb
 	mode := params.ChatMode
@@ -202,27 +201,24 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			return h.executeCreateSwarmTaskTool(ctx, params, input, collector)
 		},
 		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("CREATE_TASK", input, true)
-			if err != nil {
+			var req service.TaskCreationRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			// Guard: an empty project context means task FK insert would fail
-			// silently (the model would still see a "success" tool result without
-			// the task ever landing on the board). Fail loudly instead.
 			if strings.TrimSpace(params.ProjectID) == "" {
 				return "", fmt.Errorf("create_task: no current project — cannot create task without a project context")
+			}
+			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
+				return "", fmt.Errorf("create_task requires title and prompt")
+			}
+			if req.Priority == 0 {
+				req.Priority = 2
 			}
 			agents, err := h.llmConfigRepo.List(ctx)
 			if err != nil {
 				agents = nil
 			}
-			updated, _ := h.processChatTaskCreations(ctx, params.ExecID, params.ProjectID, marker, agents, params.ChannelReply)
-			summary := toolSummaryFromMarker(marker, updated)
-			// Verify the summary actually contains at least one [TASK_ID:...]
-			// marker AND that each referenced task exists in the current project.
-			// If create silently failed, surface that as a tool error so the
-			// model sees is_error=true and reports the failure to the user
-			// instead of paraphrasing the result as a success.
+			summary, _ := h.executeChatTaskCreationRequests(ctx, params.ExecID, params.ProjectID, []service.TaskCreationRequest{req}, agents, params.ChannelReply)
 			createdIDs := extractTaskIDsFromOutput(summary)
 			if len(createdIDs) == 0 {
 				return summary, fmt.Errorf("create_task: no tasks were persisted (see summary for details)")
@@ -230,8 +226,8 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			if h.taskRepo != nil {
 				var missing []string
 				for _, id := range createdIDs {
-					t, gerr := h.taskRepo.GetByID(ctx, id)
-					if gerr != nil || t == nil || t.ProjectID != params.ProjectID {
+					task, getErr := h.taskRepo.GetByID(ctx, id)
+					if getErr != nil || task == nil || task.ProjectID != params.ProjectID {
 						missing = append(missing, id)
 					}
 				}
@@ -242,38 +238,41 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			if collector != nil {
 				collector.addCreated(summary)
 			}
-			return summary, nil
+			return strings.TrimSpace(summary), nil
 		},
 		"edit_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("EDIT_TASK", input, true)
-			if err != nil {
+			var req service.TaskEditRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			updated := h.processChatTaskEdits(ctx, params.ExecID, params.ProjectID, marker)
-			summary := toolSummaryFromMarker(marker, updated)
+			if strings.TrimSpace(req.ID) == "" {
+				return "", fmt.Errorf("edit_task requires id")
+			}
+			summary := h.executeChatTaskEditRequests(ctx, params.ExecID, params.ProjectID, []service.TaskEditRequest{req})
 			if collector != nil {
 				collector.addEdited(summary)
 			}
-			return summary, nil
+			return strings.TrimSpace(summary), nil
 		},
 		"execute_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("EXECUTE_TASKS", input, true)
-			if err != nil {
+			var req service.TaskExecutionRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			updated := h.processChatTaskExecutions(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+			if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" && len(req.Tags) == 0 && req.MinPriority == 0 {
+				return "", fmt.Errorf("execute_tasks requires task_id/title or tags/min_priority")
+			}
+			return strings.TrimSpace(h.executeChatTaskExecutionRequests(ctx, params.ExecID, params.ProjectID, []service.TaskExecutionRequest{req})), nil
 		},
 		"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return service.ExecuteListTasksTool(ctx, h.taskRepo, params.ProjectID, input)
 		},
 		"view_task_thread": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("VIEW_TASK_CHAT", input, true)
-			if err != nil {
+			var req service.ViewThreadRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			updated := h.processViewThread(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+			return h.executeViewTaskThreadRequest(ctx, params.ProjectID, req)
 		},
 		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSendToTaskTool(ctx, params, input)
@@ -342,131 +341,89 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			return h.executeReportTaskGoalBlockedTool(ctx, params, input)
 		},
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("SCHEDULE_TASK", input, true)
-			if err != nil {
+			var req service.ScheduleTaskRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			updated := h.processChatScheduleTask(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+			return strings.TrimSpace(h.executeChatScheduleRequests(ctx, params.ProjectID, []service.ScheduleTaskRequest{req})), nil
 		},
 		"delete_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("DELETE_SCHEDULE", input, true)
-			if err != nil {
+			var req service.DeleteScheduleRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			updated := h.processChatDeleteSchedule(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+			return strings.TrimSpace(h.executeChatDeleteScheduleRequests(ctx, params.ProjectID, []service.DeleteScheduleRequest{req})), nil
 		},
 		"modify_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("MODIFY_SCHEDULE", input, true)
-			if err != nil {
+			var req service.ModifyScheduleRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			updated := h.processChatModifySchedule(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+			return strings.TrimSpace(h.executeChatModifyScheduleRequests(ctx, params.ProjectID, []service.ModifyScheduleRequest{req})), nil
 		},
-		"list_personalities": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("LIST_PERSONALITIES", input, false)
-			if err != nil {
-				return "", err
-			}
-			updated := h.processChatListPersonalities(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+		"list_personalities": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return strings.TrimSpace(h.executeListPersonalities(ctx)), nil
 		},
 		"get_personality": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return h.executeGetPersonality(ctx), nil
 		},
 		"set_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("SET_PERSONALITY", input, true)
-			if err != nil {
+			var req service.SetPersonalityRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			updated := h.processChatSetPersonality(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+			return strings.TrimSpace(h.executeSetPersonality(ctx, req)), nil
 		},
-		"list_models": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("LIST_MODELS", input, false)
-			if err != nil {
-				return "", err
-			}
-			updated := h.processChatListModels(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+		"list_models": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return strings.TrimSpace(h.executeListModels(ctx)), nil
 		},
 		"get_model": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGetModel(ctx, input), nil
 		},
-		"list_agents": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("LIST_AGENTS", input, false)
-			if err != nil {
-				return "", err
-			}
-			updated := h.processChatListAgents(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+		"list_agents": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return strings.TrimSpace(h.executeListAgents(ctx)), nil
 		},
-		"view_settings": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("VIEW_SETTINGS", input, false)
-			if err != nil {
-				return "", err
-			}
-			updated := h.processChatViewSettings(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+		"view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return strings.TrimSpace(h.executeViewSettings(ctx)), nil
 		},
-		"project_info": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("PROJECT_INFO", input, false)
-			if err != nil {
-				return "", err
-			}
-			updated := h.processChatProjectInfo(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+		"project_info": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return strings.TrimSpace(h.executeProjectInfo(ctx, params.ProjectID)), nil
 		},
 		"get_current_project": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return h.executeGetCurrentProject(ctx, params.ProjectID), nil
 		},
-		"list_projects": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("LIST_PROJECTS", input, false)
-			if err != nil {
-				return "", err
-			}
-			updated := h.processChatListProjects(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+		"list_projects": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return strings.TrimSpace(h.executeListProjects(ctx, params.ProjectID)), nil
 		},
 		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSwitchProject(ctx, params.ProjectID, input), nil
 		},
-		"list_alerts": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("LIST_ALERTS", input, false)
-			if err != nil {
-				return "", err
-			}
-			updated := h.processChatListAlerts(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+		"list_alerts": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return strings.TrimSpace(h.executeListAlerts(ctx, params.ProjectID)), nil
 		},
 		"get_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGetAlert(ctx, params.ProjectID, input), nil
 		},
 		"create_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("CREATE_ALERT", input, true)
-			if err != nil {
+			var req service.CreateAlertRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			updated := h.processChatCreateAlert(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+			return strings.TrimSpace(h.executeCreateAlertRequests(ctx, params.ProjectID, []service.CreateAlertRequest{req})), nil
 		},
 		"delete_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("DELETE_ALERT", input, true)
-			if err != nil {
+			var req service.DeleteAlertRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			updated := h.processChatDeleteAlert(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+			return strings.TrimSpace(h.executeDeleteAlertRequests(ctx, []service.DeleteAlertRequest{req})), nil
 		},
 		"toggle_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
-			marker, err := buildToolMarker("TOGGLE_ALERT", input, true)
-			if err != nil {
+			var req service.ToggleAlertRequest
+			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			updated := h.processChatToggleAlert(ctx, params.ExecID, params.ProjectID, marker)
-			return toolSummaryFromMarker(marker, updated), nil
+			return strings.TrimSpace(h.executeToggleAlertRequests(ctx, []service.ToggleAlertRequest{req})), nil
 		},
 		"memory_view": func(_ context.Context, _ json.RawMessage) (string, error) {
 			return "memory_view is available only after the lifecycle memory router selects memory handles for this turn. Use memory_view only with handles listed in the selected memory index.", nil
@@ -988,39 +945,15 @@ func formatCapabilities(summaries []chatcontrol.ActionSummary, selectedMemoryHan
 	return sb.String()
 }
 
-func buildToolMarker(markerName string, input json.RawMessage, hasBody bool) (string, error) {
-	upper := strings.ToUpper(strings.TrimSpace(markerName))
-	if upper == "" {
-		return "", fmt.Errorf("marker name is required")
+func decodeChatActionInput(input json.RawMessage, dst any) error {
+	payload := input
+	if len(strings.TrimSpace(string(payload))) == 0 {
+		payload = json.RawMessage(`{}`)
 	}
-	if !hasBody {
-		return "[" + upper + "]", nil
+	if err := json.Unmarshal(payload, dst); err != nil {
+		return fmt.Errorf("invalid tool input JSON: %w", err)
 	}
-	payload := "{}"
-	if len(strings.TrimSpace(string(input))) > 0 {
-		var tmp map[string]interface{}
-		if err := json.Unmarshal(input, &tmp); err != nil {
-			return "", fmt.Errorf("invalid tool input JSON: %w", err)
-		}
-		b, err := json.Marshal(tmp)
-		if err != nil {
-			return "", fmt.Errorf("marshal tool input: %w", err)
-		}
-		payload = string(b)
-	}
-	return fmt.Sprintf("[%s]\n%s\n[/%s]", upper, payload, upper), nil
-}
-
-func toolSummaryFromMarker(marker, updated string) string {
-	if marker == "" {
-		return strings.TrimSpace(updated)
-	}
-	summary := strings.TrimPrefix(updated, marker)
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		return "Action completed."
-	}
-	return summary
+	return nil
 }
 
 // buildChatActionToolRuntimeFromDefs creates a RuntimeTools from pre-computed tool

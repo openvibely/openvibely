@@ -1764,22 +1764,37 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.tool-status-error { color: hsl(var(--er, 0 60% 50%) / 0.7); }
 			</style>
 			<script>
-// Configure marked for chat rendering
-				if (window.marked) {
-					marked.setOptions({
-						breaks: true,
-						gfm: true,
-						highlight: function(code, lang) {
-							if (window.hljs && lang && hljs.getLanguage(lang)) {
-								try { return hljs.highlight(code, { language: lang }).value; } catch(e) {}
-							}
-							if (window.hljs) {
-								try { return hljs.highlightAuto(code).value; } catch(e) {}
-							}
-							return code;
+// Configure Marked for chat rendering. Re-run this on first use so a
+				// dependency that becomes available after initial page load is configured
+				// before any model output reaches an innerHTML sink.
+				window.configureChatMarked = function() {
+					var parser = window.marked;
+					if (!parser || typeof parser.parse !== 'function') return false;
+					if (window._chatMarkedConfiguredFor === parser) return true;
+					try {
+						if (typeof parser.setOptions === 'function') {
+							parser.setOptions({
+								breaks: true,
+								gfm: true,
+								highlight: function(code, lang) {
+									if (window.hljs && lang && hljs.getLanguage(lang)) {
+										try { return hljs.highlight(code, { language: lang }).value; } catch(e) {}
+									}
+									if (window.hljs) {
+										try { return hljs.highlightAuto(code).value; } catch(e) {}
+									}
+									return code;
+								}
+							});
 						}
-					});
-				}
+						window._chatMarkedConfiguredFor = parser;
+						return true;
+					} catch(e) {
+						return false;
+					}
+				};
+				window.configureChatMarked();
+				// Escape plain text for safe innerHTML fallback rendering.
 				window.escapeHTMLForChat = function(value) {
 					if (!value) return '';
 					return String(value)
@@ -1789,42 +1804,171 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						.replace(/"/g, '&quot;')
 						.replace(/'/g, '&#39;');
 				};
-				// Escape raw HTML-like tags from model output before markdown parsing.
-				// Preserve fenced and inline code sections so code rendering remains intact.
+				// Preserve escaped plain text and mark it so downstream task-result
+				// hydration can keep Markdown code examples inert without Marked DOM.
+				window.renderChatMarkdownFallback = function(text) {
+					return '<span data-chat-markdown-fallback="true" style="white-space: pre-wrap">' + window.escapeHTMLForChat(text) + '</span>';
+				};
+				// Split source text without normalizing LF, CRLF, or bare CR endings.
+				window.markdownLineRanges = function(text) {
+					var lines = [];
+					for (var start = 0; start <= text.length;) {
+						var lfEnd = text.indexOf('\n', start);
+						var crEnd = text.indexOf('\r', start);
+						var end;
+						if (lfEnd === -1) end = crEnd === -1 ? text.length : crEnd;
+						else if (crEnd === -1) end = lfEnd;
+						else end = Math.min(lfEnd, crEnd);
+						var next = end;
+						if (end < text.length) {
+							next = end + 1;
+							if (text.charAt(end) === '\r' && text.charAt(next) === '\n') next++;
+						}
+						lines.push({ start: start, end: end, next: next });
+						if (end === text.length) break;
+						start = next;
+					}
+					return lines;
+				};
+				// Shared Markdown code-range parser used by transcript processing and
+				// raw-HTML escaping. Keep this aligned with the Go parser in
+				// internal/llm/transcript/markers.go.
+				window.codeRanges = function(text) {
+					var ranges = [];
+					var plainStart = 0;
+					var fenceStart = -1;
+					var fenceChar = '';
+					var fenceLength = 0;
+					function addInlineRanges(start, end) {
+						var runs = [];
+						for (var i = start; i < end;) {
+							if (text.charAt(i) !== '`') { i++; continue; }
+							var runStart = i;
+							while (i < end && text.charAt(i) === '`') i++;
+							var backslashCount = 0;
+							for (var slash = runStart - 1; slash >= start && text.charAt(slash) === '\\'; slash--) backslashCount++;
+							var openerStart = runStart;
+							var openerLength = i - runStart;
+							// Outside code, an odd backslash count escapes only the first
+							// backtick. Any remaining run can still open an inline span.
+							if (backslashCount % 2 === 1) {
+								openerStart++;
+								openerLength--;
+							}
+							runs.push({ start: runStart, end: i, rawLength: i - runStart, openerStart: openerStart, openerLength: openerLength, next: -1 });
+						}
+						var lastRawRunByLength = {};
+						// Closers use raw runs because backslashes are literal inside code.
+						// Unmatched candidates remain literal and later runs are reconsidered.
+						for (var runIndex = runs.length - 1; runIndex >= 0; runIndex--) {
+							var openerKey = String(runs[runIndex].openerLength);
+							if (runs[runIndex].openerLength > 0 && Object.prototype.hasOwnProperty.call(lastRawRunByLength, openerKey)) {
+								runs[runIndex].next = lastRawRunByLength[openerKey];
+							}
+							lastRawRunByLength[String(runs[runIndex].rawLength)] = runIndex;
+						}
+						for (var openIndex = 0; openIndex < runs.length;) {
+							var closeIndex = runs[openIndex].next;
+							if (closeIndex === -1) { openIndex++; continue; }
+							ranges.push({ start: runs[openIndex].openerStart, end: runs[closeIndex].end });
+							openIndex = closeIndex + 1;
+						}
+					}
+					var sourceLines = window.markdownLineRanges(text);
+					for (var lineIndex = 0; lineIndex < sourceLines.length; lineIndex++) {
+						var sourceLine = sourceLines[lineIndex];
+						var lineStart = sourceLine.start;
+						var lineEnd = sourceLine.end;
+						var nextLine = sourceLine.next;
+						var line = text.substring(lineStart, lineEnd);
+						var indent = 0;
+						while (indent < line.length && indent < 3 && line.charAt(indent) === ' ') indent++;
+						var marker = line.charAt(indent);
+						var runEnd = indent;
+						while (runEnd < line.length && line.charAt(runEnd) === marker) runEnd++;
+						var runLength = runEnd - indent;
+
+						if (fenceStart !== -1) {
+							if (marker === fenceChar && runLength >= fenceLength && /^[ \t]*$/.test(line.substring(runEnd))) {
+								var fenceEnd = lineEnd < text.length ? nextLine : lineEnd;
+								ranges.push({ start: fenceStart, end: fenceEnd });
+								fenceStart = -1;
+								plainStart = fenceEnd;
+							}
+						} else if ((marker === '`' || marker === '~') && runLength >= 3 &&
+							!(marker === '`' && line.substring(runEnd).indexOf('`') !== -1)) {
+							addInlineRanges(plainStart, lineStart);
+							fenceStart = lineStart;
+							fenceChar = marker;
+							fenceLength = runLength;
+						}
+					}
+					if (fenceStart !== -1) {
+						ranges.push({ start: fenceStart, end: text.length });
+					} else {
+						addInlineRanges(plainStart, text.length);
+					}
+					return ranges;
+				};
+				window.isInsideCode = function(text, start, end) {
+					var ranges = window.codeRanges(text);
+					for (var i = 0; i < ranges.length; i++) {
+						if (start >= ranges[i].start && start < ranges[i].end) return true;
+					}
+					return false;
+				};
+				// Escape raw HTML from model output before Markdown parsing. Code ranges
+				// remain byte-for-byte intact so Marked can render benign HTML examples.
 				window.escapeRawHTMLForMarkdown = function(text) {
 					if (!text) return text;
-					var placeholders = [];
-					var markerPrefix = '\u0000OVMDHTML';
-					function stash(match) {
-						var idx = placeholders.push(match) - 1;
-						return markerPrefix + idx + '\u0000';
+					var ranges = window.codeRanges(text);
+					var rangeIndex = 0;
+					var escaped = '';
+					for (var i = 0; i < text.length; i++) {
+						while (rangeIndex < ranges.length && i >= ranges[rangeIndex].end) rangeIndex++;
+						var inCode = rangeIndex < ranges.length && i >= ranges[rangeIndex].start && i < ranges[rangeIndex].end;
+						escaped += text.charAt(i) === '<' && !inCode ? '&lt;' : text.charAt(i);
 					}
-					var protectedText = text.replace(/```[\s\S]*?```/g, stash);
-					protectedText = protectedText.replace(/`[^`\n]*`/g, stash);
-					protectedText = protectedText.replace(/<\/?[A-Za-z][A-Za-z0-9:_-]*(?:\s+[^<>]*?)?>/g, function(tag) {
-						return window.escapeHTMLForChat(tag);
+					return escaped;
+				};
+				// Defense in depth for HTML emitted by Marked/highlight.js. Browser HTML
+				// parsing normalizes quoted, unquoted, and malformed attributes before
+				// this allow/deny pass, avoiding regex-only sanitizer gaps.
+				window.sanitizeChatHTML = function(html) {
+					if (!html) return html;
+					if (typeof document === 'undefined' || !document.createElement) return window.escapeHTMLForChat(html);
+					var template = document.createElement('template');
+					if (!template.content || !template.content.querySelectorAll) return window.escapeHTMLForChat(html);
+					template.innerHTML = html;
+					template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base, form, svg, math').forEach(function(element) {
+						element.remove();
 					});
-					protectedText = protectedText.replace(new RegExp(markerPrefix + '(\\d+)\\u0000', 'g'), function(_, idx) {
-						var i = parseInt(idx, 10);
-						if (Number.isNaN(i) || i < 0 || i >= placeholders.length) return '';
-						return placeholders[i];
+					template.content.querySelectorAll('*').forEach(function(element) {
+						Array.prototype.slice.call(element.attributes || []).forEach(function(attr) {
+							var name = attr.name.toLowerCase();
+							if (/^on/i.test(attr.name) || name === 'srcdoc' || name === 'srcset' || name === 'style') {
+								element.removeAttribute(attr.name);
+								return;
+							}
+							if (name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action' || name === 'formaction') {
+								var normalized = String(attr.value || '').replace(/[\u0000-\u0020\u007f-\u009f]/g, '').toLowerCase();
+								if (/^(?:javascript:|vbscript:|data:)/.test(normalized)) element.removeAttribute(attr.name);
+							}
+						});
 					});
-					return protectedText;
+					return template.innerHTML;
 				};
 				// Render markdown to HTML safely for chat messages
 				window.renderChatMarkdown = function(text) {
-					if (!text || !window.marked) return text;
+					if (!text) return text;
+					if (!window.configureChatMarked || !window.configureChatMarked()) {
+						return window.renderChatMarkdownFallback(text);
+					}
 					try {
 						var escapedText = window.escapeRawHTMLForMarkdown(text);
-						// marked.parse returns HTML string
-						var html = marked.parse(escapedText);
-						// Basic XSS sanitization: strip script tags, event handlers
-						html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-						html = html.replace(/\bon\w+\s*=\s*"[^"]*"/gi, '');
-						html = html.replace(/\bon\w+\s*=\s*'[^']*'/gi, '');
-						return html;
+						return window.sanitizeChatHTML(window.marked.parse(escapedText));
 					} catch(e) {
-						return text;
+						return window.renderChatMarkdownFallback(text);
 					}
 				};
 				// Add copy buttons to all <pre> blocks inside a container element

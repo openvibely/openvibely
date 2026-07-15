@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
 	"regexp"
@@ -143,7 +144,7 @@ templ ChatBubble(role, content string) {
 								el.textContent = raw;
 								el.classList.add('whitespace-pre-wrap');
 							}
-						// After rendering, process task links and clean markers
+						// After rendering, convert task-result metadata and clean transcript controls
 						var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
 						if (bubble) {
 							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
@@ -307,7 +308,7 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 // ChatBubbleStreaming renders a streaming SSE message bubble for new messages.
 // messagesContainerID: the ID of the scrollable messages container (e.g. "chat-messages" or "task-thread-messages")
 // pausePollingTargetID: if non-empty, pauses HTMX polling on this element during streaming (thread uses "task-thread-view")
-// isThread: true uses thread behavior (refresh on done); false uses main-chat behavior (link conversion + marker cleaning)
+// isThread: true uses thread behavior (refresh on done); false uses main-chat behavior (result-link conversion + transcript-control cleaning)
 templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID string, isThread bool) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2">
@@ -549,7 +550,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							if (window.handlePlanModeCompletion) {
 								window.handlePlanModeCompletion(textBuffer);
 							}
-							// Convert task links BEFORE cleaning markers
+							// Convert task-result metadata before cleaning transcript controls
 							var bubble = container.closest('.chat-bubble-assistant-msg');
 							try {
 								if (bubble && window.convertTaskLinksInMessage) {
@@ -2137,7 +2138,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 	</script>
 }
 
-// ChatAutoScrollScript emits the shared auto-scroll utility and marker cleaning JS.
+// ChatAutoScrollScript emits shared auto-scroll and transcript rendering/cleaning JS.
 // Should be included once per page that uses chat components.
 templ ChatAutoScrollScript() {
 	<script>
@@ -2163,6 +2164,207 @@ templ ChatAutoScrollScript() {
 		};
 			// Alias for backward compatibility (task thread used a separate namespace)
 			window.threadAutoScroll = window.chatAutoScroll;
+
+			// Convert task-creation result metadata to clickable links
+			window.convertTaskLinksInMessage = function(messageElement) {
+				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
+				var nodesToProcess = [];
+				var node;
+				while (node = walker.nextNode()) {
+					var parent = node.parentElement;
+					var inCode = !!(parent && parent.closest && parent.closest('code, pre'));
+					var inToolOutput = !!(parent && parent.closest && parent.closest('.stream-tool-body-content'));
+					if (inCode && !inToolOutput) continue;
+					if (node.textContent.includes('[TASK_ID:')) {
+						nodesToProcess.push(node);
+					}
+				}
+
+				nodesToProcess.forEach(function(textNode) {
+						var regex = /(?:-\s*)?"([^"]+)"\s*(?:\(([^)]+)\)\s*)?\[TASK_ID:([^\]]+)\]/g;
+						var text = textNode.textContent;
+						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
+						var inMarkdownFallback = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('[data-chat-markdown-fallback="true"]'));
+						var matches = [];
+						var m;
+						while ((m = regex.exec(text)) !== null) {
+							if ((inToolOutput || inMarkdownFallback) && window.isInsideCode && window.isInsideCode(text, m.index, m.index + m[0].length)) continue;
+							matches.push(m);
+						}
+						if (matches.length === 0) return;
+
+					var fragment = document.createDocumentFragment();
+					var lastIndex = 0;
+
+					matches.forEach(function(match) {
+						var fullMatch = match[0], taskTitle = match[1], category = match[2], taskId = match[3];
+						var encodedTaskId = encodeURIComponent(taskId.trim());
+						var matchStart = match.index;
+						if (matchStart > lastIndex) {
+							var beforeText = text.substring(lastIndex, matchStart);
+							// Strip trailing newline before the task item since the div provides its own line break
+							beforeText = beforeText.replace(/\n$/, '');
+							if (beforeText) {
+								fragment.appendChild(document.createTextNode(beforeText));
+							}
+						}
+						var linkWrapper = document.createElement('div');
+						linkWrapper.style.cssText = 'display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.25rem 0;';
+						// Only add bullet if not already inside a list item (markdown renders - as <li>)
+						var insideLi = textNode.parentNode && textNode.parentNode.nodeName === 'LI';
+						if (!insideLi) {
+							var bullet = document.createElement('span');
+							bullet.textContent = '\u2022';
+							bullet.style.opacity = '0.5';
+							linkWrapper.appendChild(bullet);
+						}
+							var link = document.createElement('a');
+							link.href = '/tasks/' + encodedTaskId;
+							link.className = inToolOutput
+								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
+								: 'ov-task-result-link cursor-pointer';
+							link.textContent = taskTitle;
+						link.onclick = function(e) {
+							e.preventDefault();
+							e.stopPropagation();
+							htmx.ajax('GET', '/tasks/' + encodedTaskId + '?from=chat', { target: '#main-content', swap: 'innerHTML' }).catch(function(err) { console.error('[chat] Failed to load task detail:', err); });
+							history.pushState({}, '', '/tasks/' + encodedTaskId + '?from=chat');
+						};
+						linkWrapper.appendChild(link);
+						if (category) {
+							var catBadge = document.createElement('span');
+							catBadge.className = 'badge badge-sm badge-ghost';
+							catBadge.textContent = category;
+							linkWrapper.appendChild(catBadge);
+						}
+						if (category && (category === 'backlog' || category === 'pending')) {
+							var startBtn = document.createElement('button');
+							startBtn.className = 'btn btn-xs ov-task-result-start-btn gap-1';
+							startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><polygon points="6,4 16,10 6,16"/></svg> Start Task';
+							startBtn.onclick = function(e) {
+								e.preventDefault();
+								e.stopPropagation();
+								startBtn.disabled = true;
+								startBtn.classList.add('btn-disabled');
+								startBtn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> Starting...';
+								var formData = new URLSearchParams();
+								formData.set('category', 'active');
+								fetch('/tasks/' + encodedTaskId + '/category', {
+									method: 'PATCH',
+									headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+									body: formData.toString()
+								}).then(function(resp) {
+									if (resp.ok) {
+										startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Started';
+										startBtn.classList.remove('ov-task-result-start-btn');
+										startBtn.classList.add('btn-success');
+									} else {
+										startBtn.innerHTML = 'Failed';
+										startBtn.classList.remove('ov-task-result-start-btn');
+										startBtn.classList.add('btn-error');
+									}
+								}).catch(function() {
+									startBtn.innerHTML = 'Failed';
+									startBtn.disabled = false;
+									startBtn.classList.remove('btn-disabled', 'ov-task-result-start-btn');
+									startBtn.classList.add('btn-error');
+								});
+							};
+							linkWrapper.appendChild(startBtn);
+						}
+						fragment.appendChild(linkWrapper);
+						lastIndex = matchStart + fullMatch.length;
+					});
+
+					if (lastIndex < text.length) {
+						var remaining = text.substring(lastIndex);
+						// Style "Attachments copied to tasks:" as a muted info line
+						var attMatch = remaining.match(/\n*Attachments copied to tasks:\s*(.*)/);
+						if (attMatch) {
+							var beforeAtt = remaining.substring(0, remaining.indexOf('Attachments copied to tasks:'));
+							if (beforeAtt.trim()) {
+								fragment.appendChild(document.createTextNode(beforeAtt));
+							}
+							var attDiv = document.createElement('div');
+							attDiv.className = 'text-xs opacity-60 mt-1';
+							attDiv.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>';
+							attDiv.appendChild(document.createTextNode('Attachments copied: ' + attMatch[1]));
+							fragment.appendChild(attDiv);
+						} else {
+							// Strip leading newline since divs provide their own line breaks
+							remaining = remaining.replace(/^\n/, '');
+							if (remaining) {
+								fragment.appendChild(document.createTextNode(remaining));
+							}
+						}
+					}
+					textNode.parentNode.replaceChild(fragment, textNode);
+				});
+			};
+
+			// Convert task-edit result metadata to clickable links
+			window.convertTaskEditLinksInMessage = function(messageElement) {
+				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
+				var nodesToProcess = [];
+				var node;
+				while (node = walker.nextNode()) {
+					var parent = node.parentElement;
+					var inCode = !!(parent && parent.closest && parent.closest('code, pre'));
+					var inToolOutput = !!(parent && parent.closest && parent.closest('.stream-tool-body-content'));
+					if (inCode && !inToolOutput) continue;
+					if (node.textContent.includes('[TASK_EDITED:')) {
+						nodesToProcess.push(node);
+					}
+				}
+
+				nodesToProcess.forEach(function(textNode) {
+						var regex = /(?:-\s*)?"([^"]+)"\s*\(updated:\s*([^)]+)\)\s*\[TASK_EDITED:([^\]]+)\]/g;
+						var text = textNode.textContent;
+						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
+						var inMarkdownFallback = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('[data-chat-markdown-fallback="true"]'));
+						var matches = [];
+						var m;
+						while ((m = regex.exec(text)) !== null) {
+							if ((inToolOutput || inMarkdownFallback) && window.isInsideCode && window.isInsideCode(text, m.index, m.index + m[0].length)) continue;
+							matches.push(m);
+						}
+						if (matches.length === 0) return;
+
+					var fragment = document.createDocumentFragment();
+					var lastIndex = 0;
+
+					matches.forEach(function(match) {
+						var fullMatch = match[0], taskTitle = match[1], updatedFields = match[2], taskId = match[3];
+						var encodedTaskId = encodeURIComponent(taskId.trim());
+						var matchStart = match.index;
+						if (matchStart > lastIndex) {
+							fragment.appendChild(document.createTextNode(text.substring(lastIndex, matchStart)));
+						}
+						var linkWrapper = document.createElement('span');
+						linkWrapper.innerHTML = '- ';
+							var link = document.createElement('a');
+							link.href = '/tasks/' + encodedTaskId;
+							link.className = inToolOutput
+								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
+								: 'ov-task-result-link cursor-pointer';
+							link.textContent = '"' + taskTitle + '"';
+						link.onclick = function(e) {
+							e.preventDefault();
+							htmx.ajax('GET', '/tasks/' + encodedTaskId + '?from=chat', { target: '#main-content', swap: 'innerHTML' });
+							history.pushState({}, '', '/tasks/' + encodedTaskId + '?from=chat');
+						};
+						linkWrapper.appendChild(link);
+						linkWrapper.appendChild(document.createTextNode(' (updated: ' + updatedFields + ')'));
+						fragment.appendChild(linkWrapper);
+						lastIndex = matchStart + fullMatch.length;
+					});
+
+					if (lastIndex < text.length) {
+						fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
+					}
+					textNode.parentNode.replaceChild(fragment, textNode);
+				});
+			};
 
 			window.hideMixtureProgress = function(execId) {
 				if (!execId) return;
@@ -2775,6 +2977,7 @@ templ ChatAutoScrollScript() {
 		// Thinking: collapsible <details> with italic label and markdown content.
 			window.renderStreamingContent = function(container, textBuffer) {
 				if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer || '');
+				if (window.stripFinalStatusControl) textBuffer = window.stripFinalStatusControl(textBuffer);
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
@@ -2812,20 +3015,27 @@ templ ChatAutoScrollScript() {
 
 			var thinkingPattern = /\[Thinking\]([\s\S]*?)(?:\[\/Thinking\]|$)/g;
 			var toolUsingPattern = /\[Using tool:\s*([^\]]+)\]/g;
-			var toolResultBlockPattern = /\[Tool\s+(\S+)\s+(done|error)\]\n([\s\S]*?)\n\[\/Tool\]\n?/g;
-			var toolResultLegacyPattern = /\[Tool\s+(\S+)\s+(done|error):\s*([^\n]*)\]\n?/g;
+				var toolResultBlockPattern = /\[Tool\s+(\S+)\s+(done|error)\](?:\r\n|\r|\n)?([\s\S]*?)(?:\r\n|\r|\n)?\[\/Tool\](?:\r\n|\r|\n)?/g;
+				var toolResultLegacyPattern = /\[Tool\s+(\S+)\s+(done|error):\s*([^\]\r\n]*)\](?:\r\n|\r|\n)?/g;
 
 			// Pre-strip protocol artifact lines (e.g. multi_tool_use.parallel fragments)
 			// before segment parsing so they don't appear as leaked text between tool cards
-			textBuffer = textBuffer.replace(/^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$/gm, '');
-
+				textBuffer = textBuffer.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
 			var allMatches = [];
 			var match;
 
 			while ((match = thinkingPattern.exec(textBuffer)) !== null) {
+					if (window.isInsideCode && window.isInsideCode(textBuffer, match.index, match.index + match[0].length)) {
+						thinkingPattern.lastIndex = match.index + 1;
+						continue;
+					}
 					allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
 				}
 			while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
+					if (window.isInsideCode && window.isInsideCode(textBuffer, match.index, match.index + match[0].length)) {
+						toolUsingPattern.lastIndex = match.index + 1;
+						continue;
+					}
 					var raw = match[1].trim();
 					var pipeIdx = raw.indexOf(' | ');
 					var toolName = pipeIdx >= 0 ? raw.substring(0, pipeIdx) : raw;
@@ -2833,9 +3043,17 @@ templ ChatAutoScrollScript() {
 					allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
 				}
 			while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
+					if (window.isInsideCode && window.isInsideCode(textBuffer, match.index, match.index + match[0].length)) {
+						toolResultBlockPattern.lastIndex = match.index + 1;
+						continue;
+					}
 					allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
 				}
 			while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
+					if (window.isInsideCode && window.isInsideCode(textBuffer, match.index, match.index + match[0].length)) {
+						toolResultLegacyPattern.lastIndex = match.index + 1;
+						continue;
+					}
 					var dominated = allMatches.some(function(m) { return m.index <= match.index && m.index + m.length >= match.index + match[0].length; });
 					if (!dominated) {
 						allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
@@ -2969,10 +3187,7 @@ templ ChatAutoScrollScript() {
 			}
 			function flushText() {
 				if (!pendingText) return;
-				// Strip action markers ([CREATE_TASK], [EDIT_TASK], etc.) before rendering
-				var t = pendingText;
-				if (window.cleanActionMarkers) t = window.cleanActionMarkers(t);
-				else t = t.trim();
+					var t = window.cleanTranscriptControls ? window.cleanTranscriptControls(pendingText, false, true) : pendingText.trim();
 				if (!t) { pendingText = ''; return; }
 				var div = document.createElement('div');
 				div.className = 'chat-markdown';
@@ -3195,53 +3410,141 @@ templ ChatAutoScrollScript() {
 			}
 		};
 
-		// Clean action markers from chat message content (shared between chat and task thread)
-			window.normalizeTranscriptMarkers = function(text) {
-				if (!text) return text;
-				text = text.replace(/\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">([\s\S]*?)<\/parameter>\s*<\/invoke>\s*/g, function(_, tool, command) {
-					command = command.replace(/\]/g, ')').replace(/[\r\n]+/g, ' ').trim();
-					return '\n[Using tool: ' + tool + (command ? ' | ' + command : '') + ']\n';
-				});
-				text = text.replace(/<\s*thinking\s*>/gi, '\n[Thinking]\n');
-				text = text.replace(/<\/\s*thinking\s*>/gi, '\n[/Thinking]\n');
-				return text;
-			};
+						// window.codeRanges and window.isInsideCode are installed by the base layout
+						// before Chat/task-thread content renders. All transcript transforms and
+						// Markdown rendering share those helpers.
 
-			window.cleanActionMarkers = function(text, noTrim) {
+					window.replaceOutsideCode = function(text, pattern, replacement) {
+						var result = '';
+						var previous = 0;
+						var match;
+						pattern.lastIndex = 0;
+						while ((match = pattern.exec(text)) !== null) {
+							if (window.isInsideCode(text, match.index, match.index + match[0].length)) {
+								// A protected partial alias can make one regex span a later real
+								// alias. Resume just after its start so the real alias is found.
+								pattern.lastIndex = match.index + 1;
+								continue;
+							}
+							result += text.substring(previous, match.index);
+							result += typeof replacement === 'function' ? replacement.apply(null, match) : replacement;
+							previous = match.index + match[0].length;
+							if (match[0].length === 0) pattern.lastIndex++;
+						}
+						return result + text.substring(previous);
+					};
+
+					window.stripOutsideCode = function(text, pattern) {
+						var result = '';
+						var previous = 0;
+						var match;
+						pattern.lastIndex = 0;
+						while ((match = pattern.exec(text)) !== null) {
+							var markerOffset = match[0].indexOf('[');
+							var markerStart = markerOffset >= 0 ? match.index + markerOffset : match.index;
+							if (window.isInsideCode(text, markerStart, match.index + match[0].length)) {
+								pattern.lastIndex = markerStart + 1;
+								continue;
+							}
+							result += text.substring(previous, match.index);
+							if (markerOffset > 0 && window.isInsideCode(text, match.index, markerStart)) {
+								result += match[0].substring(0, markerOffset);
+							}
+							previous = match.index + match[0].length;
+							if (match[0].length === 0) pattern.lastIndex++;
+						}
+						return result + text.substring(previous);
+					};
+					window.dedupTaskSummaries = function(text) {
+						['Created ', 'Edited '].forEach(function(prefix) {
+							var lines = window.markdownLineRanges(text);
+							var blocks = [];
+							for (var i = 0; i + 1 < lines.length; i++) {
+								var delimiter = lines[i];
+								var header = lines[i + 1];
+								if (text.substring(delimiter.start, delimiter.end) !== '---' ||
+									text.substring(header.start, header.end).indexOf(prefix) !== 0 ||
+									window.isInsideCode(text, delimiter.start, delimiter.end)) continue;
+								var start = i > 0 ? lines[i - 1].end : delimiter.start;
+								var end = Math.min(header.next, text.length);
+								for (var j = i + 2; j < lines.length; j++) {
+									var line = lines[j];
+									if (text.substring(line.start, line.end).indexOf('- ') !== 0) break;
+									end = Math.min(line.next, text.length);
+								}
+								blocks.push({ start: start, end: end });
+							}
+							for (var blockIndex = blocks.length - 2; blockIndex >= 0; blockIndex--) {
+								text = text.substring(0, blocks[blockIndex].start) + text.substring(blocks[blockIndex].end);
+							}
+						});
+						return text;
+					};
+
+					window.stripFinalStatusControl = function(text) {
+						if (!text) return text;
+						var lines = window.markdownLineRanges(text);
+						var lastNonEmpty = -1;
+						for (var i = lines.length - 1; i >= 0; i--) {
+							if (text.substring(lines[i].start, lines[i].end).trim()) { lastNonEmpty = i; break; }
+						}
+						if (lastNonEmpty === -1) return text;
+						var sourceLine = lines[lastNonEmpty];
+						var rawLine = text.substring(sourceLine.start, sourceLine.end);
+						var markerOffset = rawLine.search(/\S/);
+						var markerStart = sourceLine.start + markerOffset;
+						if (window.isInsideCode(text, markerStart, sourceLine.end)) return text;
+						var line = rawLine.trim();
+						if (!/^\[STATUS: (?:SUCCESS|(?:FAILED|NEEDS_FOLLOWUP) \|\s*[^\s\]|][^|\]]*)\]$/.test(line)) return text;
+						var removeStart = sourceLine.start;
+						var removeEnd = Math.min(sourceLine.next, text.length);
+						if (sourceLine.end === text.length && lastNonEmpty > 0) removeStart = lines[lastNonEmpty - 1].end;
+						return text.substring(0, removeStart) + text.substring(removeEnd);
+					};
+				window.stripFinalStatusControlFromElement = function(element) {
+					if (!element || !document.createTreeWalker) return;
+					var walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+					var textNodes = [];
+					var node;
+					while (node = walker.nextNode()) textNodes.push(node);
+					for (var i = textNodes.length - 1; i >= 0; i--) {
+						var textNode = textNodes[i];
+						if (!textNode.textContent || !textNode.textContent.trim()) continue;
+						if (textNode.parentElement && textNode.parentElement.closest('code, pre, blockquote, li, strong, em, del, a, h1, h2, h3, h4, h5, h6, table')) return;
+						textNode.textContent = window.stripFinalStatusControl(textNode.textContent);
+						return;
+					}
+				};
+
+				// Clean transcript control artifacts from chat message content.
+				window.normalizeTranscriptMarkers = function(text) {
+					if (!text) return text;
+					text = window.replaceOutsideCode(text, /\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">([\s\S]*?)<\/parameter>\s*<\/invoke>\s*/g, function(_, tool, command) {
+						command = command.replace(/\]/g, ')').replace(/[\r\n]+/g, ' ').trim();
+						return '\n[Using tool: ' + tool + (command ? ' | ' + command : '') + ']\n';
+					});
+					text = window.replaceOutsideCode(text, /<\s*thinking\s*>/gi, '\n[Thinking]\n');
+					text = window.replaceOutsideCode(text, /<\/\s*thinking\s*>/gi, '\n[/Thinking]\n');
+					return text;
+				};
+			window.cleanTranscriptControls = function(text, noTrim, statusAlreadyScoped) {
 				if (!text) return text;
 				text = window.normalizeTranscriptMarkers(text);
-			text = text.replace(/\[CREATE_TASK\][\s\S]*?\[\/CREATE_TASK\]/g, '');
-			text = text.replace(/\[EDIT_TASK\][\s\S]*?\[\/EDIT_TASK\]/g, '');
-			text = text.replace(/\[EXECUTE_TASKS\][\s\S]*?\[\/EXECUTE_TASKS\]/g, '');
-			text = text.replace(/\[VIEW_TASK_CHAT\][\s\S]*?\[\/VIEW_TASK_CHAT\]/g, '');
-			text = text.replace(/\[SEND_TO_TASK\][\s\S]*?\[\/SEND_TO_TASK\]/g, '');
-			text = text.replace(/\[SCHEDULE_TASK\][\s\S]*?\[\/SCHEDULE_TASK\]/g, '');
-			text = text.replace(/\[DELETE_SCHEDULE\][\s\S]*?\[\/DELETE_SCHEDULE\]/g, '');
-			text = text.replace(/\[MODIFY_SCHEDULE\][\s\S]*?\[\/MODIFY_SCHEDULE\]/g, '');
-			text = text.replace(/\[LIST_PERSONALITIES\]/g, '');
-			text = text.replace(/\[SET_PERSONALITY\][\s\S]*?\[\/SET_PERSONALITY\]/g, '');
-			text = text.replace(/\[LIST_MODELS\]/g, '');
-			text = text.replace(/\[VIEW_SETTINGS\]/g, '');
-			text = text.replace(/\[PROJECT_INFO\]/g, '');
-			text = text.replace(/\[LIST_AGENTS\]/g, '');
-			text = text.replace(/\[LIST_ALERTS\]/g, '');
-			text = text.replace(/\[CREATE_ALERT\][\s\S]*?\[\/CREATE_ALERT\]/g, '');
-			text = text.replace(/\[DELETE_ALERT\][\s\S]*?\[\/DELETE_ALERT\]/g, '');
-			text = text.replace(/\[TOGGLE_ALERT\][\s\S]*?\[\/TOGGLE_ALERT\]/g, '');
-			text = text.replace(/\[LIST_PROJECTS\]/g, '');
-			text = text.replace(/\[SWITCH_PROJECT\][\s\S]*?\[\/SWITCH_PROJECT\]/g, '');
-			text = text.replace(/\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*?)?\]/g, '');
-			text = text.replace(/\[Using tool:\s*[^\]]+\]/g, '');
-			text = text.replace(/<\/?\s*proposed_plan\s*>/gi, '');
-			text = text.replace(/\[Tool\s+\S+\s+(?:done|error)\]\n[\s\S]*?\n\[\/Tool\]\n?/g, '');
-			text = text.replace(/\[Tool\s+\S+\s+(?:done|error):[^\n]*\]\n?/g, '');
-			// Strip protocol artifact lines (e.g. multi_tool_use.parallel fragments
-			// that leak between tool calls when the LLM narrates malformed tool attempts)
-			text = text.replace(/^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$/gm, '');
-			var beforeThinking = text;
-			text = text.replace(/\n?\[Thinking\][\s\S]*?(?:\[\/Thinking\]\n?|$)/g, '');
-			// If stripping thinking left us empty but there was content, extract thinking text
-			if (text.trim() === '' && beforeThinking.trim() !== '') {
+				if (!statusAlreadyScoped) text = window.stripFinalStatusControl(text);
+				text = window.stripOutsideCode(text, /\[Using tool:\s*[^\]]+\]/g);
+				text = text.replace(/<\/?\s*proposed_plan\s*>/gi, '');
+				text = window.stripOutsideCode(text, /\[Tool\s+\S+\s+(?:done|error)\](?:\r\n|\r|\n)?[\s\S]*?(?:\r\n|\r|\n)?\[\/Tool\](?:\r\n|\r|\n)?/g);
+				text = window.stripOutsideCode(text, /\[Tool\s+\S+\s+(?:done|error):[^\]\r\n]*\](?:\r\n|\r|\n)?/g);
+				// Strip protocol artifact lines (e.g. multi_tool_use.parallel fragments
+				// that leak between tool calls when the LLM narrates malformed tool attempts)
+				text = text.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
+				var beforeThinking = text;
+				text = window.stripOutsideCode(text, /\[Thinking\][\s\S]*?(?:\[\/Thinking\](?:\r\n|\r|\n)?|$)/g);
+				if (text !== beforeThinking && /(?:\r\n|\r|\n)$/.test(text) && /\[Thinking\][\s\S]*?(?:\[\/Thinking\]\s*)?$/.test(beforeThinking)) {
+					text = text.replace(/(?:\r\n|\r|\n)$/, '');
+				}
+				// If stripping thinking left us empty but there was content, extract thinking text
+				if (text.trim() === '' && beforeThinking.trim() !== '') {
 				var extracted = [];
 				var re = /\[Thinking\]([\s\S]*?)(?:\[\/Thinking\]|$)/g;
 				var m;
@@ -3257,29 +3560,21 @@ templ ChatAutoScrollScript() {
 					text = text.replace(/\[Thinking\]/g, '').replace(/\[\/Thinking\]/g, '');
 				}
 			}
-			['Created ', 'Edited '].forEach(function(keyword) {
-				var marker = '\n---\n' + keyword;
-				var firstIdx = text.indexOf(marker);
-				var lastIdx = text.lastIndexOf(marker);
-				if (firstIdx !== -1 && firstIdx !== lastIdx) {
-					text = text.substring(0, firstIdx) + text.substring(lastIdx);
-				}
-			});
+			text = window.dedupTaskSummaries(text);
 			// Note: [TASK_ID:xxx] and [TASK_EDITED:xxx] are NOT stripped here.
 			// convertTaskLinksInMessage / convertTaskEditLinksInMessage convert them
 			// to clickable links. They get cleaned up after link conversion.
 			text = text.replace(/\n{3,}/g, '\n\n');
 			return noTrim ? text : text.trim();
 		};
-		// Alias for backward compatibility
-		window.cleanThreadMarkers = window.cleanActionMarkers;
 
-		// Apply action marker cleaning to a chat bubble element (walks text nodes, preserves DOM elements)
+			// Apply transcript control-artifact cleaning to a chat bubble element.
 		// Uses noTrim=true to preserve leading/trailing whitespace in individual text nodes,
 		// which is needed for whitespace-pre-wrap to render line breaks between DOM elements.
 		window.cleanBubbleContent = function(bubble) {
 			var contentDivs = bubble.querySelectorAll('.whitespace-pre-wrap');
 			contentDivs.forEach(function(div) {
+				if (window.stripFinalStatusControlFromElement) window.stripFinalStatusControlFromElement(div);
 				var walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null);
 				var textNodes = [];
 				var node;
@@ -3287,8 +3582,9 @@ templ ChatAutoScrollScript() {
 					textNodes.push(node);
 				}
 				textNodes.forEach(function(textNode) {
+					if (textNode.parentElement && textNode.parentElement.closest('code, pre')) return;
 					var original = textNode.textContent;
-					var cleaned = window.cleanActionMarkers(original, true);
+					var cleaned = window.cleanTranscriptControls(original, true, true);
 					if (cleaned !== original) {
 						textNode.textContent = cleaned;
 					}
@@ -3316,7 +3612,7 @@ templ ChatAutoScrollScript() {
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
 						delete el.dataset.cleanedRaw;
 					}
-					// After rendering, process task links and clean markers
+					// After rendering, convert task-result metadata and clean transcript controls
 					var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
 					if (bubble) {
 						if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
@@ -3356,6 +3652,7 @@ templ ChatAutoScrollScript() {
 							return;
 						}
 					}
+					if (window.stripFinalStatusControlFromElement) window.stripFinalStatusControlFromElement(div);
 					var walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null);
 					var textNodes = [];
 					var node;
@@ -3363,8 +3660,9 @@ templ ChatAutoScrollScript() {
 						textNodes.push(node);
 					}
 					textNodes.forEach(function(textNode) {
+						if (textNode.parentElement && textNode.parentElement.closest('code, pre')) return;
 						var original = textNode.textContent;
-						var cleaned = window.cleanActionMarkers(original);
+						var cleaned = window.cleanTranscriptControls(original, false, true);
 						if (cleaned !== original) {
 							textNode.textContent = cleaned;
 						}
@@ -3417,18 +3715,14 @@ func IsImageMediaType(mediaType string) bool {
 	return strings.HasPrefix(mediaType, "image/")
 }
 
-// Regex patterns for cleaning action markers from display content (server-side).
+// Regex patterns for cleaning transcript control artifacts from display content.
 var (
-	reCreateTask   = regexp.MustCompile(`(?s)\[CREATE_TASK\].*?\[/CREATE_TASK\]`)
-	reEditTask     = regexp.MustCompile(`(?s)\[EDIT_TASK\].*?\[/EDIT_TASK\]`)
-	reExecTasks    = regexp.MustCompile(`(?s)\[EXECUTE_TASKS\].*?\[/EXECUTE_TASKS\]`)
-	reStatus       = regexp.MustCompile(`\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*?)?\]`)
 	reUsingTool    = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
 	reProposedPlan = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
-	reToolBlock    = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\]\n?[\s\S]*?\n?\[/Tool\]\n?`)
-	reToolDone     = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]]*\](?:\n)?`)
-	reProtocolArt  = regexp.MustCompile(`(?m)^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$`)
-	reThinking     = regexp.MustCompile(`(?s)\n?\[Thinking\][\s\S]*?(?:\[/Thinking\]\n?|$)`)
+	reToolBlock    = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\](?:\r\n|\r|\n)?[\s\S]*?(?:\r\n|\r|\n)?\[/Tool\](?:\r\n|\r|\n)?`)
+	reToolDone     = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]\r\n]*\](?:\r\n|\r|\n)?`)
+	reProtocolArt  = regexp.MustCompile(`(?m)(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)`)
+	reThinking     = regexp.MustCompile(`(?s)\[Thinking\][\s\S]*?(?:\[/Thinking\](?:\r\n|\r|\n)?|$)`)
 	reExcessLines  = regexp.MustCompile(`\n{3,}`)
 )
 
@@ -3437,26 +3731,23 @@ func NormalizeDisplayMarkers(text string) string {
 	return llmtranscript.NormalizeMarkers(text)
 }
 
-// CleanDisplayContent strips action markers from chat content for display.
+// CleanDisplayContent strips transcript control artifacts from chat content for display.
 func CleanDisplayContent(text string) string {
 	if text == "" {
 		return text
 	}
 	text = NormalizeDisplayMarkers(text)
-	text = reCreateTask.ReplaceAllString(text, "")
-	text = reEditTask.ReplaceAllString(text, "")
-	text = reExecTasks.ReplaceAllString(text, "")
-	text = reStatus.ReplaceAllString(text, "")
-	text = reUsingTool.ReplaceAllString(text, "")
+	text = llmoutput.StripFinalStatusControl(text)
+	text = llmoutput.ReplaceOutsideMarkdownCode(text, reUsingTool, "")
 	text = reProposedPlan.ReplaceAllString(text, "")
-	text = reToolBlock.ReplaceAllString(text, "")
-	text = reToolDone.ReplaceAllString(text, "")
-	text = reProtocolArt.ReplaceAllString(text, "")
+	text = llmoutput.ReplaceOutsideMarkdownCode(text, reToolBlock, "")
+	text = llmoutput.ReplaceOutsideMarkdownCode(text, reToolDone, "")
+	text = reProtocolArt.ReplaceAllString(text, "$1$2")
 
 	// Strip thinking blocks, but if that would leave the text empty,
 	// extract the thinking content as the display text (the model put
 	// its entire response inside a thinking block).
-	cleaned := reThinking.ReplaceAllString(text, "")
+	cleaned := llmoutput.ReplaceOutsideMarkdownCode(text, reThinking, "")
 	if strings.TrimSpace(cleaned) == "" && strings.TrimSpace(text) != "" {
 		text = extractThinkingContent(text)
 	} else {
@@ -3506,14 +3797,7 @@ func extractThinkingContent(text string) string {
 	return strings.TrimSpace(result)
 }
 
-// DedupTaskSummaries removes duplicate task summary blocks.
+// DedupTaskSummaries removes duplicate task summary blocks outside Markdown code.
 func DedupTaskSummaries(text string) string {
-	for _, marker := range []string{"\n---\nCreated ", "\n---\nEdited "} {
-		firstIdx := strings.Index(text, marker)
-		lastIdx := strings.LastIndex(text, marker)
-		if firstIdx != -1 && firstIdx != lastIdx {
-			text = text[:firstIdx] + text[lastIdx:]
-		}
-	}
-	return text
+	return llmoutput.DeduplicateTaskSummaries(text)
 }

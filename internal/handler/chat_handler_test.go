@@ -410,7 +410,7 @@ func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeToo
 	time.Sleep(20 * time.Millisecond)
 }
 
-func TestHandler_ChatSend_MixtureOllamaAggregatorCreatesTaskThroughMarker(t *testing.T) {
+func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -428,7 +428,7 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorCreatesTaskThroughMarker(t *tes
 		}
 		providerRequests <- body
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Investigate marker fallback through Ollama.\"}\n[/CREATE_TASK]"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Verify marker-looking text remains inert through Ollama.\"}\n[/CREATE_TASK]"},"done":false}`)
 		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
 	}))
 	defer providerServer.Close()
@@ -466,18 +466,19 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorCreatesTaskThroughMarker(t *tes
 	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
 		message, _ := raw.(map[string]any)
 		content, _ := message["content"].(string)
-		return message["role"] == "system" && strings.Contains(content, "[CREATE_TASK]")
-	}), "runtime-tool-incapable aggregator must retain marker guidance")
-	require.Eventually(t, func() bool {
-		tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
-		return err == nil && slices.ContainsFunc(tasks, func(task models.Task) bool {
-			return task.Title == "HTTP mixture marker investigation"
-		})
-	}, 3*time.Second, 10*time.Millisecond)
+		return message["role"] == "system" &&
+			strings.Contains(content, "Runtime actions are unavailable for this request") &&
+			!strings.Contains(content, "[CREATE_TASK]")
+	}), "runtime-tool-incapable aggregator must surface its action limitation without marker guidance")
 	require.Eventually(t, func() bool {
 		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
 		return err == nil && active == nil
 	}, 3*time.Second, 10*time.Millisecond)
+	tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.False(t, slices.ContainsFunc(tasks, func(task models.Task) bool {
+		return task.Title == "HTTP mixture marker investigation"
+	}), "marker-looking model prose must not create a task")
 	time.Sleep(20 * time.Millisecond)
 }
 
@@ -2684,88 +2685,6 @@ func TestCopyChatAttachmentsToTask_NoAttachments(t *testing.T) {
 // TestProcessChatTaskCreations_DeferredAttachmentActivationExactlyOnce verifies that
 // the production Chat creation path publishes attachments before activating and
 // submits the resulting task exactly once.
-func TestProcessChatTaskCreations_DeferredAttachmentActivationExactlyOnce(t *testing.T) {
-	h, _, llmConfigRepo := setupTestHandler(t)
-	ctx := context.Background()
-
-	agent := &models.LLMConfig{
-		Name: "Test Agent", Provider: models.ProviderTest,
-		Model: "claude-3-sonnet-20240229", APIKey: "test-key",
-		MaxTokens: 4096, Temperature: 1.0, IsDefault: true,
-	}
-	require.NoError(t, llmConfigRepo.Create(ctx, agent))
-
-	projects, _ := h.projectSvc.List(ctx)
-
-	// Create a chat task and execution
-	chatTask := &models.Task{
-		ProjectID: projects[0].ID, Title: "Chat: deferred test",
-		Prompt: "test", Status: models.StatusPending,
-		Category: models.CategoryChat, AgentID: &agent.ID,
-	}
-	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
-
-	exec := &models.Execution{
-		TaskID: chatTask.ID, AgentConfigID: agent.ID,
-		Status: models.ExecRunning, PromptSent: "test",
-	}
-	require.NoError(t, h.execRepo.Create(ctx, exec))
-
-	tmpDir := t.TempDir()
-	oldUploadsDir := uploadsDir
-	uploadsDir = tmpDir
-	defer func() { uploadsDir = oldUploadsDir }()
-
-	// Create a chat attachment (simulating user uploading screenshot in chat)
-	chatDir := filepath.Join(tmpDir, "chat", exec.ID)
-	require.NoError(t, os.MkdirAll(chatDir, 0755))
-	testFile := filepath.Join(chatDir, "screenshot.png")
-	require.NoError(t, os.WriteFile(testFile, []byte{0x89, 0x50, 0x4E, 0x47}, 0644))
-
-	chatAtt := &models.ChatAttachment{
-		ExecutionID: exec.ID,
-		FileName:    "screenshot.png",
-		FilePath:    testFile,
-		MediaType:   "image/png",
-		FileSize:    4,
-	}
-	require.NoError(t, h.chatAttachmentRepo.Create(ctx, chatAtt))
-
-	output := `[CREATE_TASK]
-{"title":"Deferred active task","prompt":"update styling based on screenshot","category":"active","agent_id":"` + agent.ID + `"}
-[/CREATE_TASK]`
-	updatedOutput, copiedCount := h.processChatTaskCreations(ctx, exec.ID, projects[0].ID, output, []models.LLMConfig{*agent})
-	require.Equal(t, 1, copiedCount)
-	createdIDs := extractTaskIDsFromOutput(updatedOutput)
-	require.Len(t, createdIDs, 1)
-	deferredTask, err := h.taskRepo.GetByID(ctx, createdIDs[0])
-	require.NoError(t, err)
-	require.NotNil(t, deferredTask)
-	assert.Equal(t, models.CategoryActive, deferredTask.Category)
-	assert.Contains(t, updatedOutput, `"Deferred active task" (active)`)
-
-	// The key invariant: publication and prompt updates are complete when the
-	// production creation path reports and submits the task as Active.
-	taskAttachments, err := h.attachmentRepo.ListByTask(ctx, deferredTask.ID)
-	require.NoError(t, err)
-	require.Len(t, taskAttachments, 1)
-	assert.Equal(t, "screenshot.png", taskAttachments[0].FileName)
-	assert.Contains(t, deferredTask.Prompt, "[Attached files from chat:")
-	assert.Contains(t, deferredTask.Prompt, "screenshot.png (path: ")
-	taskDir := filepath.Join(tmpDir, "tasks", deferredTask.ID)
-	assert.FileExists(t, filepath.Join(taskDir, "screenshot.png"))
-	select {
-	case submitted := <-h.workerSvc.Submitted():
-		assert.Equal(t, deferredTask.ID, submitted.ID)
-	case <-time.After(time.Second):
-		t.Fatal("activated attachment task was not submitted")
-	}
-	select {
-	case submitted := <-h.workerSvc.Submitted():
-		t.Fatalf("activated attachment task was submitted more than once: %s", submitted.ID)
-	default:
-	}
-}
 
 // TestHandler_Chat_FullPageVsHTMXPartial verifies that HTMX requests return partial content
 // while non-HTMX requests return full page with layout. This difference is why the server
@@ -4175,7 +4094,7 @@ func TestHandler_Chat_AssistantBubbleRehydrationOnLoadAndSwap(t *testing.T) {
 	body := rec.Body.String()
 
 	assert.Contains(t, body, "if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);",
-		"chat transforms must rehydrate assistant bubbles from data-raw-content before marker cleaning")
+		"chat transforms must rehydrate assistant bubbles from data-raw-content before transcript-control cleaning")
 	assert.Contains(t, body, "window.rehydrateChatAssistantBubbles = function()",
 		"chat page must expose explicit rehydration helper")
 	assert.Contains(t, body, "if (window.rehydrateChatAssistantBubbles) window.rehydrateChatAssistantBubbles();",
@@ -4243,11 +4162,19 @@ func TestHandler_Chat_RenderChatMarkdown_EscapesRawHTMLLikeTags(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 
-	// Regression guard: chat markdown rendering must escape raw HTML-like tags
-	// (e.g. malformed <div>/<button>/<function_calls> blocks) before marked.parse.
+	// Regression guard: full-page Chat must use the shared Markdown range grammar,
+	// escape raw tag openers before Marked, and DOM-sanitize Marked output.
+	assert.Contains(t, body, "window.codeRanges = function(text)")
 	assert.Contains(t, body, "window.escapeRawHTMLForMarkdown = function(text)")
 	assert.Contains(t, body, "var escapedText = window.escapeRawHTMLForMarkdown(text);")
-	assert.Contains(t, body, "var html = marked.parse(escapedText);")
+	assert.Contains(t, body, "window.configureChatMarked = function()")
+	assert.Contains(t, body, "if (!window.configureChatMarked || !window.configureChatMarked())")
+	assert.Contains(t, body, "window.renderChatMarkdownFallback = function(text)")
+	assert.Contains(t, body, `data-chat-markdown-fallback="true"`)
+	assert.Contains(t, body, "return window.renderChatMarkdownFallback(text);")
+	assert.Contains(t, body, "(inToolOutput || inMarkdownFallback) && window.isInsideCode")
+	assert.Contains(t, body, "return window.sanitizeChatHTML(window.marked.parse(escapedText));")
+	assert.NotContains(t, body, "OVMDHTML")
 }
 
 func TestHandler_Chat_PlanCompletionCTA_ServerRenderedPersistence(t *testing.T) {

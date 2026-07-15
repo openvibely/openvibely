@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -11,12 +12,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -4396,7 +4399,75 @@ func TestHandler_TaskThreadSend_DoesNotResumeExplicitlyPausedGoal(t *testing.T) 
 	assert.Equal(t, "paused by user", paused.Reason)
 }
 
-func TestHandler_TaskThreadSend_ProcessesCreateTaskMarkerFromUIFollowup(t *testing.T) {
+func TestHandler_TaskThreadSend_MixtureOllamaAggregatorReportsRuntimeActionsUnavailable(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	providerRequests := make(chan map[string]any, 1)
+	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		providerRequests <- body
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"Runtime actions are unavailable."},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":8}`)
+	}))
+	defer providerServer.Close()
+
+	aggregator := &models.LLMConfig{
+		Name: "Task Followup Ollama Aggregator", Provider: models.ProviderOllama, Model: "test-model",
+		OllamaBaseURL: providerServer.URL,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
+	mixture := &models.LLMConfig{
+		Name: "Task Followup Ollama Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"` + aggregator.ID + `"}}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, mixture))
+
+	project := createProject(t, h, "Task Followup Ollama Mixture Project")
+	task := createTask(t, h, project.ID, "Task Followup Ollama Mixture Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &mixture.ID
+	})
+
+	form := url.Values{}
+	form.Set("message", "Create a child task from this follow-up")
+	form.Set("agent_id", mixture.ID)
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+
+	var providerRequest map[string]any
+	select {
+	case providerRequest = <-providerRequests:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for task-followup Ollama mixture aggregator request")
+	}
+	require.NotContains(t, providerRequest, "tools", "runtime-tool-incapable follow-up aggregator must not receive tools")
+	messages, _ := providerRequest["messages"].([]any)
+	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
+		message, _ := raw.(map[string]any)
+		content, _ := message["content"].(string)
+		return message["role"] == "system" &&
+			strings.Contains(content, llmprompt.ChatActionUnavailableInstructions) &&
+			!strings.Contains(content, "[CREATE_TASK]")
+	}), "runtime-tool-incapable follow-up aggregator must receive a limitation without marker guidance")
+	require.Eventually(t, func() bool {
+		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+		return err == nil && len(execs) == 1 && execs[0].Status == models.ExecCompleted
+	}, 3*time.Second, 10*time.Millisecond)
+}
+
+func TestHandler_TaskThreadSend_LeavesCreateTaskMarkerTextInert(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -4423,23 +4494,22 @@ func TestHandler_TaskThreadSend_ProcessesCreateTaskMarkerFromUIFollowup(t *testi
 
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	require.Eventually(t, func() bool {
-		tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
-		if err != nil {
-			return false
-		}
-		for _, candidate := range tasks {
-			if candidate.Title == "UI thread marker child" {
-				return true
-			}
-		}
-		return false
+		execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+		return err == nil && len(execs) == 1 && strings.Contains(execs[0].Output, "[CREATE_TASK]")
 	}, 2*time.Second, 25*time.Millisecond)
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	for _, candidate := range tasks {
+		if candidate.Title == "UI thread marker child" {
+			t.Fatalf("task-thread marker-looking prose created a task: %+v", tasks)
+		}
+	}
 
 	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, execs, 1)
 	require.True(t, execs[0].IsFollowup)
-	require.Contains(t, execs[0].Output, "[TASK_ID:")
+	require.NotContains(t, execs[0].Output, "[TASK_ID:")
 }
 
 func TestHandler_TaskThreadSend_CompletedTaskIgnoresAndRepairsStaleRunningExecution(t *testing.T) {

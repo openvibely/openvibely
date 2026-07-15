@@ -1266,42 +1266,6 @@ func decodeRuntimeToolInput(input json.RawMessage, dst interface{}) error {
 	return nil
 }
 
-func buildToolMarker(markerName string, input json.RawMessage, hasBody bool) (string, error) {
-	upper := strings.ToUpper(strings.TrimSpace(markerName))
-	if upper == "" {
-		return "", fmt.Errorf("marker name is required")
-	}
-	if !hasBody {
-		return "[" + upper + "]", nil
-	}
-	payload := "{}"
-	if len(strings.TrimSpace(string(input))) > 0 {
-		var tmp map[string]interface{}
-		if err := json.Unmarshal(input, &tmp); err != nil {
-			return "", fmt.Errorf("invalid tool input: %w", err)
-		}
-		b, err := json.Marshal(tmp)
-		if err != nil {
-			return "", fmt.Errorf("marshal tool input: %w", err)
-		}
-		payload = string(b)
-	}
-	return fmt.Sprintf("[%s]%s[/%s]", upper, payload, upper), nil
-}
-
-func toolSummaryFromMarker(marker, updated string) string {
-	trimmedMarker := strings.TrimSpace(marker)
-	trimmedUpdated := strings.TrimSpace(updated)
-	if trimmedMarker == "" {
-		return trimmedUpdated
-	}
-	summary := strings.TrimSpace(strings.Replace(trimmedUpdated, trimmedMarker, "", 1))
-	if summary == "" {
-		return trimmedUpdated
-	}
-	return summary
-}
-
 // actionToolDefinitions returns tool definitions from the canonical registry
 // for channel surfaces (Telegram/Slack). Uses orchestrate mode since channels
 // always operate in orchestrate mode.

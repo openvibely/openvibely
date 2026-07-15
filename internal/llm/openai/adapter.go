@@ -254,15 +254,11 @@ func runtimeToolNames(rt *llmcontracts.RuntimeTools) []string {
 	return names
 }
 
-func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, isTaskFollowup bool, chatMode models.ChatMode) string {
-	if rt == nil || isTaskFollowup || chatMode != models.ChatModeOrchestrate {
+func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode) string {
+	if chatMode != models.ChatModeOrchestrate {
 		return base
 	}
-	names := runtimeToolNames(rt)
-	if len(names) == 0 {
-		return base
-	}
-	return llmprompt.ApplyChatActionToolMode(base, names)
+	return llmprompt.ApplyChatActionToolMode(base, runtimeToolNames(rt))
 }
 
 func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Agent) ([]openaiclient.ToolDefinition, func(context.Context, string, json.RawMessage) (string, bool, error), func(string) bool, func()) {
@@ -417,7 +413,6 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
-	fullPrompt += "\n\n" + llmprompt.TaskCreationInstructions
 	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, runtimeToolNames(rt))
 	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
@@ -534,7 +529,7 @@ func (a *Adapter) CallChatStreaming(ctx context.Context, message string, attachm
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
-	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, isTaskFollowup, chatMode)
+	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 	systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
 
 	oaAttachments, err := convertAttachments(attachments)
@@ -642,7 +637,6 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
-	fullPrompt += "\n\n" + llmprompt.TaskCreationInstructions
 	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, runtimeToolNames(rt))
 	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
@@ -728,7 +722,7 @@ func (a *Adapter) CallCompletionsChatStreaming(ctx context.Context, message stri
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
-	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, isTaskFollowup, chatMode)
+	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 	systemPromptStr = applyOpenAIOAuthSystemPrompt(systemPromptStr, agent)
 
 	oaAttachments, err := convertAttachments(attachments)

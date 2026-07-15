@@ -153,9 +153,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: chatQueuedSteerEndpoint,
 		})
-		<!-- Shared auto-scroll and marker cleaning utilities -->
+		<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
 		@components.ChatAutoScrollScript()
-		<!-- Chat-specific: task link conversion, draft persistence, HTMX swap handler -->
+		<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
 		<script>
 				// Scroll to bottom on page load to show latest messages
 				setTimeout(function() {
@@ -238,189 +238,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 					});			})();
 
-			// Convert task creation markers to clickable links
-			window.convertTaskLinksInMessage = function(messageElement) {
-				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
-				var nodesToProcess = [];
-				var node;
-				while (node = walker.nextNode()) {
-					if (node.textContent.includes('[TASK_ID:')) {
-						nodesToProcess.push(node);
-					}
-				}
-
-				nodesToProcess.forEach(function(textNode) {
-						var regex = /(?:-\s*)?"([^"]+)"\s*(?:\(([^)]+)\)\s*)?\[TASK_ID:([^\]]+)\]/g;
-						var text = textNode.textContent;
-						var matches = [];
-						var m;
-						while ((m = regex.exec(text)) !== null) { matches.push(m); }
-						if (matches.length === 0) return;
-						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
-
-					var fragment = document.createDocumentFragment();
-					var lastIndex = 0;
-
-					matches.forEach(function(match) {
-						var fullMatch = match[0], taskTitle = match[1], category = match[2], taskId = match[3];
-						var matchStart = match.index;
-						if (matchStart > lastIndex) {
-							var beforeText = text.substring(lastIndex, matchStart);
-							// Strip trailing newline before the task item since the div provides its own line break
-							beforeText = beforeText.replace(/\n$/, '');
-							if (beforeText) {
-								fragment.appendChild(document.createTextNode(beforeText));
-							}
-						}
-						var linkWrapper = document.createElement('div');
-						linkWrapper.style.cssText = 'display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.25rem 0;';
-						// Only add bullet if not already inside a list item (markdown renders - as <li>)
-						var insideLi = textNode.parentNode && textNode.parentNode.nodeName === 'LI';
-						if (!insideLi) {
-							var bullet = document.createElement('span');
-							bullet.textContent = '\u2022';
-							bullet.style.opacity = '0.5';
-							linkWrapper.appendChild(bullet);
-						}
-							var link = document.createElement('a');
-							link.href = '/tasks/' + taskId;
-							link.className = inToolOutput
-								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
-								: 'ov-task-result-link cursor-pointer';
-							link.textContent = taskTitle;
-						link.onclick = function(e) {
-							e.preventDefault();
-							e.stopPropagation();
-							htmx.ajax('GET', '/tasks/' + taskId + '?from=chat', { target: '#main-content', swap: 'innerHTML' }).catch(function(err) { console.error('[chat] Failed to load task detail:', err); });
-							history.pushState({}, '', '/tasks/' + taskId + '?from=chat');
-						};
-						linkWrapper.appendChild(link);
-						if (category) {
-							var catBadge = document.createElement('span');
-							catBadge.className = 'badge badge-sm badge-ghost';
-							catBadge.textContent = category;
-							linkWrapper.appendChild(catBadge);
-						}
-						if (category && (category === 'backlog' || category === 'pending')) {
-							var startBtn = document.createElement('button');
-							startBtn.className = 'btn btn-xs ov-task-result-start-btn gap-1';
-							startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><polygon points="6,4 16,10 6,16"/></svg> Start Task';
-							startBtn.onclick = function(e) {
-								e.preventDefault();
-								e.stopPropagation();
-								startBtn.disabled = true;
-								startBtn.classList.add('btn-disabled');
-								startBtn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> Starting...';
-								var formData = new URLSearchParams();
-								formData.set('category', 'active');
-								fetch('/tasks/' + taskId + '/category', {
-									method: 'PATCH',
-									headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-									body: formData.toString()
-								}).then(function(resp) {
-									if (resp.ok) {
-										startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Started';
-										startBtn.classList.remove('ov-task-result-start-btn');
-										startBtn.classList.add('btn-success');
-									} else {
-										startBtn.innerHTML = 'Failed';
-										startBtn.classList.remove('ov-task-result-start-btn');
-										startBtn.classList.add('btn-error');
-									}
-								}).catch(function() {
-									startBtn.innerHTML = 'Failed';
-									startBtn.disabled = false;
-									startBtn.classList.remove('btn-disabled', 'ov-task-result-start-btn');
-									startBtn.classList.add('btn-error');
-								});
-							};
-							linkWrapper.appendChild(startBtn);
-						}
-						fragment.appendChild(linkWrapper);
-						lastIndex = matchStart + fullMatch.length;
-					});
-
-					if (lastIndex < text.length) {
-						var remaining = text.substring(lastIndex);
-						// Style "Attachments copied to tasks:" as a muted info line
-						var attMatch = remaining.match(/\n*Attachments copied to tasks:\s*(.*)/);
-						if (attMatch) {
-							var beforeAtt = remaining.substring(0, remaining.indexOf('Attachments copied to tasks:'));
-							if (beforeAtt.trim()) {
-								fragment.appendChild(document.createTextNode(beforeAtt));
-							}
-							var attDiv = document.createElement('div');
-							attDiv.className = 'text-xs opacity-60 mt-1';
-							attDiv.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>';
-							attDiv.appendChild(document.createTextNode('Attachments copied: ' + attMatch[1]));
-							fragment.appendChild(attDiv);
-						} else {
-							// Strip leading newline since divs provide their own line breaks
-							remaining = remaining.replace(/^\n/, '');
-							if (remaining) {
-								fragment.appendChild(document.createTextNode(remaining));
-							}
-						}
-					}
-					textNode.parentNode.replaceChild(fragment, textNode);
-				});
-			};
-
-			// Convert task edit markers to clickable links
-			window.convertTaskEditLinksInMessage = function(messageElement) {
-				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
-				var nodesToProcess = [];
-				var node;
-				while (node = walker.nextNode()) {
-					if (node.textContent.includes('[TASK_EDITED:')) {
-						nodesToProcess.push(node);
-					}
-				}
-
-				nodesToProcess.forEach(function(textNode) {
-						var regex = /(?:-\s*)?"([^"]+)"\s*\(updated:\s*([^)]+)\)\s*\[TASK_EDITED:([^\]]+)\]/g;
-						var text = textNode.textContent;
-						var matches = [];
-						var m;
-						while ((m = regex.exec(text)) !== null) { matches.push(m); }
-						if (matches.length === 0) return;
-						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
-
-					var fragment = document.createDocumentFragment();
-					var lastIndex = 0;
-
-					matches.forEach(function(match) {
-						var fullMatch = match[0], taskTitle = match[1], updatedFields = match[2], taskId = match[3];
-						var matchStart = match.index;
-						if (matchStart > lastIndex) {
-							fragment.appendChild(document.createTextNode(text.substring(lastIndex, matchStart)));
-						}
-						var linkWrapper = document.createElement('span');
-						linkWrapper.innerHTML = '- ';
-							var link = document.createElement('a');
-							link.href = '/tasks/' + taskId;
-							link.className = inToolOutput
-								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
-								: 'ov-task-result-link cursor-pointer';
-							link.textContent = '"' + taskTitle + '"';
-						link.onclick = function(e) {
-							e.preventDefault();
-							htmx.ajax('GET', '/tasks/' + taskId + '?from=chat', { target: '#main-content', swap: 'innerHTML' });
-							history.pushState({}, '', '/tasks/' + taskId + '?from=chat');
-						};
-						linkWrapper.appendChild(link);
-						linkWrapper.appendChild(document.createTextNode(' (updated: ' + updatedFields + ')'));
-						fragment.appendChild(linkWrapper);
-						lastIndex = matchStart + fullMatch.length;
-					});
-
-					if (lastIndex < text.length) {
-						fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
-					}
-					textNode.parentNode.replaceChild(fragment, textNode);
-				});
-			};
-
 			// Detect <proposed_plan> marker in raw assistant content.
 			// Checks raw XML tags only; does not match HTML-escaped variants
 			// (&lt;proposed_plan&gt;) since raw content is stored unescaped in
@@ -482,7 +299,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					if (!chatMessages) return;
 					// Re-hydrate assistant bubbles from raw content first (tool/thinking cards).
 					// This keeps hard-refresh behavior consistent with task-thread rendering
-					// and prevents marker-cleanup passes from stripping tool markers before
+					// and prevents transcript-control cleanup from stripping tool controls before
 					// tool-card rendering runs.
 					if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
 					chatMessages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
@@ -661,7 +478,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				}
 			})();
 
-			// Process task links and clean markers on HTMX swaps
+			// Convert task-result metadata and clean transcript controls on HTMX swaps
 			if (!window._chatSwapHandlerAttached) {
 				window._chatSwapHandlerAttached = true;
 

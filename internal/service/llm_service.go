@@ -108,7 +108,7 @@ func (s *LLMService) SetAlertService(alertSvc *AlertService) {
 	s.alertSvc = alertSvc
 }
 
-// SetTaskService sets the task service for creating tasks from agent output.
+// SetTaskService sets the task service used by authorized runtime actions.
 // Called after construction to avoid circular dependencies
 // (LLMService -> TaskService -> WorkerService -> LLMService).
 func (s *LLMService) SetTaskService(taskSvc *TaskService) {
@@ -756,12 +756,10 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if runtimeToolsSupported {
 		taskActionTools = s.taskActionRuntimeTools(task)
 	}
-	runtimeToolsActive := false
 	if runtimeToolsSupported || agent.Provider != models.ProviderMixture {
 		if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
 			mergedTools := llmcontracts.CompositeRuntimeTools(runtimeTools, ctxTools, taskActionTools)
 			callCtx = llmcontracts.WithRuntimeTools(callCtx, mergedTools)
-			runtimeToolsActive = mergedTools != nil && len(mergedTools.Definitions) > 0
 			if mergedTools != nil && mergedTools.SkipDefaultTools {
 				projectInstructions = ""
 			}
@@ -964,26 +962,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// can retry or fix the issue, and continues working. Intermediate command failures
 	// should not kill the task. The model uses [STATUS: FAILED | reason] to explicitly
 	// report task failure when it determines the task cannot be completed.
-
-	// Process task creation markers from the agent's output.
-	// Webhook-created tasks must remain one-task-per-webhook-call, so do not
-	// allow marker-driven fan-out during their execution.
-	if s.taskSvc != nil {
-		if runtimeToolsActive {
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent skipping marker task creation because runtime tools are active task=%s", task.ID)
-		} else if task.CreatedVia == models.TaskOriginWebhook {
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent skipping marker task creation for webhook-origin task=%s", task.ID)
-		} else {
-			taskRequests := ParseTaskCreations(output)
-			if len(taskRequests) > 0 {
-				applog.Infof("[agent-svc] ExecuteTaskWithAgent task=%s found %d task creation requests", task.ID, len(taskRequests))
-				summary := ExecuteTaskCreations(finalizeCtx, taskRequests, task.ProjectID, s.taskSvc)
-				if summary != "" {
-					output += summary
-				}
-			}
-		}
-	}
 
 	// Record success
 	completedExecution := false
@@ -1741,6 +1719,9 @@ func (s *LLMService) callAnthropicChat(ctx context.Context, message string, atta
 	// Build the system prompt based on whether this is a task followup or orchestration chat
 	// Anthropic API agents don't need tool restrictions (restrictTools=false)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	if chatMode == models.ChatModeOrchestrate {
+		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil)
+	}
 	client.History = append(client.History, buildAnthropicClientHistory(chatHistory)...)
 
 	// Convert attachments to anthropicclient format
@@ -1837,11 +1818,7 @@ func (s *LLMService) callClaudeCLI(ctx context.Context, prompt string, attachmen
 		fullPrompt.WriteString("\n\n")
 	}
 	fullPrompt.WriteString(llmprompt.BuildAttachmentInstructions(attachments))
-	fullPrompt.WriteString(prompt)
-
-	// Add task creation instructions so the agent can create sub-tasks
-	fullPrompt.WriteString("\n\n")
-	fullPrompt.WriteString(llmprompt.TaskCreationInstructions)
+	fullPrompt.WriteString(llmprompt.ApplyTaskCreationToolMode(prompt, nil))
 
 	// Append status reporting instructions AFTER the task prompt so the agent
 	// sees them last and is more likely to follow them.
@@ -2003,6 +1980,9 @@ func (s *LLMService) callClaudeCLIChat(ctx context.Context, message string, atta
 	// If resuming a session, the CLI manages its own conversation state.
 	var fullPrompt strings.Builder
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, true)
+	if chatMode == models.ChatModeOrchestrate {
+		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil)
+	}
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	fullPrompt.WriteString(systemPromptStr)
 	fullPrompt.WriteString("\n")
@@ -2331,7 +2311,7 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 		fullPrompt.WriteString("\n\n")
 	}
 	fullPrompt.WriteString(llmprompt.BuildAttachmentInstructions(attachments))
-	fullPrompt.WriteString(prompt)
+	fullPrompt.WriteString(llmprompt.ApplyTaskCreationToolMode(prompt, nil))
 
 	imagePaths := make([]string, 0, len(attachments))
 	for _, att := range attachments {
@@ -2339,8 +2319,6 @@ func (s *LLMService) callCodexCLI(ctx context.Context, prompt string, attachment
 			imagePaths = append(imagePaths, llmprompt.AttachmentAbsPath(att))
 		}
 	}
-	fullPrompt.WriteString("\n\n")
-	fullPrompt.WriteString(llmprompt.TaskCreationInstructions)
 	fullPrompt.WriteString("\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
 		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
@@ -2436,6 +2414,9 @@ func (s *LLMService) callCodexCLIChat(ctx context.Context, message string, attac
 
 	var fullPrompt strings.Builder
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, true)
+	if chatMode == models.ChatModeOrchestrate {
+		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil)
+	}
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	fullPrompt.WriteString(systemPromptStr)
 	fullPrompt.WriteString("\n")

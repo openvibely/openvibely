@@ -431,7 +431,6 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   false,
-		ProcessMarkers:   false,
 		Surface:          chatcontrol.SurfaceAPI,
 	})
 

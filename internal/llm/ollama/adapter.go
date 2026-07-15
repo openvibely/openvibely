@@ -68,7 +68,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		}, err
 
 	case llmcontracts.OperationStreaming:
-		if req.ChatHistory != nil {
+		if req.Followup || req.ChatHistory != nil || req.ChatMode == models.ChatModeOrchestrate || req.ChatMode == models.ChatModePlan {
 			output, tokens, err := a.callChat(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode)
 			return llmcontracts.AgentResult{
 				Output: output,
@@ -159,13 +159,16 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	return output, tokens, nil
 }
 
-// callChat calls the Ollama API with chat history for interactive chat.
+// callChat calls the Ollama API for Chat and task follow-up requests.
 func (a *Adapter) callChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode) (string, int, error) {
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callChat model=%s base_url=%s history=%d message_len=%d attachments=%d exec=%s isTaskFollowup=%v",
 		agent.Model, baseURL, len(chatHistory), len(message), len(attachments), execID, isTaskFollowup)
 
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	if chatMode == models.ChatModeOrchestrate {
+		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil)
+	}
 	messages := buildChatHistory(systemPromptStr, chatHistory)
 
 	userMsg := chatMessage{Role: "user", Content: message}
@@ -267,7 +270,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	systemPrompt := llmprompt.BuildAgentSystemPrompt(projectInstructions)
 	messages = append(messages, chatMessage{Role: "system", Content: systemPrompt})
 
-	userMsg := chatMessage{Role: "user", Content: prompt}
+	userMsg := chatMessage{Role: "user", Content: llmprompt.ApplyTaskCreationToolMode(prompt, nil)}
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
 		userMsg.Images = images
 	}
