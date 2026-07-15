@@ -33,6 +33,15 @@ func TestNormalizeAgentToolsKeepsRuntimeMessagingGitHubAndTaskGoalTools(t *testi
 		"github_comment_on_issue",
 		"github_add_issue_labels",
 		"github_open_pull_request",
+		"create_alert",
+		"list_alerts",
+		"get_alert",
+		"claim_alert",
+		"create_alert_implementation_task",
+		"link_alert_implementation_task",
+		"complete_alert_processing",
+		"fail_alert_processing",
+		"release_alert_claim",
 	}
 
 	tools := normalizeAgentTools(input)

@@ -809,7 +809,7 @@ func TestTelegramService_RuntimeListAlertsTool_Handled(t *testing.T) {
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.NoError(t, err)
-	require.Contains(t, output, "No alerts found")
+	require.Contains(t, output, `"notifications":[]`)
 }
 
 func TestTelegramService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {

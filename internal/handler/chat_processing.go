@@ -3198,7 +3198,7 @@ func (h *Handler) executeCreateAlertRequests(ctx context.Context, projectID stri
 }
 
 // executeDeleteAlertRequests deletes alerts from typed runtime-tool requests.
-func (h *Handler) executeDeleteAlertRequests(ctx context.Context, requests []service.DeleteAlertRequest) string {
+func (h *Handler) executeDeleteAlertRequests(ctx context.Context, projectID string, requests []service.DeleteAlertRequest) string {
 	if len(requests) == 0 {
 		return ""
 	}
@@ -3208,7 +3208,7 @@ func (h *Handler) executeDeleteAlertRequests(ctx context.Context, requests []ser
 
 	var results []string
 	for _, req := range requests {
-		if err := h.alertSvc.Delete(ctx, req.AlertID); err != nil {
+		if err := h.alertSvc.Delete(ctx, projectID, req.AlertID); err != nil {
 			applog.Infof("[handler] executeDeleteAlertRequests error: %v", err)
 			results = append(results, fmt.Sprintf("- Error deleting alert %q: %v", req.AlertID, err))
 			continue
@@ -3223,7 +3223,7 @@ func (h *Handler) executeDeleteAlertRequests(ctx context.Context, requests []ser
 }
 
 // executeToggleAlertRequests marks alerts read from typed runtime-tool requests.
-func (h *Handler) executeToggleAlertRequests(ctx context.Context, requests []service.ToggleAlertRequest) string {
+func (h *Handler) executeToggleAlertRequests(ctx context.Context, projectID string, requests []service.ToggleAlertRequest) string {
 	if len(requests) == 0 {
 		return ""
 	}
@@ -3233,7 +3233,7 @@ func (h *Handler) executeToggleAlertRequests(ctx context.Context, requests []ser
 
 	var results []string
 	for _, req := range requests {
-		if err := h.alertSvc.MarkRead(ctx, req.AlertID); err != nil {
+		if err := h.alertSvc.MarkRead(ctx, projectID, req.AlertID); err != nil {
 			applog.Infof("[handler] executeToggleAlertRequests error: %v", err)
 			results = append(results, fmt.Sprintf("- Error marking alert %q as read: %v", req.AlertID, err))
 			continue

@@ -118,8 +118,16 @@ type channelProjectActionHandlerOptions struct {
 	SwitchProject func(context.Context, *models.Project) error
 }
 
+type AlertRuntimeOptions struct {
+	ProjectID    string
+	CallerTaskID string
+	Source       string
+	AlertSvc     *AlertService
+}
+
 type channelUtilityActionHandlerOptions struct {
 	ProjectID             string
+	CallerTaskID          string
 	TaskRepo              *repository.TaskRepo
 	ScheduleRepo          *repository.ScheduleRepo
 	LLMConfigRepo         *repository.LLMConfigRepo
@@ -428,7 +436,7 @@ func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) 
 }
 
 func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
-	return map[string]chatcontrol.RuntimeActionHandler{
+	handlers := map[string]chatcontrol.RuntimeActionHandler{
 		"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return ExecuteListTasksTool(ctx, opts.TaskRepo, opts.ProjectID, input)
 		},
@@ -469,18 +477,22 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 			return channelListAlertsResult(ctx, opts.AlertSvc, opts.ProjectID), nil
 		},
 		"get_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return channelGetAlertResult(ctx, opts.AlertSvc, input), nil
+			return channelGetAlertResult(ctx, opts.AlertSvc, opts.ProjectID, input), nil
 		},
 		"create_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return channelCreateAlertResult(ctx, opts.AlertSvc, opts.ProjectID, input), nil
 		},
 		"delete_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return channelDeleteAlertResult(ctx, opts.AlertSvc, input), nil
+			return channelDeleteAlertResult(ctx, opts.AlertSvc, opts.ProjectID, input), nil
 		},
 		"toggle_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return channelToggleAlertResult(ctx, opts.AlertSvc, input), nil
+			return channelToggleAlertResult(ctx, opts.AlertSvc, opts.ProjectID, input), nil
 		},
 	}
+	mergeChannelRuntimeActionHandlers(handlers, BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{
+		ProjectID: opts.ProjectID, CallerTaskID: opts.CallerTaskID, Source: "agent", AlertSvc: opts.AlertSvc,
+	}))
+	return handlers
 }
 
 func buildChannelProjectListResult(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
@@ -985,6 +997,297 @@ func channelProjectInfoResult(ctx context.Context, projectRepo *repository.Proje
 	return strings.TrimSpace(sb.String())
 }
 
+func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatcontrol.RuntimeActionHandler {
+	resultJSON := func(value any) (string, error) {
+		data, err := json.Marshal(value)
+		return string(data), err
+	}
+	assertProject := func(requested string) error {
+		requested = strings.TrimSpace(requested)
+		if strings.TrimSpace(opts.ProjectID) == "" {
+			return fmt.Errorf("notification project context is unavailable")
+		}
+		if requested != "" && requested != opts.ProjectID {
+			return fmt.Errorf("project_id %q is outside the caller's authorized project context", requested)
+		}
+		return nil
+	}
+	requireCaller := func() error {
+		if strings.TrimSpace(opts.CallerTaskID) == "" {
+			return fmt.Errorf("this notification operation requires a persisted caller task")
+		}
+		return nil
+	}
+	requireService := func() error {
+		if opts.AlertSvc == nil {
+			return fmt.Errorf("alert service not available")
+		}
+		return nil
+	}
+	return map[string]chatcontrol.RuntimeActionHandler{
+		"create_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req struct {
+				ProjectID      string         `json:"project_id"`
+				Type           string         `json:"type"`
+				Title          string         `json:"title"`
+				Message        string         `json:"message"`
+				Body           string         `json:"body"`
+				Severity       string         `json:"severity"`
+				Source         string         `json:"source"`
+				Metadata       map[string]any `json:"metadata"`
+				IdempotencyKey string         `json:"idempotency_key"`
+			}
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := assertProject(req.ProjectID); err != nil {
+				return "", err
+			}
+			if opts.AlertSvc == nil {
+				return "", fmt.Errorf("alert service not available")
+			}
+			req.Title = strings.TrimSpace(req.Title)
+			req.Type = strings.TrimSpace(req.Type)
+			req.Source = strings.TrimSpace(req.Source)
+			if req.Title == "" || len(req.Title) > 200 {
+				return "", fmt.Errorf("title is required and must be at most 200 characters")
+			}
+			if req.Type == "" || len(req.Type) > 100 {
+				return "", fmt.Errorf("type is required and must be at most 100 characters")
+			}
+			if len(req.Message) > 2000 || len(req.Body) > 20000 || len(req.IdempotencyKey) > 200 {
+				return "", fmt.Errorf("notification content exceeds the allowed size")
+			}
+			severity, severityErr := channelAlertSeverity(req.Severity)
+			if severityErr != "" {
+				return "", fmt.Errorf("%s", severityErr)
+			}
+			source := req.Source
+			if source == "" {
+				source = strings.TrimSpace(opts.Source)
+			}
+			if source == "" {
+				source = "agent"
+			}
+			if len(source) > 100 {
+				return "", fmt.Errorf("source must be at most 100 characters")
+			}
+			a := &models.Alert{ProjectID: opts.ProjectID, Scope: models.AlertScopeProject, Type: models.AlertType(req.Type),
+				Severity: severity, Title: req.Title, Message: req.Message, Body: req.Body, Source: source,
+				Metadata: req.Metadata, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey)}
+			if opts.CallerTaskID != "" {
+				sourceTaskID := opts.CallerTaskID
+				a.SourceTaskID = &sourceTaskID
+			}
+			created, err := opts.AlertSvc.CreateActionable(ctx, a)
+			if err != nil {
+				return "", err
+			}
+			return resultJSON(map[string]any{"notification": created})
+		},
+		"list_alerts": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req struct {
+				ProjectID                string `json:"project_id"`
+				DecisionState            string `json:"decision_state"`
+				ProcessingState          string `json:"processing_state"`
+				Type                     string `json:"type"`
+				Source                   string `json:"source"`
+				Read                     *bool  `json:"read"`
+				ImplementationTaskLinked *bool  `json:"implementation_task_linked"`
+				Limit                    int    `json:"limit"`
+				Offset                   int    `json:"offset"`
+			}
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := assertProject(req.ProjectID); err != nil {
+				return "", err
+			}
+			if err := requireService(); err != nil {
+				return "", err
+			}
+			if req.Limit == 0 {
+				req.Limit = 50
+			}
+			if req.Limit < 1 || req.Limit > 100 || req.Offset < 0 {
+				return "", fmt.Errorf("limit must be 1-100 and offset must be non-negative")
+			}
+			if req.DecisionState != "" && req.DecisionState != string(models.AlertDecisionNotRequired) && req.DecisionState != string(models.AlertDecisionPending) && req.DecisionState != string(models.AlertDecisionApproved) && req.DecisionState != string(models.AlertDecisionRejected) && req.DecisionState != string(models.AlertDecisionDismissed) {
+				return "", fmt.Errorf("invalid decision_state %q", req.DecisionState)
+			}
+			if req.ProcessingState != "" && req.ProcessingState != string(models.AlertProcessingNotApplicable) && req.ProcessingState != string(models.AlertProcessingUnclaimed) && req.ProcessingState != string(models.AlertProcessingClaimed) && req.ProcessingState != string(models.AlertProcessingImplementationTaskLinked) && req.ProcessingState != string(models.AlertProcessingCompleted) && req.ProcessingState != string(models.AlertProcessingFailed) {
+				return "", fmt.Errorf("invalid processing_state %q", req.ProcessingState)
+			}
+			alerts, err := opts.AlertSvc.ListFiltered(ctx, opts.ProjectID, models.AlertListFilter{
+				DecisionState: models.AlertDecisionState(req.DecisionState), ProcessingState: models.AlertProcessingState(req.ProcessingState),
+				Type: models.AlertType(req.Type), Source: req.Source, Read: req.Read,
+				ImplementationTaskLinked: req.ImplementationTaskLinked, Limit: req.Limit, Offset: req.Offset,
+			})
+			if err != nil {
+				return "", err
+			}
+			nextOffset := 0
+			if len(alerts) == req.Limit {
+				nextOffset = req.Offset + len(alerts)
+			}
+			return resultJSON(map[string]any{"notifications": alerts, "project_id": opts.ProjectID, "offset": req.Offset, "next_offset": nextOffset})
+		},
+		"get_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req struct {
+				ProjectID string `json:"project_id"`
+				AlertID   string `json:"alert_id"`
+			}
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := assertProject(req.ProjectID); err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(req.AlertID) == "" {
+				return "", fmt.Errorf("alert_id is required")
+			}
+			if err := requireService(); err != nil {
+				return "", err
+			}
+			a, err := opts.AlertSvc.GetByID(ctx, opts.ProjectID, req.AlertID)
+			if err != nil {
+				return "", err
+			}
+			return resultJSON(map[string]any{"notification": a})
+		},
+		"claim_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req struct {
+				ProjectID    string `json:"project_id"`
+				AlertID      string `json:"alert_id"`
+				LeaseSeconds int    `json:"lease_seconds"`
+			}
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := assertProject(req.ProjectID); err != nil {
+				return "", err
+			}
+			if err := requireCaller(); err != nil {
+				return "", err
+			}
+			if err := requireService(); err != nil {
+				return "", err
+			}
+			lease := time.Duration(req.LeaseSeconds) * time.Second
+			a, err := opts.AlertSvc.ClaimApproved(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, lease)
+			if err != nil {
+				return "", err
+			}
+			return resultJSON(map[string]any{"notification": a})
+		},
+		"create_alert_implementation_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req struct {
+				ProjectID string         `json:"project_id"`
+				AlertID   string         `json:"alert_id"`
+				Title     string         `json:"title"`
+				Prompt    string         `json:"prompt"`
+				Priority  int            `json:"priority"`
+				Tag       models.TaskTag `json:"tag"`
+			}
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := assertProject(req.ProjectID); err != nil {
+				return "", err
+			}
+			if err := requireCaller(); err != nil {
+				return "", err
+			}
+			if err := requireService(); err != nil {
+				return "", err
+			}
+			task, err := opts.AlertSvc.CreateImplementationTask(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, models.AlertImplementationTaskInput{
+				Title: req.Title, Prompt: req.Prompt, Priority: req.Priority, Tag: req.Tag,
+			})
+			if err != nil {
+				return "", err
+			}
+			return resultJSON(map[string]any{"alert_id": req.AlertID, "implementation_task_id": task.ID, "task": task})
+		},
+		"link_alert_implementation_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req struct {
+				ProjectID string `json:"project_id"`
+				AlertID   string `json:"alert_id"`
+				TaskID    string `json:"task_id"`
+			}
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := assertProject(req.ProjectID); err != nil {
+				return "", err
+			}
+			if err := requireCaller(); err != nil {
+				return "", err
+			}
+			if err := requireService(); err != nil {
+				return "", err
+			}
+			if err := opts.AlertSvc.LinkImplementationTask(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, req.TaskID); err != nil {
+				return "", err
+			}
+			return resultJSON(map[string]any{"alert_id": req.AlertID, "implementation_task_id": req.TaskID})
+		},
+		"complete_alert_processing": alertTerminalRuntimeHandler(opts, models.AlertProcessingCompleted, assertProject, requireCaller, resultJSON),
+		"fail_alert_processing":     alertTerminalRuntimeHandler(opts, models.AlertProcessingFailed, assertProject, requireCaller, resultJSON),
+		"release_alert_claim": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req struct {
+				ProjectID string `json:"project_id"`
+				AlertID   string `json:"alert_id"`
+			}
+			if err := decodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := assertProject(req.ProjectID); err != nil {
+				return "", err
+			}
+			if err := requireCaller(); err != nil {
+				return "", err
+			}
+			if err := requireService(); err != nil {
+				return "", err
+			}
+			if err := opts.AlertSvc.ReleaseClaim(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID); err != nil {
+				return "", err
+			}
+			return resultJSON(map[string]any{"alert_id": req.AlertID, "processing_state": models.AlertProcessingUnclaimed})
+		},
+	}
+}
+
+func alertTerminalRuntimeHandler(opts AlertRuntimeOptions, state models.AlertProcessingState, assertProject func(string) error, requireCaller func() error, resultJSON func(any) (string, error)) chatcontrol.RuntimeActionHandler {
+	return func(ctx context.Context, input json.RawMessage) (string, error) {
+		var req struct {
+			ProjectID string `json:"project_id"`
+			AlertID   string `json:"alert_id"`
+			Message   string `json:"message"`
+		}
+		if err := decodeRuntimeToolInput(input, &req); err != nil {
+			return "", err
+		}
+		if err := assertProject(req.ProjectID); err != nil {
+			return "", err
+		}
+		if err := requireCaller(); err != nil {
+			return "", err
+		}
+		if len(req.Message) > 2000 {
+			return "", fmt.Errorf("message must be at most 2000 characters")
+		}
+		if opts.AlertSvc == nil {
+			return "", fmt.Errorf("alert service not available")
+		}
+		if err := opts.AlertSvc.MarkProcessing(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, state, req.Message); err != nil {
+			return "", err
+		}
+		return resultJSON(map[string]any{"alert_id": req.AlertID, "processing_state": state})
+	}
+}
+
 func channelListAlertsResult(ctx context.Context, alertSvc *AlertService, projectID string) string {
 	if alertSvc == nil {
 		return "Alert service not available."
@@ -1009,7 +1312,7 @@ func channelListAlertsResult(ctx context.Context, alertSvc *AlertService, projec
 	return strings.TrimSpace(sb.String())
 }
 
-func channelGetAlertResult(ctx context.Context, alertSvc *AlertService, input json.RawMessage) string {
+func channelGetAlertResult(ctx context.Context, alertSvc *AlertService, projectID string, input json.RawMessage) string {
 	var req struct {
 		AlertID string `json:"alert_id"`
 	}
@@ -1022,7 +1325,7 @@ func channelGetAlertResult(ctx context.Context, alertSvc *AlertService, input js
 	if alertSvc == nil {
 		return "Alert service not available."
 	}
-	alert, err := alertSvc.GetByID(ctx, req.AlertID)
+	alert, err := alertSvc.GetByID(ctx, projectID, req.AlertID)
 	if err != nil {
 		return fmt.Sprintf("Error retrieving alert %q: %v", req.AlertID, err)
 	}
@@ -1066,7 +1369,7 @@ func channelCreateAlertResult(ctx context.Context, alertSvc *AlertService, proje
 	return fmt.Sprintf("Created alert %q (id: %s, severity: %s)", req.Title, a.ID, severity)
 }
 
-func channelDeleteAlertResult(ctx context.Context, alertSvc *AlertService, input json.RawMessage) string {
+func channelDeleteAlertResult(ctx context.Context, alertSvc *AlertService, projectID string, input json.RawMessage) string {
 	var req DeleteAlertRequest
 	if err := decodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for delete_alert."
@@ -1077,13 +1380,13 @@ func channelDeleteAlertResult(ctx context.Context, alertSvc *AlertService, input
 	if alertSvc == nil {
 		return "Alert service not available."
 	}
-	if err := alertSvc.Delete(ctx, req.AlertID); err != nil {
+	if err := alertSvc.Delete(ctx, projectID, req.AlertID); err != nil {
 		return fmt.Sprintf("Error deleting alert %q: %v", req.AlertID, err)
 	}
 	return fmt.Sprintf("Deleted alert %s.", req.AlertID)
 }
 
-func channelToggleAlertResult(ctx context.Context, alertSvc *AlertService, input json.RawMessage) string {
+func channelToggleAlertResult(ctx context.Context, alertSvc *AlertService, projectID string, input json.RawMessage) string {
 	var req ToggleAlertRequest
 	if err := decodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for toggle_alert."
@@ -1094,7 +1397,7 @@ func channelToggleAlertResult(ctx context.Context, alertSvc *AlertService, input
 	if alertSvc == nil {
 		return "Alert service not available."
 	}
-	if err := alertSvc.MarkRead(ctx, req.AlertID); err != nil {
+	if err := alertSvc.MarkRead(ctx, projectID, req.AlertID); err != nil {
 		return fmt.Sprintf("Error marking alert %q as read: %v", req.AlertID, err)
 	}
 	return fmt.Sprintf("Marked alert %s as read.", req.AlertID)

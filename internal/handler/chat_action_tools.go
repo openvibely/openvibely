@@ -196,6 +196,9 @@ func (h *Handler) chatActionExecutor(params streamingResponseParams, collector *
 }
 
 func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) map[string]chatcontrol.RuntimeActionHandler {
+	alertHandlers := service.BuildAlertRuntimeActionHandlers(service.AlertRuntimeOptions{
+		ProjectID: params.ProjectID, CallerTaskID: params.TaskID, Source: "agent", AlertSvc: h.alertSvc,
+	})
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeCreateSwarmTaskTool(ctx, params, input, collector)
@@ -398,32 +401,28 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSwitchProject(ctx, params.ProjectID, input), nil
 		},
-		"list_alerts": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			return strings.TrimSpace(h.executeListAlerts(ctx, params.ProjectID)), nil
-		},
-		"get_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeGetAlert(ctx, params.ProjectID, input), nil
-		},
-		"create_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req service.CreateAlertRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
-				return "", err
-			}
-			return strings.TrimSpace(h.executeCreateAlertRequests(ctx, params.ProjectID, []service.CreateAlertRequest{req})), nil
-		},
+		"list_alerts":                      alertHandlers["list_alerts"],
+		"get_alert":                        alertHandlers["get_alert"],
+		"create_alert":                     alertHandlers["create_alert"],
+		"claim_alert":                      alertHandlers["claim_alert"],
+		"create_alert_implementation_task": alertHandlers["create_alert_implementation_task"],
+		"link_alert_implementation_task":   alertHandlers["link_alert_implementation_task"],
+		"complete_alert_processing":        alertHandlers["complete_alert_processing"],
+		"fail_alert_processing":            alertHandlers["fail_alert_processing"],
+		"release_alert_claim":              alertHandlers["release_alert_claim"],
 		"delete_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.DeleteAlertRequest
 			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			return strings.TrimSpace(h.executeDeleteAlertRequests(ctx, []service.DeleteAlertRequest{req})), nil
+			return strings.TrimSpace(h.executeDeleteAlertRequests(ctx, params.ProjectID, []service.DeleteAlertRequest{req})), nil
 		},
 		"toggle_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ToggleAlertRequest
 			if err := decodeChatActionInput(input, &req); err != nil {
 				return "", err
 			}
-			return strings.TrimSpace(h.executeToggleAlertRequests(ctx, []service.ToggleAlertRequest{req})), nil
+			return strings.TrimSpace(h.executeToggleAlertRequests(ctx, params.ProjectID, []service.ToggleAlertRequest{req})), nil
 		},
 		"memory_view": func(_ context.Context, _ json.RawMessage) (string, error) {
 			return "memory_view is available only after the lifecycle memory router selects memory handles for this turn. Use memory_view only with handles listed in the selected memory index.", nil
@@ -896,7 +895,7 @@ func (h *Handler) executeGetAlert(ctx context.Context, projectID string, input j
 		return "Alert service not available."
 	}
 
-	alert, err := h.alertSvc.GetByID(ctx, req.AlertID)
+	alert, err := h.alertSvc.GetByID(ctx, projectID, req.AlertID)
 	if err != nil {
 		applog.Infof("[handler] executeGetAlert error: %v", err)
 		return fmt.Sprintf("Error retrieving alert %q: %v", req.AlertID, err)
@@ -1331,6 +1330,15 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"schedule_task":                        true,
 		"delete_schedule":                      true,
 		"modify_schedule":                      true,
+		"create_alert":                         true,
+		"list_alerts":                          true,
+		"get_alert":                            true,
+		"claim_alert":                          true,
+		"create_alert_implementation_task":     true,
+		"link_alert_implementation_task":       true,
+		"complete_alert_processing":            true,
+		"fail_alert_processing":                true,
+		"release_alert_claim":                  true,
 		"github_create_issue":                  true,
 		"github_get_issue":                     true,
 		"github_get_project_inbox":             true,

@@ -6,8 +6,44 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHandler_ApproveAlertIsProjectScoped(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Approval Project")
+	foreign := createProject(t, h, "Foreign Approval Project")
+	a := &models.Alert{ProjectID: project.ID, Scope: models.AlertScopeProject, Type: models.AlertType("suggestion"), Severity: models.SeverityInfo,
+		Title: "Review suggestion", Body: "Inspect me", Source: "test", DecisionState: models.AlertDecisionPending, ProcessingState: models.AlertProcessingUnclaimed}
+	require.NoError(t, h.alertSvc.Create(context.Background(), a))
+
+	foreignReq := httptest.NewRequest(http.MethodPost, "/alerts/"+a.ID+"/approve?project_id="+foreign.ID, nil)
+	foreignRec := httptest.NewRecorder()
+	foreignCtx := e.NewContext(foreignReq, foreignRec)
+	foreignCtx.SetParamNames("id")
+	foreignCtx.SetParamValues(a.ID)
+	err := h.ApproveAlert(foreignCtx)
+	require.Error(t, err)
+	unchanged, getErr := h.alertSvc.GetByID(context.Background(), project.ID, a.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, models.AlertDecisionPending, unchanged.DecisionState)
+
+	req := httptest.NewRequest(http.MethodPost, "/alerts/"+a.ID+"/approve?project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(a.ID)
+	require.NoError(t, h.ApproveAlert(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "approved")
+	require.NotContains(t, rec.Body.String(), ">Approve<")
+	approved, getErr := h.alertSvc.GetByID(context.Background(), project.ID, a.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, models.AlertDecisionApproved, approved.DecisionState)
+	require.Equal(t, models.AlertProcessingUnclaimed, approved.ProcessingState)
+}
 
 func TestHandler_ListAlerts(t *testing.T) {
 	t.Run("lists alerts for current project", func(t *testing.T) {
@@ -96,7 +132,7 @@ func TestHandler_MarkAlertRead(t *testing.T) {
 		assertAlertUpdate(t, rec)
 
 		// Verify alert is marked as read
-		updatedAlert, err := h.alertSvc.GetByID(context.Background(), alert.ID)
+		updatedAlert, err := h.alertSvc.GetByIDAdmin(context.Background(), alert.ID)
 		require.NoError(t, err)
 		require.True(t, updatedAlert.IsRead)
 	})
@@ -164,7 +200,7 @@ func TestHandler_MarkAllAlertsRead(t *testing.T) {
 		// Verify all alerts are marked as read
 		ctx := context.Background()
 		for _, alertID := range []string{alert1.ID, alert2.ID, alert3.ID} {
-			alert, err := h.alertSvc.GetByID(ctx, alertID)
+			alert, err := h.alertSvc.GetByIDAdmin(ctx, alertID)
 			require.NoError(t, err)
 			require.True(t, alert.IsRead, "Alert %s should be marked as read", alertID)
 		}
@@ -189,11 +225,11 @@ func TestHandler_MarkAllAlertsRead(t *testing.T) {
 
 		// Verify only project 1 alert is marked as read
 		ctx := context.Background()
-		updatedAlert1, err := h.alertSvc.GetByID(ctx, alert1.ID)
+		updatedAlert1, err := h.alertSvc.GetByIDAdmin(ctx, alert1.ID)
 		require.NoError(t, err)
 		require.True(t, updatedAlert1.IsRead)
 
-		updatedAlert2, err := h.alertSvc.GetByID(ctx, alert2.ID)
+		updatedAlert2, err := h.alertSvc.GetByIDAdmin(ctx, alert2.ID)
 		require.NoError(t, err)
 		require.False(t, updatedAlert2.IsRead)
 	})
@@ -206,7 +242,7 @@ func TestHandler_DeleteAlert(t *testing.T) {
 		alert := createAlert(t, h, project.ID, "To Delete")
 
 		// Delete alert
-		req := httptest.NewRequest(http.MethodDelete, "/alerts/"+alert.ID, nil)
+		req := httptest.NewRequest(http.MethodDelete, "/alerts/"+alert.ID+"?project_id="+project.ID, nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("id")
@@ -217,7 +253,7 @@ func TestHandler_DeleteAlert(t *testing.T) {
 		require.Equal(t, http.StatusSeeOther, rec.Code)
 
 		// Verify alert is deleted
-		_, err = h.alertSvc.GetByID(context.Background(), alert.ID)
+		_, err = h.alertSvc.GetByIDAdmin(context.Background(), alert.ID)
 		require.Error(t, err)
 	})
 
@@ -250,7 +286,7 @@ func TestHandler_DeleteAlert(t *testing.T) {
 		project := createProject(t, h, "Test Project")
 		alert := createAlert(t, h, project.ID, "Alert")
 
-		req := httptest.NewRequest(http.MethodDelete, "/alerts/"+alert.ID, nil)
+		req := httptest.NewRequest(http.MethodDelete, "/alerts/"+alert.ID+"?project_id="+project.ID, nil)
 		req.Header.Set("HX-Request", "true")
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
@@ -326,7 +362,7 @@ func TestHandler_DeleteAllAlerts(t *testing.T) {
 		// Verify all alerts are deleted
 		ctx := context.Background()
 		for _, alertID := range []string{alert1.ID, alert2.ID, alert3.ID} {
-			_, err := h.alertSvc.GetByID(ctx, alertID)
+			_, err := h.alertSvc.GetByIDAdmin(ctx, alertID)
 			require.Error(t, err, "Alert %s should be deleted", alertID)
 		}
 	})
@@ -350,10 +386,10 @@ func TestHandler_DeleteAllAlerts(t *testing.T) {
 
 		// Verify only project 1 alert is deleted
 		ctx := context.Background()
-		_, err = h.alertSvc.GetByID(ctx, alert1.ID)
+		_, err = h.alertSvc.GetByIDAdmin(ctx, alert1.ID)
 		require.Error(t, err)
 
-		alert2Check, err := h.alertSvc.GetByID(ctx, alert2.ID)
+		alert2Check, err := h.alertSvc.GetByIDAdmin(ctx, alert2.ID)
 		require.NoError(t, err)
 		require.Equal(t, alert2.ID, alert2Check.ID)
 	})

@@ -257,18 +257,27 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
 	allowed := map[string]bool{
-		"list_tasks":        true,
-		"create_task":       true,
-		"create_swarm_task": true,
-		"set_task_goal":     true,
-		"clear_task_goal":   true,
-		"get_task_goal":     true,
-		"pause_task_goal":   true,
-		"resume_task_goal":  true,
-		"schedule_task":     true,
-		"delete_schedule":   true,
-		"modify_schedule":   true,
-		"list_capabilities": true,
+		"list_tasks":                       true,
+		"create_task":                      true,
+		"create_swarm_task":                true,
+		"set_task_goal":                    true,
+		"clear_task_goal":                  true,
+		"get_task_goal":                    true,
+		"pause_task_goal":                  true,
+		"resume_task_goal":                 true,
+		"schedule_task":                    true,
+		"delete_schedule":                  true,
+		"modify_schedule":                  true,
+		"create_alert":                     true,
+		"list_alerts":                      true,
+		"get_alert":                        true,
+		"claim_alert":                      true,
+		"create_alert_implementation_task": true,
+		"link_alert_implementation_task":   true,
+		"complete_alert_processing":        true,
+		"fail_alert_processing":            true,
+		"release_alert_claim":              true,
+		"list_capabilities":                true,
 	}
 	for _, def := range defs {
 		if allowed[strings.ToLower(strings.TrimSpace(def.Name))] {
@@ -291,6 +300,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             task.ProjectID,
+		CallerTaskID:          task.ID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
 		LLMConfigRepo:         s.llmConfigRepo,

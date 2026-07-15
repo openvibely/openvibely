@@ -58,3 +58,4 @@ OpenVibely is organized around a selected project. The sidebar project selector 
 | Email | [Email Channel Setup](./email-channels-setup.md) |
 | GitHub | [GitHub Channels Setup](./github-channels-setup.md) |
 | GitHub autonomous SDLC | [GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md) |
+| OpenVibely-native autonomous SDLC | [OpenVibely-Native Autonomous SDLC User Guide](./openvibely-native-autonomous-sdlc-user-guide.md) |

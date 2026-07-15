@@ -12,6 +12,41 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestMigration112_BackfillsOperationalAlertsWithoutInferringProject(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "alerts-112.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 111); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('legacy-project', 'Legacy', '', '')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO alerts (id, project_id, type, severity, title, message) VALUES ('legacy-alert', 'legacy-project', 'task_failed', 'error', 'Legacy failure', 'preserve me')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 112); err != nil {
+		t.Fatal(err)
+	}
+	var projectID, scope, body, source, decision, processing string
+	if err := db.QueryRow(`SELECT project_id, scope, body, source, decision_state, processing_state FROM alerts WHERE id = 'legacy-alert'`).Scan(&projectID, &scope, &body, &source, &decision, &processing); err != nil {
+		t.Fatal(err)
+	}
+	if projectID != "legacy-project" || scope != "project" || body != "preserve me" || source != "operational" || decision != "not_required" || processing != "not_applicable" {
+		t.Fatalf("unexpected legacy backfill: project=%q scope=%q body=%q source=%q decision=%q processing=%q", projectID, scope, body, source, decision, processing)
+	}
+	if _, err := db.Exec(`INSERT INTO alerts (project_id, type, severity, title) VALUES (NULL, 'custom', 'info', 'global')`); err == nil {
+		t.Fatal("projectless/global alert unexpectedly inserted")
+	}
+}
+
 // TestMigrations_PreserveForeignKeyData verifies that all migrations preserve
 // foreign key referenced data when recreating tables.
 func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *testing.T) {
@@ -87,8 +122,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 111 {
-		t.Fatalf("max goose version = %d, want 111", maxVersion)
+	if maxVersion != 112 {
+		t.Fatalf("max goose version = %d, want 112", maxVersion)
 	}
 }
 
@@ -239,8 +274,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 111 {
-		t.Fatalf("max goose version = %d, want 111", maxVersion)
+	if maxVersion != 112 {
+		t.Fatalf("max goose version = %d, want 112", maxVersion)
 	}
 }
 
@@ -726,8 +761,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 111 {
-		t.Fatalf("max goose version = %d, want 111", maxVersion)
+	if maxVersion != 112 {
+		t.Fatalf("max goose version = %d, want 112", maxVersion)
 	}
 }
 
@@ -1078,8 +1113,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 111 {
-		t.Fatalf("max goose version = %d, want 111", maxVersion)
+	if maxVersion != 112 {
+		t.Fatalf("max goose version = %d, want 112", maxVersion)
 	}
 }
 

@@ -12,6 +12,83 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Native SDLC"}
+	foreign := &models.Project{Name: "Foreign SDLC"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	caller := &models.Task{ProjectID: project.ID, Title: "Scheduled notification inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+
+	createInput := json.RawMessage(`{"project_id":"` + project.ID + `","type":"product_suggestion","title":"Add approval inbox","message":"Review this","body":"Detailed implementation context","metadata":{"component":"alerts"},"idempotency_key":"suggestion:approval-inbox"}`)
+	createdJSON, err := handlers["create_alert"](ctx, createInput)
+	require.NoError(t, err)
+	var created struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+	require.NotEmpty(t, created.Notification.ID)
+	require.Equal(t, project.ID, created.Notification.ProjectID)
+	require.Equal(t, models.AlertDecisionPending, created.Notification.DecisionState)
+	require.Equal(t, caller.ID, *created.Notification.SourceTaskID)
+
+	duplicateJSON, err := handlers["create_alert"](ctx, createInput)
+	require.NoError(t, err)
+	var duplicate struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(duplicateJSON), &duplicate))
+	require.Equal(t, created.Notification.ID, duplicate.Notification.ID)
+
+	_, err = handlers["list_alerts"](ctx, json.RawMessage(`{"project_id":"`+foreign.ID+`"}`))
+	require.ErrorContains(t, err, "outside the caller's authorized project")
+	listJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"pending","limit":1,"offset":0}`))
+	require.NoError(t, err)
+	require.Contains(t, listJSON, created.Notification.ID)
+	require.Contains(t, listJSON, `"next_offset":1`)
+	detailJSON, err := handlers["get_alert"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, detailJSON, "Detailed implementation context")
+
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
+	approvedJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"approved","processing_state":"unclaimed"}`))
+	require.NoError(t, err)
+	require.Contains(t, approvedJSON, created.Notification.ID)
+	claimJSON, err := handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`","lease_seconds":300}`))
+	require.NoError(t, err)
+	require.Contains(t, claimJSON, `"processing_state":"claimed"`)
+
+	createTaskInput := json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","title":"Implement approval inbox","prompt":"Implement the approved suggestion and leave merge/release to human review.","priority":3,"tag":"feature"}`)
+	taskJSON, err := handlers["create_alert_implementation_task"](ctx, createTaskInput)
+	require.NoError(t, err)
+	var linked struct {
+		ImplementationTaskID string `json:"implementation_task_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(taskJSON), &linked))
+	require.NotEmpty(t, linked.ImplementationTaskID)
+	secondTaskJSON, err := handlers["create_alert_implementation_task"](ctx, createTaskInput)
+	require.NoError(t, err)
+	var linkedAgain struct {
+		ImplementationTaskID string `json:"implementation_task_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(secondTaskJSON), &linkedAgain))
+	require.Equal(t, linked.ImplementationTaskID, linkedAgain.ImplementationTaskID)
+
+	completeJSON, err := handlers["complete_alert_processing"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, completeJSON, `"processing_state":"completed"`)
+	final, err := alertSvc.GetByID(ctx, project.ID, created.Notification.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertProcessingCompleted, final.ProcessingState)
+	require.Equal(t, linked.ImplementationTaskID, *final.ImplementationTaskID)
+}
+
 func TestRunChannelTaskThreadSendStartsDirectFollowupWithReplyContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
