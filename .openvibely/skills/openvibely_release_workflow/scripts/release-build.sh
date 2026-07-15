@@ -41,6 +41,10 @@ err()  { echo -e "${RED}[build]${NC} $*" >&2; }
 info() { echo -e "${CYAN}[build]${NC} $*"; }
 fail() { err "$*"; exit 1; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=release-version.sh
+source "${SCRIPT_DIR}/release-version.sh"
+
 run() {
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}[DRY-RUN]${NC} $*"
@@ -58,9 +62,9 @@ if [[ $# -lt 1 ]]; then
 fi
 
 RAW_VERSION="$1"
-VERSION="${RAW_VERSION#v}"
+VERSION="$(normalize_release_version "$RAW_VERSION")"
 
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if ! is_valid_release_version "$VERSION"; then
     fail "Invalid semver: '$RAW_VERSION'. Expected X.Y.Z or vX.Y.Z."
 fi
 

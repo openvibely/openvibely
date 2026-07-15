@@ -31,6 +31,10 @@ err()  { echo -e "${RED}[release]${NC} $*" >&2; }
 info() { echo -e "${CYAN}[release]${NC} $*"; }
 fail() { err "$*"; exit 1; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=release-version.sh
+source "${SCRIPT_DIR}/release-version.sh"
+
 ###############################################################################
 # 0. Arguments
 ###############################################################################
@@ -40,13 +44,12 @@ if [[ $# -lt 1 ]]; then
 fi
 
 RAW_VERSION="$1"
-VERSION="${RAW_VERSION#v}"
+VERSION="$(normalize_release_version "$RAW_VERSION")"
 
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if ! is_valid_release_version "$VERSION"; then
     fail "Invalid semver: '$RAW_VERSION'. Expected X.Y.Z or vX.Y.Z."
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || fail "Not in a git repository.")"
 DIST_DIR="${DIST_DIR:-${REPO_ROOT}/dist/${VERSION}}"
 
