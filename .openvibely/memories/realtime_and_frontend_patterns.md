@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-07-13
-source: consolidation
-source_id: memory_consolidation_2026_07_13
+updated: 2026-07-15
+source: task_completion
+source_id: 23cf372374af6884a59a03b1ff800c0d
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -54,7 +54,10 @@ Chat/thread rendering facts:
 - Long Chat and Task Thread histories remain complete in the database but are server-windowed in the UI with scroll-top pagination; initial and older windows default to 30 execution/turn rows and request `limit` is capped at 100.
 - Browser-memory protection depends on removing old transcript execution DOM nodes from the visible window, not hiding them with CSS.
 - Active chat/task-thread streaming uses smart autoscroll semantics: pinned viewers follow growth, while upward user movement is intent to read.
-- Chat/thread markdown rendering escapes raw HTML-like tags outside fenced/inline code before markdown parsing.
+- Final Chat/task-thread Markdown rendering uses the base layout's single shared escaped/unmatched/multiline code-range parser. Raw < tag openers outside protected code are escaped before Marked, while benign HTML examples in valid multiline inline spans, tilde fences, and matching long fences remain code. Closing backtick/tilde fences must use the opening character, have a run at least as long as the opener, and be followed only by ASCII spaces/tabs; NBSP and all other Unicode whitespace remain fence content and cannot expose coded aliases, controls, task metadata, or summaries. Marked output is DOM-sanitized to remove dangerous elements, event attributes, style/srcdoc/srcset attributes, and javascript:/vbscript:/data: URLs. All completed, resumed, direct-load, live-stream, and tool-output innerHTML hydration paths call this shared renderer.
+- Missing, incomplete, configuration-failing, or parse-failing Marked returns an HTML-escaped plain-text wrapper preserving Markdown source provenance. Shared create/edit task-result converters apply the shared code-range parser inside that wrapper, so inline, multiline, and fenced `[TASK_ID:...]`/`[TASK_EDITED:...]` examples remain visible and inert while real metadata outside code still hydrates across completed, resumed, direct-load, live-stream, and tool-output paths. Late-loaded Marked configures on first use before normal pre-escape, parse, and DOM-sanitize rendering resumes.
+- Shared Go, browser, and generated transcript parsing treats LF, CRLF, and bare CR as equivalent CommonMark line endings without normalizing source bytes. Fence/span protection, terminal-status boundaries, thinking/tool-result and protocol-artifact cleanup, Created/Edited summary deduplication, browser raw cleanup, streaming, DOM/direct-load, raw-tool-output, dependency fallback, and generated paths use the same line-ending semantics. Coded aliases, controls, task metadata, and summaries remain visible and inert, while real controls after valid matching fence closers behave normally.
+- Block tool-result controls accept both same-line payloads such as `[Tool name done]payload[/Tool]` and LF/CRLF/bare-CR multiline payloads consistently across raw cleanup, streaming segmentation, DOM/direct-load hydration, and generated templates; coded inline/fenced examples remain visible and inert, overlap-safe scanning still discovers later real blocks, and real blocks are cleaned or rendered normally.
 - Chat and Task Thread composers share sent-message history navigation in the common composer template. History persists in localStorage, is capped at 50 entries, uses separate global-chat and per-task keys, and restores the pre-navigation draft when navigating past newest or pressing Escape.
 - Chat/task-thread tool result output should remain full-fidelity: canonical stream `tool_result` markers are not display-truncated, and shared rendering uses bounded responsive scroll containers that avoid trapping page/thread scrolling.
 - Chat/task-thread tool-call rendering must keep output boundaries per execution segment. Persisted/streamed tool markers currently identify results by tool name/status rather than provider call ID, so repeated same-tool cards, such as adjacent Bash calls, use stable per-tool render IDs, FIFO pairing of matching tool results, and scroll-state restoration keyed by tool render ID plus IN/OUT row rather than by tool name or positional index.
@@ -94,7 +97,7 @@ Responsive and shared UI contracts:
 - Channels searchable-card consistency depends on core Telegram, GitHub, Slack, Discord, Email, and inbound webhook create/update/delete/rotate-secret HTMX success paths using an in-place `channels-refresh` reload of `#channels-container`, so the shared card-search helper reapplies active filters without a full page refresh. Because that refresh re-executes the Channels inline script, top-level Webhook modal state such as `webhookAvailableAgents`, `selectedWebhookAgentIDs`, and `activeWebhookSection` must remain redeclarable `var` state rather than top-level `let`.
 - Independent HTMX child controls inside an open Channels modal, such as GitHub runtime authorized-actor and project-inbox controls, should return only their modal-scoped fragment and should not emit broad `channels-refresh` unless a separate safe sibling/card refresh path is explicitly implemented. Broad `channels-refresh from:body` swaps `#channels-container` with `outerHTML`, so using it from modal child mutations can close or disrupt the dialog.
 - `Managed Memory` as a tool/profile is presented as a scoped memory-file capability, not broad repo read/write access.
-- Toast rendering accounts for native dialog top-layer behavior.
+- Shared toast rendering in the base layout accounts for native dialog top-layer behavior. Toasts reserve a consistent right-side content inset, anchor the close control out of DaisyUI's centered alert flow at the top-right, and use a 44px accessible button target with visible keyboard focus. On mobile, the fixed toast container uses left/right viewport insets with `width: auto` so it does not over-constrain or overflow narrow screens; this contract is shared across themes and statuses.
 - Native DaisyUI dialogs should become full-screen on mobile via shared base CSS, including landscape phone dimensions; dimension-based rules are more reliable than pointer/hover heuristics in emulators and WebViews.
 - Destructive deletes for projects, tasks, models, agents, skills, schedules, and channel integrations use the shared native DaisyUI `<dialog>` confirmation pattern with explicit Cancel and destructive confirm controls; avoid reverting to browser `confirm()` or HTMX `hx-confirm` immediate-delete wiring.
 

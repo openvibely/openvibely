@@ -183,3 +183,7 @@ always_use:
 ## openvibely_github_finding_workflow
 
 [OpenVibely GitHub Finding Workflow](openvibely_github_finding_workflow/SKILL.md) — Run focused read-only OpenVibely repository scans and publish actionable findings as GitHub issues.
+
+## openvibely_managed_memory_maintenance
+
+[OpenVibely Managed Memory Maintenance](openvibely_managed_memory_maintenance/SKILL.md) — Apply narrow, idempotent corrections to authoritative OpenVibely managed-memory topics and verify the saved result.

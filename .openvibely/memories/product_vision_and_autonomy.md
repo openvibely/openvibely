@@ -2,7 +2,7 @@
 name: product_vision_and_autonomy
 type: project
 created: 2026-06-10
-updated: 2026-07-13
+updated: 2026-07-15
 source: consolidation
 source_id: memory_consolidation_2026_07_13
 confidence: high
@@ -44,5 +44,6 @@ GitHub-backed autonomous SDLC direction:
 - The GitHub-centered approach should reuse the older Vision Driver ideas of durable goals, schedules, dynamic wakeups, user-priority-first handling, task chaining, and review-gated autonomy, but move external coordination/status to GitHub issues/PRs.
 - The recorded hosted topology runs Dev Inbox hourly, code-finder tasks daily, and Loop Auditor weekly. Dev Inbox forwards authorized PR feedback before assigned-issue processing; finder prompts only open issues, bot/self comments are ignored, recurring loop tasks have no persisted goals, and correctness must be validated through the autonomous path rather than manual message forwarding or wakeups.
 - GitHub autonomous-SDLC support should remain generic: provide reusable GitHub/runtime/control-plane tools that can be used in many workflows, avoid bespoke hidden SDLC daemons or workflow-specific services unless a generic primitive is actually needed, and make the bootstrap skill set up prompt-driven visible schedules/tasks such as “check GitHub for assigned issues matching the configured mailbox criteria” instead of hardcoded backend loops.
+- An OpenVibely-native alternative is also implemented through approval-based Alerts and the bundled `openvibely_native_autonomous_sdlc_bootstrap` skill. It uses project-scoped actionable notifications as the suggestion mailbox and human approval boundary, then lease-based scheduled claiming and atomic implementation-task linkage; the GitHub-backed workflow remains available rather than being replaced. Detailed contracts live in `alerts_and_actionable_notifications.md` and `docs/openvibely-native-autonomous-sdlc-user-guide.md`.
 
 Current product-completeness themes from `VISION.md` expected to require recurring work include outcome-to-work decomposition, multi-agent team coordination, reviewable autonomy UX, durable learning quality, external integrations, operational clarity, and provider/model normalization.

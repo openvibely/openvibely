@@ -29,5 +29,6 @@ Lifecycle and retrieval facts:
 - Selected-memory prompt context is handle-only for skill-style parity. Memory bodies are loaded only on demand through the authorized `memory_view` tool.
 - `memory_view` is a read-only request-scoped runtime tool authorized only for route-selected indexed handles plus exact indexed handles explicitly requested by the user for that turn. It rejects `MEMORIES.md`, full paths, traversal, unindexed handles, and arbitrary unselected files.
 - `memory_view` is also an explicit agent allowed-tool grant surfaced in the agent create/edit dialog.
+- The product currently exposes selected memory labels in task lifecycle evidence but has no project-level UI for browsing the durable memory index/files, unlike the skill management surface. A bounded read-only browser backed by `MEMORIES.md` and the existing safe memory-file resolver is tracked in `openvibely/openvibely#32`; editing, new persistence, and background processing are intentionally outside that proposal.
 - Route-generated memory summaries/snippets/topics are debug metadata, not final task/chat model context.
 - Memory consolidation runs as a normal visible scheduled task assigned to Memory Curator with scoped memory-file tools; hidden bespoke scheduler behavior is not intended.

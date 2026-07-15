@@ -12,3 +12,4 @@
 - [Usage Analytics](usage_analytics.md) - Local model/skill usage, token normalization, Analytics UI/API, OAuth account snapshots, and privacy.
 - [Testing Coverage and Performance](testing_coverage_and_performance.md) - Coverage policy, durable test priorities, validation, performance seams, and recurring caveats.
 - [Product Vision and Reviewable Autonomy](product_vision_and_autonomy.md) - Product direction, review boundaries, user priorities, recursive improvement, and GitHub-centered autonomy.
+- [Alerts and Actionable Notifications](alerts_and_actionable_notifications.md) - Project-scoped operational alerts and approval-based notifications, lifecycle state, authorization, atomic claims/task linkage, UI, runtime tools, and native autonomous SDLC.

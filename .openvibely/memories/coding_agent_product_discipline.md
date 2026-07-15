@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-07-14
-source: task_conversation
-source_id: cb1d81f40983b9cf25134cddf1b8ecca:615219d36968b41d
+updated: 2026-07-15
+source: consolidation
+source_id: memory_consolidation_2026_07_15
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -57,8 +57,8 @@ Release-note preferences:
 - Release-note bullets should use bolded lead labels/sections, following `- **Feature or theme** — Details...`.
 
 Current release facts and boundaries:
-- Latest recorded public release is `v0.3.0` (2026-06-24): `https://github.com/openvibely/openvibely/releases/tag/v0.3.0`, whose canonical annotated tag targets `bfcc37d479e4f5f2c6784a900f5a6672ec754bdb`. Verify live release state before preparing or publishing a later release.
-- The `v0.4.0` release candidate is commit `a13ab410c84a9ff26128d72ff6165841bcabfbf7`, and `origin/main` was fast-forwarded to that exact commit on 2026-07-14. Its release themes are multi-agent swarms, Discord/Email and project-scoped outbound messaging, autonomous GitHub issue-to-PR workflows, and Mixture of Models. At the last recorded state, no `v0.4.0` tag or GitHub release had been created; GitHub CLI device authorization was awaiting user approval. Verify live refs and release state before resuming.
-- Candidate `a13ab41` passed all 55 release-tooling checks, `make build`, and `go test ./... -count=1 -timeout 120s`. Seven fresh server/macOS archives plus `SHA256SUMS` were verified, including both macOS archives with `OpenVibely.app` as the exact root. Windows desktop remained pending because `mingw-w64` was unavailable, Docker publishing remained pending for explicit credentials, and sibling `openvibely-docs` edits remained uncommitted.
+- Recorded release state: latest public release was `v0.3.0` (2026-06-24), whose canonical annotated tag targets `bfcc37d479e4f5f2c6784a900f5a6672ec754bdb`. `origin/main` was later fast-forwarded to the `v0.4.0` candidate `a13ab410c84a9ff26128d72ff6165841bcabfbf7`, but no `v0.4.0` tag or GitHub release had been created at the last recorded state. Verify live refs and GitHub release state before resuming release work.
+- The recorded `v0.4.0` themes are multi-agent swarms, Discord/Email and project-scoped outbound messaging, autonomous GitHub issue-to-PR workflows, and Mixture of Models.
 - Release artifacts normally cover macOS desktop bundles and darwin/linux/Windows server archives with checksums. Windows desktop packaging requires a MinGW cross-compiler; Docker publishing remains pending when credentials are unavailable.
+- GitHub issue #29 was implemented in PR #35 on 2026-07-15: `.openvibely/skills/openvibely_release_workflow/scripts/release-version.sh` is now the side-effect-free shared `X.Y.Z`/optional-leading-`v` policy used by all five release entrypoints and `release-validate.sh`. The validation suite exercises the production helper and verifies accepted forms, early invalid-version rejection, and source safety without cwd or caller shell-option mutation.
 - Release-build invariants include preserving `OpenVibely.app` as the zip root, making dry runs fully non-writing, avoiding managed worktree cleanup paths for real builds, and using script-default or absolute dist paths.

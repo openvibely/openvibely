@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-07-13
-source: consolidation
-source_id: memory_consolidation_2026_07_13
+updated: 2026-07-15
+source: task_completion
+source_id: 88990168c8b392137cec566b9d72be8b
 confidence: high
 title: Integrations and Channels
 ---
@@ -18,8 +18,8 @@ Durable channel direction:
 - Shared generic channel image validation, pending-session ID generation, unique temp filenames, MIME sniffing, and decoder imports belong in neutral channel ingress code rather than Slack/Discord/Telegram/Email-specific files.
 - `internal/service/chat_action_runtime.go` centralizes generic channel runtime handlers for task creation/edit/execution, task goals, task thread viewing/sending, project switching/listing, schedule/personality/model/project utilities, channel completion, and shared alert/capability formatting.
 - GitHub issue #16 tracks the remaining four-way duplication in Slack, Telegram, Discord, and Email runtime assembly: each channel separately registers equivalent `get_current_project`, fixed `get_chat_mode`, and unsupported `set_chat_mode` handlers adjacent to the existing shared project-switch abstraction. The intended scope is to centralize that common policy without broad channel-runtime refactoring.
-- GitHub issue #24 tracks duplicated settings cleanup across channel removal handlers in `internal/handler/settings_handler.go`: handlers manually clear channel-specific setting keys and discard write failures, which can report successful deletion while credentials or feature flags remain stored. The intended scope is a small shared key-clearing helper with one failure-reporting policy and failure-path regression coverage, not a broad settings refactor.
-- GitHub issue #27 tracks the repeated empty/list/remove/add HTMX shell across the Slack, Discord, Telegram, and Email authorization templates. The intended scope is small shared template primitives while preserving channel-specific identity formatting, explanatory copy, endpoints, parsing, validation, and repository behavior; the adjacent authorization repositories are not equivalent enough for the same generic abstraction because Telegram username backfill and Email mailbox normalization are materially different.
+- GitHub issue #24 was implemented in PR #36 with one ordered handler-level settings reset helper shared by Telegram, GitHub, Slack, Discord, and Email removal handlers. Required reset write failures now return a controlled server error without a successful Channels refresh/redirect, while each handler retains its explicit reset list and existing stop/disconnect and authorization lifecycle behavior. Slack removal preserves `SlackSettingBotTokenSource=oauth`; Discord removal still clears the current project's authorized-user allowlist and supports the service-unavailable fallback.
+- GitHub issue #27 was implemented in PR #33 with exactly two shared templ primitives in `web/templates/components/channel_auth.templ`: one owns the authorization fragment's empty/list branch, row/remove layout, confirmation, and modal-scoped target/swap wiring; the other owns hidden `project_id`, primary/display-name inputs, and Add wiring. Slack, Discord, Telegram, and Email wrappers remain thin and channel-specific for copy, identity formatting, endpoints, input semantics, parsing, validation, and repository behavior. Regression coverage locks each wrapper's fragment ID, add/delete routes, input contract, empty state, modal-only swaps, and Telegram username/numeric-ID rendering.
 - Slack, Telegram, Discord, and Email channel runtimes must handle advertised runtime tools through shared channel action handling. Channel-origin `create_swarm_task` creates real swarm parents with channel origin/context metadata and uses the active authorized channel project rather than any tool-supplied `project_id`.
 - Attachment-bearing Chat turns should choose the model config after channel downloads and byte classification where bytes are available, so persisted execution or `thread_inputs.AgentConfigID` matches the runner/promotion config.
 - Slack and Telegram runtime goal actions are wired through durable `TaskGoalService` behavior rather than surface-specific stubs.
@@ -49,6 +49,7 @@ GitHub facts:
 - Shared GitHub paginated JSON reads in `internal/service/github_service.go` cover PR issue comments, reviews, review comments, assigned issues, and issue-to-PR cross-reference lookup. They own authenticated headers, API-error decoding, same-origin `Link` traversal, and cycle prevention; later-page errors fail the whole read rather than returning partial results, while endpoint callers retain mapping, filtering, and feedback sorting.
 - `ListPullRequestFeedback` fetches PR issue comments, reviews, and review comments concurrently using one shared cancellable context and exactly three source goroutines. Each source retains independent pagination; empty reviews remain filtered; successful results are merged in fixed source order and stably sorted by `CreatedAt`; the first source error cancels outstanding requests and returns no partial feedback.
 - The scheduled GitHub Dev Inbox treats assignment to the PAT owner or a configured GitHub Authorized User as approval to begin implementation; it does not require an `approved` label or an existing PR. It skips closed, duplicate, explicitly blocked/non-actionable, unexpectedly assigned, and already-active issues, and maintains one visible implementation task per actionable issue.
+- Before creating implementation work, GitHub Dev Inbox runs must query the current project's `list_tasks` discovery action by issue number or URL so recurring runs reconcile existing tasks rather than creating duplicates.
 - The Dev Inbox orchestrator forwards authorized feedback from linked PRs before polling assigned issues and must not carry its own persisted task goal. Persisted completion goals belong on dispatched implementation tasks and continue through code changes, relevant build/tests, and opening or reusing the issue-linked PR.
 - Default/recommended auth mode is PAT (`github_auth_mode=pat`) for local/self-hosted OSS installs.
 - GitHub App mode (`github_auth_mode=app`) is Advanced for cloud deployments.
