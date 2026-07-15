@@ -868,11 +868,9 @@ func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 		"overflow: hidden;",
 		".stream-tool-body-scroll {",
 		"overflow-x: auto;",
-		"overflow-y: hidden;",
+		"overflow-y: auto;",
 		"max-height: min(26rem, 52vh);",
 		"max-width: 100%;",
-		`.stream-tool-body-scroll[data-scrollable-y="true"] {`,
-		"overflow-y: auto;",
 		"width: max-content;",
 		"min-width: 100%;",
 	}

@@ -438,9 +438,13 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						var textBuffer = '';
 						var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
 						function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
-						var renderScheduled = false;
-					var lastRenderedLength = 0;
-						function renderBufferedOutput(force) {
+							var renderScheduled = false;
+							var renderDelayTimer = null;
+							var lastRenderFinishedAt = 0;
+							var lastRenderedSourceLength = 0;
+							var largeStreamRenderThreshold = 100 * 1024;
+							var largeStreamRenderInterval = 250;
+							function renderBufferedOutput(force) {
 							if (!window.renderStreamingContent) {
 							container.classList.remove('text-error/80', 'font-medium');
 								container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
@@ -448,9 +452,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							}
 							if (!force && renderScheduled) return;
 							var runRender = function() {
-						renderScheduled = false;
-						var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
-						if (!force && renderText.length === lastRenderedLength) return;
+							var sourceLength = textBuffer.length;
+							var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
+							if (!force && sourceLength === lastRenderedSourceLength) return;
 						// Refresh tracker against the live messages element. If a morph
 						// swap replaced the container mid-stream, the old tracker would
 						// be holding a detached element and isNearBottom() would always
@@ -461,26 +465,55 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
 					container.classList.remove('text-error/80', 'font-medium');
-						container.setAttribute('data-raw-content', renderText);
-						window.renderStreamingContent(container, renderText);
-						lastRenderedLength = renderText.length;
-						// Auto-scroll only if the viewport was pinned before this render grew the DOM.
-						if (shouldScroll) {
+							container.setAttribute('data-raw-content', renderText);
+							function finishScheduledRender(committed) {
+								if (committed === false) return;
+								renderScheduled = false;
+								lastRenderedSourceLength = sourceLength;
+								lastRenderFinishedAt = Date.now();
+								// Auto-scroll only if the viewport was pinned before this render grew the DOM.
+								if (shouldScroll) {
 							requestAnimationFrame(function() {
 								var chatMessages = document.getElementById(messagesId);
 								if (chatMessages) {
 									window.chatAutoScroll.scrollToBottom(chatMessages, false);
 								}
 							});
-						}
-						};
-						if (force) {
-							runRender();
-							return;
-						}
-						renderScheduled = true;
-						requestAnimationFrame(runRender);
+								}
+								if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
+							}
+							var renderPromise = window.renderStreamingContent(container, renderText, !force);
+							if (renderPromise && typeof renderPromise.then === 'function') {
+								renderPromise.then(finishScheduledRender);
+								return;
+							}
+							finishScheduledRender(true);
+							};
+							if (force) {
+								if (renderDelayTimer !== null) {
+									clearTimeout(renderDelayTimer);
+									renderDelayTimer = null;
+								}
+								renderScheduled = false;
+								runRender();
+								return;
+							}
+							renderScheduled = true;
+							if (textBuffer.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {
+								var delay = Math.max(0, largeStreamRenderInterval - (Date.now() - lastRenderFinishedAt));
+								renderDelayTimer = setTimeout(function() {
+									renderDelayTimer = null;
+									requestAnimationFrame(runRender);
+								}, delay);
+							} else {
+								requestAnimationFrame(runRender);
+							}
 					}
+						function flushBufferedOutput() {
+							if (renderScheduled || lastRenderedSourceLength !== textBuffer.length) {
+								renderBufferedOutput(true);
+							}
+						}
 						function finalizeEmptyTerminalBubble(status) {
 							if (textBuffer !== '') return;
 							if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
@@ -493,6 +526,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 
 						var streamRetryCount = 0;
+						var streamTerminalHandled = false;
 						var eventSource = null;
 						function connectExecutionStream() {
 							var streamOffset = utf8ByteLength(textBuffer);
@@ -526,12 +560,12 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 
 							// Append to buffer and re-render
 						textBuffer += event.data;
-						// Persist normalized render content for completion fallback logic
-						container.setAttribute('data-raw-content', window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer);
 						renderBufferedOutput(false);
 					};
 
 							eventSource.addEventListener('done', function(event) {
+								if (streamTerminalHandled) return;
+								streamTerminalHandled = true;
 								var terminalStatus = event && event.data ? event.data : 'completed';
 								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 								renderBufferedOutput(true);
@@ -588,6 +622,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							setTimeout(connectExecutionStream, 150 * streamRetryCount);
 							return;
 						}
+						if (streamTerminalHandled) return;
+						streamTerminalHandled = true;
+						flushBufferedOutput();
 						// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
@@ -612,12 +649,15 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							eventSource.close();
 							removeThreadEventSource(eventSource);
 							removeChatEventSource(execId, eventSource);
-							if (textBuffer === '' && streamRetryCount < 5) {
+						if (textBuffer === '' && streamRetryCount < 5) {
 								streamRetryCount++;
-								setTimeout(connectExecutionStream, 150 * streamRetryCount);
-								return;
-							}
-							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+							setTimeout(connectExecutionStream, 150 * streamRetryCount);
+							return;
+						}
+						if (streamTerminalHandled) return;
+						streamTerminalHandled = true;
+						flushBufferedOutput();
+						if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
@@ -814,9 +854,13 @@ templ _initThreadStreamingScript() {
 				}
 
 				var eventSource = null;
-				var streamRetryCount = 0;
-				var renderScheduled = false;
-				var lastRenderedLength = 0;
+					var streamRetryCount = 0;
+					var renderScheduled = false;
+					var renderDelayTimer = null;
+					var lastRenderFinishedAt = Date.now();
+					var lastRenderedSourceLength = cumulativeContent.length;
+					var largeStreamRenderThreshold = 100 * 1024;
+					var largeStreamRenderInterval = 250;
 				function renderCumulativeContent(force) {
 					if (!window.renderStreamingContent) {
 					container.classList.remove('text-error/80', 'font-medium');
@@ -824,10 +868,10 @@ templ _initThreadStreamingScript() {
 						return;
 					}
 					if (!force && renderScheduled) return;
-					var runRender = function() {
-						renderScheduled = false;
-						var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
-						if (!force && renderText.length === lastRenderedLength) return;
+						var runRender = function() {
+							var sourceLength = cumulativeContent.length;
+							var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
+							if (!force && sourceLength === lastRenderedSourceLength) return;
 						// Refresh tracker against the live messages element in case a
 						// morph swap replaced the container while streaming.
 						var liveMessages = document.getElementById(messagesId);
@@ -837,22 +881,51 @@ templ _initThreadStreamingScript() {
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
 					container.classList.remove('text-error/80', 'font-medium');
 						container.setAttribute('data-raw-content', renderText);
-						window.renderStreamingContent(container, renderText);
-						lastRenderedLength = renderText.length;
-						if (shouldScroll) {
+						function finishScheduledRender(committed) {
+							if (committed === false) return;
+							renderScheduled = false;
+							lastRenderedSourceLength = sourceLength;
+							lastRenderFinishedAt = Date.now();
+							if (shouldScroll) {
 							requestAnimationFrame(function() {
 								var cm = document.getElementById(messagesId);
 								if (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, false);
 							});
+							}
+							if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
 						}
+						var renderPromise = window.renderStreamingContent(container, renderText, !force);
+						if (renderPromise && typeof renderPromise.then === 'function') {
+							renderPromise.then(finishScheduledRender);
+							return;
+						}
+						finishScheduledRender(true);
 					};
 					if (force) {
+						if (renderDelayTimer !== null) {
+							clearTimeout(renderDelayTimer);
+							renderDelayTimer = null;
+						}
+						renderScheduled = false;
 						runRender();
 						return;
 					}
 					renderScheduled = true;
-					requestAnimationFrame(runRender);
+					if (cumulativeContent.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {
+						var delay = Math.max(0, largeStreamRenderInterval - (Date.now() - lastRenderFinishedAt));
+						renderDelayTimer = setTimeout(function() {
+							renderDelayTimer = null;
+							requestAnimationFrame(runRender);
+						}, delay);
+					} else {
+						requestAnimationFrame(runRender);
+					}
 				}
+					function flushCumulativeContent() {
+						if (renderScheduled || lastRenderedSourceLength !== cumulativeContent.length) {
+							renderCumulativeContent(true);
+						}
+					}
 					function finalizeEmptyTerminalBubble(status) {
 						if (cumulativeContent !== '') return;
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
@@ -868,6 +941,7 @@ templ _initThreadStreamingScript() {
 						var idx = window._threadEventSources.indexOf(es);
 						if (idx >= 0) window._threadEventSources.splice(idx, 1);
 					}
+						var streamTerminalHandled = false;
 						function connectResumeExecutionStream() {
 							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
 						// Track EventSource globally so sidebar navigation can close it
@@ -886,7 +960,9 @@ templ _initThreadStreamingScript() {
 							renderCumulativeContent(false);
 					};
 
-						eventSource.addEventListener('done', function(event) {
+							eventSource.addEventListener('done', function(event) {
+								if (streamTerminalHandled) return;
+								streamTerminalHandled = true;
 							var terminalStatus = event && event.data ? event.data : 'completed';
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							renderCumulativeContent(true);
@@ -922,6 +998,9 @@ templ _initThreadStreamingScript() {
 						setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
 						return;
 					}
+					if (streamTerminalHandled) return;
+					streamTerminalHandled = true;
+					flushCumulativeContent();
 					if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
 				container.classList.remove('hidden');
@@ -936,12 +1015,15 @@ templ _initThreadStreamingScript() {
 						console.error('EventSource failed:', error);
 						eventSource.close();
 						removeThreadEventSource(eventSource);
-						if (cumulativeContent === '' && streamRetryCount < 5) {
+					if (cumulativeContent === '' && streamRetryCount < 5) {
 							streamRetryCount++;
-							setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
-							return;
-						}
-						if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+						setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
+						return;
+					}
+					if (streamTerminalHandled) return;
+					streamTerminalHandled = true;
+					flushCumulativeContent();
+					if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
 				container.classList.remove('hidden');
@@ -2396,8 +2478,8 @@ templ ChatAutoScrollScript() {
 			// ChatScrollTracker tracks whether the user has scrolled away from the bottom
 		// using REAL user-interaction signals (wheel/touchmove/keydown/pointerdown).
 		// This is critical for very large conversations during streaming because:
-		//   - renderStreamingContent() does `container.innerHTML = ''` on every chunk.
-		//     That temporarily shrinks scrollHeight; the browser clamps scrollTop and
+		//   - renderStreamingContent() replaces the response DOM as streaming grows.
+		//     That can change scrollHeight; the browser clamps scrollTop and
 		//     fires a scroll event. A naive "userScrolledUp = !isNearBottom" handler
 		//     would interpret the clamp as the user being at the bottom and clear the
 		//     scrolled-up flag, undoing the user's scroll-up on every chunk.
@@ -2975,7 +3057,9 @@ templ ChatAutoScrollScript() {
 		// into styled DOM elements matching Claude Code VSCode extension style.
 		// Tools: flat row with bold name + checkmark (completed) or spinner (active).
 		// Thinking: collapsible <details> with italic label and markdown content.
-			window.renderStreamingContent = function(container, textBuffer) {
+			window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches) {
+				var renderVersion = (container._streamRenderVersion || 0) + 1;
+				container._streamRenderVersion = renderVersion;
 				if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer || '');
 				if (window.stripFinalStatusControl) textBuffer = window.stripFinalStatusControl(textBuffer);
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
@@ -3021,18 +3105,19 @@ templ ChatAutoScrollScript() {
 			// Pre-strip protocol artifact lines (e.g. multi_tool_use.parallel fragments)
 			// before segment parsing so they don't appear as leaked text between tool cards
 				textBuffer = textBuffer.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
-			var allMatches = [];
-			var match;
+				var allMatches = [];
+				var match;
+				var codeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
 
-			while ((match = thinkingPattern.exec(textBuffer)) !== null) {
-					if (window.isInsideCode && window.isInsideCode(textBuffer, match.index, match.index + match[0].length)) {
+				while ((match = thinkingPattern.exec(textBuffer)) !== null) {
+						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
 						thinkingPattern.lastIndex = match.index + 1;
 						continue;
 					}
 					allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
 				}
-			while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
-					if (window.isInsideCode && window.isInsideCode(textBuffer, match.index, match.index + match[0].length)) {
+				while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
+						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
 						toolUsingPattern.lastIndex = match.index + 1;
 						continue;
 					}
@@ -3042,15 +3127,15 @@ templ ChatAutoScrollScript() {
 					var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
 					allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
 				}
-			while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
-					if (window.isInsideCode && window.isInsideCode(textBuffer, match.index, match.index + match[0].length)) {
+				while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
+						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
 						toolResultBlockPattern.lastIndex = match.index + 1;
 						continue;
 					}
 					allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
 				}
-			while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
-					if (window.isInsideCode && window.isInsideCode(textBuffer, match.index, match.index + match[0].length)) {
+				while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
+						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
 						toolResultLegacyPattern.lastIndex = match.index + 1;
 						continue;
 					}
@@ -3131,9 +3216,8 @@ templ ChatAutoScrollScript() {
 					var toolID = el.getAttribute('data-tool-render-id') || '';
 					var rowKind = el.getAttribute('data-tool-row') || '';
 					if (!toolID || !rowKind) return;
-					var scrollableY = el.getAttribute('data-scrollable-y') === 'true' || el.scrollHeight > el.clientHeight + 1;
-					var pinned = !scrollableY || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
-					prevToolBodyScrollStates[toolID + ':' + rowKind] = { scrollTop: el.scrollTop || 0, pinned: pinned, scrollableY: scrollableY };
+					var pinned = el.getAttribute('data-scroll-pinned') !== 'false';
+					prevToolBodyScrollStates[toolID + ':' + rowKind] = { scrollTop: el.scrollTop || 0, pinned: pinned };
 				});
 			if (containerKey && prevThinkingStates.length > 0) {
 					window._thinkingOpenStates[containerKey] = prevThinkingStates.slice();
@@ -3143,11 +3227,10 @@ templ ChatAutoScrollScript() {
 					prevThinkingStates = window._thinkingOpenStates[containerKey];
 				}
 
-			container.innerHTML = '';
 			// Remove pre-wrap styling from streaming container since we're creating
 			// properly-styled .chat-markdown children (pre-wrap leaks via inheritance
 			// and causes extra spacing in markdown/task-link elements)
-			container.classList.remove('whitespace-pre-wrap');
+			var renderFragment = document.createDocumentFragment();
 
 			var chevronSvg = '<svg class="thinking-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>';
 			var checkSvg = '<svg class="tool-status-icon tool-status-done" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>';
@@ -3183,7 +3266,7 @@ templ ChatAutoScrollScript() {
 				}
 				details.appendChild(summary);
 				details.appendChild(body);
-				container.appendChild(details);
+				renderFragment.appendChild(details);
 			}
 			function flushText() {
 				if (!pendingText) return;
@@ -3198,7 +3281,7 @@ templ ChatAutoScrollScript() {
 					div.textContent = t;
 					div.classList.add('whitespace-pre-wrap');
 				}
-				container.appendChild(div);
+				renderFragment.appendChild(div);
 				pendingText = '';
 			}
 
@@ -3208,6 +3291,13 @@ templ ChatAutoScrollScript() {
 				var inLabel = '';
 				var inContent = '';
 				var dn = toolDisplayName(seg.name);
+				function trackScrollPin(el) {
+					el.setAttribute('data-scroll-pinned', 'true');
+					el.addEventListener('scroll', function() {
+						var pinned = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
+						el.setAttribute('data-scroll-pinned', pinned ? 'true' : 'false');
+					}, { passive: true });
+				}
 
 				// Extract IN content based on tool type
 				if (dn === 'Bash' && seg.secondary) {
@@ -3241,6 +3331,7 @@ templ ChatAutoScrollScript() {
 					inScroll.className = 'stream-tool-body-scroll';
 					inScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
 					inScroll.setAttribute('data-tool-row', 'in');
+					trackScrollPin(inScroll);
 					var inPre = document.createElement('pre');
 					inPre.textContent = inContent;
 					inScroll.appendChild(inPre);
@@ -3262,6 +3353,7 @@ templ ChatAutoScrollScript() {
 					outScroll.className = 'stream-tool-body-scroll';
 					outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
 					outScroll.setAttribute('data-tool-row', 'out');
+					trackScrollPin(outScroll);
 					var outPre = document.createElement('pre');
 					outPre.textContent = seg.resultOutput.trim();
 					outScroll.appendChild(outPre);
@@ -3275,7 +3367,7 @@ templ ChatAutoScrollScript() {
 				return body;
 			}
 
-			segments.forEach(function(seg, idx) {
+			function renderSegment(seg, idx) {
 				if (seg.type === 'text') {
 					// If we're accumulating thinking and this text is a short fragment
 					// between thinking blocks, absorb it into thinking instead of
@@ -3354,11 +3446,14 @@ templ ChatAutoScrollScript() {
 					var toolBody = buildToolBody(seg);
 					if (toolBody) wrap.appendChild(toolBody);
 
-					container.appendChild(wrap);
+					renderFragment.appendChild(wrap);
 				}
-			});
-			flushThinking();
-			flushText();
+			}
+			function finishRender() {
+				flushThinking();
+				flushText();
+				container.classList.remove('whitespace-pre-wrap');
+				container.replaceChildren(renderFragment);
 
 			// Restore open state of thinking sections from before re-render
 			if (prevThinkingStates.length > 0) {
@@ -3380,25 +3475,18 @@ templ ChatAutoScrollScript() {
 				}
 			}
 
-			// Restore per-tool output scroll positions. Only genuinely overflowing
-			// blocks become vertical scroll targets; boundary wheel/touch events then
-			// chain naturally to the chat/task thread scroller.
+			// Restore per-tool output scroll positions without synchronously measuring
+			// every tool body. CSS overflow:auto handles non-overflowing bodies.
 			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
-					var scrollableY = el.scrollHeight > el.clientHeight + 1;
-					if (scrollableY) {
-						el.setAttribute('data-scrollable-y', 'true');
-					} else {
-						el.removeAttribute('data-scrollable-y');
-						el.scrollTop = 0;
-						return;
-					}
 					var toolID = el.getAttribute('data-tool-render-id') || '';
 					var rowKind = el.getAttribute('data-tool-row') || '';
 					var state = prevToolBodyScrollStates[toolID + ':' + rowKind];
 					if (!state || state.pinned) {
-						el.scrollTop = el.scrollHeight;
+						el.scrollTop = Number.MAX_SAFE_INTEGER;
+						el.setAttribute('data-scroll-pinned', 'true');
 					} else {
 						el.scrollTop = state.scrollTop;
+						el.setAttribute('data-scroll-pinned', 'false');
 					}
 				});
 			// Convert [TASK_ID:xxx] references to clickable links after rendering
@@ -3408,6 +3496,34 @@ templ ChatAutoScrollScript() {
 			if (window.convertTaskEditLinksInMessage) {
 				window.convertTaskEditLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);
 			}
+			}
+			if (yieldBetweenBatches && textBuffer.length >= 100 * 1024) {
+				return new Promise(function(resolve) {
+					var segmentIndex = 0;
+					function renderBatch() {
+						if (container._streamRenderVersion !== renderVersion) {
+							resolve(false);
+							return;
+						}
+						var batchEnd = Math.min(segmentIndex + 12, segments.length);
+						while (segmentIndex < batchEnd) {
+							renderSegment(segments[segmentIndex], segmentIndex);
+							segmentIndex++;
+						}
+						if (segmentIndex < segments.length) {
+							setTimeout(renderBatch, 0);
+							return;
+						}
+						finishRender();
+						resolve(true);
+					}
+					renderBatch();
+				});
+			}
+			for (var renderIndex = 0; renderIndex < segments.length; renderIndex++) {
+				renderSegment(segments[renderIndex], renderIndex);
+			}
+			finishRender();
 		};
 
 						// window.codeRanges and window.isInsideCode are installed by the base layout

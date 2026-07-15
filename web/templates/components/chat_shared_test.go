@@ -342,6 +342,16 @@ func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 	if !strings.Contains(content, "restoreThreadPollingFallback()") {
 		t.Error("resume transport errors should restore polling as a fallback")
 	}
+	if !strings.Contains(content, "var largeStreamRenderThreshold = 100 * 1024") ||
+		!strings.Contains(content, "var largeStreamRenderInterval = 250") {
+		t.Error("resume streaming must throttle full rerenders for large accumulated responses")
+	}
+	if !strings.Contains(content, "if (renderDelayTimer !== null)") {
+		t.Error("resume completion must cancel a pending delayed render before forcing the final render")
+	}
+	if strings.Count(content, "flushCumulativeContent();") != 2 {
+		t.Error("both resume-stream error paths must flush and cancel pending delayed output")
+	}
 }
 
 // TestChatBubbleStreamingScrollBehavior verifies streaming bubble has correct scroll behavior
@@ -375,6 +385,16 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	if !strings.Contains(content, "requestAnimationFrame(runRender)") {
 		t.Error("Missing requestAnimationFrame batching for streaming renders")
 	}
+	if !strings.Contains(content, "var largeStreamRenderThreshold = 100 * 1024") ||
+		!strings.Contains(content, "var largeStreamRenderInterval = 250") {
+		t.Error("Missing size-aware throttling for large streaming responses")
+	}
+	if strings.Contains(content, "container.setAttribute('data-raw-content', window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer)") {
+		t.Error("Streaming onmessage must not normalize and copy the entire accumulated response before the scheduled render")
+	}
+	if strings.Count(content, "flushBufferedOutput();") != 2 {
+		t.Error("both fresh-stream error paths must flush and cancel pending delayed output")
+	}
 
 	// Verify that the onmessage handler uses the scroll tracker
 	if !strings.Contains(content, "tracker.shouldAutoScroll") {
@@ -397,6 +417,76 @@ func TestChatBubbleStreamingScrollBehavior(t *testing.T) {
 	}
 
 	t.Logf("ChatBubbleStreaming scroll behavior verified (%d bytes)", len(content))
+}
+
+func TestChatBubbleStreamingFlushesDelayedOutputBeforeError(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the streaming scheduler")
+	}
+	var buf bytes.Buffer
+	if err := ChatBubbleStreaming("assistant", "exec-id", "chat-messages", "", false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatBubbleStreaming: %v", err)
+	}
+	content := buf.String()
+	start := strings.LastIndex(content, `<script type="text/javascript">`)
+	end := strings.LastIndex(content, "</script>")
+	if start == -1 || end == -1 || end <= start {
+		t.Fatal("streaming script is missing")
+	}
+	source := content[start+len(`<script type="text/javascript">`) : end]
+	harness := `
+let now = 1000, renders = 0, cleared = 0;
+const frames = [], timers = new Map(); let nextTimer = 1;
+global.requestAnimationFrame = fn => { frames.push(fn); return frames.length; };
+global.setTimeout = (fn, delay) => { const id = nextTimer++; timers.set(id, { fn, delay }); return id; };
+global.clearTimeout = id => { if (timers.delete(id)) cleared++; };
+Date.now = () => now;
+function classList() { return { add() {}, remove() {}, contains() { return false; } }; }
+const appended = [];
+const container = {
+  attrs: { 'data-exec-id': 'exec-id', 'data-messages-container': 'chat-messages', 'data-pause-polling-target': '', 'data-is-thread': 'false' },
+  classList: classList(), getAttribute(name) { return this.attrs[name] || ''; },
+  setAttribute(name, value) { this.attrs[name] = value; },
+  appendChild(node) { appended.push(node); }, closest() { return null; }
+};
+const streamingDots = { classList: classList(), previousElementSibling: container };
+const thinking = { classList: classList() };
+const messages = {};
+global.document = {
+  currentScript: { previousElementSibling: streamingDots },
+  getElementById(id) { if (id === 'streaming-thinking-exec-id') return thinking; if (id === 'chat-messages') return messages; return null; },
+  createTextNode(text) { return { textContent: text }; }
+};
+class FakeEventSource {
+  constructor() { this.listeners = {}; global.source = this; }
+  addEventListener(name, fn) { this.listeners[name] = fn; }
+  close() {}
+}
+global.EventSource = FakeEventSource;
+global.window = {
+  normalizeTranscriptMarkers: text => text.replace(/alias/g, 'normalized-alias'),
+  renderStreamingContent(container, text) { renders++; container.rendered = text; },
+  resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
+  registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {}
+};
+`
+	assertions := `
+source.onmessage({ data: 'x'.repeat(100 * 1024) });
+if (frames.length !== 1) process.exit(1);
+frames.shift()();
+if (renders !== 1) process.exit(2);
+source.onmessage({ data: 'alias' });
+if (timers.size !== 1 || renders !== 1) process.exit(3);
+source.listeners.error({ data: 'boom' });
+if (renders !== 2 || timers.size !== 0 || cleared !== 1) process.exit(4);
+if (!appended.length || appended[appended.length - 1].textContent.indexOf('Error: boom') === -1) process.exit(5);
+source.onerror({ data: 'boom' });
+if (renders !== 2 || appended[appended.length - 1].textContent.indexOf('Error: boom') === -1) process.exit(6);
+`
+	if output, err := exec.Command(node, "-e", harness+source+assertions).CombinedOutput(); err != nil {
+		t.Fatalf("streaming scheduler failed to flush delayed output before error: %v\n%s", err, output)
+	}
 }
 
 // TestChatBubbleStreamingResumeScrollBehavior verifies resume bubble uses data attributes
@@ -2114,7 +2204,10 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		t.Fatal("rendered script must define transcript normalization and cleaning helpers")
 	}
 	codeHelpers := renderedBaseMarkdownCodeHelpers(t)
-	if strings.Count(content, "window.isInsideCode(textBuffer, match.index, match.index + match[0].length)") != 4 {
+	if strings.Count(content, "window.codeRanges(textBuffer)") != 1 {
+		t.Fatal("streaming renderer must calculate Markdown code ranges once per render")
+	}
+	if strings.Count(content, "window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)") != 4 {
 		t.Fatal("streaming renderer must not convert inline or fenced-code thinking/tool use/result examples into control cards")
 	}
 	if strings.Count(content, "textNode.parentElement.closest('code, pre')") != 2 {
@@ -2185,8 +2278,8 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 	renderer := content[rendererStart:rendererEnd]
 	script := "global.window = {};\n" +
 		"global.NodeFilter = { SHOW_TEXT: 4 };\n" +
-		"function element(tag) { return { tagName: tag, className: '', textContent: '', children: [], style: {}, classList: { add: function() {}, remove: function() {} }, addEventListener: function() {}, appendChild: function(child) { this.children.push(child); }, querySelectorAll: function() { return []; }, getAttribute: function() { return null; }, setAttribute: function() {}, closest: function() { return null; } }; }\n" +
-		"global.document = { createTreeWalker: function(element) { let i = 0; return { nextNode: function() { return element.nodes[i++] || null; } }; }, createElement: element };\n" +
+		"function element(tag) { return { tagName: tag, className: '', textContent: '', children: [], replaceCount: 0, style: {}, classList: { add: function() {}, remove: function() {} }, addEventListener: function() {}, appendChild: function(child) { this.children.push(child); return child; }, replaceChildren: function(fragment) { this.replaceCount++; this.children = (fragment && fragment.children ? fragment.children : []).slice(); }, querySelectorAll: function() { return []; }, getAttribute: function() { return null; }, setAttribute: function() {}, closest: function() { return null; } }; }\n" +
+		"global.document = { createTreeWalker: function(element) { let i = 0; return { nextNode: function() { return element.nodes[i++] || null; } }; }, createElement: element, createDocumentFragment: function() { return element('fragment'); } };\n" +
 		codeHelpers + "\n" + content[start:end] + "\n" + renderer + "\n" + bubbleCleaner + "\n" +
 		"const got = window.cleanTranscriptControls(" + strconv.Quote(input) + ", true);\n" +
 		"if (got !== " + strconv.Quote(want) + ") { console.error(JSON.stringify(got)); process.exit(1); }\n" +
@@ -2200,7 +2293,7 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"if (fencedNode.textContent !== '[Thinking]example[/Thinking]\\n[Using tool: bash]\\n[Tool bash done: output]' || realNode.textContent !== 'Visible answer.') { console.error(JSON.stringify({ fenced: fencedNode.textContent, real: realNode.textContent })); process.exit(3); }\n" +
 		"const stream = element('div'); stream.id = 'streaming-test';\n" +
 		"window.renderStreamingContent(stream, '```text\\n[Thinking]\\nfenced thought\\n[/Thinking]\\n[Using tool: bash]\\n[Tool bash done: output]\\n```');\n" +
-		"if (stream.children.length !== 1 || stream.children[0].className.indexOf('chat-markdown') === -1 || stream.children[0].textContent !== '```text\\n[Thinking]\\nfenced thought\\n[/Thinking]\\n[Using tool: bash]\\n[Tool bash done: output]\\n```') process.exit(4);\n" +
+		"if (stream.replaceCount !== 1 || stream.children.length !== 1 || stream.children[0].className.indexOf('chat-markdown') === -1 || stream.children[0].textContent !== '```text\\n[Thinking]\\nfenced thought\\n[/Thinking]\\n[Using tool: bash]\\n[Tool bash done: output]\\n```') process.exit(4);\n" +
 		"const realThinking = element('div'); realThinking.id = 'streaming-real-thinking';\n" +
 		"window.renderStreamingContent(realThinking, '[Thinking]real internal text[/Thinking]\\nVisible answer.');\n" +
 		"if (realThinking.children.length !== 2 || realThinking.children[0].className.indexOf('stream-thinking') === -1) process.exit(5);\n" +
@@ -2357,6 +2450,7 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 		"addInlineRanges(plainStart, text.length)",
 		"/^[ \\\\t]*$/.test(line.substring(runEnd))",
 		"window.isInsideCode = function(text, start, end)",
+		"window.isInsideCodeRanges = function(ranges, start, end)",
 		"window.stripOutsideCode = function(text, pattern)",
 		"window.replaceOutsideCode = function(text, pattern, replacement)",
 		"window.dedupTaskSummaries = function(text)",
@@ -2376,7 +2470,10 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 	if strings.Contains(string(generated), "function addInlineRanges(start, end)") || strings.Contains(string(generated), "window.isInsideCode = function") {
 		t.Fatal("generated Chat component must use the base layout's shared Markdown helpers instead of defining duplicates")
 	}
-	if strings.Count(content, "window.isInsideCode(textBuffer, match.index, match.index + match[0].length)") != 4 {
+	if strings.Count(content, "window.codeRanges(textBuffer)") != 1 {
+		t.Fatal("generated streaming renderer must calculate Markdown code ranges once per render")
+	}
+	if strings.Count(content, "window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)") != 4 {
 		t.Fatal("generated streaming renderer must protect thinking, tool-use, and both tool-result controls inside Markdown code")
 	}
 	if strings.Count(content, "window.replaceOutsideCode(text,") != 3 {
@@ -2476,10 +2573,36 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 	}
 
 	content := buf.String()
+	rendererStart := strings.Index(content, "window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches)")
+	if rendererStart == -1 {
+		t.Fatal("renderStreamingContent definition is missing")
+	}
+	rendererEnd := strings.Index(content[rendererStart:], "// window.codeRanges and window.isInsideCode are installed by the base layout")
+	if rendererEnd == -1 {
+		t.Fatal("renderStreamingContent definition end is missing")
+	}
+	renderer := content[rendererStart : rendererStart+rendererEnd]
 
 	// renderStreamingContent should remove whitespace-pre-wrap from the container
-	if !strings.Contains(content, "container.classList.remove('whitespace-pre-wrap')") {
+	if !strings.Contains(renderer, "container.classList.remove('whitespace-pre-wrap')") {
 		t.Error("renderStreamingContent should remove 'whitespace-pre-wrap' class from container to prevent CSS inheritance issues")
+	}
+	if !strings.Contains(renderer, "var renderFragment = document.createDocumentFragment()") ||
+		!strings.Contains(renderer, "container.replaceChildren(renderFragment)") {
+		t.Error("renderStreamingContent must build detached DOM and commit it once")
+	}
+	if strings.Contains(renderer, "container.innerHTML = ''") {
+		t.Error("renderStreamingContent must not clear the live container before detached rendering completes")
+	}
+	for _, snippet := range []string{
+		"if (yieldBetweenBatches && textBuffer.length >= 100 * 1024)",
+		"var batchEnd = Math.min(segmentIndex + 12, segments.length)",
+		"setTimeout(renderBatch, 0)",
+		"if (container._streamRenderVersion !== renderVersion)",
+	} {
+		if !strings.Contains(renderer, snippet) {
+			t.Errorf("large renderer must yield and cancel stale batches; missing %q", snippet)
+		}
 	}
 }
 
@@ -3444,12 +3567,12 @@ func TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth(t *testing.T) {
 		t.Fatalf("expected streaming renderers to snapshot shouldScroll before DOM render, found %d", count)
 	}
 	textScrollIdx := strings.Index(content, "var shouldScroll = !tracker || tracker.shouldAutoScroll();")
-	textRenderIdx := strings.Index(content, "window.renderStreamingContent(container, renderText)")
+	textRenderIdx := strings.Index(content, "window.renderStreamingContent(container, renderText, !force)")
 	if textScrollIdx == -1 || textRenderIdx == -1 || textScrollIdx > textRenderIdx {
 		t.Error("new-message streaming renderer must compute shouldScroll before renderStreamingContent")
 	}
 
-	resumeRenderIdx := strings.LastIndex(content, "window.renderStreamingContent(container, renderText)")
+	resumeRenderIdx := strings.LastIndex(content, "window.renderStreamingContent(container, renderText, !force)")
 	if resumeRenderIdx == -1 {
 		t.Fatal("resume streaming renderer must call renderStreamingContent")
 	}
@@ -3658,15 +3781,15 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el)",
 		"var toolID = el.getAttribute('data-tool-render-id') || ''",
 		"var rowKind = el.getAttribute('data-tool-row') || ''",
-		"var scrollableY = el.getAttribute('data-scrollable-y') === 'true' || el.scrollHeight > el.clientHeight + 1",
-		"var pinned = !scrollableY || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2",
+		"var pinned = el.getAttribute('data-scroll-pinned') !== 'false'",
+		"function trackScrollPin(el)",
+		"el.addEventListener('scroll'",
+		"el.setAttribute('data-scroll-pinned', pinned ? 'true' : 'false')",
 		"inScroll.className = 'stream-tool-body-scroll'",
 		"outScroll.className = 'stream-tool-body-scroll'",
 		"inScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
 		"outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
-		"el.setAttribute('data-scrollable-y', 'true')",
-		"el.removeAttribute('data-scrollable-y')",
-		"el.scrollTop = el.scrollHeight",
+		"el.scrollTop = Number.MAX_SAFE_INTEGER",
 		"el.scrollTop = state.scrollTop",
 		"var hasOut = seg.resultOutput && seg.resultOutput.trim()",
 		"outPre.textContent = seg.resultOutput.trim()",
@@ -3685,6 +3808,11 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 	for _, fragment := range forbidden {
 		if strings.Contains(content, fragment) {
 			t.Fatalf("tool output renderer must not suppress non-empty outputs for any tool type; found %q", fragment)
+		}
+	}
+	for _, fragment := range []string{"el.scrollHeight > el.clientHeight", "el.scrollTop = el.scrollHeight"} {
+		if strings.Contains(content, fragment) {
+			t.Fatalf("render pass must not synchronously measure every tool scroller; found %q", fragment)
 		}
 	}
 }

@@ -1717,16 +1717,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 				.stream-tool-body-scroll {
 					overflow-x: auto;
-					overflow-y: hidden;
+					overflow-y: auto;
 					max-height: min(26rem, 52vh);
 					width: 100%;
 					max-width: 100%;
 					min-width: 0;
 					scrollbar-width: thin;
 					scrollbar-color: hsl(var(--bc) / 0.3) transparent;
-				}
-				.stream-tool-body-scroll[data-scrollable-y="true"] {
-					overflow-y: auto;
 				}
 				.stream-tool-body-scroll::-webkit-scrollbar {
 					width: 6px;
@@ -1910,12 +1907,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					return ranges;
 				};
-				window.isInsideCode = function(text, start, end) {
-					var ranges = window.codeRanges(text);
+				window.isInsideCodeRanges = function(ranges, start, end) {
 					for (var i = 0; i < ranges.length; i++) {
 						if (start >= ranges[i].start && start < ranges[i].end) return true;
 					}
 					return false;
+				};
+				window.isInsideCode = function(text, start, end) {
+					return window.isInsideCodeRanges(window.codeRanges(text), start, end);
 				};
 				// Escape raw HTML from model output before Markdown parsing. Code ranges
 				// remain byte-for-byte intact so Marked can render benign HTML examples.
