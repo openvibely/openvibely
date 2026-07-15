@@ -25,6 +25,10 @@ err()  { echo -e "${RED}[notes]${NC} $*" >&2; }
 info() { echo -e "${CYAN}[notes]${NC} $*"; }
 fail() { err "$*"; exit 1; }
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=release-version.sh
+source "${SCRIPT_DIR}/release-version.sh"
+
 ###############################################################################
 # 1. Arguments
 ###############################################################################
@@ -34,11 +38,11 @@ if [[ $# -lt 2 ]]; then
 fi
 
 RAW_VERSION="$1"
-VERSION="${RAW_VERSION#v}"
+VERSION="$(normalize_release_version "$RAW_VERSION")"
 PREV_TAG="${2:-}"   # empty string = first release
 DIST_DIR="${3:-./dist/${VERSION}}"
 
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if ! is_valid_release_version "$VERSION"; then
     fail "Invalid semver: '$RAW_VERSION'."
 fi
 
