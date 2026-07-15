@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,6 +38,20 @@ var updateTelegramServiceToken = func(svc *service.TelegramService, token string
 }
 
 const channelsRefreshTrigger = "channels-refresh"
+
+type channelSettingReset struct {
+	key   string
+	value string
+}
+
+func applyChannelSettingResets(ctx context.Context, settingsRepo *repository.SettingsRepo, resets []channelSettingReset) error {
+	for _, reset := range resets {
+		if err := settingsRepo.Set(ctx, reset.key, reset.value); err != nil {
+			return fmt.Errorf("reset channel setting %q: %w", reset.key, err)
+		}
+	}
+	return nil
+}
 
 func triggerChannelsRefresh(c echo.Context) error {
 	c.Response().Header().Set("HX-Trigger", channelsRefreshTrigger)
@@ -427,9 +443,13 @@ func (h *Handler) handleTelegramRemove(c echo.Context) error {
 	if h.telegramService != nil && h.telegramService.IsRunning() {
 		h.telegramService.Stop()
 	}
-	_ = h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingBotToken, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingSendResponses, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.TelegramSettingRichMessagesV2, "")
+	if err := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
+		{key: service.TelegramSettingBotToken, value: ""},
+		{key: service.TelegramSettingSendResponses, value: ""},
+		{key: service.TelegramSettingRichMessagesV2, value: ""},
+	}); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
+	}
 
 	if isHTMX(c) {
 		return triggerChannelsRefresh(c)
@@ -546,12 +566,16 @@ func (h *Handler) handleGitHubRemove(c echo.Context) error {
 	if h.githubSvc != nil {
 		_ = h.githubSvc.Disconnect(c.Request().Context())
 	}
-	_ = h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAppID, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAppSlug, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAppPrivateKey, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingPAT, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingPATUserLogin, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAuthMode, "")
+	if err := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
+		{key: service.GitHubSettingAppID, value: ""},
+		{key: service.GitHubSettingAppSlug, value: ""},
+		{key: service.GitHubSettingAppPrivateKey, value: ""},
+		{key: service.GitHubSettingPAT, value: ""},
+		{key: service.GitHubSettingPATUserLogin, value: ""},
+		{key: service.GitHubSettingAuthMode, value: ""},
+	}); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
+	}
 
 	if isHTMX(c) {
 		return triggerChannelsRefresh(c)
@@ -682,18 +706,22 @@ func (h *Handler) handleSlackRemove(c echo.Context) error {
 	if h.slackSvc != nil {
 		_ = h.slackSvc.Disconnect(c.Request().Context())
 	}
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingClientID, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingClientSecret, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingAppToken, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingBotToken, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingBotTokenOverride, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingBotTokenSource, service.SlackBotTokenSourceOAuth)
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingBotUserID, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingTeamID, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingTeamName, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingConnectedAt, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingOAuthState, "")
-	_ = h.settingsRepo.Set(c.Request().Context(), service.SlackSettingSendResponses, "")
+	if err := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
+		{key: service.SlackSettingClientID, value: ""},
+		{key: service.SlackSettingClientSecret, value: ""},
+		{key: service.SlackSettingAppToken, value: ""},
+		{key: service.SlackSettingBotToken, value: ""},
+		{key: service.SlackSettingBotTokenOverride, value: ""},
+		{key: service.SlackSettingBotTokenSource, value: service.SlackBotTokenSourceOAuth},
+		{key: service.SlackSettingBotUserID, value: ""},
+		{key: service.SlackSettingTeamID, value: ""},
+		{key: service.SlackSettingTeamName, value: ""},
+		{key: service.SlackSettingConnectedAt, value: ""},
+		{key: service.SlackSettingOAuthState, value: ""},
+		{key: service.SlackSettingSendResponses, value: ""},
+	}); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
+	}
 
 	if isHTMX(c) {
 		return triggerChannelsRefresh(c)
@@ -751,15 +779,21 @@ func (h *Handler) handleDiscordRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
 	projectID, _ := h.getCurrentProjectID(c)
+	var resetErr error
 	if h.discordSvc != nil {
 		_ = h.discordSvc.Disconnect(c.Request().Context())
 	} else {
-		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingBotToken, "")
-		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingBotUserID, "")
-		_ = h.settingsRepo.Set(c.Request().Context(), service.DiscordSettingSendResponses, "")
+		resetErr = applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
+			{key: service.DiscordSettingBotToken, value: ""},
+			{key: service.DiscordSettingBotUserID, value: ""},
+			{key: service.DiscordSettingSendResponses, value: ""},
+		})
 	}
 	if h.discordAuthRepo != nil && projectID != "" {
 		_ = h.discordAuthRepo.DeleteByProject(c.Request().Context(), projectID)
+	}
+	if resetErr != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(resetErr)
 	}
 	if isHTMX(c) {
 		return triggerChannelsRefresh(c)
@@ -834,8 +868,20 @@ func (h *Handler) handleEmailRemove(c echo.Context) error {
 	if h.emailService != nil {
 		h.emailService.Stop()
 	}
-	for _, key := range []string{service.EmailSettingProvider, service.EmailSettingAddress, service.EmailSettingPassword, service.EmailSettingIMAPHost, service.EmailSettingIMAPPort, service.EmailSettingSMTPHost, service.EmailSettingSMTPPort, service.EmailSettingPollIntervalSeconds, service.EmailSettingSendResponses, service.EmailSettingSkipAttachments, service.EmailSettingMarkExistingSeenOnStart} {
-		_ = h.settingsRepo.Set(c.Request().Context(), key, "")
+	if err := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
+		{key: service.EmailSettingProvider, value: ""},
+		{key: service.EmailSettingAddress, value: ""},
+		{key: service.EmailSettingPassword, value: ""},
+		{key: service.EmailSettingIMAPHost, value: ""},
+		{key: service.EmailSettingIMAPPort, value: ""},
+		{key: service.EmailSettingSMTPHost, value: ""},
+		{key: service.EmailSettingSMTPPort, value: ""},
+		{key: service.EmailSettingPollIntervalSeconds, value: ""},
+		{key: service.EmailSettingSendResponses, value: ""},
+		{key: service.EmailSettingSkipAttachments, value: ""},
+		{key: service.EmailSettingMarkExistingSeenOnStart, value: ""},
+	}); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
 	if isHTMX(c) {
 		return triggerChannelsRefresh(c)
