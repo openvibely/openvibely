@@ -2,66 +2,48 @@ package components
 
 import (
 	"fmt"
+
 	"github.com/openvibely/openvibely/internal/models"
 )
 
 // EmailAuthorizedSendersList renders the list of authorized email senders with add/remove controls.
 templ EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, projectID string) {
-	<div id="email-authorized-senders">
-		<p class="text-xs opacity-60 mb-2">Authorized email senders are system-level for this channel and can use Email across projects. Outbound Message Targets remain project-specific.</p>
-		if len(senders) == 0 {
-			<p class="text-sm opacity-50 italic mb-3">No authorized senders configured. Access is denied until senders are added.</p>
-		} else {
-			<div class="space-y-2 mb-3">
-				for _, sender := range senders {
-					<div class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2">
-						<div class="flex items-center gap-2 min-w-0">
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12H8m8 0a4 4 0 10-8 0m8 0v1a4 4 0 01-8 0v-1m8 0a8 8 0 10-8 0m8 0v1a8 8 0 01-8 0v-1"></path>
-							</svg>
-							<span class="text-sm font-medium truncate">{ sender.DisplayName }</span>
-							<span class="text-xs opacity-50 truncate">{ sender.EmailAddress }</span>
-						</div>
-						<button
-							type="button"
-							class="btn btn-ghost btn-xs text-error"
-							hx-delete={ fmt.Sprintf("/channels/email/authorized-senders/%s?project_id=%s", sender.ID, projectID) }
-							hx-target="#email-authorized-senders"
-							hx-swap="outerHTML"
-							hx-confirm="Remove this authorized sender?"
-						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-							</svg>
-						</button>
-					</div>
-				}
-			</div>
-		}
-		<div class="flex gap-2" id="email-authorized-senders-add-controls">
-			<input type="hidden" name="project_id" value={ projectID }/>
-			<input
-				type="email"
-				name="authorized_email_address"
-				placeholder="person@example.com"
-				class="input input-bordered input-sm flex-1"
-			/>
-			<input
-				type="text"
-				name="display_name"
-				placeholder="Display name (optional)"
-				class="input input-bordered input-sm w-40"
-			/>
-			<button
-				type="button"
-				class="btn btn-primary btn-sm"
-				hx-post="/channels/email/authorized-senders"
-				hx-target="#email-authorized-senders"
-				hx-swap="outerHTML"
-				hx-include="#email-authorized-senders-add-controls"
-			>
-				Add
-			</button>
-		</div>
+	@channelAuthorizationList(
+		channelAuthorizationListConfig{
+			ContainerID: "email-authorized-senders",
+			Description: "Authorized email senders are system-level for this channel and can use Email across projects. Outbound Message Targets remain project-specific.",
+			EmptyState: "No authorized senders configured. Access is denied until senders are added.",
+			RemoveConfirmation: "Remove this authorized sender?",
+		},
+		emailAuthorizationRows(senders, projectID),
+		channelAuthorizationAddConfig{
+			ContainerID: "email-authorized-senders",
+			ProjectID: projectID,
+			Endpoint: "/channels/email/authorized-senders",
+			InputType: "email",
+			InputName: "authorized_email_address",
+			InputPlaceholder: "person@example.com",
+		},
+	)
+}
+
+func emailAuthorizationRows(senders []models.EmailAuthorizedSender, projectID string) []channelAuthorizationRow {
+	rows := make([]channelAuthorizationRow, 0, len(senders))
+	for _, sender := range senders {
+		rows = append(rows, channelAuthorizationRow{
+			Identity:       emailAuthorizedSenderIdentity(sender),
+			DeleteEndpoint: fmt.Sprintf("/channels/email/authorized-senders/%s?project_id=%s", sender.ID, projectID),
+		})
+	}
+	return rows
+}
+
+templ emailAuthorizedSenderIdentity(sender models.EmailAuthorizedSender) {
+	<div class="flex items-center gap-2 min-w-0">
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12H8m8 0a4 4 0 10-8 0m8 0v1a4 4 0 01-8 0v-1m8 0a8 8 0 10-8 0m8 0v1a8 8 0 01-8 0v-1"></path>
+		</svg>
+		<span class="text-sm font-medium truncate">{ sender.DisplayName }</span>
+		<span class="text-xs opacity-50 truncate">{ sender.EmailAddress }</span>
 	</div>
 }
