@@ -369,9 +369,9 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
 		})
 		if preservedExecIDs != nil {
-			<div id="task-thread-runtime" class="contents" hx-preserve="true"></div>
+			<div id={ "task-thread-runtime-" + task.ID } class="contents" hx-preserve="true"></div>
 		} else {
-			<div id="task-thread-runtime" class="contents" hx-preserve="true">
+			<div id={ "task-thread-runtime-" + task.ID } class="contents" hx-preserve="true">
 			<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
 			@ChatAutoScrollScript()
 			@_initThreadStreamingScript()
@@ -1005,16 +1005,19 @@ templ TaskThreadLiveEventsScript(taskID string) {
 				window._taskThreadReconnectHandlers[taskId] = reconnectHandler;
 				window.addEventListener('sse-live-connected', reconnectHandler);
 
-					document.body.addEventListener('htmx:beforeSwap', function(event) {
+					var cleanupTaskThreadLiveHandlers = function(event) {
 						var target = event.detail && event.detail.target;
-						if (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content' || target.id === 'task-thread-view')) {
+						if (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content')) {
 							window.removeEventListener('sse-task-event', handler);
 							window.removeEventListener('sse-chat-live-event', chatHandler);
 							delete window._taskThreadLiveHandlers[taskId];
 							window.removeEventListener('sse-live-connected', reconnectHandler);
 							delete window._taskThreadReconnectHandlers[taskId];
+							document.body.removeEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);
 						}
-					}, { once: true });			})();
+					};
+					document.body.addEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);
+			})();
 		</script>
 }
 

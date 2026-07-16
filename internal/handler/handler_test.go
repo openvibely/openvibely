@@ -5211,7 +5211,7 @@ func TestHandler_GetTaskThreadPollOmitsPreservedTerminalOutput(t *testing.T) {
 	assert.NotContains(t, body, "function _taskThreadTaskId()")
 	assert.Contains(t, body, `id="chat-execution-`+completed.ID+`"`)
 	assert.Contains(t, body, `hx-preserve="true"`)
-	assert.Contains(t, body, `id="task-thread-runtime"`)
+	assert.Contains(t, body, `id="task-thread-runtime-`+task.ID+`"`)
 	assert.Contains(t, body, "currently running prompt")
 
 	fallbackPoll := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1")

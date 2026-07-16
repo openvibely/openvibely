@@ -3211,6 +3211,25 @@ func TestTaskThreadLiveEventsScript_HandlesMixtureProgressWithoutTaskID(t *testi
 	}
 }
 
+func TestTaskThreadView_RuntimePreservationIsTaskScoped(t *testing.T) {
+	taskOne := &models.Task{ID: "task-one", Status: models.StatusRunning}
+	taskTwo := &models.Task{ID: "task-two", Status: models.StatusRunning}
+	var first bytes.Buffer
+	if err := TaskThreadView(taskOne, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &first); err != nil {
+		t.Fatalf("render first task thread: %v", err)
+	}
+	var second bytes.Buffer
+	if err := TaskThreadView(taskTwo, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &second); err != nil {
+		t.Fatalf("render second task thread: %v", err)
+	}
+	if !strings.Contains(first.String(), `id="task-thread-runtime-task-one"`) || strings.Contains(first.String(), `id="task-thread-runtime-task-two"`) {
+		t.Fatal("first task thread runtime must use its task-scoped preservation ID")
+	}
+	if !strings.Contains(second.String(), `id="task-thread-runtime-task-two"`) || strings.Contains(second.String(), `id="task-thread-runtime-task-one"`) {
+		t.Fatal("second task thread runtime must not reuse the first task's preservation ID")
+	}
+}
+
 func TestTaskThreadLiveEventsScript_ReconcilesChatResponseDoneCompletedOutput(t *testing.T) {
 	var buf bytes.Buffer
 	if err := TaskThreadLiveEventsScript("task-1").Render(context.Background(), &buf); err != nil {
@@ -3239,6 +3258,12 @@ func TestTaskThreadLiveEventsScript_ReconcilesChatResponseDoneCompletedOutput(t 
 		if !strings.Contains(html, snippet) {
 			t.Fatalf("task-thread live script must reconcile completed task follow-up output from chat_response_done; missing %q", snippet)
 		}
+	}
+	if strings.Contains(html, "|| target.id === 'task-thread-view'") {
+		t.Fatal("ordinary task-thread polling must not tear down preserved live handlers")
+	}
+	if strings.Contains(html, "}, { once: true });") || !strings.Contains(html, "document.body.removeEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers)") {
+		t.Fatal("live-handler cleanup must survive polls and unregister itself only after navigation cleanup")
 	}
 }
 
@@ -3568,8 +3593,8 @@ func TestTaskThreadView_ClosesStreamsBeforeThreadRefresh(t *testing.T) {
 	if !strings.Contains(content, "function _closeTaskThreadEventSources()") {
 		t.Fatal("expected shared thread EventSource cleanup helper")
 	}
-	if !strings.Contains(content, "target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content' || target.id === 'task-thread-view'") {
-		t.Fatal("expected thread refresh and navigation targets to close active stream EventSources before swap")
+	if !strings.Contains(content, "target.id === 'thread-content' || target.id === 'task-thread-view' || target.id === 'task-detail-content' || target.id === 'main-content'") {
+		t.Fatal("expected thread refresh and navigation targets to close per-execution EventSources before swap")
 	}
 	if !strings.Contains(content, "_closeTaskThreadEventSources();") {
 		t.Fatal("expected beforeSwap to close active thread EventSources")
