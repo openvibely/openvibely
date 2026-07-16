@@ -3270,8 +3270,12 @@ templ ChatAutoScrollScript() {
 					activeRequest.finish(false, false, true);
 					setTimeout(function() {
 						if (!interruptedRequest.container.isConnected) return;
-						var raw = interruptedRequest.container.getAttribute && interruptedRequest.container.getAttribute('data-raw-content');
-						if (raw === interruptedRequest.text && window.scheduleChatElementRender) {
+						var newerRequest = interruptedRequest.container._scheduledChatRender;
+						if (newerRequest && newerRequest !== interruptedRequest) return;
+						var hasRaw = interruptedRequest.container.hasAttribute && interruptedRequest.container.hasAttribute('data-raw-content');
+						var raw = hasRaw ? interruptedRequest.container.getAttribute('data-raw-content') : null;
+						if (hasRaw && raw !== interruptedRequest.text) return;
+						if (hasRaw && window.scheduleChatElementRender) {
 							window.scheduleChatElementRender(interruptedRequest.container, interruptedRequest.text, interruptedRequest.yield);
 						} else if (window.scheduleChatContentRender) {
 							window.scheduleChatContentRender(interruptedRequest.container, interruptedRequest.text, interruptedRequest.yield);
@@ -3282,6 +3286,7 @@ templ ChatAutoScrollScript() {
 					if (liveRequest.finished) return;
 					liveRequest.finished = true;
 					if (liveRequest.timeout) clearTimeout(liveRequest.timeout);
+					if (!err && result !== false && container.dataset) container.dataset.liveRenderedRaw = textBuffer || '';
 					if (container._activeLiveChatRender === liveRequest) container._activeLiveChatRender = null;
 					window._liveChatRenderActive = Math.max(0, (window._liveChatRenderActive || 1) - 1);
 					window._liveChatRenderRequests.delete(liveRequest);
