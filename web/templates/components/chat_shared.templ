@@ -132,9 +132,14 @@ templ ChatBubble(role, content string) {
 				<script>
 					(function() {
 						var el = document.currentScript.previousElementSibling;
+						var renderStarted = false;
 						function render() {
+							if (renderStarted) return;
+							renderStarted = true;
 							var raw = el.getAttribute('data-raw-content');
-							if (window.renderStreamingContent && raw) {
+							if (window.scheduleChatContentRender && raw) {
+								window.scheduleChatContentRender(el, raw);
+							} else if (window.renderStreamingContent && raw) {
 								window.renderStreamingContent(el, raw);
 							} else if (window.renderChatMarkdown && raw) {
 								el.classList.add('chat-markdown');
@@ -183,9 +188,14 @@ templ ChatBubbleError(role, errorMsg, output string) {
 				<script>
 					(function() {
 						var el = document.currentScript.previousElementSibling;
+						var renderStarted = false;
 						function render() {
+							if (renderStarted) return;
+							renderStarted = true;
 							var raw = el.getAttribute('data-raw-content');
-							if (window.renderStreamingContent && raw) {
+							if (window.scheduleChatContentRender && raw) {
+								window.scheduleChatContentRender(el, raw);
+							} else if (window.renderStreamingContent && raw) {
 								window.renderStreamingContent(el, raw);
 							} else if (window.renderChatMarkdown && raw) {
 								el.classList.add('chat-markdown');
@@ -721,7 +731,10 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
+					var renderStarted = false;
 					function render() {
+						if (renderStarted) return;
+						renderStarted = true;
 						var raw = el.getAttribute('data-raw-content');
 						if (!raw) return;
 						if (window.renderStreamingContent) {
@@ -3096,6 +3109,38 @@ templ ChatAutoScrollScript() {
 		// into styled DOM elements matching Claude Code VSCode extension style.
 		// Tools: flat row with bold name + checkmark (completed) or spinner (active).
 		// Thinking: collapsible <details> with italic label and markdown content.
+			if (!window._chatContentRenderQueue) window._chatContentRenderQueue = [];
+			if (typeof window._chatContentRenderActive !== 'number') window._chatContentRenderActive = 0;
+			window.scheduleChatContentRender = function(container, textBuffer, yieldBetweenBatches) {
+				if (!container) return Promise.resolve(false);
+				var request = { container: container, text: textBuffer || '', yield: yieldBetweenBatches, resolve: null };
+				container._scheduledChatRender = request;
+				var promise = new Promise(function(resolve) { request.resolve = resolve; });
+				window._chatContentRenderQueue.push(request);
+				function drain() {
+					if (window._chatContentRenderActive >= 1) return;
+					var next = window._chatContentRenderQueue.shift();
+					if (!next) return;
+					if (next.container._scheduledChatRender !== next || !next.container.isConnected) {
+						next.resolve(false);
+						setTimeout(drain, 0);
+						return;
+					}
+					window._chatContentRenderActive++;
+					next.container._scheduledChatRender = null;
+					Promise.resolve(window.renderStreamingContent(next.container, next.text, next.yield)).then(function(result) {
+						next.resolve(result);
+					}, function() {
+						next.resolve(false);
+					}).then(function() {
+						window._chatContentRenderActive--;
+						setTimeout(drain, 0);
+					});
+				}
+				setTimeout(drain, 0);
+				return promise;
+			};
+
 			window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches) {
 				var renderVersion = (container._streamRenderVersion || 0) + 1;
 				container._streamRenderVersion = renderVersion;
@@ -3146,6 +3191,7 @@ templ ChatAutoScrollScript() {
 					var rawCodeRanges = [];
 					var codeRanges = [];
 					var segments = [];
+					var preparationFailed = false;
 					function normalizePreparedText() {
 						if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer, rawCodeRanges);
 						return true;
@@ -3162,6 +3208,7 @@ templ ChatAutoScrollScript() {
 						if (shouldYieldPreparation && window.codeRangesAsync) {
 							return window.codeRangesAsync(textBuffer, container).then(function(result) {
 								if (result !== null) rawCodeRanges = result;
+								else preparationFailed = true;
 								return true;
 							});
 						}
@@ -3172,6 +3219,7 @@ templ ChatAutoScrollScript() {
 						if (shouldYieldPreparation && window.codeRangesAsync) {
 							return window.codeRangesAsync(textBuffer, container).then(function(result) {
 								if (result !== null) codeRanges = result;
+								else preparationFailed = true;
 								return true;
 							});
 						}
@@ -3787,6 +3835,12 @@ templ ChatAutoScrollScript() {
 									setTimeout(runPreparationPhase, 0);
 								return;
 							}
+							if (preparationFailed) {
+								var fallback = window.renderChatMarkdownLargeFallback ? window.renderChatMarkdownLargeFallback(textBuffer) : null;
+								container.replaceChildren(fallback || document.createTextNode(textBuffer));
+								resolve(true);
+								return;
+							}
 							var rendered = renderPreparedSegments();
 							if (rendered && typeof rendered.then === 'function') rendered.then(resolve, reject);
 							else resolve(rendered !== false);
@@ -3999,7 +4053,10 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
 					if (el.dataset.cleanedRaw === raw && hasRenderedContent) return;
-					if (raw && window.renderStreamingContent) {
+					if (raw && window.scheduleChatContentRender) {
+						window.scheduleChatContentRender(el, raw);
+						el.dataset.cleanedRaw = raw;
+					} else if (raw && window.renderStreamingContent) {
 						window.renderStreamingContent(el, raw);
 						el.dataset.cleanedRaw = raw;
 					} else if (raw && window.renderChatMarkdown) {
@@ -4023,7 +4080,10 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
 					if (el.dataset.cleanedRaw === raw && hasRenderedContent) return;
-					if (raw && window.renderStreamingContent) {
+					if (raw && window.scheduleChatContentRender) {
+						window.scheduleChatContentRender(el, raw);
+						el.dataset.cleanedRaw = raw;
+					} else if (raw && window.renderStreamingContent) {
 						window.renderStreamingContent(el, raw);
 						el.dataset.cleanedRaw = raw;
 					} else if (raw && window.renderChatMarkdown) {
@@ -4042,7 +4102,11 @@ templ ChatAutoScrollScript() {
 					// Check if content has streaming markers that need rendering
 					if (text.indexOf('[Thinking]') >= 0 || text.indexOf('[Using tool:') >= 0) {
 						// Render streaming markers into styled DOM elements
-						if (window.renderStreamingContent) {
+						if (window.scheduleChatContentRender) {
+							window.scheduleChatContentRender(div, text);
+							div.dataset.cleanedText = text;
+							return;
+						} else if (window.renderStreamingContent) {
 							window.renderStreamingContent(div, text);
 							div.dataset.cleanedText = text;
 							return;

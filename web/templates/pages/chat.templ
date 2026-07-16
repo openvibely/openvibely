@@ -315,10 +315,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				if (!chatMessages) return;
 				if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
 			};
-			setTimeout(function() {
-				if (window.rehydrateChatAssistantBubbles) window.rehydrateChatAssistantBubbles();
-			}, 0);
-
 			window.switchChatMode = function(mode) {
 				var form = document.getElementById('chat-form');
 				if (!form) return;

@@ -697,12 +697,32 @@ func TestChatAutoScrollScript_RehydratesAssistantRawContentViaStreamingRenderer(
 	if !strings.Contains(content, "if (raw && window.renderStreamingContent)") {
 		t.Error("cleanAssistantMessages must prefer streaming renderer for tool-card reconstruction")
 	}
+	if !strings.Contains(content, "window.scheduleChatContentRender = function(container, textBuffer, yieldBetweenBatches)") ||
+		!strings.Contains(content, "if (window._chatContentRenderActive >= 1) return") {
+		t.Error("completed transcript hydration must serialize expensive renders")
+	}
+	if !strings.Contains(content, "window.scheduleChatContentRender(el, raw);") {
+		t.Error("completed raw assistant messages must use the bounded render scheduler")
+	}
 	if !strings.Contains(content, "window.renderStreamingContent(el, raw);") {
 		t.Error("cleanAssistantMessages must rebuild tool/thinking cards from raw content")
 	}
 	if !strings.Contains(content, "window.dedupTaskSummaries = function(text)") ||
 		!strings.Contains(content, "text = window.dedupTaskSummaries(text);") {
 		t.Error("hard-refresh hydration must use shared Markdown-aware task-summary deduplication")
+	}
+}
+
+func TestCompletedBubblePollingFallbackDoesNotRenderTwice(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatBubble("Assistant", "completed").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render completed bubble: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, "var renderStarted = false") ||
+		!strings.Contains(content, "if (renderStarted) return") ||
+		!strings.Contains(content, "renderStarted = true") {
+		t.Fatal("completed bubble polling and timeout paths must share a one-shot render guard")
 	}
 }
 
@@ -2404,6 +2424,7 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 	renderer := content[rendererStart:rendererEnd]
 	script := "global.window = {};\n" +
 		"global.NodeFilter = { SHOW_TEXT: 4 };\n" +
+		"global.Blob = function() {}; window.URL = { createObjectURL: function() { return 'blob:test'; } }; global.Worker = function() {}; Worker.prototype.terminate = function() {}; Worker.prototype.postMessage = function(value) { var self = this; setTimeout(function() { self.onmessage({ data: { ranges: window.codeRanges(value) } }); }, 0); };\n" +
 		"function element(tag) { return { tagName: tag, className: '', textContent: '', children: [], replaceCount: 0, style: {}, classList: { add: function() {}, remove: function() {} }, addEventListener: function() {}, appendChild: function(child) { this.children.push(child); return child; }, replaceChildren: function(fragment) { this.replaceCount++; this.children = (fragment && fragment.children ? fragment.children : []).slice(); }, querySelectorAll: function() { return []; }, getAttribute: function() { return null; }, setAttribute: function() {}, closest: function() { return null; } }; }\n" +
 		"global.document = { createTreeWalker: function(element) { let i = 0; return { nextNode: function() { return element.nodes[i++] || null; } }; }, createElement: element, createDocumentFragment: function() { return element('fragment'); }, createTextNode: function(text) { return { textContent: text }; } };\n" +
 		codeHelpers + "\n" + content[start:end] + "\n" + renderer + "\n" + bubbleCleaner + "\n" +

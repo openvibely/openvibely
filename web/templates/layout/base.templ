@@ -1908,8 +1908,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					return ranges;
 				};
 				window.codeRangesAsync = function(text, owner) {
-					if (!text || text.length < 64 * 1024 || typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
+					if (!text || text.length < 64 * 1024) {
 						return Promise.resolve(window.codeRanges(text || ''));
+					}
+					if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
+						return Promise.resolve(null);
 					}
 					if (owner && owner._codeRangeWorkerState) {
 						owner._codeRangeWorkerState.worker.terminate();
@@ -1933,13 +1936,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								resolve(ranges);
 							}
 							worker.onmessage = function(event) {
-								finish(event.data && !event.data.error ? event.data.ranges : window.codeRanges(text));
+								finish(event.data && !event.data.error ? event.data.ranges : null);
 							};
-							worker.onerror = function() { finish(window.codeRanges(text)); };
+							worker.onerror = function() { finish(null); };
 							worker.postMessage(text);
 						});
 					} catch (err) {
-						return Promise.resolve(window.codeRanges(text));
+						return Promise.resolve(null);
 					}
 				};
 				window.isInsideCodeRanges = function(ranges, start, end) {
@@ -2009,10 +2012,29 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (!html || typeof document === 'undefined' || !document.createElement) return Promise.resolve(null);
 					var template = document.createElement('template');
 					if (!template.content || !document.createTreeWalker) return Promise.resolve(window.sanitizeChatHTMLFragment(html));
-					// HTML parsing is a browser primitive, but sanitizing the resulting tree is
-					// cooperatively batched so large documents do not monopolize the UI thread.
-					template.innerHTML = html;
-					var walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT, null);
+					// Split Marked's top-level blocks before parsing. If one block is itself
+					// enormous, return null so the caller can use the safe text fallback.
+					var chunks = [];
+					var chunkStart = 0;
+					var tagPattern = /<\/?([a-zA-Z][\w:-]*)(?:\s[^<>]*?)?\s*\/?>/g;
+					var voidTags = { AREA:1, BASE:1, BR:1, COL:1, EMBED:1, HR:1, IMG:1, INPUT:1, LINK:1, META:1, PARAM:1, SOURCE:1, TRACK:1, WBR:1 };
+					var depth = 0;
+					var tagMatch;
+					while ((tagMatch = tagPattern.exec(html)) !== null) {
+						var wholeTag = tagMatch[0];
+						var tagName = tagMatch[1].toUpperCase();
+						if (wholeTag.charAt(1) === '/') depth = Math.max(0, depth - 1);
+						else if (!voidTags[tagName] && wholeTag.substring(wholeTag.length - 2) !== '/>') depth++;
+						if (depth === 0 && tagPattern.lastIndex - chunkStart >= 32 * 1024) {
+							if (tagPattern.lastIndex - chunkStart > 128 * 1024) return Promise.resolve(null);
+							chunks.push(html.substring(chunkStart, tagPattern.lastIndex));
+							chunkStart = tagPattern.lastIndex;
+						}
+					}
+					if (html.length - chunkStart > 128 * 1024) return Promise.resolve(null);
+					if (chunkStart < html.length) chunks.push(html.substring(chunkStart));
+					if (chunks.length === 0) chunks.push(html);
+					var walker = null;
 					return new Promise(function(resolve) {
 						var elements = [];
 						function collectBatch() {
@@ -2060,7 +2082,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							}
 							resolve(template.content);
 						}
-						setTimeout(collectBatch, 0);
+						var parseIndex = 0;
+						function parseBatch() {
+							if (cancelled && cancelled()) { resolve(null); return; }
+							var chunkTemplate = document.createElement('template');
+							chunkTemplate.innerHTML = chunks[parseIndex++];
+							template.content.appendChild(chunkTemplate.content);
+							if (parseIndex < chunks.length) { setTimeout(parseBatch, 0); return; }
+							walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT, null);
+							setTimeout(collectBatch, 0);
+						}
+						setTimeout(parseBatch, 0);
 					});
 				};
 				window.renderChatMarkdownLargeFallback = function(text) {
@@ -2133,7 +2165,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								if (state.fallbackTimer) { clearTimeout(state.fallbackTimer); state.fallbackTimer = null; }
 								if (!event.data || event.data.error) { finish(window.renderChatMarkdownLargeFallback(text)); return; }
 								window.sanitizeChatHTMLFragmentAsync(event.data.html, function() { return state.cancelled; }).then(function(fragment) {
-									finish(fragment === null ? null : fragment);
+									finish(fragment === null ? (state.cancelled ? null : window.renderChatMarkdownLargeFallback(text)) : fragment);
 								}, function() { finish(window.renderChatMarkdownLargeFallback(text)); });
 							};
 							worker.onerror = function() { finish(window.renderChatMarkdownLargeFallback(text)); };

@@ -4100,8 +4100,8 @@ func TestHandler_Chat_AssistantBubbleRehydrationOnLoadAndSwap(t *testing.T) {
 		"chat transforms must rehydrate assistant bubbles from data-raw-content before transcript-control cleaning")
 	assert.Contains(t, body, "window.rehydrateChatAssistantBubbles = function()",
 		"chat page must expose explicit rehydration helper")
-	assert.Contains(t, body, "if (window.rehydrateChatAssistantBubbles) window.rehydrateChatAssistantBubbles();",
-		"chat page must schedule initial rehydration pass after load")
+	assert.NotContains(t, body, "if (window.rehydrateChatAssistantBubbles) window.rehydrateChatAssistantBubbles();",
+		"chat page must not restart the per-bubble initial render with a duplicate hydration pass")
 	assert.Contains(t, body, "if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory)",
 		"afterSwap prompt recovery must not run while an active stream is still in progress")
 }

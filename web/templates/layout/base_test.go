@@ -121,6 +121,13 @@ func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T)
 	if strings.Contains(string(generated), "worker.onerror = function() { finish(window.renderChatMarkdown(text))") {
 		t.Fatal("large Markdown worker failures must not synchronously parse the full document")
 	}
+	if strings.Contains(string(generated), "finish(window.codeRanges(text))") ||
+		strings.Contains(string(generated), "Promise.resolve(window.codeRanges(text))") {
+		t.Fatal("large code-range worker failures must not synchronously scan the full document")
+	}
+	if !strings.Contains(string(generated), "html.length - chunkStart > 128 * 1024") {
+		t.Fatal("large sanitized HTML must be parsed in bounded top-level chunks")
+	}
 }
 
 func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
