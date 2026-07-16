@@ -471,11 +471,16 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					// Render tool/thinking transcript controls and initialize SSE for any running executions.
 					// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.
 					var resumeContainers = document.querySelectorAll('[data-streaming-resume="true"]');
-					resumeContainers.forEach(function(c) {
-						var raw = c.getAttribute('data-raw-content') || '';
-						if (raw.trim() && window.renderStreamingContent) {
-							window.renderStreamingContent(c, raw);
-						}
+						resumeContainers.forEach(function(c) {
+							var raw = c.getAttribute('data-raw-content') || '';
+							var hasRenderedContent = !!(c.textContent && c.textContent.trim()) || !!c.querySelector('*');
+							if (raw.trim() && !hasRenderedContent && !c._activeLiveChatRender && window.renderStreamingContent) {
+								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+								var renderPromise = liveRenderer(c, raw);
+								if (renderPromise && typeof renderPromise.catch === 'function') {
+									renderPromise.catch(function() { c.textContent = raw; });
+								}
+							}
 					});
 					if (window._initThreadStreaming) window._initThreadStreaming();
 					_restoreTaskThreadDraftToTextarea();

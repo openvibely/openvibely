@@ -645,8 +645,43 @@ func TestChatBubbleStreamingResumeScrollBehavior(t *testing.T) {
 	if !strings.Contains(content, `data-messages-container="chat-messages"`) {
 		t.Error("Missing data-messages-container attribute")
 	}
+	if !strings.Contains(content, "var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;") ||
+		!strings.Contains(content, "var renderPromise = liveRenderer(el, raw);") {
+		t.Fatal("streaming resume bubble must render through the live coordinator")
+	}
+	if strings.Contains(content, "window.renderStreamingContent(el, raw);") {
+		t.Fatal("streaming resume bubble must not bypass live-render ownership")
+	}
 
 	t.Logf("ChatBubbleStreamingResume scroll behavior verified (%d bytes)", len(content))
+}
+
+func TestTaskThreadView_ResumeHydrationUsesLiveCoordinator(t *testing.T) {
+	task := &models.Task{ID: "resume-owner-task", ProjectID: "p1", Status: models.StatusRunning, Category: models.CategoryActive}
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task thread view: %v", err)
+	}
+	content := buf.String()
+	start := strings.Index(content, `var resumeContainers = document.querySelectorAll('[data-streaming-resume="true"]')`)
+	if start == -1 {
+		t.Fatal("task thread resume hydration block is missing")
+	}
+	end := strings.Index(content[start:], "if (window._initThreadStreaming) window._initThreadStreaming();")
+	if end == -1 {
+		t.Fatal("task thread resume hydration terminator is missing")
+	}
+	section := content[start : start+end]
+	if !strings.Contains(section, "var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;") ||
+		!strings.Contains(section, "var renderPromise = liveRenderer(c, raw);") {
+		t.Fatal("task thread resume hydration must use the live coordinator")
+	}
+	if !strings.Contains(section, "!hasRenderedContent && !c._activeLiveChatRender") {
+		t.Fatal("task thread resume hydration must not restart an inline render that already owns the container")
+	}
+	if strings.Contains(section, "window.renderStreamingContent(c, raw);") {
+		t.Fatal("task thread resume hydration must not call the raw renderer directly")
+	}
 }
 
 // TestChatAutoScrollLogic tests the JavaScript logic for determining if we should auto-scroll
@@ -758,8 +793,8 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"  window.renderStreamingContent = function(c, text) { if (text === 'hydrate-fail') return Promise.reject(new Error('hydrate failed')); return Promise.resolve(true); };\n" +
 		"  const hydrated = container(true, 'hydrate-ok'); if (!await window.scheduleChatElementRender(hydrated, 'hydrate-ok') || hydrated.dataset.cleanedRaw !== 'hydrate-ok' || hydrated.dataset.renderingRaw) throw new Error('successful hydration signature was not committed');\n" +
 		"  const failedHydration = container(true, 'hydrate-fail'); if (await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydration.dataset.cleanedRaw || failedHydration.dataset.renderingRaw) throw new Error('failed hydration signature was retained');\n" +
-		"  window._chatLiveRenderQuietMS = 5; let liveResolve = null; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'completed-hung') return new Promise(function() {}); if (text === 'live-hung') return new Promise(function(resolve) { liveResolve = resolve; }); return Promise.resolve(true); };\n" +
-		"  const completedDuringLive = container(true); const completedResult = window.scheduleChatContentRender(completedDuringLive, 'completed-hung'); await delay(10); const liveResult = window.renderLiveChatContent(container(true), 'live-now'); if (!await liveResult || await completedResult || !completedDuringLive.replacements[0]) throw new Error('live render did not cancel active completed render safely');\n" +
+		"  window._chatLiveRenderQuietMS = 5; let liveResolve = null, completedAttempts = 0; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'completed-hung' && ++completedAttempts === 1) return new Promise(function() {}); if (text === 'live-hung') return new Promise(function(resolve) { liveResolve = resolve; }); return Promise.resolve(true); };\n" +
+		"  const completedDuringLive = container(true); const completedResult = window.scheduleChatContentRender(completedDuringLive, 'completed-hung'); await delay(10); const liveResult = window.renderLiveChatContent(container(true), 'live-now'); if (!await liveResult || await completedResult || completedDuringLive.replacements.length !== 0) throw new Error('live render dumped interrupted completed output into the DOM'); await delay(15); if (completedAttempts !== 2) throw new Error('interrupted completed render was not requeued after live work');\n" +
 		"  const livePending = window.renderLiveChatContent(container(true), 'live-hung'); await delay(1); const queuedAfterLive = window.scheduleChatContentRender(container(true), 'queued-after-live'); await delay(2); if (calls.indexOf('queued-after-live') !== -1) throw new Error('completed render ran concurrently with live render'); liveResolve(true); await livePending; if (!await queuedAfterLive || calls.indexOf('queued-after-live') === -1) throw new Error('completed queue did not resume after live render');\n" +
 		"  window._chatLiveRenderTimeoutMS = 5; window.renderStreamingContent = function() { return new Promise(function() {}); }; if (await window.renderLiveChatContent(container(true), 'live-timeout') || window._liveChatRenderActive !== 0) throw new Error('live timeout did not settle and release renderer');\n" +
 		"  window._chatLiveRenderTimeoutMS = 50; window._chatRenderMaxLiveDeferralMS = 5; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'live-deferral-cap') return new Promise(function() {}); return Promise.resolve(true); }; const cappedLive = window.renderLiveChatContent(container(true), 'live-deferral-cap'); const cappedQueued = window.scheduleChatContentRender(container(true), 'queued-after-cap'); if (!await cappedQueued || await cappedLive || calls.indexOf('queued-after-cap') === -1) throw new Error('active live render exceeded completed-render deferral cap');\n" +
