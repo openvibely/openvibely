@@ -95,6 +95,7 @@ type streamingResponseParams struct {
 
 	steeringHistoryStarted bool
 	steeringOutputCursor   string
+	lifecycleUserMessage   string
 }
 
 func streamingTransportScope(params streamingResponseParams) string {
@@ -115,11 +116,11 @@ func streamingTransportScope(params streamingResponseParams) string {
 // background goroutine, allowing the HTTP handler to return immediately.
 //
 // Process flow:
-// 1. Creates a timeout context and registers cancellation with worker service
-// 2. Attaches authorized runtime tools and calls the LLM service for streaming output
-//    (writes to DB in real-time)
-// 3. Evaluates final standalone task status markers
-// 4. Completes the execution and updates task status
+//  1. Creates a timeout context and registers cancellation with worker service
+//  2. Attaches authorized runtime tools and calls the LLM service for streaming output
+//     (writes to DB in real-time)
+//  3. Evaluates final standalone task status markers
+//  4. Completes the execution and updates task status
 //
 // Uses context.Background() for the base context since this goroutine should
 // complete independently of the HTTP request (which may be canceled when the
@@ -463,6 +464,9 @@ modelLoop:
 			break
 		}
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
+		if params.lifecycleUserMessage != "" {
+			requestCtx = llmcontracts.WithLifecycleCompletionUserMessage(requestCtx, params.lifecycleUserMessage)
+		}
 		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
 			requestCtx, params.Message, requestImageAttachments, params.Agent,
 			params.ExecID, params.ChatHistory, params.SystemContext,
@@ -729,6 +733,7 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 	}
 	steeringMessage := combinedSteeringContent(batch.inputs)
 	steeringInstruction := formatSteeringInstruction(steeringMessage)
+	params.lifecycleUserMessage = steeringInstruction
 	if previousAssistantOutput != "" {
 		assistantDelta := previousAssistantOutput
 		if strings.HasPrefix(previousAssistantOutput, params.steeringOutputCursor) {

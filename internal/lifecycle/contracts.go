@@ -170,9 +170,9 @@ type LearningSkillContext struct {
 const LearningSnapshotKey = "learning_snapshot"
 
 // ConversationTranscriptKey is the conventional HookInput.Extras key for the
-// retained task chat context handed to observe_task_for_learning. It is
-// intentionally only the user/assistant chat messages, not task metadata,
-// execution artifacts, diffs, statuses, or lifecycle internals.
+// current completed user/assistant turn handed to after_complete hooks. It does
+// not include prior chat history, task metadata, execution artifacts, diffs,
+// statuses, or lifecycle internals.
 const ConversationTranscriptKey = "conversation_transcript"
 
 // LibraryUpdateSummary is the validated payload for scheduled/explicit

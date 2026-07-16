@@ -3340,6 +3340,9 @@ func TestProcessStreamingResponse_AppliesPendingSteeringBeforeModelCall(t *testi
 	if strings.Contains(request.Message, "latest user instruction") || strings.Contains(request.Message, "Start the next visible assistant text") {
 		t.Fatalf("expected steering without wrapper text, got %q", request.Message)
 	}
+	if got, ok := llmcontracts.LifecycleCompletionUserMessageFromContext(request.Ctx); !ok || got != "do not change the public API" {
+		t.Fatalf("lifecycle completion user message = %q, %v; want latest steering", got, ok)
+	}
 	for _, turn := range request.ChatHistory {
 		if turn.PromptSent == "do not change the public API" {
 			t.Fatalf("steering should be delivered as the current provider message, not trailing user-only history: %#v", request.ChatHistory)

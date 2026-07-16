@@ -318,13 +318,11 @@ func TestLLMService_ExecuteTaskWithAgent_PreservesFailedTranscriptForTaskThreadF
 	}
 	got := res.ChatContext.Messages
 	want := []llmcontracts.ChatContextMessage{
-		{Role: "user", Content: "original task context"},
-		{Role: "assistant", Content: "I inspected the repository and could not finish."},
 		{Role: "user", Content: "follow up with the prior failure context"},
 		{Role: "assistant", Content: "ok"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected follow-up replay context\n got: %#v\nwant: %#v", got, want)
+		t.Fatalf("unexpected current-turn lifecycle context\n got: %#v\nwant: %#v", got, want)
 	}
 	if len(capture.lastReq.ChatHistory) != 1 || capture.lastReq.ChatHistory[0].Status != models.ExecFailed {
 		t.Fatalf("provider request should include failed terminal execution history, got %#v", capture.lastReq.ChatHistory)
@@ -757,8 +755,6 @@ func TestLLMService_CallAgentDirectStreamingDetailed_PreservesFailedHistoryWitho
 	}
 	got := res.ChatContext.Messages
 	want := []llmcontracts.ChatContextMessage{
-		{Role: "user", Content: "original task prompt"},
-		{Role: "assistant", Content: "Previous execution failed before producing output: provider timeout"},
 		{Role: "user", Content: "follow up after failure"},
 		{Role: "assistant", Content: "ok"},
 	}
@@ -787,7 +783,7 @@ func TestLLMService_CallAgentDirectStreamingDetailed_PropagatesTransportScope(t 
 	}
 }
 
-func TestLLMService_CallAgentDirectStreamingDetailed_BuildsChatContextFromNormalizedHistory(t *testing.T) {
+func TestLLMService_CallAgentDirectStreamingDetailed_LifecycleContextContainsOnlyCurrentTurn(t *testing.T) {
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
 	capture := &captureProviderAdapter{}
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
@@ -806,25 +802,52 @@ func TestLLMService_CallAgentDirectStreamingDetailed_BuildsChatContextFromNormal
 		t.Fatalf("CallAgentDirectStreamingDetailed error: %v", err)
 	}
 	got := res.ChatContext.Messages
-	if len(got) != 41 {
-		t.Fatalf("expected 20 normalized history prompts, completed/failed assistant outputs, plus current turn, got %d: %#v", len(got), got)
+	want := []llmcontracts.ChatContextMessage{
+		{Role: "user", Content: "current prompt"},
+		{Role: "assistant", Content: "ok"},
 	}
-	if got[0].Content != "old prompt 02" {
-		t.Fatalf("expected oldest retained history after normalization, got %#v", got[0])
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected current-turn lifecycle context\n got: %#v\nwant: %#v", got, want)
 	}
-	if got[38].Content != history[21].Output {
-		t.Fatalf("expected inert marker-looking historical output to be preserved, got %#v", got[38])
+	if len(capture.lastReq.ChatHistory) != 20 || capture.lastReq.ChatHistory[0].PromptSent != "old prompt 02" {
+		t.Fatalf("provider request should retain normalized history, got %#v", capture.lastReq.ChatHistory)
 	}
-	for _, msg := range got {
-		if msg.Content == "running output should be skipped" {
-			t.Fatalf("running assistant output should not be included: %#v", got)
+}
+
+func TestLLMService_CallAgentDirectStreamingDetailed_LifecycleContextUsesToolBoundarySteering(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		callback := llmcontracts.SteeringCallbackFromContext(req.Ctx)
+		if callback == nil {
+			return llmcontracts.AgentResult{}, fmt.Errorf("missing steering callback")
 		}
+		for i := 0; i < 2; i++ {
+			if _, err := callback(req.Ctx); err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+		}
+		return llmcontracts.AgentResult{Output: "task output", TextOnlyOutput: "task output"}, nil
+	})
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: adapter}
+	steering := []string{"first steering", "latest steering"}
+	steeringIndex := 0
+	ctx := llmcontracts.WithSteeringCallback(context.Background(), func(context.Context) (string, error) {
+		message := steering[steeringIndex]
+		steeringIndex++
+		return message, nil
+	})
+
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test"}
+	res, err := svc.CallAgentDirectStreamingDetailed(ctx, "original prompt", nil, agent, "exec-123", nil, "ctx", "/tmp/workdir", nil)
+	if err != nil {
+		t.Fatalf("CallAgentDirectStreamingDetailed error: %v", err)
 	}
-	if got[39].Role != "user" || got[39].Content != "current prompt" {
-		t.Fatalf("expected normalized current user message, got %#v", got[39])
+	want := []llmcontracts.ChatContextMessage{
+		{Role: "user", Content: "latest steering"},
+		{Role: "assistant", Content: "task output"},
 	}
-	if got[40].Role != "assistant" || got[40].Content != "ok" {
-		t.Fatalf("expected current assistant text, got %#v", got[40])
+	if !reflect.DeepEqual(res.ChatContext.Messages, want) {
+		t.Fatalf("unexpected lifecycle context after streaming steering\n got: %#v\nwant: %#v", res.ChatContext.Messages, want)
 	}
 }
 
@@ -1235,7 +1258,7 @@ func TestLLMService_ExecuteTaskWithAgent_ClaimsToolBoundarySteering(t *testing.T
 	svc.providerAdapters[models.LLMProvider("task-steer-test")] = adapterWithInsert
 	svc.routing = nil
 
-	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	exec, chatContext, err := svc.executeTaskWithAgent(ctx, *task, *agent)
 	if err != nil {
 		t.Fatalf("ExecuteTaskWithAgent: %v", err)
 	}
@@ -1244,6 +1267,13 @@ func TestLLMService_ExecuteTaskWithAgent_ClaimsToolBoundarySteering(t *testing.T
 	}
 	if adapter.steering != "review only" {
 		t.Fatalf("expected steering injected, got %q", adapter.steering)
+	}
+	wantContext := []llmcontracts.ChatContextMessage{
+		{Role: "user", Content: "review only"},
+		{Role: "assistant", Content: "task output"},
+	}
+	if !reflect.DeepEqual(chatContext.Messages, wantContext) {
+		t.Fatalf("unexpected lifecycle context after task steering\n got: %#v\nwant: %#v", chatContext.Messages, wantContext)
 	}
 	updated, err := threadInputRepo.GetByID(ctx, input.ID)
 	if err != nil {

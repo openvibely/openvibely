@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
@@ -1529,8 +1530,9 @@ func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, messa
 	if err != nil {
 		return llmcontracts.AgentResult{}, err
 	}
+	callCtx, lifecycleUserMessage := trackLifecycleCompletionUserMessage(ctx, message)
 	req, err := llmnormalize.NormalizeRequest(llmcontracts.AgentRequest{
-		Ctx:               ctx,
+		Ctx:               callCtx,
 		Operation:         llmcontracts.OperationStreaming,
 		Message:           message,
 		Attachments:       attachments,
@@ -1552,7 +1554,7 @@ func (s *LLMService) CallAgentDirectStreamingDetailed(ctx context.Context, messa
 	if assistantOutput == "" {
 		assistantOutput = res.Output
 	}
-	res.ChatContext = chatContextFromNormalizedRequest(req, assistantOutput)
+	res.ChatContext = lifecycleCompletionChatContext(lifecycleUserMessage(), assistantOutput)
 	if err != nil {
 		if res.StopReason == "max_tokens" {
 			return res, err
@@ -1617,8 +1619,9 @@ func (s *LLMService) callLLMDetailed(ctx context.Context, prompt string, attachm
 	if len(agentDef) > 0 {
 		ad = agentDef[0]
 	}
+	callCtx, lifecycleUserMessage := trackLifecycleCompletionUserMessage(ctx, prompt)
 	req, err := llmnormalize.NormalizeRequest(llmcontracts.AgentRequest{
-		Ctx:                 ctx,
+		Ctx:                 callCtx,
 		Operation:           llmcontracts.OperationTask,
 		Message:             prompt,
 		Attachments:         attachments,
@@ -1636,7 +1639,7 @@ func (s *LLMService) callLLMDetailed(ctx context.Context, prompt string, attachm
 	if assistantOutput == "" {
 		assistantOutput = res.Output
 	}
-	res.ChatContext = chatContextFromNormalizedRequest(req, assistantOutput)
+	res.ChatContext = lifecycleCompletionChatContext(lifecycleUserMessage(), assistantOutput)
 	if err != nil {
 		// On max_tokens, return the partial output so callers can preserve it.
 		// The error still propagates so the task is marked as failed.
@@ -1648,23 +1651,47 @@ func (s *LLMService) callLLMDetailed(ctx context.Context, prompt string, attachm
 	return res, nil
 }
 
-func chatContextFromNormalizedRequest(req llmcontracts.AgentRequest, assistantOutput string) llmcontracts.ChatContext {
-	messages := make([]llmcontracts.ChatContextMessage, 0, len(req.ChatHistory)*2+2)
-	for _, turn := range req.ChatHistory {
-		if strings.TrimSpace(turn.PromptSent) != "" {
-			messages = append(messages, llmcontracts.ChatContextMessage{Role: "user", Content: turn.PromptSent})
-		}
-		if replay := llmprompt.ReplayAssistantContent(turn); replay != "" {
-			messages = append(messages, llmcontracts.ChatContextMessage{Role: "assistant", Content: replay})
-		}
-	}
-	if strings.TrimSpace(req.Message) != "" {
-		messages = append(messages, llmcontracts.ChatContextMessage{Role: "user", Content: req.Message})
+// lifecycleCompletionChatContext returns only the user/assistant pair completed
+// by this call. Provider requests may still receive history when answering a
+// follow-up, but after_complete hooks must not replay that history a second time.
+func lifecycleCompletionChatContext(userMessage, assistantOutput string) llmcontracts.ChatContext {
+	messages := make([]llmcontracts.ChatContextMessage, 0, 2)
+	if userMessage = strings.TrimSpace(userMessage); userMessage != "" {
+		messages = append(messages, llmcontracts.ChatContextMessage{Role: "user", Content: userMessage})
 	}
 	if strings.TrimSpace(assistantOutput) != "" {
 		messages = append(messages, llmcontracts.ChatContextMessage{Role: "assistant", Content: assistantOutput})
 	}
 	return llmcontracts.ChatContext{Messages: messages}
+}
+
+func trackLifecycleCompletionUserMessage(ctx context.Context, fallback string) (context.Context, func() string) {
+	latest := strings.TrimSpace(fallback)
+	if explicit, ok := llmcontracts.LifecycleCompletionUserMessageFromContext(ctx); ok {
+		latest = strings.TrimSpace(explicit)
+	}
+	var mu sync.Mutex
+	current := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return latest
+	}
+	steering := llmcontracts.SteeringCallbackFromContext(ctx)
+	if steering == nil {
+		return ctx, current
+	}
+	tracked := func(callbackCtx context.Context) (string, error) {
+		message, err := steering(callbackCtx)
+		if err == nil {
+			if latestMessage := strings.TrimSpace(message); latestMessage != "" {
+				mu.Lock()
+				latest = latestMessage
+				mu.Unlock()
+			}
+		}
+		return message, err
+	}
+	return llmcontracts.WithSteeringCallback(ctx, tracked), current
 }
 
 func (s *LLMService) callAnthropic(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig) (string, int, error) {

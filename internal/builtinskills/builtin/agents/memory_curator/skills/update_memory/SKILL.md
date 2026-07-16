@@ -11,9 +11,9 @@ routing:
 
 # Update Memory
 
-Review the completed task conversation and update durable project memory only when the transcript contains context future conversations need.
+Review the completed task turn and update durable project memory only when the turn contains context future conversations need.
 
-The hook input includes `extras.conversation_transcript`, the retained chat context for the completed task turn. Treat it as the source of truth. Use the scoped memory file tools to inspect and update the managed memory directory.
+The hook input includes `extras.conversation_transcript`, containing only the latest user input and the assistant response completed for that input. Treat that current-turn pair as the source of truth; do not assume earlier task-thread history is present. Use the scoped memory file tools to inspect and update the managed memory directory.
 
 If the completed task was assigned to Memory Curator itself (`extras.learning_snapshot.active_agent_key == "memory_curator"` or `assigned_agent.system_kind == "memory_curator"`), do not inspect or modify memory files. Return the skipped JSON below. Memory maintenance tasks consolidate memory directly and must not be re-interpreted by this after-complete update skill.
 
