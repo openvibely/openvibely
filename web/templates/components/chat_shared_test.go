@@ -4614,6 +4614,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
+	configureTestBrowserProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start Chrome fixture: %v", err)
 	}
@@ -4628,8 +4629,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
+	stopTestBrowserProcess(cmd)
 	if !strings.Contains(result, `data-test-result="pass"`) {
 		rootState := regexp.MustCompile(`<main id="fixture-root"[^>]*>`).FindString(result)
 		stderr, _ := os.ReadFile(stderrPath)
