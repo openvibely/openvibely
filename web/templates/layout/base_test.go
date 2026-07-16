@@ -134,7 +134,7 @@ func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
 	}
 	script := "global.window = {};\n" +
 		"global.document = { createElement: function() { return { _html: '', content: { querySelectorAll: function() { return []; } }, set innerHTML(value) { this._html = value; }, get innerHTML() { return this._html; } }; } };\n" +
-		"global.Blob = function(parts) { this.parts = parts; }; window.URL = { createObjectURL: function() { return 'blob:test'; } };\n" +
+		"let lastBlob = null; global.Blob = function(parts) { this.parts = parts; lastBlob = this; }; window.URL = { createObjectURL: function() { return 'blob:test'; } };\n" +
 		"const workers = []; global.Worker = function(url) { this.url = url; this.terminated = false; workers.push(this); }; Worker.prototype.terminate = function() { this.terminated = true; }; Worker.prototype.postMessage = function(value) { this.value = value; };\n" +
 		"window.marked = global.marked = { parse: function(value) { return '<p>' + value + '</p>'; }, setOptions: function() {} };\n" +
 		content[start:end] + "\n" +
@@ -144,10 +144,14 @@ func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
 		"if (!firstCodeWorker.terminated) throw new Error('superseded code-range worker was not terminated');\n" +
 		"secondCodeWorker.onmessage({ data: { ranges: [{ start: 1, end: 2 }] } });\n" +
 		"const markdownOwner = {}; const firstMarkdown = window.renderChatMarkdownAsync(large, markdownOwner); const firstMarkdownWorker = workers[workers.length - 1];\n" +
+		"const markdownWorkerSource = lastBlob.parts.join(''); let importedURL = '', workerPost = null; const workerScope = { postMessage: function(value) { workerPost = value; } };\n" +
+		"new Function('self', 'importScripts', 'marked', markdownWorkerSource)(workerScope, function(url) { importedURL = url; }, { setOptions: function() {}, parse: function(value) { return value; } });\n" +
+		"workerScope.onmessage({ data: 'outside <img src=x>\\n```html\\n<img src=y>\\n```' });\n" +
+		"if (importedURL.indexOf('marked@15.0.4') === -1 || !workerPost || workerPost.error || workerPost.html.indexOf('outside &lt;img src=x>') === -1 || workerPost.html.indexOf('<img src=y>') === -1) throw new Error('generated Markdown worker did not execute safely');\n" +
 		"const secondMarkdown = window.renderChatMarkdownAsync(large + 'y', markdownOwner); const secondMarkdownWorker = workers[workers.length - 1];\n" +
 		"if (!firstMarkdownWorker.terminated) throw new Error('superseded Markdown worker was not terminated');\n" +
 		"secondMarkdownWorker.onmessage({ data: { html: '<ol><li>whole document</li></ol>' } });\n" +
-		"Promise.all([firstCode, secondCode, firstMarkdown, secondMarkdown]).then(function(values) { if (values[0] !== null || values[1].length !== 1 || values[2] !== null || values[3] !== '<ol><li>whole document</li></ol>' || codeOwner._codeRangeWorkerState !== null || markdownOwner._markdownWorkerState !== null) process.exit(1); }, function(err) { console.error(err); process.exit(2); });\n"
+		"Promise.all([firstCode, secondCode, firstMarkdown, secondMarkdown]).then(function(values) { if (values[0] !== null || values[1].length !== 1 || values[2] !== null || !values[3] || typeof values[3] !== 'object' || codeOwner._codeRangeWorkerState !== null || markdownOwner._markdownWorkerState !== null) process.exit(1); }, function(err) { console.error(err); process.exit(2); });\n"
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("large Markdown/code-range worker lifecycle failed: %v\n%s", err, output)
 	}

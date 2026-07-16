@@ -3100,7 +3100,7 @@ templ ChatAutoScrollScript() {
 				var renderVersion = (container._streamRenderVersion || 0) + 1;
 				container._streamRenderVersion = renderVersion;
 				textBuffer = textBuffer || '';
-				var shouldYieldPreparation = yieldBetweenBatches && textBuffer.length >= 64 * 1024;
+				var shouldYieldPreparation = yieldBetweenBatches !== false && textBuffer.length >= 64 * 1024;
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
@@ -3278,13 +3278,52 @@ templ ChatAutoScrollScript() {
 					function prepareLargeMarkdownSegments() {
 						if (!shouldYieldPreparation) return true;
 						while (markdownPreparationIndex < segments.length) {
-							var segment = segments[markdownPreparationIndex++];
-							if (segment.type !== 'text' || segment.content.length < 64 * 1024 || !window.renderChatMarkdownAsync) continue;
-							var cleaned = cleanPreparedText(segment.content);
-							segment.cleanedContent = cleaned;
-							if (!cleaned) { segment.renderedHTML = ''; continue; }
-							return window.renderChatMarkdownAsync(cleaned, container).then(function(html) {
-								if (html !== null) segment.renderedHTML = html;
+							var segment = segments[markdownPreparationIndex];
+							var source = '';
+							var targetProperty = '';
+							if (segment.type === 'text') {
+								markdownPreparationIndex++;
+								if (segment.content.length < 64 * 1024) continue;
+								source = cleanPreparedText(segment.content);
+								targetProperty = 'renderedContent';
+							} else if (segment.type === 'thinking') {
+								var thinkingParts = [];
+								var thinkingTarget = null;
+								var groupEnd = markdownPreparationIndex;
+								while (groupEnd < segments.length) {
+									var groupSegment = segments[groupEnd];
+									if (groupSegment.type === 'thinking') {
+										var thinkingText = groupSegment.content.trim();
+										if (thinkingText) {
+											if (!thinkingTarget) thinkingTarget = groupSegment;
+											thinkingParts.push(thinkingText);
+										}
+										groupEnd++;
+										continue;
+									}
+									if (groupSegment.type !== 'text' || groupSegment.content.trim().length >= 100) break;
+									var nextThinking = false;
+									for (var groupLookahead = groupEnd + 1; groupLookahead < segments.length; groupLookahead++) {
+										if (segments[groupLookahead].type === 'thinking') { nextThinking = true; break; }
+										if (segments[groupLookahead].type !== 'text') break;
+									}
+									if (!nextThinking) break;
+									var interstitial = groupSegment.content.trim();
+									if (interstitial) thinkingParts.push(interstitial);
+									groupEnd++;
+								}
+								markdownPreparationIndex = Math.max(groupEnd, markdownPreparationIndex + 1);
+								if (thinkingTarget) segment = thinkingTarget;
+								source = thinkingParts.join('\n\n');
+								targetProperty = 'thinkingRenderedContent';
+							} else {
+								markdownPreparationIndex++;
+								continue;
+							}
+							if (source.length < 64 * 1024 || !window.renderChatMarkdownAsync) continue;
+							if (!source) { segment[targetProperty] = ''; continue; }
+							return window.renderChatMarkdownAsync(source, container).then(function(content) {
+								if (content !== null) segment[targetProperty] = content;
 								return markdownPreparationIndex >= segments.length ? true : false;
 							});
 						}
@@ -3383,6 +3422,7 @@ templ ChatAutoScrollScript() {
 
 			var pendingText = '';
 			var pendingThinking = []; // accumulate consecutive thinking blocks
+			var pendingThinkingRenderedContent = null;
 			var pendingLargeToolOutputs = [];
 			function flushThinking() {
 				if (pendingThinking.length === 0) return;
@@ -3404,7 +3444,11 @@ templ ChatAutoScrollScript() {
 				summary.innerHTML = chevronSvg + '<span>Thinking\u2026</span>';
 				var body = document.createElement('div');
 				body.className = 'stream-thinking-body';
-				if (window.renderChatMarkdown) {
+				if (pendingThinkingRenderedContent !== null) {
+					if (typeof pendingThinkingRenderedContent === 'string') body.innerHTML = pendingThinkingRenderedContent;
+					else body.appendChild(pendingThinkingRenderedContent);
+					pendingThinkingRenderedContent = null;
+				} else if (window.renderChatMarkdown) {
 					body.innerHTML = window.renderChatMarkdown(merged);
 				} else {
 					body.textContent = merged;
@@ -3520,13 +3564,14 @@ templ ChatAutoScrollScript() {
 
 			function renderSegment(seg, idx) {
 				if (seg.type === 'text') {
-					if (Object.prototype.hasOwnProperty.call(seg, 'renderedHTML')) {
+					if (Object.prototype.hasOwnProperty.call(seg, 'renderedContent')) {
 						flushThinking();
 						flushText();
-						if (!seg.renderedHTML) return;
+						if (!seg.renderedContent) return;
 						var rendered = document.createElement('div');
 						rendered.className = 'chat-markdown';
-						rendered.innerHTML = seg.renderedHTML;
+						if (typeof seg.renderedContent === 'string') rendered.innerHTML = seg.renderedContent;
+						else rendered.appendChild(seg.renderedContent);
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(rendered);
 						renderFragment.appendChild(rendered);
 						return;
@@ -3561,6 +3606,7 @@ templ ChatAutoScrollScript() {
 							flushThinking();
 							flushText();
 						}
+						if (Object.prototype.hasOwnProperty.call(seg, 'thinkingRenderedContent')) pendingThinkingRenderedContent = seg.thinkingRenderedContent;
 						pendingThinking.push(c);
 					}
 					return;

@@ -2548,7 +2548,7 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"if (sameLineDOMNode.textContent !== 'Visible DOM answer.') { console.error(JSON.stringify(sameLineDOMNode.textContent)); process.exit(55); }\n" +
 		"const largeMarkdown = Array(2200).fill('A paragraph with enough words to exercise cooperative Markdown chunking.\\n\\n').join('');\n" +
 		"const largeMarkdownStream = element('div'); largeMarkdownStream.id = 'large-markdown';\n" +
-		"window.renderStreamingContent(largeMarkdownStream, largeMarkdown, true).then(function(committed) {\n" +
+		"window.renderStreamingContent(largeMarkdownStream, largeMarkdown).then(function(committed) {\n" +
 		"  if (!committed || largeMarkdownStream.replaceCount !== 1 || largeMarkdownStream.children.length !== 1) throw new Error('large Markdown was not rendered as one document');\n" +
 		"  const largeToolStream = element('div'); largeToolStream.id = 'large-tool';\n" +
 		"  const largeTool = '[Using tool: bash]\\n[Tool bash done]\\n' + 'x'.repeat(150 * 1024) + '\\n[/Tool]';\n" +
@@ -2736,8 +2736,10 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 		t.Error("renderStreamingContent must not clear the live container before detached rendering completes")
 	}
 	for _, snippet := range []string{
-		"var shouldYieldPreparation = yieldBetweenBatches && textBuffer.length >= 64 * 1024",
+		"var shouldYieldPreparation = yieldBetweenBatches !== false && textBuffer.length >= 64 * 1024",
 		"window.codeRangesAsync(textBuffer, container)",
+		"targetProperty = 'thinkingRenderedContent'",
+		"pendingThinkingRenderedContent = seg.thinkingRenderedContent",
 		"var preparationPhases = [",
 		"if (phaseResult && typeof phaseResult.then === 'function')",
 		"setTimeout(runPreparationPhase, 0)",
