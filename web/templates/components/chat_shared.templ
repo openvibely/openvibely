@@ -2367,20 +2367,21 @@ templ ChatAutoScrollScript() {
 					var parent = node.parentElement;
 					var inCode = !!(parent && parent.closest && parent.closest('code, pre'));
 					var inToolOutput = !!(parent && parent.closest && parent.closest('.stream-tool-body-content'));
-					if (inCode || inToolOutput) continue;
+					if (inCode && !inToolOutput) continue;
 					if (node.textContent.includes('[TASK_ID:')) {
 						nodesToProcess.push(node);
 					}
 				}
 
 				nodesToProcess.forEach(function(textNode) {
-						var regex = /(?:-\s*)?"([^"]+)"\s*(?:\(([^)]+)\)\s*)?\[TASK_ID:([^\]]+)\]/g;
+						var regex = /(?:-[ \t]*)?"([^"\r\n]+)"[ \t]*(?:\(([^)\r\n]+)\)[ \t]*)?\[TASK_ID:([^\]\r\n]+)\]/g;
 						var text = textNode.textContent;
 						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
 						var inMarkdownFallback = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('[data-chat-markdown-fallback="true"]'));
 						var matches = [];
 						var m;
 						while ((m = regex.exec(text)) !== null) {
+							if (!m[3] || !m[3].trim()) continue;
 							if ((inToolOutput || inMarkdownFallback) && window.isInsideCode && window.isInsideCode(text, m.index, m.index + m[0].length)) continue;
 							matches.push(m);
 						}
@@ -2504,20 +2505,21 @@ templ ChatAutoScrollScript() {
 					var parent = node.parentElement;
 					var inCode = !!(parent && parent.closest && parent.closest('code, pre'));
 					var inToolOutput = !!(parent && parent.closest && parent.closest('.stream-tool-body-content'));
-					if (inCode || inToolOutput) continue;
+					if (inCode && !inToolOutput) continue;
 					if (node.textContent.includes('[TASK_EDITED:')) {
 						nodesToProcess.push(node);
 					}
 				}
 
 				nodesToProcess.forEach(function(textNode) {
-						var regex = /(?:-\s*)?"([^"]+)"\s*\(updated:\s*([^)]+)\)\s*\[TASK_EDITED:([^\]]+)\]/g;
+						var regex = /(?:-[ \t]*)?"([^"\r\n]+)"[ \t]*\(updated:[ \t]*([^)\r\n]+)\)[ \t]*\[TASK_EDITED:([^\]\r\n]+)\]/g;
 						var text = textNode.textContent;
 						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
 						var inMarkdownFallback = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('[data-chat-markdown-fallback="true"]'));
 						var matches = [];
 						var m;
 						while ((m = regex.exec(text)) !== null) {
+							if (!m[3] || !m[3].trim()) continue;
 							if ((inToolOutput || inMarkdownFallback) && window.isInsideCode && window.isInsideCode(text, m.index, m.index + m[0].length)) continue;
 							matches.push(m);
 						}
@@ -3143,8 +3145,97 @@ templ ChatAutoScrollScript() {
 					});
 				};
 
-			// Persistent store for thinking section open states (survives DOM replacement by morph:outerHTML)
+			// Persistent stores survive streaming rerenders and HTMX morph replacement.
 			if (!window._thinkingOpenStates) window._thinkingOpenStates = {};
+			if (!window._toolOutputRowStates) window._toolOutputRowStates = {};
+			window.invalidateToolOutputLineCapacity = function() {
+				window._toolOutputCapacityCache = null;
+			};
+			if (!window._toolOutputCapacityInvalidationBound) {
+				window._toolOutputCapacityInvalidationBound = true;
+				window.addEventListener('resize', window.invalidateToolOutputLineCapacity, { passive: true });
+				if (window.visualViewport) window.visualViewport.addEventListener('resize', window.invalidateToolOutputLineCapacity, { passive: true });
+				if (window.MutationObserver && document.documentElement) {
+					var toolOutputThemeObserver = new MutationObserver(window.invalidateToolOutputLineCapacity);
+					toolOutputThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+					if (document.body) toolOutputThemeObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
+				}
+				if (document.fonts) {
+					if (document.fonts.addEventListener) {
+						document.fonts.addEventListener('loadingdone', window.invalidateToolOutputLineCapacity);
+						document.fonts.addEventListener('loadingerror', window.invalidateToolOutputLineCapacity);
+					}
+					document.fonts.ready.then(window.invalidateToolOutputLineCapacity);
+				}
+			}
+			function toolOutputCapacitySignature() {
+				var root = document.documentElement;
+				var body = document.body;
+				return [
+					window.innerWidth || 0,
+					window.innerHeight || 0,
+					window.devicePixelRatio || 1,
+					root ? root.getAttribute('data-theme') || '' : '',
+					root ? root.className || '' : '',
+					root ? root.getAttribute('style') || '' : '',
+					body ? body.className || '' : '',
+					body ? body.getAttribute('style') || '' : '',
+					document.fonts ? document.fonts.status : ''
+				].join('|');
+			}
+			function toolOutputLineCount(text) {
+				var matches = text.match(/\n/g);
+				return (matches ? matches.length : 0) + 1;
+			}
+			function resolveToolOutputLineCapacity() {
+				var signature = toolOutputCapacitySignature();
+				var cached = window._toolOutputCapacityCache;
+				if (cached && cached.signature === signature) return cached.capacity;
+
+				// Measure in the exact production OUT-row hierarchy so inherited font,
+				// line-height, theme, viewport max-height, and padding all participate.
+				var probe = document.createElement('div');
+				probe.className = 'stream-tool';
+				probe.style.cssText = 'position:fixed;left:-100000px;top:0;width:min(40rem,90vw);visibility:hidden;pointer-events:none;contain:layout style paint;';
+				var probeBody = document.createElement('div');
+				probeBody.className = 'stream-tool-body';
+				var probeGrid = document.createElement('div');
+				probeGrid.className = 'stream-tool-body-grid';
+				var probeRow = document.createElement('div');
+				probeRow.className = 'stream-tool-body-row';
+				var probeLabel = document.createElement('div');
+				probeLabel.className = 'stream-tool-body-label';
+				probeLabel.textContent = 'OUT';
+				var probeContent = document.createElement('div');
+				probeContent.className = 'stream-tool-body-content';
+				var probeScroll = document.createElement('div');
+				probeScroll.className = 'stream-tool-body-scroll';
+				var probePre = document.createElement('pre');
+				probePre.textContent = 'M\nM';
+				probeScroll.appendChild(probePre);
+				probeContent.appendChild(probeScroll);
+				probeRow.appendChild(probeLabel);
+				probeRow.appendChild(probeContent);
+				probeGrid.appendChild(probeRow);
+				probeBody.appendChild(probeGrid);
+				probe.appendChild(probeBody);
+				document.body.appendChild(probe);
+
+				var preStyle = window.getComputedStyle(probePre);
+				var lineHeight = parseFloat(preStyle.lineHeight);
+				if (!lineHeight || !isFinite(lineHeight)) lineHeight = probePre.getBoundingClientRect().height / 2;
+				if (!lineHeight || !isFinite(lineHeight)) lineHeight = 16;
+				var fontSignature = [preStyle.fontFamily, preStyle.fontSize, preStyle.fontWeight, preStyle.lineHeight, preStyle.letterSpacing].join('|');
+				probePre.textContent = '';
+				probePre.style.height = '100000px';
+				var resolvedMaxHeight = probeScroll.clientHeight;
+				if (!resolvedMaxHeight || !isFinite(resolvedMaxHeight)) resolvedMaxHeight = lineHeight;
+				probe.remove();
+
+				var capacity = Math.max(1, Math.floor(resolvedMaxHeight / lineHeight));
+				window._toolOutputCapacityCache = { signature: signature, fontSignature: fontSignature, capacity: capacity };
+				return capacity;
+			}
 			if (typeof window._chatRawRevisionCounter !== 'number') window._chatRawRevisionCounter = 0;
 			window.setChatRawContent = function(container, raw) {
 				raw = raw || '';
@@ -3764,12 +3855,18 @@ templ ChatAutoScrollScript() {
 			// block must independently remember whether it was pinned to bottom.
 			var prevToolBodyScrollStates = {};
 			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
-					var toolID = el.getAttribute('data-tool-render-id') || '';
-					var rowKind = el.getAttribute('data-tool-row') || '';
-					if (!toolID || !rowKind) return;
-					var pinned = el.getAttribute('data-scroll-pinned') !== 'false';
-					prevToolBodyScrollStates[toolID + ':' + rowKind] = { scrollTop: el.scrollTop || 0, pinned: pinned };
-				});
+				var toolID = el.getAttribute('data-tool-render-id') || '';
+				var rowKind = el.getAttribute('data-tool-row') || '';
+				if (!toolID || !rowKind) return;
+				var pinned = el.getAttribute('data-scroll-pinned') !== 'false';
+				var scrollState = { scrollTop: el.scrollTop || 0, pinned: pinned };
+				prevToolBodyScrollStates[toolID + ':' + rowKind] = scrollState;
+				var persistentStateKey = (containerKey || 'chat') + ':' + toolID + ':' + rowKind;
+				var persistentState = window._toolOutputRowStates[persistentStateKey] || {};
+				persistentState.scrollTop = scrollState.scrollTop;
+				persistentState.pinned = scrollState.pinned;
+				window._toolOutputRowStates[persistentStateKey] = persistentState;
+			});
 			if (containerKey && prevThinkingStates.length > 0) {
 					window._thinkingOpenStates[containerKey] = prevThinkingStates.slice();
 				}
@@ -3848,11 +3945,18 @@ templ ChatAutoScrollScript() {
 				var inLabel = '';
 				var inContent = '';
 				var dn = toolDisplayName(seg.name);
-				function trackScrollPin(el) {
+				function rowStateKey(rowKind) {
+					return (containerKey || 'chat') + ':' + (seg.toolRenderID || '') + ':' + rowKind;
+				}
+				function trackScrollPin(el, stateKey) {
 					el.setAttribute('data-scroll-pinned', 'true');
 					el.addEventListener('scroll', function() {
 						var pinned = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
 						el.setAttribute('data-scroll-pinned', pinned ? 'true' : 'false');
+						var state = window._toolOutputRowStates[stateKey] || {};
+						state.scrollTop = el.scrollTop || 0;
+						state.pinned = pinned;
+						window._toolOutputRowStates[stateKey] = state;
 					}, { passive: true });
 				}
 
@@ -3869,7 +3973,6 @@ templ ChatAutoScrollScript() {
 
 				var outputText = seg.resultOutput ? seg.resultOutput.trim() : '';
 				var hasOut = outputText !== '';
-
 				if (!hasIn && !hasOut) return null;
 
 				var body = document.createElement('div');
@@ -3889,7 +3992,7 @@ templ ChatAutoScrollScript() {
 					inScroll.className = 'stream-tool-body-scroll';
 					inScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
 					inScroll.setAttribute('data-tool-row', 'in');
-					trackScrollPin(inScroll);
+					trackScrollPin(inScroll, rowStateKey('in'));
 					var inPre = document.createElement('pre');
 					inPre.textContent = inContent;
 					inScroll.appendChild(inPre);
@@ -3907,19 +4010,93 @@ templ ChatAutoScrollScript() {
 					outLbl.textContent = 'OUT';
 					var outVal = document.createElement('div');
 					outVal.className = 'stream-tool-body-content';
-					var outScroll = document.createElement('div');
-					outScroll.className = 'stream-tool-body-scroll';
-					outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
-					outScroll.setAttribute('data-tool-row', 'out');
-					trackScrollPin(outScroll);
-					var outPre = document.createElement('pre');
-					if (shouldYieldPreparation && outputText.length > 64 * 1024) {
-						pendingLargeToolOutputs.push({ node: outPre, text: outputText, offset: 0 });
-					} else {
-						outPre.textContent = outputText;
+					var lineCount = toolOutputLineCount(outputText);
+					var shouldCollapse = lineCount > 1 && lineCount > resolveToolOutputLineCapacity();
+					var stateKey = rowStateKey('out');
+					var rowState = window._toolOutputRowStates[stateKey] || {};
+					var expanded = shouldCollapse ? rowState.expanded === true : true;
+					var outScroll = null;
+					var toggle = null;
+					var materializationVersion = 0;
+
+					function hydrateOutputLinks() {
+						if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(outVal);
+						if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(outVal);
 					}
-					outScroll.appendChild(outPre);
-					outVal.appendChild(outScroll);
+					function restoreOutputScroll() {
+						if (!outScroll) return;
+						if (rowState.pinned === false) {
+							outScroll.scrollTop = rowState.scrollTop || 0;
+							outScroll.setAttribute('data-scroll-pinned', 'false');
+						} else {
+							outScroll.scrollTop = Number.MAX_SAFE_INTEGER;
+							outScroll.setAttribute('data-scroll-pinned', 'true');
+						}
+					}
+					function materializeOutput(useInitialChunkQueue) {
+						if (outScroll) return;
+						var version = ++materializationVersion;
+						outScroll = document.createElement('div');
+						outScroll.className = 'stream-tool-body-scroll';
+						outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
+						outScroll.setAttribute('data-tool-row', 'out');
+						trackScrollPin(outScroll, stateKey);
+						var outPre = document.createElement('pre');
+						outScroll.appendChild(outPre);
+						outVal.appendChild(outScroll);
+						if (useInitialChunkQueue && shouldYieldPreparation && outputText.length > 64 * 1024) {
+							pendingLargeToolOutputs.push({ node: outPre, text: outputText, offset: 0 });
+							return;
+						}
+						if (outputText.length <= 64 * 1024) {
+							outPre.textContent = outputText;
+							restoreOutputScroll();
+							hydrateOutputLinks();
+							return;
+						}
+						var offset = 0;
+						function appendOutputChunk() {
+							if (!outScroll || version !== materializationVersion) return;
+							var end = Math.min(offset + 64 * 1024, outputText.length);
+							outPre.appendChild(document.createTextNode(outputText.substring(offset, end)));
+							offset = end;
+							if (offset < outputText.length) {
+								setTimeout(appendOutputChunk, 0);
+								return;
+							}
+							restoreOutputScroll();
+							hydrateOutputLinks();
+						}
+						appendOutputChunk();
+					}
+					function collapseOutput() {
+						materializationVersion++;
+						if (outScroll && outScroll.parentNode === outVal) outVal.removeChild(outScroll);
+						outScroll = null;
+					}
+					function updateToggle() {
+						if (!toggle) return;
+						toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+						toggle.textContent = (expanded ? 'Hide output (' : 'Show output (') + lineCount + ' lines)';
+					}
+
+					if (shouldCollapse) {
+						toggle = document.createElement('button');
+						toggle.type = 'button';
+						toggle.className = 'stream-tool-output-toggle';
+						updateToggle();
+						toggle.addEventListener('click', function() {
+							expanded = !expanded;
+							rowState.expanded = expanded;
+							window._toolOutputRowStates[stateKey] = rowState;
+							updateToggle();
+							if (expanded) materializeOutput(false);
+							else collapseOutput();
+						});
+						outVal.appendChild(toggle);
+					}
+					if (expanded) materializeOutput(true);
+
 					outRow.appendChild(outLbl);
 					outRow.appendChild(outVal);
 					grid.appendChild(outRow);
@@ -4054,17 +4231,17 @@ templ ChatAutoScrollScript() {
 			// Restore per-tool output scroll positions without synchronously measuring
 			// every tool body. CSS overflow:auto handles non-overflowing bodies.
 			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
-					var toolID = el.getAttribute('data-tool-render-id') || '';
-					var rowKind = el.getAttribute('data-tool-row') || '';
-					var state = prevToolBodyScrollStates[toolID + ':' + rowKind];
-					if (!state || state.pinned) {
-						el.scrollTop = Number.MAX_SAFE_INTEGER;
-						el.setAttribute('data-scroll-pinned', 'true');
-					} else {
-						el.scrollTop = state.scrollTop;
-						el.setAttribute('data-scroll-pinned', 'false');
-					}
-				});
+				var toolID = el.getAttribute('data-tool-render-id') || '';
+				var rowKind = el.getAttribute('data-tool-row') || '';
+				var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(containerKey || 'chat') + ':' + toolID + ':' + rowKind];
+				if (!state || state.pinned) {
+					el.scrollTop = Number.MAX_SAFE_INTEGER;
+					el.setAttribute('data-scroll-pinned', 'true');
+				} else {
+					el.scrollTop = state.scrollTop;
+					el.setAttribute('data-scroll-pinned', 'false');
+				}
+			});
 			// Convert [TASK_ID:xxx] references to clickable links after rendering
 			if (window.convertTaskLinksInMessage) {
 				window.convertTaskLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);

@@ -3,12 +3,16 @@ package components
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -2153,8 +2157,7 @@ func TestSharedTaskResultLinkConversionAvailableOnDirectTaskThreadLoad(t *testin
 	for _, snippet := range []string{
 		"var encodedTaskId = encodeURIComponent(taskId.trim())",
 		"link.href = '/tasks/' + encodedTaskId",
-		"if (inCode || inToolOutput) continue",
-		"(inToolOutput || inMarkdownFallback) && window.isInsideCode",
+		"if (inCode && !inToolOutput) continue", "(inToolOutput || inMarkdownFallback) && window.isInsideCode",
 		"window.convertTaskLinksInMessage(bubble)",
 		"window.convertTaskEditLinksInMessage(bubble)",
 	} {
@@ -2248,6 +2251,10 @@ const fallbackCreate = message('Inline \x60- "Fallback inline" (backlog) [TASK_I
 const fallbackEdit = message('Inline \x60- "Fallback inline edit" (updated: title) [TASK_EDITED:fallback/inline-edit]\x60\nMultiline \x60\x60- "Fallback multiline edit" (updated: prompt)\n[TASK_EDITED:fallback/multiline-edit]\x60\x60\n~~~text\n- "Fallback fence edit" (updated: priority) [TASK_EDITED:fallback/fence-edit]\n~~~\n\x60\x60\x60\x60\x60text\r\x60\x60\x60\r- "Fallback bare CR edit" (updated: title) [TASK_EDITED:fallback/bare-cr-edit]\r\x60\x60\x60\x60\x60\r- "Fallback real edit" (updated: title) [TASK_EDITED:fallback/real-edit]', 'fallback');
 const fallbackToolCreate = message('Example \x60- "Fallback tool coded" (backlog) [TASK_ID:fallback/tool-coded]\x60\n~~~text\r- "Fallback tool bare CR" (backlog) [TASK_ID:fallback/tool-bare-cr]\r~~~\r- "Fallback tool real" (active) [TASK_ID:fallback/tool-real]', 'fallback-tool');
 const fallbackToolEdit = message('~~~text\n- "Fallback tool coded edit" (updated: title) [TASK_EDITED:fallback/tool-coded-edit]\n~~~\n\x60\x60\x60text\r- "Fallback tool bare CR edit" (updated: title) [TASK_EDITED:fallback/tool-bare-cr-edit]\r\x60\x60\x60\r- "Fallback tool real edit" (updated: prompt) [TASK_EDITED:fallback/tool-real-edit]', 'fallback-tool');
+const sourceCreate = message('package chatcontrol\n\ncase "create_task":\n\treturn "source value"\n[TASK_ID:source/create]', 'tool-pre');
+const sourceEdit = message('package chatcontrol\r\n\r\ncase "edit_task":\r\n\treturn "source value"\r\n[TASK_EDITED:source/edit]', 'tool-pre');
+const blankCreate = message('- "Blank create" (backlog) [TASK_ID: \t]', 'tool-pre');
+const blankEdit = message('- "Blank edit" (updated: title) [TASK_EDITED: \t]', 'tool-pre');
 window.convertTaskLinksInMessage(inlineCreate);
 window.convertTaskEditLinksInMessage(fencedEdit);
 window.convertTaskLinksInMessage(codedToolCreate);
@@ -2266,18 +2273,27 @@ window.convertTaskLinksInMessage(fallbackCreate);
 window.convertTaskEditLinksInMessage(fallbackEdit);
 window.convertTaskLinksInMessage(fallbackToolCreate);
 window.convertTaskEditLinksInMessage(fallbackToolEdit);
-if (replacements.length !== 4) { console.error('replacements', replacements.length); process.exit(1); }
+window.convertTaskLinksInMessage(sourceCreate);
+window.convertTaskEditLinksInMessage(sourceEdit);
+window.convertTaskLinksInMessage(blankCreate);
+window.convertTaskEditLinksInMessage(blankEdit);
+if (replacements.length !== 10) { console.error('replacements', replacements.length, replacements.map(item => anchors(item.next).map(link => link.href).join(','))); process.exit(1); }
 if (inlineCreate.nodes[0].textContent !== '- "Inline example" (backlog) [TASK_ID:inline/create]' || fencedEdit.nodes[0].textContent !== '- "Fence example" (updated: title) [TASK_EDITED:fence/edit]' || codedToolCreate.nodes[0].textContent.indexOf('[TASK_ID:example/create]') === -1 || codedToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:example/edit]') === -1 || multilineToolCreate.nodes[0].textContent.indexOf('[TASK_ID:multiline/create]') === -1 || multilineToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:multiline/edit]') === -1 || unmatchedThenCreate.nodes[0].textContent.indexOf('[TASK_ID:later/create]') === -1 || unmatchedThenEdit.nodes[0].textContent.indexOf('[TASK_EDITED:later/edit]') === -1 || unicodeFenceCreate.nodes[0].textContent.indexOf('[TASK_ID:unicode/create]') === -1 || unicodeFenceEdit.nodes[0].textContent.indexOf('[TASK_EDITED:unicode/edit]') === -1 || bareCRFenceCreate.nodes[0].textContent.indexOf('[TASK_ID:bare-cr/create]') === -1 || bareCRFenceEdit.nodes[0].textContent.indexOf('[TASK_EDITED:bare-cr/edit]') === -1) { console.error('coded metadata changed'); process.exit(2); }
-const fallbackCreateOutput = replacements[2];
-const fallbackEditOutput = replacements[3];
+const fallbackCreateOutput = replacements[6];
+const fallbackEditOutput = replacements[7];
 if (anchors(fallbackCreateOutput.next).length !== 1 || anchors(fallbackCreateOutput.next)[0].href !== '/tasks/fallback%2Freal' || buttons(fallbackCreateOutput.next).length !== 1) { console.error('fallback create hydration', fallbackCreateOutput); process.exit(9); }
 if (anchors(fallbackEditOutput.next).length !== 1 || anchors(fallbackEditOutput.next)[0].href !== '/tasks/fallback%2Freal-edit') { console.error('fallback edit hydration', fallbackEditOutput); process.exit(10); }
 if (fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/inline]') === -1 || fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/multiline]') === -1 || fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/fence]') === -1 || fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/bare-cr]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/inline-edit]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/multiline-edit]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/fence-edit]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/bare-cr-edit]') === -1 || fallbackToolCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/tool-bare-cr]') === -1 || fallbackToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/tool-bare-cr-edit]') === -1) { console.error('fallback coded metadata changed'); process.exit(11); }
 if (toolCreate.nodes[0].textContent.indexOf('[TASK_ID:tool/create]') === -1 || toolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:tool/edit]') === -1 || fallbackToolCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/tool-real]') === -1 || fallbackToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/tool-real-edit]') === -1) { console.error('preformatted tool metadata changed'); process.exit(12); }
 const links = replacements.flatMap(item => anchors(item.next));
-if (links.length !== 4) { console.error('links', links.length); process.exit(3); }
+if (links.length !== 10) { console.error('links', links.length); process.exit(3); }
 if (links[0].href !== '/tasks/task%2Fid%3Funsafe' || links[0].textContent !== 'Created') { console.error(links[0]); process.exit(4); }
 if (links[1].href !== '/tasks/edit%2Fid' || links[1].textContent !== '"Edited"') { console.error(links[1]); process.exit(5); }
+if (links[2].href !== '/tasks/tool%2Fcreate' || links[2].textContent !== 'Tool-created' || links[2].textContent.includes('\n')) { console.error('tool create', links[2]); process.exit(13); }
+if (links[3].href !== '/tasks/tool%2Fedit' || links[3].textContent !== '"Tool-edited"' || links[3].textContent.includes('\n')) { console.error('tool edit', links[3]); process.exit(14); }
+if (links[4].href !== '/tasks/escaped%2Fcreate' || links[5].href !== '/tasks/escaped%2Fedit') { console.error('escaped real links', links[4], links[5]); process.exit(15); }
+if (links[8].href !== '/tasks/fallback%2Ftool-real' || links[9].href !== '/tasks/fallback%2Ftool-real-edit') { console.error('fallback tool links', links[8], links[9]); process.exit(17); }
+if (anchors(sourceCreate).length || anchors(sourceEdit).length || anchors(blankCreate).length || anchors(blankEdit).length) { console.error('invalid source or blank marker linked'); process.exit(16); }
 const createButtons = buttons(replacements[0].next);
 if (createButtons.length !== 1 || createButtons[0].className.indexOf('ov-task-result-start-btn') === -1) { console.error('buttons', createButtons); process.exit(8); }
 `
@@ -2296,9 +2312,10 @@ func TestSharedTaskResultLinkConversionGeneratedParity(t *testing.T) {
 		"window.convertTaskLinksInMessage = function(messageElement)",
 		"window.convertTaskEditLinksInMessage = function(messageElement)",
 		"var encodedTaskId = encodeURIComponent(taskId.trim())",
-		"if (inCode || inToolOutput) continue",
+		"if (inCode && !inToolOutput) continue",
 		`textNode.parentElement.closest('[data-chat-markdown-fallback=\"true\"]')`,
 		"(inToolOutput || inMarkdownFallback) && window.isInsideCode",
+		"if (!m[3] || !m[3].trim()) continue;",
 	} {
 		if !strings.Contains(content, snippet) {
 			t.Fatalf("generated shared template missing task-result conversion snippet %q", snippet)
@@ -2315,9 +2332,8 @@ func TestSharedTaskResultLinkConversionGeneratedParity(t *testing.T) {
 func TestTaskLinkRegex_MatchesBothPlainAndMarkdownRendered(t *testing.T) {
 	// This is the JS regex from convertTaskLinksInMessage in chat.templ
 	// Go's regexp uses the same syntax (with minor escaping differences)
-	taskIDRegex := regexp.MustCompile(`(?:-\s*)?"([^"]+)"\s*(?:\(([^)]+)\)\s*)?\[TASK_ID:([^\]]+)\]`)
-	taskEditRegex := regexp.MustCompile(`(?:-\s*)?"([^"]+)"\s*\(updated:\s*([^)]+)\)\s*\[TASK_EDITED:([^\]]+)\]`)
-
+	taskIDRegex := regexp.MustCompile(`(?:-[ \t]*)?"([^"\r\n]+)"[ \t]*(?:\(([^)\r\n]+)\)[ \t]*)?\[TASK_ID:([^\]\r\n]+)\]`)
+	taskEditRegex := regexp.MustCompile(`(?:-[ \t]*)?"([^"\r\n]+)"[ \t]*\(updated:[ \t]*([^)\r\n]+)\)[ \t]*\[TASK_EDITED:([^\]\r\n]+)\]`)
 	tests := []struct {
 		name        string
 		input       string
@@ -2372,8 +2388,31 @@ func TestTaskLinkRegex_MatchesBothPlainAndMarkdownRendered(t *testing.T) {
 			expectExtra: "title, priority",
 			expectID:    "task789",
 		},
+		{
+			name:        "create marker on later source line",
+			input:       "case \"create_task\":\n\treturn \"source value\"\n[TASK_ID:source-task]",
+			regex:       taskIDRegex,
+			expectMatch: false,
+		},
+		{
+			name:        "edit marker on later source line",
+			input:       "case \"edit_task\":\r\n\treturn \"source value\"\r\n[TASK_EDITED:source-task]",
+			regex:       taskEditRegex,
+			expectMatch: false,
+		},
+		{
+			name:        "create title crosses line",
+			input:       "- \"Crossed\nline\" (backlog) [TASK_ID:crossed]",
+			regex:       taskIDRegex,
+			expectMatch: false,
+		},
+		{
+			name:        "edit fields cross line",
+			input:       "- \"Edited\" (updated: title\npriority) [TASK_EDITED:crossed]",
+			regex:       taskEditRegex,
+			expectMatch: false,
+		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			matches := tt.regex.FindStringSubmatch(tt.input)
@@ -2555,17 +2594,17 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		t.Fatal("rendered script must define DOM transcript cleaning")
 	}
 	bubbleCleaner := content[bubbleStart:bubbleEnd]
-	rendererStart := strings.Index(content, "// Persistent store for thinking section")
+	rendererStart := strings.Index(content, "// Persistent stores survive streaming rerenders")
 	rendererEnd := strings.Index(content, "// window.codeRanges and window.isInsideCode are installed by the base layout")
 	if rendererStart == -1 || rendererEnd == -1 || rendererEnd <= rendererStart {
 		t.Fatal("rendered script must define shared streaming rendering")
 	}
 	renderer := content[rendererStart:rendererEnd]
-	script := "global.window = {};\n" +
+	script := "global.window = { addEventListener: function() {}, innerWidth: 1280, innerHeight: 900, devicePixelRatio: 1, getComputedStyle: function() { return { lineHeight: '14px', fontFamily: 'monospace', fontSize: '12px', fontWeight: '400', letterSpacing: 'normal' }; } };\n" +
 		"global.NodeFilter = { SHOW_TEXT: 4 };\n" +
 		"global.Blob = function() {}; window.URL = { createObjectURL: function() { return 'blob:test'; } }; global.Worker = function() {}; Worker.prototype.terminate = function() {}; Worker.prototype.postMessage = function(value) { var self = this; setTimeout(function() { self.onmessage({ data: { ranges: window.codeRanges(value) } }); }, 0); };\n" +
-		"function element(tag) { return { tagName: tag, className: '', textContent: '', children: [], replaceCount: 0, style: {}, classList: { add: function() {}, remove: function() {} }, addEventListener: function() {}, appendChild: function(child) { this.children.push(child); return child; }, replaceChildren: function(fragment) { this.replaceCount++; this.children = (fragment && fragment.children ? fragment.children : []).slice(); }, querySelectorAll: function() { return []; }, getAttribute: function() { return null; }, setAttribute: function() {}, closest: function() { return null; } }; }\n" +
-		"global.document = { createTreeWalker: function(element) { let i = 0; return { nextNode: function() { return element.nodes[i++] || null; } }; }, createElement: element, createDocumentFragment: function() { return element('fragment'); }, createTextNode: function(text) { return { textContent: text }; } };\n" +
+		"function element(tag) { return { tagName: tag, className: '', textContent: '', children: [], replaceCount: 0, style: {}, clientHeight: 416, classList: { add: function() {}, remove: function() {} }, addEventListener: function() {}, appendChild: function(child) { this.children.push(child); child.parentNode = this; return child; }, removeChild: function(child) { this.children = this.children.filter(function(candidate) { return candidate !== child; }); }, remove: function() {}, getBoundingClientRect: function() { return { height: 28 }; }, replaceChildren: function(fragment) { this.replaceCount++; this.children = (fragment && fragment.children ? fragment.children : []).slice(); }, querySelectorAll: function() { return []; }, getAttribute: function() { return null; }, setAttribute: function() {}, closest: function() { return null; } }; }\n" +
+		"global.document = { documentElement: { getAttribute: function() { return ''; }, className: '' }, body: { className: '', getAttribute: function() { return ''; }, appendChild: function() {} }, createTreeWalker: function(element) { let i = 0; return { nextNode: function() { return element.nodes[i++] || null; } }; }, createElement: element, createDocumentFragment: function() { return element('fragment'); }, createTextNode: function(text) { return { textContent: text }; } };\n" +
 		codeHelpers + "\n" + content[start:end] + "\n" + renderer + "\n" + bubbleCleaner + "\n" +
 		"const got = window.cleanTranscriptControls(" + strconv.Quote(input) + ", true);\n" +
 		"if (got !== " + strconv.Quote(want) + ") { console.error(JSON.stringify(got)); process.exit(1); }\n" +
@@ -2828,7 +2867,7 @@ func TestStatusCleaning_ScopesStreamingAndDOMToFinalCanonicalControl(t *testing.
 	if err != nil {
 		t.Skip("node is required to execute the rendered DOM status cleaner")
 	}
-	script := "global.window = {};\n" +
+	script := "global.window = { addEventListener: function() {}, innerWidth: 1280, innerHeight: 900, devicePixelRatio: 1, getComputedStyle: function() { return { lineHeight: '14px', fontFamily: 'monospace', fontSize: '12px', fontWeight: '400', letterSpacing: 'normal' }; } };\n" +
 		"global.NodeFilter = { SHOW_TEXT: 4 };\n" +
 		"global.document = { createTreeWalker: function(element) { let i = 0; return { nextNode: function() { return element.nodes[i++] || null; } }; } };\n" +
 		codeHelpers + "\n" + content[start:end] + "\n" +
@@ -4230,6 +4269,248 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 	}
 }
 
+func TestLargeToolOutputHydrationIsLazyAndStatefulInChrome(t *testing.T) {
+	chrome := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+	if _, err := os.Stat(chrome); err != nil {
+		for _, candidate := range []string{"google-chrome", "chromium", "chromium-browser"} {
+			if resolved, lookupErr := exec.LookPath(candidate); lookupErr == nil {
+				chrome = resolved
+				break
+			}
+		}
+		if _, err := os.Stat(chrome); err != nil {
+			t.Skip("Chrome or Chromium is required for integrated tool-output layout validation")
+		}
+	}
+
+	var baseHTML bytes.Buffer
+	if err := layout.Base("Large tool output fixture", nil, "").Render(context.Background(), &baseHTML); err != nil {
+		t.Fatalf("render base layout: %v", err)
+	}
+	var chatScript bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &chatScript); err != nil {
+		t.Fatalf("render shared chat script: %v", err)
+	}
+
+	styles := strings.Join(regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(baseHTML.String(), -1), "")
+	html := `<!DOCTYPE html><html lang="en" data-theme="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">` + styles + `</head><body>`
+	fixture := `<main id="fixture-root"><div id="streaming-message-large-fixture" class="chat-stream-content chat-bubble-assistant-msg"></div></main><script>` + renderedBaseMarkdownCodeHelpers(t) + `</script>` + chatScript.String() + `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  var result = document.getElementById('fixture-root');
+  var container = document.getElementById('streaming-message-large-fixture');
+  var longTasks = [];
+  if (window.PerformanceObserver) {
+    try {
+      var observer = new PerformanceObserver(function(list) {
+        list.getEntries().forEach(function(entry) { longTasks.push(entry.duration); });
+      });
+      observer.observe({ entryTypes: ['longtask'] });
+    } catch (_) {}
+  }
+  window.renderChatMarkdown = function(text) {
+    return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+  window.renderChatMarkdownAsync = null;
+  window.addCodeCopyButtons = function() {};
+  window.codeRangesAsync = function(text) {
+    return new Promise(function(resolve) {
+      setTimeout(function() { resolve(window.codeRanges(text)); }, 0);
+    });
+  };
+
+  function repeatedLines(count, width, prefix) {
+    var rows = [];
+    for (var i = 0; i < count; i++) rows.push((prefix + '-' + i + ' ').padEnd(width, 'x'));
+    return rows.join('\n');
+  }
+  var largeRows = [
+    'package chatcontrol',
+    '',
+    'case "create_task":',
+    '\treturn "source value"',
+    '[TASK_ID:source/create]'
+  ];
+  for (var line = largeRows.length; line < 889; line++) largeRows.push(('chat_action_tools.go source line ' + line + ' ').padEnd(56, 'x'));
+  largeRows.push('- "Large created" (backlog) [TASK_ID:large/create]');
+  largeRows.push('\u0060- "Coded create" (backlog) [TASK_ID:coded/create]\u0060');
+  largeRows.push('- "Large edited" (updated: title) [TASK_EDITED:large/edit]');
+  var largeOutput = largeRows.join('\n');
+
+  var transcript = '[Thinking]\nPreparing synthetic large transcript.\n[/Thinking]\n' +
+    '- "Assistant created" (backlog) [TASK_ID:assistant/create]\n' +
+    '- "Assistant edited" (updated: title) [TASK_EDITED:assistant/edit]\n';
+  for (var tool = 0; tool < 114; tool++) {
+    var output = tool === 0 ? largeOutput : repeatedLines(40, 100, 'tool-' + tool);
+    transcript += '[Using tool: read_file | fixture-' + tool + '.go]\n[Tool read_file done]\n' + output + '\n[/Tool]\n';
+  }
+  var wideOutput = 'wide '.padEnd(12000, 'w');
+  transcript += '[Using tool: read_file | wide.txt]\n[Tool read_file done]\n' + wideOutput + '\n[/Tool]\n';
+  transcript += '[Using tool: read_file | short.txt]\n[Tool read_file done]\nshort output\n[/Tool]\n';
+
+  function fail(message) { throw new Error(message); }
+  function waitFor(check, timeout) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        if (check()) { resolve(); return; }
+        if (performance.now() - started > timeout) { reject(new Error('timed out waiting for output materialization')); return; }
+        setTimeout(poll, 5);
+      }
+      poll();
+    });
+  }
+
+  var started = performance.now();
+  Promise.resolve(window.renderStreamingContent(container, transcript, true)).then(async function(committed) {
+    if (!committed) fail('large hydration did not commit');
+    var hydrationMS = performance.now() - started;
+    await new Promise(function(resolve) { setTimeout(resolve, 0); });
+    var initialMaxLongTask = longTasks.length ? Math.max.apply(Math, longTasks) : 0;
+    var tools = container.querySelectorAll('.stream-tool');
+    if (tools.length !== 116) fail('expected 116 tool cards, got ' + tools.length + ': ' + container.innerHTML.substring(0, 500));
+    var toggles = Array.from(container.querySelectorAll('.stream-tool-output-toggle'));
+    if (toggles.length !== 114) fail('expected 114 vertically overflowing OUT toggles, got ' + toggles.length);
+    var collapsed = toggles.filter(function(button) { return button.getAttribute('aria-expanded') === 'false'; });
+    if (collapsed.length !== 114) fail('all overflowing OUT rows must start collapsed');
+    collapsed.forEach(function(button) {
+      var content = button.closest('.stream-tool-body-content');
+      if (content.querySelector('pre') || content.querySelector('.stream-tool-body-scroll')) fail('collapsed output materialized a DOM surface');
+    });
+    if (container.querySelectorAll('.stream-tool-body-scroll > pre').length !== 2) fail('only short and horizontal one-line OUT values should initially materialize');
+    if (container.querySelector('[data-tool-output]')) fail('tool output must not be duplicated in data attributes');
+    var shortPre = Array.from(container.querySelectorAll('.stream-tool-body-scroll > pre')).find(function(pre) { return pre.textContent === 'short output'; });
+    var widePre = Array.from(container.querySelectorAll('.stream-tool-body-scroll > pre')).find(function(pre) { return pre.textContent.length === wideOutput.length; });
+    if (!shortPre || !widePre) fail('short or horizontally wide one-line output was collapsed');
+    if (!container.querySelector('a[href="/tasks/assistant%2Fcreate"]') || !container.querySelector('a[href="/tasks/assistant%2Fedit"]')) fail('assistant task links were not hydrated');
+
+    var largeToggle = toggles.find(function(button) { return button.textContent === 'Show output (892 lines)'; });
+    if (!largeToggle || largeToggle.tagName !== 'BUTTON' || largeToggle.type !== 'button') fail('large output toggle is not an accessible native button');
+    var renderVersion = container._streamRenderVersion;
+    var expansionStarted = performance.now();
+    largeToggle.focus();
+    largeToggle.click();
+    await waitFor(function() {
+      var pre = largeToggle.closest('.stream-tool-body-content').querySelector('pre');
+      return pre && pre.textContent.indexOf('Large edited') !== -1;
+    }, 1000);
+    var expandedContent = largeToggle.closest('.stream-tool-body-content');
+    var expansionMS = performance.now() - expansionStarted;
+    if (largeToggle.getAttribute('aria-expanded') !== 'true' || !expandedContent.querySelector('.stream-tool-body-scroll > pre')) fail('expansion did not materialize the styled OUT subtree');
+    if (container._streamRenderVersion !== renderVersion) fail('expanding one OUT rerendered the response');
+    if (!expandedContent.querySelector('a[href="/tasks/large%2Fcreate"]') || !expandedContent.querySelector('a[href="/tasks/large%2Fedit"]')) fail('expanded tool task links were not hydrated');
+    if (expandedContent.querySelector('a[href="/tasks/source%2Fcreate"]') || expandedContent.querySelector('a[href="/tasks/coded%2Fcreate"]')) fail('source or Markdown-code task marker became a link');
+    Array.from(container.querySelectorAll('a')).forEach(function(anchor) { if (/\r|\n/.test(anchor.textContent)) fail('anchor text contains a newline'); });
+
+    await Promise.resolve(window.renderStreamingContent(container, transcript, true));
+    largeToggle = Array.from(container.querySelectorAll('.stream-tool-output-toggle')).find(function(button) { return button.textContent === 'Hide output (892 lines)'; });
+    if (!largeToggle || !largeToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('rerender did not preserve expanded state');
+    var collapseStarted = performance.now();
+    largeToggle.click();
+    var collapseMS = performance.now() - collapseStarted;
+    if (largeToggle.getAttribute('aria-expanded') !== 'false' || largeToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('collapse did not release the large DOM surface');
+    document.documentElement.setAttribute('data-theme', 'light');
+    window.dispatchEvent(new Event('resize'));
+    await Promise.resolve(window.renderStreamingContent(container, transcript, true));
+    largeToggle = Array.from(container.querySelectorAll('.stream-tool-output-toggle')).find(function(button) { return button.textContent === 'Show output (892 lines)'; });
+    if (!largeToggle || largeToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('rerender did not preserve collapsed state');
+
+    result.setAttribute('data-test-result', 'pass');
+    result.setAttribute('data-hydration-ms', hydrationMS.toFixed(1));
+    result.setAttribute('data-max-long-task-ms', initialMaxLongTask.toFixed(1));
+    result.setAttribute('data-expansion-ms', expansionMS.toFixed(1));
+    result.setAttribute('data-collapse-ms', collapseMS.toFixed(1));
+  }).catch(function(error) {
+    result.setAttribute('data-test-result', 'fail');
+    result.setAttribute('data-test-error', String(error && error.stack || error));
+  });
+});
+</script>`
+	html += fixture + "</body></html>"
+	fixtureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer fixtureServer.Close()
+
+	stdoutPath := filepath.Join(t.TempDir(), "chrome-stdout.html")
+	stderrPath := filepath.Join(t.TempDir(), "chrome-stderr.log")
+	stdoutFile, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatalf("create Chrome stdout file: %v", err)
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr file: %v", err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new",
+		"--no-sandbox",
+		"--disable-gpu",
+		"--disable-software-rasterizer",
+		"--disable-dev-shm-usage",
+		"--disable-background-networking",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"),
+		"--window-size=1280,900",
+		"--virtual-time-budget=10000",
+		"--dump-dom",
+		fixtureServer.URL,
+	)
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start Chrome fixture: %v", err)
+	}
+	deadline := time.Now().Add(25 * time.Second)
+	var result string
+	for time.Now().Before(deadline) {
+		if output, readErr := os.ReadFile(stdoutPath); readErr == nil {
+			result = string(output)
+			if strings.Contains(result, `data-test-result="pass"`) || strings.Contains(result, `data-test-result="fail"`) {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	if !strings.Contains(result, `data-test-result="pass"`) {
+		rootState := regexp.MustCompile(`<main id="fixture-root"[^>]*>`).FindString(result)
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(result) > 4000 {
+			result = result[len(result)-4000:]
+		}
+		if len(stderr) > 4000 {
+			stderr = stderr[len(stderr)-4000:]
+		}
+		t.Fatalf("large tool-output browser fixture failed:\nFixture state: %s\nDOM tail:\n%s\nChrome stderr tail:\n%s", rootState, result, stderr)
+	}
+	metrics := regexp.MustCompile(`data-hydration-ms="([^"]+)" data-max-long-task-ms="([^"]+)" data-expansion-ms="([^"]+)" data-collapse-ms="([^"]+)"`).FindStringSubmatch(result)
+	if len(metrics) != 5 {
+		t.Fatalf("synthetic browser fixture did not report performance metrics")
+	}
+	hydrationMS, hydrationErr := strconv.ParseFloat(metrics[1], 64)
+	maxLongTaskMS, longTaskErr := strconv.ParseFloat(metrics[2], 64)
+	expansionMS, expansionErr := strconv.ParseFloat(metrics[3], 64)
+	collapseMS, collapseErr := strconv.ParseFloat(metrics[4], 64)
+	if hydrationErr != nil || longTaskErr != nil || expansionErr != nil || collapseErr != nil {
+		t.Fatalf("parse synthetic browser metrics: hydration=%v long-task=%v expansion=%v collapse=%v", hydrationErr, longTaskErr, expansionErr, collapseErr)
+	}
+	if hydrationMS > 2000 {
+		t.Fatalf("synthetic large hydration exceeded 2s acceptance ceiling: %.1f ms", hydrationMS)
+	}
+	if maxLongTaskMS > 50 {
+		t.Fatalf("synthetic hydration exceeded 50ms slice ceiling: %.1f ms", maxLongTaskMS)
+	}
+	if expansionMS > 200 || collapseMS > 200 {
+		t.Fatalf("tool output interaction exceeded 200ms target: expansion %.1f ms, collapse %.1f ms", expansionMS, collapseMS)
+	}
+	t.Logf("synthetic large hydration: %.1f ms, max observed long task: %.1f ms, expansion: %.1f ms, collapse: %.1f ms", hydrationMS, maxLongTaskMS, expansionMS, collapseMS)
+}
+
 func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
@@ -4243,18 +4524,32 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"var toolID = el.getAttribute('data-tool-render-id') || ''",
 		"var rowKind = el.getAttribute('data-tool-row') || ''",
 		"var pinned = el.getAttribute('data-scroll-pinned') !== 'false'",
-		"function trackScrollPin(el)",
+		"function trackScrollPin(el, stateKey)",
 		"el.addEventListener('scroll'",
 		"el.setAttribute('data-scroll-pinned', pinned ? 'true' : 'false')",
 		"inScroll.className = 'stream-tool-body-scroll'",
-		"outScroll.className = 'stream-tool-body-scroll'",
 		"inScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
-		"outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
 		"el.scrollTop = Number.MAX_SAFE_INTEGER",
 		"el.scrollTop = state.scrollTop",
 		"var outputText = seg.resultOutput ? seg.resultOutput.trim() : ''",
 		"var hasOut = outputText !== ''",
-		"outPre.textContent = outputText",
+		"function toolOutputLineCount(text)",
+		"function resolveToolOutputLineCapacity()",
+		"probe.className = 'stream-tool'",
+		"probeBody.className = 'stream-tool-body'",
+		"probeGrid.className = 'stream-tool-body-grid'",
+		"probeRow.className = 'stream-tool-body-row'",
+		"probeContent.className = 'stream-tool-body-content'",
+		"probeScroll.className = 'stream-tool-body-scroll'",
+		"var shouldCollapse = lineCount > 1 && lineCount > resolveToolOutputLineCapacity()",
+		"toggle.type = 'button'",
+		"toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false')",
+		"toggle.textContent = (expanded ? 'Hide output (' : 'Show output (') + lineCount + ' lines)'",
+		"function materializeOutput(useInitialChunkQueue)",
+		"outVal.removeChild(outScroll)",
+		"window.convertTaskLinksInMessage(outVal)",
+		"window.convertTaskEditLinksInMessage(outVal)",
+		"window._toolOutputRowStates[stateKey]",
 	}
 	for _, fragment := range required {
 		if !strings.Contains(content, fragment) {
@@ -4266,6 +4561,8 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"suppressOut",
 		"dn === 'Read' || dn === 'List Files' || dn === 'Write'",
 		"Don't show output body for Read/List Files/Write",
+		"setAttribute('data-tool-output'",
+		"setAttribute(\"data-tool-output\"",
 	}
 	for _, fragment := range forbidden {
 		if strings.Contains(content, fragment) {

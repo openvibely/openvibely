@@ -35,8 +35,8 @@ func TestChatContent_IncludesSharedTaskResultConverters(t *testing.T) {
 	if !strings.Contains(content, "if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble)") {
 		t.Fatal("global Chat hydration must apply shared task-result conversion")
 	}
-	if count := strings.Count(content, "if (inCode || inToolOutput) continue"); count != 2 {
-		t.Fatalf("global Chat shared converters must keep code and preformatted tool output literal, got %d guards", count)
+	if count := strings.Count(content, "if (inCode && !inToolOutput) continue"); count != 2 {
+		t.Fatalf("global Chat shared converters must preserve ordinary code while allowing code-aware raw tool-output conversion, got %d guards", count)
 	}
 	if count := strings.Count(content, "(inToolOutput || inMarkdownFallback) && window.isInsideCode"); count != 2 {
 		t.Fatalf("global Chat fallback hydration must keep coded task-result examples inert, got %d raw-range guards", count)
