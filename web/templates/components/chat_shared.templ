@@ -4297,7 +4297,8 @@ templ ChatAutoScrollScript() {
 			// Clean all assistant messages in a container.
 			// Uses content signatures to avoid re-processing unchanged bubbles on each poll/morph swap.
 			window.cleanAssistantMessages = function(container) {
-				if (!container) return;
+				if (!container) return Promise.resolve([]);
+				var renderPromises = [];
 				// Handle chat-stream-content elements with data-raw-content (rendered by ChatBubble for completed assistant messages).
 				// After morph:outerHTML replaces JS-formatted content with server-rendered empty divs,
 				// these need to be re-rendered using the raw content stored in the data attribute.
@@ -4305,21 +4306,27 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					if ((el._renderedRevision === revision && hasRenderedContent) || el._renderingRevision === revision) return;
+					if (el._renderedRevision === revision && hasRenderedContent) return;
+					if (el._renderingRevision === revision) {
+						if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);
+						return;
+					}
 					if (raw && window.scheduleChatElementRender) {
-						window.scheduleChatElementRender(el, raw);
+						var scheduledRender = window.scheduleChatElementRender(el, raw);
+						renderPromises.push(scheduledRender);
 					} else if (raw && window.renderStreamingContent) {
 						el._renderingRevision = revision;
 						var renderPromise;
 						try { renderPromise = window.renderStreamingContent(el, raw); }
 						catch (err) { renderPromise = Promise.reject(err); }
-						Promise.resolve(renderPromise).then(function(rendered) {
+						var renderCompletion = Promise.resolve(renderPromise).then(function(rendered) {
 							if (el._renderingRevision === revision) delete el._renderingRevision;
 							if (rendered !== false && (el.getAttribute('data-raw-revision') || raw) === revision) el._renderedRevision = revision;
 						}, function() {
 							if (el._renderingRevision === revision) delete el._renderingRevision;
 							if (el._renderedRevision === revision) delete el._renderedRevision;
 						});
+						renderPromises.push(renderCompletion);
 					} else if (raw && window.renderChatMarkdown) {
 						el.classList.add('chat-markdown');
 						el.innerHTML = window.renderChatMarkdown(raw);
@@ -4341,21 +4348,27 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					if ((el._renderedRevision === revision && hasRenderedContent) || el._renderingRevision === revision) return;
+					if (el._renderedRevision === revision && hasRenderedContent) return;
+					if (el._renderingRevision === revision) {
+						if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);
+						return;
+					}
 					if (raw && window.scheduleChatElementRender) {
-						window.scheduleChatElementRender(el, raw);
+						var scheduledRender = window.scheduleChatElementRender(el, raw);
+						renderPromises.push(scheduledRender);
 					} else if (raw && window.renderStreamingContent) {
 						el._renderingRevision = revision;
 						var renderPromise;
 						try { renderPromise = window.renderStreamingContent(el, raw); }
 						catch (err) { renderPromise = Promise.reject(err); }
-						Promise.resolve(renderPromise).then(function(rendered) {
+						var renderCompletion = Promise.resolve(renderPromise).then(function(rendered) {
 							if (el._renderingRevision === revision) delete el._renderingRevision;
 							if (rendered !== false && (el.getAttribute('data-raw-revision') || raw) === revision) el._renderedRevision = revision;
 						}, function() {
 							if (el._renderingRevision === revision) delete el._renderingRevision;
 							if (el._renderedRevision === revision) delete el._renderedRevision;
 						});
+						renderPromises.push(renderCompletion);
 					} else if (raw && window.renderChatMarkdown) {
 						var div = document.createElement('div');
 						div.className = 'chat-markdown';
@@ -4374,12 +4387,13 @@ templ ChatAutoScrollScript() {
 						// Render streaming markers into styled DOM elements
 						if (window.scheduleChatContentRender) {
 							div.dataset.renderingText = text;
-							window.scheduleChatContentRender(div, text).then(function(rendered) {
+							var renderCompletion = window.scheduleChatContentRender(div, text).then(function(rendered) {
 								if (div.dataset.renderingText !== text) return;
 								delete div.dataset.renderingText;
 								if (rendered) div.dataset.cleanedText = div.textContent || '';
 								else delete div.dataset.cleanedText;
 							});
+							renderPromises.push(renderCompletion);
 							return;
 						} else if (window.renderStreamingContent) {
 							window.renderStreamingContent(div, text);
@@ -4404,6 +4418,9 @@ templ ChatAutoScrollScript() {
 					});
 					div.dataset.cleanedText = div.textContent || '';
 				});
+				return Promise.all(renderPromises.map(function(promise) {
+					return Promise.resolve(promise).catch(function() { return false; });
+				}));
 			};
 	</script>
 }

@@ -422,6 +422,20 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				return true;
 			}
 
+			function _finishTaskThreadRenderScroll(messages, renderPromise) {
+				if (!messages || !renderPromise || typeof renderPromise.then !== 'function') return;
+				Promise.resolve(renderPromise).then(function() {
+					requestAnimationFrame(function() {
+						if (!messages.isConnected || document.getElementById('task-thread-messages') !== messages) return;
+						var tracker = window._taskThreadPageTracker;
+						var userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;
+						if (userScrolledUp || !window.chatAutoScroll) return;
+						window.chatAutoScroll.scrollToBottom(messages, false);
+						_saveTaskThreadScrollState();
+					});
+				});
+			}
+
 			function _syncTaskThreadDraftFromTextarea() {
 				window._taskThreadDrafts = window._taskThreadDrafts || {};
 				var key = _taskThreadDraftStorageKey();
@@ -474,7 +488,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				(function() {
 					var chatMessages = document.getElementById('task-thread-messages');
 					if (chatMessages) {
-						if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+						var cleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 						var taskId = _taskThreadTaskId();
@@ -496,6 +510,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 
 						// Keep global flag as fallback source of truth across partial re-inits.
 						window._taskThreadUserScrolledUp = preservedUserScrolledUp;
+						_finishTaskThreadRenderScroll(chatMessages, cleanPromise);
 					}
 					// Render tool/thinking transcript controls and initialize SSE for any running executions.
 					// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.

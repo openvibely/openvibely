@@ -3990,6 +3990,49 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 	}
 }
 
+func TestTaskThreadView_PinsAfterQueuedTranscriptRendering(t *testing.T) {
+	task := &models.Task{ID: "thread-render-scroll-1", Status: models.StatusCompleted, Category: models.CategoryCompleted}
+
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render TaskThreadView: %v", err)
+	}
+	content := buf.String()
+
+	for _, required := range []string{
+		"var cleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;",
+		"_finishTaskThreadRenderScroll(chatMessages, cleanPromise);",
+		"Promise.resolve(renderPromise).then(function()",
+		"var userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;",
+		"if (userScrolledUp || !window.chatAutoScroll) return;",
+		"window.chatAutoScroll.scrollToBottom(messages, false);",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("task thread must bottom-align after queued transcript rendering unless the user scrolled up; missing %q", required)
+		}
+	}
+}
+
+func TestCleanAssistantMessagesReturnsQueuedRenderCompletion(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+
+	for _, required := range []string{
+		"var renderPromises = [];",
+		"var scheduledRender = window.scheduleChatElementRender(el, raw);",
+		"renderPromises.push(scheduledRender);",
+		"if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);",
+		"return Promise.all(renderPromises.map(function(promise)",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("cleanAssistantMessages must expose queued transcript completion; missing %q", required)
+		}
+	}
+}
+
 func TestChatScrollTracker_DestroyRemovesAllListeners(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
