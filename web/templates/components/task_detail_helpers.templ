@@ -329,7 +329,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			hx-trigger="every 3s"
 			hx-target="#task-thread-view"
 			hx-swap="morph:outerHTML"
-			hx-vals="js:{preserved_exec_ids: window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : ''}"
+			hx-on::config-request="if (event.target === this) event.detail.parameters.preserved_exec_ids = window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : ''"
 		}
 			data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) }
 		data-task-id={ task.ID }
@@ -368,11 +368,15 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
 		})
-		<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
-		@ChatAutoScrollScript()
-		@_initThreadStreamingScript()
-		@TaskThreadLiveEventsScript(task.ID)
-		<script>
+		if preservedExecIDs != nil {
+			<div id="task-thread-runtime" class="contents" hx-preserve="true"></div>
+		} else {
+			<div id="task-thread-runtime" class="contents" hx-preserve="true">
+			<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
+			@ChatAutoScrollScript()
+			@_initThreadStreamingScript()
+			@TaskThreadLiveEventsScript(task.ID)
+			<script>
 			function _taskThreadTaskId() {
 				var threadContent = document.getElementById('thread-content');
 				if (threadContent && threadContent.dataset.taskId) return threadContent.dataset.taskId;
@@ -732,6 +736,8 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					});
 			}
 			</script>
+			</div>
+		}
 	</div>
 }
 

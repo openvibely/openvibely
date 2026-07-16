@@ -5208,8 +5208,10 @@ func TestHandler_GetTaskThreadPollOmitsPreservedTerminalOutput(t *testing.T) {
 	assertCode(t, poll, http.StatusOK)
 	body := poll.Body.String()
 	assert.NotContains(t, body, "preserved-terminal-sentinel-")
+	assert.NotContains(t, body, "function _taskThreadTaskId()")
 	assert.Contains(t, body, `id="chat-execution-`+completed.ID+`"`)
 	assert.Contains(t, body, `hx-preserve="true"`)
+	assert.Contains(t, body, `id="task-thread-runtime"`)
 	assert.Contains(t, body, "currently running prompt")
 
 	fallbackPoll := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1")
@@ -5458,6 +5460,9 @@ func TestHandler_GetTaskThread_PollsWhenQueued(t *testing.T) {
 	assert.Contains(t, body, `id="task-thread-view"`)
 	assert.Contains(t, body, `hx-trigger="every 3s"`)
 	assert.Contains(t, body, fmt.Sprintf(`hx-get="/tasks/%s/thread?poll=1&amp;limit=%d"`, task.ID, taskThreadWindowLimitDefault))
+	assert.Contains(t, body, `hx-on::config-request=`)
+	assert.Contains(t, body, `event.target === this`)
+	assert.NotContains(t, body, `hx-vals=`)
 }
 
 func TestHandler_GetTaskThread_DraftClearLogic_DoesNotTreatPollingGetAsSend(t *testing.T) {
