@@ -4000,8 +4000,11 @@ func TestTaskThreadView_PinsAfterQueuedTranscriptRendering(t *testing.T) {
 	content := buf.String()
 
 	for _, required := range []string{
-		"var cleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;",
-		"_finishTaskThreadRenderScroll(chatMessages, cleanPromise);",
+		"cleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;",
+		"var renderPromise = c._activeLiveChatRender && c._activeLiveChatRender.promise;",
+		"resumeRenderPromises.push(Promise.resolve(renderPromise).catch(function()",
+		"initialRenderPromises = initialRenderPromises.concat(resumeRenderPromises);",
+		"_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises));",
 		"Promise.resolve(renderPromise).then(function()",
 		"var userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;",
 		"if (userScrolledUp || !window.chatAutoScroll) return;",
@@ -4010,6 +4013,11 @@ func TestTaskThreadView_PinsAfterQueuedTranscriptRendering(t *testing.T) {
 		if !strings.Contains(content, required) {
 			t.Fatalf("task thread must bottom-align after queued transcript rendering unless the user scrolled up; missing %q", required)
 		}
+	}
+	resumeRenderIdx := strings.Index(content, "resumeRenderPromises.push(Promise.resolve(renderPromise).catch(function()")
+	finishScrollIdx := strings.Index(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises));")
+	if resumeRenderIdx == -1 || finishScrollIdx == -1 || finishScrollIdx < resumeRenderIdx {
+		t.Fatal("task thread must collect resumed/live render completion before scheduling the final bottom alignment")
 	}
 }
 
@@ -4030,6 +4038,16 @@ func TestCleanAssistantMessagesReturnsQueuedRenderCompletion(t *testing.T) {
 		if !strings.Contains(content, required) {
 			t.Fatalf("cleanAssistantMessages must expose queued transcript completion; missing %q", required)
 		}
+	}
+}
+
+func TestLiveChatRenderExposesCompletionPromise(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render ChatAutoScrollScript: %v", err)
+	}
+	if !strings.Contains(buf.String(), "liveRequest.promise = outerPromise;") {
+		t.Fatal("resumed task-thread rendering must expose its completion promise to the initial scroll barrier")
 	}
 }
 

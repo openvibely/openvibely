@@ -3319,6 +3319,7 @@ templ ChatAutoScrollScript() {
 				var outerResolve;
 				var outerReject;
 				var outerPromise = new Promise(function(resolve, reject) { outerResolve = resolve; outerReject = reject; });
+				liveRequest.promise = outerPromise;
 				var activeRequest = window._activeChatContentRender;
 				if (activeRequest && activeRequest.finish) {
 					var interruptedRequest = activeRequest;

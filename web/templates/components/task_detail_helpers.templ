@@ -487,8 +487,10 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				// Apply cleaning and scroll on load
 				(function() {
 					var chatMessages = document.getElementById('task-thread-messages');
+					var cleanPromise = null;
+					var resumeRenderPromises = [];
 					if (chatMessages) {
-						var cleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;
+						cleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 						var taskId = _taskThreadTaskId();
@@ -510,7 +512,6 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 
 						// Keep global flag as fallback source of truth across partial re-inits.
 						window._taskThreadUserScrolledUp = preservedUserScrolledUp;
-						_finishTaskThreadRenderScroll(chatMessages, cleanPromise);
 					}
 					// Render tool/thinking transcript controls and initialize SSE for any running executions.
 					// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.
@@ -520,14 +521,22 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 							var revision = c.getAttribute('data-raw-revision') || raw;
 							var hasRenderedContent = !!(c.textContent && c.textContent.trim()) || !!c.querySelector('*');
 							var hasCurrentRenderedContent = hasRenderedContent && c._renderedRevision === revision;
+							var renderPromise = c._activeLiveChatRender && c._activeLiveChatRender.promise;
 							if (raw.trim() && !hasCurrentRenderedContent && !c._activeLiveChatRender && window.renderStreamingContent) {
 								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
 								var renderPromise = liveRenderer(c, raw);
-								if (renderPromise && typeof renderPromise.catch === 'function') {
-									renderPromise.catch(function() { c.textContent = raw; });
-								}
+							}
+							if (renderPromise && typeof renderPromise.then === 'function') {
+								resumeRenderPromises.push(Promise.resolve(renderPromise).catch(function() {
+									c.textContent = raw;
+									return false;
+								}));
 							}
 					});
+					var initialRenderPromises = [];
+					if (cleanPromise && typeof cleanPromise.then === 'function') initialRenderPromises.push(cleanPromise);
+					initialRenderPromises = initialRenderPromises.concat(resumeRenderPromises);
+					if (chatMessages) _finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises));
 					if (window._initThreadStreaming) window._initThreadStreaming();
 					_restoreTaskThreadDraftToTextarea();
 				})();
