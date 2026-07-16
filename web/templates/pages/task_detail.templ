@@ -1075,10 +1075,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						var chatMessages = document.getElementById('task-thread-messages');
 						if (!key || !chatMessages || !window.chatAutoScroll) return;
 						var tracker = window._taskThreadPageTracker;
-						var nearBottom = window.chatAutoScroll.isNearBottom(chatMessages);
+						var userScrolledUp = tracker
+							? !!tracker.userScrolledUp
+							: !!window._taskThreadUserScrolledUp;
 						var snapshot = tracker && typeof tracker.snapshot === 'function'
 							? tracker.snapshot()
-							: { scrollTop: chatMessages.scrollTop || 0, userScrolledUp: !nearBottom, pinned: nearBottom };
+							: { scrollTop: chatMessages.scrollTop || 0, userScrolledUp: userScrolledUp, pinned: !userScrolledUp };
 						window._taskThreadScrollStates = window._taskThreadScrollStates || {};
 						window._taskThreadScrollStates[key] = snapshot;
 						window._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;
@@ -1091,7 +1093,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 
 							var state = _getTaskThreadScrollState(taskId);
 							if (!forceBottom && state) {
-								chatMessages.scrollTop = state.pinned ? chatMessages.scrollHeight : (state.scrollTop || 0);
+								chatMessages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : chatMessages.scrollHeight;
 								if (window._taskThreadPageTracker) window._taskThreadPageTracker.userScrolledUp = !!state.userScrolledUp;
 								window._taskThreadUserScrolledUp = !!state.userScrolledUp;
 								return;

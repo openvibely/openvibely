@@ -3943,13 +3943,16 @@ func TestChatScrollTracker_ExposesNavigationSnapshot(t *testing.T) {
 	required := []string{
 		"snapshot: function()",
 		"scrollTop: this.element.scrollTop || 0",
-		"userScrolledUp: this.userScrolledUp || !nearBottom",
-		"pinned: !this.userScrolledUp && nearBottom",
+		"userScrolledUp: this.userScrolledUp",
+		"pinned: !this.userScrolledUp",
 	}
 	for _, r := range required {
 		if !strings.Contains(content, r) {
 			t.Fatalf("expected ChatScrollTracker snapshot to include %q", r)
 		}
+	}
+	if strings.Contains(content, "userScrolledUp: this.userScrolledUp || !nearBottom") {
+		t.Fatal("scroll snapshots must not mistake automatic content growth for explicit user scroll-up")
 	}
 }
 
@@ -3972,7 +3975,8 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 		"return taskId ? 'task-thread-scroll-' + taskId : '';",
 		"var preservedScrollState = _getTaskThreadScrollState(taskId);",
 		"var restoredScrollState = _restoreTaskThreadScrollState(chatMessages, preservedScrollState);",
-		"messages.scrollTop = state.pinned ? messages.scrollHeight : (state.scrollTop || 0);",
+		"messages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : messages.scrollHeight;",
+		"userScrolledUp: userScrolledUp, pinned: !userScrolledUp",
 		"_saveTaskThreadScrollState();",
 	}
 	for _, r := range required {

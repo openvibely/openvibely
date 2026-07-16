@@ -405,10 +405,12 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				var messages = document.getElementById('task-thread-messages');
 				if (!key || !messages || !window.chatAutoScroll) return;
 				var tracker = window._taskThreadPageTracker;
-				var nearBottom = window.chatAutoScroll.isNearBottom(messages);
+				var userScrolledUp = tracker
+					? !!tracker.userScrolledUp
+					: !!window._taskThreadUserScrolledUp;
 				var snapshot = tracker && typeof tracker.snapshot === 'function'
 					? tracker.snapshot()
-					: { scrollTop: messages.scrollTop || 0, userScrolledUp: !nearBottom, pinned: nearBottom };
+					: { scrollTop: messages.scrollTop || 0, userScrolledUp: userScrolledUp, pinned: !userScrolledUp };
 				window._taskThreadScrollStates = window._taskThreadScrollStates || {};
 				window._taskThreadScrollStates[key] = snapshot;
 				window._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;
@@ -416,7 +418,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 
 			function _restoreTaskThreadScrollState(messages, state) {
 				if (!messages || !state) return false;
-				messages.scrollTop = state.pinned ? messages.scrollHeight : (state.scrollTop || 0);
+				messages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : messages.scrollHeight;
 				return true;
 			}
 

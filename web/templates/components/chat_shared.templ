@@ -2732,11 +2732,10 @@ templ ChatAutoScrollScript() {
 
 			snapshot: function() {
 				if (!this.element) return { scrollTop: 0, userScrolledUp: false, pinned: true };
-				var nearBottom = window.chatAutoScroll.isNearBottom(this.element);
 				return {
 					scrollTop: this.element.scrollTop || 0,
-					userScrolledUp: this.userScrolledUp || !nearBottom,
-					pinned: !this.userScrolledUp && nearBottom
+					userScrolledUp: this.userScrolledUp,
+					pinned: !this.userScrolledUp
 				};
 			},
 
