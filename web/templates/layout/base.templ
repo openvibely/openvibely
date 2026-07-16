@@ -1907,6 +1907,41 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					return ranges;
 				};
+				window.codeRangesAsync = function(text, owner) {
+					if (!text || text.length < 100 * 1024 || typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
+						return Promise.resolve(window.codeRanges(text || ''));
+					}
+					if (owner && owner._codeRangeWorkerState) {
+						owner._codeRangeWorkerState.worker.terminate();
+						owner._codeRangeWorkerState.resolve(null);
+						owner._codeRangeWorkerState = null;
+					}
+					try {
+						if (!window._codeRangeWorkerURL) {
+							var workerSource = 'var window=self;window.markdownLineRanges=' + window.markdownLineRanges.toString() +
+								';window.codeRanges=' + window.codeRanges.toString() +
+								';self.onmessage=function(event){try{self.postMessage({ranges:window.codeRanges(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};';
+							window._codeRangeWorkerURL = window.URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
+						}
+						return new Promise(function(resolve) {
+							var worker = new Worker(window._codeRangeWorkerURL);
+							var state = { worker: worker, resolve: resolve };
+							if (owner) owner._codeRangeWorkerState = state;
+							function finish(ranges) {
+								worker.terminate();
+								if (owner && owner._codeRangeWorkerState === state) owner._codeRangeWorkerState = null;
+								resolve(ranges);
+							}
+							worker.onmessage = function(event) {
+								finish(event.data && !event.data.error ? event.data.ranges : window.codeRanges(text));
+							};
+							worker.onerror = function() { finish(window.codeRanges(text)); };
+							worker.postMessage(text);
+						});
+					} catch (err) {
+						return Promise.resolve(window.codeRanges(text));
+					}
+				};
 				window.isInsideCodeRanges = function(ranges, start, end) {
 					for (var i = 0; i < ranges.length; i++) {
 						if (start >= ranges[i].start && start < ranges[i].end) return true;

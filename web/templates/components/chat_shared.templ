@@ -488,9 +488,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						renderScheduled = false;
 						console.error('[chat] streaming render failed:', err);
 						// Preserve the complete response even if the styled renderer fails.
-						var fallbackText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(renderText) : renderText;
-						container.textContent = fallbackText;
-						container.setAttribute('data-raw-content', fallbackText);
+							container.textContent = renderText;
+							container.setAttribute('data-raw-content', renderText);
 						lastRenderedSourceLength = sourceLength;
 						lastRenderFinishedAt = Date.now();
 						if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
@@ -921,9 +920,8 @@ templ _initThreadStreamingScript() {
 				return renderPromise.then(finishScheduledRender).catch(function(err) {
 					renderScheduled = false;
 					console.error('[thread] streaming render failed:', err);
-					var fallbackText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(renderText) : renderText;
-					container.textContent = fallbackText;
-					container.setAttribute('data-raw-content', fallbackText);
+						container.textContent = renderText;
+						container.setAttribute('data-raw-content', renderText);
 					lastRenderedSourceLength = sourceLength;
 					lastRenderFinishedAt = Date.now();
 					if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
@@ -3147,75 +3145,146 @@ templ ChatAutoScrollScript() {
 				var match;
 				var codeRanges = [];
 				var segments = [];
-				function prepareText() {
-					if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer);
-					if (window.stripFinalStatusControl) textBuffer = window.stripFinalStatusControl(textBuffer);
-					// Strip protocol artifact lines before segment parsing so they do not
-					// appear as leaked text between tool cards.
-					textBuffer = textBuffer.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
-				}
-				function prepareCodeRanges() {
-					codeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
-				}
-				function collectThinkingMatches() {
-					while ((match = thinkingPattern.exec(textBuffer)) !== null) {
-						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
-							thinkingPattern.lastIndex = match.index + 1;
-							continue;
-						}
-						allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
+					function normalizePreparedText() {
+						if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer);
+						return true;
 					}
-				}
-				function collectToolUsingMatches() {
-					while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
-						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
-							toolUsingPattern.lastIndex = match.index + 1;
-						continue;
+					function stripPreparedStatus() {
+						if (window.stripFinalStatusControl) textBuffer = window.stripFinalStatusControl(textBuffer);
+						return true;
+					}
+					function stripPreparedArtifacts() {
+						textBuffer = textBuffer.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
+						return true;
+					}
+					function prepareCodeRanges() {
+						if (shouldYieldPreparation && window.codeRangesAsync) {
+							return window.codeRangesAsync(textBuffer, container).then(function(result) {
+								if (result !== null) codeRanges = result;
+								return true;
+							});
+						}
+						codeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
+						return true;
+					}
+					function preparationBudgetExpired(startedAt, processed) {
+						return processed >= 64 || ((window.performance && performance.now ? performance.now() : Date.now()) - startedAt) >= 8;
+					}
+					function collectThinkingMatches() {
+						var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+						var processed = 0;
+						while ((match = thinkingPattern.exec(textBuffer)) !== null) {
+							processed++;
+							if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
+								thinkingPattern.lastIndex = match.index + 1;
+								if (preparationBudgetExpired(startedAt, processed)) return false;
+								continue;
+							}
+							allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
+							if (preparationBudgetExpired(startedAt, processed)) return false;
+						}
+						return true;
+					}
+					function collectToolUsingMatches() {
+						var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+						var processed = 0;
+						while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
+							processed++;
+							if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
+								toolUsingPattern.lastIndex = match.index + 1;
+								if (preparationBudgetExpired(startedAt, processed)) return false;
+							continue;
 					}
 					var raw = match[1].trim();
 					var pipeIdx = raw.indexOf(' | ');
 					var toolName = pipeIdx >= 0 ? raw.substring(0, pipeIdx) : raw;
-						var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
-						allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
-					}
-				}
-				function collectToolResultBlockMatches() {
-					while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
-						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
-						toolResultBlockPattern.lastIndex = match.index + 1;
-						continue;
+							var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
+							allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
+							if (preparationBudgetExpired(startedAt, processed)) return false;
 						}
-						allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+						return true;
 					}
-				}
-				function collectLegacyToolResultMatches() {
-					while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
-						if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
-						toolResultLegacyPattern.lastIndex = match.index + 1;
-						continue;
+					function collectToolResultBlockMatches() {
+						var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+						var processed = 0;
+						while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
+							processed++;
+							if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
+								toolResultBlockPattern.lastIndex = match.index + 1;
+								if (preparationBudgetExpired(startedAt, processed)) return false;
+							continue;
+							}
+							allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+							if (preparationBudgetExpired(startedAt, processed)) return false;
+						}
+						return true;
+					}
+					function collectLegacyToolResultMatches() {
+						var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+						var processed = 0;
+						while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
+							processed++;
+							if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
+								toolResultLegacyPattern.lastIndex = match.index + 1;
+								if (preparationBudgetExpired(startedAt, processed)) return false;
+							continue;
 					}
 					var dominated = allMatches.some(function(m) { return m.index <= match.index && m.index + m.length >= match.index + match[0].length; });
 					if (!dominated) {
-							allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+								allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+							}
+							if (preparationBudgetExpired(startedAt, processed)) return false;
 						}
+						return true;
 					}
-				}
-				function buildSegments() {
-					allMatches.sort(function(a, b) { return a.index - b.index; });
+					function buildSegments() {
+						allMatches.sort(function(a, b) { return a.index - b.index; });
 					var lastIndex = 0;
 					allMatches.forEach(function(m) {
 						if (m.index < lastIndex) return;
 						if (m.index > lastIndex) {
-							segments.push({ type: 'text', content: textBuffer.substring(lastIndex, m.index) });
+								segments.push({ type: 'text', content: textBuffer.substring(lastIndex, m.index), index: lastIndex });
 						}
 						segments.push(m);
 						lastIndex = m.index + m.length;
 					});
 					if (lastIndex < textBuffer.length) {
-						segments.push({ type: 'text', content: textBuffer.substring(lastIndex) });
+							segments.push({ type: 'text', content: textBuffer.substring(lastIndex), index: lastIndex });
+						}
+						return true;
 					}
-				}
-				function linkToolResults() {
+					function splitLargeMarkdownSegments() {
+						var splitSegments = [];
+						for (var segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+							var segment = segments[segmentIndex];
+							if (segment.type !== 'text' || segment.content.length <= 64 * 1024) { splitSegments.push(segment); continue; }
+							var partStart = 0;
+							while (segment.content.length - partStart > 64 * 1024) {
+								var target = partStart + 64 * 1024;
+								var splitAt = segment.content.lastIndexOf('\n\n', target);
+								var splitAdvance = 2;
+								while (splitAt > partStart && window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, segment.index + splitAt, segment.index + splitAt + 2)) {
+									splitAt = segment.content.lastIndexOf('\n\n', splitAt - 1);
+								}
+								if (splitAt <= partStart + 16 * 1024) {
+									splitAt = segment.content.lastIndexOf('\n', target);
+									splitAdvance = 1;
+								}
+								if (splitAt <= partStart + 16 * 1024) {
+									splitAt = segment.content.lastIndexOf(' ', target);
+									splitAdvance = 1;
+								}
+								if (splitAt <= partStart + 16 * 1024 || (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, segment.index + splitAt, segment.index + splitAt + splitAdvance))) break;
+								splitAt += splitAdvance;
+								splitSegments.push({ type: 'text', content: segment.content.substring(partStart, splitAt), index: segment.index + partStart, flushAfter: true });
+								partStart = splitAt;
+							}
+							splitSegments.push({ type: 'text', content: segment.content.substring(partStart), index: segment.index + partStart, flushAfter: true });
+						}
+						segments = splitSegments;
+						return true;
+					}
+					function linkToolResults() {
 					// Assign stable IDs and link each result to the oldest unmatched use.
 					var toolUseQueues = {};
 					var toolRenderOrdinal = 0;
@@ -3249,17 +3318,21 @@ templ ChatAutoScrollScript() {
 							break;
 							}
 						}
+						}
+						return true;
 					}
-				}
-				var preparationPhases = [
-					prepareText,
-					prepareCodeRanges,
+					var preparationPhases = [
+						normalizePreparedText,
+						stripPreparedStatus,
+						stripPreparedArtifacts,
+						prepareCodeRanges,
 					collectThinkingMatches,
 					collectToolUsingMatches,
 					collectToolResultBlockMatches,
-					collectLegacyToolResultMatches,
-					buildSegments,
-					linkToolResults
+						collectLegacyToolResultMatches,
+						buildSegments,
+						splitLargeMarkdownSegments,
+						linkToolResults
 				];
 
 				function renderPreparedSegments() {
@@ -3458,6 +3531,7 @@ templ ChatAutoScrollScript() {
 						}
 					}
 					pendingText += seg.content;
+					if (seg.flushAfter) flushText();
 					return;
 				}
 				if (seg.type === 'tool_result') return;
@@ -3569,56 +3643,60 @@ templ ChatAutoScrollScript() {
 				window.convertTaskEditLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);
 			}
 			}
-			function fillLargeToolOutputChunks(done) {
-				var outputIndex = 0;
-				function fillNextChunk() {
-					if (container._streamRenderVersion !== renderVersion) { done(false); return; }
-					while (outputIndex < pendingLargeToolOutputs.length) {
-						var output = pendingLargeToolOutputs[outputIndex];
-						var end = Math.min(output.offset + 64 * 1024, output.text.length);
-						output.node.appendChild(document.createTextNode(output.text.substring(output.offset, end)));
-						output.offset = end;
-						if (output.offset >= output.text.length) outputIndex++;
-						if (outputIndex < pendingLargeToolOutputs.length || output.offset < output.text.length) {
-							setTimeout(fillNextChunk, 0);
-							return;
+				function fillLargeToolOutputChunks(done, fail) {
+					var outputIndex = 0;
+					function fillNextChunk() {
+						try {
+							if (container._streamRenderVersion !== renderVersion) { done(false); return; }
+							while (outputIndex < pendingLargeToolOutputs.length) {
+								var output = pendingLargeToolOutputs[outputIndex];
+								var end = Math.min(output.offset + 64 * 1024, output.text.length);
+								output.node.appendChild(document.createTextNode(output.text.substring(output.offset, end)));
+								output.offset = end;
+								if (output.offset >= output.text.length) outputIndex++;
+								if (outputIndex < pendingLargeToolOutputs.length || output.offset < output.text.length) {
+									setTimeout(fillNextChunk, 0);
+									return;
+								}
+							}
+							done(true);
+						} catch (err) {
+							fail(err);
 						}
 					}
-					done(true);
+					fillNextChunk();
 				}
-				fillNextChunk();
-			}
-			if (shouldYieldPreparation) {
-				return new Promise(function(resolve) {
-					var segmentIndex = 0;
-					function renderBatch() {
-						if (container._streamRenderVersion !== renderVersion) {
-							resolve(false);
-							return;
+				if (shouldYieldPreparation) {
+					return new Promise(function(resolve, reject) {
+						var segmentIndex = 0;
+						function renderBatch() {
+							try {
+								if (container._streamRenderVersion !== renderVersion) { resolve(false); return; }
+								var batchStartedAt = window.performance && performance.now ? performance.now() : Date.now();
+								var batchBytes = 0;
+								var batchSegments = 0;
+								while (segmentIndex < segments.length) {
+									var segment = segments[segmentIndex];
+									var segmentBytes = (segment.content || '').length + (segment.resultOutput || '').length + (segment.secondary || '').length;
+									if (batchSegments > 0 && (batchSegments >= 12 || batchBytes + segmentBytes > 64 * 1024 ||
+										((window.performance && performance.now ? performance.now() : Date.now()) - batchStartedAt) >= 8)) break;
+									renderSegment(segment, segmentIndex);
+									segmentIndex++;
+									batchSegments++;
+									batchBytes += segmentBytes;
+								}
+								if (segmentIndex < segments.length) { setTimeout(renderBatch, 0); return; }
+								fillLargeToolOutputChunks(function(committed) {
+									try {
+										if (!committed) { resolve(false); return; }
+										finishRender();
+										resolve(true);
+									} catch (err) { reject(err); }
+								}, reject);
+							} catch (err) {
+								reject(err);
+							}
 						}
-						var batchStartedAt = window.performance && performance.now ? performance.now() : Date.now();
-						var batchBytes = 0;
-						var batchSegments = 0;
-						while (segmentIndex < segments.length) {
-							var segment = segments[segmentIndex];
-							var segmentBytes = (segment.content || '').length + (segment.resultOutput || '').length + (segment.secondary || '').length;
-							if (batchSegments > 0 && (batchSegments >= 12 || batchBytes + segmentBytes > 64 * 1024 ||
-								((window.performance && performance.now ? performance.now() : Date.now()) - batchStartedAt) >= 8)) break;
-							renderSegment(segment, segmentIndex);
-							segmentIndex++;
-							batchSegments++;
-							batchBytes += segmentBytes;
-						}
-						if (segmentIndex < segments.length) {
-							setTimeout(renderBatch, 0);
-							return;
-						}
-						fillLargeToolOutputChunks(function(committed) {
-							if (!committed) { resolve(false); return; }
-							finishRender();
-							resolve(true);
-						});
-					}
 					renderBatch();
 				});
 			}
@@ -3632,10 +3710,18 @@ templ ChatAutoScrollScript() {
 					var preparationIndex = 0;
 					function runPreparationPhase() {
 						if (container._streamRenderVersion !== renderVersion) { resolve(false); return; }
-						try {
-							if (preparationIndex < preparationPhases.length) {
-								preparationPhases[preparationIndex++]();
-								setTimeout(runPreparationPhase, 0);
+							try {
+								if (preparationIndex < preparationPhases.length) {
+									var phaseResult = preparationPhases[preparationIndex]();
+									if (phaseResult && typeof phaseResult.then === 'function') {
+										phaseResult.then(function(completed) {
+											if (completed !== false) preparationIndex++;
+											setTimeout(runPreparationPhase, 0);
+										}, reject);
+										return;
+									}
+									if (phaseResult !== false) preparationIndex++;
+									setTimeout(runPreparationPhase, 0);
 								return;
 							}
 							var rendered = renderPreparedSegments();
@@ -3647,10 +3733,10 @@ templ ChatAutoScrollScript() {
 					}
 					setTimeout(runPreparationPhase, 0);
 				});
-			}
-			for (var preparationIndex = 0; preparationIndex < preparationPhases.length; preparationIndex++) {
-				preparationPhases[preparationIndex]();
-			}
+				}
+				for (var preparationIndex = 0; preparationIndex < preparationPhases.length; preparationIndex++) {
+					while (preparationPhases[preparationIndex]() === false) {}
+				}
 			return renderPreparedSegments();
 		};
 

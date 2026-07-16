@@ -596,6 +596,7 @@ class FakeEventSource {
 }
 global.EventSource = FakeEventSource;
 global.window = {
+  normalizeTranscriptMarkers() { throw new Error('normalizer must not run in fallback'); },
   renderStreamingContent() { renders++; return Promise.reject(new Error('renderer failed')); },
   resolveScrollTracker() { return { resetOnUserSend() {}, shouldAutoScroll() { return false; } }; },
   registerChatStreamEventSource() {}, unregisterChatStreamEventSource() {}, hideMixtureProgress() {}
@@ -2404,7 +2405,7 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 	script := "global.window = {};\n" +
 		"global.NodeFilter = { SHOW_TEXT: 4 };\n" +
 		"function element(tag) { return { tagName: tag, className: '', textContent: '', children: [], replaceCount: 0, style: {}, classList: { add: function() {}, remove: function() {} }, addEventListener: function() {}, appendChild: function(child) { this.children.push(child); return child; }, replaceChildren: function(fragment) { this.replaceCount++; this.children = (fragment && fragment.children ? fragment.children : []).slice(); }, querySelectorAll: function() { return []; }, getAttribute: function() { return null; }, setAttribute: function() {}, closest: function() { return null; } }; }\n" +
-		"global.document = { createTreeWalker: function(element) { let i = 0; return { nextNode: function() { return element.nodes[i++] || null; } }; }, createElement: element, createDocumentFragment: function() { return element('fragment'); } };\n" +
+		"global.document = { createTreeWalker: function(element) { let i = 0; return { nextNode: function() { return element.nodes[i++] || null; } }; }, createElement: element, createDocumentFragment: function() { return element('fragment'); }, createTextNode: function(text) { return { textContent: text }; } };\n" +
 		codeHelpers + "\n" + content[start:end] + "\n" + renderer + "\n" + bubbleCleaner + "\n" +
 		"const got = window.cleanTranscriptControls(" + strconv.Quote(input) + ", true);\n" +
 		"if (got !== " + strconv.Quote(want) + ") { console.error(JSON.stringify(got)); process.exit(1); }\n" +
@@ -2544,7 +2545,22 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"if (!codedSameLineStream.children.some(function(child) { return child.textContent.indexOf('`[Tool grep_search done]coded[/Tool]`') !== -1; }) || !codedSameLineStream.children.some(function(child) { return child.className.indexOf('stream-tool') !== -1; })) process.exit(54);\n" +
 		"const sameLineDOMNode = textNode('[Tool grep_search done]actual[/Tool]\\nVisible DOM answer.', false);\n" +
 		"window.cleanBubbleContent({ querySelectorAll: function() { return [{ nodes: [sameLineDOMNode] }]; } });\n" +
-		"if (sameLineDOMNode.textContent !== 'Visible DOM answer.') { console.error(JSON.stringify(sameLineDOMNode.textContent)); process.exit(55); }\n"
+		"if (sameLineDOMNode.textContent !== 'Visible DOM answer.') { console.error(JSON.stringify(sameLineDOMNode.textContent)); process.exit(55); }\n" +
+		"const largeMarkdown = Array(2200).fill('A paragraph with enough words to exercise cooperative Markdown chunking.\\n\\n').join('');\n" +
+		"const largeMarkdownStream = element('div'); largeMarkdownStream.id = 'large-markdown';\n" +
+		"window.renderStreamingContent(largeMarkdownStream, largeMarkdown, true).then(function(committed) {\n" +
+		"  if (!committed || largeMarkdownStream.replaceCount !== 1 || largeMarkdownStream.children.length < 2) throw new Error('large Markdown was not rendered in resumable chunks');\n" +
+		"  const largeToolStream = element('div'); largeToolStream.id = 'large-tool';\n" +
+		"  const largeTool = '[Using tool: bash]\\n[Tool bash done]\\n' + 'x'.repeat(150 * 1024) + '\\n[/Tool]';\n" +
+		"  return window.renderStreamingContent(largeToolStream, largeTool, true).then(function(toolCommitted) {\n" +
+		"    function findPre(node) { if (node.tagName === 'pre') return node; for (const child of (node.children || [])) { const found = findPre(child); if (found) return found; } return null; }\n" +
+		"    const pre = findPre(largeToolStream);\n" +
+		"    if (!toolCommitted || !pre || pre.children.length < 3) throw new Error('large tool output was not appended in chunks');\n" +
+		"    const failing = element('div'); failing.id = 'failing-large-render'; failing.replaceChildren = function() { throw new Error('commit failed'); };\n" +
+		"    const manyTools = ('[Using tool: bash]\\n[Tool bash done]\\nx\\n[/Tool]\\n').repeat(80) + 'tail '.repeat(22000);\n" +
+		"    return window.renderStreamingContent(failing, manyTools, true).then(function() { process.exit(56); }, function(err) { if (!err || err.message !== 'commit failed') process.exit(57); });\n" +
+		"  });\n" +
+		"}).catch(function(err) { console.error(err && err.stack || err); process.exit(58); });\n"
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("rendered browser cleaner did not preserve code examples: %v\n%s", err, output)
 	}
@@ -2721,7 +2737,9 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 	}
 	for _, snippet := range []string{
 		"var shouldYieldPreparation = yieldBetweenBatches && textBuffer.length >= 100 * 1024",
+		"window.codeRangesAsync(textBuffer, container)",
 		"var preparationPhases = [",
+		"if (phaseResult && typeof phaseResult.then === 'function')",
 		"setTimeout(runPreparationPhase, 0)",
 		"batchSegments >= 12 || batchBytes + segmentBytes > 64 * 1024",
 		"- batchStartedAt) >= 8",
