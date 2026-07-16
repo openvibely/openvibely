@@ -698,10 +698,11 @@ func TestChatAutoScrollScript_RehydratesAssistantRawContentViaStreamingRenderer(
 		t.Error("cleanAssistantMessages must prefer streaming renderer for tool-card reconstruction")
 	}
 	if !strings.Contains(content, "window.scheduleChatContentRender = function(container, textBuffer, yieldBetweenBatches)") ||
-		!strings.Contains(content, "if (window._chatContentRenderActive >= 1) return") {
+		!strings.Contains(content, "if (window._chatContentRenderActive >= 1) return") ||
+		!strings.Contains(content, "while (next && (next.container._scheduledChatRender !== next || !next.container.isConnected))") {
 		t.Error("completed transcript hydration must serialize expensive renders")
 	}
-	if !strings.Contains(content, "window.scheduleChatContentRender(el, raw).then(function(rendered)") {
+	if !strings.Contains(content, "window.scheduleChatElementRender(el, raw);") {
 		t.Error("completed raw assistant messages must use the bounded render scheduler")
 	}
 	if !strings.Contains(content, "window.renderStreamingContent(el, raw);") {
@@ -721,7 +722,8 @@ func TestCompletedBubblePollingFallbackDoesNotRenderTwice(t *testing.T) {
 	content := buf.String()
 	if !strings.Contains(content, "var renderStarted = false") ||
 		!strings.Contains(content, "if (renderStarted) return") ||
-		!strings.Contains(content, "renderStarted = true") {
+		!strings.Contains(content, "renderStarted = true") ||
+		!strings.Contains(content, "window.scheduleChatElementRender(el, raw)") {
 		t.Fatal("completed bubble polling and timeout paths must share a one-shot render guard")
 	}
 }
@@ -744,7 +746,7 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 	}
 	script := "global.window = { _chatContentRenderTimeoutMS: 50 }; global.document = { createTextNode: function(text) { return { text: text }; } };\n" +
 		"window.renderChatMarkdownLargeFallback = function(text) { return { safe: text }; };\n" +
-		"function container(connected) { return { isConnected: connected, replacements: [], replaceChildren: function(value) { this.replacements.push(value); } }; }\n" +
+		"function container(connected, raw) { return { isConnected: connected, raw: raw || '', dataset: {}, replacements: [], getAttribute: function(name) { return name === 'data-raw-content' ? this.raw : null; }, replaceChildren: function(value) { this.replacements.push(value); } }; }\n" +
 		scheduler + "\n" +
 		"const delay = ms => new Promise(resolve => setTimeout(resolve, ms));\n" +
 		"(async function() {\n" +
@@ -753,6 +755,11 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"  await delay(10); if (calls.join(',') !== 'first') throw new Error('renders were not serialized'); controls[0].resolve(true);\n" +
 		"  await delay(10); if (calls.join(',') !== 'first,second') throw new Error('second render did not drain'); controls[1].reject(new Error('failed'));\n" +
 		"  const initial = await Promise.all([p1, p2]); if (!initial[0] || initial[1] || !second.replacements[0] || second.replacements[0].safe !== 'second') throw new Error('rejection did not use safe fallback');\n" +
+		"  window.renderStreamingContent = function(c, text) { if (text === 'hydrate-fail') return Promise.reject(new Error('hydrate failed')); return Promise.resolve(true); };\n" +
+		"  const hydrated = container(true, 'hydrate-ok'); if (!await window.scheduleChatElementRender(hydrated, 'hydrate-ok') || hydrated.dataset.cleanedRaw !== 'hydrate-ok' || hydrated.dataset.renderingRaw) throw new Error('successful hydration signature was not committed');\n" +
+		"  const failedHydration = container(true, 'hydrate-fail'); if (await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydration.dataset.cleanedRaw || failedHydration.dataset.renderingRaw) throw new Error('failed hydration signature was retained');\n" +
+		"  window._chatContentRenderTimeoutMS = 50; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'old-active') return new Promise(function() {}); return Promise.resolve(true); };\n" +
+		"  const oldActive = container(true), navigated = container(true); const oldResult = window.scheduleChatContentRender(oldActive, 'old-active'); await delay(10); oldActive.isConnected = false; const navigatedResult = window.scheduleChatContentRender(navigated, 'navigated'); const navigation = await Promise.all([oldResult, navigatedResult]); if (navigation[0] || !navigation[1] || calls.indexOf('navigated') === -1) throw new Error('navigation did not cancel disconnected active render');\n" +
 		"  window._chatContentRenderTimeoutMS = 5;\n" +
 		"  window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'hung') return new Promise(function() {}); return Promise.resolve(true); };\n" +
 		"  const hung = container(true), after = container(true); const hungResult = window.scheduleChatContentRender(hung, 'hung'); const afterResult = window.scheduleChatContentRender(after, 'after');\n" +

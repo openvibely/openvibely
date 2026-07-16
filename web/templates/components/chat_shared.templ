@@ -137,8 +137,8 @@ templ ChatBubble(role, content string) {
 							if (renderStarted) return;
 							renderStarted = true;
 							var raw = el.getAttribute('data-raw-content');
-							if (window.scheduleChatContentRender && raw) {
-								window.scheduleChatContentRender(el, raw);
+							if (window.scheduleChatElementRender && raw) {
+								window.scheduleChatElementRender(el, raw);
 							} else if (window.renderStreamingContent && raw) {
 								window.renderStreamingContent(el, raw);
 							} else if (window.renderChatMarkdown && raw) {
@@ -193,8 +193,8 @@ templ ChatBubbleError(role, errorMsg, output string) {
 							if (renderStarted) return;
 							renderStarted = true;
 							var raw = el.getAttribute('data-raw-content');
-							if (window.scheduleChatContentRender && raw) {
-								window.scheduleChatContentRender(el, raw);
+							if (window.scheduleChatElementRender && raw) {
+								window.scheduleChatElementRender(el, raw);
 							} else if (window.renderStreamingContent && raw) {
 								window.renderStreamingContent(el, raw);
 							} else if (window.renderChatMarkdown && raw) {
@@ -3113,6 +3113,8 @@ templ ChatAutoScrollScript() {
 			if (typeof window._chatContentRenderActive !== 'number') window._chatContentRenderActive = 0;
 			window.scheduleChatContentRender = function(container, textBuffer, yieldBetweenBatches) {
 				if (!container) return Promise.resolve(false);
+				var activeRequest = window._activeChatContentRender;
+				if (activeRequest && !activeRequest.container.isConnected && activeRequest.finish) activeRequest.finish(false, false, true);
 				var request = { container: container, text: textBuffer || '', yield: yieldBetweenBatches, resolve: null, finished: false, timeout: null };
 				container._scheduledChatRender = request;
 				var promise = new Promise(function(resolve) { request.resolve = resolve; });
@@ -3120,21 +3122,22 @@ templ ChatAutoScrollScript() {
 				function drain() {
 					if (window._chatContentRenderActive >= 1) return;
 					var next = window._chatContentRenderQueue.shift();
-					if (!next) return;
-					if (next.container._scheduledChatRender !== next || !next.container.isConnected) {
+					while (next && (next.container._scheduledChatRender !== next || !next.container.isConnected)) {
+						next.finished = true;
 						next.resolve(false);
-						setTimeout(drain, 0);
-						return;
+						next = window._chatContentRenderQueue.shift();
 					}
+					if (!next) return;
 					window._chatContentRenderActive++;
 					next.container._scheduledChatRender = null;
 					next.container._activeScheduledChatRender = next;
-					function finish(result, showFallback) {
+					window._activeChatContentRender = next;
+					function finish(result, showFallback, cancelRender) {
 						if (next.finished) return;
 						next.finished = true;
 						if (next.timeout) clearTimeout(next.timeout);
 						if (next.container._activeScheduledChatRender === next) {
-							if (showFallback && next.container.isConnected) {
+							if (cancelRender) {
 								next.container._streamRenderVersion = (next.container._streamRenderVersion || 0) + 1;
 								if (next.container._codeRangeWorkerState && next.container._codeRangeWorkerState.finish) next.container._codeRangeWorkerState.finish(null);
 								if (next.container._markdownWorkerState) {
@@ -3145,6 +3148,8 @@ templ ChatAutoScrollScript() {
 									markdownState.resolve(null);
 									next.container._markdownWorkerState = null;
 								}
+							}
+							if (showFallback && next.container.isConnected) {
 								try {
 									var fallback = window.renderChatMarkdownLargeFallback ? window.renderChatMarkdownLargeFallback(next.text) : null;
 									next.container.replaceChildren(fallback || document.createTextNode(next.text));
@@ -3154,25 +3159,41 @@ templ ChatAutoScrollScript() {
 							}
 							next.container._activeScheduledChatRender = null;
 						}
+						if (window._activeChatContentRender === next) window._activeChatContentRender = null;
 						next.resolve(result);
 						window._chatContentRenderActive--;
 						setTimeout(drain, 0);
 					}
+					next.finish = finish;
 					var renderPromise;
 					try {
 						renderPromise = window.renderStreamingContent(next.container, next.text, next.yield);
 					} catch (err) {
-						finish(false, true);
+						finish(false, true, true);
 						return;
 					}
 					Promise.resolve(renderPromise).then(function(result) {
-						finish(result !== false, false);
+						finish(result !== false, false, false);
 					}, function() {
-						finish(false, true);
+						finish(false, true, true);
 					});
-					next.timeout = setTimeout(function() { finish(false, true); }, window._chatContentRenderTimeoutMS || 30000);
+					next.timeout = setTimeout(function() { finish(false, true, true); }, window._chatContentRenderTimeoutMS || 30000);
 				}
 				setTimeout(drain, 0);
+				return promise;
+			};
+			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
+				if (!container || !raw) return Promise.resolve(false);
+				if (container.dataset.renderingRaw === raw && container._chatElementRenderPromise) return container._chatElementRenderPromise;
+				container.dataset.renderingRaw = raw;
+				var promise = window.scheduleChatContentRender(container, raw, yieldBetweenBatches).then(function(rendered) {
+					if (container.dataset.renderingRaw !== raw) return rendered;
+					delete container.dataset.renderingRaw;
+					if (rendered && container.getAttribute('data-raw-content') === raw) container.dataset.cleanedRaw = raw;
+					else delete container.dataset.cleanedRaw;
+					return rendered;
+				});
+				container._chatElementRenderPromise = promise;
 				return promise;
 			};
 
@@ -4088,14 +4109,8 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
 					if ((el.dataset.cleanedRaw === raw && hasRenderedContent) || el.dataset.renderingRaw === raw) return;
-					if (raw && window.scheduleChatContentRender) {
-						el.dataset.renderingRaw = raw;
-						window.scheduleChatContentRender(el, raw).then(function(rendered) {
-							if (el.dataset.renderingRaw !== raw) return;
-							delete el.dataset.renderingRaw;
-							if (rendered && el.getAttribute('data-raw-content') === raw) el.dataset.cleanedRaw = raw;
-							else delete el.dataset.cleanedRaw;
-						});
+					if (raw && window.scheduleChatElementRender) {
+						window.scheduleChatElementRender(el, raw);
 					} else if (raw && window.renderStreamingContent) {
 						window.renderStreamingContent(el, raw);
 						el.dataset.cleanedRaw = raw;
@@ -4120,14 +4135,8 @@ templ ChatAutoScrollScript() {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
 					if ((el.dataset.cleanedRaw === raw && hasRenderedContent) || el.dataset.renderingRaw === raw) return;
-					if (raw && window.scheduleChatContentRender) {
-						el.dataset.renderingRaw = raw;
-						window.scheduleChatContentRender(el, raw).then(function(rendered) {
-							if (el.dataset.renderingRaw !== raw) return;
-							delete el.dataset.renderingRaw;
-							if (rendered && el.getAttribute('data-raw-content') === raw) el.dataset.cleanedRaw = raw;
-							else delete el.dataset.cleanedRaw;
-						});
+					if (raw && window.scheduleChatElementRender) {
+						window.scheduleChatElementRender(el, raw);
 					} else if (raw && window.renderStreamingContent) {
 						window.renderStreamingContent(el, raw);
 						el.dataset.cleanedRaw = raw;
