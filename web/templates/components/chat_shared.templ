@@ -4118,7 +4118,7 @@ templ ChatAutoScrollScript() {
 					}
 
 					if (shouldCollapse) {
-						preview = document.createElement('div');
+						preview = document.createElement('pre');
 						preview.className = 'stream-tool-output-preview';
 						preview.textContent = toolOutputPreview(outputText);
 						outVal.appendChild(preview);

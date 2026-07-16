@@ -4498,9 +4498,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (collapsed.length !== 115) fail('all overflowing OUT rows must start collapsed');
     collapsed.forEach(function(button) {
       var content = button.closest('.stream-tool-body-content');
-      if (content.querySelector('pre') || content.querySelector('.stream-tool-body-scroll')) fail('collapsed output materialized a DOM surface');
-      var preview = content.querySelector('.stream-tool-output-preview');
-      if (!preview || !preview.textContent.trim()) fail('collapsed output did not show an actual output preview');
+      if (content.querySelector('.stream-tool-body-scroll')) fail('collapsed output materialized the full scroll surface');
+      var preview = content.querySelector('pre.stream-tool-output-preview');
+      if (!preview || !preview.textContent.trim()) fail('collapsed output did not use the standard preformatted output presentation');
       if (preview.textContent.length > 4100) fail('collapsed output preview was not bounded');
     });
     if (container.querySelectorAll('.stream-tool-body-scroll > pre').length !== 2) fail('only short and horizontal one-line OUT values should initially materialize');
@@ -4510,8 +4510,8 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!shortPre || !widePre) fail('short or horizontally wide one-line output was collapsed');
     var bareCRTool = tools[116];
     var bareCRToggle = bareCRTool && bareCRTool.querySelector('.stream-tool-output-toggle');
-    var bareCRPreview = bareCRTool && bareCRTool.querySelector('.stream-tool-output-preview');
-    if (!bareCRToggle || bareCRToggle.textContent !== 'Show output (40 lines)' || bareCRToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('vertically overflowing bare-CR output did not start collapsed');
+    var bareCRPreview = bareCRTool && bareCRTool.querySelector('pre.stream-tool-output-preview');
+    if (!bareCRToggle || bareCRToggle.textContent !== 'Show output (40 lines)' || bareCRToggle.closest('.stream-tool-body-content').querySelector('.stream-tool-body-scroll')) fail('vertically overflowing bare-CR output did not start collapsed');
     if (!bareCRPreview || bareCRPreview.textContent.indexOf('bare-cr row\rbare-cr row') !== 0) fail('bare-CR output preview did not preserve actual output');
     if (!container.querySelector('a[href="/tasks/assistant%2Fcreate"]') || !container.querySelector('a[href="/tasks/assistant%2Fedit"]')) fail('assistant task links were not hydrated');
 
@@ -4522,7 +4522,7 @@ window.addEventListener('DOMContentLoaded', function() {
     largeToggle.focus();
     largeToggle.click();
     await waitFor(function() {
-      var pre = largeToggle.closest('.stream-tool-body-content').querySelector('pre');
+      var pre = largeToggle.closest('.stream-tool-body-content').querySelector('.stream-tool-body-scroll > pre');
       return pre && pre.textContent.indexOf('Coded boundary edit') !== -1;
     }, 1000);
     var expandedContent = largeToggle.closest('.stream-tool-body-content');
@@ -4532,7 +4532,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!expandedPreview || !expandedPreview.hidden) fail('expansion did not hide the collapsed output preview');
     if (container._streamRenderVersion !== renderVersion) fail('expanding one OUT rerendered the response');
     if (!expandedContent.querySelector('a[href="/tasks/boundary%2Fcreate"]') || !expandedContent.querySelector('a[href="/tasks/boundary%2Fedit"]')) {
-      fail('chunk-boundary tool task links were not hydrated; links=' + Array.from(expandedContent.querySelectorAll('a')).map(function(anchor) { return anchor.getAttribute('href'); }).join(',') + '; preNodes=' + expandedContent.querySelector('pre').childNodes.length);
+      fail('chunk-boundary tool task links were not hydrated; links=' + Array.from(expandedContent.querySelectorAll('a')).map(function(anchor) { return anchor.getAttribute('href'); }).join(',') + '; preNodes=' + expandedContent.querySelector('.stream-tool-body-scroll > pre').childNodes.length);
     }
     if (expandedContent.querySelector('a[href="/tasks/coded%2Fboundary-create"]') || expandedContent.querySelector('a[href="/tasks/coded%2Fboundary-edit"]')) fail('cross-chunk Markdown-code task marker became a link');
     Array.from(container.querySelectorAll('a')).forEach(function(anchor) { if (/\r|\n/.test(anchor.textContent)) fail('anchor text contains a newline'); });
@@ -4543,14 +4543,14 @@ window.addEventListener('DOMContentLoaded', function() {
     var collapseStarted = performance.now();
     largeToggle.click();
     var collapseMS = performance.now() - collapseStarted;
-    if (largeToggle.getAttribute('aria-expanded') !== 'false' || largeToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('collapse did not release the large DOM surface');
-    var collapsedPreview = largeToggle.closest('.stream-tool-body-content').querySelector('.stream-tool-output-preview');
+    if (largeToggle.getAttribute('aria-expanded') !== 'false' || largeToggle.closest('.stream-tool-body-content').querySelector('.stream-tool-body-scroll')) fail('collapse did not release the full large DOM surface');
+    var collapsedPreview = largeToggle.closest('.stream-tool-body-content').querySelector('pre.stream-tool-output-preview');
     if (!collapsedPreview || collapsedPreview.hidden || !collapsedPreview.textContent.trim()) fail('collapse did not restore the output preview');
     document.documentElement.setAttribute('data-theme', 'light');
     window.dispatchEvent(new Event('resize'));
     await Promise.resolve(window.renderStreamingContent(container, transcript, true));
     largeToggle = Array.from(container.querySelectorAll('.stream-tool-output-toggle')).find(function(button) { return button.textContent === 'Show output (' + largeLineCount + ' lines)'; });
-    if (!largeToggle || largeToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('rerender did not preserve collapsed state');
+    if (!largeToggle || largeToggle.closest('.stream-tool-body-content').querySelector('.stream-tool-body-scroll')) fail('rerender did not preserve collapsed state');
 
     result.setAttribute('data-test-result', 'pass');
     result.setAttribute('data-hydration-ms', hydrationMS.toFixed(1));
@@ -4675,6 +4675,7 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"function toolOutputPreview(text)",
 		"var maxLines = 6",
 		"var maxChars = 4096",
+		"preview = document.createElement('pre')",
 		"preview.className = 'stream-tool-output-preview'",
 		"function resolveToolOutputLineCapacity()",
 		"probe.className = 'stream-tool'",
