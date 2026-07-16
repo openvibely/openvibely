@@ -3455,6 +3455,16 @@ templ ChatAutoScrollScript() {
 					function protectInitialToolBlocks() {
 						rawCodeRanges = rawCodeRanges.concat(toolBlockRanges(textBuffer));
 						rawCodeRanges.sort(function(a, b) { return a.start - b.start; });
+						var mergedRanges = [];
+						rawCodeRanges.forEach(function(range) {
+							var previous = mergedRanges[mergedRanges.length - 1];
+							if (!previous || range.start > previous.end) {
+								mergedRanges.push({ start: range.start, end: range.end });
+								return;
+							}
+							previous.end = Math.max(previous.end, range.end);
+						});
+						rawCodeRanges = mergedRanges;
 						return true;
 					}
 					function normalizePreparedText() {

@@ -2547,7 +2547,7 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 	bareCRDuplicateSummaryWant := "Intro.\r\rExample:\r~~~text\r---\rCreated 1 task(s):\r- \"Coded\" (backlog) [TASK_ID:coded]\r~~~\r\r---\rCreated 1 task(s):\r- \"Real\" (backlog) [TASK_ID:real]"
 	bareCREditedSummary := "Intro.\r\r---\rEdited 1 task(s):\r- \"Old\" (updated: title)\r\rExample:\r`````text\r---\rEdited 1 task(s):\r- \"Coded\" (updated: title) [TASK_EDITED:coded]\r```\r``````\r\r---\rEdited 1 task(s):\r- \"Real\" (updated: title) [TASK_EDITED:real]"
 	bareCREditedSummaryWant := "Intro.\r\rExample:\r`````text\r---\rEdited 1 task(s):\r- \"Coded\" (updated: title) [TASK_EDITED:coded]\r```\r``````\r\r---\rEdited 1 task(s):\r- \"Real\" (updated: title) [TASK_EDITED:real]"
-	literalToolOutput := "const fixture = '[Using tool: fake]\\n[Tool fake done]\\ninside\\n[/Tool]';\nconst thinking = '<thinking>literal source</thinking>';\n- \"Valid task\" (backlog) [TASK_ID:fixture]"
+	literalToolOutput := "const first = `inline code`;\nconst second = `more inline code`;\nconst fixture = '[Using tool: fake]\\n[Tool fake done]\\ninside\\n[/Tool]';\nconst thinking = '<thinking>literal source</thinking>';\n- \"Valid task\" (backlog) [TASK_ID:fixture]"
 	literalToolTranscript := "[Using tool: read_file | fixture.go]\n[Tool read_file done]\n" + literalToolOutput + "\n[/Tool]"
 	bubbleStart := strings.Index(content, "window.cleanBubbleContent = function")
 	bubbleEnd := strings.Index(content, "// Clean all assistant messages")
