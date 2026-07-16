@@ -2138,15 +2138,16 @@ func TestSharedTaskResultLinkConversionAvailableOnDirectTaskThreadLoad(t *testin
 	}
 	content := renderedBaseMarkdownCodeHelpers(t) + buf.String()
 
+	normalizeToolTextDefinition := strings.Index(content, "window.normalizeTaskResultToolOutputTextNodes = function(messageElement)")
 	createDefinition := strings.Index(content, "window.convertTaskLinksInMessage = function(messageElement)")
 	editDefinition := strings.Index(content, "window.convertTaskEditLinksInMessage = function(messageElement)")
 	codeDefinition := strings.Index(content, "window.codeRanges = function(text)")
 	normalizeDefinition := strings.Index(content, "window.normalizeTranscriptMarkers = function(text, ranges)")
 	hydration := strings.Index(content, "// Apply cleaning and scroll on load")
-	if createDefinition == -1 || editDefinition == -1 || codeDefinition == -1 || normalizeDefinition == -1 {
+	if normalizeToolTextDefinition == -1 || createDefinition == -1 || editDefinition == -1 || codeDefinition == -1 || normalizeDefinition == -1 {
 		t.Fatal("direct task-thread output must define task-result converters plus Markdown-aware transcript normalization without requiring a prior /chat load")
 	}
-	if hydration == -1 || createDefinition > hydration || editDefinition > hydration || codeDefinition > hydration || normalizeDefinition > hydration {
+	if hydration == -1 || normalizeToolTextDefinition > hydration || createDefinition > hydration || editDefinition > hydration || codeDefinition > hydration || normalizeDefinition > hydration {
 		t.Fatal("task-result converters and Markdown-aware transcript normalization must be defined before hard-refresh task-thread hydration")
 	}
 	for _, marker := range []string{"[TASK_ID:task/id?unsafe]", "[TASK_EDITED:edited/id]", "[TASK_ID:coded/create]", "[TASK_EDITED:coded/edit]", "[TASK_ID:later/create]", "[TASK_EDITED:later/edit]", "[TASK_ID:escaped/create]", "[TASK_EDITED:escaped/edit]", "[TASK_ID:unicode/create]", "[TASK_EDITED:unicode/edit]", "[TASK_ID:bare-cr/create]", "[TASK_EDITED:bare-cr/edit]", "`[Tool grep_search done]coded[/Tool]`", "[Tool grep_search done]actual[/Tool]"} {
@@ -2178,7 +2179,7 @@ func TestSharedTaskResultLinkConversionExecutesForCreateAndEditMetadata(t *testi
 		t.Fatalf("render ChatAutoScrollScript: %v", err)
 	}
 	content := buf.String()
-	start := strings.Index(content, "window.convertTaskLinksInMessage = function(messageElement)")
+	start := strings.Index(content, "window.normalizeTaskResultToolOutputTextNodes = function(messageElement)")
 	end := strings.Index(content, "window.hideMixtureProgress = function(execId)")
 	codeHelpers := renderedBaseMarkdownCodeHelpers(t)
 	if start == -1 || end == -1 || end <= start {
@@ -2216,6 +2217,26 @@ function message(text, context) {
   parent.replaceChild = function(next, old) { replacements.push({ context, next }); };
   const textNode = { textContent: text, parentElement: parent, parentNode: parent };
   return { nodes: [textNode] };
+}
+function chunkedToolMessage(text) {
+  const root = element('div');
+  const pre = element('pre');
+  const chunks = [text.substring(0, 64 * 1024), text.substring(64 * 1024)];
+  root.nodes = chunks.map(function(chunk) { return { textContent: chunk, parentElement: pre, parentNode: pre }; });
+  root.matches = function(selector) { return selector === '.stream-tool-body-content'; };
+  root.querySelectorAll = function(selector) { return selector === 'pre' ? [pre] : []; };
+  pre.childNodes = root.nodes;
+  pre.closest = function(selector) {
+    if (selector === 'code, pre' || selector === '.stream-tool-body-content') return pre;
+    return null;
+  };
+  pre.normalize = function() {
+    const merged = { textContent: pre.childNodes.map(function(child) { return child.textContent; }).join(''), parentElement: pre, parentNode: pre };
+    pre.childNodes = [merged];
+    root.nodes = [merged];
+  };
+  pre.replaceChild = function(next, old) { replacements.push({ context: 'chunked-tool', next }); };
+  return { root, pre };
 }
 function descendants(root, tag, out = []) {
   if (!root) return out;
@@ -2294,6 +2315,19 @@ if (links[3].href !== '/tasks/tool%2Fedit' || links[3].textContent !== '"Tool-ed
 if (links[4].href !== '/tasks/escaped%2Fcreate' || links[5].href !== '/tasks/escaped%2Fedit') { console.error('escaped real links', links[4], links[5]); process.exit(15); }
 if (links[8].href !== '/tasks/fallback%2Ftool-real' || links[9].href !== '/tasks/fallback%2Ftool-real-edit') { console.error('fallback tool links', links[8], links[9]); process.exit(17); }
 if (anchors(sourceCreate).length || anchors(sourceEdit).length || anchors(blankCreate).length || anchors(blankEdit).length) { console.error('invalid source or blank marker linked'); process.exit(16); }
+const chunkSize = 64 * 1024;
+const crossingCreate = chunkedToolMessage('x'.repeat(chunkSize - 18) + '\n- "Boundary create" (backlog) [TASK_ID:chunk/create]');
+const crossingEdit = chunkedToolMessage('y'.repeat(chunkSize - 18) + '\n- "Boundary edit" (updated: title) [TASK_EDITED:chunk/edit]');
+const codedInline = chunkedToolMessage('z'.repeat(chunkSize - 8) + '\x60coded\n- "Coded create" (backlog) [TASK_ID:chunk/coded-create]\n\x60');
+const codedFence = chunkedToolMessage('q'.repeat(chunkSize - 16) + '\n\x60\x60\x60text\nfence lead\n- "Coded edit" (updated: title) [TASK_EDITED:chunk/coded-edit]\n\x60\x60\x60');
+const chunkedReplacementStart = replacements.length;
+window.convertTaskLinksInMessage(crossingCreate.root);
+window.convertTaskEditLinksInMessage(crossingEdit.root);
+window.convertTaskLinksInMessage(codedInline.root);
+window.convertTaskEditLinksInMessage(codedFence.root);
+const chunkedReplacements = replacements.slice(chunkedReplacementStart);
+if (chunkedReplacements.length !== 2 || anchors(chunkedReplacements[0].next)[0].href !== '/tasks/chunk%2Fcreate' || anchors(chunkedReplacements[1].next)[0].href !== '/tasks/chunk%2Fedit') { console.error('chunk-boundary links', chunkedReplacements); process.exit(18); }
+if (codedInline.pre.childNodes.length !== 1 || codedFence.pre.childNodes.length !== 1 || anchors(codedInline.root).length || anchors(codedFence.root).length) { console.error('cross-chunk coded metadata converted'); process.exit(19); }
 const createButtons = buttons(replacements[0].next);
 if (createButtons.length !== 1 || createButtons[0].className.indexOf('ov-task-result-start-btn') === -1) { console.error('buttons', createButtons); process.exit(8); }
 `
@@ -2309,6 +2343,10 @@ func TestSharedTaskResultLinkConversionGeneratedParity(t *testing.T) {
 	}
 	content := string(generated)
 	for _, snippet := range []string{
+		"window.normalizeTaskResultToolOutputTextNodes = function(messageElement)",
+		"var selector = messageElement.matches && messageElement.matches('.stream-tool-body-content')",
+		"messageElement.querySelectorAll(selector).forEach(function(pre)",
+		"if (pre.childNodes && pre.childNodes.length > 1 && pre.normalize) pre.normalize()",
 		"window.convertTaskLinksInMessage = function(messageElement)",
 		"window.convertTaskEditLinksInMessage = function(messageElement)",
 		"var encodedTaskId = encodeURIComponent(taskId.trim())",
@@ -4323,18 +4361,17 @@ window.addEventListener('DOMContentLoaded', function() {
     for (var i = 0; i < count; i++) rows.push((prefix + '-' + i + ' ').padEnd(width, 'x'));
     return rows.join('\n');
   }
-  var largeRows = [
-    'package chatcontrol',
-    '',
-    'case "create_task":',
-    '\treturn "source value"',
-    '[TASK_ID:source/create]'
-  ];
-  for (var line = largeRows.length; line < 889; line++) largeRows.push(('chat_action_tools.go source line ' + line + ' ').padEnd(56, 'x'));
-  largeRows.push('- "Large created" (backlog) [TASK_ID:large/create]');
-  largeRows.push('\u0060- "Coded create" (backlog) [TASK_ID:coded/create]\u0060');
-  largeRows.push('- "Large edited" (updated: title) [TASK_EDITED:large/edit]');
-  var largeOutput = largeRows.join('\n');
+  var chunkSize = 64 * 1024;
+  var largeOutput = repeatedLines(889, 56, 'chat_action_tools.go source line');
+  var boundaryCreate = '- "Boundary created" (backlog) [TASK_ID:boundary/create]';
+  largeOutput = largeOutput.padEnd(chunkSize - 20, 'x') + '\n' + boundaryCreate + '\n';
+  var boundaryEdit = '- "Boundary edited" (updated: title) [TASK_EDITED:boundary/edit]';
+  largeOutput = largeOutput.padEnd((2 * chunkSize) - 20, 'y') + '\n' + boundaryEdit + '\n';
+  largeOutput = largeOutput.padEnd((3 * chunkSize) - 8, 'z') + '\u0060coded inline\n' +
+    '- "Coded boundary create" (backlog) [TASK_ID:coded/boundary-create]\n\u0060\n';
+  largeOutput = largeOutput.padEnd((4 * chunkSize) - 16, 'q') + '\n\u0060\u0060\u0060text\nfence lead\n' +
+    '- "Coded boundary edit" (updated: title) [TASK_EDITED:coded/boundary-edit]\n\u0060\u0060\u0060';
+  var largeLineCount = largeOutput.split('\n').length;
 
   var transcript = '[Thinking]\nPreparing synthetic large transcript.\n[/Thinking]\n' +
     '- "Assistant created" (backlog) [TASK_ID:assistant/create]\n' +
@@ -4383,7 +4420,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!shortPre || !widePre) fail('short or horizontally wide one-line output was collapsed');
     if (!container.querySelector('a[href="/tasks/assistant%2Fcreate"]') || !container.querySelector('a[href="/tasks/assistant%2Fedit"]')) fail('assistant task links were not hydrated');
 
-    var largeToggle = toggles.find(function(button) { return button.textContent === 'Show output (892 lines)'; });
+    var largeToggle = toggles.find(function(button) { return button.textContent === 'Show output (' + largeLineCount + ' lines)'; });
     if (!largeToggle || largeToggle.tagName !== 'BUTTON' || largeToggle.type !== 'button') fail('large output toggle is not an accessible native button');
     var renderVersion = container._streamRenderVersion;
     var expansionStarted = performance.now();
@@ -4391,18 +4428,20 @@ window.addEventListener('DOMContentLoaded', function() {
     largeToggle.click();
     await waitFor(function() {
       var pre = largeToggle.closest('.stream-tool-body-content').querySelector('pre');
-      return pre && pre.textContent.indexOf('Large edited') !== -1;
+      return pre && pre.textContent.indexOf('Coded boundary edit') !== -1;
     }, 1000);
     var expandedContent = largeToggle.closest('.stream-tool-body-content');
     var expansionMS = performance.now() - expansionStarted;
     if (largeToggle.getAttribute('aria-expanded') !== 'true' || !expandedContent.querySelector('.stream-tool-body-scroll > pre')) fail('expansion did not materialize the styled OUT subtree');
     if (container._streamRenderVersion !== renderVersion) fail('expanding one OUT rerendered the response');
-    if (!expandedContent.querySelector('a[href="/tasks/large%2Fcreate"]') || !expandedContent.querySelector('a[href="/tasks/large%2Fedit"]')) fail('expanded tool task links were not hydrated');
-    if (expandedContent.querySelector('a[href="/tasks/source%2Fcreate"]') || expandedContent.querySelector('a[href="/tasks/coded%2Fcreate"]')) fail('source or Markdown-code task marker became a link');
+    if (!expandedContent.querySelector('a[href="/tasks/boundary%2Fcreate"]') || !expandedContent.querySelector('a[href="/tasks/boundary%2Fedit"]')) {
+      fail('chunk-boundary tool task links were not hydrated; links=' + Array.from(expandedContent.querySelectorAll('a')).map(function(anchor) { return anchor.getAttribute('href'); }).join(',') + '; preNodes=' + expandedContent.querySelector('pre').childNodes.length);
+    }
+    if (expandedContent.querySelector('a[href="/tasks/coded%2Fboundary-create"]') || expandedContent.querySelector('a[href="/tasks/coded%2Fboundary-edit"]')) fail('cross-chunk Markdown-code task marker became a link');
     Array.from(container.querySelectorAll('a')).forEach(function(anchor) { if (/\r|\n/.test(anchor.textContent)) fail('anchor text contains a newline'); });
 
     await Promise.resolve(window.renderStreamingContent(container, transcript, true));
-    largeToggle = Array.from(container.querySelectorAll('.stream-tool-output-toggle')).find(function(button) { return button.textContent === 'Hide output (892 lines)'; });
+    largeToggle = Array.from(container.querySelectorAll('.stream-tool-output-toggle')).find(function(button) { return button.textContent === 'Hide output (' + largeLineCount + ' lines)'; });
     if (!largeToggle || !largeToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('rerender did not preserve expanded state');
     var collapseStarted = performance.now();
     largeToggle.click();
@@ -4411,7 +4450,7 @@ window.addEventListener('DOMContentLoaded', function() {
     document.documentElement.setAttribute('data-theme', 'light');
     window.dispatchEvent(new Event('resize'));
     await Promise.resolve(window.renderStreamingContent(container, transcript, true));
-    largeToggle = Array.from(container.querySelectorAll('.stream-tool-output-toggle')).find(function(button) { return button.textContent === 'Show output (892 lines)'; });
+    largeToggle = Array.from(container.querySelectorAll('.stream-tool-output-toggle')).find(function(button) { return button.textContent === 'Show output (' + largeLineCount + ' lines)'; });
     if (!largeToggle || largeToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('rerender did not preserve collapsed state');
 
     result.setAttribute('data-test-result', 'pass');

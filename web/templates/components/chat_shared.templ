@@ -2358,8 +2358,22 @@ templ ChatAutoScrollScript() {
 			// Alias for backward compatibility (task thread used a separate namespace)
 			window.threadAutoScroll = window.chatAutoScroll;
 
+			// Large raw tool outputs are inserted cooperatively as adjacent text nodes.
+			// Join those nodes before conversion so line matching and Markdown code
+			// ranges are evaluated against the complete OUT text across chunk boundaries.
+			window.normalizeTaskResultToolOutputTextNodes = function(messageElement) {
+				if (!messageElement || !messageElement.querySelectorAll) return;
+				var selector = messageElement.matches && messageElement.matches('.stream-tool-body-content')
+					? 'pre'
+					: '.stream-tool-body-content pre';
+				messageElement.querySelectorAll(selector).forEach(function(pre) {
+					if (pre.childNodes && pre.childNodes.length > 1 && pre.normalize) pre.normalize();
+				});
+			};
+
 			// Convert task-creation result metadata to clickable links
 			window.convertTaskLinksInMessage = function(messageElement) {
+				window.normalizeTaskResultToolOutputTextNodes(messageElement);
 				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
 				var nodesToProcess = [];
 				var node;
@@ -2498,6 +2512,7 @@ templ ChatAutoScrollScript() {
 
 			// Convert task-edit result metadata to clickable links
 			window.convertTaskEditLinksInMessage = function(messageElement) {
+				window.normalizeTaskResultToolOutputTextNodes(messageElement);
 				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
 				var nodesToProcess = [];
 				var node;
