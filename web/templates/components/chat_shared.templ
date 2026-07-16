@@ -10,6 +10,19 @@ import (
 	"time"
 )
 
+// chatContentRevision returns a compact fingerprint for comparing rendered
+// transcript snapshots without repeatedly comparing the full response text.
+func chatContentRevision(content string) string {
+	const offset64 = uint64(14695981039346656037)
+	const prime64 = uint64(1099511628211)
+	hash := offset64
+	for i := 0; i < len(content); i++ {
+		hash ^= uint64(content[i])
+		hash *= prime64
+	}
+	return fmt.Sprintf("%x-%016x", len(content), hash)
+}
+
 // jsStringLength returns the JavaScript string.length for a Go string.
 // JS uses UTF-16 encoding, so characters outside the BMP (U+10000+) count as
 // 2 code units (surrogate pair), matching how JS .length works.
@@ -128,7 +141,7 @@ templ ChatBubble(role, content string) {
 			if role == "User" {
 				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
 			} else {
-				<div class="chat-stream-content" data-raw-content={ NormalizeDisplayMarkers(content) }></div>
+				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(content) } data-raw-content={ NormalizeDisplayMarkers(content) }></div>
 				<script>
 					(function() {
 						var el = document.currentScript.previousElementSibling;
@@ -184,7 +197,7 @@ templ ChatBubbleError(role, errorMsg, output string) {
 				<div class="text-error/80 text-sm font-medium mb-2">{ "Error: " + errorMsg }</div>
 			}
 			if output != "" {
-				<div class="chat-stream-content" data-raw-content={ NormalizeDisplayMarkers(output) }></div>
+				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(output) } data-raw-content={ NormalizeDisplayMarkers(output) }></div>
 				<script>
 					(function() {
 						var el = document.currentScript.previousElementSibling;
@@ -504,7 +517,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						console.error('[chat] streaming render failed:', err);
 						// Preserve the complete response even if the styled renderer fails.
 							container.textContent = renderText;
-							container.setAttribute('data-raw-content', renderText);
+							if (window.setChatRawContent) window.setChatRawContent(container, renderText);
+							else container.setAttribute('data-raw-content', renderText);
 						lastRenderedSourceLength = sourceLength;
 						lastRenderFinishedAt = Date.now();
 						if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
@@ -544,7 +558,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							if (status === 'cancelled') {
 								container.classList.add('text-error/80', 'font-medium');
 								container.textContent = 'Error: Cancelled';
-								container.setAttribute('data-raw-content', 'Error: Cancelled');
+								if (window.setChatRawContent) window.setChatRawContent(container, 'Error: Cancelled');
+								else container.setAttribute('data-raw-content', 'Error: Cancelled');
 							}
 						}
 
@@ -732,7 +747,7 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 					</div>
 				}
 				<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
-				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", len(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
+				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", len(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -948,7 +963,8 @@ templ _initThreadStreamingScript() {
 					renderScheduled = false;
 					console.error('[thread] streaming render failed:', err);
 						container.textContent = renderText;
-						container.setAttribute('data-raw-content', renderText);
+						if (window.setChatRawContent) window.setChatRawContent(container, renderText);
+						else container.setAttribute('data-raw-content', renderText);
 					lastRenderedSourceLength = sourceLength;
 					lastRenderFinishedAt = Date.now();
 					if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
@@ -988,7 +1004,8 @@ templ _initThreadStreamingScript() {
 						if (status === 'cancelled') {
 							container.classList.add('text-error/80', 'font-medium');
 							container.textContent = 'Error: Cancelled';
-							container.setAttribute('data-raw-content', 'Error: Cancelled');
+							if (window.setChatRawContent) window.setChatRawContent(container, 'Error: Cancelled');
+							else container.setAttribute('data-raw-content', 'Error: Cancelled');
 						}
 					}
 					function removeThreadEventSource(es) {
@@ -1205,8 +1222,11 @@ templ ChatEarlierMessagesLoader(containerID, url string, limit int) {
 	</div>
 }
 
-templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
-	<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+func chatExecutionIsTerminal(exec models.Execution) bool {
+	return exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled
+}
+
+templ chatExecutionPairContent(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
 		<!-- User message: show for followups and first non-followup only -->
 		if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
 			if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
@@ -1225,7 +1245,18 @@ templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []m
 		} else if exec.Status == models.ExecRunning {
 			@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
 		}
-	</div>
+}
+
+templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
+	if chatExecutionIsTerminal(exec) {
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true">
+			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+		</div>
+	} else {
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+		</div>
+	}
 }
 
 // ChatFollowupResponse renders user message + streaming assistant for a follow-up.
@@ -3101,7 +3132,17 @@ templ ChatAutoScrollScript() {
 
 			// Persistent store for thinking section open states (survives DOM replacement by morph:outerHTML)
 			if (!window._thinkingOpenStates) window._thinkingOpenStates = {};
-
+			if (typeof window._chatRawRevisionCounter !== 'number') window._chatRawRevisionCounter = 0;
+			window.setChatRawContent = function(container, raw) {
+				raw = raw || '';
+				var currentRaw = container.getAttribute('data-raw-content');
+				var currentRevision = container.getAttribute('data-raw-revision');
+				if (currentRevision && currentRaw === raw) return currentRevision;
+				var revision = 'runtime-' + (++window._chatRawRevisionCounter);
+				container.setAttribute('data-raw-content', raw);
+				container.setAttribute('data-raw-revision', revision);
+				return revision;
+			};
 		// Generate a stable key for a container to persist thinking states across morph swaps.
 		// Uses container ID (streaming-message-{execID}) or data-raw-content fingerprint.
 		function _thinkingStateKey(container) {
@@ -3258,6 +3299,7 @@ templ ChatAutoScrollScript() {
 				}
 			};
 			window.renderLiveChatContent = function(container, textBuffer, yieldBetweenBatches) {
+				var renderRevision = window.setChatRawContent ? window.setChatRawContent(container, textBuffer || '') : (textBuffer || '');
 				window._liveChatRenderActive = (window._liveChatRenderActive || 0) + 1;
 				if (!window._liveChatRenderRequests) window._liveChatRenderRequests = new Set();
 				var liveRequest = { container: container, finished: false, cancel: null, timeout: null };
@@ -3286,7 +3328,7 @@ templ ChatAutoScrollScript() {
 					if (liveRequest.finished) return;
 					liveRequest.finished = true;
 					if (liveRequest.timeout) clearTimeout(liveRequest.timeout);
-					if (!err && result !== false) container._renderedRaw = textBuffer || '';
+					if (!err && result !== false) container._renderedRevision = renderRevision;
 					if (container._activeLiveChatRender === liveRequest) container._activeLiveChatRender = null;
 					window._liveChatRenderActive = Math.max(0, (window._liveChatRenderActive || 1) - 1);
 					window._liveChatRenderRequests.delete(liveRequest);
@@ -3324,13 +3366,14 @@ templ ChatAutoScrollScript() {
 			};
 			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
 				if (!container || !raw) return Promise.resolve(false);
-				if (container._renderingRaw === raw && container._chatElementRenderPromise) return container._chatElementRenderPromise;
-				container._renderingRaw = raw;
+				var renderRevision = container.getAttribute('data-raw-revision') || raw || '';
+				if (container._renderingRevision === renderRevision && container._chatElementRenderPromise) return container._chatElementRenderPromise;
+				container._renderingRevision = renderRevision;
 				var promise = window.scheduleChatContentRender(container, raw, yieldBetweenBatches).then(function(rendered) {
-					if (container._renderingRaw !== raw) return rendered;
-					delete container._renderingRaw;
-					if (rendered && container.getAttribute('data-raw-content') === raw) container._renderedRaw = raw;
-					else if (container._renderedRaw === raw) delete container._renderedRaw;
+					if (container._renderingRevision !== renderRevision) return rendered;
+					delete container._renderingRevision;
+					if (rendered && (container.getAttribute('data-raw-revision') || raw || '') === renderRevision) container._renderedRevision = renderRevision;
+					else if (container._renderedRevision === renderRevision) delete container._renderedRevision;
 					return rendered;
 				});
 				container._chatElementRenderPromise = promise;
@@ -3905,7 +3948,7 @@ templ ChatAutoScrollScript() {
 				flushThinking();
 				flushText();
 				container.classList.remove('whitespace-pre-wrap');
-				container.setAttribute('data-raw-content', textBuffer);
+				window.setChatRawContent(container, textBuffer);
 				container.replaceChildren(renderFragment);
 
 			// Restore open state of thinking sections from before re-render
@@ -4247,18 +4290,28 @@ templ ChatAutoScrollScript() {
 				// these need to be re-rendered using the raw content stored in the data attribute.
 				container.querySelectorAll('.chat-stream-content[data-raw-content]').forEach(function(el) {
 					var raw = el.getAttribute('data-raw-content') || '';
+					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					if ((el._renderedRaw === raw && hasRenderedContent) || el._renderingRaw === raw) return;
+					if ((el._renderedRevision === revision && hasRenderedContent) || el._renderingRevision === revision) return;
 					if (raw && window.scheduleChatElementRender) {
 						window.scheduleChatElementRender(el, raw);
 					} else if (raw && window.renderStreamingContent) {
-						window.renderStreamingContent(el, raw);
-						el._renderedRaw = raw;
+						el._renderingRevision = revision;
+						var renderPromise;
+						try { renderPromise = window.renderStreamingContent(el, raw); }
+						catch (err) { renderPromise = Promise.reject(err); }
+						Promise.resolve(renderPromise).then(function(rendered) {
+							if (el._renderingRevision === revision) delete el._renderingRevision;
+							if (rendered !== false && (el.getAttribute('data-raw-revision') || raw) === revision) el._renderedRevision = revision;
+						}, function() {
+							if (el._renderingRevision === revision) delete el._renderingRevision;
+							if (el._renderedRevision === revision) delete el._renderedRevision;
+						});
 					} else if (raw && window.renderChatMarkdown) {
 						el.classList.add('chat-markdown');
 						el.innerHTML = window.renderChatMarkdown(raw);
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
-						delete el._renderedRaw;
+						delete el._renderedRevision;
 					}
 					// After rendering, convert task-result metadata and clean transcript controls
 					var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
@@ -4273,13 +4326,23 @@ templ ChatAutoScrollScript() {
 				// to be re-rendered using the raw content stored in the data attribute.
 				container.querySelectorAll('[data-streaming-resume][data-raw-content]').forEach(function(el) {
 					var raw = el.getAttribute('data-raw-content') || '';
+					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					if ((el._renderedRaw === raw && hasRenderedContent) || el._renderingRaw === raw) return;
+					if ((el._renderedRevision === revision && hasRenderedContent) || el._renderingRevision === revision) return;
 					if (raw && window.scheduleChatElementRender) {
 						window.scheduleChatElementRender(el, raw);
 					} else if (raw && window.renderStreamingContent) {
-						window.renderStreamingContent(el, raw);
-						el._renderedRaw = raw;
+						el._renderingRevision = revision;
+						var renderPromise;
+						try { renderPromise = window.renderStreamingContent(el, raw); }
+						catch (err) { renderPromise = Promise.reject(err); }
+						Promise.resolve(renderPromise).then(function(rendered) {
+							if (el._renderingRevision === revision) delete el._renderingRevision;
+							if (rendered !== false && (el.getAttribute('data-raw-revision') || raw) === revision) el._renderedRevision = revision;
+						}, function() {
+							if (el._renderingRevision === revision) delete el._renderingRevision;
+							if (el._renderedRevision === revision) delete el._renderedRevision;
+						});
 					} else if (raw && window.renderChatMarkdown) {
 						var div = document.createElement('div');
 						div.className = 'chat-markdown';
@@ -4287,7 +4350,7 @@ templ ChatAutoScrollScript() {
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(div);
 						el.innerHTML = '';
 						el.appendChild(div);
-						delete el._renderedRaw;
+						delete el._renderedRevision;
 					}
 				});
 				container.querySelectorAll('.chat-bubble-assistant-msg .whitespace-pre-wrap').forEach(function(div) {

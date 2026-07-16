@@ -676,7 +676,7 @@ func TestTaskThreadView_ResumeHydrationUsesLiveCoordinator(t *testing.T) {
 		!strings.Contains(section, "var renderPromise = liveRenderer(c, raw);") {
 		t.Fatal("task thread resume hydration must use the live coordinator")
 	}
-	if !strings.Contains(section, "hasRenderedContent && c._renderedRaw === raw") ||
+	if !strings.Contains(section, "hasRenderedContent && c._renderedRevision === revision") ||
 		!strings.Contains(section, "!hasCurrentRenderedContent && !c._activeLiveChatRender") {
 		t.Fatal("task thread resume hydration must only reuse content committed for the current raw snapshot")
 	}
@@ -797,9 +797,9 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"  await delay(10); if (calls.join(',') !== 'first,second') throw new Error('second render did not drain'); controls[1].reject(new Error('failed'));\n" +
 		"  const initial = await Promise.all([p1, p2]); if (!initial[0] || initial[1] || !second.replacements[0] || second.replacements[0].safe !== 'second') throw new Error('rejection did not use safe fallback');\n" +
 		"  window.renderStreamingContent = function(c, text) { if (text === 'hydrate-fail') return Promise.reject(new Error('hydrate failed')); return Promise.resolve(true); };\n" +
-		"  const hydrated = container(true, 'hydrate-ok'); if (!await window.scheduleChatElementRender(hydrated, 'hydrate-ok') || hydrated._renderedRaw !== 'hydrate-ok' || hydrated._renderingRaw) throw new Error('successful hydration signature was not committed');\n" +
-		"  const failedHydration = container(true, 'hydrate-fail'); if (await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydration._renderedRaw || failedHydration._renderingRaw) throw new Error('failed hydration signature was retained');\n" +
-		"  const orderingOwner = container(true, 'snapshot-a'); if (!await window.renderLiveChatContent(orderingOwner, 'snapshot-a') || orderingOwner._renderedRaw !== 'snapshot-a') throw new Error('live snapshot was not authoritative'); orderingOwner.raw = 'snapshot-b'; if (!await window.scheduleChatElementRender(orderingOwner, 'snapshot-b') || orderingOwner._renderedRaw !== 'snapshot-b') throw new Error('scheduled snapshot did not replace live snapshot'); orderingOwner.raw = 'snapshot-a'; if (orderingOwner._renderedRaw === orderingOwner.raw) throw new Error('A-B-A ordering falsely treated stale DOM as current');\n" +
+		"  const hydrated = container(true, 'hydrate-ok'); if (!await window.scheduleChatElementRender(hydrated, 'hydrate-ok') || hydrated._renderedRevision !== 'hydrate-ok' || hydrated._renderingRevision) throw new Error('successful hydration signature was not committed');\n" +
+		"  const failedHydration = container(true, 'hydrate-fail'); if (await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydration._renderedRevision || failedHydration._renderingRevision) throw new Error('failed hydration signature was retained');\n" +
+		"  const orderingOwner = container(true, 'snapshot-a'); if (!await window.renderLiveChatContent(orderingOwner, 'snapshot-a') || orderingOwner._renderedRevision !== 'snapshot-a') throw new Error('live snapshot was not authoritative'); orderingOwner.raw = 'snapshot-b'; if (!await window.scheduleChatElementRender(orderingOwner, 'snapshot-b') || orderingOwner._renderedRevision !== 'snapshot-b') throw new Error('scheduled snapshot did not replace live snapshot'); orderingOwner.raw = 'snapshot-a'; if (orderingOwner._renderedRevision === orderingOwner.raw) throw new Error('A-B-A ordering falsely treated stale DOM as current');\n" +
 		"  window._chatLiveRenderQuietMS = 5; let liveResolve = null, completedAttempts = 0; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'completed-hung' && ++completedAttempts === 1) return new Promise(function() {}); if (text === 'live-hung') return new Promise(function(resolve) { liveResolve = resolve; }); return Promise.resolve(true); };\n" +
 		"  const completedDuringLive = container(true); const completedResult = window.scheduleChatContentRender(completedDuringLive, 'completed-hung'); await delay(10); const liveResult = window.renderLiveChatContent(container(true), 'live-now'); if (!await liveResult || await completedResult || completedDuringLive.replacements.length !== 0) throw new Error('live render dumped interrupted completed output into the DOM'); await delay(15); if (completedAttempts !== 2) throw new Error('interrupted completed render was not requeued after live work');\n" +
 		"  const livePending = window.renderLiveChatContent(container(true), 'live-hung'); await delay(1); const queuedAfterLive = window.scheduleChatContentRender(container(true), 'queued-after-live'); await delay(2); if (calls.indexOf('queued-after-live') !== -1) throw new Error('completed render ran concurrently with live render'); liveResolve(true); await livePending; if (!await queuedAfterLive || calls.indexOf('queued-after-live') === -1) throw new Error('completed queue did not resume after live render');\n" +
@@ -808,7 +808,7 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"  window._chatLiveRenderTimeoutMS = 50; window._chatRenderMaxLiveDeferralMS = 5; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'live-deferral-cap') return new Promise(function() {}); return Promise.resolve(true); }; const cappedLive = window.renderLiveChatContent(container(true), 'live-deferral-cap'); const cappedQueued = window.scheduleChatContentRender(container(true), 'queued-after-cap'); if (!await cappedQueued || await cappedLive || calls.indexOf('queued-after-cap') === -1) throw new Error('active live render exceeded completed-render deferral cap');\n" +
 		"  let staleLiveSettled = false; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'live-with-stale-queue') return new Promise(function() {}); return Promise.resolve(true); }; const staleLive = window.renderLiveChatContent(container(true), 'live-with-stale-queue').then(function(result) { staleLiveSettled = true; return result; }); const staleQueued = window.scheduleChatContentRender(container(false), 'stale-during-live'); if (await staleQueued) throw new Error('disconnected queued render succeeded'); await delay(10); if (staleLiveSettled) throw new Error('stale queue entry cancelled active live render'); window.cancelLiveChatRenders(); if (await staleLive) throw new Error('cancelled stale-test live render succeeded');\n" +
 		"  let markdownFallbackRan = false, markdownWorkerTerminated = false; const markdownOwner = container(true); window.renderStreamingContent = function(c) { c._markdownWorkerState = { cancelled: false, finished: false, fallbackTimer: setTimeout(function() { markdownFallbackRan = true; }, 5), worker: { terminate: function() { markdownWorkerTerminated = true; } }, resolve: function() {} }; return new Promise(function() {}); }; const cancelledMarkdown = window.renderLiveChatContent(markdownOwner, 'cancel-markdown'); await delay(1); window.cancelLiveChatRenders(); if (await cancelledMarkdown) throw new Error('cancelled Markdown render succeeded'); await delay(10); if (markdownFallbackRan || !markdownWorkerTerminated || markdownOwner._markdownWorkerState !== null) throw new Error('live cancellation left Markdown fallback work active');\n" +
-		"  let replacementResolve = null, replacementSettled = false; const replacementOwner = container(true); window._chatLiveRenderTimeoutMS = 5; window.renderStreamingContent = function(c, text) { if (text === 'replacement-new') return new Promise(function(resolve) { replacementResolve = resolve; }); return new Promise(function() {}); }; const replacedLive = window.renderLiveChatContent(replacementOwner, 'replacement-old'); await delay(1); window._chatLiveRenderTimeoutMS = 50; const replacementLive = window.renderLiveChatContent(replacementOwner, 'replacement-new').then(function(result) { replacementSettled = true; return result; }); if (await replacedLive) throw new Error('superseded same-container render succeeded'); await delay(10); if (replacementSettled || window._liveChatRenderActive !== 1) throw new Error('old live timeout cancelled the replacement render'); replacementResolve(true); if (!await replacementLive || replacementOwner._activeLiveChatRender !== null || replacementOwner._renderedRaw !== 'replacement-new') throw new Error('replacement render did not commit its owned raw signature');\n" +
+		"  let replacementResolve = null, replacementSettled = false; const replacementOwner = container(true); window._chatLiveRenderTimeoutMS = 5; window.renderStreamingContent = function(c, text) { if (text === 'replacement-new') return new Promise(function(resolve) { replacementResolve = resolve; }); return new Promise(function() {}); }; const replacedLive = window.renderLiveChatContent(replacementOwner, 'replacement-old'); await delay(1); window._chatLiveRenderTimeoutMS = 50; const replacementLive = window.renderLiveChatContent(replacementOwner, 'replacement-new').then(function(result) { replacementSettled = true; return result; }); if (await replacedLive) throw new Error('superseded same-container render succeeded'); await delay(10); if (replacementSettled || window._liveChatRenderActive !== 1) throw new Error('old live timeout cancelled the replacement render'); replacementResolve(true); if (!await replacementLive || replacementOwner._activeLiveChatRender !== null || replacementOwner._renderedRevision !== 'replacement-new') throw new Error('replacement render did not commit its owned raw signature');\n" +
 		"  let timeoutFallbackRan = false, timeoutWorkerTerminated = false; const timeoutMarkdownOwner = container(true); window._chatLiveRenderTimeoutMS = 5; window.renderStreamingContent = function(c) { c._markdownWorkerState = { cancelled: false, finished: false, fallbackTimer: setTimeout(function() { timeoutFallbackRan = true; }, 15), worker: { terminate: function() { timeoutWorkerTerminated = true; } }, resolve: function() {} }; return new Promise(function() {}); }; if (await window.renderLiveChatContent(timeoutMarkdownOwner, 'timeout-markdown')) throw new Error('timed out Markdown render succeeded'); await delay(20); if (timeoutFallbackRan || !timeoutWorkerTerminated || timeoutMarkdownOwner._markdownWorkerState !== null || timeoutMarkdownOwner._activeLiveChatRender !== null) throw new Error('live timeout left owned Markdown work active');\n" +
 		"  window._chatRenderMaxLiveDeferralMS = 5; window._chatLiveRenderQuietUntil = Date.now() + 1000; window.renderStreamingContent = function(c, text) { calls.push(text); return Promise.resolve(true); }; if (!await window.scheduleChatContentRender(container(true), 'max-deferral') || calls.indexOf('max-deferral') === -1) throw new Error('live quiet period starved completed render');\n" +
 		"  window._chatContentRenderTimeoutMS = 50; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'old-active') return new Promise(function() {}); return Promise.resolve(true); };\n" +
@@ -821,6 +821,40 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"})().catch(function(err) { console.error(err && err.stack || err); process.exit(1); });\n"
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("chat render scheduler failed: %v\n%s", err, output)
+	}
+}
+
+func TestChatContentRevisionIsCompactAndContentSensitive(t *testing.T) {
+	large := strings.Repeat("tool output\n", 100000)
+	revision := chatContentRevision(large)
+	if len(revision) > 40 {
+		t.Fatalf("revision must stay compact, got %d bytes", len(revision))
+	}
+	if revision != chatContentRevision(large) {
+		t.Fatal("revision must be stable for identical content")
+	}
+	if revision == chatContentRevision(large+"changed") {
+		t.Fatal("revision must change with transcript content")
+	}
+}
+
+func TestChatExecutionPairPreservesTerminalTranscriptDuringMorph(t *testing.T) {
+	terminal := models.Execution{ID: "terminal-1", Status: models.ExecCompleted, Output: "large output"}
+	var terminalHTML bytes.Buffer
+	if err := ChatExecutionPair(terminal, nil, []models.Execution{terminal}, 0, false, nil, "messages", "thread").Render(context.Background(), &terminalHTML); err != nil {
+		t.Fatalf("render terminal execution pair: %v", err)
+	}
+	if !strings.Contains(terminalHTML.String(), `id="chat-execution-terminal-1"`) || !strings.Contains(terminalHTML.String(), `hx-preserve="true"`) {
+		t.Fatal("terminal execution pair must be preserved across polling morphs")
+	}
+
+	running := models.Execution{ID: "running-1", Status: models.ExecRunning}
+	var runningHTML bytes.Buffer
+	if err := ChatExecutionPair(running, nil, []models.Execution{running}, 0, false, nil, "messages", "thread").Render(context.Background(), &runningHTML); err != nil {
+		t.Fatalf("render running execution pair: %v", err)
+	}
+	if strings.Contains(runningHTML.String(), `hx-preserve="true"`) {
+		t.Fatal("running execution pair must remain morphable for polling fallback")
 	}
 }
 
@@ -3273,8 +3307,12 @@ func TestCleanAssistantMessages_HandlesStreamingResumeContainers(t *testing.T) {
 	}
 
 	// Must use content signatures so unchanged bubbles are skipped on poll updates
-	if count := strings.Count(content, "el._renderedRaw === raw"); count < 2 {
+	if count := strings.Count(content, "el._renderedRevision === revision"); count < 2 {
 		t.Errorf("cleanAssistantMessages must recognize the authoritative rendered signature in both raw-content paths, found %d", count)
+	}
+	if !strings.Contains(content, "Promise.resolve(renderPromise).then(function(rendered)") ||
+		!strings.Contains(content, "if (el._renderingRevision === revision) delete el._renderingRevision") {
+		t.Error("direct async rendering fallback must settle before committing or clearing its revision")
 	}
 	if !strings.Contains(content, "div.dataset.cleanedText === text") {
 		t.Error("cleanAssistantMessages must skip unchanged assistant text blocks using cleanedText signature")
@@ -3283,7 +3321,7 @@ func TestCleanAssistantMessages_HandlesStreamingResumeContainers(t *testing.T) {
 	// If renderStreamingContent is unavailable, fallback markdown render must NOT lock
 	// renderedRaw state. This allows a later pass (after renderStreamingContent loads)
 	// to re-render tool cards from raw markers instead of staying markdown-only.
-	if !strings.Contains(content, "delete el._renderedRaw") {
+	if !strings.Contains(content, "delete el._renderedRevision") {
 		t.Error("cleanAssistantMessages fallback markdown path must clear renderedRaw so tool-card re-render can occur later")
 	}
 }

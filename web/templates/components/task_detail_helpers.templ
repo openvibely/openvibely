@@ -473,8 +473,9 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					var resumeContainers = document.querySelectorAll('[data-streaming-resume="true"]');
 						resumeContainers.forEach(function(c) {
 							var raw = c.getAttribute('data-raw-content') || '';
+							var revision = c.getAttribute('data-raw-revision') || raw;
 							var hasRenderedContent = !!(c.textContent && c.textContent.trim()) || !!c.querySelector('*');
-							var hasCurrentRenderedContent = hasRenderedContent && c._renderedRaw === raw;
+							var hasCurrentRenderedContent = hasRenderedContent && c._renderedRevision === revision;
 							if (raw.trim() && !hasCurrentRenderedContent && !c._activeLiveChatRender && window.renderStreamingContent) {
 								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
 								var renderPromise = liveRenderer(c, raw);
@@ -798,7 +799,8 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							if (!currentTaskThreadView() || !execId || typeof completedOutput !== 'string' || completedOutput === '') return;
 							var streamContainer = document.getElementById('streaming-message-' + execId);
 							if (!streamContainer) return;
-							streamContainer.setAttribute('data-raw-content', completedOutput);
+							if (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);
+							else streamContainer.setAttribute('data-raw-content', completedOutput);
 							if (window.renderStreamingContent) {
 								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
 								var renderPromise = liveRenderer(streamContainer, completedOutput);
