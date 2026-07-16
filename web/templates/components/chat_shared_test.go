@@ -2354,6 +2354,8 @@ func TestSharedTaskResultLinkConversionGeneratedParity(t *testing.T) {
 		`textNode.parentElement.closest('[data-chat-markdown-fallback=\"true\"]')`,
 		"(inToolOutput || inMarkdownFallback) && window.isInsideCode",
 		"if (!m[3] || !m[3].trim()) continue;",
+		`container.closest('[data-execution-pair=\"true\"][data-exec-id]')`,
+		`text.match(/\\r\\n|\\r|\\n/g)`,
 	} {
 		if !strings.Contains(content, snippet) {
 			t.Fatalf("generated shared template missing task-result conversion snippet %q", snippet)
@@ -3061,6 +3063,89 @@ func TestRenderStreamingContent_PreservesToolScrollByStableToolID(t *testing.T) 
 
 	if strings.Contains(content, "prevToolBodyScrollStates.push") || strings.Contains(content, "prevToolBodyScrollStates[idx]") {
 		t.Fatal("renderStreamingContent must not preserve tool output scroll state by positional index")
+	}
+}
+
+func TestRenderStreamingContent_ToolStateKeyIsExecutionScopedAcrossMorphReplacement(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the tool state-key regression")
+	}
+
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+	start := strings.Index(content, "function _thinkingStateKey(container)")
+	end := strings.Index(content[start:], "// Shared streaming content renderer")
+	if start == -1 || end == -1 {
+		t.Fatal("shared state-key function is missing")
+	}
+	stateKeyFunction := content[start : start+end]
+
+	script := `
+const sharedPrefix = 'same-prefix-'.padEnd(200, 'x');
+function completedContainer(execID) {
+  const pair = { getAttribute(name) { return name === 'data-exec-id' ? execID : ''; } };
+  return {
+    id: '',
+    parentElement: null,
+    getAttribute(name) { return name === 'data-raw-content' ? sharedPrefix + '-tail-' + execID : ''; },
+    closest(selector) { return selector === '[data-execution-pair="true"][data-exec-id]' ? pair : null; }
+  };
+}
+const first = completedContainer('exec-first');
+const second = completedContainer('exec-second');
+const firstReplacement = completedContainer('exec-first');
+const firstKey = _thinkingStateKey(first);
+const secondKey = _thinkingStateKey(second);
+const replacementKey = _thinkingStateKey(firstReplacement);
+if (firstKey === secondKey) throw new Error('different executions shared state key: ' + firstKey);
+if (firstKey !== replacementKey) throw new Error('morph replacement changed execution key');
+const rowStates = {};
+rowStates[firstKey + ':tool-1-0:out'] = { expanded: true, scrollTop: 42, pinned: false };
+if (rowStates[secondKey + ':tool-1-0:out']) throw new Error('second execution inherited first execution state');
+if (!rowStates[replacementKey + ':tool-1-0:out'] || rowStates[replacementKey + ':tool-1-0:out'].scrollTop !== 42) throw new Error('replacement did not restore first execution state');
+`
+	if output, err := exec.Command(node, "-e", stateKeyFunction+script).CombinedOutput(); err != nil {
+		t.Fatalf("execution-scoped tool state regression failed: %v\n%s", err, output)
+	}
+}
+
+func TestToolOutputLineCountUsesCommonMarkLineEndings(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute tool-output line counting")
+	}
+
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+	start := strings.Index(content, "function toolOutputLineCount(text)")
+	end := strings.Index(content[start:], "function resolveToolOutputLineCapacity()")
+	if start == -1 || end == -1 {
+		t.Fatal("tool-output line-count function is missing")
+	}
+	lineCountFunction := content[start : start+end]
+	script := `
+const cases = [
+  ['one', 1],
+  ['one\ntwo', 2],
+  ['one\r\ntwo', 2],
+  ['one\rtwo', 2],
+  ['one\r\ntwo\rthree\nfour', 4],
+  [Array(40).fill('row').join('\r'), 40]
+];
+for (const [text, expected] of cases) {
+  const actual = toolOutputLineCount(text);
+  if (actual !== expected) throw new Error(JSON.stringify(text) + ': got ' + actual + ', want ' + expected);
+}
+`
+	if output, err := exec.Command(node, "-e", lineCountFunction+script).CombinedOutput(); err != nil {
+		t.Fatalf("CommonMark tool-output line counting failed: %v\n%s", err, output)
 	}
 }
 
@@ -4381,8 +4466,10 @@ window.addEventListener('DOMContentLoaded', function() {
     transcript += '[Using tool: read_file | fixture-' + tool + '.go]\n[Tool read_file done]\n' + output + '\n[/Tool]\n';
   }
   var wideOutput = 'wide '.padEnd(12000, 'w');
+  var bareCROutput = Array(40).fill('bare-cr row').join('\r');
   transcript += '[Using tool: read_file | wide.txt]\n[Tool read_file done]\n' + wideOutput + '\n[/Tool]\n';
   transcript += '[Using tool: read_file | short.txt]\n[Tool read_file done]\nshort output\n[/Tool]\n';
+  transcript += '[Using tool: read_file | bare-cr.txt]\n[Tool read_file done]\n' + bareCROutput + '\n[/Tool]\n';
 
   function fail(message) { throw new Error(message); }
   function waitFor(check, timeout) {
@@ -4404,11 +4491,11 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { setTimeout(resolve, 0); });
     var initialMaxLongTask = longTasks.length ? Math.max.apply(Math, longTasks) : 0;
     var tools = container.querySelectorAll('.stream-tool');
-    if (tools.length !== 116) fail('expected 116 tool cards, got ' + tools.length + ': ' + container.innerHTML.substring(0, 500));
+    if (tools.length !== 117) fail('expected 117 tool cards, got ' + tools.length + ': ' + container.innerHTML.substring(0, 500));
     var toggles = Array.from(container.querySelectorAll('.stream-tool-output-toggle'));
-    if (toggles.length !== 114) fail('expected 114 vertically overflowing OUT toggles, got ' + toggles.length);
+    if (toggles.length !== 115) fail('expected 115 vertically overflowing OUT toggles, got ' + toggles.length);
     var collapsed = toggles.filter(function(button) { return button.getAttribute('aria-expanded') === 'false'; });
-    if (collapsed.length !== 114) fail('all overflowing OUT rows must start collapsed');
+    if (collapsed.length !== 115) fail('all overflowing OUT rows must start collapsed');
     collapsed.forEach(function(button) {
       var content = button.closest('.stream-tool-body-content');
       if (content.querySelector('pre') || content.querySelector('.stream-tool-body-scroll')) fail('collapsed output materialized a DOM surface');
@@ -4418,6 +4505,9 @@ window.addEventListener('DOMContentLoaded', function() {
     var shortPre = Array.from(container.querySelectorAll('.stream-tool-body-scroll > pre')).find(function(pre) { return pre.textContent === 'short output'; });
     var widePre = Array.from(container.querySelectorAll('.stream-tool-body-scroll > pre')).find(function(pre) { return pre.textContent.length === wideOutput.length; });
     if (!shortPre || !widePre) fail('short or horizontally wide one-line output was collapsed');
+    var bareCRTool = tools[116];
+    var bareCRToggle = bareCRTool && bareCRTool.querySelector('.stream-tool-output-toggle');
+    if (!bareCRToggle || bareCRToggle.textContent !== 'Show output (40 lines)' || bareCRToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('vertically overflowing bare-CR output did not start collapsed');
     if (!container.querySelector('a[href="/tasks/assistant%2Fcreate"]') || !container.querySelector('a[href="/tasks/assistant%2Fedit"]')) fail('assistant task links were not hydrated');
 
     var largeToggle = toggles.find(function(button) { return button.textContent === 'Show output (' + largeLineCount + ' lines)'; });

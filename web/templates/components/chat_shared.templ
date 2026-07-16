@@ -3199,7 +3199,7 @@ templ ChatAutoScrollScript() {
 				].join('|');
 			}
 			function toolOutputLineCount(text) {
-				var matches = text.match(/\n/g);
+				var matches = text.match(/\r\n|\r|\n/g);
 				return (matches ? matches.length : 0) + 1;
 			}
 			function resolveToolOutputLineCapacity() {
@@ -3262,10 +3262,13 @@ templ ChatAutoScrollScript() {
 				container.setAttribute('data-raw-revision', revision);
 				return revision;
 			};
-		// Generate a stable key for a container to persist thinking states across morph swaps.
-		// Uses container ID (streaming-message-{execID}) or data-raw-content fingerprint.
+		// Generate a stable key for a container to persist thinking and tool-row
+		// states across rerenders and morph replacement. Prefer execution identity.
 		function _thinkingStateKey(container) {
 			if (container.id) return container.id;
+			var executionPair = container.closest && container.closest('[data-execution-pair="true"][data-exec-id]');
+			var executionID = executionPair && executionPair.getAttribute('data-exec-id');
+			if (executionID) return 'exec:' + executionID;
 			var raw = container.getAttribute('data-raw-content');
 			if (raw) return 'raw:' + raw.substring(0, 200);
 			// Fallback: use position among chat-stream-content siblings
