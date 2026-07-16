@@ -3225,6 +3225,9 @@ func TestTaskThreadView_RuntimePreservationIsTaskScoped(t *testing.T) {
 	if !strings.Contains(first.String(), `id="task-thread-runtime-task-one"`) || strings.Contains(first.String(), `id="task-thread-runtime-task-two"`) {
 		t.Fatal("first task thread runtime must use its task-scoped preservation ID")
 	}
+	if strings.Contains(first.String(), `id="task-thread-runtime-task-one" class="contents" hx-preserve="true"`) {
+		t.Fatal("full task-thread runtime must remain replaceable on same-task detail refreshes")
+	}
 	if !strings.Contains(second.String(), `id="task-thread-runtime-task-two"`) || strings.Contains(second.String(), `id="task-thread-runtime-task-one"`) {
 		t.Fatal("second task thread runtime must not reuse the first task's preservation ID")
 	}

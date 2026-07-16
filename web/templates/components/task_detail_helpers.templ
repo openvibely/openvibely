@@ -371,7 +371,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 		if preservedExecIDs != nil {
 			<div id={ "task-thread-runtime-" + task.ID } class="contents" hx-preserve="true"></div>
 		} else {
-			<div id={ "task-thread-runtime-" + task.ID } class="contents" hx-preserve="true">
+			<div id={ "task-thread-runtime-" + task.ID } class="contents">
 			<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
 			@ChatAutoScrollScript()
 			@_initThreadStreamingScript()

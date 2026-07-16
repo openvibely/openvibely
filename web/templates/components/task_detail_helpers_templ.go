@@ -785,7 +785,7 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\" class=\"contents\" hx-preserve=\"true\"><!-- Shared auto-scroll and transcript rendering/cleaning utilities -->")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "\" class=\"contents\"><!-- Shared auto-scroll and transcript rendering/cleaning utilities -->")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
