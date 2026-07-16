@@ -4029,6 +4029,7 @@ templ ChatAutoScrollScript() {
 					inScroll.setAttribute('data-tool-row', 'in');
 					trackScrollPin(inScroll, rowStateKey('in'));
 					var inPre = document.createElement('pre');
+					inPre.className = 'stream-tool-output-text';
 					inPre.textContent = inContent;
 					inScroll.appendChild(inPre);
 					inVal.appendChild(inScroll);

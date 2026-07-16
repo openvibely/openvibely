@@ -4468,7 +4468,7 @@ window.addEventListener('DOMContentLoaded', function() {
   var wideOutput = 'wide '.padEnd(12000, 'w');
   var bareCROutput = Array(40).fill('bare-cr row').join('\r');
   transcript += '[Using tool: read_file | wide.txt]\n[Tool read_file done]\n' + wideOutput + '\n[/Tool]\n';
-  transcript += '[Using tool: read_file | short.txt]\n[Tool read_file done]\nshort output\n[/Tool]\n';
+  transcript += '[Using tool: Bash | printf short-output]\n[Tool Bash done]\nshort output\n[/Tool]\n';
   transcript += '[Using tool: read_file | bare-cr.txt]\n[Tool read_file done]\n' + bareCROutput + '\n[/Tool]\n';
 
   function fail(message) { throw new Error(message); }
@@ -4504,7 +4504,7 @@ window.addEventListener('DOMContentLoaded', function() {
       if (preview.textContent.length > 4100) fail('collapsed output preview was not bounded');
       if (preview.nextElementSibling !== button) fail('collapsed output toggle must follow the visible output');
     });
-    if (container.querySelectorAll('.stream-tool-body-scroll > pre').length !== 2) fail('only short and horizontal one-line OUT values should initially materialize');
+    if (container.querySelectorAll('.stream-tool-body-scroll[data-tool-row="out"] > pre').length !== 2) fail('only short and horizontal one-line OUT values should initially materialize');
     if (container.querySelector('[data-tool-output]')) fail('tool output must not be duplicated in data attributes');
     var shortPre = Array.from(container.querySelectorAll('.stream-tool-body-scroll > pre')).find(function(pre) { return pre.textContent === 'short output'; });
     var widePre = Array.from(container.querySelectorAll('.stream-tool-body-scroll > pre')).find(function(pre) { return pre.textContent.length === wideOutput.length; });
@@ -4538,6 +4538,11 @@ window.addEventListener('DOMContentLoaded', function() {
     var expandedStyle = window.getComputedStyle(expandedPre);
     var expandedFontSignature = [expandedStyle.fontFamily, expandedStyle.fontSize, expandedStyle.fontWeight, expandedStyle.fontStyle, expandedStyle.lineHeight, expandedStyle.letterSpacing].join('|');
     if (expandedFontSignature !== previewFontSignature) fail('collapsed and expanded output font styling differs: ' + previewFontSignature + ' vs ' + expandedFontSignature);
+    var inputPre = container.querySelector('.stream-tool-body-scroll[data-tool-row="in"] > pre');
+    if (!inputPre) fail('Bash tool input did not render an IN text surface');
+    var inputStyle = window.getComputedStyle(inputPre);
+    var inputFontSignature = [inputStyle.fontFamily, inputStyle.fontSize, inputStyle.fontWeight, inputStyle.fontStyle, inputStyle.lineHeight, inputStyle.letterSpacing].join('|');
+    if (inputFontSignature !== expandedFontSignature) fail('tool IN and OUT font styling differs: ' + inputFontSignature + ' vs ' + expandedFontSignature);
     var expandedPreview = expandedContent.querySelector('.stream-tool-output-preview');
     if (!expandedPreview || !expandedPreview.hidden) fail('expansion did not hide the collapsed output preview');
     if (container._streamRenderVersion !== renderVersion) fail('expanding one OUT rerendered the response');
@@ -4677,6 +4682,7 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"el.setAttribute('data-scroll-pinned', pinned ? 'true' : 'false')",
 		"inScroll.className = 'stream-tool-body-scroll'",
 		"inScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '')",
+		"inPre.className = 'stream-tool-output-text'",
 		"el.scrollTop = Number.MAX_SAFE_INTEGER",
 		"el.scrollTop = state.scrollTop",
 		"var outputText = seg.resultOutput ? seg.resultOutput.trim() : ''",
