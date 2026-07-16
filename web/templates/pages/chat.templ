@@ -625,7 +625,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							if (!streamContainer) return;
 							streamContainer.setAttribute('data-raw-content', completedOutput);
 							if (window.renderStreamingContent) {
-							window.renderStreamingContent(streamContainer, completedOutput);
+							var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+							liveRenderer(streamContainer, completedOutput);
 						} else {
 							streamContainer.textContent = completedOutput;
 						}
@@ -710,7 +711,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							renderScheduled = false;
 							if (!force && textBuffer.length === lastRenderedLength) return;
 							var shouldScroll = !tracker || tracker.shouldAutoScroll();
-							window.renderStreamingContent(contentDiv, textBuffer);
+							var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+							liveRenderer(contentDiv, textBuffer);
 							lastRenderedLength = textBuffer.length;
 							if (shouldScroll) {
 								requestAnimationFrame(function() {

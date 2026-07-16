@@ -758,6 +758,9 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"  window.renderStreamingContent = function(c, text) { if (text === 'hydrate-fail') return Promise.reject(new Error('hydrate failed')); return Promise.resolve(true); };\n" +
 		"  const hydrated = container(true, 'hydrate-ok'); if (!await window.scheduleChatElementRender(hydrated, 'hydrate-ok') || hydrated.dataset.cleanedRaw !== 'hydrate-ok' || hydrated.dataset.renderingRaw) throw new Error('successful hydration signature was not committed');\n" +
 		"  const failedHydration = container(true, 'hydrate-fail'); if (await window.scheduleChatElementRender(failedHydration, 'hydrate-fail') || failedHydration.dataset.cleanedRaw || failedHydration.dataset.renderingRaw) throw new Error('failed hydration signature was retained');\n" +
+		"  window._chatLiveRenderQuietMS = 5; let liveResolve = null; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'completed-hung') return new Promise(function() {}); if (text === 'live-hung') return new Promise(function(resolve) { liveResolve = resolve; }); return Promise.resolve(true); };\n" +
+		"  const completedDuringLive = container(true); const completedResult = window.scheduleChatContentRender(completedDuringLive, 'completed-hung'); await delay(10); const liveResult = window.renderLiveChatContent(container(true), 'live-now'); if (!await liveResult || await completedResult || !completedDuringLive.replacements[0]) throw new Error('live render did not cancel active completed render safely');\n" +
+		"  const livePending = window.renderLiveChatContent(container(true), 'live-hung'); await delay(1); const queuedAfterLive = window.scheduleChatContentRender(container(true), 'queued-after-live'); await delay(2); if (calls.indexOf('queued-after-live') !== -1) throw new Error('completed render ran concurrently with live render'); liveResolve(true); await livePending; if (!await queuedAfterLive || calls.indexOf('queued-after-live') === -1) throw new Error('completed queue did not resume after live render');\n" +
 		"  window._chatContentRenderTimeoutMS = 50; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'old-active') return new Promise(function() {}); return Promise.resolve(true); };\n" +
 		"  const oldActive = container(true), navigated = container(true); const oldResult = window.scheduleChatContentRender(oldActive, 'old-active'); await delay(10); oldActive.isConnected = false; const navigatedResult = window.scheduleChatContentRender(navigated, 'navigated'); const navigation = await Promise.all([oldResult, navigatedResult]); if (navigation[0] || !navigation[1] || calls.indexOf('navigated') === -1) throw new Error('navigation did not cancel disconnected active render');\n" +
 		"  window._chatContentRenderTimeoutMS = 5;\n" +
@@ -3133,7 +3136,7 @@ func TestTaskThreadLiveEventsScript_ReconcilesChatResponseDoneCompletedOutput(t 
 		"view.setAttribute('data-task-active', 'false')",
 		"document.getElementById('streaming-message-' + execId)",
 		"streamContainer.setAttribute('data-raw-content', completedOutput)",
-		"window.renderStreamingContent(streamContainer, completedOutput)",
+		"liveRenderer(streamContainer, completedOutput)",
 		"streamContainer.classList.remove('hidden')",
 		"loading.classList.add('hidden')",
 		"thinking.classList.add('hidden')",
@@ -3784,12 +3787,12 @@ func TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth(t *testing.T) {
 		t.Fatalf("expected streaming renderers to snapshot shouldScroll before DOM render, found %d", count)
 	}
 	textScrollIdx := strings.Index(content, "var shouldScroll = !tracker || tracker.shouldAutoScroll();")
-	textRenderIdx := strings.Index(content, "window.renderStreamingContent(container, renderText, shouldYield)")
+	textRenderIdx := strings.Index(content, "var renderPromise = liveRenderer(container, renderText, shouldYield)")
 	if textScrollIdx == -1 || textRenderIdx == -1 || textScrollIdx > textRenderIdx {
 		t.Error("new-message streaming renderer must compute shouldScroll before renderStreamingContent")
 	}
 
-	resumeRenderIdx := strings.LastIndex(content, "window.renderStreamingContent(container, renderText, shouldYield)")
+	resumeRenderIdx := strings.LastIndex(content, "var renderPromise = liveRenderer(container, renderText, shouldYield)")
 	if resumeRenderIdx == -1 {
 		t.Fatal("resume streaming renderer must call renderStreamingContent")
 	}

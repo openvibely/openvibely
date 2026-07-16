@@ -794,7 +794,8 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							if (!streamContainer) return;
 							streamContainer.setAttribute('data-raw-content', completedOutput);
 							if (window.renderStreamingContent) {
-								window.renderStreamingContent(streamContainer, completedOutput);
+								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+								liveRenderer(streamContainer, completedOutput);
 							} else {
 								streamContainer.textContent = completedOutput;
 							}

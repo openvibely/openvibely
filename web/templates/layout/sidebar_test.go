@@ -135,6 +135,7 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 	requiredSnippets := []string{
 		// Flag for stale morph suppression
 		"window._sidebarNavigating = true",
+		"if (window.cancelChatContentRenders) window.cancelChatContentRenders()",
 		// Abort polling requests within main-content
 		`querySelectorAll('[hx-trigger*="every"]')`,
 		`htmx.trigger(el, 'htmx:abort')`,

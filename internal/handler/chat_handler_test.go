@@ -3738,7 +3738,7 @@ func TestHandler_Chat_LiveStreamingUsesRenderStreamingContent(t *testing.T) {
 		"live streaming should define a batched render helper")
 	assert.Contains(t, body, "if (!window.renderStreamingContent)",
 		"batched render helper should provide text fallback when renderer is unavailable")
-	assert.Contains(t, body, "window.renderStreamingContent(contentDiv, textBuffer)",
+	assert.Contains(t, body, "liveRenderer(contentDiv, textBuffer)",
 		"batched render helper should render via shared renderer")
 	assert.Contains(t, onMsgBody, "renderBufferedOutput(false)",
 		"live streaming should batch per-chunk rendering to keep UI responsive")

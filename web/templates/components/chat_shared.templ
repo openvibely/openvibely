@@ -492,7 +492,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
 							}
 							var shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;
-							var renderPromise = window.renderStreamingContent(container, renderText, shouldYield);
+							var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+							var renderPromise = liveRenderer(container, renderText, shouldYield);
 							if (renderPromise && typeof renderPromise.then === 'function') {
 					return renderPromise.then(finishScheduledRender).catch(function(err) {
 						renderScheduled = false;
@@ -738,7 +739,8 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 						var raw = el.getAttribute('data-raw-content');
 						if (!raw) return;
 						if (window.renderStreamingContent) {
-							window.renderStreamingContent(el, raw);
+							var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+							liveRenderer(el, raw);
 						} else if (window.renderChatMarkdown) {
 							el.className = el.className.replace('whitespace-pre-wrap', '').trim();
 							var div = document.createElement('div');
@@ -928,7 +930,8 @@ templ _initThreadStreamingScript() {
 							if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
 						}
 						var shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;
-						var renderPromise = window.renderStreamingContent(container, renderText, shouldYield);
+						var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+						var renderPromise = liveRenderer(container, renderText, shouldYield);
 						if (renderPromise && typeof renderPromise.then === 'function') {
 				return renderPromise.then(finishScheduledRender).catch(function(err) {
 					renderScheduled = false;
@@ -3121,6 +3124,13 @@ templ ChatAutoScrollScript() {
 				window._chatContentRenderQueue.push(request);
 				function drain() {
 					if (window._chatContentRenderActive >= 1) return;
+					if ((window._liveChatRenderActive || 0) > 0) return;
+					var quietRemaining = (window._chatLiveRenderQuietUntil || 0) - Date.now();
+					if (quietRemaining > 0) {
+						clearTimeout(window._chatRenderResumeTimer);
+						window._chatRenderResumeTimer = setTimeout(drain, quietRemaining);
+						return;
+					}
 					var next = window._chatContentRenderQueue.shift();
 					while (next && (next.container._scheduledChatRender !== next || !next.container.isConnected)) {
 						next.finished = true;
@@ -3179,8 +3189,69 @@ templ ChatAutoScrollScript() {
 					});
 					next.timeout = setTimeout(function() { finish(false, true, true); }, window._chatContentRenderTimeoutMS || 30000);
 				}
+				window._drainChatContentRenderQueue = drain;
 				setTimeout(drain, 0);
 				return promise;
+			};
+			window.cancelChatContentRenders = function() {
+				var activeRequest = window._activeChatContentRender;
+				if (activeRequest && activeRequest.finish) activeRequest.finish(false, false, true);
+				var queued = window._chatContentRenderQueue.splice(0);
+				queued.forEach(function(request) {
+					if (request.finished) return;
+					request.finished = true;
+					if (request.container._scheduledChatRender === request) request.container._scheduledChatRender = null;
+					request.resolve(false);
+				});
+				if (window._liveChatRenderRequests) {
+					window._liveChatRenderRequests.forEach(function(liveRequest) {
+						var container = liveRequest.container;
+						container._streamRenderVersion = (container._streamRenderVersion || 0) + 1;
+						if (container._codeRangeWorkerState && container._codeRangeWorkerState.finish) container._codeRangeWorkerState.finish(null);
+						if (container._markdownWorkerState) {
+							container._markdownWorkerState.cancelled = true;
+							container._markdownWorkerState.worker.terminate();
+							container._markdownWorkerState.resolve(null);
+							container._markdownWorkerState = null;
+						}
+						liveRequest.finish();
+					});
+				}
+			};
+			window.renderLiveChatContent = function(container, textBuffer, yieldBetweenBatches) {
+				window._liveChatRenderActive = (window._liveChatRenderActive || 0) + 1;
+				if (!window._liveChatRenderRequests) window._liveChatRenderRequests = new Set();
+				var liveRequest = { container: container, finished: false, finish: null };
+				var activeRequest = window._activeChatContentRender;
+				if (activeRequest && activeRequest.finish) activeRequest.finish(false, true, true);
+				function finishLiveRender() {
+					if (liveRequest.finished) return;
+					liveRequest.finished = true;
+					window._liveChatRenderActive = Math.max(0, (window._liveChatRenderActive || 1) - 1);
+					window._liveChatRenderRequests.delete(liveRequest);
+					var quietMS = window._chatLiveRenderQuietMS || 300;
+					window._chatLiveRenderQuietUntil = Date.now() + quietMS;
+					clearTimeout(window._chatRenderResumeTimer);
+					window._chatRenderResumeTimer = setTimeout(function() {
+						if (window._drainChatContentRenderQueue) window._drainChatContentRenderQueue();
+					}, quietMS);
+				}
+				liveRequest.finish = finishLiveRender;
+				window._liveChatRenderRequests.add(liveRequest);
+				var renderPromise;
+				try {
+					renderPromise = window.renderStreamingContent(container, textBuffer, yieldBetweenBatches);
+				} catch (err) {
+					finishLiveRender();
+					throw err;
+				}
+				return Promise.resolve(renderPromise).then(function(result) {
+					finishLiveRender();
+					return result;
+				}, function(err) {
+					finishLiveRender();
+					throw err;
+				});
 			};
 			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
 				if (!container || !raw) return Promise.resolve(false);
