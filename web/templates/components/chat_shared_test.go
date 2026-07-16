@@ -2712,6 +2712,11 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"function findTag(node, tag) { if (node.tagName === tag) return node; for (const child of (node.children || [])) { const found = findTag(child, tag); if (found) return found; } return null; }\n" +
 		"const literalPre = findTag(literalToolStream, 'pre');\n" +
 		"if (literalToolStream.children.length !== 1 || literalToolStream.children[0].className.indexOf('stream-tool') === -1 || !literalPre || literalPre.textContent !== literalToolOutput) { console.error(JSON.stringify(literalToolStream)); process.exit(59); }\n" +
+		"const crossedToolOutput = 'output closes ` span';\n" +
+		"const crossedToolStream = element('div'); crossedToolStream.id = 'cross-boundary-code-range';\n" +
+		"window.renderStreamingContent(crossedToolStream, 'Literal `unclosed\\n[Using tool: bash]\\n[Tool bash done]\\n' + crossedToolOutput + '\\n[/Tool]\\n[Thinking]real thought[/Thinking]\\nVisible answer.');\n" +
+		"const crossedPre = findTag(crossedToolStream, 'pre');\n" +
+		"if (!crossedToolStream.children.some(function(child) { return child.className.indexOf('stream-tool') !== -1; }) || !crossedToolStream.children.some(function(child) { return child.className.indexOf('stream-thinking') !== -1; }) || !crossedPre || crossedPre.textContent !== crossedToolOutput) { console.error(JSON.stringify(crossedToolStream)); process.exit(60); }\n" +
 		"const largeMarkdown = Array(2200).fill('A paragraph with enough words to exercise cooperative Markdown chunking.\\n\\n').join('');\n" +
 		"const largeMarkdownStream = element('div'); largeMarkdownStream.id = 'large-markdown';\n" +
 		"window.renderStreamingContent(largeMarkdownStream, largeMarkdown).then(function(committed) {\n" +

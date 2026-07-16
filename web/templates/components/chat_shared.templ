@@ -3443,6 +3443,7 @@ templ ChatAutoScrollScript() {
 					var match;
 					var rawCodeRanges = [];
 					var codeRanges = [];
+					var transcriptToolRanges = [];
 					var segments = [];
 					var preparationFailed = false;
 					function toolBlockRanges(text) {
@@ -3479,6 +3480,21 @@ templ ChatAutoScrollScript() {
 						textBuffer = textBuffer.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
 						return true;
 					}
+					function prepareToolBlockRanges() {
+						transcriptToolRanges = toolBlockRanges(textBuffer);
+						return true;
+					}
+					function excludeToolBlockCodeRanges(ranges) {
+						if (!ranges.length || !transcriptToolRanges.length) return ranges;
+						var filtered = [];
+						var toolIndex = 0;
+						ranges.forEach(function(range) {
+							while (toolIndex < transcriptToolRanges.length && transcriptToolRanges[toolIndex].end <= range.start) toolIndex++;
+							if (toolIndex < transcriptToolRanges.length && transcriptToolRanges[toolIndex].start < range.end) return;
+							filtered.push(range);
+						});
+						return filtered;
+					}
 					function prepareInitialCodeRanges() {
 						if (shouldYieldPreparation && window.codeRangesAsync) {
 							return window.codeRangesAsync(textBuffer, container).then(function(result) {
@@ -3493,12 +3509,12 @@ templ ChatAutoScrollScript() {
 					function prepareCodeRanges() {
 						if (shouldYieldPreparation && window.codeRangesAsync) {
 							return window.codeRangesAsync(textBuffer, container).then(function(result) {
-								if (result !== null) codeRanges = result;
+								if (result !== null) codeRanges = excludeToolBlockCodeRanges(result);
 								else preparationFailed = true;
 								return true;
 							});
 						}
-						codeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
+						codeRanges = excludeToolBlockCodeRanges(window.codeRanges ? window.codeRanges(textBuffer) : []);
 						return true;
 					}
 					function preparationBudgetExpired(startedAt, processed) {
@@ -3695,6 +3711,7 @@ templ ChatAutoScrollScript() {
 						stripPreparedStatus,
 						normalizePreparedText,
 						stripPreparedArtifacts,
+						prepareToolBlockRanges,
 						prepareCodeRanges,
 					collectThinkingMatches,
 					collectToolUsingMatches,
