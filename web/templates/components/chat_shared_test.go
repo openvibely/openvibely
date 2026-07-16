@@ -4422,14 +4422,6 @@ window.addEventListener('DOMContentLoaded', function() {
   var result = document.getElementById('fixture-root');
   var container = document.getElementById('streaming-message-large-fixture');
   var longTasks = [];
-  if (window.PerformanceObserver) {
-    try {
-      var observer = new PerformanceObserver(function(list) {
-        list.getEntries().forEach(function(entry) { longTasks.push(entry.duration); });
-      });
-      observer.observe({ entryTypes: ['longtask'] });
-    } catch (_) {}
-  }
   window.renderChatMarkdown = function(text) {
     return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   };
@@ -4484,6 +4476,14 @@ window.addEventListener('DOMContentLoaded', function() {
     });
   }
 
+  if (window.PerformanceObserver) {
+    try {
+      var observer = new PerformanceObserver(function(list) {
+        list.getEntries().forEach(function(entry) { longTasks.push(entry.duration); });
+      });
+      observer.observe({ entryTypes: ['longtask'] });
+    } catch (_) {}
+  }
   var started = performance.now();
   Promise.resolve(window.renderStreamingContent(container, transcript, true)).then(async function(committed) {
     if (!committed) fail('large hydration did not commit');
