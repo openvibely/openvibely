@@ -3895,6 +3895,7 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 		"earlierGestureLocked",
 		"earlierRequestLoading",
 		"window.finishChatEarlierRequest",
+		"else if (window.cleanAssistantMessages) window.cleanAssistantMessages(container)",
 		"!event.detail.successful",
 		"loader.setAttribute('hx-swap', 'outerHTML show:none')",
 	}
@@ -3905,6 +3906,9 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 	}
 	if strings.Contains(content, "setTimeout(maybeLoadEarlier") {
 		t.Fatal("earlier loader must not eagerly fetch older history on initialization")
+	}
+	if strings.Contains(content, "if (window.cleanAssistantMessages) window.cleanAssistantMessages(container);\n\t\t\t\tif (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(container)") {
+		t.Fatal("earlier-message swaps must not start duplicate assistant hydration renders")
 	}
 	if strings.Contains(content, "scheduleGestureUnlock") || strings.Contains(content, "document.addEventListener('keyup'") {
 		t.Fatal("earlier loader must not unlock a consumed gesture before the HTMX request/swap completes")

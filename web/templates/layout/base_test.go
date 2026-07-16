@@ -108,12 +108,18 @@ func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T)
 		"/^[ \\\\t]*$/.test(line.substring(runEnd))",
 		"window.escapeRawHTMLForMarkdown = function(text, ranges)",
 		"window.sanitizeChatHTML = function(html)",
+		"window.sanitizeChatHTMLFragmentAsync = function(html, cancelled)",
+		"window.renderChatMarkdownLargeFallback = function(text)",
+		"state.fallbackTimer = setTimeout(function()",
 		"/^on/i.test(attr.name)",
 		"javascript:|vbscript:|data:",
 	} {
 		if !strings.Contains(string(generated), snippet) {
 			t.Fatalf("generated base template missing Markdown safety snippet %q", snippet)
 		}
+	}
+	if strings.Contains(string(generated), "worker.onerror = function() { finish(window.renderChatMarkdown(text))") {
+		t.Fatal("large Markdown worker failures must not synchronously parse the full document")
 	}
 }
 
@@ -148,10 +154,12 @@ func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
 		"new Function('self', 'importScripts', 'marked', markdownWorkerSource)(workerScope, function(url) { importedURL = url; }, { setOptions: function() {}, parse: function(value) { return value; } });\n" +
 		"workerScope.onmessage({ data: 'outside <img src=x>\\n```html\\n<img src=y>\\n```' });\n" +
 		"if (importedURL.indexOf('marked@15.0.4') === -1 || !workerPost || workerPost.error || workerPost.html.indexOf('outside &lt;img src=x>') === -1 || workerPost.html.indexOf('<img src=y>') === -1) throw new Error('generated Markdown worker did not execute safely');\n" +
+		"const ThreadWorker = require('worker_threads').Worker; const threadWorkerSource = \"const {parentPort}=require('worker_threads');var self=globalThis;self.postMessage=function(value){parentPort.postMessage(value);};\" + markdownWorkerSource.replace(/importScripts\\([^;]+\\);/, \"var marked={setOptions:function(){},parse:function(value){return value;}};\") + \";parentPort.on('message',function(data){self.onmessage({data:data});});\";\n" +
+		"const threadWorker = new ThreadWorker(threadWorkerSource, { eval: true }); const threadResult = new Promise(function(resolve, reject) { threadWorker.once('message', function(value) { threadWorker.terminate(); if (!value || value.error || value.html.indexOf('outside &lt;img src=thread>') === -1) reject(new Error('real worker thread returned unsafe output')); else resolve(true); }); threadWorker.once('error', reject); }); threadWorker.postMessage('outside <img src=thread>');\n" +
 		"const secondMarkdown = window.renderChatMarkdownAsync(large + 'y', markdownOwner); const secondMarkdownWorker = workers[workers.length - 1];\n" +
 		"if (!firstMarkdownWorker.terminated) throw new Error('superseded Markdown worker was not terminated');\n" +
 		"secondMarkdownWorker.onmessage({ data: { html: '<ol><li>whole document</li></ol>' } });\n" +
-		"Promise.all([firstCode, secondCode, firstMarkdown, secondMarkdown]).then(function(values) { if (values[0] !== null || values[1].length !== 1 || values[2] !== null || !values[3] || typeof values[3] !== 'object' || codeOwner._codeRangeWorkerState !== null || markdownOwner._markdownWorkerState !== null) process.exit(1); }, function(err) { console.error(err); process.exit(2); });\n"
+		"Promise.all([firstCode, secondCode, firstMarkdown, secondMarkdown, threadResult]).then(function(values) { if (values[0] !== null || values[1].length !== 1 || values[2] !== null || !values[3] || typeof values[3] !== 'object' || values[4] !== true || codeOwner._codeRangeWorkerState !== null || markdownOwner._markdownWorkerState !== null) process.exit(1); }, function(err) { console.error(err); process.exit(2); });\n"
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("large Markdown/code-range worker lifecycle failed: %v\n%s", err, output)
 	}

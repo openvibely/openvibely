@@ -2850,8 +2850,8 @@ templ ChatAutoScrollScript() {
 				if (!container) return;
 				setAllEarlierLoadersIdle(container);
 				if (window.htmx) htmx.process(container);
-				if (window.cleanAssistantMessages) window.cleanAssistantMessages(container);
 				if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(container);
+				else if (window.cleanAssistantMessages) window.cleanAssistantMessages(container);
 				if (window._initThreadStreaming) window._initThreadStreaming();
 			};
 

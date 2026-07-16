@@ -2005,6 +2005,74 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					var template = window.sanitizeChatHTMLTemplate(html);
 					return template ? template.content : null;
 				};
+				window.sanitizeChatHTMLFragmentAsync = function(html, cancelled) {
+					if (!html || typeof document === 'undefined' || !document.createElement) return Promise.resolve(null);
+					var template = document.createElement('template');
+					if (!template.content || !document.createTreeWalker) return Promise.resolve(window.sanitizeChatHTMLFragment(html));
+					// HTML parsing is a browser primitive, but sanitizing the resulting tree is
+					// cooperatively batched so large documents do not monopolize the UI thread.
+					template.innerHTML = html;
+					var walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT, null);
+					return new Promise(function(resolve) {
+						var elements = [];
+						function collectBatch() {
+							if (cancelled && cancelled()) { resolve(null); return; }
+							var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+							var processed = 0;
+							var element;
+							while ((element = walker.nextNode()) !== null) {
+								elements.push(element);
+								processed++;
+								if (processed >= 256 || ((window.performance && performance.now ? performance.now() : Date.now()) - startedAt) >= 8) {
+									setTimeout(collectBatch, 0);
+									return;
+								}
+							}
+							setTimeout(sanitizeBatch, 0);
+						}
+						var elementIndex = 0;
+						function sanitizeBatch() {
+							if (cancelled && cancelled()) { resolve(null); return; }
+							var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+							var processed = 0;
+							while (elementIndex < elements.length) {
+								var element = elements[elementIndex++];
+								processed++;
+								if (/^(?:SCRIPT|STYLE|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|SVG|MATH)$/.test(element.tagName || '')) {
+									element.remove();
+								} else {
+									Array.prototype.slice.call(element.attributes || []).forEach(function(attr) {
+										var name = attr.name.toLowerCase();
+										if (/^on/i.test(attr.name) || name === 'srcdoc' || name === 'srcset' || name === 'style') {
+											element.removeAttribute(attr.name);
+											return;
+										}
+										if (name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action' || name === 'formaction') {
+											var normalized = String(attr.value || '').replace(/[\u0000-\u0020\u007f-\u009f]/g, '').toLowerCase();
+											if (/^(?:javascript:|vbscript:|data:)/.test(normalized)) element.removeAttribute(attr.name);
+										}
+									});
+								}
+								if (processed >= 256 || ((window.performance && performance.now ? performance.now() : Date.now()) - startedAt) >= 8) {
+									setTimeout(sanitizeBatch, 0);
+									return;
+								}
+							}
+							resolve(template.content);
+						}
+						setTimeout(collectBatch, 0);
+					});
+				};
+				window.renderChatMarkdownLargeFallback = function(text) {
+					if (typeof document === 'undefined' || !document.createDocumentFragment || !document.createElement) return window.renderChatMarkdownFallback(text);
+					var fragment = document.createDocumentFragment();
+					var span = document.createElement('span');
+					span.setAttribute('data-chat-markdown-fallback', 'true');
+					span.style.whiteSpace = 'pre-wrap';
+					span.textContent = text || '';
+					fragment.appendChild(span);
+					return fragment;
+				};
 				// Render markdown to HTML safely for chat messages
 				window.renderChatMarkdown = function(text) {
 					if (!text) return text;
@@ -2022,13 +2090,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// source is parsed as one document so lists, references, tables, and code
 				// fences retain their normal Marked semantics.
 				window.renderChatMarkdownAsync = function(text, owner, ranges) {
-					if (!text || text.length < 64 * 1024 || typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
+					if (!text || text.length < 64 * 1024) {
 						return Promise.resolve(window.renderChatMarkdown(text));
+					}
+					if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
+						return Promise.resolve(window.renderChatMarkdownLargeFallback(text));
 					}
 					if (!window.configureChatMarked || !window.configureChatMarked()) {
 						return Promise.resolve(window.renderChatMarkdownFallback(text));
 					}
 					if (owner && owner._markdownWorkerState) {
+						owner._markdownWorkerState.cancelled = true;
+						if (owner._markdownWorkerState.fallbackTimer) clearTimeout(owner._markdownWorkerState.fallbackTimer);
 						owner._markdownWorkerState.worker.terminate();
 						owner._markdownWorkerState.resolve(null);
 						owner._markdownWorkerState = null;
@@ -2045,22 +2118,30 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 						return new Promise(function(resolve) {
 							var worker = new Worker(window._markdownWorkerURL);
-							var state = { worker: worker, resolve: resolve };
+							var state = { worker: worker, resolve: resolve, cancelled: false, fallbackTimer: null, finished: false };
 							if (owner) owner._markdownWorkerState = state;
 							function finish(html) {
+								if (state.finished) return;
+								state.finished = true;
+								if (state.fallbackTimer) clearTimeout(state.fallbackTimer);
 								worker.terminate();
 								if (owner && owner._markdownWorkerState === state) owner._markdownWorkerState = null;
 								resolve(html);
 							}
 							worker.onmessage = function(event) {
-								if (event.data && !event.data.error) finish(window.sanitizeChatHTMLFragment(event.data.html) || window.sanitizeChatHTML(event.data.html));
-								else finish(window.renderChatMarkdown(text));
+								worker.terminate();
+								if (state.fallbackTimer) { clearTimeout(state.fallbackTimer); state.fallbackTimer = null; }
+								if (!event.data || event.data.error) { finish(window.renderChatMarkdownLargeFallback(text)); return; }
+								window.sanitizeChatHTMLFragmentAsync(event.data.html, function() { return state.cancelled; }).then(function(fragment) {
+									finish(fragment === null ? null : fragment);
+								}, function() { finish(window.renderChatMarkdownLargeFallback(text)); });
 							};
-							worker.onerror = function() { finish(window.renderChatMarkdown(text)); };
+							worker.onerror = function() { finish(window.renderChatMarkdownLargeFallback(text)); };
+							state.fallbackTimer = setTimeout(function() { finish(window.renderChatMarkdownLargeFallback(text)); }, 3000);
 							worker.postMessage(text);
 						});
 					} catch (err) {
-						return Promise.resolve(window.renderChatMarkdown(text));
+						return Promise.resolve(window.renderChatMarkdownLargeFallback(text));
 					}
 				};
 				// Add copy buttons to all <pre> blocks inside a container element
