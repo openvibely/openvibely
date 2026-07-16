@@ -2,7 +2,7 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-07-15
+updated: 2026-07-16
 source: consolidation
 source_id: memory_consolidation_2026_07_15
 confidence: high
@@ -15,6 +15,7 @@ User interaction preferences:
 - For design, behavior, or feasibility questions, answer directly without making implementation changes unless explicitly requested.
 - Do not describe unreleased feature contracts as legacy or preserve compatibility shims for unreleased API/UI shapes unless the user explicitly asks for migration compatibility.
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
+- Treat requests explicitly limited to memory or skill maintenance as a hard scope boundary: do not add implementation, generated-file, test, rebase, or other repository changes unless the user separately requests them; clearly distinguish any pre-existing or later-instructed code work when reporting the diff.
 - When diagnosing autonomous integration loops, do not manually forward, wake, or otherwise push one live message through as a substitute for fixing the product path. The user wants the implementation to work properly end-to-end; validation should prove the scheduled/tool/runtime behavior works without ad hoc live intervention unless the user explicitly asks for a one-off operational action.
 - When the user has already explicitly requested an outbound action such as sending an email/message, attempt the available configured/runtime mechanism instead of asking for redundant confirmation; if no viable send path exists, report the completed work and the send limitation clearly.
 - Prefer plain, direct explanations over jargon-heavy phrasing; if the user asks for “no word salad,” respond with a terse concrete summary rather than audit-style detail. For user-facing UI/docs copy, avoid internal tool-name or architecture jargon unless it is clearly marked as advanced/reference text.
