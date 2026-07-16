@@ -1915,9 +1915,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						return Promise.resolve(null);
 					}
 					if (owner && owner._codeRangeWorkerState) {
-						owner._codeRangeWorkerState.worker.terminate();
-						owner._codeRangeWorkerState.resolve(null);
-						owner._codeRangeWorkerState = null;
+						owner._codeRangeWorkerState.finish(null);
 					}
 					try {
 						if (!window._codeRangeWorkerURL) {
@@ -1928,17 +1926,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 						return new Promise(function(resolve) {
 							var worker = new Worker(window._codeRangeWorkerURL);
-							var state = { worker: worker, resolve: resolve };
-							if (owner) owner._codeRangeWorkerState = state;
+							var state = { worker: worker, resolve: resolve, fallbackTimer: null, finished: false, finish: null };
 							function finish(ranges) {
+								if (state.finished) return;
+								state.finished = true;
+								if (state.fallbackTimer) clearTimeout(state.fallbackTimer);
 								worker.terminate();
 								if (owner && owner._codeRangeWorkerState === state) owner._codeRangeWorkerState = null;
 								resolve(ranges);
 							}
+							state.finish = finish;
+							if (owner) owner._codeRangeWorkerState = state;
 							worker.onmessage = function(event) {
 								finish(event.data && !event.data.error ? event.data.ranges : null);
 							};
 							worker.onerror = function() { finish(null); };
+							state.fallbackTimer = setTimeout(function() { finish(null); }, window._chatCodeRangeWorkerTimeoutMS || 3000);
 							worker.postMessage(text);
 						});
 					} catch (err) {

@@ -103,7 +103,7 @@ func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T)
 		`if (text.charAt(end) === '\\r' && text.charAt(next) === '\\n') next++`,
 		"window.codeRanges = function(text)",
 		"window.codeRangesAsync = function(text, owner)",
-		"owner._codeRangeWorkerState.worker.terminate()",
+		"owner._codeRangeWorkerState.finish(null)",
 		"window.URL.createObjectURL(new Blob([workerSource]",
 		"/^[ \\\\t]*$/.test(line.substring(runEnd))",
 		"window.escapeRawHTMLForMarkdown = function(text, ranges)",
@@ -166,7 +166,8 @@ func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
 		"const secondMarkdown = window.renderChatMarkdownAsync(large + 'y', markdownOwner); const secondMarkdownWorker = workers[workers.length - 1];\n" +
 		"if (!firstMarkdownWorker.terminated) throw new Error('superseded Markdown worker was not terminated');\n" +
 		"secondMarkdownWorker.onmessage({ data: { html: '<ol><li>whole document</li></ol>' } });\n" +
-		"Promise.all([firstCode, secondCode, firstMarkdown, secondMarkdown, threadResult]).then(function(values) { if (values[0] !== null || values[1].length !== 1 || values[2] !== null || !values[3] || typeof values[3] !== 'object' || values[4] !== true || codeOwner._codeRangeWorkerState !== null || markdownOwner._markdownWorkerState !== null) process.exit(1); }, function(err) { console.error(err); process.exit(2); });\n"
+		"window._chatCodeRangeWorkerTimeoutMS = 5; const timeoutOwner = {}; const timedCode = window.codeRangesAsync(large + 'timeout', timeoutOwner); const timedCodeWorker = workers[workers.length - 1];\n" +
+		"Promise.all([firstCode, secondCode, firstMarkdown, secondMarkdown, threadResult, timedCode]).then(function(values) { if (values[0] !== null || values[1].length !== 1 || values[2] !== null || !values[3] || typeof values[3] !== 'object' || values[4] !== true || values[5] !== null || !timedCodeWorker.terminated || codeOwner._codeRangeWorkerState !== null || timeoutOwner._codeRangeWorkerState !== null || markdownOwner._markdownWorkerState !== null) process.exit(1); }, function(err) { console.error(err); process.exit(2); });\n"
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("large Markdown/code-range worker lifecycle failed: %v\n%s", err, output)
 	}

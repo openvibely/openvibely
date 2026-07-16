@@ -701,7 +701,7 @@ func TestChatAutoScrollScript_RehydratesAssistantRawContentViaStreamingRenderer(
 		!strings.Contains(content, "if (window._chatContentRenderActive >= 1) return") {
 		t.Error("completed transcript hydration must serialize expensive renders")
 	}
-	if !strings.Contains(content, "window.scheduleChatContentRender(el, raw);") {
+	if !strings.Contains(content, "window.scheduleChatContentRender(el, raw).then(function(rendered)") {
 		t.Error("completed raw assistant messages must use the bounded render scheduler")
 	}
 	if !strings.Contains(content, "window.renderStreamingContent(el, raw);") {
@@ -723,6 +723,44 @@ func TestCompletedBubblePollingFallbackDoesNotRenderTwice(t *testing.T) {
 		!strings.Contains(content, "if (renderStarted) return") ||
 		!strings.Contains(content, "renderStarted = true") {
 		t.Fatal("completed bubble polling and timeout paths must share a one-shot render guard")
+	}
+}
+
+func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render chat scheduler: %v", err)
+	}
+	content := buf.String()
+	start := strings.Index(content, "if (!window._chatContentRenderQueue)")
+	end := strings.Index(content[start:], "window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches)")
+	if start == -1 || end == -1 {
+		t.Fatal("chat render scheduler source is missing")
+	}
+	scheduler := content[start : start+end]
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the chat render scheduler")
+	}
+	script := "global.window = { _chatContentRenderTimeoutMS: 50 }; global.document = { createTextNode: function(text) { return { text: text }; } };\n" +
+		"window.renderChatMarkdownLargeFallback = function(text) { return { safe: text }; };\n" +
+		"function container(connected) { return { isConnected: connected, replacements: [], replaceChildren: function(value) { this.replacements.push(value); } }; }\n" +
+		scheduler + "\n" +
+		"const delay = ms => new Promise(resolve => setTimeout(resolve, ms));\n" +
+		"(async function() {\n" +
+		"  const calls = [], controls = []; window.renderStreamingContent = function(c, text) { calls.push(text); return new Promise(function(resolve, reject) { controls.push({ resolve: resolve, reject: reject }); }); };\n" +
+		"  const first = container(true), second = container(true); const p1 = window.scheduleChatContentRender(first, 'first'), p2 = window.scheduleChatContentRender(second, 'second');\n" +
+		"  await delay(10); if (calls.join(',') !== 'first') throw new Error('renders were not serialized'); controls[0].resolve(true);\n" +
+		"  await delay(10); if (calls.join(',') !== 'first,second') throw new Error('second render did not drain'); controls[1].reject(new Error('failed'));\n" +
+		"  const initial = await Promise.all([p1, p2]); if (!initial[0] || initial[1] || !second.replacements[0] || second.replacements[0].safe !== 'second') throw new Error('rejection did not use safe fallback');\n" +
+		"  window._chatContentRenderTimeoutMS = 5;\n" +
+		"  window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'hung') return new Promise(function() {}); return Promise.resolve(true); };\n" +
+		"  const hung = container(true), after = container(true); const hungResult = window.scheduleChatContentRender(hung, 'hung'); const afterResult = window.scheduleChatContentRender(after, 'after');\n" +
+		"  const recovered = await Promise.all([hungResult, afterResult]); if (recovered[0] || !recovered[1] || !hung.replacements[0] || calls.indexOf('after') === -1) throw new Error('timeout did not release queue');\n" +
+		"  const disconnected = container(false); if (await window.scheduleChatContentRender(disconnected, 'gone')) throw new Error('disconnected render succeeded'); if (calls.indexOf('gone') !== -1) throw new Error('disconnected render ran');\n" +
+		"})().catch(function(err) { console.error(err && err.stack || err); process.exit(1); });\n"
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("chat render scheduler failed: %v\n%s", err, output)
 	}
 }
 
