@@ -29,7 +29,7 @@ Authorization, concurrency, and runtime facts:
 
 Product surfaces:
 - The Alerts page supports inspection, approve/reject controls for pending notifications, decision and processing badges, claimant/failure details, linked-task navigation, project context, and project-filtered live refresh. Existing operational alert read/delete behavior remains supported.
-- The bundled `openvibely_native_autonomous_sdlc_bootstrap` skill provides an OpenVibely-native alternative to the retained GitHub-backed workflow. Suggestion producers use `create_notification`; scheduled inbox tasks list and inspect approved notifications, claim them, and create one atomically linked implementation task.
+- The former bundled `openvibely_native_autonomous_sdlc_bootstrap` used `create_notification` plus scheduled inbox tasks to claim approved notifications and create atomically linked implementation tasks. It was archived during skill-library maintenance after its required approval, claim, task-linking, completion, and failure operations were no longer available on the current capability surface; do not rely on that bootstrap unless those tool contracts are restored.
 - The model, migration, authorization boundaries, tool contracts, lease recovery, and schedule configuration are documented in `docs/openvibely-native-autonomous-sdlc-user-guide.md`.
 
 Final validation and audit evidence as of 2026-07-15:

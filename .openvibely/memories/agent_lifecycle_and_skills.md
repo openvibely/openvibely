@@ -2,7 +2,7 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-07-11
+updated: 2026-07-16
 source: consolidation
 source_id: memory_consolidation_2026_07_11
 confidence: high
@@ -41,6 +41,7 @@ Skill Curator facts:
 - Skill-library maintenance may create, patch, consolidate, or archive skills, but agents are user-managed configurations: do not create, edit, archive, route, reassign, or mutate agent metadata/tools/hooks/attachments as part of skill maintenance.
 - Skill Curator consolidation/archive decisions must inspect the full safe package manifest from `skill_view`, including nested files and directories beyond `SKILL.md`; package file actions must explicitly account for safe non-`SKILL.md` contents.
 - Assigned-agent updates are reserved for behavior specific to that agent's role, purpose, private workflow, or selected agent-owned skill. Agent-owned skill mutation uses the server-scoped `agent_skill_manage` path.
+- A 2026-07-16 full-library maintenance pass (~40 of ~60 packages reviewed) found the skill catalog's global-vs-project name/topic overlaps are intentional layering, not duplication, and made no changes: generic global skills (e.g. `audit_only_code_review`, `github_optimization_finder`/`github_redundancy_finder`, `verify_requested_git_rebase`, `safely_fast_forward_dirty_worktree`, `update_go_deps`, `run_scheduled_memory_consolidation`) pair with OpenVibely-specific deep-dive skills (e.g. `openvibely_audit_review_workflow`, `openvibely_github_finding_workflow`, `openvibely_git_worktree_rebase_workflow`, `openvibely_go_maintenance_workflow`, `openvibely_managed_memory_maintenance`), and the four skill-system meta-skills (`openvibely_skill_lifecycle_workflow`, `_skill_index_staleness`, `_skill_import_workflow`, `_skill_analytics_workflow`) are already cross-referenced to avoid overlap. Future maintenance passes should treat these specific pairs as settled rather than re-auditing them from scratch.
 
 Lifecycle facts:
 - Lifecycle hooks live around `internal/lifecycle/` and task execution/server setup. Durable concepts include `route_task`, `before_run`, `after_complete`, `scheduled`, task-mode bookkeeping, blocking/non-blocking execution, idempotency/audit rows, recursion prevention, output contracts, and runtime-tool filtering.
