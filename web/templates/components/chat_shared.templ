@@ -3129,10 +3129,18 @@ templ ChatAutoScrollScript() {
 				var request = { container: container, text: textBuffer || '', yield: yieldBetweenBatches, resolve: null, finished: false, timeout: null, enqueuedAt: Date.now() };
 				container._scheduledChatRender = request;
 				var promise = new Promise(function(resolve) { request.resolve = resolve; });
-				window._chatContentRenderQueue.push(request);
-				function drain() {
-					if (window._chatContentRenderActive >= 1) return;
-					var now = Date.now();
+					window._chatContentRenderQueue.push(request);
+					function drain() {
+						if (window._chatContentRenderActive >= 1) return;
+						while (window._chatContentRenderQueue.length > 0) {
+							var queuedRequest = window._chatContentRenderQueue[0];
+							if (queuedRequest.container._scheduledChatRender === queuedRequest && queuedRequest.container.isConnected) break;
+							window._chatContentRenderQueue.shift();
+							queuedRequest.finished = true;
+							queuedRequest.resolve(false);
+						}
+						if (window._chatContentRenderQueue.length === 0) return;
+						var now = Date.now();
 					var oldestRequest = window._chatContentRenderQueue[0];
 					var maxDeferralRemaining = oldestRequest ? (window._chatRenderMaxLiveDeferralMS || 1000) - (now - oldestRequest.enqueuedAt) : 0;
 					if ((window._liveChatRenderActive || 0) > 0) {
@@ -3230,9 +3238,12 @@ templ ChatAutoScrollScript() {
 						container._streamRenderVersion = (container._streamRenderVersion || 0) + 1;
 						if (container._codeRangeWorkerState && container._codeRangeWorkerState.finish) container._codeRangeWorkerState.finish(null);
 						if (container._markdownWorkerState) {
-							container._markdownWorkerState.cancelled = true;
-							container._markdownWorkerState.worker.terminate();
-							container._markdownWorkerState.resolve(null);
+							var markdownState = container._markdownWorkerState;
+							markdownState.cancelled = true;
+							markdownState.finished = true;
+							if (markdownState.fallbackTimer) clearTimeout(markdownState.fallbackTimer);
+							markdownState.worker.terminate();
+							markdownState.resolve(null);
 							container._markdownWorkerState = null;
 						}
 						liveRequest.cancel();
@@ -3281,9 +3292,12 @@ templ ChatAutoScrollScript() {
 					container._streamRenderVersion = (container._streamRenderVersion || 0) + 1;
 					if (container._codeRangeWorkerState && container._codeRangeWorkerState.finish) container._codeRangeWorkerState.finish(null);
 					if (container._markdownWorkerState) {
-						container._markdownWorkerState.cancelled = true;
-						container._markdownWorkerState.worker.terminate();
-						container._markdownWorkerState.resolve(null);
+						var markdownState = container._markdownWorkerState;
+						markdownState.cancelled = true;
+						markdownState.finished = true;
+						if (markdownState.fallbackTimer) clearTimeout(markdownState.fallbackTimer);
+						markdownState.worker.terminate();
+						markdownState.resolve(null);
 						container._markdownWorkerState = null;
 					}
 					finishLiveRender(false, null);

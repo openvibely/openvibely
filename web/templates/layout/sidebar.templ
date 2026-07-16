@@ -328,7 +328,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						// to avoid expensive DOM work that would block the page change.
 					document.body.addEventListener('htmx:beforeSwap', function(event) {
 						var target = event.detail.target;
-						if (target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders();
+						if (event.detail.shouldSwap !== false && target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders();
 						if (!window._sidebarNavigating) return;
 						if (!target) return;
 						if (target.id === 'main-content') {

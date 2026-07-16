@@ -192,7 +192,7 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 	if !strings.Contains(beforeSendBlock, `closeMobileDrawer()`) {
 		t.Fatal("sidebar must close the mobile drawer in htmx:beforeSend after HTMX accepts the nav request")
 	}
-	if !strings.Contains(beforeSendBlock, `if (target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders()`) {
+	if !strings.Contains(beforeSendBlock, `if (event.detail.shouldSwap !== false && target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders()`) {
 		t.Fatal("committed main-content swaps must cancel obsolete transcript renders")
 	}
 }
