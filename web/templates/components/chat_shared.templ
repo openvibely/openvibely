@@ -3202,6 +3202,23 @@ templ ChatAutoScrollScript() {
 				var matches = text.match(/\r\n|\r|\n/g);
 				return (matches ? matches.length : 0) + 1;
 			}
+			function toolOutputPreview(text) {
+				var maxLines = 6;
+				var maxChars = 4096;
+				var offset = 0;
+				var lines = 1;
+				while (offset < text.length && offset < maxChars) {
+					var code = text.charCodeAt(offset);
+					if (code === 13 || code === 10) {
+						if (lines >= maxLines) break;
+						lines++;
+						if (code === 13 && text.charCodeAt(offset + 1) === 10) offset++;
+					}
+					offset++;
+				}
+				if (offset > 0 && offset < text.length && text.charCodeAt(offset - 1) >= 0xD800 && text.charCodeAt(offset - 1) <= 0xDBFF && text.charCodeAt(offset) >= 0xDC00 && text.charCodeAt(offset) <= 0xDFFF) offset--;
+				return text.substring(0, offset) + (offset < text.length ? '\n…' : '');
+			}
 			function resolveToolOutputLineCapacity() {
 				var signature = toolOutputCapacitySignature();
 				var cached = window._toolOutputCapacityCache;
@@ -4034,6 +4051,7 @@ templ ChatAutoScrollScript() {
 					var rowState = window._toolOutputRowStates[stateKey] || {};
 					var expanded = shouldCollapse ? rowState.expanded === true : true;
 					var outScroll = null;
+					var preview = null;
 					var toggle = null;
 					var materializationVersion = 0;
 
@@ -4093,12 +4111,17 @@ templ ChatAutoScrollScript() {
 						outScroll = null;
 					}
 					function updateToggle() {
+						if (preview) preview.hidden = expanded;
 						if (!toggle) return;
 						toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 						toggle.textContent = (expanded ? 'Hide output (' : 'Show output (') + lineCount + ' lines)';
 					}
 
 					if (shouldCollapse) {
+						preview = document.createElement('div');
+						preview.className = 'stream-tool-output-preview';
+						preview.textContent = toolOutputPreview(outputText);
+						outVal.appendChild(preview);
 						toggle = document.createElement('button');
 						toggle.type = 'button';
 						toggle.className = 'stream-tool-output-toggle';

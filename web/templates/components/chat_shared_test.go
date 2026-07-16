@@ -4499,6 +4499,9 @@ window.addEventListener('DOMContentLoaded', function() {
     collapsed.forEach(function(button) {
       var content = button.closest('.stream-tool-body-content');
       if (content.querySelector('pre') || content.querySelector('.stream-tool-body-scroll')) fail('collapsed output materialized a DOM surface');
+      var preview = content.querySelector('.stream-tool-output-preview');
+      if (!preview || !preview.textContent.trim()) fail('collapsed output did not show an actual output preview');
+      if (preview.textContent.length > 4100) fail('collapsed output preview was not bounded');
     });
     if (container.querySelectorAll('.stream-tool-body-scroll > pre').length !== 2) fail('only short and horizontal one-line OUT values should initially materialize');
     if (container.querySelector('[data-tool-output]')) fail('tool output must not be duplicated in data attributes');
@@ -4507,7 +4510,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!shortPre || !widePre) fail('short or horizontally wide one-line output was collapsed');
     var bareCRTool = tools[116];
     var bareCRToggle = bareCRTool && bareCRTool.querySelector('.stream-tool-output-toggle');
+    var bareCRPreview = bareCRTool && bareCRTool.querySelector('.stream-tool-output-preview');
     if (!bareCRToggle || bareCRToggle.textContent !== 'Show output (40 lines)' || bareCRToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('vertically overflowing bare-CR output did not start collapsed');
+    if (!bareCRPreview || bareCRPreview.textContent.indexOf('bare-cr row\rbare-cr row') !== 0) fail('bare-CR output preview did not preserve actual output');
     if (!container.querySelector('a[href="/tasks/assistant%2Fcreate"]') || !container.querySelector('a[href="/tasks/assistant%2Fedit"]')) fail('assistant task links were not hydrated');
 
     var largeToggle = toggles.find(function(button) { return button.textContent === 'Show output (' + largeLineCount + ' lines)'; });
@@ -4523,6 +4528,8 @@ window.addEventListener('DOMContentLoaded', function() {
     var expandedContent = largeToggle.closest('.stream-tool-body-content');
     var expansionMS = performance.now() - expansionStarted;
     if (largeToggle.getAttribute('aria-expanded') !== 'true' || !expandedContent.querySelector('.stream-tool-body-scroll > pre')) fail('expansion did not materialize the styled OUT subtree');
+    var expandedPreview = expandedContent.querySelector('.stream-tool-output-preview');
+    if (!expandedPreview || !expandedPreview.hidden) fail('expansion did not hide the collapsed output preview');
     if (container._streamRenderVersion !== renderVersion) fail('expanding one OUT rerendered the response');
     if (!expandedContent.querySelector('a[href="/tasks/boundary%2Fcreate"]') || !expandedContent.querySelector('a[href="/tasks/boundary%2Fedit"]')) {
       fail('chunk-boundary tool task links were not hydrated; links=' + Array.from(expandedContent.querySelectorAll('a')).map(function(anchor) { return anchor.getAttribute('href'); }).join(',') + '; preNodes=' + expandedContent.querySelector('pre').childNodes.length);
@@ -4537,6 +4544,8 @@ window.addEventListener('DOMContentLoaded', function() {
     largeToggle.click();
     var collapseMS = performance.now() - collapseStarted;
     if (largeToggle.getAttribute('aria-expanded') !== 'false' || largeToggle.closest('.stream-tool-body-content').querySelector('pre')) fail('collapse did not release the large DOM surface');
+    var collapsedPreview = largeToggle.closest('.stream-tool-body-content').querySelector('.stream-tool-output-preview');
+    if (!collapsedPreview || collapsedPreview.hidden || !collapsedPreview.textContent.trim()) fail('collapse did not restore the output preview');
     document.documentElement.setAttribute('data-theme', 'light');
     window.dispatchEvent(new Event('resize'));
     await Promise.resolve(window.renderStreamingContent(container, transcript, true));
@@ -4663,6 +4672,10 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"var outputText = seg.resultOutput ? seg.resultOutput.trim() : ''",
 		"var hasOut = outputText !== ''",
 		"function toolOutputLineCount(text)",
+		"function toolOutputPreview(text)",
+		"var maxLines = 6",
+		"var maxChars = 4096",
+		"preview.className = 'stream-tool-output-preview'",
 		"function resolveToolOutputLineCapacity()",
 		"probe.className = 'stream-tool'",
 		"probeBody.className = 'stream-tool-body'",

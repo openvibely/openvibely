@@ -925,6 +925,8 @@ func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 		"border-top: none;",
 		".stream-tool-body-content {",
 		"overflow: hidden;",
+		".stream-tool-output-preview {",
+		"white-space: pre;",
 		".stream-tool-body-scroll {",
 		"overflow-x: auto;",
 		"overflow-y: auto;",

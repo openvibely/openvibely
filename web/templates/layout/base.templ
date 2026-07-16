@@ -1715,6 +1715,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.stream-tool-body-row:first-child > .stream-tool-body-content {
 					border-top: none;
 				}
+				.stream-tool-output-preview {
+					max-width: 100%;
+					overflow: hidden;
+					margin: 0 0 0.35rem;
+					color: hsl(var(--bc) / 0.72);
+					font-family: ui-monospace, SFMono-Regular, monospace;
+					font-size: 0.85em;
+					line-height: 1.25;
+					white-space: pre;
+				}
 				.stream-tool-output-toggle {
 					display: inline-flex;
 					align-items: center;
