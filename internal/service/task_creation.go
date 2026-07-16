@@ -145,40 +145,17 @@ func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskC
 			task.AgentID = &selectedAgentID
 		}
 
-		// Set agent definition ID if provided. The agent field resolves an exact,
-		// unique enabled/selectable Agent definition name; agent_definition_id remains
-		// an explicit ID escape hatch for callers that already know the database ID.
-		if req.AgentDefinitionID != "" {
-			task.AgentDefinitionID = &req.AgentDefinitionID
+		// Explicit Agent assignments are all-or-nothing. Silently dropping an
+		// invalid or non-selectable Agent would run the task with a different tool
+		// policy and worktree mode than the caller requested.
+		agentDefinitionID, err := resolveTaskCreationAgentDefinition(ctx, req, projectID, taskSvc)
+		if err != nil {
+			applog.Infof("[task-creation] refusing invalid agent assignment for task %q: %v", req.Title, err)
+			failed = append(failed, fmt.Sprintf("- \"%s\": %v", req.Title, err))
+			continue
 		}
-		if req.Agent != "" {
-			if taskSvc != nil && taskSvc.agentRepo != nil {
-				if ad, err := taskSvc.agentRepo.GetUniqueSelectableByName(ctx, req.Agent); err != nil {
-					applog.Infof("[task-creation] could not resolve agent %q for task %q: %v", req.Agent, req.Title, err)
-				} else if ad != nil {
-					task.AgentDefinitionID = &ad.ID
-					applog.Infof("[task-creation] resolved agent %q → %s for task %q", req.Agent, ad.ID, req.Title)
-				} else {
-					applog.Infof("[task-creation] agent %q did not exactly match one unique enabled/selectable Agent definition for task %q", req.Agent, req.Title)
-					if req.AgentDefinitionID == req.Agent {
-						task.AgentDefinitionID = nil
-					}
-				}
-			} else if req.AgentDefinitionID == req.Agent {
-				task.AgentDefinitionID = nil
-				applog.Infof("[task-creation] cannot resolve agent %q for task %q without an Agent repository", req.Agent, req.Title)
-			}
-		} else if req.AgentDefinitionID != "" && taskSvc != nil && taskSvc.agentRepo != nil {
-			if existing, err := taskSvc.agentRepo.GetByID(ctx, req.AgentDefinitionID); err != nil {
-				applog.Infof("[task-creation] could not validate agent_definition_id %q for task %q: %v", req.AgentDefinitionID, req.Title, err)
-			} else if existing == nil {
-				if ad, err := taskSvc.agentRepo.GetUniqueSelectableByName(ctx, req.AgentDefinitionID); err != nil {
-					applog.Infof("[task-creation] could not resolve agent_definition_id name %q for task %q: %v", req.AgentDefinitionID, req.Title, err)
-				} else if ad != nil {
-					task.AgentDefinitionID = &ad.ID
-					applog.Infof("[task-creation] resolved agent_definition_id name %q → %s for task %q", req.AgentDefinitionID, ad.ID, req.Title)
-				}
-			}
+		if agentDefinitionID != "" {
+			task.AgentDefinitionID = &agentDefinitionID
 		}
 
 		if err := taskSvc.CreateWithGoal(ctx, task, req.Goal); err != nil {
@@ -231,6 +208,48 @@ func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskC
 	}
 
 	return createdResults, summary.String()
+}
+
+func resolveTaskCreationAgentDefinition(ctx context.Context, req TaskCreationRequest, projectID string, taskSvc *TaskService) (string, error) {
+	requestedName := strings.TrimSpace(req.Agent)
+	requestedID := strings.TrimSpace(req.AgentDefinitionID)
+	if requestedName == "" && requestedID == "" {
+		return "", nil
+	}
+	if taskSvc == nil || taskSvc.agentRepo == nil {
+		return "", fmt.Errorf("cannot validate explicit Agent assignment because the Agent repository is unavailable")
+	}
+
+	var agent *models.Agent
+	var err error
+	if requestedName != "" {
+		agent, err = taskSvc.agentRepo.GetUniqueSelectableByName(ctx, requestedName)
+		if err != nil {
+			return "", fmt.Errorf("resolve Agent %q: %w", requestedName, err)
+		}
+		if agent == nil {
+			return "", fmt.Errorf("Agent %q is not one unique enabled, selectable primary Agent definition", requestedName)
+		}
+		if requestedID != "" && requestedID != agent.ID {
+			return "", fmt.Errorf("Agent %q does not match agent_definition_id %q", requestedName, requestedID)
+		}
+	} else {
+		agent, err = taskSvc.agentRepo.GetByID(ctx, requestedID)
+		if err != nil {
+			return "", fmt.Errorf("validate agent_definition_id %q: %w", requestedID, err)
+		}
+		if agent == nil {
+			return "", fmt.Errorf("agent_definition_id %q does not exist", requestedID)
+		}
+	}
+	if !isChatAssignableAgentDefinition(*agent) {
+		return "", fmt.Errorf("Agent %q is not assignable as a primary task Agent", agent.Name)
+	}
+
+	if agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) != strings.TrimSpace(projectID) {
+		return "", fmt.Errorf("Agent %q belongs to a different project", agent.Name)
+	}
+	return agent.ID, nil
 }
 
 // TaskEditRequest represents a typed task edit action request.
@@ -587,7 +606,7 @@ func UniqueChatAssignableAgentDefinitions(agents []models.Agent) []models.Agent 
 }
 
 func isChatAssignableAgentDefinition(a models.Agent) bool {
-	return strings.TrimSpace(a.Name) != "" && a.Enabled && a.SelectableAsPrimary && a.GeneratedStatus != models.AgentStatusArchived && a.ArchivedAt == nil
+	return strings.TrimSpace(a.Name) != "" && strings.TrimSpace(a.SystemKind) == "" && a.Enabled && a.SelectableAsPrimary && a.GeneratedStatus != models.AgentStatusArchived && a.ArchivedAt == nil
 }
 
 func sanitizeAgentContextField(value string, limit int) string {

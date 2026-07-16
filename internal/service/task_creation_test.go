@@ -1705,7 +1705,7 @@ func TestExecuteTaskCreations_ResolvesAgentNameInSharedService(t *testing.T) {
 	}
 }
 
-func TestExecuteTaskCreations_UnresolvedAgentNameDoesNotPersistNameAsID(t *testing.T) {
+func TestExecuteTaskCreations_UnresolvedAgentNameFailsInsteadOfCreatingUnassignedTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -1721,15 +1721,65 @@ func TestExecuteTaskCreations_UnresolvedAgentNameDoesNotPersistNameAsID(t *testi
 	}
 
 	created, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: "Fix bug", Prompt: "Fix blah.go", Agent: "Missing Agent"}}, project.ID, taskSvc)
-	if len(created) != 1 {
-		t.Fatalf("expected one task, got %d summary=%q", len(created), summary)
+	if len(created) != 0 {
+		t.Fatalf("explicit unresolved Agent must prevent task creation, got %#v summary=%q", created, summary)
 	}
-	task, err := taskSvc.GetByID(ctx, created[0].ID)
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
 	if err != nil {
-		t.Fatalf("get created task: %v", err)
+		t.Fatalf("list tasks: %v", err)
 	}
-	if task.AgentDefinitionID != nil {
-		t.Fatalf("unresolved agent name must not be persisted as agent_definition_id, got %v", *task.AgentDefinitionID)
+	if len(tasks) != 0 {
+		t.Fatalf("invalid Agent assignment silently created tasks: %#v", tasks)
+	}
+	if !strings.Contains(summary, `Agent "Missing Agent" is not one unique enabled, selectable primary Agent definition`) {
+		t.Fatalf("failure summary should explain rejected Agent assignment, got %q", summary)
+	}
+}
+
+func TestExecuteTaskCreations_RejectsSystemAgentByNameAndID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := repository.NewAgentRepo(db)
+	taskSvc.SetAgentRepo(agentRepo)
+
+	project := &models.Project{Name: "Protected Agent Assignment"}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	memoryCurator := &models.Agent{
+		Name:       "System: Memory Curator",
+		Key:        models.AgentSystemKindMemoryCurator,
+		SystemKind: models.AgentSystemKindMemoryCurator,
+		Enabled:    true,
+		// Even a corrupted or stale selectable flag must not make a system agent
+		// assignable through create_task; only its internal schedule may assign it.
+		SelectableAsPrimary: true,
+		GeneratedStatus:     models.AgentStatusProtected,
+	}
+	if err := agentRepo.Create(ctx, memoryCurator); err != nil {
+		t.Fatalf("create Memory Curator: %v", err)
+	}
+
+	requests := []TaskCreationRequest{
+		{Title: "By short name", Prompt: "Update memory", Agent: "Memory Curator"},
+		{Title: "By exact name", Prompt: "Update memory", Agent: memoryCurator.Name},
+		{Title: "By ID", Prompt: "Update memory", AgentDefinitionID: memoryCurator.ID},
+	}
+	created, summary := ExecuteTaskCreationsWithReturn(ctx, requests, project.ID, taskSvc)
+	if len(created) != 0 {
+		t.Fatalf("non-selectable Memory Curator must not be assigned by create_task: %#v", created)
+	}
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("rejected Memory Curator requests created fallback tasks: %#v", tasks)
+	}
+	if strings.Count(summary, "Failed to create 3 task(s)") != 1 || !strings.Contains(summary, `Agent "System: Memory Curator" is not assignable as a primary task Agent`) {
+		t.Fatalf("unexpected rejection summary: %q", summary)
 	}
 }
 

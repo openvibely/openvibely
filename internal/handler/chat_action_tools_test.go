@@ -476,6 +476,38 @@ func TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure(t *testing.T) {
 		}
 	})
 
+	t.Run("system Memory Curator assignment", func(t *testing.T) {
+		agentRepo := repository.NewAgentRepo(db)
+		h.SetAgentRepo(agentRepo)
+		memoryCurator := &models.Agent{
+			Name:       "System: Memory Curator",
+			Key:        models.AgentSystemKindMemoryCurator,
+			SystemKind: models.AgentSystemKindMemoryCurator,
+			Enabled:    true,
+			// System identity must win even if persisted selectability drifts.
+			SelectableAsPrimary: true,
+			GeneratedStatus:     models.AgentStatusProtected,
+		}
+		if err := agentRepo.Create(ctx, memoryCurator); err != nil {
+			t.Fatalf("create Memory Curator: %v", err)
+		}
+		handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-memory-curator", ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+		output, err := handlers["create_task"](ctx, json.RawMessage(`{"title":"Reconcile memory","prompt":"Update managed memory","agent":"Memory Curator"}`))
+		if err == nil {
+			t.Fatalf("expected create_task to reject system Memory Curator, got output %q", output)
+		}
+		if !strings.Contains(output, `Agent "Memory Curator" is not one unique enabled, selectable primary Agent definition`) {
+			t.Fatalf("expected rejected Agent assignment in tool output, got %q", output)
+		}
+		tasks, listErr := h.taskRepo.ListByProject(ctx, project.ID, "")
+		if listErr != nil {
+			t.Fatalf("list project tasks: %v", listErr)
+		}
+		if len(tasks) != 0 {
+			t.Fatalf("rejected Memory Curator assignment created fallback tasks: %#v", tasks)
+		}
+	})
+
 	t.Run("summary without persisted task id", func(t *testing.T) {
 		handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-db-failure", ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 		createHandler := handlers["create_task"]
