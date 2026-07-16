@@ -4007,6 +4007,33 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 	}
 }
 
+func TestTaskThreadView_ClearsScrollStateWhenLeavingTaskDetail(t *testing.T) {
+	task := &models.Task{
+		ID:        "thread-scroll-leave",
+		ProjectID: "p1",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("Failed to render TaskThreadView: %v", err)
+	}
+	content := buf.String()
+
+	for _, required := range []string{
+		"if (target && target.id === 'main-content')",
+		"var leavingTaskId = _taskThreadTaskId();",
+		"var leavingScrollKey = _taskThreadScrollStateKey(leavingTaskId);",
+		"if (leavingScrollKey) delete window._taskThreadScrollStates[leavingScrollKey];",
+		"window._taskThreadUserScrolledUp = false;",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("expected task-detail navigation cleanup to include %q", required)
+		}
+	}
+}
+
 func TestTaskThreadView_PinsAfterQueuedTranscriptRendering(t *testing.T) {
 	task := &models.Task{ID: "thread-render-scroll-1", Status: models.StatusCompleted, Category: models.CategoryCompleted}
 

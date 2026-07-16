@@ -645,7 +645,11 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 						// Clean up thread state when navigating away via sidebar
 						// (sidebar replaces main-content, removing the thread view)
 						if (target && target.id === 'main-content') {
-							_saveTaskThreadScrollState();
+							var leavingTaskId = _taskThreadTaskId();
+							var leavingScrollKey = _taskThreadScrollStateKey(leavingTaskId);
+							window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+							if (leavingScrollKey) delete window._taskThreadScrollStates[leavingScrollKey];
+							window._taskThreadUserScrolledUp = false;
 							window._taskThreadSavedInput = '';
 							if (window._taskThreadPageTracker) {
 								window._taskThreadPageTracker.destroy();
