@@ -2367,7 +2367,7 @@ templ ChatAutoScrollScript() {
 					var parent = node.parentElement;
 					var inCode = !!(parent && parent.closest && parent.closest('code, pre'));
 					var inToolOutput = !!(parent && parent.closest && parent.closest('.stream-tool-body-content'));
-					if (inCode && !inToolOutput) continue;
+					if (inCode || inToolOutput) continue;
 					if (node.textContent.includes('[TASK_ID:')) {
 						nodesToProcess.push(node);
 					}
@@ -2504,7 +2504,7 @@ templ ChatAutoScrollScript() {
 					var parent = node.parentElement;
 					var inCode = !!(parent && parent.closest && parent.closest('code, pre'));
 					var inToolOutput = !!(parent && parent.closest && parent.closest('.stream-tool-body-content'));
-					if (inCode && !inToolOutput) continue;
+					if (inCode || inToolOutput) continue;
 					if (node.textContent.includes('[TASK_EDITED:')) {
 						nodesToProcess.push(node);
 					}
@@ -3434,10 +3434,10 @@ templ ChatAutoScrollScript() {
 				return displayNames[normalized] || displayNames[raw] || raw;
 			}
 
-			var thinkingPattern = /\[Thinking\]([\s\S]*?)(?:\[\/Thinking\]|$)/g;
-			var toolUsingPattern = /\[Using tool:\s*([^\]]+)\]/g;
-				var toolResultBlockPattern = /\[Tool\s+(\S+)\s+(done|error)\](?:\r\n|\r|\n)?([\s\S]*?)(?:\r\n|\r|\n)?\[\/Tool\](?:\r\n|\r|\n)?/g;
-				var toolResultLegacyPattern = /\[Tool\s+(\S+)\s+(done|error):\s*([^\]\r\n]*)\](?:\r\n|\r|\n)?/g;
+			var thinkingPattern = /^[\t ]*\[Thinking\][\t ]*(?:\r\n|\r|\n)?([\s\S]*?)(?:\[\/Thinking\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?|(?![\s\S]))/gm;
+			var toolUsingPattern = /^[\t ]*\[Using tool:\s*([^\]\r\n]+)\][\t ]*(?=\r?$)/gm;
+				var toolResultBlockPattern = /^[\t ]*\[Tool\s+(\S+)\s+(done|error)\][\t ]*(?:\r\n|\r|\n)?([\s\S]*?)\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
+				var toolResultLegacyPattern = /^[\t ]*\[Tool\s+(\S+)\s+(done|error):\s*([^\]\r\n]*)\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
 
 					var allMatches = [];
 					var match;
@@ -3445,6 +3445,18 @@ templ ChatAutoScrollScript() {
 					var codeRanges = [];
 					var segments = [];
 					var preparationFailed = false;
+					function toolBlockRanges(text) {
+						var ranges = [];
+						var pattern = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?[\s\S]*?\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
+						var block;
+						while ((block = pattern.exec(text)) !== null) ranges.push({ start: block.index, end: block.index + block[0].length });
+						return ranges;
+					}
+					function protectInitialToolBlocks() {
+						rawCodeRanges = rawCodeRanges.concat(toolBlockRanges(textBuffer));
+						rawCodeRanges.sort(function(a, b) { return a.start - b.start; });
+						return true;
+					}
 					function normalizePreparedText() {
 						if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer, rawCodeRanges);
 						return true;
@@ -3667,8 +3679,9 @@ templ ChatAutoScrollScript() {
 						}
 						return true;
 					}
-					var preparationPhases = [
+				var preparationPhases = [
 						prepareInitialCodeRanges,
+						protectInitialToolBlocks,
 						stripPreparedStatus,
 						normalizePreparedText,
 						stripPreparedArtifacts,

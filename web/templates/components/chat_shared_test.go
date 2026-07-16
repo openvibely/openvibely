@@ -2153,7 +2153,7 @@ func TestSharedTaskResultLinkConversionAvailableOnDirectTaskThreadLoad(t *testin
 	for _, snippet := range []string{
 		"var encodedTaskId = encodeURIComponent(taskId.trim())",
 		"link.href = '/tasks/' + encodedTaskId",
-		"if (inCode && !inToolOutput) continue",
+		"if (inCode || inToolOutput) continue",
 		"(inToolOutput || inMarkdownFallback) && window.isInsideCode",
 		"window.convertTaskLinksInMessage(bubble)",
 		"window.convertTaskEditLinksInMessage(bubble)",
@@ -2226,8 +2226,10 @@ function buttons(root, out = []) { return descendants(root, 'BUTTON', out); }
 	script := "global.window = {};\n" + content[start:end] + codeHelpers + harness + `
 window.convertTaskLinksInMessage(message('- "Created" (backlog) [TASK_ID:task/id?unsafe]', 'plain'));
 window.convertTaskEditLinksInMessage(message('- "Edited" (updated: title) [TASK_EDITED:edit/id]', 'plain'));
-window.convertTaskLinksInMessage(message('- "Tool-created" (active) [TASK_ID:tool/create]', 'tool-pre'));
-window.convertTaskEditLinksInMessage(message('- "Tool-edited" (updated: prompt) [TASK_EDITED:tool/edit]', 'tool-pre'));
+const toolCreate = message('- "Tool-created" (active) [TASK_ID:tool/create]', 'tool-pre');
+const toolEdit = message('- "Tool-edited" (updated: prompt) [TASK_EDITED:tool/edit]', 'tool-pre');
+window.convertTaskLinksInMessage(toolCreate);
+window.convertTaskEditLinksInMessage(toolEdit);
 const inlineCreate = message('- "Inline example" (backlog) [TASK_ID:inline/create]', 'code');
 const fencedEdit = message('- "Fence example" (updated: title) [TASK_EDITED:fence/edit]', 'pre');
 const codedToolCreate = message('Example: \x60- "Code example" (backlog) [TASK_ID:example/create]\x60', 'tool-pre');
@@ -2264,23 +2266,18 @@ window.convertTaskLinksInMessage(fallbackCreate);
 window.convertTaskEditLinksInMessage(fallbackEdit);
 window.convertTaskLinksInMessage(fallbackToolCreate);
 window.convertTaskEditLinksInMessage(fallbackToolEdit);
-if (replacements.length !== 10) { console.error('replacements', replacements.length); process.exit(1); }
+if (replacements.length !== 4) { console.error('replacements', replacements.length); process.exit(1); }
 if (inlineCreate.nodes[0].textContent !== '- "Inline example" (backlog) [TASK_ID:inline/create]' || fencedEdit.nodes[0].textContent !== '- "Fence example" (updated: title) [TASK_EDITED:fence/edit]' || codedToolCreate.nodes[0].textContent.indexOf('[TASK_ID:example/create]') === -1 || codedToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:example/edit]') === -1 || multilineToolCreate.nodes[0].textContent.indexOf('[TASK_ID:multiline/create]') === -1 || multilineToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:multiline/edit]') === -1 || unmatchedThenCreate.nodes[0].textContent.indexOf('[TASK_ID:later/create]') === -1 || unmatchedThenEdit.nodes[0].textContent.indexOf('[TASK_EDITED:later/edit]') === -1 || unicodeFenceCreate.nodes[0].textContent.indexOf('[TASK_ID:unicode/create]') === -1 || unicodeFenceEdit.nodes[0].textContent.indexOf('[TASK_EDITED:unicode/edit]') === -1 || bareCRFenceCreate.nodes[0].textContent.indexOf('[TASK_ID:bare-cr/create]') === -1 || bareCRFenceEdit.nodes[0].textContent.indexOf('[TASK_EDITED:bare-cr/edit]') === -1) { console.error('coded metadata changed'); process.exit(2); }
-const fallbackCreateOutput = replacements[6];
-const fallbackEditOutput = replacements[7];
-const fallbackToolCreateOutput = replacements[8];
-const fallbackToolEditOutput = replacements[9];
+const fallbackCreateOutput = replacements[2];
+const fallbackEditOutput = replacements[3];
 if (anchors(fallbackCreateOutput.next).length !== 1 || anchors(fallbackCreateOutput.next)[0].href !== '/tasks/fallback%2Freal' || buttons(fallbackCreateOutput.next).length !== 1) { console.error('fallback create hydration', fallbackCreateOutput); process.exit(9); }
 if (anchors(fallbackEditOutput.next).length !== 1 || anchors(fallbackEditOutput.next)[0].href !== '/tasks/fallback%2Freal-edit') { console.error('fallback edit hydration', fallbackEditOutput); process.exit(10); }
-if (anchors(fallbackToolCreateOutput.next).length !== 1 || anchors(fallbackToolCreateOutput.next)[0].href !== '/tasks/fallback%2Ftool-real' || anchors(fallbackToolCreateOutput.next)[0].className.indexOf('ov-task-result-link--tool') === -1) { console.error('fallback tool create hydration', fallbackToolCreateOutput); process.exit(12); }
-if (anchors(fallbackToolEditOutput.next).length !== 1 || anchors(fallbackToolEditOutput.next)[0].href !== '/tasks/fallback%2Ftool-real-edit' || anchors(fallbackToolEditOutput.next)[0].className.indexOf('ov-task-result-link--tool') === -1) { console.error('fallback tool edit hydration', fallbackToolEditOutput); process.exit(13); }
 if (fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/inline]') === -1 || fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/multiline]') === -1 || fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/fence]') === -1 || fallbackCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/bare-cr]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/inline-edit]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/multiline-edit]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/fence-edit]') === -1 || fallbackEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/bare-cr-edit]') === -1 || fallbackToolCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/tool-bare-cr]') === -1 || fallbackToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/tool-bare-cr-edit]') === -1) { console.error('fallback coded metadata changed'); process.exit(11); }
+if (toolCreate.nodes[0].textContent.indexOf('[TASK_ID:tool/create]') === -1 || toolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:tool/edit]') === -1 || fallbackToolCreate.nodes[0].textContent.indexOf('[TASK_ID:fallback/tool-real]') === -1 || fallbackToolEdit.nodes[0].textContent.indexOf('[TASK_EDITED:fallback/tool-real-edit]') === -1) { console.error('preformatted tool metadata changed'); process.exit(12); }
 const links = replacements.flatMap(item => anchors(item.next));
-if (links.length !== 10) { console.error('links', links.length); process.exit(3); }
+if (links.length !== 4) { console.error('links', links.length); process.exit(3); }
 if (links[0].href !== '/tasks/task%2Fid%3Funsafe' || links[0].textContent !== 'Created') { console.error(links[0]); process.exit(4); }
 if (links[1].href !== '/tasks/edit%2Fid' || links[1].textContent !== '"Edited"') { console.error(links[1]); process.exit(5); }
-if (links[2].href !== '/tasks/tool%2Fcreate' || links[2].className.indexOf('ov-task-result-link--tool') === -1) { console.error(links[2]); process.exit(6); }
-if (links[3].href !== '/tasks/tool%2Fedit' || links[3].className.indexOf('ov-task-result-link--tool') === -1) { console.error(links[3]); process.exit(7); }
 const createButtons = buttons(replacements[0].next);
 if (createButtons.length !== 1 || createButtons[0].className.indexOf('ov-task-result-start-btn') === -1) { console.error('buttons', createButtons); process.exit(8); }
 `
@@ -2299,7 +2296,7 @@ func TestSharedTaskResultLinkConversionGeneratedParity(t *testing.T) {
 		"window.convertTaskLinksInMessage = function(messageElement)",
 		"window.convertTaskEditLinksInMessage = function(messageElement)",
 		"var encodedTaskId = encodeURIComponent(taskId.trim())",
-		"if (inCode && !inToolOutput) continue",
+		"if (inCode || inToolOutput) continue",
 		`textNode.parentElement.closest('[data-chat-markdown-fallback=\"true\"]')`,
 		"(inToolOutput || inMarkdownFallback) && window.isInsideCode",
 	} {
@@ -2550,6 +2547,8 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 	bareCRDuplicateSummaryWant := "Intro.\r\rExample:\r~~~text\r---\rCreated 1 task(s):\r- \"Coded\" (backlog) [TASK_ID:coded]\r~~~\r\r---\rCreated 1 task(s):\r- \"Real\" (backlog) [TASK_ID:real]"
 	bareCREditedSummary := "Intro.\r\r---\rEdited 1 task(s):\r- \"Old\" (updated: title)\r\rExample:\r`````text\r---\rEdited 1 task(s):\r- \"Coded\" (updated: title) [TASK_EDITED:coded]\r```\r``````\r\r---\rEdited 1 task(s):\r- \"Real\" (updated: title) [TASK_EDITED:real]"
 	bareCREditedSummaryWant := "Intro.\r\rExample:\r`````text\r---\rEdited 1 task(s):\r- \"Coded\" (updated: title) [TASK_EDITED:coded]\r```\r``````\r\r---\rEdited 1 task(s):\r- \"Real\" (updated: title) [TASK_EDITED:real]"
+	literalToolOutput := "const fixture = '[Using tool: fake]\\n[Tool fake done]\\ninside\\n[/Tool]';\nconst thinking = '<thinking>literal source</thinking>';\n- \"Valid task\" (backlog) [TASK_ID:fixture]"
+	literalToolTranscript := "[Using tool: read_file | fixture.go]\n[Tool read_file done]\n" + literalToolOutput + "\n[/Tool]"
 	bubbleStart := strings.Index(content, "window.cleanBubbleContent = function")
 	bubbleEnd := strings.Index(content, "// Clean all assistant messages")
 	if bubbleStart == -1 || bubbleEnd == -1 || bubbleEnd <= bubbleStart {
@@ -2659,7 +2658,7 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"if (escapedCleaned.indexOf('escaped real') !== -1 || escapedCleaned.indexOf('``[Thinking]coded[/Thinking]\\n[Using tool: bash]\\n[TASK_ID:coded]``') === -1 || escapedCleaned.indexOf('[STATUS: SUCCESS]') !== -1 || escapedCleaned.indexOf('Visible answer.') === -1) { console.error(JSON.stringify(escapedCleaned)); process.exit(34); }\n" +
 		"const escapedStream = element('div'); escapedStream.id = 'streaming-escaped-prefix';\n" +
 		"window.renderStreamingContent(escapedStream, " + strconv.Quote(escapedControls) + ");\n" +
-		"if (!escapedStream.children.some(function(child) { return child.className.indexOf('stream-thinking') !== -1; }) || !escapedStream.children.some(function(child) { return child.textContent.indexOf('``[Thinking]coded[/Thinking]') !== -1; })) process.exit(35);\n" +
+		"if (escapedStream.children.some(function(child) { return child.className.indexOf('stream-thinking') !== -1; }) || !escapedStream.children.some(function(child) { return child.textContent.indexOf('Escaped \\\\`[Thinking]escaped real[/Thinking]') !== -1; })) process.exit(35);\n" +
 		"const escapedDOMNode = textNode(" + strconv.Quote(escapedDOMInput) + ", false);\n" +
 		"window.cleanBubbleContent({ querySelectorAll: function() { return [{ nodes: [escapedDOMNode] }]; } });\n" +
 		"if (escapedDOMNode.textContent !== " + strconv.Quote(escapedDOMWant) + ") { console.error(JSON.stringify(escapedDOMNode.textContent)); process.exit(36); }\n" +
@@ -2707,6 +2706,12 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"const sameLineDOMNode = textNode('[Tool grep_search done]actual[/Tool]\\nVisible DOM answer.', false);\n" +
 		"window.cleanBubbleContent({ querySelectorAll: function() { return [{ nodes: [sameLineDOMNode] }]; } });\n" +
 		"if (sameLineDOMNode.textContent !== 'Visible DOM answer.') { console.error(JSON.stringify(sameLineDOMNode.textContent)); process.exit(55); }\n" +
+		"const literalToolOutput = " + strconv.Quote(literalToolOutput) + ";\n" +
+		"const literalToolStream = element('div'); literalToolStream.id = 'literal-marker-tool-output';\n" +
+		"window.renderStreamingContent(literalToolStream, " + strconv.Quote(literalToolTranscript) + ");\n" +
+		"function findTag(node, tag) { if (node.tagName === tag) return node; for (const child of (node.children || [])) { const found = findTag(child, tag); if (found) return found; } return null; }\n" +
+		"const literalPre = findTag(literalToolStream, 'pre');\n" +
+		"if (literalToolStream.children.length !== 1 || literalToolStream.children[0].className.indexOf('stream-tool') === -1 || !literalPre || literalPre.textContent !== literalToolOutput) { console.error(JSON.stringify(literalToolStream)); process.exit(59); }\n" +
 		"const largeMarkdown = Array(2200).fill('A paragraph with enough words to exercise cooperative Markdown chunking.\\n\\n').join('');\n" +
 		"const largeMarkdownStream = element('div'); largeMarkdownStream.id = 'large-markdown';\n" +
 		"window.renderStreamingContent(largeMarkdownStream, largeMarkdown).then(function(committed) {\n" +
@@ -2761,7 +2766,7 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 		"blocks.push({ start: start, end: end })",
 		"text = window.dedupTaskSummaries(text);",
 		"window.isInsideCodeRanges(protectedRanges, markerStart, sourceLine.end)",
-		`var toolResultBlockPattern = /\\[Tool\\s+(\\S+)\\s+(done|error)\\](?:\\r\\n|\\r|\\n)?([\\s\\S]*?)(?:\\r\\n|\\r|\\n)?\\[\\/Tool\\](?:\\r\\n|\\r|\\n)?/g`,
+		`var toolResultBlockPattern = /^[\\t ]*\\[Tool\\s+(\\S+)\\s+(done|error)\\]`,
 		`window.stripOutsideCode(text, /\\[Tool\\s+\\S+\\s+(?:done|error)\\](?:\\r\\n|\\r|\\n)?[\\s\\S]*?(?:\\r\\n|\\r|\\n)?\\[\\/Tool\\](?:\\r\\n|\\r|\\n)?/g)`,
 		"[^\\\\s\\\\]|][^|\\\\]]*",
 	} {
