@@ -134,6 +134,15 @@ func TestRetryableStatuses(t *testing.T) {
 	}
 }
 
+func TestRetryableErrorRequiresExactStatusToken(t *testing.T) {
+	if IsRetryableError(errors.New("invalid request: maximum is 500-token units")) {
+		t.Fatal("embedded number must not make a permanent error retryable")
+	}
+	if !IsRetryableError(errors.New("API error (503): unavailable")) {
+		t.Fatal("exact transient status token should be retryable")
+	}
+}
+
 func TestBackoffHonorsRetryAfterAndExponentialDelay(t *testing.T) {
 	if got := Backoff(2, nil, time.Second); got != 4*time.Second {
 		t.Fatalf("exponential backoff = %v, want 4s", got)
@@ -252,4 +261,55 @@ func TestDoStreamRetriesProviderOverloadBeforeOutput(t *testing.T) {
 	if err != nil || result != "ok" || attempts != 2 {
 		t.Fatalf("result/error/attempts = %q/%v/%d, want ok/nil/2", result, err, attempts)
 	}
+}
+
+func TestDoStreamHonorsResponseRetryAfter(t *testing.T) {
+	attempts := 0
+	var delays []time.Duration
+	policy := instantPolicy()
+	policy.OnRetry = func(event RetryEvent) { delays = append(delays, event.Delay) }
+	result, err := DoStream(context.Background(), policy, func(context.Context) (string, bool, error) {
+		attempts++
+		if attempts == 1 {
+			resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": []string{"7"}}}
+			return "", false, NewResponseError(resp, errors.New("rate limited"))
+		}
+		return "ok", true, nil
+	})
+	if err != nil || result != "ok" || len(delays) != 1 || delays[0] != 7*time.Second {
+		t.Fatalf("result/error/delays = %q/%v/%v, want ok/nil/[7s]", result, err, delays)
+	}
+}
+
+func TestMaxBackoffAppliesToNetworkAndStreamRetries(t *testing.T) {
+	t.Run("network", func(t *testing.T) {
+		attempts := 0
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			attempts++
+			return nil, errors.New("read: operation timed out")
+		})}
+		policy := instantPolicy()
+		policy.BaseDelay = 2 * time.Second
+		policy.MaxBackoff = time.Second
+		_, _ = Do(context.Background(), client, func() (*http.Request, error) {
+			return http.NewRequest(http.MethodGet, "https://external.test", nil)
+		}, policy)
+		if attempts != 1 {
+			t.Fatalf("attempts = %d, want 1 when delay exceeds maximum", attempts)
+		}
+	})
+
+	t.Run("stream", func(t *testing.T) {
+		attempts := 0
+		policy := instantPolicy()
+		policy.BaseDelay = 2 * time.Second
+		policy.MaxBackoff = time.Second
+		_, _ = DoStream(context.Background(), policy, func(context.Context) (string, bool, error) {
+			attempts++
+			return "", false, NewStreamError(errors.New("read: operation timed out"))
+		})
+		if attempts != 1 {
+			t.Fatalf("attempts = %d, want 1 when delay exceeds maximum", attempts)
+		}
+	})
 }

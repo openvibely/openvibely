@@ -20,6 +20,26 @@ import (
 	"github.com/coder/websocket"
 )
 
+func TestSendRetriesResponseBodyTimeoutBeforeOutput(t *testing.T) {
+	attempts := 0
+	client := NewWithAPIKey("sk-test")
+	client.httpClient = &http.Client{Transport: completionsRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		body := io.ReadCloser(failingCompletionsBody{})
+		if attempts == 2 {
+			body = io.NopCloser(strings.NewReader(`{"model":"test","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
+	})}
+	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || resp.Text != "ok" {
+		t.Fatalf("attempts/text = %d/%q, want 2/ok", attempts, resp.Text)
+	}
+}
+
 func TestRefreshToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

@@ -1217,9 +1217,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		errBody, _ := io.ReadAll(resp.Body)
 		trimmed := strings.TrimSpace(string(errBody))
 		if trimmed == "" {
-			return nil, fmt.Errorf("POST %q: %d %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode))
+			return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %d %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode)))
 		}
-		return nil, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed)
+		return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed))
 	}
 
 	result, err := c.parseAgenticStreamWithToolCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)

@@ -311,6 +311,9 @@ func (a *Adapter) bufferedWithRetry(ctx context.Context, url string, body []byte
 		if err != nil {
 			return result, false, httpretry.NewStreamError(fmt.Errorf("reading ollama response: %w", err))
 		}
+		if httpretry.IsRetryableStatus(resp.StatusCode) {
+			return result, false, httpretry.NewResponseError(resp, ollamaResponseError(resp.StatusCode, result.body))
+		}
 		return result, false, nil
 	})
 }
@@ -339,11 +342,8 @@ func (a *Adapter) streamWithRetry(ctx context.Context, url string, body []byte, 
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			respBody, _ := io.ReadAll(resp.Body)
-			var errResp errorResponse
-			if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != "" {
-				return result, observed, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, errResp.Error)
-			}
-			return result, observed, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(respBody))
+			err := ollamaResponseError(resp.StatusCode, respBody)
+			return result, observed, httpretry.NewResponseError(resp, err)
 		}
 
 		decoder := json.NewDecoder(resp.Body)
@@ -366,6 +366,14 @@ func (a *Adapter) streamWithRetry(ctx context.Context, url string, body []byte, 
 			}
 		}
 	})
+}
+
+func ollamaResponseError(statusCode int, body []byte) error {
+	var errResp errorResponse
+	if json.Unmarshal(body, &errResp) == nil && errResp.Error != "" {
+		return fmt.Errorf("ollama API error (%d): %s", statusCode, errResp.Error)
+	}
+	return fmt.Errorf("ollama API error (%d): %s", statusCode, string(body))
 }
 
 func (a *Adapter) doWithRetry(ctx context.Context, buildReq func() (*http.Request, error)) (*http.Response, error) {

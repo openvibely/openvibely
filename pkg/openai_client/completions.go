@@ -381,9 +381,9 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 		errBody, _ := io.ReadAll(resp.Body)
 		trimmed := strings.TrimSpace(string(errBody))
 		if trimmed == "" {
-			return nil, fmt.Errorf("POST %q: %d %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode))
+			return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %d %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode)))
 		}
-		return nil, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed)
+		return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed))
 	}
 
 	result, err := c.parseCompletionsStream(resp.Body, opts.OnText)

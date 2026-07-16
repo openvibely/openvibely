@@ -66,6 +66,27 @@ func NewStreamError(err error) error {
 	return &StreamError{Err: err}
 }
 
+// ResponseError preserves HTTP retry metadata after provider-specific code has
+// consumed and closed a response body.
+type ResponseError struct {
+	StatusCode int
+	Header     http.Header
+	Err        error
+}
+
+func (e *ResponseError) Error() string { return e.Err.Error() }
+func (e *ResponseError) Unwrap() error { return e.Err }
+
+func NewResponseError(resp *http.Response, err error) error {
+	if err == nil {
+		return nil
+	}
+	if resp == nil {
+		return err
+	}
+	return &ResponseError{StatusCode: resp.StatusCode, Header: resp.Header.Clone(), Err: err}
+}
+
 func DefaultPolicy() Policy {
 	return Policy{
 		MaxRetries: DefaultMaxRetries,
@@ -117,9 +138,19 @@ func IsRetryableError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
+	var responseErr *ResponseError
+	if errors.As(err, &responseErr) {
+		return IsRetryableStatus(responseErr.StatusCode)
+	}
 	msg := strings.ToLower(err.Error())
-	for _, hint := range []string{"rate limit", "too many requests", "overloaded", "temporar", "unavailable", "server error", "408", "429", "500", "502", "503", "504", "529"} {
+	for _, hint := range []string{"rate limit", "too many requests", "overloaded", "temporar", "unavailable", "server error"} {
 		if strings.Contains(msg, hint) {
+			return true
+		}
+	}
+	for _, field := range strings.Fields(msg) {
+		field = strings.Trim(field, "()[]{}:;,.\"")
+		if code, parseErr := strconv.Atoi(field); parseErr == nil && IsRetryableStatus(code) {
 			return true
 		}
 	}
@@ -145,7 +176,18 @@ func Backoff(retry int, resp *http.Response, baseDelay time.Duration, now ...tim
 	if baseDelay <= 0 {
 		baseDelay = time.Second
 	}
-	return baseDelay * time.Duration(1<<uint(retry))
+	if retry < 0 {
+		retry = 0
+	}
+	const maxDuration = time.Duration(1<<63 - 1)
+	if retry >= 63 {
+		return maxDuration
+	}
+	factor := time.Duration(1) << uint(retry)
+	if baseDelay > maxDuration/factor {
+		return maxDuration
+	}
+	return baseDelay * factor
 }
 
 // Do executes a fresh request for every attempt. It retries transient network
@@ -173,6 +215,12 @@ func Do(ctx context.Context, client Doer, buildReq func() (*http.Request, error)
 				return nil, fmt.Errorf("send request: %w", err)
 			}
 			delay := Backoff(attempt, nil, policy.BaseDelay, policy.Now())
+			if delay > policy.MaxBackoff {
+				if policy.WrapNetworkError != nil {
+					err = policy.WrapNetworkError(err)
+				}
+				return nil, fmt.Errorf("send request: %w", err)
+			}
 			notify(policy, attempt+1, delay, 0, err)
 			if err := wait(ctx, policy.After, delay); err != nil {
 				return nil, err
@@ -213,7 +261,10 @@ func DoStream[T any](ctx context.Context, policy Policy, fn func(context.Context
 		if observed || attempt == policy.MaxRetries || !policy.AllowReplay || !retryableError(policy, err) {
 			return result, err
 		}
-		delay := Backoff(attempt, nil, policy.BaseDelay, policy.Now())
+		delay := backoffForError(attempt, err, policy)
+		if delay > policy.MaxBackoff {
+			return result, err
+		}
 		notify(policy, attempt+1, delay, 0, err)
 		if err := wait(ctx, policy.After, delay); err != nil {
 			var zero T
@@ -222,6 +273,14 @@ func DoStream[T any](ctx context.Context, policy Policy, fn func(context.Context
 	}
 	var zero T
 	return zero, errors.New("stream retry loop exited unexpectedly")
+}
+
+func backoffForError(attempt int, err error, policy Policy) time.Duration {
+	var responseErr *ResponseError
+	if errors.As(err, &responseErr) {
+		return Backoff(attempt, &http.Response{StatusCode: responseErr.StatusCode, Header: responseErr.Header}, policy.BaseDelay, policy.Now())
+	}
+	return Backoff(attempt, nil, policy.BaseDelay, policy.Now())
 }
 
 func normalize(policy Policy) Policy {

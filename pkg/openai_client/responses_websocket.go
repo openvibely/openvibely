@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 
 	"github.com/coder/websocket"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 var errResponsesWebsocketTransport = errors.New("Responses websocket transport error")
@@ -431,7 +432,7 @@ func (c *Client) openResponsesLiteHTTPStream(ctx context.Context, websocketPaylo
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("POST %q: %w", endpoint, parseAPIError(resp.StatusCode, errBody))
+		return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %w", endpoint, parseAPIError(resp.StatusCode, errBody)))
 	}
 	return resp.Body, nil
 }

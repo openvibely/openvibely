@@ -3,6 +3,7 @@ package anthropicclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,37 @@ import (
 	"testing"
 	"time"
 )
+
+type anthropicRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f anthropicRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+type failingAnthropicBody struct{}
+
+func (failingAnthropicBody) Read([]byte) (int, error) {
+	return 0, errors.New("read: operation timed out")
+}
+func (failingAnthropicBody) Close() error { return nil }
+
+func TestSendRetriesResponseBodyTimeoutBeforeOutput(t *testing.T) {
+	attempts := 0
+	client := NewWithAPIKey("test-key")
+	client.httpClient = &http.Client{Transport: anthropicRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		body := io.ReadCloser(failingAnthropicBody{})
+		if attempts == 2 {
+			body = io.NopCloser(strings.NewReader(`{"model":"test","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
+	})}
+	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || resp.Text != "ok" {
+		t.Fatalf("attempts/text = %d/%q, want 2/ok", attempts, resp.Text)
+	}
+}
 
 func TestParseAgenticStream_TextOnly(t *testing.T) {
 	// Simulate a streaming response with only text content

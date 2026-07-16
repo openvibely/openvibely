@@ -31,14 +31,18 @@ func instantOllamaRetry(t *testing.T) {
 }
 
 type retryingOllamaDoer struct {
-	attempts int
-	firstErr error
+	attempts    int
+	firstErr    error
+	firstStatus int
 }
 
 func (d *retryingOllamaDoer) Do(*http.Request) (*http.Response, error) {
 	d.attempts++
 	if d.attempts == 1 && d.firstErr != nil {
 		return nil, d.firstErr
+	}
+	if d.attempts == 1 && d.firstStatus != 0 {
+		return &http.Response{StatusCode: d.firstStatus, Body: io.NopCloser(strings.NewReader(`{"error":"temporarily unavailable"}`)), Header: make(http.Header)}, nil
 	}
 	return &http.Response{
 		StatusCode: http.StatusOK,
@@ -47,6 +51,24 @@ func (d *retryingOllamaDoer) Do(*http.Request) (*http.Response, error) {
 		)),
 		Header: make(http.Header),
 	}, nil
+}
+
+func TestCallDirectRetriesTransientHTTPStatus(t *testing.T) {
+	instantOllamaRetry(t)
+	doer := &retryingOllamaDoer{firstStatus: http.StatusServiceUnavailable}
+	adapter := New(nil, nil)
+	adapter.SetHTTPClient(doer)
+	result, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationDirect,
+		Message:   "hello",
+		Agent:     models.LLMConfig{Provider: models.ProviderOllama, Model: "test-model", OllamaBaseURL: "http://ollama.invalid"},
+	}, ".", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doer.attempts != 2 || result.Output != "retry succeeded" {
+		t.Fatalf("attempts/text = %d/%q, want 2/retry succeeded", doer.attempts, result.Output)
+	}
 }
 
 func TestCallDirectRetriesNetworkTimeout(t *testing.T) {
