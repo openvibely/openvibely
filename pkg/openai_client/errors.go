@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 // Common sentinel errors
@@ -79,7 +81,7 @@ func (e *APIError) Is(target error) bool {
 
 // Temporary returns true if the error is likely temporary and retryable.
 func (e *APIError) Temporary() bool {
-	return isRetryable(e.StatusCode)
+	return httpretry.IsRetryableStatus(e.StatusCode)
 }
 
 // parseAPIError attempts to parse an API error from the response body.

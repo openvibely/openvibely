@@ -18,7 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/applog"
-	llmretry "github.com/openvibely/openvibely/internal/llm/retry"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -733,7 +733,7 @@ func isGenerateAgentTransientTimeoutError(err error) bool {
 	if strings.Contains(msg, "context deadline exceeded") {
 		return true
 	}
-	return llmretry.IsRetryable(err)
+	return httpretry.IsRetryableError(err)
 }
 
 func isGenerateAgentMalformedModelOutputError(err error) bool {

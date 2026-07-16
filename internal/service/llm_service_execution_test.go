@@ -43,7 +43,7 @@ func (f providerAdapterFunc) Call(req llmcontracts.AgentRequest) (llmcontracts.A
 }
 
 func (f retryingProviderAdapterFunc) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	return callWithRetry(req, func() (llmcontracts.AgentResult, error) {
+	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		return f(req)
 	})
 }
@@ -1254,7 +1254,7 @@ func TestLLMService_ExecuteTaskWithAgent_ClaimsToolBoundarySteering(t *testing.T
 	}
 }
 
-func TestLLMService_ExecuteTaskWithAgent_RestoresToolBoundarySteeringBeforeRetry(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_DoesNotReplayProviderCall(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	execRepo := repository.NewExecutionRepo(db)
@@ -1314,22 +1314,22 @@ func TestLLMService_ExecuteTaskWithAgent_RestoresToolBoundarySteeringBeforeRetry
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	agent.Provider = testProvider
 
-	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
-	if err != nil {
-		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err == nil {
+		t.Fatal("expected provider error")
 	}
-	if exec == nil || attempts != 2 {
-		t.Fatalf("expected successful retry after 2 attempts, exec=%#v attempts=%d", exec, attempts)
+	if attempts != 1 {
+		t.Fatalf("expected provider call not to be replayed, attempts=%d", attempts)
 	}
-	if len(steers) != 2 || steers[0] != "retry steer" || steers[1] != "retry steer" {
-		t.Fatalf("expected steering injected into both attempts, got %#v", steers)
+	if len(steers) != 1 || steers[0] != "retry steer" {
+		t.Fatalf("expected steering injected into the single attempt, got %#v", steers)
 	}
 	updated, err := threadInputRepo.GetByID(ctx, inputID)
 	if err != nil {
 		t.Fatalf("get input: %v", err)
 	}
-	if updated == nil || updated.InputStatus != models.ThreadInputApplied {
-		t.Fatalf("expected steering applied after successful retry, got %#v", updated)
+	if updated == nil || updated.InputMode != models.ThreadInputModeQueued || updated.InputStatus != models.ThreadInputPending {
+		t.Fatalf("expected steering requeued after failed call, got %#v", updated)
 	}
 }
 

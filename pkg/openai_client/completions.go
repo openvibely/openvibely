@@ -9,10 +9,11 @@ import (
 	"fmt"
 	"io"
 	"math"
-
-	"github.com/openvibely/openvibely/internal/applog"
 	"net/http"
 	"strings"
+
+	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 // CompletionsOptions configures a /v1/chat/completions call with tool use.
@@ -306,6 +307,26 @@ type completionsTurnResult struct {
 }
 
 func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		applog.Infof("[openai-client] chat completions stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+	}
+	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*completionsTurnResult, bool, error) {
+		attemptOpts := *opts
+		observed := false
+		attemptOpts.OnText = func(text string) {
+			observed = true
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+		result, err := c.sendCompletionsTurnOnce(attemptCtx, messages, tools, &attemptOpts)
+		return result, observed, err
+	})
+}
+
+func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
 	payload := map[string]interface{}{
 		"model":       opts.Model,
 		"messages":    messages,
@@ -365,7 +386,11 @@ func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completions
 		return nil, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed)
 	}
 
-	return c.parseCompletionsStream(resp.Body, opts.OnText)
+	result, err := c.parseCompletionsStream(resp.Body, opts.OnText)
+	if err != nil {
+		return result, httpretry.NewStreamError(err)
+	}
+	return result, nil
 }
 
 func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*completionsTurnResult, error) {

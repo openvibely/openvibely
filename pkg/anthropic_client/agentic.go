@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 // DefaultCompactionThreshold is the default input token count that triggers compaction.
@@ -807,6 +808,44 @@ func usesAdaptiveThinking(model string) bool {
 
 // sendAgenticTurn sends a single streaming request and returns parsed content blocks.
 func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		applog.Infof("[anthropicclient] stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+	}
+	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*turnResult, bool, error) {
+		attemptOpts := *opts
+		observed := false
+		attemptOpts.OnText = func(text string) {
+			observed = true
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+		attemptOpts.OnThinking = func(text string) {
+			observed = true
+			if opts.OnThinking != nil {
+				opts.OnThinking(text)
+			}
+		}
+		attemptOpts.OnToolUse = func(name string, input json.RawMessage) {
+			observed = true
+			if opts.OnToolUse != nil {
+				opts.OnToolUse(name, input)
+			}
+		}
+		attemptOpts.OnToolResult = func(name, output string, isError bool) {
+			observed = true
+			if opts.OnToolResult != nil {
+				opts.OnToolResult(name, output, isError)
+			}
+		}
+		result, err := c.sendAgenticTurnOnce(attemptCtx, messages, tools, &attemptOpts)
+		return result, observed, err
+	})
+}
+
+func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
 	// Build system prompt as content blocks with cache_control for prompt caching.
 	// OAuth tokens require a billing attribution block as the first system entry;
 	// without it the API returns 400 "Error".
@@ -956,7 +995,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 	}
 
 	tokenUsed := c.auth.Token
-	resp, err := doWithRetry(ctx, c.httpClient, buildReq)
+	resp, err := c.doRequestWithRetry(ctx, buildReq)
 	if err != nil {
 		return nil, err
 	}
@@ -970,7 +1009,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 			return nil, fmt.Errorf("API error 401: OAuth unauthorized recovery did not refresh token")
 		}
 		c.applyOAuthTokens(tokens)
-		resp, err = doWithRetry(ctx, c.httpClient, buildReq)
+		resp, err = c.doRequestWithRetry(ctx, buildReq)
 		if err != nil {
 			return nil, err
 		}
@@ -989,7 +1028,11 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	return c.parseAgenticStreamWithCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
+	result, err := c.parseAgenticStreamWithCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
+	if err != nil {
+		return result, httpretry.NewStreamError(err)
+	}
+	return result, nil
 }
 
 // parseAgenticStream parses a streaming response, handling text, tool_use, and compaction blocks.

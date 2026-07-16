@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 // AnthropicAPIHost is the base URL for the Anthropic Messages API.
@@ -368,7 +369,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		return httpReq, nil
 	}
 
-	resp, err := doWithRetry(ctx, c.httpClient, buildReq)
+	resp, err := c.doRequestWithRetry(ctx, buildReq)
 	if err != nil {
 		return nil, err
 	}
@@ -398,6 +399,19 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
 	return result, nil
+}
+
+func (c *Client) doRequestWithRetry(ctx context.Context, buildReq func() (*http.Request, error)) (*http.Response, error) {
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		if event.Err != nil {
+			applog.Infof("[anthropicclient] network error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+			return
+		}
+		applog.Infof("[anthropicclient] received HTTP %d, retry attempt %d/%d in %v", event.StatusCode, event.Attempt, event.MaxRetries, event.Delay)
+	}
+	return httpretry.Do(ctx, c.httpClient, buildReq, policy)
 }
 
 func (c *Client) handleResponse(body io.Reader) (*Response, error) {

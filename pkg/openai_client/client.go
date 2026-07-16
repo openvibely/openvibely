@@ -13,12 +13,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-
-	"github.com/openvibely/openvibely/internal/applog"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 const (
@@ -265,7 +266,7 @@ func (c *Client) doWithOAuthRecovery(ctx context.Context, endpoint string, isOAu
 	if c.auth != nil {
 		tokenUsed = c.auth.Token
 	}
-	resp, err := doWithRetry(ctx, c.httpClient, buildReq)
+	resp, err := c.doRequestWithRetry(ctx, buildReq)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +283,21 @@ func (c *Client) doWithOAuthRecovery(ctx context.Context, endpoint string, isOAu
 		return nil, fmt.Errorf("POST %q: 401 Unauthorized: OAuth unauthorized recovery did not refresh token", endpoint)
 	}
 	c.applyOAuthTokens(tokens)
-	return doWithRetry(ctx, c.httpClient, buildReq)
+	return c.doRequestWithRetry(ctx, buildReq)
+}
+
+func (c *Client) doRequestWithRetry(ctx context.Context, buildReq func() (*http.Request, error)) (*http.Response, error) {
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	policy.WrapNetworkError = wrapNetworkError
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		if event.Err != nil {
+			applog.Infof("[openai-client] network error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+			return
+		}
+		applog.Infof("[openai-client] received HTTP %d, retry attempt %d/%d in %v", event.StatusCode, event.Attempt, event.MaxRetries, event.Delay)
+	}
+	return httpretry.Do(ctx, c.httpClient, buildReq, policy)
 }
 
 // EnsureValidToken refreshes the OAuth token if it is expiring within 1 hour.

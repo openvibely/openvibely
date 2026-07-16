@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpretry"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
@@ -32,6 +33,8 @@ const defaultOllamaRequestTimeout = 10 * time.Minute
 
 // DefaultHTTPClient is the default HTTP client for Ollama requests.
 var DefaultHTTPClient HTTPDoer = &http.Client{Timeout: defaultOllamaRequestTimeout}
+
+var retryAfter = time.After
 
 // Adapter encapsulates Ollama provider logic.
 type Adapter struct {
@@ -122,33 +125,21 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	}
 
 	url := strings.TrimRight(baseURL, "/") + "/api/chat"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return "", 0, fmt.Errorf("creating ollama request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(httpReq)
+	buffered, err := a.bufferedWithRetry(ctx, url, body)
 	if err != nil {
 		return "", 0, fmt.Errorf("ollama API call failed (is Ollama running at %s?): %w", baseURL, err)
 	}
-	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", 0, fmt.Errorf("reading ollama response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
+	if buffered.statusCode != http.StatusOK {
 		var errResp errorResponse
-		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != "" {
-			return "", 0, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, errResp.Error)
+		if json.Unmarshal(buffered.body, &errResp) == nil && errResp.Error != "" {
+			return "", 0, fmt.Errorf("ollama API error (%d): %s", buffered.statusCode, errResp.Error)
 		}
-		return "", 0, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(respBody))
+		return "", 0, fmt.Errorf("ollama API error (%d): %s", buffered.statusCode, string(buffered.body))
 	}
 
 	var chatResp chatResponse
-	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+	if err := json.Unmarshal(buffered.body, &chatResp); err != nil {
 		return "", 0, fmt.Errorf("parsing ollama response: %w", err)
 	}
 
@@ -195,64 +186,25 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	}
 
 	url := strings.TrimRight(baseURL, "/") + "/api/chat"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return "", 0, fmt.Errorf("creating ollama chat request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(httpReq)
-	if err != nil {
-		return "", 0, fmt.Errorf("ollama API call failed (is Ollama running at %s?): %w", baseURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		var errResp errorResponse
-		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != "" {
-			return "", 0, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, errResp.Error)
-		}
-		return "", 0, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(respBody))
-	}
-
 	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
-
-	decoder := json.NewDecoder(resp.Body)
-	totalTokens := 0
-	promptTokens := 0
-
-	for {
-		var chunk chatStreamChunk
-		if err := decoder.Decode(&chunk); err != nil {
-			if err == io.EOF {
-				break
-			}
-			if ctx.Err() != nil {
-				sw.Flush()
-				return "", 0, fmt.Errorf("ollama streaming cancelled: %w", ctx.Err())
-			}
-			sw.Flush()
-			return "", 0, fmt.Errorf("decoding ollama stream chunk: %w", err)
-		}
-
+	streamResult, err := a.streamWithRetry(ctx, url, body, func(chunk chatStreamChunk) bool {
 		if chunk.Message.Content != "" {
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventTextDelta, Text: chunk.Message.Content}, true)
+			return true
 		}
-
-		if chunk.Done {
-			totalTokens = chunk.EvalCount
-			promptTokens = chunk.PromptEvalCount
-			break
-		}
+		return false
+	})
+	if err != nil {
+		sw.Flush()
+		return "", 0, fmt.Errorf("ollama API call failed (is Ollama running at %s?): %w", baseURL, err)
 	}
 
 	sw.Flush()
 	output := sw.String()
 	applog.Infof("[ollama] callChat success model=%s eval_tokens=%d prompt_tokens=%d output_len=%d",
-		agent.Model, totalTokens, promptTokens, len(output))
-	return output, totalTokens, nil
+		agent.Model, streamResult.totalTokens, streamResult.promptTokens, len(output))
+	return output, streamResult.totalTokens, nil
 }
 
 // callStreaming calls Ollama with streaming for task execution.
@@ -289,65 +241,27 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	}
 
 	url := strings.TrimRight(baseURL, "/") + "/api/chat"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return "", "", 0, fmt.Errorf("creating ollama streaming request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := a.httpClient.Do(httpReq)
-	if err != nil {
-		return "", "", 0, fmt.Errorf("ollama API call failed (is Ollama running at %s?): %w", baseURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		var errResp errorResponse
-		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != "" {
-			return "", "", 0, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, errResp.Error)
-		}
-		return "", "", 0, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(respBody))
-	}
-
 	sw := llmstream.NewWriterWithPublisher(execID, "", a.execRepo, ctx, 500*time.Millisecond, a.streamHub)
 	defer sw.Stop()
-
-	decoder := json.NewDecoder(resp.Body)
-	totalTokens := 0
-	promptTokens := 0
 	var thinkingBuf strings.Builder
 	var textBuf strings.Builder
-
-	for {
-		var chunk chatStreamChunk
-		if err := decoder.Decode(&chunk); err != nil {
-			if err == io.EOF {
-				break
-			}
-			if ctx.Err() != nil {
-				sw.Flush()
-				return "", "", 0, fmt.Errorf("ollama streaming cancelled: %w", ctx.Err())
-			}
-			sw.Flush()
-			return "", "", 0, fmt.Errorf("decoding ollama stream chunk: %w", err)
-		}
-
+	streamResult, err := a.streamWithRetry(ctx, url, body, func(chunk chatStreamChunk) bool {
+		observed := false
 		if chunk.Message.Thinking != "" {
+			observed = true
 			thinkingBuf.WriteString(chunk.Message.Thinking)
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventThinkingText, Text: chunk.Message.Thinking}, false)
 		}
-
 		if chunk.Message.Content != "" {
+			observed = true
 			textBuf.WriteString(chunk.Message.Content)
 			llmstream.WriteEvent(sw, llmstream.Event{Type: llmstream.EventTextDelta, Text: chunk.Message.Content}, false)
 		}
-
-		if chunk.Done {
-			totalTokens = chunk.EvalCount
-			promptTokens = chunk.PromptEvalCount
-			break
-		}
+		return observed
+	})
+	if err != nil {
+		sw.Flush()
+		return "", "", 0, fmt.Errorf("ollama API call failed (is Ollama running at %s?): %w", baseURL, err)
 	}
 
 	sw.Flush()
@@ -357,8 +271,115 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 		textOutput = output
 	}
 	applog.Infof("[ollama] callStreaming success model=%s eval_tokens=%d prompt_tokens=%d output_len=%d",
-		agent.Model, totalTokens, promptTokens, len(output))
-	return output, textOutput, totalTokens, nil
+		agent.Model, streamResult.totalTokens, streamResult.promptTokens, len(output))
+	return output, textOutput, streamResult.totalTokens, nil
+}
+
+type ollamaStreamResult struct {
+	totalTokens  int
+	promptTokens int
+}
+
+type ollamaBufferedResponse struct {
+	statusCode int
+	body       []byte
+}
+
+func (a *Adapter) bufferedWithRetry(ctx context.Context, url string, body []byte) (ollamaBufferedResponse, error) {
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	policy.After = retryAfter
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		applog.Infof("[ollama] response read error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+	}
+	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (ollamaBufferedResponse, bool, error) {
+		result := ollamaBufferedResponse{}
+		resp, err := a.doWithRetry(attemptCtx, func() (*http.Request, error) {
+			httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, url, bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			httpReq.Header.Set("Content-Type", "application/json")
+			return httpReq, nil
+		})
+		if err != nil {
+			return result, false, err
+		}
+		defer resp.Body.Close()
+		result.statusCode = resp.StatusCode
+		result.body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return result, false, httpretry.NewStreamError(fmt.Errorf("reading ollama response: %w", err))
+		}
+		return result, false, nil
+	})
+}
+
+func (a *Adapter) streamWithRetry(ctx context.Context, url string, body []byte, onChunk func(chatStreamChunk) bool) (ollamaStreamResult, error) {
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	policy.After = retryAfter
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		applog.Infof("[ollama] stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+	}
+	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (ollamaStreamResult, bool, error) {
+		result := ollamaStreamResult{}
+		observed := false
+		resp, err := a.doWithRetry(attemptCtx, func() (*http.Request, error) {
+			httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, url, bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			httpReq.Header.Set("Content-Type", "application/json")
+			return httpReq, nil
+		})
+		if err != nil {
+			return result, observed, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			respBody, _ := io.ReadAll(resp.Body)
+			var errResp errorResponse
+			if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != "" {
+				return result, observed, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, errResp.Error)
+			}
+			return result, observed, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(respBody))
+		}
+
+		decoder := json.NewDecoder(resp.Body)
+		for {
+			var chunk chatStreamChunk
+			if err := decoder.Decode(&chunk); err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return result, observed, fmt.Errorf("ollama streaming cancelled: %w", ctxErr)
+				}
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
+				return result, observed, httpretry.NewStreamError(fmt.Errorf("decoding ollama stream chunk: %w", err))
+			}
+			observed = onChunk(chunk) || observed
+			if chunk.Done {
+				result.totalTokens = chunk.EvalCount
+				result.promptTokens = chunk.PromptEvalCount
+				return result, observed, nil
+			}
+		}
+	})
+}
+
+func (a *Adapter) doWithRetry(ctx context.Context, buildReq func() (*http.Request, error)) (*http.Response, error) {
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	policy.After = retryAfter
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		if event.Err != nil {
+			applog.Infof("[ollama] network error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+			return
+		}
+		applog.Infof("[ollama] received HTTP %d, retry attempt %d/%d in %v", event.StatusCode, event.Attempt, event.MaxRetries, event.Delay)
+	}
+	return httpretry.Do(ctx, a.httpClient, buildReq, policy)
 }
 
 // buildChatHistory converts execution history to Ollama chat messages.

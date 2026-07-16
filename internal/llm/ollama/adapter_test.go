@@ -3,10 +3,12 @@ package ollama
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
@@ -15,6 +17,59 @@ import (
 
 type recordingHTTPDoer struct {
 	request chatRequest
+}
+
+func instantOllamaRetry(t *testing.T) {
+	t.Helper()
+	original := retryAfter
+	retryAfter = func(time.Duration) <-chan time.Time {
+		ch := make(chan time.Time, 1)
+		ch <- time.Time{}
+		return ch
+	}
+	t.Cleanup(func() { retryAfter = original })
+}
+
+type retryingOllamaDoer struct {
+	attempts int
+	firstErr error
+}
+
+func (d *retryingOllamaDoer) Do(*http.Request) (*http.Response, error) {
+	d.attempts++
+	if d.attempts == 1 && d.firstErr != nil {
+		return nil, d.firstErr
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(
+			`{"message":{"role":"assistant","content":"retry succeeded"},"done":true,"eval_count":2}` + "\n",
+		)),
+		Header: make(http.Header),
+	}, nil
+}
+
+func TestCallDirectRetriesNetworkTimeout(t *testing.T) {
+	instantOllamaRetry(t)
+	doer := &retryingOllamaDoer{firstErr: errors.New("read: operation timed out")}
+	adapter := New(nil, nil)
+	adapter.SetHTTPClient(doer)
+
+	result, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationDirect,
+		Message:   "hello",
+		Agent: models.LLMConfig{
+			Provider:      models.ProviderOllama,
+			Model:         "test-model",
+			OllamaBaseURL: "http://ollama.invalid",
+		},
+	}, ".", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doer.attempts != 2 || result.Output != "retry succeeded" {
+		t.Fatalf("attempts/text = %d/%q, want 2/retry succeeded", doer.attempts, result.Output)
+	}
 }
 
 func (d *recordingHTTPDoer) Do(req *http.Request) (*http.Response, error) {
