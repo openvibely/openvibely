@@ -2156,6 +2156,19 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 	}
 
 	renderTask := h.taskThreadRenderTaskWithEffectiveAgent(c.Request().Context(), task)
+	if c.QueryParam("poll") == "1" {
+		preservedExecIDs := make(map[string]bool)
+		for index, id := range strings.Split(c.QueryParam("preserved_exec_ids"), ",") {
+			if index >= taskThreadWindowLimitMax {
+				break
+			}
+			id = strings.TrimSpace(id)
+			if id != "" && len(id) <= 128 {
+				preservedExecIDs[id] = true
+			}
+		}
+		return render(c, http.StatusOK, components.TaskThreadPollView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit, preservedExecIDs))
+	}
 	return render(c, http.StatusOK, components.TaskThreadView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit))
 }
 

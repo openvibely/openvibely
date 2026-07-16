@@ -856,6 +856,14 @@ func TestChatExecutionPairPreservesTerminalTranscriptDuringMorph(t *testing.T) {
 	if strings.Contains(runningHTML.String(), `hx-preserve="true"`) {
 		t.Fatal("running execution pair must remain morphable for polling fallback")
 	}
+
+	var followupHTML bytes.Buffer
+	if err := ChatFollowupResponse("follow up", "running-1", "messages", "thread", true, nil).Render(context.Background(), &followupHTML); err != nil {
+		t.Fatalf("render live follow-up pair: %v", err)
+	}
+	if !strings.Contains(followupHTML.String(), `id="chat-execution-running-1"`) {
+		t.Fatal("live follow-up pair must use the same stable execution ID as polling markup")
+	}
 }
 
 func TestChatAutoScrollScript_ToolHeaderUsesTextNodesNotInnerHTML(t *testing.T) {

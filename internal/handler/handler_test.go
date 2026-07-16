@@ -5183,6 +5183,40 @@ func TestHandler_GetTaskThread(t *testing.T) {
 	assertContains(t, rec, "task-thread-form")
 }
 
+func TestHandler_GetTaskThreadPollOmitsPreservedTerminalOutput(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Compact Thread Poll Project")
+	task := createTask(t, h, project.ID, "Compact Thread Poll Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+	})
+	completed := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "completed prompt"
+	})
+	largeOutput := "preserved-terminal-sentinel-" + strings.Repeat("tool output ", 10000)
+	require.NoError(t, h.execRepo.Complete(ctx, completed.ID, models.ExecCompleted, largeOutput, "", 100, 500))
+	createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "currently running prompt"
+		ex.IsFollowup = true
+	})
+
+	poll := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&preserved_exec_ids="+completed.ID)
+	assertCode(t, poll, http.StatusOK)
+	body := poll.Body.String()
+	assert.NotContains(t, body, "preserved-terminal-sentinel-")
+	assert.Contains(t, body, `id="chat-execution-`+completed.ID+`"`)
+	assert.Contains(t, body, `hx-preserve="true"`)
+	assert.Contains(t, body, "currently running prompt")
+
+	fallbackPoll := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1")
+	assertCode(t, fallbackPoll, http.StatusOK)
+	assert.Contains(t, fallbackPoll.Body.String(), "preserved-terminal-sentinel-")
+}
+
 func TestHandler_GetTaskThreadExecutionFragment(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	agent := createAgent(t, llmConfigRepo)
@@ -5423,7 +5457,7 @@ func TestHandler_GetTaskThread_PollsWhenQueued(t *testing.T) {
 
 	assert.Contains(t, body, `id="task-thread-view"`)
 	assert.Contains(t, body, `hx-trigger="every 3s"`)
-	assert.Contains(t, body, fmt.Sprintf(`hx-get="/tasks/%s/thread?limit=%d"`, task.ID, taskThreadWindowLimitDefault))
+	assert.Contains(t, body, fmt.Sprintf(`hx-get="/tasks/%s/thread?poll=1&amp;limit=%d"`, task.ID, taskThreadWindowLimitDefault))
 }
 
 func TestHandler_GetTaskThread_DraftClearLogic_DoesNotTreatPollingGetAsSend(t *testing.T) {

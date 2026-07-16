@@ -1259,10 +1259,18 @@ templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []m
 	}
 }
 
+templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, preservedExecIDs map[string]bool) {
+	if chatExecutionIsTerminal(exec) && preservedExecIDs[exec.ID] {
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true"></div>
+	} else {
+		@ChatExecutionPair(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+	}
+}
+
 // ChatFollowupResponse renders user message + streaming assistant for a follow-up.
 // Used by both ChatSend (main chat) and TaskThreadSend (task thread).
 templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment) {
-	<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID }>
+	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID }>
 		if len(attachments) > 0 {
 			@ChatBubbleWithAttachments("User", message, attachments)
 		} else {
@@ -1279,6 +1287,12 @@ templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTar
 templ ChatMessages(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool) {
 	for i, exec := range executions {
 		@ChatExecutionPair(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+	}
+}
+
+templ ChatMessagesPoll(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool, preservedExecIDs map[string]bool) {
+	for i, exec := range executions {
+		@ChatExecutionPairPoll(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, preservedExecIDs)
 	}
 }
 

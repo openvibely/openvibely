@@ -307,19 +307,29 @@ templ TaskThreadEarlierMessages(task *models.Task, executions []models.Execution
 	@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
 }
 
-// TaskThreadView renders the unified thread interface for a task.
-// Uses shared chat components for message bubbles and input form.
-// Accepts agents list to show model selector matching /chat page behavior.
-// chatAttachments map is optional - when nil, no attachment indicators are shown on messages.
 templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int) {
+	@taskThreadView(task, executions, agents, agentDef, chatAttachments, pendingInputs, hasEarlier, windowLimit, nil)
+}
+
+// TaskThreadPollView omits terminal transcript bodies the browser reports as
+// already preserved, keeping the recurring polling response small.
+templ TaskThreadPollView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int, preservedExecIDs map[string]bool) {
+	@taskThreadView(task, executions, agents, agentDef, chatAttachments, pendingInputs, hasEarlier, windowLimit, preservedExecIDs)
+}
+
+// taskThreadView renders the unified thread interface for a task.
+// Uses shared chat components for message bubbles and input form.
+// chatAttachments map is optional - when nil, no attachment indicators are shown on messages.
+templ taskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int, preservedExecIDs map[string]bool) {
 	<div
 		id="task-thread-view"
 		class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full"
 			if task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) {
-			hx-get={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }
+			hx-get={ fmt.Sprintf("/tasks/%s/thread?poll=1&limit=%d", task.ID, windowLimit) }
 			hx-trigger="every 3s"
 			hx-target="#task-thread-view"
 			hx-swap="morph:outerHTML"
+			hx-vals="js:{preserved_exec_ids: window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : ''}"
 		}
 			data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) }
 		data-task-id={ task.ID }
@@ -333,7 +343,11 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 			if len(executions) == 0 && len(pendingInputs) == 0 {
 				@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
 			} else {
-				@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
+				if preservedExecIDs != nil {
+					@ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, preservedExecIDs)
+				} else {
+					@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
+				}
 				@PendingThreadInputRows(pendingInputs, taskQueuedSteerEndpoint)
 				@TaskThreadStatusIndicator(task, executions)
 			}
@@ -440,6 +454,15 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 				}
 				window._taskThreadSavedInput = '';
 			}
+
+			window.taskThreadPreservedExecutionIDs = function() {
+				var view = document.getElementById('task-thread-view');
+				if (!view) return '';
+				return Array.prototype.map.call(
+					view.querySelectorAll('#task-thread-messages > [data-execution-pair="true"][hx-preserve]'),
+					function(pair) { return pair.getAttribute('data-exec-id') || ''; }
+				).filter(function(id) { return id !== ''; }).join(',');
+			};
 
 				// Apply cleaning and scroll on load
 				(function() {
