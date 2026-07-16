@@ -4079,7 +4079,7 @@ templ ChatAutoScrollScript() {
 						trackScrollPin(outScroll, stateKey);
 						var outPre = document.createElement('pre');
 						outScroll.appendChild(outPre);
-						outVal.appendChild(outScroll);
+						if (toggle && toggle.parentNode === outVal) outVal.insertBefore(outScroll, toggle); else outVal.appendChild(outScroll);
 						if (useInitialChunkQueue && shouldYieldPreparation && outputText.length > 64 * 1024) {
 							pendingLargeToolOutputs.push({ node: outPre, text: outputText, offset: 0 });
 							return;

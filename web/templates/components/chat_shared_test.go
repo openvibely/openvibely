@@ -4502,6 +4502,7 @@ window.addEventListener('DOMContentLoaded', function() {
       var preview = content.querySelector('pre.stream-tool-output-preview');
       if (!preview || !preview.textContent.trim()) fail('collapsed output did not use the standard preformatted output presentation');
       if (preview.textContent.length > 4100) fail('collapsed output preview was not bounded');
+      if (preview.nextElementSibling !== button) fail('collapsed output toggle must follow the visible output');
     });
     if (container.querySelectorAll('.stream-tool-body-scroll > pre').length !== 2) fail('only short and horizontal one-line OUT values should initially materialize');
     if (container.querySelector('[data-tool-output]')) fail('tool output must not be duplicated in data attributes');
@@ -4528,6 +4529,8 @@ window.addEventListener('DOMContentLoaded', function() {
     var expandedContent = largeToggle.closest('.stream-tool-body-content');
     var expansionMS = performance.now() - expansionStarted;
     if (largeToggle.getAttribute('aria-expanded') !== 'true' || !expandedContent.querySelector('.stream-tool-body-scroll > pre')) fail('expansion did not materialize the styled OUT subtree');
+    var expandedSurface = expandedContent.querySelector('.stream-tool-body-scroll');
+    if (!expandedSurface || expandedSurface.nextElementSibling !== largeToggle) fail('expanded output toggle moved above the visible output');
     var expandedPreview = expandedContent.querySelector('.stream-tool-output-preview');
     if (!expandedPreview || !expandedPreview.hidden) fail('expansion did not hide the collapsed output preview');
     if (container._streamRenderVersion !== renderVersion) fail('expanding one OUT rerendered the response');

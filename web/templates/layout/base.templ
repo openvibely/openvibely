@@ -1356,11 +1356,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background: var(--ov-l-surface);
 						border: none;
 					}
+					[data-theme="light"] .stream-tool-output-preview,
 					[data-theme="light"] .stream-tool-body-scroll pre {
 						background: transparent;
 						border: none;
 					}
 					[data-theme="light"] .stream-tool-body-content,
+					[data-theme="light"] .stream-tool-output-preview,
 					[data-theme="light"] .stream-tool-body-scroll pre {
 						color: var(--ov-l-text-strong);
 					}
@@ -1737,7 +1739,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					outline: 2px solid var(--ov-link-color);
 					outline-offset: 2px;
 				}
-				.stream-tool-output-toggle + .stream-tool-body-scroll {
+				.stream-tool-body-scroll + .stream-tool-output-toggle {
 					margin-top: 0.25rem;
 				}
 				.stream-tool-body-scroll {
