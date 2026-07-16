@@ -635,8 +635,8 @@ func TestHandler_TaskThread_LightModeToolCallContrastStyles(t *testing.T) {
 	if !strings.Contains(body, `border: none;`) {
 		t.Error("expected light-theme tool outer content block to avoid extra border")
 	}
-	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-scroll pre`) {
-		t.Error("expected light-theme tool inner scroll content style in thread view response")
+	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-content .stream-tool-output-text`) {
+		t.Error("expected light-theme tool output text style in thread view response")
 	}
 	if !strings.Contains(body, `background: transparent;`) {
 		t.Error("expected light-theme tool inner content to avoid a second scrolling surface")
@@ -647,8 +647,8 @@ func TestHandler_TaskThread_LightModeToolCallContrastStyles(t *testing.T) {
 	if !strings.Contains(body, `[data-theme="light"] .tool-status-done`) {
 		t.Error("expected light-theme tool status icon style in thread view response")
 	}
-	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-scroll pre`) {
-		t.Error("expected light-theme tool body content color style in thread view response")
+	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-content .stream-tool-output-text`) {
+		t.Error("expected light-theme tool output text color style in thread view response")
 	}
 	if !strings.Contains(body, `.chat-markdown a {`) {
 		t.Error("expected shared markdown link styling in thread view response")

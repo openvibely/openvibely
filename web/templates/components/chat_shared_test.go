@@ -4518,6 +4518,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
     var largeToggle = toggles.find(function(button) { return button.textContent === 'Show output (' + largeLineCount + ' lines)'; });
     if (!largeToggle || largeToggle.tagName !== 'BUTTON' || largeToggle.type !== 'button') fail('large output toggle is not an accessible native button');
+    var largePreview = largeToggle.closest('.stream-tool-body-content').querySelector('pre.stream-tool-output-preview');
+    var previewStyle = window.getComputedStyle(largePreview);
+    var previewFontSignature = [previewStyle.fontFamily, previewStyle.fontSize, previewStyle.fontWeight, previewStyle.fontStyle, previewStyle.lineHeight, previewStyle.letterSpacing].join('|');
     var renderVersion = container._streamRenderVersion;
     var expansionStarted = performance.now();
     largeToggle.focus();
@@ -4531,6 +4534,10 @@ window.addEventListener('DOMContentLoaded', function() {
     if (largeToggle.getAttribute('aria-expanded') !== 'true' || !expandedContent.querySelector('.stream-tool-body-scroll > pre')) fail('expansion did not materialize the styled OUT subtree');
     var expandedSurface = expandedContent.querySelector('.stream-tool-body-scroll');
     if (!expandedSurface || expandedSurface.nextElementSibling !== largeToggle) fail('expanded output toggle moved above the visible output');
+    var expandedPre = expandedSurface.querySelector('pre');
+    var expandedStyle = window.getComputedStyle(expandedPre);
+    var expandedFontSignature = [expandedStyle.fontFamily, expandedStyle.fontSize, expandedStyle.fontWeight, expandedStyle.fontStyle, expandedStyle.lineHeight, expandedStyle.letterSpacing].join('|');
+    if (expandedFontSignature !== previewFontSignature) fail('collapsed and expanded output font styling differs: ' + previewFontSignature + ' vs ' + expandedFontSignature);
     var expandedPreview = expandedContent.querySelector('.stream-tool-output-preview');
     if (!expandedPreview || !expandedPreview.hidden) fail('expansion did not hide the collapsed output preview');
     if (container._streamRenderVersion !== renderVersion) fail('expanding one OUT rerendered the response');
@@ -4679,7 +4686,8 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"var maxLines = 6",
 		"var maxChars = 4096",
 		"preview = document.createElement('pre')",
-		"preview.className = 'stream-tool-output-preview'",
+		"preview.className = 'stream-tool-output-preview stream-tool-output-text'",
+		"outPre.className = 'stream-tool-output-text'",
 		"function resolveToolOutputLineCapacity()",
 		"probe.className = 'stream-tool'",
 		"probeBody.className = 'stream-tool-body'",

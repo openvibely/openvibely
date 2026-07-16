@@ -4078,6 +4078,7 @@ templ ChatAutoScrollScript() {
 						outScroll.setAttribute('data-tool-row', 'out');
 						trackScrollPin(outScroll, stateKey);
 						var outPre = document.createElement('pre');
+						outPre.className = 'stream-tool-output-text';
 						outScroll.appendChild(outPre);
 						if (toggle && toggle.parentNode === outVal) outVal.insertBefore(outScroll, toggle); else outVal.appendChild(outScroll);
 						if (useInitialChunkQueue && shouldYieldPreparation && outputText.length > 64 * 1024) {
@@ -4119,7 +4120,7 @@ templ ChatAutoScrollScript() {
 
 					if (shouldCollapse) {
 						preview = document.createElement('pre');
-						preview.className = 'stream-tool-output-preview';
+						preview.className = 'stream-tool-output-preview stream-tool-output-text';
 						preview.textContent = toolOutputPreview(outputText);
 						outVal.appendChild(preview);
 						toggle = document.createElement('button');
