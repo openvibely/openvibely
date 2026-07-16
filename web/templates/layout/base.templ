@@ -1908,7 +1908,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					return ranges;
 				};
 				window.codeRangesAsync = function(text, owner) {
-					if (!text || text.length < 100 * 1024 || typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
+					if (!text || text.length < 64 * 1024 || typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
 						return Promise.resolve(window.codeRanges(text || ''));
 					}
 					if (owner && owner._codeRangeWorkerState) {
@@ -1943,8 +1943,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				};
 				window.isInsideCodeRanges = function(ranges, start, end) {
-					for (var i = 0; i < ranges.length; i++) {
-						if (start >= ranges[i].start && start < ranges[i].end) return true;
+					var low = 0;
+					var high = ranges.length - 1;
+					while (low <= high) {
+						var middle = (low + high) >> 1;
+						if (start < ranges[middle].start) high = middle - 1;
+						else if (start >= ranges[middle].end) low = middle + 1;
+						else return true;
 					}
 					return false;
 				};
@@ -1953,9 +1958,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				};
 				// Escape raw HTML from model output before Markdown parsing. Code ranges
 				// remain byte-for-byte intact so Marked can render benign HTML examples.
-				window.escapeRawHTMLForMarkdown = function(text) {
+				window.escapeRawHTMLForMarkdown = function(text, ranges) {
 					if (!text) return text;
-					var ranges = window.codeRanges(text);
+					ranges = ranges || window.codeRanges(text);
 					var rangeIndex = 0;
 					var escaped = '';
 					for (var i = 0; i < text.length; i++) {
@@ -2003,6 +2008,49 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						return window.sanitizeChatHTML(window.marked.parse(escapedText));
 					} catch(e) {
 						return window.renderChatMarkdownFallback(text);
+					}
+				};
+				// Parse large Markdown documents away from the main thread. The complete
+				// source is parsed as one document so lists, references, tables, and code
+				// fences retain their normal Marked semantics.
+				window.renderChatMarkdownAsync = function(text, owner, ranges) {
+					if (!text || text.length < 64 * 1024 || typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
+						return Promise.resolve(window.renderChatMarkdown(text));
+					}
+					if (!window.configureChatMarked || !window.configureChatMarked()) {
+						return Promise.resolve(window.renderChatMarkdownFallback(text));
+					}
+					if (owner && owner._markdownWorkerState) {
+						owner._markdownWorkerState.worker.terminate();
+						owner._markdownWorkerState.resolve(null);
+						owner._markdownWorkerState = null;
+					}
+					try {
+						if (!window._markdownWorkerURL) {
+							var workerSource = "importScripts('https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js');" +
+								"marked.setOptions({breaks:true,gfm:true});" +
+								"self.onmessage=function(event){try{self.postMessage({html:marked.parse(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};";
+							window._markdownWorkerURL = window.URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
+						}
+						var escapedText = window.escapeRawHTMLForMarkdown(text, ranges);
+						return new Promise(function(resolve) {
+							var worker = new Worker(window._markdownWorkerURL);
+							var state = { worker: worker, resolve: resolve };
+							if (owner) owner._markdownWorkerState = state;
+							function finish(html) {
+								worker.terminate();
+								if (owner && owner._markdownWorkerState === state) owner._markdownWorkerState = null;
+								resolve(html);
+							}
+							worker.onmessage = function(event) {
+								if (event.data && !event.data.error) finish(window.sanitizeChatHTML(event.data.html));
+								else finish(window.renderChatMarkdown(text));
+							};
+							worker.onerror = function() { finish(window.renderChatMarkdown(text)); };
+							worker.postMessage(escapedText);
+						});
+					} catch (err) {
+						return Promise.resolve(window.renderChatMarkdown(text));
 					}
 				};
 				// Add copy buttons to all <pre> blocks inside a container element

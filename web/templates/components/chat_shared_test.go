@@ -22,7 +22,7 @@ func renderedBaseMarkdownCodeHelpers(t *testing.T) string {
 	}
 	content := buf.String()
 	start := strings.Index(content, "window.markdownLineRanges = function(text)")
-	end := strings.Index(content, "window.escapeRawHTMLForMarkdown = function(text)")
+	end := strings.Index(content, "window.escapeRawHTMLForMarkdown = function(text, ranges)")
 	if start == -1 || end == -1 || end <= start {
 		t.Fatal("base layout must install shared Markdown code helpers")
 	}
@@ -1977,7 +1977,7 @@ func TestSharedTaskResultLinkConversionAvailableOnDirectTaskThreadLoad(t *testin
 	createDefinition := strings.Index(content, "window.convertTaskLinksInMessage = function(messageElement)")
 	editDefinition := strings.Index(content, "window.convertTaskEditLinksInMessage = function(messageElement)")
 	codeDefinition := strings.Index(content, "window.codeRanges = function(text)")
-	normalizeDefinition := strings.Index(content, "window.normalizeTranscriptMarkers = function(text)")
+	normalizeDefinition := strings.Index(content, "window.normalizeTranscriptMarkers = function(text, ranges)")
 	hydration := strings.Index(content, "// Apply cleaning and scroll on load")
 	if createDefinition == -1 || editDefinition == -1 || codeDefinition == -1 || normalizeDefinition == -1 {
 		t.Fatal("direct task-thread output must define task-result converters plus Markdown-aware transcript normalization without requiring a prior /chat load")
@@ -2330,8 +2330,8 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		t.Fatal("rendered script must define transcript normalization and cleaning helpers")
 	}
 	codeHelpers := renderedBaseMarkdownCodeHelpers(t)
-	if strings.Count(content, "window.codeRanges(textBuffer)") != 1 {
-		t.Fatal("streaming renderer must calculate Markdown code ranges once per render")
+	if strings.Count(content, "window.codeRanges(textBuffer)") != 2 {
+		t.Fatal("streaming renderer must calculate code ranges once before and once after marker normalization")
 	}
 	if strings.Count(content, "window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)") != 4 {
 		t.Fatal("streaming renderer must not convert inline or fenced-code thinking/tool use/result examples into control cards")
@@ -2549,7 +2549,7 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"const largeMarkdown = Array(2200).fill('A paragraph with enough words to exercise cooperative Markdown chunking.\\n\\n').join('');\n" +
 		"const largeMarkdownStream = element('div'); largeMarkdownStream.id = 'large-markdown';\n" +
 		"window.renderStreamingContent(largeMarkdownStream, largeMarkdown, true).then(function(committed) {\n" +
-		"  if (!committed || largeMarkdownStream.replaceCount !== 1 || largeMarkdownStream.children.length < 2) throw new Error('large Markdown was not rendered in resumable chunks');\n" +
+		"  if (!committed || largeMarkdownStream.replaceCount !== 1 || largeMarkdownStream.children.length !== 1) throw new Error('large Markdown was not rendered as one document');\n" +
 		"  const largeToolStream = element('div'); largeToolStream.id = 'large-tool';\n" +
 		"  const largeTool = '[Using tool: bash]\\n[Tool bash done]\\n' + 'x'.repeat(150 * 1024) + '\\n[/Tool]';\n" +
 		"  return window.renderStreamingContent(largeToolStream, largeTool, true).then(function(toolCommitted) {\n" +
@@ -2592,14 +2592,14 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 		"/^[ \\\\t]*$/.test(line.substring(runEnd))",
 		"window.isInsideCode = function(text, start, end)",
 		"window.isInsideCodeRanges = function(ranges, start, end)",
-		"window.stripOutsideCode = function(text, pattern)",
-		"window.replaceOutsideCode = function(text, pattern, replacement)",
+		"window.stripOutsideCode = function(text, pattern, ranges)",
+		"window.replaceOutsideCode = function(text, pattern, replacement, ranges)",
 		"window.dedupTaskSummaries = function(text)",
 		"var lines = window.markdownLineRanges(text)",
-		"window.isInsideCode(text, delimiter.start, delimiter.end)",
+		"window.isInsideCodeRanges(protectedRanges, delimiter.start, delimiter.end)",
 		"blocks.push({ start: start, end: end })",
 		"text = window.dedupTaskSummaries(text);",
-		"window.isInsideCode(text, markerStart, sourceLine.end)",
+		"window.isInsideCodeRanges(protectedRanges, markerStart, sourceLine.end)",
 		`var toolResultBlockPattern = /\\[Tool\\s+(\\S+)\\s+(done|error)\\](?:\\r\\n|\\r|\\n)?([\\s\\S]*?)(?:\\r\\n|\\r|\\n)?\\[\\/Tool\\](?:\\r\\n|\\r|\\n)?/g`,
 		`window.stripOutsideCode(text, /\\[Tool\\s+\\S+\\s+(?:done|error)\\](?:\\r\\n|\\r|\\n)?[\\s\\S]*?(?:\\r\\n|\\r|\\n)?\\[\\/Tool\\](?:\\r\\n|\\r|\\n)?/g)`,
 		"[^\\\\s\\\\]|][^|\\\\]]*",
@@ -2611,14 +2611,14 @@ func TestTranscriptCodeProtectionGeneratedParity(t *testing.T) {
 	if strings.Contains(string(generated), "function addInlineRanges(start, end)") || strings.Contains(string(generated), "window.isInsideCode = function") {
 		t.Fatal("generated Chat component must use the base layout's shared Markdown helpers instead of defining duplicates")
 	}
-	if strings.Count(content, "window.codeRanges(textBuffer)") != 1 {
-		t.Fatal("generated streaming renderer must calculate Markdown code ranges once per render")
+	if strings.Count(content, "window.codeRanges(textBuffer)") != 2 {
+		t.Fatal("generated streaming renderer must calculate code ranges once before and once after marker normalization")
 	}
 	if strings.Count(content, "window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)") != 4 {
 		t.Fatal("generated streaming renderer must protect thinking, tool-use, and both tool-result controls inside Markdown code")
 	}
-	if strings.Count(content, "window.replaceOutsideCode(text,") != 3 {
-		t.Fatal("generated transcript normalization must protect malformed tool and thinking aliases inside Markdown code")
+	if !strings.Contains(content, "function(raw, tool, command, closing)") || strings.Count(content, "return window.replaceOutsideCode(text,") != 1 {
+		t.Fatal("generated transcript normalization must process tool and thinking aliases in one protected pass")
 	}
 }
 
@@ -2636,9 +2636,9 @@ func TestStatusCleaning_ScopesStreamingAndDOMToFinalCanonicalControl(t *testing.
 	}
 	codeHelpers := renderedBaseMarkdownCodeHelpers(t)
 	for _, want := range []string{
-		"textBuffer = window.stripFinalStatusControl(textBuffer)",
+		"textBuffer = window.stripFinalStatusControl(textBuffer, rawCodeRanges)",
 		"window.stripFinalStatusControlFromElement(div)",
-		"window.cleanTranscriptControls(pendingText, false, true)",
+		"var t = cleanPreparedText(pendingText)",
 		"closest('code, pre, blockquote, li, strong, em, del, a, h1, h2, h3, h4, h5, h6, table')",
 	} {
 		if !strings.Contains(content, want) {
@@ -2736,7 +2736,7 @@ func TestRenderStreamingContent_RemovesWhitespacePreWrap(t *testing.T) {
 		t.Error("renderStreamingContent must not clear the live container before detached rendering completes")
 	}
 	for _, snippet := range []string{
-		"var shouldYieldPreparation = yieldBetweenBatches && textBuffer.length >= 100 * 1024",
+		"var shouldYieldPreparation = yieldBetweenBatches && textBuffer.length >= 64 * 1024",
 		"window.codeRangesAsync(textBuffer, container)",
 		"var preparationPhases = [",
 		"if (phaseResult && typeof phaseResult.then === 'function')",

@@ -106,7 +106,7 @@ func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T)
 		"owner._codeRangeWorkerState.worker.terminate()",
 		"window.URL.createObjectURL(new Blob([workerSource]",
 		"/^[ \\\\t]*$/.test(line.substring(runEnd))",
-		"window.escapeRawHTMLForMarkdown = function(text)",
+		"window.escapeRawHTMLForMarkdown = function(text, ranges)",
 		"window.sanitizeChatHTML = function(html)",
 		"/^on/i.test(attr.name)",
 		"javascript:|vbscript:|data:",
@@ -114,6 +114,42 @@ func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T)
 		if !strings.Contains(string(generated), snippet) {
 			t.Fatalf("generated base template missing Markdown safety snippet %q", snippet)
 		}
+	}
+}
+
+func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	content := buf.String()
+	start := strings.Index(content, "window.configureChatMarked = function")
+	end := strings.Index(content, "// Add copy buttons")
+	if start == -1 || end == -1 || end <= start {
+		t.Fatal("base layout must define Markdown worker helpers")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute worker lifecycle helpers")
+	}
+	script := "global.window = {};\n" +
+		"global.document = { createElement: function() { return { _html: '', content: { querySelectorAll: function() { return []; } }, set innerHTML(value) { this._html = value; }, get innerHTML() { return this._html; } }; } };\n" +
+		"global.Blob = function(parts) { this.parts = parts; }; window.URL = { createObjectURL: function() { return 'blob:test'; } };\n" +
+		"const workers = []; global.Worker = function(url) { this.url = url; this.terminated = false; workers.push(this); }; Worker.prototype.terminate = function() { this.terminated = true; }; Worker.prototype.postMessage = function(value) { this.value = value; };\n" +
+		"window.marked = global.marked = { parse: function(value) { return '<p>' + value + '</p>'; }, setOptions: function() {} };\n" +
+		content[start:end] + "\n" +
+		"const large = 'x'.repeat(110 * 1024), codeOwner = {};\n" +
+		"const firstCode = window.codeRangesAsync(large, codeOwner); const firstCodeWorker = workers[workers.length - 1];\n" +
+		"const secondCode = window.codeRangesAsync(large + 'y', codeOwner); const secondCodeWorker = workers[workers.length - 1];\n" +
+		"if (!firstCodeWorker.terminated) throw new Error('superseded code-range worker was not terminated');\n" +
+		"secondCodeWorker.onmessage({ data: { ranges: [{ start: 1, end: 2 }] } });\n" +
+		"const markdownOwner = {}; const firstMarkdown = window.renderChatMarkdownAsync(large, markdownOwner); const firstMarkdownWorker = workers[workers.length - 1];\n" +
+		"const secondMarkdown = window.renderChatMarkdownAsync(large + 'y', markdownOwner); const secondMarkdownWorker = workers[workers.length - 1];\n" +
+		"if (!firstMarkdownWorker.terminated) throw new Error('superseded Markdown worker was not terminated');\n" +
+		"secondMarkdownWorker.onmessage({ data: { html: '<ol><li>whole document</li></ol>' } });\n" +
+		"Promise.all([firstCode, secondCode, firstMarkdown, secondMarkdown]).then(function(values) { if (values[0] !== null || values[1].length !== 1 || values[2] !== null || values[3] !== '<ol><li>whole document</li></ol>' || codeOwner._codeRangeWorkerState !== null || markdownOwner._markdownWorkerState !== null) process.exit(1); }, function(err) { console.error(err); process.exit(2); });\n"
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("large Markdown/code-range worker lifecycle failed: %v\n%s", err, output)
 	}
 }
 

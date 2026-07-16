@@ -3100,7 +3100,7 @@ templ ChatAutoScrollScript() {
 				var renderVersion = (container._streamRenderVersion || 0) + 1;
 				container._streamRenderVersion = renderVersion;
 				textBuffer = textBuffer || '';
-				var shouldYieldPreparation = yieldBetweenBatches && textBuffer.length >= 100 * 1024;
+				var shouldYieldPreparation = yieldBetweenBatches && textBuffer.length >= 64 * 1024;
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
@@ -3141,20 +3141,31 @@ templ ChatAutoScrollScript() {
 				var toolResultBlockPattern = /\[Tool\s+(\S+)\s+(done|error)\](?:\r\n|\r|\n)?([\s\S]*?)(?:\r\n|\r|\n)?\[\/Tool\](?:\r\n|\r|\n)?/g;
 				var toolResultLegacyPattern = /\[Tool\s+(\S+)\s+(done|error):\s*([^\]\r\n]*)\](?:\r\n|\r|\n)?/g;
 
-				var allMatches = [];
-				var match;
-				var codeRanges = [];
-				var segments = [];
+					var allMatches = [];
+					var match;
+					var rawCodeRanges = [];
+					var codeRanges = [];
+					var segments = [];
 					function normalizePreparedText() {
-						if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer);
+						if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer, rawCodeRanges);
 						return true;
 					}
 					function stripPreparedStatus() {
-						if (window.stripFinalStatusControl) textBuffer = window.stripFinalStatusControl(textBuffer);
+						if (window.stripFinalStatusControl) textBuffer = window.stripFinalStatusControl(textBuffer, rawCodeRanges);
 						return true;
 					}
 					function stripPreparedArtifacts() {
 						textBuffer = textBuffer.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
+						return true;
+					}
+					function prepareInitialCodeRanges() {
+						if (shouldYieldPreparation && window.codeRangesAsync) {
+							return window.codeRangesAsync(textBuffer, container).then(function(result) {
+								if (result !== null) rawCodeRanges = result;
+								return true;
+							});
+						}
+						rawCodeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
 						return true;
 					}
 					function prepareCodeRanges() {
@@ -3253,35 +3264,30 @@ templ ChatAutoScrollScript() {
 						}
 						return true;
 					}
-					function splitLargeMarkdownSegments() {
-						var splitSegments = [];
-						for (var segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
-							var segment = segments[segmentIndex];
-							if (segment.type !== 'text' || segment.content.length <= 64 * 1024) { splitSegments.push(segment); continue; }
-							var partStart = 0;
-							while (segment.content.length - partStart > 64 * 1024) {
-								var target = partStart + 64 * 1024;
-								var splitAt = segment.content.lastIndexOf('\n\n', target);
-								var splitAdvance = 2;
-								while (splitAt > partStart && window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, segment.index + splitAt, segment.index + splitAt + 2)) {
-									splitAt = segment.content.lastIndexOf('\n\n', splitAt - 1);
-								}
-								if (splitAt <= partStart + 16 * 1024) {
-									splitAt = segment.content.lastIndexOf('\n', target);
-									splitAdvance = 1;
-								}
-								if (splitAt <= partStart + 16 * 1024) {
-									splitAt = segment.content.lastIndexOf(' ', target);
-									splitAdvance = 1;
-								}
-								if (splitAt <= partStart + 16 * 1024 || (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, segment.index + splitAt, segment.index + splitAt + splitAdvance))) break;
-								splitAt += splitAdvance;
-								splitSegments.push({ type: 'text', content: segment.content.substring(partStart, splitAt), index: segment.index + partStart, flushAfter: true });
-								partStart = splitAt;
-							}
-							splitSegments.push({ type: 'text', content: segment.content.substring(partStart), index: segment.index + partStart, flushAfter: true });
+					var markdownPreparationIndex = 0;
+					function cleanPreparedText(text) {
+						if (!text) return text;
+						// Tool/thinking/status controls were already normalized, scoped, and
+						// extracted above. Do not run the general cleaner's code-range scans
+						// again for every visible Markdown segment.
+						text = text.replace(/<\/?\s*proposed_plan\s*>/gi, '');
+						text = text.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
+						if (window.dedupTaskSummaries && (text.indexOf('Created ') !== -1 || text.indexOf('Edited ') !== -1)) text = window.dedupTaskSummaries(text);
+						return text.replace(/\n{3,}/g, '\n\n').trim();
+					}
+					function prepareLargeMarkdownSegments() {
+						if (!shouldYieldPreparation) return true;
+						while (markdownPreparationIndex < segments.length) {
+							var segment = segments[markdownPreparationIndex++];
+							if (segment.type !== 'text' || segment.content.length < 64 * 1024 || !window.renderChatMarkdownAsync) continue;
+							var cleaned = cleanPreparedText(segment.content);
+							segment.cleanedContent = cleaned;
+							if (!cleaned) { segment.renderedHTML = ''; continue; }
+							return window.renderChatMarkdownAsync(cleaned, container).then(function(html) {
+								if (html !== null) segment.renderedHTML = html;
+								return markdownPreparationIndex >= segments.length ? true : false;
+							});
 						}
-						segments = splitSegments;
 						return true;
 					}
 					function linkToolResults() {
@@ -3322,8 +3328,9 @@ templ ChatAutoScrollScript() {
 						return true;
 					}
 					var preparationPhases = [
-						normalizePreparedText,
+						prepareInitialCodeRanges,
 						stripPreparedStatus,
+						normalizePreparedText,
 						stripPreparedArtifacts,
 						prepareCodeRanges,
 					collectThinkingMatches,
@@ -3331,8 +3338,8 @@ templ ChatAutoScrollScript() {
 					collectToolResultBlockMatches,
 						collectLegacyToolResultMatches,
 						buildSegments,
-						splitLargeMarkdownSegments,
-						linkToolResults
+						linkToolResults,
+						prepareLargeMarkdownSegments
 				];
 
 				function renderPreparedSegments() {
@@ -3409,7 +3416,7 @@ templ ChatAutoScrollScript() {
 			}
 			function flushText() {
 				if (!pendingText) return;
-					var t = window.cleanTranscriptControls ? window.cleanTranscriptControls(pendingText, false, true) : pendingText.trim();
+					var t = cleanPreparedText(pendingText);
 				if (!t) { pendingText = ''; return; }
 				var div = document.createElement('div');
 				div.className = 'chat-markdown';
@@ -3513,6 +3520,17 @@ templ ChatAutoScrollScript() {
 
 			function renderSegment(seg, idx) {
 				if (seg.type === 'text') {
+					if (Object.prototype.hasOwnProperty.call(seg, 'renderedHTML')) {
+						flushThinking();
+						flushText();
+						if (!seg.renderedHTML) return;
+						var rendered = document.createElement('div');
+						rendered.className = 'chat-markdown';
+						rendered.innerHTML = seg.renderedHTML;
+						if (window.addCodeCopyButtons) window.addCodeCopyButtons(rendered);
+						renderFragment.appendChild(rendered);
+						return;
+					}
 					// If we're accumulating thinking and this text is a short fragment
 					// between thinking blocks, absorb it into thinking instead of
 					// rendering it as visible text (these are typically tool output
@@ -3531,7 +3549,6 @@ templ ChatAutoScrollScript() {
 						}
 					}
 					pendingText += seg.content;
-					if (seg.flushAfter) flushText();
 					return;
 				}
 				if (seg.type === 'tool_result') return;
@@ -3744,13 +3761,14 @@ templ ChatAutoScrollScript() {
 						// before Chat/task-thread content renders. All transcript transforms and
 						// Markdown rendering share those helpers.
 
-					window.replaceOutsideCode = function(text, pattern, replacement) {
-						var result = '';
-						var previous = 0;
-						var match;
-						pattern.lastIndex = 0;
-						while ((match = pattern.exec(text)) !== null) {
-							if (window.isInsideCode(text, match.index, match.index + match[0].length)) {
+						window.replaceOutsideCode = function(text, pattern, replacement, ranges) {
+							var result = '';
+							var previous = 0;
+							var match;
+							var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
+							pattern.lastIndex = 0;
+							while ((match = pattern.exec(text)) !== null) {
+								if (window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, match.index, match.index + match[0].length)) {
 								// A protected partial alias can make one regex span a later real
 								// alias. Resume just after its start so the real alias is found.
 								pattern.lastIndex = match.index + 1;
@@ -3764,20 +3782,21 @@ templ ChatAutoScrollScript() {
 						return result + text.substring(previous);
 					};
 
-					window.stripOutsideCode = function(text, pattern) {
-						var result = '';
-						var previous = 0;
-						var match;
+						window.stripOutsideCode = function(text, pattern, ranges) {
+							var result = '';
+							var previous = 0;
+							var match;
+							var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
 						pattern.lastIndex = 0;
 						while ((match = pattern.exec(text)) !== null) {
 							var markerOffset = match[0].indexOf('[');
 							var markerStart = markerOffset >= 0 ? match.index + markerOffset : match.index;
-							if (window.isInsideCode(text, markerStart, match.index + match[0].length)) {
+								if (window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, markerStart, match.index + match[0].length)) {
 								pattern.lastIndex = markerStart + 1;
 								continue;
 							}
 							result += text.substring(previous, match.index);
-							if (markerOffset > 0 && window.isInsideCode(text, match.index, markerStart)) {
+								if (markerOffset > 0 && window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, match.index, markerStart)) {
 								result += match[0].substring(0, markerOffset);
 							}
 							previous = match.index + match[0].length;
@@ -3785,8 +3804,9 @@ templ ChatAutoScrollScript() {
 						}
 						return result + text.substring(previous);
 					};
-					window.dedupTaskSummaries = function(text) {
+						window.dedupTaskSummaries = function(text) {
 						['Created ', 'Edited '].forEach(function(prefix) {
+							var protectedRanges = window.codeRanges ? window.codeRanges(text) : [];
 							var lines = window.markdownLineRanges(text);
 							var blocks = [];
 							for (var i = 0; i + 1 < lines.length; i++) {
@@ -3794,7 +3814,7 @@ templ ChatAutoScrollScript() {
 								var header = lines[i + 1];
 								if (text.substring(delimiter.start, delimiter.end) !== '---' ||
 									text.substring(header.start, header.end).indexOf(prefix) !== 0 ||
-									window.isInsideCode(text, delimiter.start, delimiter.end)) continue;
+										(window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, delimiter.start, delimiter.end))) continue;
 								var start = i > 0 ? lines[i - 1].end : delimiter.start;
 								var end = Math.min(header.next, text.length);
 								for (var j = i + 2; j < lines.length; j++) {
@@ -3811,7 +3831,7 @@ templ ChatAutoScrollScript() {
 						return text;
 					};
 
-					window.stripFinalStatusControl = function(text) {
+						window.stripFinalStatusControl = function(text, ranges) {
 						if (!text) return text;
 						var lines = window.markdownLineRanges(text);
 						var lastNonEmpty = -1;
@@ -3823,7 +3843,8 @@ templ ChatAutoScrollScript() {
 						var rawLine = text.substring(sourceLine.start, sourceLine.end);
 						var markerOffset = rawLine.search(/\S/);
 						var markerStart = sourceLine.start + markerOffset;
-						if (window.isInsideCode(text, markerStart, sourceLine.end)) return text;
+							var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
+							if (window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, markerStart, sourceLine.end)) return text;
 						var line = rawLine.trim();
 						if (!/^\[STATUS: (?:SUCCESS|(?:FAILED|NEEDS_FOLLOWUP) \|\s*[^\s\]|][^|\]]*)\]$/.test(line)) return text;
 						var removeStart = sourceLine.start;
@@ -3847,15 +3868,14 @@ templ ChatAutoScrollScript() {
 				};
 
 				// Clean transcript control artifacts from chat message content.
-				window.normalizeTranscriptMarkers = function(text) {
-					if (!text) return text;
-					text = window.replaceOutsideCode(text, /\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">([\s\S]*?)<\/parameter>\s*<\/invoke>\s*/g, function(_, tool, command) {
-						command = command.replace(/\]/g, ')').replace(/[\r\n]+/g, ' ').trim();
-						return '\n[Using tool: ' + tool + (command ? ' | ' + command : '') + ']\n';
-					});
-					text = window.replaceOutsideCode(text, /<\s*thinking\s*>/gi, '\n[Thinking]\n');
-					text = window.replaceOutsideCode(text, /<\/\s*thinking\s*>/gi, '\n[/Thinking]\n');
-					return text;
+					window.normalizeTranscriptMarkers = function(text, ranges) {
+						if (!text) return text;
+						var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
+						return window.replaceOutsideCode(text, /\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">([\s\S]*?)<\/parameter>\s*<\/invoke>\s*|<\s*(\/?)\s*thinking\s*>/gi, function(raw, tool, command, closing) {
+							if (!tool) return closing ? '\n[/Thinking]\n' : '\n[Thinking]\n';
+							command = command.replace(/\]/g, ')').replace(/[\r\n]+/g, ' ').trim();
+							return '\n[Using tool: ' + tool + (command ? ' | ' + command : '') + ']\n';
+						}, protectedRanges);
 				};
 			window.cleanTranscriptControls = function(text, noTrim, statusAlreadyScoped) {
 				if (!text) return text;
