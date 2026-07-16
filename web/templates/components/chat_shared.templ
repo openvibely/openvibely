@@ -3286,7 +3286,7 @@ templ ChatAutoScrollScript() {
 					if (liveRequest.finished) return;
 					liveRequest.finished = true;
 					if (liveRequest.timeout) clearTimeout(liveRequest.timeout);
-					if (!err && result !== false && container.dataset) container.dataset.liveRenderedRaw = textBuffer || '';
+					if (!err && result !== false) container._liveRenderedRaw = textBuffer || '';
 					if (container._activeLiveChatRender === liveRequest) container._activeLiveChatRender = null;
 					window._liveChatRenderActive = Math.max(0, (window._liveChatRenderActive || 1) - 1);
 					window._liveChatRenderRequests.delete(liveRequest);
@@ -3324,13 +3324,13 @@ templ ChatAutoScrollScript() {
 			};
 			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
 				if (!container || !raw) return Promise.resolve(false);
-				if (container.dataset.renderingRaw === raw && container._chatElementRenderPromise) return container._chatElementRenderPromise;
-				container.dataset.renderingRaw = raw;
+				if (container._renderingRaw === raw && container._chatElementRenderPromise) return container._chatElementRenderPromise;
+				container._renderingRaw = raw;
 				var promise = window.scheduleChatContentRender(container, raw, yieldBetweenBatches).then(function(rendered) {
-					if (container.dataset.renderingRaw !== raw) return rendered;
-					delete container.dataset.renderingRaw;
-					if (rendered && container.getAttribute('data-raw-content') === raw) container.dataset.cleanedRaw = raw;
-					else delete container.dataset.cleanedRaw;
+					if (container._renderingRaw !== raw) return rendered;
+					delete container._renderingRaw;
+					if (rendered && container.getAttribute('data-raw-content') === raw) container._cleanedRaw = raw;
+					else delete container._cleanedRaw;
 					return rendered;
 				});
 				container._chatElementRenderPromise = promise;
@@ -4248,17 +4248,17 @@ templ ChatAutoScrollScript() {
 				container.querySelectorAll('.chat-stream-content[data-raw-content]').forEach(function(el) {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					if ((el.dataset.cleanedRaw === raw && hasRenderedContent) || el.dataset.renderingRaw === raw) return;
+					if ((el._cleanedRaw === raw && hasRenderedContent) || el._renderingRaw === raw) return;
 					if (raw && window.scheduleChatElementRender) {
 						window.scheduleChatElementRender(el, raw);
 					} else if (raw && window.renderStreamingContent) {
 						window.renderStreamingContent(el, raw);
-						el.dataset.cleanedRaw = raw;
+						el._cleanedRaw = raw;
 					} else if (raw && window.renderChatMarkdown) {
 						el.classList.add('chat-markdown');
 						el.innerHTML = window.renderChatMarkdown(raw);
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
-						delete el.dataset.cleanedRaw;
+						delete el._cleanedRaw;
 					}
 					// After rendering, convert task-result metadata and clean transcript controls
 					var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
@@ -4274,12 +4274,12 @@ templ ChatAutoScrollScript() {
 				container.querySelectorAll('[data-streaming-resume][data-raw-content]').forEach(function(el) {
 					var raw = el.getAttribute('data-raw-content') || '';
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					if ((el.dataset.cleanedRaw === raw && hasRenderedContent) || el.dataset.renderingRaw === raw) return;
+					if ((el._cleanedRaw === raw && hasRenderedContent) || el._renderingRaw === raw) return;
 					if (raw && window.scheduleChatElementRender) {
 						window.scheduleChatElementRender(el, raw);
 					} else if (raw && window.renderStreamingContent) {
 						window.renderStreamingContent(el, raw);
-						el.dataset.cleanedRaw = raw;
+						el._cleanedRaw = raw;
 					} else if (raw && window.renderChatMarkdown) {
 						var div = document.createElement('div');
 						div.className = 'chat-markdown';
@@ -4287,7 +4287,7 @@ templ ChatAutoScrollScript() {
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(div);
 						el.innerHTML = '';
 						el.appendChild(div);
-						delete el.dataset.cleanedRaw;
+						delete el._cleanedRaw;
 					}
 				});
 				container.querySelectorAll('.chat-bubble-assistant-msg .whitespace-pre-wrap').forEach(function(div) {
