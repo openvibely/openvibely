@@ -3490,7 +3490,14 @@ templ ChatAutoScrollScript() {
 						var toolIndex = 0;
 						ranges.forEach(function(range) {
 							while (toolIndex < transcriptToolRanges.length && transcriptToolRanges[toolIndex].end <= range.start) toolIndex++;
-							if (toolIndex < transcriptToolRanges.length && transcriptToolRanges[toolIndex].start < range.end) return;
+							var crossesToolBoundary = false;
+							for (var index = toolIndex; index < transcriptToolRanges.length && transcriptToolRanges[index].start < range.end; index++) {
+								var toolRange = transcriptToolRanges[index];
+								var startsInsideTool = range.start >= toolRange.start && range.start < toolRange.end;
+								var endsInsideTool = range.end > toolRange.start && range.end <= toolRange.end;
+								if (startsInsideTool || endsInsideTool) { crossesToolBoundary = true; break; }
+							}
+							if (crossesToolBoundary) return;
 							filtered.push(range);
 						});
 						return filtered;

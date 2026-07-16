@@ -2717,6 +2717,10 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"window.renderStreamingContent(crossedToolStream, 'Literal `unclosed\\n[Using tool: bash]\\n[Tool bash done]\\n' + crossedToolOutput + '\\n[/Tool]\\n[Thinking]real thought[/Thinking]\\nVisible answer.');\n" +
 		"const crossedPre = findTag(crossedToolStream, 'pre');\n" +
 		"if (!crossedToolStream.children.some(function(child) { return child.className.indexOf('stream-tool') !== -1; }) || !crossedToolStream.children.some(function(child) { return child.className.indexOf('stream-thinking') !== -1; }) || !crossedPre || crossedPre.textContent !== crossedToolOutput) { console.error(JSON.stringify(crossedToolStream)); process.exit(60); }\n" +
+		"const fencedCanonicalTool = '```text\\n[Tool bash done]\\nliteral example\\n[/Tool]\\n```';\n" +
+		"const fencedCanonicalStream = element('div'); fencedCanonicalStream.id = 'fenced-canonical-tool';\n" +
+		"window.renderStreamingContent(fencedCanonicalStream, fencedCanonicalTool);\n" +
+		"if (fencedCanonicalStream.children.length !== 1 || fencedCanonicalStream.children[0].className.indexOf('chat-markdown') === -1 || fencedCanonicalStream.children[0].textContent !== fencedCanonicalTool) { console.error(JSON.stringify(fencedCanonicalStream)); process.exit(61); }\n" +
 		"const largeMarkdown = Array(2200).fill('A paragraph with enough words to exercise cooperative Markdown chunking.\\n\\n').join('');\n" +
 		"const largeMarkdownStream = element('div'); largeMarkdownStream.id = 'large-markdown';\n" +
 		"window.renderStreamingContent(largeMarkdownStream, largeMarkdown).then(function(committed) {\n" +
