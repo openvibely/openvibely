@@ -476,7 +476,11 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
 					container.classList.remove('text-error/80', 'font-medium');
 							function finishScheduledRender(committed) {
-								if (committed === false) return;
+								if (committed === false) {
+									renderScheduled = false;
+									if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
+									return;
+								}
 								renderScheduled = false;
 								lastRenderedSourceLength = sourceLength;
 								lastRenderFinishedAt = Date.now();
@@ -917,7 +921,11 @@ templ _initThreadStreamingScript() {
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
 					container.classList.remove('text-error/80', 'font-medium');
 						function finishScheduledRender(committed) {
-							if (committed === false) return;
+							if (committed === false) {
+								renderScheduled = false;
+								if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
+								return;
+							}
 							renderScheduled = false;
 							lastRenderedSourceLength = sourceLength;
 							lastRenderFinishedAt = Date.now();
@@ -3124,11 +3132,18 @@ templ ChatAutoScrollScript() {
 				window._chatContentRenderQueue.push(request);
 				function drain() {
 					if (window._chatContentRenderActive >= 1) return;
-					if ((window._liveChatRenderActive || 0) > 0) return;
 					var now = Date.now();
-					var quietRemaining = (window._chatLiveRenderQuietUntil || 0) - now;
 					var oldestRequest = window._chatContentRenderQueue[0];
 					var maxDeferralRemaining = oldestRequest ? (window._chatRenderMaxLiveDeferralMS || 1000) - (now - oldestRequest.enqueuedAt) : 0;
+					if ((window._liveChatRenderActive || 0) > 0) {
+						if (maxDeferralRemaining > 0) {
+							clearTimeout(window._chatRenderResumeTimer);
+							window._chatRenderResumeTimer = setTimeout(drain, maxDeferralRemaining);
+							return;
+						}
+						if (window.cancelLiveChatRenders) window.cancelLiveChatRenders();
+					}
+					var quietRemaining = (window._chatLiveRenderQuietUntil || 0) - now;
 					if (quietRemaining > 0 && maxDeferralRemaining > 0) {
 						clearTimeout(window._chatRenderResumeTimer);
 						window._chatRenderResumeTimer = setTimeout(drain, Math.min(quietRemaining, maxDeferralRemaining));
@@ -3206,6 +3221,9 @@ templ ChatAutoScrollScript() {
 					if (request.container._scheduledChatRender === request) request.container._scheduledChatRender = null;
 					request.resolve(false);
 				});
+				if (window.cancelLiveChatRenders) window.cancelLiveChatRenders();
+			};
+			window.cancelLiveChatRenders = function() {
 				if (window._liveChatRenderRequests) {
 					window._liveChatRenderRequests.forEach(function(liveRequest) {
 						var container = liveRequest.container;

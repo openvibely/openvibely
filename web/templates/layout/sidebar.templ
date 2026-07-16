@@ -287,10 +287,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 					document.body.addEventListener('htmx:beforeRequest', function(event) {
 						var elt = event.detail.elt;
-						var mainContentNav = elt && elt.closest ? elt.closest('[hx-target="#main-content"]') : null;
-						if (mainContentNav && !(elt && elt.hasAttribute('data-nav-base'))) {
-							if (window.cancelChatContentRenders) window.cancelChatContentRenders();
-						}
 						if (elt && elt.hasAttribute('data-nav-base')) {
 							var navBase = elt.getAttribute('data-nav-base');
 							if (window.location.pathname === navBase) {
@@ -300,7 +296,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							}
 							// Abort in-flight polling to prevent morph from blocking navigation
 							window._sidebarNavigating = true;
-							if (window.cancelChatContentRenders) window.cancelChatContentRenders();
 							var mainContent = document.getElementById('main-content');
 							if (mainContent) {
 								mainContent.querySelectorAll('[hx-trigger*="every"]').forEach(function(el) {
@@ -332,8 +327,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						// If a polling response arrives after we started navigating, skip its swap
 						// to avoid expensive DOM work that would block the page change.
 					document.body.addEventListener('htmx:beforeSwap', function(event) {
-						if (!window._sidebarNavigating) return;
 						var target = event.detail.target;
+						if (target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders();
+						if (!window._sidebarNavigating) return;
 						if (!target) return;
 						if (target.id === 'main-content') {
 							// This is the sidebar navigation swap — allow it and clear flag

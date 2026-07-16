@@ -762,6 +762,7 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 		"  const completedDuringLive = container(true); const completedResult = window.scheduleChatContentRender(completedDuringLive, 'completed-hung'); await delay(10); const liveResult = window.renderLiveChatContent(container(true), 'live-now'); if (!await liveResult || await completedResult || !completedDuringLive.replacements[0]) throw new Error('live render did not cancel active completed render safely');\n" +
 		"  const livePending = window.renderLiveChatContent(container(true), 'live-hung'); await delay(1); const queuedAfterLive = window.scheduleChatContentRender(container(true), 'queued-after-live'); await delay(2); if (calls.indexOf('queued-after-live') !== -1) throw new Error('completed render ran concurrently with live render'); liveResolve(true); await livePending; if (!await queuedAfterLive || calls.indexOf('queued-after-live') === -1) throw new Error('completed queue did not resume after live render');\n" +
 		"  window._chatLiveRenderTimeoutMS = 5; window.renderStreamingContent = function() { return new Promise(function() {}); }; if (await window.renderLiveChatContent(container(true), 'live-timeout') || window._liveChatRenderActive !== 0) throw new Error('live timeout did not settle and release renderer');\n" +
+		"  window._chatLiveRenderTimeoutMS = 50; window._chatRenderMaxLiveDeferralMS = 5; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'live-deferral-cap') return new Promise(function() {}); return Promise.resolve(true); }; const cappedLive = window.renderLiveChatContent(container(true), 'live-deferral-cap'); const cappedQueued = window.scheduleChatContentRender(container(true), 'queued-after-cap'); if (!await cappedQueued || await cappedLive || calls.indexOf('queued-after-cap') === -1) throw new Error('active live render exceeded completed-render deferral cap');\n" +
 		"  window._chatRenderMaxLiveDeferralMS = 5; window._chatLiveRenderQuietUntil = Date.now() + 1000; window.renderStreamingContent = function(c, text) { calls.push(text); return Promise.resolve(true); }; if (!await window.scheduleChatContentRender(container(true), 'max-deferral') || calls.indexOf('max-deferral') === -1) throw new Error('live quiet period starved completed render');\n" +
 		"  window._chatContentRenderTimeoutMS = 50; window.renderStreamingContent = function(c, text) { calls.push(text); if (text === 'old-active') return new Promise(function() {}); return Promise.resolve(true); };\n" +
 		"  const oldActive = container(true), navigated = container(true); const oldResult = window.scheduleChatContentRender(oldActive, 'old-active'); await delay(10); oldActive.isConnected = false; const navigatedResult = window.scheduleChatContentRender(navigated, 'navigated'); const navigation = await Promise.all([oldResult, navigatedResult]); if (navigation[0] || !navigation[1] || calls.indexOf('navigated') === -1) throw new Error('navigation did not cancel disconnected active render');\n" +
@@ -3784,6 +3785,10 @@ func TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth(t *testing.T) {
 		t.Fatalf("Failed to render thread streaming script: %v", err)
 	}
 	content := buf.String()
+	unlockPattern := regexp.MustCompile(`if\s*\(committed === false\)\s*\{\s*renderScheduled = false;`)
+	if count := len(unlockPattern.FindAllString(content, -1)); count < 2 {
+		t.Fatalf("both streaming callers must unlock scheduling after cancellation or timeout, found %d", count)
+	}
 
 	if count := strings.Count(content, "var shouldScroll = !tracker || tracker.shouldAutoScroll();"); count < 2 {
 		t.Fatalf("expected streaming renderers to snapshot shouldScroll before DOM render, found %d", count)

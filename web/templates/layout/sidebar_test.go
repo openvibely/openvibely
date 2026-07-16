@@ -135,7 +135,6 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 	requiredSnippets := []string{
 		// Flag for stale morph suppression
 		"window._sidebarNavigating = true",
-		"if (window.cancelChatContentRenders) window.cancelChatContentRenders()",
 		// Abort polling requests within main-content
 		`querySelectorAll('[hx-trigger*="every"]')`,
 		`htmx.trigger(el, 'htmx:abort')`,
@@ -183,9 +182,8 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 		t.Fatal("sidebar pointerdown must not cancel transcript rendering before navigation is committed")
 	}
 	beforeRequestBlock := html[beforeRequestStart:beforeSendStart]
-	if !strings.Contains(beforeRequestBlock, `closest('[hx-target="#main-content"]')`) ||
-		!strings.Contains(beforeRequestBlock, `if (window.cancelChatContentRenders) window.cancelChatContentRenders()`) {
-		t.Fatal("all committed HTMX main-content navigation must cancel obsolete transcript renders")
+	if strings.Contains(beforeRequestBlock, `cancelChatContentRenders`) {
+		t.Fatal("HTMX beforeRequest must not cancel transcript rendering before a response is ready to swap")
 	}
 	if strings.Contains(beforeRequestBlock, `closeMobileDrawer();`) && strings.Contains(beforeRequestBlock, `window.location.pathname !== navBase`) {
 		t.Fatal("sidebar must not close the mobile drawer in the real-navigation htmx:beforeRequest path before HTMX sends the request")
@@ -193,6 +191,9 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 	beforeSendBlock := html[beforeSendStart:]
 	if !strings.Contains(beforeSendBlock, `closeMobileDrawer()`) {
 		t.Fatal("sidebar must close the mobile drawer in htmx:beforeSend after HTMX accepts the nav request")
+	}
+	if !strings.Contains(beforeSendBlock, `if (target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders()`) {
+		t.Fatal("committed main-content swaps must cancel obsolete transcript renders")
 	}
 }
 
