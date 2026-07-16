@@ -3488,16 +3488,35 @@ templ ChatAutoScrollScript() {
 						if (!ranges.length || !transcriptToolRanges.length) return ranges;
 						var filtered = [];
 						var toolIndex = 0;
+						function isFencedCodeRange(range) {
+							if (range.start > 0 && textBuffer.charAt(range.start - 1) !== '\n' && textBuffer.charAt(range.start - 1) !== '\r') return false;
+							var offset = range.start;
+							var spaces = 0;
+							while (spaces < 3 && textBuffer.charAt(offset + spaces) === ' ') spaces++;
+							var marker = textBuffer.charAt(offset + spaces);
+							if (marker !== '`' && marker !== '~') return false;
+							var runEnd = offset + spaces;
+							while (textBuffer.charAt(runEnd) === marker) runEnd++;
+							if (runEnd - offset - spaces < 3) return false;
+							var lineEnd = textBuffer.length;
+							var lfEnd = textBuffer.indexOf('\n', runEnd);
+							var crEnd = textBuffer.indexOf('\r', runEnd);
+							if (lfEnd !== -1) lineEnd = lfEnd;
+							if (crEnd !== -1) lineEnd = Math.min(lineEnd, crEnd);
+							return marker !== '`' || textBuffer.substring(runEnd, lineEnd).indexOf('`') === -1;
+						}
 						ranges.forEach(function(range) {
 							while (toolIndex < transcriptToolRanges.length && transcriptToolRanges[toolIndex].end <= range.start) toolIndex++;
+							var overlapsTool = false;
 							var crossesToolBoundary = false;
 							for (var index = toolIndex; index < transcriptToolRanges.length && transcriptToolRanges[index].start < range.end; index++) {
 								var toolRange = transcriptToolRanges[index];
+								overlapsTool = true;
 								var startsInsideTool = range.start >= toolRange.start && range.start < toolRange.end;
 								var endsInsideTool = range.end > toolRange.start && range.end <= toolRange.end;
 								if (startsInsideTool || endsInsideTool) { crossesToolBoundary = true; break; }
 							}
-							if (crossesToolBoundary) return;
+							if (crossesToolBoundary || (overlapsTool && !isFencedCodeRange(range))) return;
 							filtered.push(range);
 						});
 						return filtered;

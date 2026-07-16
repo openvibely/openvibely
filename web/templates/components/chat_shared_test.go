@@ -2721,6 +2721,9 @@ func TestCleanTranscriptControls_PreservesCodeExamples(t *testing.T) {
 		"const fencedCanonicalStream = element('div'); fencedCanonicalStream.id = 'fenced-canonical-tool';\n" +
 		"window.renderStreamingContent(fencedCanonicalStream, fencedCanonicalTool);\n" +
 		"if (fencedCanonicalStream.children.length !== 1 || fencedCanonicalStream.children[0].className.indexOf('chat-markdown') === -1 || fencedCanonicalStream.children[0].textContent !== fencedCanonicalTool) { console.error(JSON.stringify(fencedCanonicalStream)); process.exit(61); }\n" +
+		"const enclosedToolStream = element('div'); enclosedToolStream.id = 'inline-range-enclosing-tool';\n" +
+		"window.renderStreamingContent(enclosedToolStream, 'Literal `open\\n[Using tool: bash]\\n[Tool bash done]\\nenclosed output\\n[/Tool]\\nclose`\\n[Thinking]later thought[/Thinking]');\n" +
+		"if (!enclosedToolStream.children.some(function(child) { return child.className.indexOf('stream-tool') !== -1; }) || !enclosedToolStream.children.some(function(child) { return child.className.indexOf('stream-thinking') !== -1; })) { console.error(JSON.stringify(enclosedToolStream)); process.exit(62); }\n" +
 		"const largeMarkdown = Array(2200).fill('A paragraph with enough words to exercise cooperative Markdown chunking.\\n\\n').join('');\n" +
 		"const largeMarkdownStream = element('div'); largeMarkdownStream.id = 'large-markdown';\n" +
 		"window.renderStreamingContent(largeMarkdownStream, largeMarkdown).then(function(committed) {\n" +
