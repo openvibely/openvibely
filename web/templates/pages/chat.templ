@@ -626,7 +626,10 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							streamContainer.setAttribute('data-raw-content', completedOutput);
 							if (window.renderStreamingContent) {
 							var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
-							liveRenderer(streamContainer, completedOutput);
+							var renderPromise = liveRenderer(streamContainer, completedOutput);
+							if (renderPromise && typeof renderPromise.catch === 'function') {
+								renderPromise.catch(function() { streamContainer.textContent = completedOutput; });
+							}
 						} else {
 							streamContainer.textContent = completedOutput;
 						}
@@ -699,35 +702,59 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					var textBuffer = '';
 					var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
 					function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
-					var renderScheduled = false;
-					var lastRenderedLength = 0;
-					function renderBufferedOutput(force) {
+						var renderScheduled = false;
+						var renderFrame = null;
+						var renderGeneration = 0;
+						var lastRenderedLength = 0;
+						function renderBufferedOutput(force) {
 						if (!window.renderStreamingContent) {
 							contentDiv.textContent = textBuffer;
 							return;
 						}
-						if (!force && renderScheduled) return;
-						var runRender = function() {
-							renderScheduled = false;
-							if (!force && textBuffer.length === lastRenderedLength) return;
-							var shouldScroll = !tracker || tracker.shouldAutoScroll();
-							var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
-							liveRenderer(contentDiv, textBuffer);
-							lastRenderedLength = textBuffer.length;
-							if (shouldScroll) {
-								requestAnimationFrame(function() {
-									if (chatMessages && window.chatAutoScroll) {
-										window.chatAutoScroll.scrollToBottom(chatMessages, false);
+							if (!force && renderScheduled) return;
+							var runRender = function() {
+								renderFrame = null;
+								var sourceLength = textBuffer.length;
+								var renderText = textBuffer;
+								if (!force && sourceLength === lastRenderedLength) {
+									renderScheduled = false;
+									return;
+								}
+								var generation = ++renderGeneration;
+								renderScheduled = true;
+								var shouldScroll = !tracker || tracker.shouldAutoScroll();
+								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+								function finishRender(committed) {
+									if (generation !== renderGeneration) return;
+									renderScheduled = false;
+									if (committed !== false) {
+										lastRenderedLength = sourceLength;
+										if (shouldScroll) {
+											requestAnimationFrame(function() {
+												if (chatMessages && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
+											});
+										}
 									}
-								});
+									if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
+								}
+								var renderPromise = liveRenderer(contentDiv, renderText);
+								if (renderPromise && typeof renderPromise.then === 'function') {
+									renderPromise.then(finishRender).catch(function() {
+										if (generation !== renderGeneration) return;
+										contentDiv.textContent = renderText;
+										finishRender(true);
+									});
+									return;
+								}
+								finishRender(true);
+							};
+							if (force) {
+								if (renderFrame !== null) cancelAnimationFrame(renderFrame);
+								runRender();
+								return;
 							}
-						};
-						if (force) {
-							runRender();
-							return;
-						}
-						renderScheduled = true;
-						requestAnimationFrame(runRender);
+							renderScheduled = true;
+							renderFrame = requestAnimationFrame(runRender);
 					}
 					var chatMessages = document.getElementById('chat-messages');
 					var tracker = window._chatPageTracker;

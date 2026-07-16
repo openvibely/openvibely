@@ -3231,21 +3231,25 @@ templ ChatAutoScrollScript() {
 				});
 				if (window.cancelLiveChatRenders) window.cancelLiveChatRenders();
 			};
+			function cancelOwnedLiveRenderWork(liveRequest) {
+				var container = liveRequest && liveRequest.container;
+				if (!container || container._activeLiveChatRender !== liveRequest) return;
+				container._activeLiveChatRender = null;
+				container._streamRenderVersion = (container._streamRenderVersion || 0) + 1;
+				if (container._codeRangeWorkerState && container._codeRangeWorkerState.finish) container._codeRangeWorkerState.finish(null);
+				if (container._markdownWorkerState) {
+					var markdownState = container._markdownWorkerState;
+					markdownState.cancelled = true;
+					markdownState.finished = true;
+					if (markdownState.fallbackTimer) clearTimeout(markdownState.fallbackTimer);
+					markdownState.worker.terminate();
+					markdownState.resolve(null);
+					container._markdownWorkerState = null;
+				}
+			}
 			window.cancelLiveChatRenders = function() {
 				if (window._liveChatRenderRequests) {
 					window._liveChatRenderRequests.forEach(function(liveRequest) {
-						var container = liveRequest.container;
-						container._streamRenderVersion = (container._streamRenderVersion || 0) + 1;
-						if (container._codeRangeWorkerState && container._codeRangeWorkerState.finish) container._codeRangeWorkerState.finish(null);
-						if (container._markdownWorkerState) {
-							var markdownState = container._markdownWorkerState;
-							markdownState.cancelled = true;
-							markdownState.finished = true;
-							if (markdownState.fallbackTimer) clearTimeout(markdownState.fallbackTimer);
-							markdownState.worker.terminate();
-							markdownState.resolve(null);
-							container._markdownWorkerState = null;
-						}
 						liveRequest.cancel();
 					});
 				}
@@ -3263,6 +3267,7 @@ templ ChatAutoScrollScript() {
 					if (liveRequest.finished) return;
 					liveRequest.finished = true;
 					if (liveRequest.timeout) clearTimeout(liveRequest.timeout);
+					if (container._activeLiveChatRender === liveRequest) container._activeLiveChatRender = null;
 					window._liveChatRenderActive = Math.max(0, (window._liveChatRenderActive || 1) - 1);
 					window._liveChatRenderRequests.delete(liveRequest);
 					var quietMS = window._chatLiveRenderQuietMS || 300;
@@ -3274,7 +3279,13 @@ templ ChatAutoScrollScript() {
 					if (err) outerReject(err);
 					else outerResolve(result);
 				}
-				liveRequest.cancel = function() { finishLiveRender(false, null); };
+				liveRequest.cancel = function() {
+					cancelOwnedLiveRenderWork(liveRequest);
+					finishLiveRender(false, null);
+				};
+				var previousLiveRequest = container._activeLiveChatRender;
+				if (previousLiveRequest && previousLiveRequest.cancel) previousLiveRequest.cancel();
+				container._activeLiveChatRender = liveRequest;
 				window._liveChatRenderRequests.add(liveRequest);
 				var renderPromise;
 				try {
@@ -3288,20 +3299,7 @@ templ ChatAutoScrollScript() {
 				}, function(err) {
 					finishLiveRender(false, err);
 				});
-				liveRequest.timeout = setTimeout(function() {
-					container._streamRenderVersion = (container._streamRenderVersion || 0) + 1;
-					if (container._codeRangeWorkerState && container._codeRangeWorkerState.finish) container._codeRangeWorkerState.finish(null);
-					if (container._markdownWorkerState) {
-						var markdownState = container._markdownWorkerState;
-						markdownState.cancelled = true;
-						markdownState.finished = true;
-						if (markdownState.fallbackTimer) clearTimeout(markdownState.fallbackTimer);
-						markdownState.worker.terminate();
-						markdownState.resolve(null);
-						container._markdownWorkerState = null;
-					}
-					finishLiveRender(false, null);
-				}, window._chatLiveRenderTimeoutMS || 30000);
+				liveRequest.timeout = setTimeout(liveRequest.cancel, window._chatLiveRenderTimeoutMS || 30000);
 				return outerPromise;
 			};
 			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
