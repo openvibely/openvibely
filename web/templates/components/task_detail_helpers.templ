@@ -474,7 +474,7 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 						resumeContainers.forEach(function(c) {
 							var raw = c.getAttribute('data-raw-content') || '';
 							var hasRenderedContent = !!(c.textContent && c.textContent.trim()) || !!c.querySelector('*');
-							var hasCurrentRenderedContent = hasRenderedContent && (c._liveRenderedRaw === raw || c._cleanedRaw === raw);
+							var hasCurrentRenderedContent = hasRenderedContent && c._renderedRaw === raw;
 							if (raw.trim() && !hasCurrentRenderedContent && !c._activeLiveChatRender && window.renderStreamingContent) {
 								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
 								var renderPromise = liveRenderer(c, raw);
