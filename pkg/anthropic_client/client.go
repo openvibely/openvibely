@@ -452,6 +452,7 @@ func (c *Client) handleStream(body io.Reader, onDelta func(string)) (*Response, 
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	var collected strings.Builder
 	var result Response
+	terminal := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -460,6 +461,7 @@ func (c *Client) handleStream(body io.Reader, onDelta func(string)) (*Response, 
 		}
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
+			terminal = true
 			break
 		}
 
@@ -469,6 +471,8 @@ func (c *Client) handleStream(body io.Reader, onDelta func(string)) (*Response, 
 		}
 
 		switch event.Type {
+		case "message_stop":
+			terminal = true
 		case "content_block_delta":
 			var delta StreamDelta
 			if err := json.Unmarshal(event.Delta, &delta); err == nil && delta.Type == "text_delta" {
@@ -499,8 +503,14 @@ func (c *Client) handleStream(body io.Reader, onDelta func(string)) (*Response, 
 			}
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if !terminal {
+		return nil, io.ErrUnexpectedEOF
+	}
 	result.Text = collected.String()
-	return &result, scanner.Err()
+	return &result, nil
 }
 
 // --- Token Storage ---

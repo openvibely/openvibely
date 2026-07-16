@@ -452,6 +452,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
 		policy := httpretry.DefaultPolicy()
 		policy.AllowReplay = true
+		policy.RetryableError = isRetryableResponsesTransportError
 		result, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*Response, bool, error) {
 			openStream := func(useWebsocket bool) (io.ReadCloser, error) {
 				if useWebsocket {
@@ -463,8 +464,7 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 			body, wsErr := openStream(useWebsocket)
 			if useWebsocket && shouldFallbackResponsesWebsocket(attemptCtx, wsErr) {
 				c.responsesTransportState.disableWebsocket()
-				useWebsocket = false
-				body, wsErr = openStream(false)
+				return nil, false, wsErr
 			}
 			if wsErr != nil {
 				return nil, false, wsErr
@@ -480,13 +480,6 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 			body.Close()
 			if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(attemptCtx, wsErr) {
 				c.responsesTransportState.disableWebsocket()
-				if !sawOutput {
-					body, wsErr = openStream(false)
-					if wsErr == nil {
-						result, wsErr = parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
-						body.Close()
-					}
-				}
 			}
 			if wsErr != nil {
 				return result, sawOutput, httpretry.NewStreamError(wsErr)
@@ -769,6 +762,9 @@ func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMa
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	if completed == nil {
+		return nil, io.ErrUnexpectedEOF
 	}
 
 	if emitter != nil {

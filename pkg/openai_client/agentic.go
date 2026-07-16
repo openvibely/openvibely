@@ -1022,6 +1022,7 @@ func statelessOAuthOutputItems(items []any) []any {
 func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
 	policy := httpretry.DefaultPolicy()
 	policy.AllowReplay = true
+	policy.RetryableError = isRetryableResponsesTransportError
 	policy.OnRetry = func(event httpretry.RetryEvent) {
 		applog.Infof("[openai-client] stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
 	}
@@ -1130,33 +1131,27 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		body, wsErr := openStream(useWebsocket)
 		if useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
 			c.responsesTransportState.disableWebsocket()
-			useWebsocket = false
-			body, wsErr = openStream(false)
+			return nil, wsErr
 		}
 		if wsErr != nil {
 			return nil, wsErr
 		}
-		sawOutput := false
 		onText := func(text string) {
-			sawOutput = true
 			if opts.OnText != nil {
 				opts.OnText(text)
 			}
 		}
 		onThinking := func(text string) {
-			sawOutput = true
 			if opts.OnThinking != nil {
 				opts.OnThinking(text)
 			}
 		}
 		onToolUse := func(name string, input json.RawMessage) {
-			sawOutput = true
 			if opts.OnToolUse != nil {
 				opts.OnToolUse(name, input)
 			}
 		}
 		onToolResult := func(name, output string, isError bool) {
-			sawOutput = true
 			if opts.OnToolResult != nil {
 				opts.OnToolResult(name, output, isError)
 			}
@@ -1165,13 +1160,6 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tool
 		body.Close()
 		if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
 			c.responsesTransportState.disableWebsocket()
-			if !sawOutput {
-				body, wsErr = openStream(false)
-				if wsErr == nil {
-					result, wsErr = c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, onToolUse, onToolResult)
-					body.Close()
-				}
-			}
 		}
 		if wsErr != nil {
 			return result, httpretry.NewStreamError(wsErr)
@@ -1433,6 +1421,9 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	if completed == nil {
+		return nil, io.ErrUnexpectedEOF
 	}
 
 	emitter.Flush()

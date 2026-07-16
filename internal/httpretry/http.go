@@ -116,6 +116,9 @@ func IsRetryableNetworkError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return true

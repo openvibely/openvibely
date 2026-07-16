@@ -399,6 +399,7 @@ func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*c
 
 	result := &completionsTurnResult{}
 	var textBuilder strings.Builder
+	terminal := false
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -407,7 +408,11 @@ func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*c
 		}
 
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "" || data == "[DONE]" {
+		if data == "[DONE]" {
+			terminal = true
+			continue
+		}
+		if data == "" {
 			continue
 		}
 
@@ -486,6 +491,7 @@ func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*c
 		// Handle finish reason
 		if reason, ok := choice["finish_reason"].(string); ok && reason != "" {
 			result.stopReason = reason
+			terminal = true
 		}
 
 		// Handle usage (appears in last chunk)
@@ -517,6 +523,9 @@ func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*c
 
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	if !terminal {
+		return nil, io.ErrUnexpectedEOF
 	}
 
 	result.text = textBuilder.String()

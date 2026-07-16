@@ -1075,6 +1075,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 	}
 	blocks := make(map[int]*blockState)
 	seenMeaningfulEvent := false
+	terminal := false
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -1083,6 +1084,7 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 		}
 		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
+			terminal = true
 			break
 		}
 
@@ -1101,6 +1103,8 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 		}
 
 		switch event.Type {
+		case "message_stop":
+			terminal = true
 		case "error":
 			var streamErr struct {
 				Type    string `json:"type"`
@@ -1422,6 +1426,9 @@ func (c *Client) parseAgenticStreamWithCallbacks(
 	}
 	if !seenMeaningfulEvent {
 		return result, fmt.Errorf("empty anthropic stream: no message events received")
+	}
+	if !terminal {
+		return result, io.ErrUnexpectedEOF
 	}
 	return result, nil
 }

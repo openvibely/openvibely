@@ -47,6 +47,24 @@ func TestSendRetriesResponseBodyTimeoutBeforeOutput(t *testing.T) {
 	}
 }
 
+func TestHandleStreamRejectsMissingTerminalEvent(t *testing.T) {
+	stream := `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}` + "\n\n"
+	client := &Client{}
+	_, err := client.handleStream(strings.NewReader(stream), nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want unexpected EOF", err)
+	}
+}
+
+func TestParseAgenticStreamRejectsMissingTerminalEvent(t *testing.T) {
+	client := &Client{}
+	stream := buildSSE([]string{`{"type":"message_start","message":{"id":"msg_1","model":"test","usage":{"input_tokens":1}}}`})
+	_, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want unexpected EOF", err)
+	}
+}
+
 func TestParseAgenticStream_TextOnly(t *testing.T) {
 	// Simulate a streaming response with only text content
 	stream := buildSSE([]string{
@@ -539,6 +557,7 @@ func TestParseAgenticStream_StripsToolCallTags(t *testing.T) {
 		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done reading."}}`,
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		`{"type":"message_stop"}`,
 	})
 
 	var collected strings.Builder
@@ -584,6 +603,7 @@ func TestParseAgenticStream_ToolCallTagAcrossDeltas(t *testing.T) {
 		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" After"}}`,
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		`{"type":"message_stop"}`,
 	})
 
 	var collected strings.Builder
@@ -772,6 +792,7 @@ func TestParseAgenticStream_CompactionBlockFailed(t *testing.T) {
 		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Response text."}}`,
 		`{"type":"content_block_stop","index":1}`,
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}`,
+		`{"type":"message_stop"}`,
 	})
 
 	client := &Client{}
@@ -802,6 +823,7 @@ func TestParseAgenticStream_NoCompaction(t *testing.T) {
 		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Normal response."}}`,
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		`{"type":"message_stop"}`,
 	})
 
 	client := &Client{}

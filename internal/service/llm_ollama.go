@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 // ---- Ollama Model Listing Types ----
@@ -60,32 +62,45 @@ func ListOllamaModels(ctx context.Context, baseURL string) ([]OllamaModelInfo, e
 	}
 	url := strings.TrimRight(baseURL, "/") + "/api/tags"
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating ollama list request: %w", err)
+	type bufferedResponse struct {
+		statusCode int
+		body       []byte
 	}
-
-	resp, err := OllamaHTTPClient.Do(httpReq)
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	buffered, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (bufferedResponse, bool, error) {
+		result := bufferedResponse{}
+		resp, err := httpretry.Do(attemptCtx, OllamaHTTPClient, func() (*http.Request, error) {
+			return http.NewRequestWithContext(attemptCtx, http.MethodGet, url, nil)
+		}, policy)
+		if err != nil {
+			return result, false, err
+		}
+		defer resp.Body.Close()
+		result.statusCode = resp.StatusCode
+		result.body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return result, false, httpretry.NewStreamError(fmt.Errorf("reading ollama model list response: %w", err))
+		}
+		if httpretry.IsRetryableStatus(resp.StatusCode) {
+			return result, false, httpretry.NewResponseError(resp, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(result.body)))
+		}
+		return result, false, nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("ollama API call failed (is Ollama running at %s?): %w", baseURL, err)
 	}
-	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading ollama model list response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
+	if buffered.statusCode != http.StatusOK {
 		var errResp ollamaErrorResponse
-		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != "" {
-			return nil, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, errResp.Error)
+		if json.Unmarshal(buffered.body, &errResp) == nil && errResp.Error != "" {
+			return nil, fmt.Errorf("ollama API error (%d): %s", buffered.statusCode, errResp.Error)
 		}
-		return nil, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("ollama API error (%d): %s", buffered.statusCode, string(buffered.body))
 	}
 
 	var modelList OllamaModelList
-	if err := json.Unmarshal(respBody, &modelList); err != nil {
+	if err := json.Unmarshal(buffered.body, &modelList); err != nil {
 		return nil, fmt.Errorf("parsing ollama model list: %w", err)
 	}
 

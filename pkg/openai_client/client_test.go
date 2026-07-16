@@ -18,7 +18,36 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
+
+func TestParseStreamingResponseRejectsMissingTerminalEvent(t *testing.T) {
+	_, err := parseStreamingResponse(strings.NewReader("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n"), nil, false)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want unexpected EOF", err)
+	}
+}
+
+func TestResponsesWebSocketHandshakePreservesRetryAfter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "7")
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	_, err := client.openResponsesWebsocketStream(context.Background(), map[string]any{"input": []any{}}, false)
+	var responseErr *httpretry.ResponseError
+	if !errors.As(err, &responseErr) {
+		t.Fatalf("error = %v, want ResponseError", err)
+	}
+	if responseErr.StatusCode != http.StatusTooManyRequests || responseErr.Header.Get("Retry-After") != "7" {
+		t.Fatalf("status/Retry-After = %d/%q, want 429/7", responseErr.StatusCode, responseErr.Header.Get("Retry-After"))
+	}
+}
 
 func TestSendRetriesResponseBodyTimeoutBeforeOutput(t *testing.T) {
 	attempts := 0

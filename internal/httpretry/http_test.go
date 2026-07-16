@@ -143,6 +143,12 @@ func TestRetryableErrorRequiresExactStatusToken(t *testing.T) {
 	}
 }
 
+func TestPlainEOFIsRetryable(t *testing.T) {
+	if !IsRetryableNetworkError(io.EOF) {
+		t.Fatal("plain EOF before a response should be retryable")
+	}
+}
+
 func TestBackoffHonorsRetryAfterAndExponentialDelay(t *testing.T) {
 	if got := Backoff(2, nil, time.Second); got != 4*time.Second {
 		t.Fatalf("exponential backoff = %v, want 4s", got)

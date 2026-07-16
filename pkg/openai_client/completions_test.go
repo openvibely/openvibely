@@ -71,6 +71,14 @@ func TestSendCompletionsDoesNotReplayStreamAfterOutput(t *testing.T) {
 	}
 }
 
+func TestParseCompletionsStreamRejectsMissingTerminalEvent(t *testing.T) {
+	client := NewWithAPIKey("test-key")
+	_, err := client.parseCompletionsStream(strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"), nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want unexpected EOF", err)
+	}
+}
+
 func TestCompletionsOptions_DefaultMaxTurnsNoLimit(t *testing.T) {
 	client := NewWithAPIKey("test-key")
 
