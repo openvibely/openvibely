@@ -3118,17 +3118,20 @@ templ ChatAutoScrollScript() {
 				if (!container) return Promise.resolve(false);
 				var activeRequest = window._activeChatContentRender;
 				if (activeRequest && !activeRequest.container.isConnected && activeRequest.finish) activeRequest.finish(false, false, true);
-				var request = { container: container, text: textBuffer || '', yield: yieldBetweenBatches, resolve: null, finished: false, timeout: null };
+				var request = { container: container, text: textBuffer || '', yield: yieldBetweenBatches, resolve: null, finished: false, timeout: null, enqueuedAt: Date.now() };
 				container._scheduledChatRender = request;
 				var promise = new Promise(function(resolve) { request.resolve = resolve; });
 				window._chatContentRenderQueue.push(request);
 				function drain() {
 					if (window._chatContentRenderActive >= 1) return;
 					if ((window._liveChatRenderActive || 0) > 0) return;
-					var quietRemaining = (window._chatLiveRenderQuietUntil || 0) - Date.now();
-					if (quietRemaining > 0) {
+					var now = Date.now();
+					var quietRemaining = (window._chatLiveRenderQuietUntil || 0) - now;
+					var oldestRequest = window._chatContentRenderQueue[0];
+					var maxDeferralRemaining = oldestRequest ? (window._chatRenderMaxLiveDeferralMS || 1000) - (now - oldestRequest.enqueuedAt) : 0;
+					if (quietRemaining > 0 && maxDeferralRemaining > 0) {
 						clearTimeout(window._chatRenderResumeTimer);
-						window._chatRenderResumeTimer = setTimeout(drain, quietRemaining);
+						window._chatRenderResumeTimer = setTimeout(drain, Math.min(quietRemaining, maxDeferralRemaining));
 						return;
 					}
 					var next = window._chatContentRenderQueue.shift();
@@ -3214,19 +3217,23 @@ templ ChatAutoScrollScript() {
 							container._markdownWorkerState.resolve(null);
 							container._markdownWorkerState = null;
 						}
-						liveRequest.finish();
+						liveRequest.cancel();
 					});
 				}
 			};
 			window.renderLiveChatContent = function(container, textBuffer, yieldBetweenBatches) {
 				window._liveChatRenderActive = (window._liveChatRenderActive || 0) + 1;
 				if (!window._liveChatRenderRequests) window._liveChatRenderRequests = new Set();
-				var liveRequest = { container: container, finished: false, finish: null };
+				var liveRequest = { container: container, finished: false, cancel: null, timeout: null };
+				var outerResolve;
+				var outerReject;
+				var outerPromise = new Promise(function(resolve, reject) { outerResolve = resolve; outerReject = reject; });
 				var activeRequest = window._activeChatContentRender;
 				if (activeRequest && activeRequest.finish) activeRequest.finish(false, true, true);
-				function finishLiveRender() {
+				function finishLiveRender(result, err) {
 					if (liveRequest.finished) return;
 					liveRequest.finished = true;
+					if (liveRequest.timeout) clearTimeout(liveRequest.timeout);
 					window._liveChatRenderActive = Math.max(0, (window._liveChatRenderActive || 1) - 1);
 					window._liveChatRenderRequests.delete(liveRequest);
 					var quietMS = window._chatLiveRenderQuietMS || 300;
@@ -3235,23 +3242,35 @@ templ ChatAutoScrollScript() {
 					window._chatRenderResumeTimer = setTimeout(function() {
 						if (window._drainChatContentRenderQueue) window._drainChatContentRenderQueue();
 					}, quietMS);
+					if (err) outerReject(err);
+					else outerResolve(result);
 				}
-				liveRequest.finish = finishLiveRender;
+				liveRequest.cancel = function() { finishLiveRender(false, null); };
 				window._liveChatRenderRequests.add(liveRequest);
 				var renderPromise;
 				try {
 					renderPromise = window.renderStreamingContent(container, textBuffer, yieldBetweenBatches);
 				} catch (err) {
-					finishLiveRender();
-					throw err;
+					finishLiveRender(false, err);
+					return outerPromise;
 				}
-				return Promise.resolve(renderPromise).then(function(result) {
-					finishLiveRender();
-					return result;
+				Promise.resolve(renderPromise).then(function(result) {
+					finishLiveRender(result, null);
 				}, function(err) {
-					finishLiveRender();
-					throw err;
+					finishLiveRender(false, err);
 				});
+				liveRequest.timeout = setTimeout(function() {
+					container._streamRenderVersion = (container._streamRenderVersion || 0) + 1;
+					if (container._codeRangeWorkerState && container._codeRangeWorkerState.finish) container._codeRangeWorkerState.finish(null);
+					if (container._markdownWorkerState) {
+						container._markdownWorkerState.cancelled = true;
+						container._markdownWorkerState.worker.terminate();
+						container._markdownWorkerState.resolve(null);
+						container._markdownWorkerState = null;
+					}
+					finishLiveRender(false, null);
+				}, window._chatLiveRenderTimeoutMS || 30000);
+				return outerPromise;
 			};
 			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
 				if (!container || !raw) return Promise.resolve(false);

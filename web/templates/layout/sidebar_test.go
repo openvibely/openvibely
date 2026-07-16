@@ -179,7 +179,14 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 	if strings.Contains(pointerdownBlock, `closeMobileDrawer()`) || strings.Contains(pointerdownBlock, `sidebarToggle.checked = false`) {
 		t.Fatal("sidebar must not close the mobile drawer on pointerdown before the click/HTMX request can fire")
 	}
+	if strings.Contains(pointerdownBlock, `cancelChatContentRenders`) {
+		t.Fatal("sidebar pointerdown must not cancel transcript rendering before navigation is committed")
+	}
 	beforeRequestBlock := html[beforeRequestStart:beforeSendStart]
+	if !strings.Contains(beforeRequestBlock, `closest('[hx-target="#main-content"]')`) ||
+		!strings.Contains(beforeRequestBlock, `if (window.cancelChatContentRenders) window.cancelChatContentRenders()`) {
+		t.Fatal("all committed HTMX main-content navigation must cancel obsolete transcript renders")
+	}
 	if strings.Contains(beforeRequestBlock, `closeMobileDrawer();`) && strings.Contains(beforeRequestBlock, `window.location.pathname !== navBase`) {
 		t.Fatal("sidebar must not close the mobile drawer in the real-navigation htmx:beforeRequest path before HTMX sends the request")
 	}

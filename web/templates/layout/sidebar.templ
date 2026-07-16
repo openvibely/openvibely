@@ -277,7 +277,6 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						var navBase = link.getAttribute('data-nav-base');
 						if (window.location.pathname === navBase) return;
 						window._sidebarNavigating = true;
-						if (window.cancelChatContentRenders) window.cancelChatContentRenders();
 						// Safety: clear flag if navigation doesn't complete within 3s
 						// (e.g., drag-off, cancelled click, or network failure)
 						clearTimeout(window._sidebarNavTimeout);
@@ -288,6 +287,10 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 					document.body.addEventListener('htmx:beforeRequest', function(event) {
 						var elt = event.detail.elt;
+						var mainContentNav = elt && elt.closest ? elt.closest('[hx-target="#main-content"]') : null;
+						if (mainContentNav && !(elt && elt.hasAttribute('data-nav-base'))) {
+							if (window.cancelChatContentRenders) window.cancelChatContentRenders();
+						}
 						if (elt && elt.hasAttribute('data-nav-base')) {
 							var navBase = elt.getAttribute('data-nav-base');
 							if (window.location.pathname === navBase) {
