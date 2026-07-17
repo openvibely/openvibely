@@ -2,8 +2,8 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-07-16
-source: task_audit
+updated: 2026-07-17
+source: task_followup
 source_id: 22989609f707f44e0c687dc1babfef8c
 confidence: high
 title: Alerts and Actionable Notifications
@@ -21,9 +21,10 @@ Authorization, concurrency, and runtime facts:
 - Scheduled execution context uses persisted `task.ProjectID`, not process-global or current UI project state. A supplied `project_id` is only an equality assertion and is rejected when it differs from the caller's authorized project.
 - `create_alert` preserves the legacy operational-alert contract: title is required, type defaults to `custom`, and message, severity, operational type, and same-project `task_id` remain optional. Operational alerts use `decision=not_required` and `processing=not_applicable` rather than entering approval workflow.
 - `create_notification` is the generic actionable-notification tool. It creates a pending project-scoped notification, binds source-task identity from the persisted caller task, accepts structured metadata, and supports project-scoped idempotency keys.
-- Initial tasks, scheduled tasks, ordinary task-thread follow-ups, Slack, Telegram, Discord, and Email expose `create_notification`. Task-thread definitions and capability summaries include it by default, and dispatch derives the project and trusted source-task identity from the persisted follow-up or channel task context.
+- Initial tasks, scheduled tasks, ordinary task-thread follow-ups, ordinary web/API Chat, Slack, Telegram, Discord, and Email expose `create_notification` when the selected provider/auth path supports runtime tools. Task-thread definitions and capability summaries include it by default, and dispatch derives the project and trusted source-task identity from the persisted follow-up, Chat backing task, or channel task context.
+- Ordinary Chat exposes the full notification lifecycle in Orchestrate mode and uses each turn's persisted backing Chat task for trusted source/claimant identity. Plan mode exposes only read operations such as `list_alerts` and `get_alert`; notification mutations are blocked. Runtime-tool-incapable provider/auth paths receive none of these tools and have no bracket-marker fallback.
 - The structured runtime surface also covers stable filtered/paginated listing, detail, atomic claim, atomic implementation-task creation/linkage, explicit linkage, processing completion/failure, and claim release/retry.
-- Claims are lease-based and atomic. Stale leases and failed attempts can be recovered. Persisted linkage and atomic notification-to-Backlog-task creation prevent duplicate implementation tasks across crashes, retries, and competing scans.
+- Claims are lease-based and atomic. Stale leases and failed attempts can be recovered. `create_alert_implementation_task` requires a non-empty title and prompt and a notification currently claimed by the persisted caller task; out-of-range priority defaults to 2. In one SQLite `BEGIN IMMEDIATE` transaction it either returns the already-linked task or creates a same-project `backlog`/`pending` task with `created_via=system_agent`, stores its ID on the notification, changes processing to `implementation_task_linked`, and clears claim expiry. It does not start the task, mark processing complete, merge, release, or deploy. This atomic persisted linkage prevents duplicates across crashes, retries, and competing scans.
 - Slack, Telegram, and Discord first-turn channel runtimes are constructed only after the channel Chat task is persisted, so channel-priority lifecycle handlers receive that task ID as trusted caller/claimant identity. Email uses the generic executor with the persisted Chat task. Channel notification creation therefore records trusted source-task linkage.
 - All alert lifecycle mutations publish the existing project-scoped alert invalidation event, including claim, release, explicit linkage, atomic task creation, completion, failure, read, and delete operations.
 
