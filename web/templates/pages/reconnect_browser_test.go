@@ -95,7 +95,17 @@ window.htmx = {
   ajax: function(method, url, options) {
     options = options || {};
     window.__ajaxCalls.push({method: method, url: url, options: options});
-    if (!options.target || String(url).indexOf('composer-action') !== -1 || String(url).indexOf('pending-inputs') !== -1) return Promise.resolve(true);
+    if (String(url).indexOf('composer-action') !== -1) {
+      if (window.__composerActionHTML && options.target) {
+        var actionTarget = typeof options.target === 'string' ? document.querySelector(options.target) : options.target;
+        var actionHolder = document.createElement('template');
+        actionHolder.innerHTML = window.__composerActionHTML;
+        var nextAction = actionTarget ? actionHolder.content.querySelector('#' + actionTarget.id) : null;
+        if (actionTarget && nextAction) actionTarget.replaceWith(nextAction.cloneNode(true));
+      }
+      return Promise.resolve(true);
+    }
+    if (!options.target || String(url).indexOf('pending-inputs') !== -1) return Promise.resolve(true);
     var target = typeof options.target === 'string' ? document.querySelector(options.target) : options.target;
     if (!target) return Promise.resolve(false);
     var html = window.__snapshotHTML();
@@ -349,6 +359,11 @@ func TestChatReconnectDiscoversMissedActiveExecutionAndAttachesStream(t *testing
 	running := models.Execution{ID: "chat-missed-active", Status: models.ExecRunning, PromptSent: "missed start", Output: "partial"}
 	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-missed-active", nil, nil, false, false, 30))
 	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-missed-active", nil, nil, false, false, 30))
+	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-missed-active", true))
+	stopActionJSON, err := json.Marshal(stopAction)
+	if err != nil {
+		t.Fatalf("marshal missed-active Chat composer action: %v", err)
+	}
 	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML, "running": runningHTML})
 
 	testScript := `<main id="reconnect-result"></main><script>
@@ -359,6 +374,9 @@ window.addEventListener('DOMContentLoaded', async function() {
     await window.__wait(300);
     window.renderStreamingContent = function(el, text) { el.textContent = text; if (window.setChatRawContent) window.setChatRawContent(el, text); else el.setAttribute('data-raw-content', text); return Promise.resolve(true); };
     window.renderLiveChatContent = window.renderStreamingContent;
+    var initialAction = document.querySelector('#chat-form-primary-action button');
+    if (!initialAction || initialAction.getAttribute('aria-label') !== 'Send message') fail('missed-active Chat fixture did not start with Send');
+    window.__composerActionHTML = ` + string(stopActionJSON) + `;
     if (window.__streamFor('chat-missed-active')) fail('missed active Chat stream existed before reconciliation');
 
     window.__hideManagedTab();
@@ -369,6 +387,8 @@ window.addEventListener('DOMContentLoaded', async function() {
 
     var pair = document.getElementById('chat-execution-chat-missed-active');
     if (!pair || pair.getAttribute('data-exec-status') !== 'running') fail('reconnect did not morph in the authoritative running Chat execution');
+    var recoveredAction = document.querySelector('#chat-form-primary-action button');
+    if (!recoveredAction || recoveredAction.getAttribute('aria-label') !== 'Stop response') fail('recovered active Chat execution did not change Send to Stop');
     var stream = window.__streamFor('chat-missed-active');
     if (!stream) fail('recovered active Chat execution did not attach a per-execution stream: init=' + typeof window._initThreadStreaming + ' resumes=' + document.querySelectorAll('[data-streaming-resume="true"]').length + ' connected=' + !!document.getElementById('streaming-message-chat-missed-active')._sseConnected + ' sources=' + window.__eventSources.map(function(source) { return {url: source.url, closed: source.closed, onmessage: typeof source.onmessage}; }).map(JSON.stringify).join(','));
     if (stream.url.indexOf('offset=7') === -1) fail('recovered Chat stream did not resume from persisted UTF-8 offset: ' + stream.url);
@@ -392,6 +412,99 @@ window.addEventListener('DOMContentLoaded', async function() {
 });
 </script>`
 	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
+}
+
+func runChatExecutionStreamOnlyTerminalComposerCase(t *testing.T, terminalStatus models.ExecutionStatus) {
+	t.Helper()
+	execID := "chat-stream-only-" + string(terminalStatus)
+	running := models.Execution{ID: execID, Status: models.ExecRunning, PromptSent: "stream-only terminal"}
+	terminal := running
+	terminal.Status = terminalStatus
+	terminal.Output = "terminal output"
+	if terminalStatus == models.ExecFailed {
+		terminal.ErrorMessage = "provider failed"
+	}
+	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-stream-only", nil, nil, false, false, 30))
+	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-stream-only", nil, nil, false, false, 30))
+	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{terminal}, "project-stream-only", nil, nil, false, false, 30))
+	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", true))
+	sendAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", false))
+	stopActionJSON, err := json.Marshal(stopAction)
+	if err != nil {
+		t.Fatalf("marshal stream-only Stop action: %v", err)
+	}
+	sendActionJSON, err := json.Marshal(sendAction)
+	if err != nil {
+		t.Fatalf("marshal stream-only Send action: %v", err)
+	}
+	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML, "running": runningHTML, "terminal": terminalHTML})
+	streamEvent := "done"
+	streamData := string(terminalStatus)
+	if terminalStatus == models.ExecFailed {
+		streamEvent = "error"
+		streamData = "provider failed"
+	}
+
+	testScript := `<main id="reconnect-result"></main><script>
+window.addEventListener('DOMContentLoaded', async function() {
+  var result = document.getElementById('reconnect-result');
+  function fail(message) { throw new Error(message); }
+  try {
+    await window.__wait(300);
+    window.renderStreamingContent = function(el, text) { el.textContent = text; if (window.setChatRawContent) window.setChatRawContent(el, text); else el.setAttribute('data-raw-content', text); return Promise.resolve(true); };
+    window.renderLiveChatContent = window.renderStreamingContent;
+    var draft = document.getElementById('message-input');
+    var session = document.getElementById('chat-form-session-id');
+    draft.value = 'preserved stream-only draft';
+    session.value = 'preserved-stream-only-session';
+    window.__phase = 'running';
+    window.__composerActionHTML = ` + string(stopActionJSON) + `;
+    window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: {type: 'chat_new_message', project_id: 'project-stream-only', exec_id: '` + execID + `', message: 'stream-only terminal', source: 'api'}}));
+    await window.__wait(100);
+    var pair = document.getElementById('chat-execution-` + execID + `');
+    var stream = window.__streamFor('` + execID + `');
+    var stopButton = document.querySelector('#chat-form-primary-action button');
+    if (!pair || !stream) fail('stream-only terminal fixture did not attach its execution stream');
+    if (!stopButton || stopButton.getAttribute('aria-label') !== 'Stop response') fail('normal live Chat start did not change Send to Stop');
+    if (document.getElementById('message-input') !== draft || draft.value !== 'preserved stream-only draft') fail('live start replaced or cleared Chat draft');
+    if (document.getElementById('chat-form-session-id') !== session || session.value !== 'preserved-stream-only-session') fail('live start replaced or cleared Chat attachment session');
+
+    window.__phase = 'terminal';
+    window.__composerActionHTML = ` + string(sendActionJSON) + `;
+    stream.emit('message', 'terminal output');
+    stream.emit('` + streamEvent + `', '` + streamData + `');
+    await window.__wait(180);
+    var sendButton = document.querySelector('#chat-form-primary-action button');
+    if (!sendButton || sendButton.getAttribute('aria-label') !== 'Send message') fail('per-execution-only ` + string(terminalStatus) + ` terminal did not change Stop to Send');
+    if (document.getElementById('chat-execution-` + execID + `') !== pair) fail('stream-only terminal replaced the Chat execution node');
+    if (pair.getAttribute('data-exec-status') !== '` + string(terminalStatus) + `') fail('stream-only terminal status was not authoritative: ' + pair.getAttribute('data-exec-status'));
+    var expectedHolder = document.createElement('template');
+    expectedHolder.innerHTML = window.__snapshots.terminal;
+    var expectedRevision = expectedHolder.content.querySelector('#chat-page-root').getAttribute('data-chat-revision');
+    if (document.getElementById('chat-page-root').getAttribute('data-chat-revision') !== expectedRevision) fail('stream-only terminal revision stayed stale');
+    var swapsBeforeRefocus = window.__swaps.length;
+    window.__hiddenToVisible();
+    await window.__wait(100);
+    if (document.getElementById('chat-execution-` + execID + `') !== pair) fail('stream-only terminal refocus replaced the Chat execution node');
+    if (window.__swaps.slice(swapsBeforeRefocus).some(function(swap) { return swap.target === 'chat-messages'; })) fail('stream-only terminal no-op refocus morphed the transcript');
+    if (document.getElementById('message-input') !== draft || draft.value !== 'preserved stream-only draft') fail('stream-only terminal lost Chat draft');
+    if (document.getElementById('chat-form-session-id') !== session || session.value !== 'preserved-stream-only-session') fail('stream-only terminal lost Chat attachment session');
+    result.setAttribute('data-test-result', 'pass');
+  } catch (error) {
+    result.setAttribute('data-test-result', 'fail');
+    result.setAttribute('data-test-error', String(error && error.stack || error));
+  }
+});
+</script>`
+	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
+}
+
+func TestChatExecutionStreamOnlyTerminalRefreshesComposerAction(t *testing.T) {
+	for _, status := range []models.ExecutionStatus{models.ExecCompleted, models.ExecFailed, models.ExecCancelled} {
+		t.Run(string(status), func(t *testing.T) {
+			runChatExecutionStreamOnlyTerminalComposerCase(t, status)
+		})
+	}
 }
 
 func TestTaskThreadQueuedPromotionRefreshesComposerActionToStop(t *testing.T) {

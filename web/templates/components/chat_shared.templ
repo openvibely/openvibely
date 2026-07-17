@@ -694,10 +694,12 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							if (isThread) {
 								showThreadTerminalStatus(terminalStatus);
 									if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
-							} else {
-								if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
-								// Always evaluate plan-completion first so prompt visibility updates
-							// even if post-render transforms throw.
+								} else {
+									window._chatStreamInProgress = false;
+									if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+									if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
+									// Always evaluate plan-completion first so prompt visibility updates
+									// even if post-render transforms throw.
 							if (window.handlePlanModeCompletion) {
 								window.handlePlanModeCompletion(textBuffer);
 							}
@@ -770,9 +772,10 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								// Clear streaming flag and re-evaluate plan prompt on error.
 								// The evaluator scans DOM for latest completed bubble; an error
 								// bubble without <proposed_plan> correctly hides the prompt.
-								window._chatStreamInProgress = false;
-								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-								if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
+									window._chatStreamInProgress = false;
+									if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+									if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+									if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
 							}
 						});
 
@@ -1167,6 +1170,8 @@ templ ChatStreamingResumeInitScript() {
 						if (bubble && window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
 						if (bubble && window.cleanBubbleContent) window.cleanBubbleContent(bubble);
 						if (window.handlePlanModeCompletion) window.handlePlanModeCompletion(cumulativeContent);
+						window._chatStreamInProgress = false;
+						if (window.refreshChatComposerAction) window.refreshChatComposerAction();
 						if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
 						if (!tracker || tracker.shouldAutoScroll()) {
 							requestAnimationFrame(function() {
@@ -1213,6 +1218,7 @@ templ ChatStreamingResumeInitScript() {
 						if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
 					} else {
 						window._chatStreamInProgress = false;
+						if (window.refreshChatComposerAction) window.refreshChatComposerAction();
 						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 						if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
 					}

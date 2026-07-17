@@ -212,6 +212,16 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					window._chatEventSources = [];
 					window._chatEventSourceByExec = {};
 				};
+				window.refreshChatComposerAction = function() {
+					var root = document.getElementById('chat-page-root');
+					var target = document.getElementById('chat-form-primary-action');
+					var pid = root ? (root.getAttribute('data-project-id') || '') : '';
+					if (!pid || !target || typeof htmx === 'undefined') return Promise.resolve(false);
+					return htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {
+						target: '#chat-form-primary-action',
+						swap: 'outerHTML'
+					});
+				};
 				var draftKey = 'chat-draft-' + projectId;
 				var messageInput = document.getElementById('message-input');
 				var chatForm = document.getElementById('chat-form');
@@ -826,13 +836,15 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						} catch (err) {
 							console.error('[chat] post-stream transform failed:', err);
 						}
-						if (!tracker || tracker.shouldAutoScroll()) {
-							requestAnimationFrame(function() {
+							if (!tracker || tracker.shouldAutoScroll()) {
+								requestAnimationFrame(function() {
 									if (chatMessages && window.chatAutoScroll) {
 										window.chatAutoScroll.scrollToBottom(chatMessages, true);
 									}
 								});
 							}
+							window._chatStreamInProgress = false;
+							if (window.refreshChatComposerAction) window.refreshChatComposerAction();
 							window.syncChatTranscriptRevision(execId);
 						});
 
@@ -869,6 +881,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							// Clear streaming flag, synchronize the authoritative failed snapshot,
 							// and re-evaluate plan prompt on error.
 							window._chatStreamInProgress = false;
+							if (window.refreshChatComposerAction) window.refreshChatComposerAction();
 							window.syncChatTranscriptRevision(execId);
 							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
 						});
@@ -1014,6 +1027,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									swap: 'morph:outerHTML'
 								}).then(function() {
 									if (window._initThreadStreaming) window._initThreadStreaming();
+									if (window.refreshChatComposerAction) window.refreshChatComposerAction();
 									var currentRoot = document.getElementById('chat-page-root');
 									if (currentRoot && currentRoot.getAttribute('data-project-id') === pid) currentRoot.setAttribute('data-chat-revision', nextRevision);
 									if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
@@ -1186,6 +1200,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									pair.appendChild(createUserBubble(data.message, data.source));
 									pair.appendChild(createStreamingBubble(data.exec_id));
 									chatMessages.appendChild(pair);
+									if (window.refreshChatComposerAction) window.refreshChatComposerAction();
 									window.syncChatTranscriptRevision(data.exec_id);
 									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 								}
