@@ -225,7 +225,7 @@ func TestChatBubbleStreaming_CancelledDoneWithoutOutputClearsThinkingIndicator(t
 
 func TestInitThreadStreamingScript_CancelledDoneWithoutOutputClearsThinkingIndicator(t *testing.T) {
 	var buf bytes.Buffer
-	err := _initThreadStreamingScript().Render(context.Background(), &buf)
+	err := ChatStreamingResumeInitScript().Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render _initThreadStreamingScript: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestChatBubbleStreaming_HidesThinkingWrapperNotMixtureProgress(t *testing.T
 
 func TestChatBubbleStreamingResume_HidesThinkingWrapperNotMixtureProgress(t *testing.T) {
 	var buf bytes.Buffer
-	if err := _initThreadStreamingScript().Render(context.Background(), &buf); err != nil {
+	if err := ChatStreamingResumeInitScript().Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render init thread streaming script: %v", err)
 	}
 	html := buf.String()
@@ -320,7 +320,7 @@ func TestChatBubbleStreaming_NeverTargetsTaskDetailContent(t *testing.T) {
 // handler also avoids fragment refreshes; live events append promoted turns.
 func TestInitThreadStreamingScript_CompletionStaysSmooth(t *testing.T) {
 	var buf bytes.Buffer
-	err := _initThreadStreamingScript().Render(context.Background(), &buf)
+	err := ChatStreamingResumeInitScript().Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render _initThreadStreamingScript: %v", err)
 	}
@@ -3340,7 +3340,7 @@ func TestChatBubbleStreamingResume_SeedsRenderedContentAndOffset(t *testing.T) {
 	}
 
 	buf.Reset()
-	if err := _initThreadStreamingScript().Render(context.Background(), &buf); err != nil {
+	if err := ChatStreamingResumeInitScript().Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render init thread streaming script: %v", err)
 	}
 	script := buf.String()
@@ -4009,7 +4009,7 @@ func TestChatBubbleStreaming_ThreadErrorDoesNotEvaluatePlanPrompt(t *testing.T) 
 
 func TestInitThreadStreaming_FindsStreamingDotsByID(t *testing.T) {
 	var buf bytes.Buffer
-	err := _initThreadStreamingScript().Render(context.Background(), &buf)
+	err := ChatStreamingResumeInitScript().Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render _initThreadStreamingScript: %v", err)
 	}
@@ -4119,7 +4119,7 @@ func TestStreamingRecoversFromStaleScrollTracker(t *testing.T) {
 	if err := ChatBubbleStreaming("Assistant", "exec-id", "chat-messages", "", false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render new-message streaming script: %v", err)
 	}
-	if err := _initThreadStreamingScript().Render(context.Background(), &buf); err != nil {
+	if err := ChatStreamingResumeInitScript().Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render thread streaming script: %v", err)
 	}
 	content := buf.String()
@@ -4138,7 +4138,7 @@ func TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth(t *testing.T) {
 	if err := ChatBubbleStreaming("Assistant", "exec-id", "chat-messages", "", false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render new-message streaming script: %v", err)
 	}
-	if err := _initThreadStreamingScript().Render(context.Background(), &buf); err != nil {
+	if err := ChatStreamingResumeInitScript().Render(context.Background(), &buf); err != nil {
 		t.Fatalf("Failed to render thread streaming script: %v", err)
 	}
 	content := buf.String()

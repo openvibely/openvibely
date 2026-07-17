@@ -3732,8 +3732,11 @@ func TestHandler_Chat_LiveStreamingUsesRenderStreamingContent(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 
-	onMsgIdx := strings.Index(body, "eventSource.onmessage = function(event)")
-	require.NotEqual(t, -1, onMsgIdx, "live streaming onmessage handler must exist")
+	renderHelperIdx := strings.Index(body, "function renderBufferedOutput(force)")
+	require.NotEqual(t, -1, renderHelperIdx, "live streaming should define a batched render helper")
+	onMsgOffset := strings.Index(body[renderHelperIdx:], "eventSource.onmessage = function(event)")
+	require.NotEqual(t, -1, onMsgOffset, "live streaming onmessage handler must exist")
+	onMsgIdx := renderHelperIdx + onMsgOffset
 	onMsgBody := body[onMsgIdx : onMsgIdx+2400]
 
 	assert.Contains(t, body, "function renderBufferedOutput(force)",
@@ -3773,8 +3776,11 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamDoneEvaluatesBeforeTransforms(t
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 
-	doneIdx := strings.Index(body, "eventSource.addEventListener('done', function(event)")
-	require.NotEqual(t, -1, doneIdx, "stream done handler must exist")
+	renderHelperIdx := strings.Index(body, "function renderBufferedOutput(force)")
+	require.NotEqual(t, -1, renderHelperIdx, "fresh stream render helper must exist")
+	doneOffset := strings.Index(body[renderHelperIdx:], "eventSource.addEventListener('done', function(event)")
+	require.NotEqual(t, -1, doneOffset, "stream done handler must exist")
+	doneIdx := renderHelperIdx + doneOffset
 	doneEnd := strings.Index(body[doneIdx:], "eventSource.addEventListener('error'")
 	require.Greater(t, doneEnd, 0, "stream done handler boundary must exist")
 	doneBody := body[doneIdx : doneIdx+doneEnd]

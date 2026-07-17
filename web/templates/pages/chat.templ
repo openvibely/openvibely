@@ -154,23 +154,26 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: chatQueuedSteerEndpoint,
 		})
-		<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
-		@components.ChatAutoScrollScript()
-		<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
-		<script>
+			<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
+			@components.ChatAutoScrollScript()
+			@components.ChatStreamingResumeInitScript()
+			<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
+			<script>
 				// Scroll to bottom on page load to show latest messages
 				setTimeout(function() {
 					var chatMessages = document.getElementById('chat-messages');
 					if (chatMessages) {
 						if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
+						if (window._initThreadStreaming) window._initThreadStreaming();
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 						if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
 						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
 						if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();
 					}
 				}, 0);
-			// Draft message persistence (scoped per project)
-			(function() {
+
+				// Draft message persistence (scoped per project)
+				(function() {
 				var chatRoot = document.getElementById('chat-page-root');
 				if (!chatRoot) return;
 				var projectId = chatRoot.getAttribute('data-project-id');
@@ -514,22 +517,23 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						chatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {
 							if (window._chatKnownExecIds) window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
 						});
-							if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
-							// Re-attach tracker to possibly new element before binding image load handlers.
-							if (chatMessages !== (window._chatPageTracker && window._chatPageTracker.element)) {
-								if (window.ChatScrollTracker) {
-									if (window._chatPageTracker) window._chatPageTracker.destroy();
-									window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
-								}
+						if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
+						if (window._initThreadStreaming) window._initThreadStreaming();
+						// Re-attach tracker to possibly new element before binding image load handlers.
+						if (chatMessages !== (window._chatPageTracker && window._chatPageTracker.element)) {
+							if (window.ChatScrollTracker) {
+								if (window._chatPageTracker) window._chatPageTracker.destroy();
+								window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
 							}
-							if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
-							// During an active stream, this swap can carry partial persisted output.
-							if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {
-								window.maybeShowPlanCompletionPromptFromHistory();
-							}
-							// Auto-scroll after swap: a deliberate send pins the next render to
-							// bottom even when attachment markup changes height; otherwise keep
-							// respecting explicit user scroll-up intent.
+						}
+						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
+						// During an active stream, this swap can carry partial persisted output.
+						if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {
+							window.maybeShowPlanCompletionPromptFromHistory();
+						}
+						// Auto-scroll after swap: a deliberate send pins the next render to
+						// bottom even when attachment markup changes height; otherwise keep
+						// respecting explicit user scroll-up intent.
 						var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;
 						var tracker = window._chatPageTracker;
 						if (sentByUser || !tracker || tracker.shouldAutoScroll()) {
@@ -1009,6 +1013,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									select: '#chat-messages',
 									swap: 'morph:outerHTML'
 								}).then(function() {
+									if (window._initThreadStreaming) window._initThreadStreaming();
 									var currentRoot = document.getElementById('chat-page-root');
 									if (currentRoot && currentRoot.getAttribute('data-project-id') === pid) currentRoot.setAttribute('data-chat-revision', nextRevision);
 									if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();

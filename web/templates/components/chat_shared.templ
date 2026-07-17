@@ -809,8 +809,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 }
 
 // ChatBubbleStreamingResume renders a chat message that reconnects to an in-progress SSE stream.
-// The EventSource is initialized by _initThreadStreaming() (called from TaskThreadView's
-// afterSwap handler) since inline scripts don't re-execute after morph:outerHTML swaps.
+// The EventSource is initialized by _initThreadStreaming() after initial hydration or an
+// authoritative Chat/Task Thread morph, since inline scripts do not re-execute after morph swaps.
 // Content is stored in data-raw-content (not as text content) so it renders formatted
 // immediately via the inline script, matching ChatBubble's pattern. This prevents
 // raw/unformatted text flash on hard refresh.
@@ -872,11 +872,11 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 	</div>
 }
 
-// _initThreadStreamingScript emits the global _initThreadStreaming function.
+// ChatStreamingResumeInitScript installs the shared resume-stream initializer.
 // It finds [data-streaming-resume] containers without an active EventSource
 // and connects them to the SSE endpoint. Called on initial page load and
-// after each morph:outerHTML swap from TaskThreadView's afterSwap handler.
-templ _initThreadStreamingScript() {
+// after each authoritative transcript morph.
+templ ChatStreamingResumeInitScript() {
 	<script type="text/javascript">
 		window._initThreadStreaming = function() {
 			var containers = document.querySelectorAll('[data-streaming-resume="true"]');
@@ -1093,23 +1093,36 @@ templ _initThreadStreamingScript() {
 						var idx = window._threadEventSources.indexOf(es);
 						if (idx >= 0) window._threadEventSources.splice(idx, 1);
 					}
-				function scheduleResumeExecutionStreamRetry() {
-					if (streamRetryScheduled) return true;
-					if (streamRetryCount >= 5) return false;
-							streamRetryScheduled = true;
-							streamRetryCount++;
-							setTimeout(function() {
-								streamRetryScheduled = false;
-						connectResumeExecutionStream();
-					}, 150 * streamRetryCount);
-					return true;
+					function registerResumeEventSource(es) {
+						if (!es) return;
+						if (pauseTarget) {
+							if (!window._threadEventSources) window._threadEventSources = [];
+							window._threadEventSources.push(es);
+						} else {
+							window._chatStreamInProgress = true;
+							if (window.registerChatStreamEventSource) window.registerChatStreamEventSource(execId, es);
 						}
-						var streamTerminalHandled = false;
-						function connectResumeExecutionStream() {
+					}
+					function removeResumeEventSource(es) {
+						if (pauseTarget) removeThreadEventSource(es);
+						else if (window.unregisterChatStreamEventSource) window.unregisterChatStreamEventSource(execId, es);
+					}
+					function scheduleResumeExecutionStreamRetry() {
+						if (streamRetryScheduled) return true;
+						if (streamRetryCount >= 5) return false;
+						streamRetryScheduled = true;
+						streamRetryCount++;
+						setTimeout(function() {
+							streamRetryScheduled = false;
+							connectResumeExecutionStream();
+						}, 150 * streamRetryCount);
+						return true;
+					}
+
+					var streamTerminalHandled = false;
+					function connectResumeExecutionStream() {
 							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
-						// Track EventSource globally so sidebar navigation can close it
-						if (!window._threadEventSources) window._threadEventSources = [];
-					window._threadEventSources.push(eventSource);
+							registerResumeEventSource(eventSource);
 
 						eventSource.onmessage = function(event) {
 							cumulativeContent += event.data;
@@ -1142,10 +1155,10 @@ templ _initThreadStreamingScript() {
 										completedPair.setAttribute('hx-preserve', 'true');
 									}
 									if (streamingDots) streamingDots.classList.add('hidden');
-					eventSource.close();
-					removeThreadEventSource(eventSource);
-					window._taskThreadStreamingActive = false;
-						if (pauseTarget) {
+									eventSource.close();
+									removeResumeEventSource(eventSource);
+									window._taskThreadStreamingActive = false;
+									if (pauseTarget) {
 							showThreadTerminalStatus(terminalStatus);
 									if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
 					} else {
@@ -1171,12 +1184,12 @@ templ _initThreadStreamingScript() {
 					eventSource.addEventListener('error', function(event) {
 					var retryableEarlyError = cumulativeContent === '' && event.data === 'execution not found';
 						if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
-					eventSource.close();
-					removeThreadEventSource(eventSource);
-						if (retryableEarlyError && scheduleResumeExecutionStreamRetry()) {
-							return;
-						}
-						if (streamTerminalHandled) return;
+							eventSource.close();
+							removeResumeEventSource(eventSource);
+							if (retryableEarlyError && scheduleResumeExecutionStreamRetry()) {
+								return;
+							}
+							if (streamTerminalHandled) return;
 						streamTerminalHandled = true;
 						if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
 							cumulativeContent = String(container._authoritativeTerminalContent || '');
@@ -1207,11 +1220,11 @@ templ _initThreadStreamingScript() {
 
 					eventSource.onerror = function(error) {
 						console.error('EventSource failed:', error);
-						eventSource.close();
-						removeThreadEventSource(eventSource);
-				if (cumulativeContent === '' && scheduleResumeExecutionStreamRetry()) {
-					return;
-					}
+							eventSource.close();
+							removeResumeEventSource(eventSource);
+							if (cumulativeContent === '' && scheduleResumeExecutionStreamRetry()) {
+								return;
+							}
 					if (streamTerminalHandled) return;
 					streamTerminalHandled = true;
 					flushCumulativeContent();

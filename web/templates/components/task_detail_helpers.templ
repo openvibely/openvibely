@@ -378,7 +378,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			<div id={ "task-thread-runtime-" + task.ID } class="contents">
 			<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
 			@ChatAutoScrollScript()
-			@_initThreadStreamingScript()
+			@ChatStreamingResumeInitScript()
 			@TaskThreadLiveEventsScript(task.ID)
 			<script>
 			function _taskThreadTaskId() {
@@ -1070,46 +1070,49 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							delete window._pendingTaskThreadLiveEvents[taskId];
 							ensureStreamingFragment(data);
 						}
-							function ensureStreamingFragment(data, attempt) {
-								attempt = attempt || 0;
-								if (!currentTaskThreadView()) return;
-								var messages = document.getElementById('task-thread-messages');
-								if (!data || data.task_id !== taskId || !data.exec_id) return;							if (!messages) {
+						function ensureStreamingFragment(data, attempt) {
+							attempt = attempt || 0;
+							if (!currentTaskThreadView()) return;
+							var messages = document.getElementById('task-thread-messages');
+							if (!data || data.task_id !== taskId || !data.exec_id) return;
+							if (!messages) {
 								rememberPendingExecutionEvent(data);
 								return;
 							}
 							if (document.querySelector('[data-exec-id="' + data.exec_id + '"]')) {
-							delete pendingFragmentExecs[data.exec_id];
-							if (window._initThreadStreaming) window._initThreadStreaming();
-							return;
+								delete pendingFragmentExecs[data.exec_id];
+								if (window._initThreadStreaming) window._initThreadStreaming();
+								refreshThreadComposerAction();
+								return;
+							}
+							removePendingRow(data.pending_input_id);
+							var terminal = document.getElementById('task-thread-terminal-status');
+							if (terminal) terminal.remove();
+							if (typeof htmx === 'undefined') return;
+							if (pendingFragmentExecs[data.exec_id] && attempt === 0) return;
+							pendingFragmentExecs[data.exec_id] = true;
+							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/executions/' + encodeURIComponent(data.exec_id) + '/fragment', {
+								target: '#task-thread-messages',
+								swap: 'beforeend'
+							}).then(function() {
+								delete pendingFragmentExecs[data.exec_id];
+								var view = document.getElementById('task-thread-view');
+								if (view) view.setAttribute('data-task-active', 'true');
+								if (window._initThreadStreaming) window._initThreadStreaming();
+								refreshThreadComposerAction();
+								if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);
+								if (window.htmx) htmx.process(messages);
+								var tracker = window._taskThreadPageTracker;
+								if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
+									window.chatAutoScroll.scrollToBottom(messages, true);
+								}
+							}).catch(function() {
+								delete pendingFragmentExecs[data.exec_id];
+								if (attempt < 5) {
+									setTimeout(function() { ensureStreamingFragment(data, attempt + 1); }, 150 * (attempt + 1));
+								}
+							});
 						}
-						removePendingRow(data.pending_input_id);
-						var terminal = document.getElementById('task-thread-terminal-status');
-						if (terminal) terminal.remove();
-						if (typeof htmx === 'undefined') return;
-						if (pendingFragmentExecs[data.exec_id] && attempt === 0) return;
-						pendingFragmentExecs[data.exec_id] = true;
-						htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/executions/' + encodeURIComponent(data.exec_id) + '/fragment', {
-							target: '#task-thread-messages',
-							swap: 'beforeend'
-						}).then(function() {
-							delete pendingFragmentExecs[data.exec_id];
-							var view = document.getElementById('task-thread-view');
-							if (view) view.setAttribute('data-task-active', 'true');
-							if (window._initThreadStreaming) window._initThreadStreaming();
-							if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);
-							if (window.htmx) htmx.process(messages);
-							var tracker = window._taskThreadPageTracker;
-							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
-								window.chatAutoScroll.scrollToBottom(messages, true);
-							}
-						}).catch(function() {
-							delete pendingFragmentExecs[data.exec_id];
-							if (attempt < 5) {
-								setTimeout(function() { ensureStreamingFragment(data, attempt + 1); }, 150 * (attempt + 1));
-							}
-						});
-					}
 						var chatHandler = function(event) {
 							var data = event.detail || {};
 							if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;

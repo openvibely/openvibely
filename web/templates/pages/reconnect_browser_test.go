@@ -345,6 +345,133 @@ window.addEventListener('DOMContentLoaded', async function() {
 	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
 }
 
+func TestChatReconnectDiscoversMissedActiveExecutionAndAttachesStream(t *testing.T) {
+	running := models.Execution{ID: "chat-missed-active", Status: models.ExecRunning, PromptSent: "missed start", Output: "partial"}
+	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-missed-active", nil, nil, false, false, 30))
+	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-missed-active", nil, nil, false, false, 30))
+	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML, "running": runningHTML})
+
+	testScript := `<main id="reconnect-result"></main><script>
+window.addEventListener('DOMContentLoaded', async function() {
+  var result = document.getElementById('reconnect-result');
+  function fail(message) { throw new Error(message); }
+  try {
+    await window.__wait(300);
+    window.renderStreamingContent = function(el, text) { el.textContent = text; if (window.setChatRawContent) window.setChatRawContent(el, text); else el.setAttribute('data-raw-content', text); return Promise.resolve(true); };
+    window.renderLiveChatContent = window.renderStreamingContent;
+    if (window.__streamFor('chat-missed-active')) fail('missed active Chat stream existed before reconciliation');
+
+    window.__hideManagedTab();
+    window.__phase = 'running';
+    var transition = window.__showManagedTab();
+    if (!transition.paused || !transition.resumed) fail('missed-active Chat visibility transition did not reconnect');
+    await window.__wait(120);
+
+    var pair = document.getElementById('chat-execution-chat-missed-active');
+    if (!pair || pair.getAttribute('data-exec-status') !== 'running') fail('reconnect did not morph in the authoritative running Chat execution');
+    var stream = window.__streamFor('chat-missed-active');
+    if (!stream) fail('recovered active Chat execution did not attach a per-execution stream: init=' + typeof window._initThreadStreaming + ' resumes=' + document.querySelectorAll('[data-streaming-resume="true"]').length + ' connected=' + !!document.getElementById('streaming-message-chat-missed-active')._sseConnected + ' sources=' + window.__eventSources.map(function(source) { return {url: source.url, closed: source.closed, onmessage: typeof source.onmessage}; }).map(JSON.stringify).join(','));
+    if (stream.url.indexOf('offset=7') === -1) fail('recovered Chat stream did not resume from persisted UTF-8 offset: ' + stream.url);
+    if (window.__emitFor('chat-missed-active', 'message', ' missed') !== 1) fail('recovered Chat execution attached duplicate streams');
+    await window.__wait(60);
+    var output = document.getElementById('streaming-message-chat-missed-active');
+    var raw = output && (output.getAttribute('data-raw-content') || output.textContent || '');
+    if (!output || raw.indexOf('partial missed') === -1) fail('recovered Chat stream did not catch up missed output: ' + raw);
+    var swapsBeforeSecondReconnect = window.__swaps.length;
+    window.__hiddenToVisible();
+    await window.__wait(40);
+    if (document.getElementById('chat-execution-chat-missed-active') !== pair) fail('second active Chat reconnect replaced the recovered execution');
+    if (window.__emitFor('chat-missed-active', 'message', ' again') !== 1) fail('second active Chat reconnect duplicated or dropped the recovered stream');
+    var transcriptSwaps = window.__swaps.slice(swapsBeforeSecondReconnect).filter(function(swap) { return swap.target === 'chat-messages'; });
+    if (transcriptSwaps.length !== 0) fail('second active Chat reconnect morphed the current transcript');
+    result.setAttribute('data-test-result', 'pass');
+  } catch (error) {
+    result.setAttribute('data-test-result', 'fail');
+    result.setAttribute('data-test-error', String(error && error.stack || error));
+  }
+});
+</script>`
+	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
+}
+
+func TestTaskThreadQueuedPromotionRefreshesComposerActionToStop(t *testing.T) {
+	task := &models.Task{ID: "thread-promotion", ProjectID: "project-promotion", Status: models.StatusCompleted, Category: models.CategoryCompleted}
+	completed := models.Execution{ID: "thread-before-promotion", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "old", Output: "done"}
+	promoted := models.Execution{ID: "thread-promoted", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "queued next", IsFollowup: true}
+	initialHTML := renderReconnectComponent(t, components.TaskThreadView(task, []models.Execution{completed}, nil, nil, nil, nil, false, 30))
+	promotedFragment := renderReconnectComponent(t, components.TaskThreadFollowupResponse(promoted.PromptSent, promoted.ID, nil))
+	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", "/tasks/thread-promotion/cancel?composer_stop=1", true))
+	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML})
+	promotedJSON, err := json.Marshal(promotedFragment)
+	if err != nil {
+		t.Fatalf("marshal promoted fragment: %v", err)
+	}
+	stopActionJSON, err := json.Marshal(stopAction)
+	if err != nil {
+		t.Fatalf("marshal promoted composer action: %v", err)
+	}
+
+	testScript := `<main id="reconnect-result"></main><script>
+window.addEventListener('DOMContentLoaded', async function() {
+  var result = document.getElementById('reconnect-result');
+  function fail(message) { throw new Error(message); }
+  try {
+    await window.__wait(300);
+    window.renderStreamingContent = function(el, text) { el.textContent = text; if (window.setChatRawContent) window.setChatRawContent(el, text); else el.setAttribute('data-raw-content', text); return Promise.resolve(true); };
+    window.renderLiveChatContent = window.renderStreamingContent;
+    var originalAjax = window.htmx.ajax;
+    window.htmx.ajax = function(method, url, options) {
+      options = options || {};
+      if (String(url).indexOf('/thread/executions/thread-promoted/fragment') !== -1) {
+        window.__ajaxCalls.push({method: method, url: url, options: options});
+        var holder = document.createElement('template');
+        holder.innerHTML = ` + string(promotedJSON) + `;
+        var target = document.querySelector(options.target);
+        Array.prototype.slice.call(holder.content.children).forEach(function(node) {
+          var clone = node.cloneNode(true);
+          target.appendChild(clone);
+          clone.querySelectorAll('script').forEach(function(oldScript) {
+            var liveScript = document.createElement('script');
+            liveScript.textContent = oldScript.textContent;
+            oldScript.replaceWith(liveScript);
+          });
+        });
+        return Promise.resolve(true);
+      }
+      if (String(url).indexOf('/thread/composer-action') !== -1) {
+        window.__ajaxCalls.push({method: method, url: url, options: options});
+        var holder = document.createElement('template');
+        holder.innerHTML = ` + string(stopActionJSON) + `;
+        var next = holder.content.querySelector('#task-thread-form-primary-action');
+        var current = document.getElementById('task-thread-form-primary-action');
+        if (next && current) current.replaceWith(next.cloneNode(true));
+        return Promise.resolve(true);
+      }
+      return originalAjax(method, url, options);
+    };
+
+    var initialAction = document.getElementById('task-thread-form-primary-action');
+    if (!initialAction || !initialAction.querySelector('[aria-label="Send message"]')) fail('promotion fixture did not start with Send action');
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail: {type: 'task_thread_input_applied', task_id: 'thread-promotion', exec_id: 'thread-promoted', pending_input_id: 'queued-input'}}));
+    await window.__wait(120);
+
+    var pair = document.getElementById('chat-execution-thread-promoted');
+    if (!pair) fail('queued promotion did not append its authoritative execution fragment');
+    if (!window.__streamFor('thread-promoted')) fail('queued promotion did not attach its execution stream');
+    var action = document.getElementById('task-thread-form-primary-action');
+    if (!action || !action.querySelector('[aria-label="Stop response"]')) fail('queued promotion left the primary composer action as Send');
+    var actionCalls = window.__ajaxCalls.filter(function(call) { return String(call.url).indexOf('/thread/composer-action') !== -1; });
+    if (actionCalls.length !== 1) fail('queued promotion composer action refresh count was ' + actionCalls.length);
+    result.setAttribute('data-test-result', 'pass');
+  } catch (error) {
+    result.setAttribute('data-test-result', 'fail');
+    result.setAttribute('data-test-error', String(error && error.stack || error));
+  }
+});
+</script>`
+	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
+}
+
 func TestTaskThreadReconnectTransitionsPreserveCurrentDOMAndPendingAttachment(t *testing.T) {
 	task := &models.Task{ID: "thread-focus", ProjectID: "project-focus", Status: models.StatusRunning, Category: models.CategoryActive}
 	completed := models.Execution{ID: "thread-done", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "old", Output: "stable"}
