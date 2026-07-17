@@ -289,6 +289,37 @@ func TestViewSchedule_PrimaryAgentOptionsAreEligibleAndProjectScoped(t *testing.
 	}
 }
 
+func TestCreateScheduledTask_NativeFormRedirectsToProjectSchedule(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+
+	rec := tc.HTTP().Post("/tasks?project_id=" + project.ID + "&from=schedule").WithForm(url.Values{
+		"title":           {"Native Scheduled Task"},
+		"prompt":          {"Run later"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"run_at":          {runAt},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}).Execute()
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 from native schedule creation, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if location := rec.Header().Get("Location"); location != "/schedule?project_id="+project.ID {
+		t.Fatalf("native redirect lost project scope: %q", location)
+	}
+	tasks, err := tc.taskRepo.ListByProject(context.Background(), project.ID, "")
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("list tasks: count=%d err=%v", len(tasks), err)
+	}
+	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), tasks[0].ID)
+	if err != nil || len(schedules) != 1 {
+		t.Fatalf("list schedules: count=%d err=%v", len(schedules), err)
+	}
+}
+
 func TestCreateScheduledTask_PersistsPrimaryAgentAndExplicitNoAgent(t *testing.T) {
 	for _, tcse := range []struct {
 		name        string
@@ -308,7 +339,7 @@ func TestCreateScheduledTask_PersistsPrimaryAgentAndExplicitNoAgent(t *testing.T
 				agentID = agent.ID
 			}
 			runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
-			rec := tc.HTTP().Post("/tasks?project_id=" + project.ID + "&from=schedule").WithForm(url.Values{
+			rec := tc.HTMX().Post("/tasks?project_id=" + project.ID + "&from=schedule").WithForm(url.Values{
 				"title":               {"Scheduled Assignment " + tcse.name},
 				"prompt":              {"Run later"},
 				"category":            {"scheduled"},

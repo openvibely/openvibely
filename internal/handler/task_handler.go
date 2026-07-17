@@ -466,8 +466,12 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		}
 	}
 
-	// If created from the schedule page, return the updated schedule content
+	// If created from the schedule page, return the updated schedule content for HTMX
+	// or redirect native form submissions back to the project-scoped schedule page.
 	if c.QueryParam("from") == "schedule" {
+		if !isHTMX(c) {
+			return c.Redirect(http.StatusSeeOther, "/schedule?project_id="+projectID)
+		}
 		project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 		scheduledTasks, _ := h.taskSvc.GetTasksWithSchedulesByProject(c.Request().Context(), projectID)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
