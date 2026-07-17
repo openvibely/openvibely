@@ -23,6 +23,30 @@ func chatContentRevision(content string) string {
 	return fmt.Sprintf("%x-%016x", len(content), hash)
 }
 
+// ChatExecutionRevision fingerprints the server-rendered state for one execution.
+// Browsers use it to prove unchanged pairs still match an authoritative snapshot
+// before advancing the root transcript revision after live DOM reconciliation.
+func ChatExecutionRevision(exec models.Execution) string {
+	const offset64 = uint64(14695981039346656037)
+	const prime64 = uint64(1099511628211)
+	hash := offset64
+	write := func(value string) {
+		for i := 0; i < len(value); i++ {
+			hash ^= uint64(value[i])
+			hash *= prime64
+		}
+		hash ^= 0xff
+		hash *= prime64
+	}
+	write(exec.ID)
+	write(string(exec.Status))
+	write(exec.PromptSent)
+	write(exec.Output)
+	write(exec.ErrorMessage)
+	write(fmt.Sprintf("%t", exec.IsFollowup))
+	return fmt.Sprintf("%016x", hash)
+}
+
 // ChatTranscriptRevision fingerprints the server-rendered transcript and pending-input
 // state so polling/reconnect paths can reject authoritative no-op responses before
 // touching the live DOM.
@@ -40,12 +64,7 @@ func ChatTranscriptRevision(executions []models.Execution, pendingInputs []model
 	}
 	write(extra)
 	for _, exec := range executions {
-		write(exec.ID)
-		write(string(exec.Status))
-		write(exec.PromptSent)
-		write(exec.Output)
-		write(exec.ErrorMessage)
-		write(fmt.Sprintf("%t", exec.IsFollowup))
+		write(ChatExecutionRevision(exec))
 	}
 	for _, input := range pendingInputs {
 		write(input.ID)
@@ -656,7 +675,10 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							function finishTerminalRender() {
 								finalizeEmptyTerminalBubble(terminalStatus);
 								var completedPair = container.closest('[data-execution-pair="true"]');
-								if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+								if (completedPair) {
+									completedPair.setAttribute('data-exec-status', terminalStatus);
+									completedPair.setAttribute('hx-preserve', 'true');
+								}
 								// Hide streaming dots
 							if (streamingDots) streamingDots.classList.add('hidden');
 							eventSource.close();
@@ -665,8 +687,10 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						window._taskThreadStreamingActive = false;
 							if (isThread) {
 								showThreadTerminalStatus(terminalStatus);
-						} else {
-							// Always evaluate plan-completion first so prompt visibility updates
+									if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
+							} else {
+								if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
+								// Always evaluate plan-completion first so prompt visibility updates
 							// even if post-render transforms throw.
 							if (window.handlePlanModeCompletion) {
 								window.handlePlanModeCompletion(textBuffer);
@@ -1088,19 +1112,24 @@ templ _initThreadStreamingScript() {
 							function finishTerminalRender() {
 								finalizeEmptyTerminalBubble(terminalStatus);
 								var completedPair = container.closest('[data-execution-pair="true"]');
-								if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+								if (completedPair) {
+									completedPair.setAttribute('data-exec-status', terminalStatus);
+									completedPair.setAttribute('hx-preserve', 'true');
+								}
 								if (streamingDots) streamingDots.classList.add('hidden');
 					eventSource.close();
 					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
 						if (pauseTarget) {
 							showThreadTerminalStatus(terminalStatus);
+									if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
 					} else {
 						var bubble = container.closest('.chat-bubble-assistant-msg');
 						if (bubble && window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
 						if (bubble && window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
 						if (bubble && window.cleanBubbleContent) window.cleanBubbleContent(bubble);
 						if (window.handlePlanModeCompletion) window.handlePlanModeCompletion(cumulativeContent);
+						if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
 						if (!tracker || tracker.shouldAutoScroll()) {
 							requestAnimationFrame(function() {
 								var cm = document.getElementById(messagesId);
@@ -1288,11 +1317,11 @@ templ chatExecutionPairContent(exec models.Execution, task *models.Task, executi
 
 templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
 	if chatExecutionIsTerminal(exec) {
-		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true">
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true">
 			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
 		</div>
 	} else {
-		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
 			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
 		</div>
 	}
@@ -1300,7 +1329,7 @@ templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []m
 
 templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, preservedExecIDs map[string]bool) {
 	if chatExecutionIsTerminal(exec) && preservedExecIDs[exec.ID] {
-		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true"></div>
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true"></div>
 	} else {
 		@ChatExecutionPair(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
 	}
@@ -1309,7 +1338,7 @@ templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions
 // ChatFollowupResponse renders user message + streaming assistant for a follow-up.
 // Used by both ChatSend (main chat) and TaskThreadSend (task thread).
 templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment) {
-	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID }>
+	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID } data-exec-status="running">
 		if len(attachments) > 0 {
 			@ChatBubbleWithAttachments("User", message, attachments)
 		} else {
@@ -3315,6 +3344,43 @@ templ ChatAutoScrollScript() {
 				container.setAttribute('data-raw-content', raw);
 				container.setAttribute('data-raw-revision', revision);
 				return revision;
+			};
+			window.chatTranscriptSnapshotMatches = function(currentRoot, nextRoot, messagesID, expectedExecID) {
+				if (!currentRoot || !nextRoot) return false;
+				var currentMessages = currentRoot.querySelector('#' + messagesID);
+				var nextMessages = nextRoot.querySelector('#' + messagesID);
+				if (!currentMessages || !nextMessages) return false;
+				var selector = ':scope > [data-execution-pair="true"][data-exec-id]';
+				var currentPairs = currentMessages.querySelectorAll(selector);
+				var nextPairs = nextMessages.querySelectorAll(selector);
+				if (currentPairs.length !== nextPairs.length) return false;
+				for (var i = 0; i < currentPairs.length; i++) {
+					var currentPair = currentPairs[i];
+					var nextPair = nextPairs[i];
+					var execID = currentPair.getAttribute('data-exec-id') || '';
+					if (!execID || execID !== (nextPair.getAttribute('data-exec-id') || '')) return false;
+					var currentRevision = currentPair.getAttribute('data-execution-revision') || '';
+					var nextRevision = nextPair.getAttribute('data-execution-revision') || '';
+					if (currentRevision && nextRevision && currentRevision === nextRevision) continue;
+					if (!expectedExecID || execID !== expectedExecID) return false;
+					if ((currentPair.getAttribute('data-exec-status') || '') !== (nextPair.getAttribute('data-exec-status') || '')) return false;
+					var currentOutput = currentPair.querySelector('[data-raw-content]');
+					var nextOutput = nextPair.querySelector('[data-raw-content]');
+					if ((currentOutput ? currentOutput.getAttribute('data-raw-content') || '' : '') !== (nextOutput ? nextOutput.getAttribute('data-raw-content') || '' : '')) return false;
+				}
+				return true;
+			};
+			window.applyChatTranscriptSnapshotRevision = function(currentRoot, nextRoot, messagesID, rootRevisionAttribute) {
+				var currentMessages = currentRoot.querySelector('#' + messagesID);
+				var nextMessages = nextRoot.querySelector('#' + messagesID);
+				var selector = ':scope > [data-execution-pair="true"][data-exec-id]';
+				var currentPairs = currentMessages.querySelectorAll(selector);
+				var nextPairs = nextMessages.querySelectorAll(selector);
+				for (var i = 0; i < currentPairs.length; i++) {
+					currentPairs[i].setAttribute('data-exec-status', nextPairs[i].getAttribute('data-exec-status') || '');
+					currentPairs[i].setAttribute('data-execution-revision', nextPairs[i].getAttribute('data-execution-revision') || '');
+				}
+				currentRoot.setAttribute(rootRevisionAttribute, nextRoot.getAttribute(rootRevisionAttribute) || '');
 			};
 		// Generate a stable key for a container to persist thinking and tool-row
 		// states across rerenders and morph replacement. Prefer execution identity.

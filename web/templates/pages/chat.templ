@@ -45,7 +45,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 		@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 	}
 	for _, exec := range chatHistory {
-		<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ components.ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
 			if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
 				@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
 			} else {
@@ -105,7 +105,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				@components.ChatEmptyState("Start a conversation by typing a message below")
 			} else {
 				for _, exec := range chatHistory {
-					<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled { hx-preserve="true" }>
+					<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ components.ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled { hx-preserve="true" }>
 						if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
 							@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
 						} else {
@@ -636,8 +636,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 						streamContainer.classList.remove('hidden');
 							var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
-							var completedPair = streamContainer.closest('[data-execution-pair="true"]');
-							if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+								var completedPair = streamContainer.closest('[data-execution-pair="true"]');
+								if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
 							if (bubble) {
 							var thinking = bubble.querySelector('.ov-loading-dots');
 							if (thinking && !thinking.closest('.hidden')) {
@@ -651,9 +651,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							}
 							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
 							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+								if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+							}
 						}
-					}
 
 					function hasActiveChatStream() {
 						var chatMessages = document.getElementById('chat-messages');
@@ -784,10 +784,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						renderBufferedOutput(false);
 					};
 
-							eventSource.addEventListener('done', function() {
+							eventSource.addEventListener('done', function(event) {
 								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 								var completedPair = bubble.closest('[data-execution-pair="true"]');
-								if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+								if (completedPair) {
+									completedPair.setAttribute('data-exec-status', event && event.data ? event.data : 'completed');
+									completedPair.setAttribute('hx-preserve', 'true');
+								}
 								renderBufferedOutput(true);
 						dots.classList.add('hidden');
 						eventSource.close();
@@ -806,12 +809,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 						if (!tracker || tracker.shouldAutoScroll()) {
 							requestAnimationFrame(function() {
-								if (chatMessages && window.chatAutoScroll) {
-									window.chatAutoScroll.scrollToBottom(chatMessages, true);
-								}
-							});
-						}
-					});
+									if (chatMessages && window.chatAutoScroll) {
+										window.chatAutoScroll.scrollToBottom(chatMessages, true);
+									}
+								});
+							}
+							window.syncChatTranscriptRevision(execId);
+						});
 
 						eventSource.addEventListener('error', function(event) {
 							var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
@@ -894,6 +898,36 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						var textareaWrap = textarea.parentElement;
 						form.insertBefore(pendingContainer, textareaWrap || textarea);
 						return pendingContainer;
+					};
+
+					window.syncChatTranscriptRevision = function(expectedExecID) {
+						var root = document.getElementById('chat-page-root');
+						if (!root || typeof fetch === 'undefined') return Promise.resolve(false);
+						var pid = root.getAttribute('data-project-id') || '';
+						if (!pid) return Promise.resolve(false);
+						window._chatRevisionSyncGeneration = (window._chatRevisionSyncGeneration || 0) + 1;
+						var generation = window._chatRevisionSyncGeneration;
+						return fetch('/chat?project_id=' + encodeURIComponent(pid), {headers: {'HX-Request': 'true'}}).then(function(response) {
+							if (!response.ok) throw new Error('HTTP ' + response.status);
+							return response.text();
+						}).then(function(html) {
+							if (generation !== window._chatRevisionSyncGeneration) return false;
+							var currentRoot = document.getElementById('chat-page-root');
+							if (!currentRoot || currentRoot.getAttribute('data-project-id') !== pid) return false;
+							var detached = document.createElement('template');
+							detached.innerHTML = html;
+							var nextRoot = detached.content.querySelector('#chat-page-root');
+							if (!nextRoot || !window.chatTranscriptSnapshotMatches || !window.chatTranscriptSnapshotMatches(currentRoot, nextRoot, 'chat-messages', expectedExecID || '')) return false;
+							window.applyChatTranscriptSnapshotRevision(currentRoot, nextRoot, 'chat-messages', 'data-chat-revision');
+							if (window._chatReconnectCatchupTimer) {
+								clearTimeout(window._chatReconnectCatchupTimer);
+								window._chatReconnectCatchupTimer = null;
+							}
+							return true;
+						}).catch(function(err) {
+							console.error('[chat] transcript revision sync failed:', err);
+							return false;
+						});
 					};
 
 						var handleSharedLiveConnected = function(event) {
@@ -1028,10 +1062,10 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										var pid = chatContainer ? chatContainer.getAttribute('data-project-id') : projectId;
 										if (chatContainer && pid && typeof htmx !== 'undefined') {
 											if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
-											htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: '#chat-messages', select: '#chat-messages', swap: 'morph:outerHTML'});
-											var attachmentAction = document.getElementById('chat-form-primary-action');
-											if (attachmentAction) htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {target: '#chat-form-primary-action', swap: 'outerHTML'});
-											chatContainer.setAttribute('data-chat-revision', '');
+										var attachmentRefresh = htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: '#chat-messages', select: '#chat-messages', swap: 'morph:outerHTML'});
+										if (attachmentRefresh && typeof attachmentRefresh.then === 'function') attachmentRefresh.then(function() { window.syncChatTranscriptRevision(data.exec_id || ''); });
+										var attachmentAction = document.getElementById('chat-form-primary-action');
+										if (attachmentAction) htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {target: '#chat-form-primary-action', swap: 'outerHTML'});
 										}
 										return;
 									}
@@ -1111,12 +1145,15 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										if (window.htmx) htmx.process(queuedRow);
 									} else {								// Append user bubble and streaming assistant for a real running turn.
 									var pair = document.createElement('div');
+									pair.id = 'chat-execution-' + data.exec_id;
 									pair.className = 'chat-execution-pair space-y-6';
 									pair.setAttribute('data-execution-pair', 'true');
 									pair.setAttribute('data-exec-id', data.exec_id);
+									pair.setAttribute('data-exec-status', 'running');
 									pair.appendChild(createUserBubble(data.message, data.source));
 									pair.appendChild(createStreamingBubble(data.exec_id));
 									chatMessages.appendChild(pair);
+									window.syncChatTranscriptRevision(data.exec_id);
 									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 								}
 							// Scroll to bottom (respect user scroll position)
@@ -1141,10 +1178,10 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								var pid = chatContainer.getAttribute('data-project-id');
 									if (pid) {
 										if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
-										htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: '#chat-messages', select: '#chat-messages', swap: 'morph:outerHTML'});
-										var missedAction = document.getElementById('chat-form-primary-action');
-										if (missedAction) htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {target: '#chat-form-primary-action', swap: 'outerHTML'});
-										chatContainer.setAttribute('data-chat-revision', '');
+											var missedRefresh = htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: '#chat-messages', select: '#chat-messages', swap: 'morph:outerHTML'});
+											if (missedRefresh && typeof missedRefresh.then === 'function') missedRefresh.then(function() { window.syncChatTranscriptRevision(data.exec_id || ''); });
+											var missedAction = document.getElementById('chat-form-primary-action');
+											if (missedAction) htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {target: '#chat-form-primary-action', swap: 'outerHTML'});
 									}
 							}
 							return;
@@ -1156,6 +1193,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (data.exec_id && typeof data.completed_output === 'string' && data.completed_output !== '') {
 							syncCompletedOutputToBubble(data.exec_id, data.completed_output);
 						}
+						var completedPair = data.exec_id ? document.getElementById('chat-execution-' + data.exec_id) : null;
+						if (completedPair) {
+							var completedStatus = completedPair.getAttribute('data-exec-status') || '';
+							if (!completedStatus || completedStatus === 'running' || completedStatus === 'pending' || completedStatus === 'queued') completedPair.setAttribute('data-exec-status', 'completed');
+							completedPair.setAttribute('hx-preserve', 'true');
+						}
+						window.syncChatTranscriptRevision(data.exec_id || '');
 
 							window._chatStreamInProgress = false;
 							if (window.evaluatePlanCompletionPrompt) {

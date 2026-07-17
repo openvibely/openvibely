@@ -333,6 +333,9 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 		}
 		data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) }
 		data-task-id={ task.ID }
+		data-task-status={ string(task.Status) }
+		data-task-category={ string(task.Category) }
+		data-task-agent={ derefString(task.AgentID) }
 		data-thread-revision={ ChatTranscriptRevision(executions, nil, fmt.Sprintf("%s|%s|%s", task.Status, task.Category, derefString(task.AgentID))) }
 	>
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
@@ -485,6 +488,48 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					).filter(function(id) { return id !== ''; }).join(',');
 				};
 
+				window.syncTaskThreadTranscriptRevision = function(expectedExecID) {
+					var view = document.getElementById('task-thread-view');
+					var taskID = view ? (view.getAttribute('data-task-id') || '') : '';
+					if (!view || !taskID || typeof fetch === 'undefined') return Promise.resolve(false);
+					window._taskThreadRevisionSyncGeneration = (window._taskThreadRevisionSyncGeneration || 0) + 1;
+					var generation = window._taskThreadRevisionSyncGeneration;
+					var messages = document.getElementById('task-thread-messages');
+					var limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';
+					var url = '/tasks/' + encodeURIComponent(taskID) + '/thread?poll=1&limit=' + encodeURIComponent(limit);
+					view.dataset.revisionSyncPending = 'true';
+					return fetch(url, {headers: {'HX-Request': 'true'}}).then(function(response) {
+						if (!response.ok) throw new Error('HTTP ' + response.status);
+						return response.text();
+					}).then(function(html) {
+						if (generation !== window._taskThreadRevisionSyncGeneration) return false;
+						var currentView = document.getElementById('task-thread-view');
+						if (!currentView || currentView.getAttribute('data-task-id') !== taskID) return false;
+						var detached = document.createElement('template');
+						detached.innerHTML = html;
+						var nextView = detached.content.querySelector('#task-thread-view');
+						if (!nextView || currentView.getAttribute('data-task-agent') !== nextView.getAttribute('data-task-agent')) return false;
+						if (!window.chatTranscriptSnapshotMatches || !window.chatTranscriptSnapshotMatches(currentView, nextView, 'task-thread-messages', expectedExecID || '')) return false;
+						window.applyChatTranscriptSnapshotRevision(currentView, nextView, 'task-thread-messages', 'data-thread-revision');
+						['data-task-active', 'data-task-status', 'data-task-category'].forEach(function(attribute) {
+							currentView.setAttribute(attribute, nextView.getAttribute(attribute) || '');
+						});
+						var catchupTimers = window._taskThreadReconnectCatchupTimers || {};
+						if (catchupTimers[taskID]) {
+							clearTimeout(catchupTimers[taskID]);
+							delete catchupTimers[taskID];
+						}
+						return true;
+					}).catch(function(err) {
+						console.error('[task-thread] transcript revision sync failed:', err);
+						return false;
+					}).finally(function() {
+						if (generation !== window._taskThreadRevisionSyncGeneration) return;
+						var currentView = document.getElementById('task-thread-view');
+						if (currentView && currentView.getAttribute('data-task-id') === taskID) delete currentView.dataset.revisionSyncPending;
+					});
+				};
+
 				window.reconcileTaskThreadState = function(reconnectTaskId) {
 					var view = document.getElementById('task-thread-view');
 					if (!view || !reconnectTaskId || view.getAttribute('data-task-id') !== reconnectTaskId) return Promise.resolve(false);
@@ -616,7 +661,8 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					// Block polling requests to task-thread-view while SSE streaming
 					// is active or sidebar navigation is in progress
 					if (triggerEl && triggerEl.id === 'task-thread-view') {
-						if (window._taskThreadStreamingActive || window._sidebarNavigating) {
+						var attachmentSession = document.getElementById('task-thread-form-session-id');
+						if ((attachmentSession && attachmentSession.value) || triggerEl.dataset.revisionSyncPending === 'true' || window._taskThreadStreamingActive || window._sidebarNavigating) {
 							event.preventDefault();
 						}
 					}
@@ -659,10 +705,16 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 
 					// Before swaps, reject unchanged authoritative snapshots before capturing
 					// state or closing streams, then preserve state for a real replacement.
-					document.body.addEventListener('htmx:beforeSwap', function(event) {
-						var target = event.detail.target;
-						if (target && target.id === 'task-thread-view') {
-							var currentRevision = target.getAttribute('data-thread-revision') || '';
+				document.body.addEventListener('htmx:beforeSwap', function(event) {
+					var target = event.detail.target;
+					if (target && target.id === 'task-thread-view') {
+						var attachmentSession = document.getElementById('task-thread-form-session-id');
+						if (attachmentSession && attachmentSession.value) {
+							event.detail.shouldSwap = false;
+							delete target.dataset.reconcilePending;
+							return;
+						}
+						var currentRevision = target.getAttribute('data-thread-revision') || '';
 							var revisionXHR = event.detail.xhr;
 							var nextRevision = _taskThreadResponseRevision(revisionXHR ? (revisionXHR.responseText || '') : '');
 							if (currentRevision && nextRevision && currentRevision === nextRevision) {
@@ -932,7 +984,11 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							streamContainer.classList.remove('hidden');
 							var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
 							var completedPair = streamContainer.closest('[data-execution-pair="true"]');
-							if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+							if (completedPair) {
+								var completedStatus = completedPair.getAttribute('data-exec-status') || '';
+								if (!completedStatus || completedStatus === 'running' || completedStatus === 'pending' || completedStatus === 'queued') completedPair.setAttribute('data-exec-status', status || 'completed');
+								completedPair.setAttribute('hx-preserve', 'true');
+							}
 							if (bubble) {
 								var thinkingWrap = document.getElementById('streaming-thinking-' + execId) || document.getElementById('streaming-thinking-resume-' + execId);
 								if (thinkingWrap) {
@@ -1028,6 +1084,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							var view = document.getElementById('task-thread-view');
 							if (view) view.setAttribute('data-task-active', 'true');
 							if (window._initThreadStreaming) window._initThreadStreaming();
+							if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);
 							if (window.htmx) htmx.process(messages);
 							var tracker = window._taskThreadPageTracker;
 							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
@@ -1043,7 +1100,14 @@ templ TaskThreadLiveEventsScript(taskID string) {
 					var chatHandler = function(event) {
 						var data = event.detail || {};
 						if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;
+						var completedPair = document.getElementById('chat-execution-' + data.exec_id);
+						if (completedPair) {
+							var completedStatus = completedPair.getAttribute('data-exec-status') || '';
+							if (!completedStatus || completedStatus === 'running' || completedStatus === 'pending' || completedStatus === 'queued') completedPair.setAttribute('data-exec-status', data.status || 'completed');
+							completedPair.setAttribute('hx-preserve', 'true');
+						}
 						syncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || 'completed');
+						if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);
 					};
 					var handler = function(event) {
 						var data = event.detail || {};

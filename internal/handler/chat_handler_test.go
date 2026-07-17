@@ -3771,9 +3771,11 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamDoneEvaluatesBeforeTransforms(t
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 
-	doneIdx := strings.Index(body, "eventSource.addEventListener('done', function()")
+	doneIdx := strings.Index(body, "eventSource.addEventListener('done', function(event)")
 	require.NotEqual(t, -1, doneIdx, "stream done handler must exist")
-	doneBody := body[doneIdx : doneIdx+2000]
+	doneEnd := strings.Index(body[doneIdx:], "eventSource.addEventListener('error'")
+	require.Greater(t, doneEnd, 0, "stream done handler boundary must exist")
+	doneBody := body[doneIdx : doneIdx+doneEnd]
 
 	handleIdx := strings.Index(doneBody, "handlePlanModeCompletion")
 	convertIdx := strings.Index(doneBody, "convertTaskLinksInMessage")
@@ -4063,7 +4065,9 @@ func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneCompletedOutput(t *te
 	// Shared live-event chat_response_done branch must pass completed_output to evaluator.
 	doneHandlerIdx := strings.Index(body, "if (eventType === 'chat_response_done') {")
 	require.NotEqual(t, -1, doneHandlerIdx, "chat_response_done handler must exist")
-	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+2200]
+	doneHandlerEnd := strings.Index(body[doneHandlerIdx:], "var handleChatAfterSwap = function(event)")
+	require.Greater(t, doneHandlerEnd, 0, "chat_response_done handler boundary must exist")
+	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+doneHandlerEnd]
 
 	syncIdx := strings.Index(doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output)")
 	flagIdx := strings.Index(doneHandlerBody, "_chatStreamInProgress = false")
