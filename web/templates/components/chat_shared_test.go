@@ -4393,6 +4393,9 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 }
 
 func TestLargeToolOutputHydrationIsLazyAndStatefulInChrome(t *testing.T) {
+	if os.Getenv("OPENVIBELY_SKIP_BROWSER_PERF") == "1" {
+		t.Skip("browser performance fixture runs in an isolated CI step")
+	}
 	chrome := "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 	if _, err := os.Stat(chrome); err != nil {
 		for _, candidate := range []string{"google-chrome", "chromium", "chromium-browser"} {

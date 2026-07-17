@@ -72,7 +72,12 @@ jobs:
         run: go build ./cmd/server
 
       - name: Run all tests with coverage
+        env:
+          OPENVIBELY_SKIP_BROWSER_PERF: "1"
         run: go test ./... -count=1 -timeout 120s -coverprofile=coverage.out
+
+      - name: Run browser performance regression
+        run: go test ./web/templates/components -run '^TestLargeToolOutputHydrationIsLazyAndStatefulInChrome$' -count=1 -timeout 60s
 
       - name: Show coverage summary (excluding generated templ code)
         run: |
