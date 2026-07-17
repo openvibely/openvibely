@@ -29,6 +29,116 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestProcessStreamingResponse_TaskFollowupRespectsGlobalWorkerLimit(t *testing.T) {
+	setup := func(t *testing.T, maxWorkers int) (*Handler, *models.Project, *models.Task, *models.Execution, *models.LLMConfig, <-chan struct{}) {
+		t.Helper()
+		h, _, llmConfigRepo := setupTestHandler(t)
+		h.workerSvc.Resize(maxWorkers)
+
+		providerCalled := make(chan struct{}, 1)
+		mock := testutil.NewMockLLMCaller()
+		mock.Response = "follow-up complete"
+		mock.TextOnly = "follow-up complete"
+		mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+			providerCalled <- struct{}{}
+		}
+		h.llmSvc.SetLLMCaller(mock)
+
+		agent := createAgent(t, llmConfigRepo)
+		project := createProject(t, h, "Global Follow-up Capacity Project")
+		task := createTask(t, h, project.ID, "Global Follow-up Capacity Task", func(tk *models.Task) {
+			tk.Category = models.CategoryActive
+			tk.Status = models.StatusQueued
+			tk.AgentID = &agent.ID
+		})
+		exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+			ex.Status = models.ExecRunning
+			ex.PromptSent = "follow-up prompt"
+			ex.IsFollowup = true
+		})
+		return h, project, task, exec, agent, providerCalled
+	}
+
+	runFollowup := func(h *Handler, project *models.Project, task *models.Task, exec *models.Execution, agent *models.LLMConfig) <-chan struct{} {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			h.processStreamingResponse(streamingResponseParams{
+				ExecID:         exec.ID,
+				TaskID:         task.ID,
+				Message:        "follow-up prompt",
+				Agent:          *agent,
+				ProjectID:      project.ID,
+				IsTaskFollowup: true,
+			})
+		}()
+		return done
+	}
+
+	t.Run("finite limit blocks provider until a global slot is released", func(t *testing.T) {
+		h, project, task, exec, agent, providerCalled := setup(t, 1)
+		require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+
+		done := runFollowup(h, project, task, exec, agent)
+		startedEarly := false
+		select {
+		case <-providerCalled:
+			startedEarly = true
+		case <-time.After(150 * time.Millisecond):
+		}
+
+		h.workerSvc.ReleaseProjectSlot(project.ID)
+		if !startedEarly {
+			select {
+			case <-providerCalled:
+			case <-time.After(3 * time.Second):
+				t.Fatal("timed out waiting for task follow-up after releasing global capacity")
+			}
+		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for task follow-up completion")
+		}
+
+		if startedEarly {
+			t.Fatal("task follow-up reached provider while finite global worker limit was full")
+		}
+		require.Equal(t, 0, h.workerSvc.TotalRunning())
+		require.Equal(t, 0, h.workerSvc.ProjectRunning(project.ID))
+	})
+
+	t.Run("unlimited permits provider while another worker is active", func(t *testing.T) {
+		h, project, task, exec, agent, providerCalled := setup(t, 0)
+		require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+		existingSlotHeld := true
+		defer func() {
+			if existingSlotHeld {
+				h.workerSvc.ReleaseProjectSlot(project.ID)
+			}
+		}()
+
+		done := runFollowup(h, project, task, exec, agent)
+		select {
+		case <-providerCalled:
+		case <-time.After(3 * time.Second):
+			t.Fatal("unlimited global worker limit blocked task follow-up provider call")
+		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for unlimited task follow-up completion")
+		}
+
+		require.Equal(t, 1, h.workerSvc.TotalRunning())
+		require.Equal(t, 1, h.workerSvc.ProjectRunning(project.ID))
+		h.workerSvc.ReleaseProjectSlot(project.ID)
+		existingSlotHeld = false
+		require.Equal(t, 0, h.workerSvc.TotalRunning())
+		require.Equal(t, 0, h.workerSvc.ProjectRunning(project.ID))
+	})
+}
+
 func TestStreamingTransportScope(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

@@ -1181,13 +1181,14 @@ func TestWorkerService_NoStarvation(t *testing.T) {
 		pending:     make(map[string]bool),
 		cancelFuncs: make(map[string]context.CancelFunc),
 		submitted:   make(chan models.Task, 100),
-		numWorkers:  10,
+		numWorkers:  0,
 	}
 
 	agentID := "test-agent"
 	projectID := "test-project"
 
-	// Simulate concurrent workers acquiring and releasing slots
+	// Simulate concurrent workers acquiring and releasing slots without a finite
+	// global cap so every successful acquisition has a matching release.
 	var wg sync.WaitGroup
 	const numGoroutines = 20
 	const opsPerGoroutine = 50

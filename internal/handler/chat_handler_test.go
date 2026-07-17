@@ -3228,8 +3228,8 @@ func TestHandler_TaskThreadSend_CancelQueuedCapacityWait(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
-	maxWorkers := 1
-	project := &models.Project{Name: "Cancellable Queue Project", MaxWorkers: &maxWorkers}
+	h.workerSvc.Resize(1)
+	project := &models.Project{Name: "Cancellable Global Queue Project"}
 	require.NoError(t, h.projectSvc.Create(ctx, project))
 	h.workerSvc.SetProjectRepo(h.projectRepo)
 
@@ -3261,7 +3261,7 @@ func TestHandler_TaskThreadSend_CancelQueuedCapacityWait(t *testing.T) {
 		return "should not run", "", 1, nil
 	}))
 
-	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID), "should saturate project slot")
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID), "should saturate global worker slot")
 
 	form := url.Values{}
 	form.Set("message", "Follow up that will be cancelled while queued")

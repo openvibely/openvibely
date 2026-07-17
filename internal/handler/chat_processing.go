@@ -214,7 +214,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		return false
 	}
 
-	// Enforce per-project and per-model worker constraints for task follow-ups only.
+	// Enforce global, per-project, and per-model worker constraints for task follow-ups only.
 	// Interactive chat (IsTaskFollowup=false) bypasses worker limits so the chat
 	// orchestrator stays responsive even when all task workers are busy.
 	// Task follow-ups (IsTaskFollowup=true) respect worker limits because they
@@ -227,8 +227,8 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		// pool needs to check if any queued tasks can now be dispatched.
 		defer h.workerSvc.DispatchNext()
 
-		// Block until a per-project slot is available (respects project max_workers limit).
-		// This queues the thread follow-up instead of rejecting it when workers are at capacity.
+		// Block until global and per-project slots are available. This queues the
+		// thread follow-up instead of rejecting it when either limit is at capacity.
 		if err := h.workerSvc.AcquireProjectSlot(waitCtx, params.ProjectID); err != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled waiting for project slot %s: %v",
 				params.ExecID, params.TaskID, params.ProjectID, err)

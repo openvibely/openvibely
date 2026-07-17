@@ -795,19 +795,34 @@ func (w *WorkerService) TryAcquireModelSlot(agentConfigID string) bool {
 	return w.tryAcquireModelSlot(agentConfigID)
 }
 
-// TryAcquireProjectSlot attempts to acquire a per-project concurrency slot.
-// Returns true if the slot was acquired, false if the project's max_workers limit is reached.
-// Used by chat-triggered task executions that bypass the worker pool.
-func (w *WorkerService) TryAcquireProjectSlot(projectID string) bool {
+// tryAcquireGlobalProjectSlot atomically reserves both global and project
+// capacity for execution paths outside dispatchNext, such as task-thread
+// follow-ups. dispatchNext already holds w.mu while checking global capacity and
+// acquiring its project slot, so it continues to call tryAcquireProjectSlot
+// directly.
+func (w *WorkerService) tryAcquireGlobalProjectSlot(projectID string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	running := int(atomic.LoadInt32(&w.totalRunning))
+	if !hasGlobalWorkerCapacity(w.numWorkers, running) {
+		return false
+	}
 	return w.tryAcquireProjectSlot(projectID)
 }
 
-// AcquireProjectSlot blocks until a per-project concurrency slot is available or
-// the context is cancelled. Used by task thread follow-ups that queue when workers
-// are at capacity instead of failing fast.
+// TryAcquireProjectSlot attempts to acquire global and per-project concurrency
+// capacity. Used by task execution paths that bypass the worker queue.
+func (w *WorkerService) TryAcquireProjectSlot(projectID string) bool {
+	return w.tryAcquireGlobalProjectSlot(projectID)
+}
+
+// AcquireProjectSlot blocks until global and per-project concurrency capacity
+// is available or the context is cancelled. Used by task thread follow-ups that
+// queue when workers are at capacity instead of failing fast.
 func (w *WorkerService) AcquireProjectSlot(ctx context.Context, projectID string) error {
 	for {
-		if w.tryAcquireProjectSlot(projectID) {
+		if w.tryAcquireGlobalProjectSlot(projectID) {
 			return nil
 		}
 		select {
