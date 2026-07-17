@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/a-h/templ"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -62,6 +63,15 @@ func renderedTabVisibilityManager(t *testing.T) string {
 	return html[start : start+endOffset]
 }
 
+func reconnectChatEventJSON(t *testing.T, event events.ChatEvent) string {
+	t.Helper()
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal reconnect Chat event: %v", err)
+	}
+	return string(encoded)
+}
+
 func reconnectFixturePrelude(t *testing.T, snapshots map[string]string) string {
 	t.Helper()
 	encoded, err := json.Marshal(snapshots)
@@ -72,6 +82,7 @@ func reconnectFixturePrelude(t *testing.T, snapshots map[string]string) string {
 window.__snapshots = ` + string(encoded) + `;
 window.__phase = 'initial';
 window.__ajaxCalls = [];
+window.__swaps = [];
 window.__eventSources = [];
 window.requestAnimationFrame = function(callback) { return setTimeout(function() { callback(Date.now()); }, 0); };
 window.cancelAnimationFrame = function(id) { clearTimeout(id); };
@@ -97,6 +108,7 @@ window.htmx = {
     if (next && (String(options.swap).indexOf('outerHTML') !== -1 || String(options.swap).indexOf('morph') !== -1)) {
       var replacement = next.cloneNode(true);
       target.replaceWith(replacement);
+      window.__swaps.push({target: target.id, replacement: replacement.id || ''});
       replacement.dispatchEvent(new CustomEvent('htmx:afterSwap', {bubbles: true, detail: {target: replacement}}));
     }
     return Promise.resolve(true);
@@ -244,6 +256,7 @@ func TestChatReconnectTransitionsPreserveCurrentDOMState(t *testing.T) {
 	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{completed, running}, "project-focus", nil, nil, false, false, 30))
 	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{completed, terminal}, "project-focus", nil, nil, false, false, 30))
 	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML, "running": runningHTML, "terminal": terminalHTML})
+	doneEvent := reconnectChatEventJSON(t, events.ChatEvent{Type: events.ChatResponseDone, ProjectID: "project-focus", ExecID: "chat-live", CompletedOutput: "partial missed", Status: string(models.ExecCompleted)})
 
 	testScript := `<main id="reconnect-result"></main><script>
 window.addEventListener('DOMContentLoaded', async function() {
@@ -301,7 +314,7 @@ window.addEventListener('DOMContentLoaded', async function() {
 
     window.__phase = 'terminal';
     stream.emit('done', 'completed');
-    window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: {type: 'chat_response_done', project_id: 'project-focus', exec_id: 'chat-live', completed_output: 'partial missed'}}));
+    window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: ` + doneEvent + `}));
     await window.__wait(120);
     var expectedHolder = document.createElement('template');
     expectedHolder.innerHTML = window.__snapshots.terminal;
@@ -346,6 +359,7 @@ func TestTaskThreadReconnectTransitionsPreserveCurrentDOMAndPendingAttachment(t 
 	initialHTML := renderReconnectComponent(t, components.TaskThreadView(task, []models.Execution{completed, running}, nil, nil, nil, nil, false, 30))
 	terminalHTML := renderReconnectComponent(t, components.TaskThreadView(&terminalTask, []models.Execution{completed, terminal}, nil, nil, nil, nil, false, 30))
 	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML, "terminal": terminalHTML})
+	doneEvent := reconnectChatEventJSON(t, events.ChatEvent{Type: events.ChatResponseDone, ProjectID: task.ProjectID, TaskID: task.ID, ExecID: "thread-live", CompletedOutput: "partial missed", Status: string(models.ExecCompleted), IsTaskFollowup: true})
 
 	testScript := `<main id="reconnect-result"></main><script>
 window.addEventListener('DOMContentLoaded', async function() {
@@ -403,7 +417,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     window.__phase = 'terminal';
     window._taskThreadStreamingActive = true;
     stream.emit('done', 'completed');
-    window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: {type: 'chat_response_done', task_id: 'thread-focus', exec_id: 'thread-live', completed_output: 'partial missed', status: 'completed'}}));
+    window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: ` + doneEvent + `}));
 	    await window.__wait(120);
 	    var expectedThreadHolder = document.createElement('template');
 	    expectedThreadHolder.innerHTML = window.__snapshots.terminal;
@@ -437,6 +451,215 @@ window.addEventListener('DOMContentLoaded', async function() {
 });
 </script>`
 	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
+}
+
+func runChatTerminalOrderingReconnectCase(t *testing.T, terminalStatus models.ExecutionStatus, sharedEventFirst bool) {
+	t.Helper()
+	execID := "chat-terminal-" + string(terminalStatus)
+	running := models.Execution{ID: execID, Status: models.ExecRunning, PromptSent: "terminal race", Output: "partial"}
+	terminal := running
+	terminal.Status = terminalStatus
+	terminal.Output = "partial authoritative"
+	if terminalStatus == models.ExecFailed {
+		terminal.ErrorMessage = "provider failed"
+	}
+	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-terminal", nil, nil, false, false, 30))
+	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-terminal", nil, nil, false, false, 30))
+	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{terminal}, "project-terminal", nil, nil, false, false, 30))
+	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML, "running": runningHTML, "terminal": terminalHTML})
+	terminalEvent := reconnectChatEventJSON(t, events.ChatEvent{
+		Type:            events.ChatResponseDone,
+		ProjectID:       "project-terminal",
+		ExecID:          execID,
+		CompletedOutput: "partial authoritative",
+		Status:          string(terminalStatus),
+	})
+	streamEvent := "done"
+	streamData := string(terminalStatus)
+	if terminalStatus == models.ExecFailed {
+		streamEvent = "error"
+		streamData = "provider failed"
+	}
+
+	testScript := `<main id="reconnect-result"></main><script>
+window.addEventListener('DOMContentLoaded', async function() {
+  var result = document.getElementById('reconnect-result');
+  function fail(message) { throw new Error(message); }
+  try {
+    await window.__wait(300);
+    window.renderStreamingContent = function(el, text) { el.textContent = text; if (window.setChatRawContent) window.setChatRawContent(el, text); else el.setAttribute('data-raw-content', text); return Promise.resolve(true); };
+    window.renderLiveChatContent = window.renderStreamingContent;
+    window.__syncResults = [];
+    var originalSync = window.syncChatTranscriptRevision;
+    window.syncChatTranscriptRevision = function(id) {
+      var syncPair = document.getElementById('chat-execution-' + id);
+      var syncOutput = syncPair ? syncPair.querySelector('[data-raw-content]') : null;
+      var call = {id: id, phase: window.__phase, result: null, status: syncPair && syncPair.getAttribute('data-exec-status'), raw: syncOutput && syncOutput.getAttribute('data-raw-content')};
+      window.__syncResults.push(call);
+      return originalSync(id).then(function(value) { call.result = value; return value; });
+    };
+    window.__phase = 'running';
+    window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: {type: 'chat_new_message', project_id: 'project-terminal', exec_id: '` + execID + `', message: 'terminal race', source: 'api'}}));
+    await window.__wait(80);
+    var pair = document.getElementById('chat-execution-` + execID + `');
+    var stream = window.__streamFor('` + execID + `');
+    if (!pair || !stream) fail('Chat terminal fixture did not attach its execution stream');
+    window.__phase = 'terminal';
+    var sharedEvent = ` + terminalEvent + `;
+    if (` + fmt.Sprintf("%t", sharedEventFirst) + `) {
+      window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: sharedEvent}));
+      await window.__wait(20);
+      stream.emit('` + streamEvent + `', '` + streamData + `');
+    } else {
+      stream.emit('` + streamEvent + `', '` + streamData + `');
+      await window.__wait(20);
+      window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: sharedEvent}));
+    }
+    await window.__wait(160);
+    var currentPair = document.getElementById('chat-execution-` + execID + `');
+    if (currentPair !== pair) fail('Chat terminal reconciliation replaced the execution node');
+    if (pair.getAttribute('data-exec-status') !== '` + string(terminalStatus) + `') fail('Chat terminal status did not remain authoritative: ' + pair.getAttribute('data-exec-status'));
+    var terminalOutput = pair.querySelector('[data-raw-content]');
+    if (!terminalOutput || terminalOutput.getAttribute('data-raw-content') !== 'partial authoritative') fail('Chat late terminal event overwrote authoritative output: ' + (terminalOutput && terminalOutput.getAttribute('data-raw-content')));
+    var expectedHolder = document.createElement('template');
+    expectedHolder.innerHTML = window.__snapshots.terminal;
+    var expectedRevision = expectedHolder.content.querySelector('#chat-page-root').getAttribute('data-chat-revision');
+    var root = document.getElementById('chat-page-root');
+    if (root.getAttribute('data-chat-revision') !== expectedRevision) {
+      var nextRoot = expectedHolder.content.querySelector('#chat-page-root');
+      var currentOutput = pair.querySelector('[data-raw-content]');
+      var nextPair = nextRoot.querySelector('[data-execution-pair="true"]');
+      var nextOutput = nextPair ? nextPair.querySelector('[data-raw-content]') : null;
+      fail('Chat terminal revision stayed stale: current=' + root.getAttribute('data-chat-revision') + ' expected=' + expectedRevision + ' match=' + window.chatTranscriptSnapshotMatches(root, nextRoot, 'chat-messages', '` + execID + `') + ' currentRaw=' + (currentOutput && currentOutput.getAttribute('data-raw-content')) + ' nextRaw=' + (nextOutput && nextOutput.getAttribute('data-raw-content')) + ' currentStatus=' + pair.getAttribute('data-exec-status') + ' nextStatus=' + (nextPair && nextPair.getAttribute('data-exec-status')) + ' syncResults=' + JSON.stringify(window.__syncResults) + ' known=' + !!window._chatKnownExecIds['` + execID + `'] + ' ajax=' + JSON.stringify(window.__ajaxCalls));
+    }
+    var swapsBeforeRefocus = window.__swaps.length;
+    window.__hiddenToVisible();
+    await window.__wait(100);
+    if (document.getElementById('chat-execution-` + execID + `') !== pair) fail('Chat no-op terminal refocus morphed the current node');
+    var transcriptSwaps = window.__swaps.slice(swapsBeforeRefocus).filter(function(swap) { return swap.target === 'chat-messages'; });
+    if (transcriptSwaps.length !== 0) fail('Chat no-op terminal refocus completed a transcript morph');
+    result.setAttribute('data-test-result', 'pass');
+  } catch (error) {
+    result.setAttribute('data-test-result', 'fail');
+    result.setAttribute('data-test-error', String(error && error.stack || error));
+  }
+});
+</script>`
+	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
+}
+
+func TestChatFailedAndCancelledTerminalOrderingKeepsNoOpRefocusStable(t *testing.T) {
+	for _, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCancelled} {
+		for _, sharedEventFirst := range []bool{false, true} {
+			order := "stream terminal before shared terminal"
+			if sharedEventFirst {
+				order = "shared terminal before stream terminal"
+			}
+			t.Run(string(status)+"/"+order, func(t *testing.T) {
+				runChatTerminalOrderingReconnectCase(t, status, sharedEventFirst)
+			})
+		}
+	}
+}
+
+func runTaskThreadTerminalOrderingReconnectCase(t *testing.T, terminalStatus models.ExecutionStatus, sharedEventFirst bool) {
+	t.Helper()
+	execID := "thread-terminal-" + string(terminalStatus)
+	task := &models.Task{ID: "thread-terminal-task", ProjectID: "project-terminal", Status: models.StatusRunning, Category: models.CategoryActive}
+	running := models.Execution{ID: execID, TaskID: task.ID, Status: models.ExecRunning, PromptSent: "terminal race", Output: "partial", IsFollowup: true}
+	terminalTask := *task
+	terminal := running
+	terminal.Status = terminalStatus
+	terminal.Output = "partial authoritative"
+	if terminalStatus == models.ExecFailed {
+		terminal.ErrorMessage = "provider failed"
+		terminalTask.Status = models.StatusFailed
+	} else {
+		terminalTask.Status = models.StatusCancelled
+	}
+	terminalTask.Category = models.CategoryBacklog
+	initialHTML := renderReconnectComponent(t, components.TaskThreadView(task, []models.Execution{running}, nil, nil, nil, nil, false, 30))
+	terminalHTML := renderReconnectComponent(t, components.TaskThreadView(&terminalTask, []models.Execution{terminal}, nil, nil, nil, nil, false, 30))
+	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML, "terminal": terminalHTML})
+	terminalEvent := reconnectChatEventJSON(t, events.ChatEvent{
+		Type:            events.ChatResponseDone,
+		ProjectID:       task.ProjectID,
+		TaskID:          task.ID,
+		ExecID:          execID,
+		CompletedOutput: "partial authoritative",
+		Status:          string(terminalStatus),
+		IsTaskFollowup:  true,
+	})
+	streamEvent := "done"
+	streamData := string(terminalStatus)
+	if terminalStatus == models.ExecFailed {
+		streamEvent = "error"
+		streamData = "provider failed"
+	}
+
+	testScript := `<main id="reconnect-result"></main><script>
+window.addEventListener('DOMContentLoaded', async function() {
+  var result = document.getElementById('reconnect-result');
+  function fail(message) { throw new Error(message); }
+  try {
+    await window.__wait(300);
+    window.renderStreamingContent = function(el, text) { el.textContent = text; if (window.setChatRawContent) window.setChatRawContent(el, text); else el.setAttribute('data-raw-content', text); return Promise.resolve(true); };
+    window.renderLiveChatContent = window.renderStreamingContent;
+    var pair = document.getElementById('chat-execution-` + execID + `');
+    var stream = window.__streamFor('` + execID + `');
+    if (!pair || !stream) fail('Task Thread terminal fixture did not attach its execution stream');
+    window.__phase = 'terminal';
+    var sharedEvent = ` + terminalEvent + `;
+    if (` + fmt.Sprintf("%t", sharedEventFirst) + `) {
+      window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: sharedEvent}));
+      await window.__wait(20);
+      var markedOutput = pair.querySelector('[data-raw-content]');
+      if (!markedOutput || markedOutput.getAttribute('data-authoritative-terminal-content') !== 'true' || markedOutput._authoritativeTerminalContent !== 'partial authoritative') fail('Task Thread shared terminal snapshot was not installed before stream terminal: marker=' + (markedOutput && markedOutput.getAttribute('data-authoritative-terminal-content')) + ' authoritative=' + (markedOutput && markedOutput._authoritativeTerminalContent) + ' raw=' + (markedOutput && markedOutput.getAttribute('data-raw-content')));
+      stream.emit('` + streamEvent + `', '` + streamData + `');
+    } else {
+      stream.emit('` + streamEvent + `', '` + streamData + `');
+      await window.__wait(20);
+      window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: sharedEvent}));
+    }
+    await window.__wait(160);
+    var currentPair = document.getElementById('chat-execution-` + execID + `');
+    if (currentPair !== pair) fail('Task Thread terminal reconciliation replaced the execution node');
+    if (pair.getAttribute('data-exec-status') !== '` + string(terminalStatus) + `') fail('Task Thread terminal status did not remain authoritative: ' + pair.getAttribute('data-exec-status'));
+    var terminalOutput = pair.querySelector('[data-raw-content]');
+    if (!terminalOutput || terminalOutput.getAttribute('data-raw-content') !== 'partial authoritative') fail('Task Thread late terminal event overwrote authoritative output: ' + (terminalOutput && terminalOutput.getAttribute('data-raw-content')));
+    var expectedHolder = document.createElement('template');
+    expectedHolder.innerHTML = window.__snapshots.terminal;
+    var expectedRevision = expectedHolder.content.querySelector('#task-thread-view').getAttribute('data-thread-revision');
+    var view = document.getElementById('task-thread-view');
+    if (view.getAttribute('data-thread-revision') !== expectedRevision) fail('Task Thread terminal revision stayed stale');
+    var swapsBeforeRefocus = window.__swaps.length;
+    window.__hiddenToVisible();
+    await window.__wait(100);
+    if (document.getElementById('chat-execution-` + execID + `') !== pair) fail('Task Thread no-op terminal refocus morphed the current node');
+    var threadSwaps = window.__swaps.slice(swapsBeforeRefocus).filter(function(swap) { return swap.target === 'task-thread-view' || swap.target === 'thread-content'; });
+    if (threadSwaps.length !== 0) fail('Task Thread no-op terminal refocus completed a transcript morph');
+    result.setAttribute('data-test-result', 'pass');
+  } catch (error) {
+    result.setAttribute('data-test-result', 'fail');
+    result.setAttribute('data-test-error', String(error && error.stack || error));
+  }
+});
+</script>`
+	runReconnectChromeFixture(t, prelude+initialHTML+testScript)
+}
+
+func TestTaskThreadFailedAndCancelledTerminalOrderingKeepsNoOpRefocusStable(t *testing.T) {
+	for _, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCancelled} {
+		for _, sharedEventFirst := range []bool{false, true} {
+			order := "stream terminal before shared terminal"
+			if sharedEventFirst {
+				order = "shared terminal before stream terminal"
+			}
+			t.Run(string(status)+"/"+order, func(t *testing.T) {
+				runTaskThreadTerminalOrderingReconnectCase(t, status, sharedEventFirst)
+			})
+		}
+	}
 }
 
 func TestReconnectFixtureSnapshotsAreDistinct(t *testing.T) {

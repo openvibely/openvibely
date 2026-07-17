@@ -351,6 +351,39 @@ func TestFinalizeStreamingTurn_BroadcastsTaskFollowupResponseDone(t *testing.T) 
 	}
 }
 
+func TestFinalizeStreamingTurn_BroadcastsPersistedTerminalStatus(t *testing.T) {
+	for _, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCancelled} {
+		t.Run(string(status), func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
+			exec := &models.Execution{TaskID: task.ID, Status: status, PromptSent: "terminal status"}
+			require.NoError(t, tc.execRepo.Create(context.Background(), exec))
+
+			chatBroadcaster := events.NewChatBroadcaster()
+			tc.handler.SetChatBroadcaster(chatBroadcaster)
+			sub, err := chatBroadcaster.Subscribe()
+			require.NoError(t, err)
+			defer chatBroadcaster.Unsubscribe(sub)
+
+			tc.handler.finalizeStreamingTurn(streamingResponseParams{
+				ProjectID:      project.ID,
+				TaskID:         task.ID,
+				ExecID:         exec.ID,
+				IsTaskFollowup: true,
+			}, "partial output")
+
+			select {
+			case evt := <-sub:
+				require.Equal(t, string(status), evt.Status)
+				require.Equal(t, "partial output", evt.CompletedOutput)
+			case <-time.After(time.Second):
+				t.Fatal("expected terminal chat_response_done event")
+			}
+		})
+	}
+}
+
 func TestBuildThreadSystemContext_WithHistory_DoesNotIncludeTaskPrompt(t *testing.T) {
 	// When there is prior conversation history, the system context should NOT
 	// include the original task prompt because it's already in the conversation

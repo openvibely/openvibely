@@ -966,47 +966,60 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							wrap.appendChild(inner);
 							messages.appendChild(wrap);
 						}
-						function syncCompletedThreadOutput(execId, completedOutput, status) {
-							if (!currentTaskThreadView() || !execId || typeof completedOutput !== 'string' || completedOutput === '') return;
-							var streamContainer = document.getElementById('streaming-message-' + execId);
-							if (!streamContainer) return;
-							if (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);
-							else streamContainer.setAttribute('data-raw-content', completedOutput);
-							if (window.renderStreamingContent) {
-								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
-								var renderPromise = liveRenderer(streamContainer, completedOutput);
-								if (renderPromise && typeof renderPromise.catch === 'function') {
-									renderPromise.catch(function() { streamContainer.textContent = completedOutput; });
+							function syncCompletedThreadOutput(execId, completedOutput, status) {
+								if (!currentTaskThreadView() || !execId) return;
+								var terminalStatus = status === 'failed' || status === 'cancelled' || status === 'completed' ? status : '';
+								var completedPair = document.getElementById('chat-execution-' + execId);
+								if (window.applyChatExecutionTerminalStatus) terminalStatus = window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);
+								else if (completedPair) {
+									var currentStatus = completedPair.getAttribute('data-exec-status') || '';
+									if (!terminalStatus) terminalStatus = currentStatus === 'failed' || currentStatus === 'cancelled' || currentStatus === 'completed' ? currentStatus : 'completed';
+									completedPair.setAttribute('data-exec-status', terminalStatus);
+									completedPair.setAttribute('hx-preserve', 'true');
 								}
-							} else {
-								streamContainer.textContent = completedOutput;
-							}
-							streamContainer.classList.remove('hidden');
-							var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
-							var completedPair = streamContainer.closest('[data-execution-pair="true"]');
-							if (completedPair) {
-								var completedStatus = completedPair.getAttribute('data-exec-status') || '';
-								if (!completedStatus || completedStatus === 'running' || completedStatus === 'pending' || completedStatus === 'queued') completedPair.setAttribute('data-exec-status', status || 'completed');
-								completedPair.setAttribute('hx-preserve', 'true');
-							}
-							if (bubble) {
-								var thinkingWrap = document.getElementById('streaming-thinking-' + execId) || document.getElementById('streaming-thinking-resume-' + execId);
-								if (thinkingWrap) {
-									thinkingWrap.classList.add('hidden');
-								} else {
-									var thinking = bubble.querySelector('.ov-loading-dots');
-									if (thinking) thinking.classList.add('hidden');
+								if (!terminalStatus) terminalStatus = 'completed';
+								var streamContainer = document.getElementById('streaming-message-' + execId);
+								if (streamContainer && typeof completedOutput === 'string') {
+									if (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);
+									else streamContainer.setAttribute('data-raw-content', completedOutput);
+									if (window._taskThreadStreamingActive) {
+										streamContainer._authoritativeTerminalContent = completedOutput;
+										streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
+									}
 								}
-								var loading = bubble.querySelector('.loading-dots, [id^="streaming-dots-"]');
-								if (loading) loading.classList.add('hidden');
-								if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
-								if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-								if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+								if (streamContainer && typeof completedOutput === 'string' && completedOutput !== '') {
+									if (window.renderStreamingContent) {
+										var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+										var renderPromise = liveRenderer(streamContainer, completedOutput);
+										if (renderPromise && typeof renderPromise.catch === 'function') {
+											renderPromise.catch(function() { streamContainer.textContent = completedOutput; });
+										}
+									} else {
+										streamContainer.textContent = completedOutput;
+									}
+								}
+								if (streamContainer) {
+									streamContainer.classList.remove('hidden');
+									var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
+									if (bubble) {
+										var thinkingWrap = document.getElementById('streaming-thinking-' + execId) || document.getElementById('streaming-thinking-resume-' + execId);
+										if (thinkingWrap) {
+											thinkingWrap.classList.add('hidden');
+										} else {
+											var thinking = bubble.querySelector('.ov-loading-dots');
+											if (thinking) thinking.classList.add('hidden');
+										}
+										var loading = bubble.querySelector('.loading-dots, [id^="streaming-dots-"]');
+										if (loading) loading.classList.add('hidden');
+										if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+										if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+										if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+									}
+								}
+								window._taskThreadStreamingActive = false;
+								showCompletedThreadTerminalStatus(terminalStatus);
 							}
-							window._taskThreadStreamingActive = false;
-							showCompletedThreadTerminalStatus(status || 'completed');
-						}
-						function renderQueuedRow(data) {
+							function renderQueuedRow(data) {
 							if (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;
 							if (document.querySelector('[data-thread-input-id="' + data.pending_input_id + '"][data-task-id="' + taskId + '"]')) return;
 							var pendingContainer = ensureComposerPendingContainer();						if (!pendingContainer) return;
@@ -1097,19 +1110,17 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							}
 						});
 					}
-					var chatHandler = function(event) {
-						var data = event.detail || {};
-						if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;
-						var completedPair = document.getElementById('chat-execution-' + data.exec_id);
-						if (completedPair) {
-							var completedStatus = completedPair.getAttribute('data-exec-status') || '';
-							if (!completedStatus || completedStatus === 'running' || completedStatus === 'pending' || completedStatus === 'queued') completedPair.setAttribute('data-exec-status', data.status || 'completed');
-							completedPair.setAttribute('hx-preserve', 'true');
-						}
-						syncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || 'completed');
-						if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);
-					};
-					var handler = function(event) {
+						var chatHandler = function(event) {
+							var data = event.detail || {};
+							if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;
+							try {
+								syncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || '');
+							} catch (err) {
+								console.error('[task-thread] completed-output reconciliation failed:', err);
+							}
+							if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);
+						};
+						var handler = function(event) {
 						var data = event.detail || {};
 						if (data.type !== 'mixture_progress' && data.task_id !== taskId) return;
 						if (data.type === 'mixture_progress') {

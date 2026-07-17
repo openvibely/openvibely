@@ -3642,7 +3642,9 @@ func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneFallback(t *testing.T
 	// Shared live-event chat_response_done branch must invoke evaluatePlanCompletionPrompt.
 	doneHandlerIdx := strings.Index(body, "if (eventType === 'chat_response_done') {")
 	require.NotEqual(t, -1, doneHandlerIdx, "chat_response_done handler must exist")
-	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+2600]
+	doneHandlerEnd := strings.Index(body[doneHandlerIdx:], "var handleChatAfterSwap = function(event)")
+	require.Greater(t, doneHandlerEnd, 0, "chat_response_done handler boundary must exist")
+	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+doneHandlerEnd]
 
 	assert.Contains(t, doneHandlerBody, "evaluatePlanCompletionPrompt",
 		"chat_response_done must invoke evaluatePlanCompletionPrompt as fallback")
@@ -3650,8 +3652,8 @@ func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneFallback(t *testing.T
 		"chat_response_done must clear streaming flag")
 	assert.Contains(t, doneHandlerBody, "data.completed_output",
 		"chat_response_done fallback should use completed_output when present")
-	assert.Contains(t, doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output)",
-		"chat_response_done should reconcile the live bubble with completed_output")
+	assert.Contains(t, doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output, data.status || '')",
+		"chat_response_done should reconcile the live bubble with authoritative output and status")
 	assert.Contains(t, doneHandlerBody, "if (data.is_task_followup) return;",
 		"global chat page must ignore task-thread completion broadcasts")
 }
@@ -3952,11 +3954,9 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	// The handler body with isThread branch can be ~1200 chars.
 	errIdx := strings.Index(body, "eventSource.addEventListener('error'")
 	require.NotEqual(t, -1, errIdx, "streaming bubble must have error event listener")
-	errEnd := errIdx + 2000
-	if errEnd > len(body) {
-		errEnd = len(body)
-	}
-	errBody := body[errIdx:errEnd]
+	errEndOffset := strings.Index(body[errIdx:], "eventSource.onerror")
+	require.Greater(t, errEndOffset, 0, "streaming bubble error handler boundary must exist")
+	errBody := body[errIdx : errIdx+errEndOffset]
 
 	assert.Contains(t, errBody, "event.data === 'execution not found'",
 		"streaming bubble error handler must retry early execution lookup races")
@@ -4069,7 +4069,7 @@ func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneCompletedOutput(t *te
 	require.Greater(t, doneHandlerEnd, 0, "chat_response_done handler boundary must exist")
 	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+doneHandlerEnd]
 
-	syncIdx := strings.Index(doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output)")
+	syncIdx := strings.Index(doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output, data.status || '')")
 	flagIdx := strings.Index(doneHandlerBody, "_chatStreamInProgress = false")
 	evalIdx := strings.Index(doneHandlerBody, "evaluatePlanCompletionPrompt(data.completed_output)")
 

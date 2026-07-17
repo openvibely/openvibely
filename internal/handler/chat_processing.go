@@ -893,8 +893,16 @@ func combineActivePromptWithSteering(activePrompt, steeringInstruction string) s
 
 func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output string) {
 	// Broadcast response done for chat messages and task-thread follow-ups.
-	// Include completed output so live UI fallbacks can reconcile visible bubbles
-	// even when the per-execution token stream was missed or closed early.
+	// Include completed output and the persisted terminal status so live UI
+	// fallbacks converge even when the per-execution terminal event races or is missed.
+	terminalStatus := ""
+	if h.execRepo != nil && params.ExecID != "" {
+		if exec, err := h.execRepo.GetByID(context.Background(), params.ExecID); err == nil && exec != nil {
+			terminalStatus = string(exec.Status)
+		} else if err != nil {
+			applog.Infof("[handler] finalizeStreamingTurn exec=%s error loading terminal status: %v", params.ExecID, err)
+		}
+	}
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
 			Type:            events.ChatResponseDone,
@@ -902,6 +910,7 @@ func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output s
 			ExecID:          params.ExecID,
 			TaskID:          params.TaskID,
 			CompletedOutput: output,
+			Status:          terminalStatus,
 			IsTaskFollowup:  params.IsTaskFollowup,
 		})
 	}

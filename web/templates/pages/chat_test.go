@@ -181,7 +181,7 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	}
 	content := buf.String()
 
-	syncStart := strings.Index(content, "function syncCompletedOutputToBubble(execId, completedOutput)")
+	syncStart := strings.Index(content, "function syncCompletedOutputToBubble(execId, completedOutput, status)")
 	if syncStart == -1 {
 		t.Fatal("expected syncCompletedOutputToBubble helper")
 	}
@@ -270,11 +270,11 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	if errIdx == -1 {
 		t.Fatal("expected error event listener in createStreamingBubble")
 	}
-	errEnd := errIdx + 1400
-	if errEnd > len(bubbleSection) {
-		errEnd = len(bubbleSection)
+	errEndOffset := strings.Index(bubbleSection[errIdx:], "eventSource.onerror = function() {")
+	if errEndOffset == -1 {
+		t.Fatal("expected createStreamingBubble error handler boundary")
 	}
-	errBody := bubbleSection[errIdx:errEnd]
+	errBody := bubbleSection[errIdx : errIdx+errEndOffset]
 	if !strings.Contains(errBody, "event.data === 'execution not found'") || !strings.Contains(errBody, "setTimeout(connectChatExecutionStream, 150 * streamRetryCount)") {
 		t.Error("error handler in createStreamingBubble must retry early execution lookup races")
 	}

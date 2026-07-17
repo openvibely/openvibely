@@ -3421,8 +3421,8 @@ func TestTaskThreadLiveEventsScript_ReconcilesChatResponseDoneCompletedOutput(t 
 	for _, snippet := range []string{
 		"window.addEventListener('sse-chat-live-event', chatHandler)",
 		"if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;",
-		"syncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || 'completed')",
-		"showCompletedThreadTerminalStatus(status || 'completed')",
+		"syncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || '')",
+		"showCompletedThreadTerminalStatus(terminalStatus)",
 		"refreshThreadComposerAction()",
 		"htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/composer-action'",
 		"stopThreadPollingAfterCompletion()",
@@ -3946,11 +3946,11 @@ func TestChatBubbleStreaming_ErrorClearsPlanStreamingFlag(t *testing.T) {
 	if errIdx == -1 {
 		t.Fatal("ChatBubbleStreaming must have an error event listener")
 	}
-	errEnd := errIdx + 2000
-	if errEnd > len(content) {
-		errEnd = len(content)
+	errEndOffset := strings.Index(content[errIdx:], "eventSource.onerror")
+	if errEndOffset <= 0 {
+		t.Fatal("ChatBubbleStreaming error handler boundary is missing")
 	}
-	errBody := content[errIdx:errEnd]
+	errBody := content[errIdx : errIdx+errEndOffset]
 	if !strings.Contains(errBody, "event.data === 'execution not found'") || !strings.Contains(errBody, "scheduleExecutionStreamRetry()") {
 		t.Error("error handler must retry early execution lookup races before failing the stream")
 	}

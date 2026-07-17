@@ -670,16 +670,22 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							eventSource.addEventListener('done', function(event) {
 								if (streamTerminalHandled) return;
 								streamTerminalHandled = true;
+								if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+									textBuffer = String(container._authoritativeTerminalContent || '');
+									delete container._authoritativeTerminalContent;
+									container.removeAttribute('data-authoritative-terminal-content');
+								}
 								var terminalStatus = event && event.data ? event.data : 'completed';
 								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							function finishTerminalRender() {
 								finalizeEmptyTerminalBubble(terminalStatus);
-								var completedPair = container.closest('[data-execution-pair="true"]');
-								if (completedPair) {
-									completedPair.setAttribute('data-exec-status', terminalStatus);
-									completedPair.setAttribute('hx-preserve', 'true');
-								}
-								// Hide streaming dots
+									var completedPair = container.closest('[data-execution-pair="true"]');
+									if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);
+									else if (completedPair) {
+										completedPair.setAttribute('data-exec-status', terminalStatus);
+										completedPair.setAttribute('hx-preserve', 'true');
+									}
+									// Hide streaming dots
 							if (streamingDots) streamingDots.classList.add('hidden');
 							eventSource.close();
 						removeThreadEventSource(eventSource);
@@ -732,30 +738,43 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						eventSource.close();
 						removeThreadEventSource(eventSource);
 						removeChatEventSource(execId, eventSource);
-					if (retryableEarlyError && scheduleExecutionStreamRetry()) {
-						return;
-						}
-						if (streamTerminalHandled) return;
-						streamTerminalHandled = true;
-						flushBufferedOutput();
-						// Hide thinking indicator and streaming dots, ensure content shows
+						if (retryableEarlyError && scheduleExecutionStreamRetry()) {
+							return;
+							}
+							if (streamTerminalHandled) return;
+							streamTerminalHandled = true;
+							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+								textBuffer = String(container._authoritativeTerminalContent || '');
+								delete container._authoritativeTerminalContent;
+								container.removeAttribute('data-authoritative-terminal-content');
+							}
+							flushBufferedOutput();
+							// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
 					container.classList.remove('hidden');
 						if (event.data) {
 							container.appendChild(document.createTextNode('\n\nError: ' + event.data));
 						}
-						window._taskThreadStreamingActive = false;
-						if (isThread) {
-							showThreadTerminalStatus('failed');
-						} else {
-							// Clear streaming flag and re-evaluate plan prompt on error.
-							// The evaluator scans DOM for latest completed bubble; an error
-							// bubble without <proposed_plan> correctly hides the prompt.
-							window._chatStreamInProgress = false;
-							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-						}
-					});
+							window._taskThreadStreamingActive = false;
+							var failedPair = container.closest('[data-execution-pair="true"]');
+							if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
+							else if (failedPair) {
+								failedPair.setAttribute('data-exec-status', 'failed');
+								failedPair.setAttribute('hx-preserve', 'true');
+							}
+							if (isThread) {
+								showThreadTerminalStatus('failed');
+								if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
+							} else {
+								// Clear streaming flag and re-evaluate plan prompt on error.
+								// The evaluator scans DOM for latest completed bubble; an error
+								// bubble without <proposed_plan> correctly hides the prompt.
+								window._chatStreamInProgress = false;
+								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+								if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
+							}
+						});
 
 						eventSource.onerror = function(error) {
 							console.error('EventSource failed:', error);
@@ -1107,16 +1126,22 @@ templ _initThreadStreamingScript() {
 							eventSource.addEventListener('done', function(event) {
 								if (streamTerminalHandled) return;
 								streamTerminalHandled = true;
-							var terminalStatus = event && event.data ? event.data : 'completed';
+								if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+									cumulativeContent = String(container._authoritativeTerminalContent || '');
+									delete container._authoritativeTerminalContent;
+									container.removeAttribute('data-authoritative-terminal-content');
+								}
+								var terminalStatus = event && event.data ? event.data : 'completed';
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							function finishTerminalRender() {
 								finalizeEmptyTerminalBubble(terminalStatus);
-								var completedPair = container.closest('[data-execution-pair="true"]');
-								if (completedPair) {
-									completedPair.setAttribute('data-exec-status', terminalStatus);
-									completedPair.setAttribute('hx-preserve', 'true');
-								}
-								if (streamingDots) streamingDots.classList.add('hidden');
+									var completedPair = container.closest('[data-execution-pair="true"]');
+									if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);
+									else if (completedPair) {
+										completedPair.setAttribute('data-exec-status', terminalStatus);
+										completedPair.setAttribute('hx-preserve', 'true');
+									}
+									if (streamingDots) streamingDots.classList.add('hidden');
 					eventSource.close();
 					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;
@@ -1148,19 +1173,35 @@ templ _initThreadStreamingScript() {
 						if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
 					eventSource.close();
 					removeThreadEventSource(eventSource);
-					if (retryableEarlyError && scheduleResumeExecutionStreamRetry()) {
-						return;
-					}
-					if (streamTerminalHandled) return;
-					streamTerminalHandled = true;
-					flushCumulativeContent();
-					if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
+						if (retryableEarlyError && scheduleResumeExecutionStreamRetry()) {
+							return;
+						}
+						if (streamTerminalHandled) return;
+						streamTerminalHandled = true;
+						if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+							cumulativeContent = String(container._authoritativeTerminalContent || '');
+							delete container._authoritativeTerminalContent;
+							container.removeAttribute('data-authoritative-terminal-content');
+						}
+						flushCumulativeContent();
+						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
 				container.classList.remove('hidden');
 					if (event.data) container.appendChild(document.createTextNode('\n\nError: ' + event.data));
 					window._taskThreadStreamingActive = false;
+					var failedPair = container.closest('[data-execution-pair="true"]');
+					if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
+					else if (failedPair) {
+						failedPair.setAttribute('data-exec-status', 'failed');
+						failedPair.setAttribute('hx-preserve', 'true');
+					}
 					if (pauseTarget) {
 						showThreadTerminalStatus('failed');
+						if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
+					} else {
+						window._chatStreamInProgress = false;
+						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+						if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
 					}
 				});
 
@@ -3381,6 +3422,15 @@ templ ChatAutoScrollScript() {
 					currentPairs[i].setAttribute('data-execution-revision', nextPairs[i].getAttribute('data-execution-revision') || '');
 				}
 				currentRoot.setAttribute(rootRevisionAttribute, nextRoot.getAttribute(rootRevisionAttribute) || '');
+			};
+			window.applyChatExecutionTerminalStatus = function(pair, authoritativeStatus) {
+				if (!pair) return '';
+				var terminalStatuses = { completed: true, failed: true, cancelled: true };
+				var currentStatus = pair.getAttribute('data-exec-status') || '';
+				var terminalStatus = terminalStatuses[authoritativeStatus] ? authoritativeStatus : (terminalStatuses[currentStatus] ? currentStatus : 'completed');
+				pair.setAttribute('data-exec-status', terminalStatus);
+				pair.setAttribute('hx-preserve', 'true');
+				return terminalStatus;
 			};
 		// Generate a stable key for a container to persist thinking and tool-row
 		// states across rerenders and morph replacement. Prefer execution identity.

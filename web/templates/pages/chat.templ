@@ -620,25 +620,35 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					return bubble;
 				}
 
-					function syncCompletedOutputToBubble(execId, completedOutput) {
-							if (!execId || typeof completedOutput !== 'string' || completedOutput === '') return;
-							var streamContainer = document.getElementById('streaming-message-' + execId);
-							if (!streamContainer) return;
-							streamContainer.setAttribute('data-raw-content', completedOutput);
-							if (window.renderStreamingContent) {
-							var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
-							var renderPromise = liveRenderer(streamContainer, completedOutput);
-							if (renderPromise && typeof renderPromise.catch === 'function') {
-								renderPromise.catch(function() { streamContainer.textContent = completedOutput; });
+					function syncCompletedOutputToBubble(execId, completedOutput, status) {
+						if (!execId) return;
+						var streamContainer = document.getElementById('streaming-message-' + execId);
+						if (!streamContainer) return;
+						var completedPair = streamContainer.closest('[data-execution-pair="true"]');
+						if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, status || '');
+						else if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+						if (typeof completedOutput === 'string') {
+							if (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);
+							else streamContainer.setAttribute('data-raw-content', completedOutput);
+							if (window._chatStreamInProgress) {
+								streamContainer._authoritativeTerminalContent = completedOutput;
+								streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
 							}
-						} else {
-							streamContainer.textContent = completedOutput;
+						}
+						if (typeof completedOutput === 'string' && completedOutput !== '') {
+							if (window.renderStreamingContent) {
+								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+								var renderPromise = liveRenderer(streamContainer, completedOutput);
+								if (renderPromise && typeof renderPromise.catch === 'function') {
+									renderPromise.catch(function() { streamContainer.textContent = completedOutput; });
+								}
+							} else {
+								streamContainer.textContent = completedOutput;
+							}
 						}
 						streamContainer.classList.remove('hidden');
-							var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
-								var completedPair = streamContainer.closest('[data-execution-pair="true"]');
-								if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
-							if (bubble) {
+						var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
+						if (bubble) {
 							var thinking = bubble.querySelector('.ov-loading-dots');
 							if (thinking && !thinking.closest('.hidden')) {
 								var thinkingWrap = thinking.closest('.flex.flex-col.items-start.gap-1');
@@ -651,10 +661,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							}
 							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
 							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-								if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
-							}
+							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
 						}
-
+					}
 					function hasActiveChatStream() {
 						var chatMessages = document.getElementById('chat-messages');
 						if (!chatMessages) return false;
@@ -786,12 +795,18 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 
 							eventSource.addEventListener('done', function(event) {
 								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-								var completedPair = bubble.closest('[data-execution-pair="true"]');
-								if (completedPair) {
-									completedPair.setAttribute('data-exec-status', event && event.data ? event.data : 'completed');
-									completedPair.setAttribute('hx-preserve', 'true');
+								if (Object.prototype.hasOwnProperty.call(contentDiv, '_authoritativeTerminalContent')) {
+									textBuffer = String(contentDiv._authoritativeTerminalContent || '');
+									delete contentDiv._authoritativeTerminalContent;
+									contentDiv.removeAttribute('data-authoritative-terminal-content');
 								}
-								renderBufferedOutput(true);
+								var completedPair = bubble.closest('[data-execution-pair="true"]');
+								if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, event && event.data ? event.data : 'completed');
+									else if (completedPair) {
+										completedPair.setAttribute('data-exec-status', event && event.data ? event.data : 'completed');
+										completedPair.setAttribute('hx-preserve', 'true');
+									}
+									renderBufferedOutput(true);
 						dots.classList.add('hidden');
 						eventSource.close();
 						if (window.unregisterChatStreamEventSource) {
@@ -824,22 +839,35 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (window.unregisterChatStreamEventSource) {
 							window.unregisterChatStreamEventSource(execId, eventSource);
 						}
-						if (retryableEarlyError) {
-							streamRetryCount++;
-							setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
-							return;
-						}
-						thinking.classList.add('hidden');
-						dots.classList.add('hidden');
-						contentDiv.classList.remove('hidden');
-						if (event.data) {
-							contentDiv.textContent += '\n\nError: ' + event.data;
-						}
-						// Clear streaming flag and re-evaluate plan prompt on error.
-						// DOM scan finds error/partial bubble without <proposed_plan> → hides prompt.
-						window._chatStreamInProgress = false;
-						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-					});
+							if (retryableEarlyError) {
+								streamRetryCount++;
+								setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
+								return;
+							}
+							if (Object.prototype.hasOwnProperty.call(contentDiv, '_authoritativeTerminalContent')) {
+								textBuffer = String(contentDiv._authoritativeTerminalContent || '');
+								delete contentDiv._authoritativeTerminalContent;
+								contentDiv.removeAttribute('data-authoritative-terminal-content');
+								renderBufferedOutput(true);
+							}
+							thinking.classList.add('hidden');
+							dots.classList.add('hidden');
+							contentDiv.classList.remove('hidden');
+							var failedPair = bubble.closest('[data-execution-pair="true"]');
+							if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
+							else if (failedPair) {
+								failedPair.setAttribute('data-exec-status', 'failed');
+								failedPair.setAttribute('hx-preserve', 'true');
+							}
+							if (event.data) {
+								contentDiv.textContent += '\n\nError: ' + event.data;
+							}
+							// Clear streaming flag, synchronize the authoritative failed snapshot,
+							// and re-evaluate plan prompt on error.
+							window._chatStreamInProgress = false;
+							window.syncChatTranscriptRevision(execId);
+							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+						});
 
 							eventSource.onerror = function() {
 								eventSource.close();
@@ -1187,19 +1215,26 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							return;
 						}
 
-						// chat_response_done may arrive before the last per-exec delta is rendered
-						// in the active bubble (especially after blur/focus reconnect timing).
-						// Reconcile with completed_output so visible UI matches persisted state.
-						if (data.exec_id && typeof data.completed_output === 'string' && data.completed_output !== '') {
-							syncCompletedOutputToBubble(data.exec_id, data.completed_output);
-						}
-						var completedPair = data.exec_id ? document.getElementById('chat-execution-' + data.exec_id) : null;
-						if (completedPair) {
-							var completedStatus = completedPair.getAttribute('data-exec-status') || '';
-							if (!completedStatus || completedStatus === 'running' || completedStatus === 'pending' || completedStatus === 'queued') completedPair.setAttribute('data-exec-status', 'completed');
-							completedPair.setAttribute('hx-preserve', 'true');
-						}
-						window.syncChatTranscriptRevision(data.exec_id || '');
+							// chat_response_done may arrive before the last per-exec delta is rendered
+							// in the active bubble (especially after blur/focus reconnect timing).
+							// Reconcile output and authoritative terminal status so visible UI matches persisted state.
+							if (data.exec_id) {
+								try {
+									syncCompletedOutputToBubble(data.exec_id, data.completed_output, data.status || '');
+								} catch (err) {
+									console.error('[chat] completed-output reconciliation failed:', err);
+								}
+							}
+							var completedPair = data.exec_id ? document.getElementById('chat-execution-' + data.exec_id) : null;
+							if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, data.status || '');
+							else if (completedPair) {
+								var completedStatus = completedPair.getAttribute('data-exec-status') || '';
+								var eventStatus = data.status === 'failed' || data.status === 'cancelled' || data.status === 'completed' ? data.status : '';
+								if (eventStatus) completedPair.setAttribute('data-exec-status', eventStatus);
+								else if (!completedStatus || completedStatus === 'running' || completedStatus === 'pending' || completedStatus === 'queued') completedPair.setAttribute('data-exec-status', 'completed');
+								completedPair.setAttribute('hx-preserve', 'true');
+							}
+							window.syncChatTranscriptRevision(data.exec_id || '');
 
 							window._chatStreamInProgress = false;
 							if (window.evaluatePlanCompletionPrompt) {
