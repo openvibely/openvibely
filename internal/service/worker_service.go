@@ -128,6 +128,12 @@ func (w *WorkerService) SetOnTaskComplete(fn func(task models.Task, executionErr
 	w.onTaskComplete = fn
 }
 
+// hasGlobalWorkerCapacity reports whether another task may dispatch. A limit of
+// zero is the canonical representation for an unlimited global worker pool.
+func hasGlobalWorkerCapacity(maxWorkers, running int) bool {
+	return maxWorkers <= 0 || running < maxWorkers
+}
+
 func NewWorkerService(llmSvc *LLMService, numWorkers int, projectRepo *repository.ProjectRepo) *WorkerService {
 	return &WorkerService{
 		llmSvc:      llmSvc,
@@ -184,7 +190,7 @@ func (w *WorkerService) Resize(n int) {
 	w.mu.Unlock()
 
 	applog.Infof("[worker] Resize %d -> %d max parallel tasks", old, n)
-	if n > old {
+	if (n <= 0 && old > 0) || n > old {
 		w.dispatchNext()
 	}
 }
@@ -232,7 +238,7 @@ func (w *WorkerService) dispatchNext() {
 	for i < len(w.queue) {
 		// Check global capacity
 		running := int(atomic.LoadInt32(&w.totalRunning))
-		if running >= w.numWorkers {
+		if !hasGlobalWorkerCapacity(w.numWorkers, running) {
 			return // globally at capacity, nothing more to dispatch
 		}
 

@@ -1267,6 +1267,8 @@ func TestHandler_WorkerSettings(t *testing.T) {
 	}
 	assertContains(t, rec, "Worker Capacity &amp; Utilization")
 	assertContains(t, rec, "badge badge-primary badge-sm\">Global")
+	assertContains(t, rec, `id="limit-input-global" value="0" min="0"`)
+	assertContains(t, rec, ">Unlimited</span>")
 	assertNotContains(t, rec, "Global Worker Pool")
 	assertContains(t, rec, "if (!window._workerSettingsHandlersBound)")
 	assertContains(t, rec, "window._workerLimitSuppressDirtyRestoreUntil")
@@ -1308,6 +1310,31 @@ func TestHandler_UpdateWorkerSettings(t *testing.T) {
 		assertCode(t, rec, http.StatusOK)
 	})
 
+	t.Run("unlimited round-trips through settings", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		ctx := context.Background()
+		h.workerSvc.Start(ctx)
+		defer h.workerSvc.Stop()
+
+		form := url.Values{}
+		form.Set("max_workers", "0")
+		rec := htmxPost(e, "/workers", form)
+		assertCode(t, rec, http.StatusOK)
+		assertContains(t, rec, `id="limit-input-global" value="0" min="0"`)
+		assertContains(t, rec, ">Unlimited</span>")
+
+		maxWorkers, err := h.workerRepo.GetMaxWorkers(ctx)
+		if err != nil {
+			t.Fatalf("GetMaxWorkers: %v", err)
+		}
+		if maxWorkers != 0 {
+			t.Fatalf("expected unlimited max_workers=0 in DB, got %d", maxWorkers)
+		}
+		if n := h.workerSvc.NumWorkers(); n != 0 {
+			t.Fatalf("expected unlimited max_workers=0 in worker service, got %d", n)
+		}
+	})
+
 	t.Run("actually resizes worker pool", func(t *testing.T) {
 		h, e, _ := setupTestHandler(t)
 		ctx := context.Background()
@@ -1338,6 +1365,8 @@ func TestHandler_GlobalWorkerStats(t *testing.T) {
 	assertContains(t, rec, "Worker Pool Size")
 	assertContains(t, rec, "Tasks Running")
 	assertContains(t, rec, "Queue")
+	assertContains(t, rec, ">Unlimited</span>")
+	assertContains(t, rec, `0 / Unlimited`)
 	assertContains(t, rec, `hx-get="/workers/stats/global"`)
 }
 

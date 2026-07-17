@@ -444,8 +444,8 @@ func (h *Handler) WorkerSettings(c echo.Context) error {
 
 func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
 	maxWorkers, err := strconv.Atoi(c.FormValue("max_workers"))
-	if err != nil || maxWorkers < 1 {
-		maxWorkers = 1
+	if err != nil || maxWorkers < 0 {
+		maxWorkers = 0
 	}
 	if maxWorkers > 10 {
 		maxWorkers = 10
@@ -753,10 +753,13 @@ func (h *Handler) GetGlobalCapacity(c echo.Context) error {
 	maxWorkers := h.workerSvc.NumWorkers()
 	totalRunning := h.workerSvc.TotalRunning()
 	queueSize := h.workerSvc.QueueSize()
-	hasCapacity := totalRunning < maxWorkers
-	availableSlots := maxWorkers - totalRunning
-	if availableSlots < 0 {
-		availableSlots = 0
+	hasCapacity := maxWorkers <= 0 || totalRunning < maxWorkers
+	availableSlots := 0
+	if maxWorkers > 0 {
+		availableSlots = maxWorkers - totalRunning
+		if availableSlots < 0 {
+			availableSlots = 0
+		}
 	}
 
 	resp := GlobalCapacityResponse{

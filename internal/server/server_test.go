@@ -125,6 +125,14 @@ func assertFreshSystemSeedState(t *testing.T, dbPath string) {
 	assertSingleProtectedSystemAgent(t, db, "goal")
 	assertSingleScheduledSystemTask(t, db, "System: Memory Consolidation", "memory_curator")
 	assertSingleScheduledSystemTask(t, db, "System: Skill Library Maintenance", "skill_curator")
+
+	var maxWorkers int
+	if err := db.QueryRow("SELECT max_workers FROM worker_settings WHERE id='singleton'").Scan(&maxWorkers); err != nil {
+		t.Fatalf("read global worker limit after startup: %v", err)
+	}
+	if maxWorkers != 0 {
+		t.Fatalf("global worker limit after startup = %d, want unlimited (0)", maxWorkers)
+	}
 }
 
 func assertSingleProtectedSystemAgent(t *testing.T, db *sql.DB, systemKind string) {

@@ -19,7 +19,7 @@ func (r *WorkerRepo) GetMaxWorkers(ctx context.Context) (int, error) {
 	err := r.db.QueryRowContext(ctx,
 		`SELECT max_workers FROM worker_settings WHERE id = 'singleton'`).Scan(&n)
 	if err != nil {
-		return 1, fmt.Errorf("getting max workers: %w", err)
+		return 0, fmt.Errorf("getting max workers: %w", err)
 	}
 	return n, nil
 }

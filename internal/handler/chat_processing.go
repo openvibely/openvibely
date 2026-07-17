@@ -2975,6 +2975,8 @@ func (h *Handler) executeViewSettings(ctx context.Context) string {
 		if err != nil {
 			applog.Infof("[handler] executeViewSettings error reading global workers: %v", err)
 			sb.WriteString("- **Global max workers:** error reading\n")
+		} else if globalMax == 0 {
+			sb.WriteString("- **Global max workers:** unlimited\n")
 		} else {
 			sb.WriteString(fmt.Sprintf("- **Global max workers:** %d\n", globalMax))
 		}
