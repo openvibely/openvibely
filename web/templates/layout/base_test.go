@@ -908,6 +908,43 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 	}
 }
 
+func TestToolOutputToggleCSS_UsesThemeSafeIntegratedControls(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	expected := []string{
+		"[data-theme=\"light\"] .stream-tool-output-toggle {",
+		"background: #e2e4e8;",
+		"color: #24272c;",
+		"border-color: #7f8794;",
+		"[data-theme=\"light\"] .stream-tool-output-toggle:hover {",
+		"background: #d5d8de;",
+		"[data-theme=\"dark\"] .stream-tool-body {",
+		"background: #252a32;",
+		"border-color: #414854;",
+		"[data-theme=\"dark\"] .stream-tool-output-toggle {",
+		"background: #343b46;",
+		"color: #f3f4f6;",
+		"border-color: #6b7689;",
+		"[data-theme=\"dark\"] .stream-tool-output-toggle:hover {",
+		"background: #414a57;",
+		"appearance: none;",
+		"max-width: 100%;",
+		"border: 1px solid;",
+		"transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;",
+		".stream-tool-output-toggle:focus-visible {",
+		"outline: 2px solid var(--ov-link-color);",
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected integrated tool output toggle CSS fragment %q", fragment)
+		}
+	}
+}
+
 func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
