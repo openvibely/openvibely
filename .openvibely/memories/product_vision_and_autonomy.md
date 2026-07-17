@@ -2,9 +2,9 @@
 name: product_vision_and_autonomy
 type: project
 created: 2026-06-10
-updated: 2026-07-15
-source: consolidation
-source_id: memory_consolidation_2026_07_13
+updated: 2026-07-16
+source: task_audit
+source_id: 22989609f707f44e0c687dc1babfef8c
 confidence: high
 title: Product Vision and Reviewable Autonomy
 ---
@@ -30,7 +30,7 @@ Recursive bootstrap skill direction:
 - The skill should use real OpenVibely control-plane tools to create/update the priority inbox, autonomous driver task, persisted goals, triage/audit/implementation/repair/review tasks, recurring schedules, dynamic wakeup guidance, task chaining, and curator loops; it should not merely describe the loop.
 - Source-of-truth file selection should be conservative: use explicit file paths or a single obvious canonical root file. If vision/spec/defect files are missing or ambiguous, ask the user which exact file(s) to use rather than guessing or creating a generic discovery task.
 - Direct setup for bootstrap skills should run from a visible task or task-thread follow-up where lifecycle routing can select standalone skills and expose `skill_view`; ordinary interactive Chat does not run standalone skill routing today. Runtime-tool-capable initial task runs and task-thread follow-ups have bootstrap support for visible task creation, schedules, capabilities, GitHub inbox/issue/PR tools, and persisted task goals for implementation tasks or explicitly goal-driven work when dependencies are wired and the provider supports runtime tools. Recurring GitHub loop tasks should not receive persisted goals by default.
-- The tool contract should stay aligned with actual chat-control capabilities and avoid fictional orchestration APIs; current bootstrap idempotency is limited because there is no generic `list_tasks`/`list_schedules` action, and several goal/task actions require real task IDs rather than titles. A bounded read-only, project-scoped task discovery/search capability for Chat and scheduled automation is tracked in `openvibely/openvibely#25`; it should reuse existing task-query primitives and let control-plane agents discover completed, blocked, or otherwise relevant durable tasks instead of depending on prior transcript visibility.
+- The tool contract should stay aligned with actual chat-control capabilities and avoid fictional orchestration APIs. Generic `list_tasks` now provides bounded, read-only, project-scoped task discovery/search for Chat and scheduled automation, including partial title and category/status filters with stable pagination. Bootstrap idempotency remains limited because there is no generic `list_schedules` action and several goal/task actions require real task IDs rather than titles.
 - A successful bootstrap should produce visible OpenVibely objects, not just guidance: a User Priority Inbox, an Autonomous Project Driver, User Priority Triage, focused audit tasks, recurring schedules, safe initial executions when allowed, generated user-priority implementation tasks, and chained review/audit follow-ups.
 - The autonomous-loop skill should describe task coordination as mediated orchestration, not task-to-task communication.
 
@@ -45,6 +45,6 @@ GitHub-backed autonomous SDLC direction:
 - The GitHub-centered approach should reuse the older Vision Driver ideas of durable goals, schedules, dynamic wakeups, user-priority-first handling, task chaining, and review-gated autonomy, but move external coordination/status to GitHub issues/PRs.
 - The recorded hosted topology runs Dev Inbox hourly, code-finder tasks daily, and Loop Auditor weekly. Dev Inbox forwards authorized PR feedback before assigned-issue processing; finder prompts only open issues, bot/self comments are ignored, recurring loop tasks have no persisted goals, and correctness must be validated through the autonomous path rather than manual message forwarding or wakeups.
 - GitHub autonomous-SDLC support should remain generic: provide reusable GitHub/runtime/control-plane tools that can be used in many workflows, avoid bespoke hidden SDLC daemons or workflow-specific services unless a generic primitive is actually needed, and make the bootstrap skill set up prompt-driven visible schedules/tasks such as “check GitHub for assigned issues matching the configured mailbox criteria” instead of hardcoded backend loops.
-- An OpenVibely-native alternative was implemented through approval-based Alerts, but its bundled `openvibely_native_autonomous_sdlc_bootstrap` skill is now archived because the required approval, claim, task-linking, completion, and failure operations are absent from the current capability surface. The GitHub-backed workflow remains supported; do not plan around the native bootstrap unless those tool contracts are restored. Historical notification contracts remain documented in `alerts_and_actionable_notifications.md` and `docs/openvibely-native-autonomous-sdlc-user-guide.md`.
+- OpenVibely also provides a supported native alternative through approval-based Alerts. The bundled `openvibely_native_autonomous_sdlc_bootstrap` skill uses generic project-scoped actionable notifications and the available approval, claim, task-linking, completion, failure, and retry tools to create implementation tasks only after human approval. The GitHub-backed workflow remains supported as an alternative.
 
 Current product-completeness themes from `VISION.md` expected to require recurring work include outcome-to-work decomposition, multi-agent team coordination, reviewable autonomy UX, durable learning quality, external integrations, operational clarity, and provider/model normalization.
