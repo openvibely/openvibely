@@ -829,6 +829,104 @@ func TestTaskDetailContent_AgentSelectorAllowsNoAgentSelection(t *testing.T) {
 	}
 }
 
+func TestTaskDetailContent_ScheduleAgentSelectorsHydratePersistedAssignment(t *testing.T) {
+	selectedID := "agent-selected"
+	task := &models.Task{
+		ID:                "task-scheduled-agent",
+		ProjectID:         "project-1",
+		Title:             "Scheduled Agent Task",
+		Status:            models.StatusPending,
+		Category:          models.CategoryScheduled,
+		AgentDefinitionID: &selectedID,
+	}
+	runAt := time.Now().Add(time.Hour).UTC()
+	schedules := []models.Schedule{{
+		ID:             "schedule-agent-1",
+		TaskID:         task.ID,
+		RunAt:          runAt,
+		NextRun:        &runAt,
+		RepeatType:     models.RepeatDaily,
+		RepeatInterval: 1,
+		Enabled:        true,
+	}}
+	agentDefs := []models.Agent{
+		{ID: selectedID, Name: "Selected Runner", Model: "inherit", Scope: models.AgentScopeProject, ProjectID: task.ProjectID, Enabled: true, SelectableAsPrimary: true},
+		{ID: "protected", Name: "Protected Maintenance", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false},
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail: %v", err)
+	}
+	body := buf.String()
+	editStart := strings.Index(body, `id="schedule-edit-schedule-agent-1"`)
+	if editStart == -1 {
+		t.Fatal("expected schedule edit form")
+	}
+	editBody := body[editStart:]
+	for _, want := range []string{
+		`name="schedule_agent_definition_present" value="1"`,
+		`name="agent_definition_id"`,
+		`>Primary Agent</span>`,
+		`value="agent-selected" selected`,
+		`action="/schedules/schedule-agent-1?project_id=project-1"`,
+		`name="_method" value="PUT"`,
+		`/schedules/schedule-agent-1?project_id=project-1`,
+		`grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2`,
+	} {
+		if !strings.Contains(editBody, want) {
+			t.Fatalf("expected schedule edit form to contain %q", want)
+		}
+	}
+	if strings.Contains(editBody, "Protected Maintenance") {
+		t.Fatal("schedule Agent choices must exclude agents that are not selectable as primary")
+	}
+}
+
+func TestTaskDetailContent_ScheduleAgentSelectorsSupportNoAgent(t *testing.T) {
+	task := &models.Task{ID: "task-no-agent", ProjectID: "project-1", Title: "No Agent Task", Status: models.StatusPending, Category: models.CategoryScheduled}
+	runAt := time.Now().Add(time.Hour).UTC()
+	schedules := []models.Schedule{{ID: "schedule-no-agent", TaskID: task.ID, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}}
+	agentDefs := []models.Agent{{ID: "runner", Name: "Runner", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true}}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail: %v", err)
+	}
+	body := buf.String()
+	if strings.Count(body, `>No Agent</option>`) < 3 {
+		t.Fatalf("expected no-agent option in task, add-schedule, and edit-schedule selectors")
+	}
+	if strings.Count(body, `option value="" selected>No Agent</option>`) < 3 {
+		t.Fatalf("expected server-rendered no-agent selection in all schedule-related selectors")
+	}
+	if !strings.Contains(body, `/tasks/task-no-agent/schedule?project_id=project-1`) {
+		t.Fatal("expected add-schedule form to preserve project scope")
+	}
+}
+
+func TestTaskDetailContent_ScheduleEditDoesNotOfferOrClearProtectedAgent(t *testing.T) {
+	protectedID := "protected-agent"
+	task := &models.Task{ID: "task-protected-agent", ProjectID: "project-1", Title: "Protected Agent Task", Status: models.StatusPending, Category: models.CategoryScheduled, AgentDefinitionID: &protectedID}
+	runAt := time.Now().Add(time.Hour).UTC()
+	schedules := []models.Schedule{{ID: "schedule-protected-agent", TaskID: task.ID, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}}
+	agentDefs := []models.Agent{{ID: protectedID, Name: "Protected Maintenance", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false}}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail: %v", err)
+	}
+	body := buf.String()
+	editStart := strings.Index(body, `id="schedule-edit-schedule-protected-agent"`)
+	if editStart == -1 {
+		t.Fatal("expected protected schedule edit form")
+	}
+	editBody := body[editStart:]
+	if strings.Contains(editBody, "Protected Maintenance") || strings.Contains(editBody, `name="schedule_agent_definition_present"`) {
+		t.Fatal("protected Agent must not be exposed or overwritten by the schedule edit form")
+	}
+}
+
 // TestTaskDetailContent_ScheduleEnabledState verifies the task detail schedule
 // card renders the correct controls and badges based on Schedule.Enabled.
 func TestTaskDetailContent_ScheduleEnabledState(t *testing.T) {

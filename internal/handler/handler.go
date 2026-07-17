@@ -590,6 +590,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Schedules
 	e.POST("/tasks/:taskId/schedule", h.CreateSchedule)
+	e.POST("/schedules/:id", h.UpdateSchedule) // Native form fallback; HTMX uses PUT below.
 	e.PUT("/schedules/:id", h.UpdateSchedule)
 	e.DELETE("/schedules/:id", h.DeleteSchedule)
 	e.POST("/schedules/:id/toggle", h.ToggleScheduleEnabled)

@@ -382,19 +382,62 @@ func buildWeekData(tasks []repository.TaskWithSchedule, weekOffset int) WeekData
 	}
 }
 
-templ Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig) {
+func schedulePrimaryAgentSelectable(agent models.Agent) bool {
+	return agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil
+}
+
+func schedulePrimaryAgentSelectionEditable(selected *string, agentDefs []models.Agent) bool {
+	if selected == nil || *selected == "" {
+		return true
+	}
+	for _, agent := range agentDefs {
+		if agent.ID == *selected && schedulePrimaryAgentSelectable(agent) {
+			return true
+		}
+	}
+	return false
+}
+
+templ SchedulePrimaryAgentSelector(selected *string, agentDefs []models.Agent, selectClass string) {
+	<input type="hidden" name="schedule_agent_definition_present" value="1"/>
+	<select name="agent_definition_id" class={ selectClass }>
+		<option
+			value=""
+			if selected == nil || *selected == "" {
+				selected
+			}
+		>No Agent</option>
+		for _, ad := range agentDefs {
+			if schedulePrimaryAgentSelectable(ad) {
+				<option
+					value={ ad.ID }
+					if selected != nil && *selected == ad.ID {
+						selected
+					}
+				>
+					{ ad.Name }
+					if ad.Model != "inherit" {
+						({ ad.Model })
+					}
+				</option>
+			}
+		}
+	</select>
+}
+
+templ Schedule(projects []models.Project, currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
 	@layout.Base("Schedule", projects, projectID(currentProject)) {
-		@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents)
+		@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs)
 	}
 }
 
 // ScheduleContent renders just the schedule content for HTMX requests
-templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig) {
-	@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents)
+templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWithSchedule, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+	@scheduleContent(currentProject, buildWeekData(tasks, weekOffset), weekOffset, agents, agentDefs)
 }
 
-templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig) {
-	<div id="schedule-content" class="flex flex-col h-full">
+templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
+	<div id="schedule-content" class="flex flex-col h-full" data-project-id={ projectID(currentProject) }>
 		<!-- Header: Row 1 – Title + New Task button -->
 		<div class="flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto">
 			<div class="flex justify-between items-center mb-3">
@@ -589,6 +632,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				<h3 class="font-bold text-lg mb-4 pr-10">New Scheduled Task</h3>
 				<form
 					method="post"
+					action={ fmt.Sprintf("/tasks?project_id=%s&from=schedule", projectID(currentProject)) }
 					hx-post={ fmt.Sprintf("/tasks?project_id=%s&from=schedule", projectID(currentProject)) }
 					hx-target="#schedule-content"
 					hx-swap="outerHTML show:none"
@@ -608,10 +652,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						<label class="label"><span class="label-text">Prompt</span></label>
 						<textarea name="prompt" class="textarea textarea-bordered h-24" required placeholder="The prompt/instruction for the model to execute"></textarea>
 					</div>
-					<div class="grid grid-cols-2 gap-3">
-						<div class="form-control">
+					<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+						<div class="form-control min-w-0">
 							<label class="label"><span class="label-text">Model</span></label>
-							<select name="agent_id" class="select select-bordered">
+							<select name="agent_id" class="select select-bordered w-full max-w-full">
 								<option value="">Use Default Model</option>
 								for _, agent := range agents {
 									<option value={ agent.ID }>
@@ -622,24 +666,32 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 									</option>
 								}
 							</select>
+							<label class="label"><span class="label-text-alt opacity-60">Model configuration</span></label>
 						</div>
-						<div class="form-control">
+						<div class="form-control min-w-0">
+							<label class="label"><span class="label-text">Primary Agent</span></label>
+							@SchedulePrimaryAgentSelector(nil, agentDefs, "select select-bordered w-full max-w-full")
+							<label class="label"><span class="label-text-alt opacity-60">Agent definition used for scheduled runs</span></label>
+						</div>
+					</div>
+					<div class="grid grid-cols-1 gap-3 mt-3 sm:grid-cols-2">
+						<div class="form-control min-w-0">
 							<label class="label"><span class="label-text">Priority</span></label>
-							<select name="priority" class="select select-bordered">
+							<select name="priority" class="select select-bordered w-full max-w-full">
 								<option value="1">Low</option>
 								<option value="2" selected>Normal</option>
 								<option value="3">High</option>
 								<option value="4">Urgent</option>
 							</select>
 						</div>
-					</div>
-					<div class="form-control mt-3">
-						<label class="label"><span class="label-text">Tag</span></label>
-						<select name="tag" class="select select-bordered">
-							<option value="">None</option>
-							<option value="feature">Feature</option>
-							<option value="bug">Bug</option>
-						</select>
+						<div class="form-control min-w-0">
+							<label class="label"><span class="label-text">Tag</span></label>
+							<select name="tag" class="select select-bordered w-full max-w-full">
+								<option value="">None</option>
+								<option value="feature">Feature</option>
+								<option value="bug">Bug</option>
+							</select>
+						</div>
 					</div>
 					<!-- Schedule Configuration -->
 					<div class="divider text-xs opacity-60">Schedule Configuration</div>
@@ -862,11 +914,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			function openTaskDialog(taskId) {
 				// Only navigate if not dragging and not just finished dragging
 				if (!draggedScheduleId && !_schedDragActive) {
-					htmx.ajax('GET', `/tasks/${taskId}?tab=chat&from=schedule`, {
+					var scheduleRoot = document.getElementById('schedule-content');
+					var projectId = scheduleRoot ? (scheduleRoot.dataset.projectId || '') : '';
+					var taskURL = '/tasks/' + encodeURIComponent(taskId) + '?tab=chat&from=schedule';
+					if (projectId) taskURL += '&project_id=' + encodeURIComponent(projectId);
+					htmx.ajax('GET', taskURL, {
 						target: '#main-content',
 						swap: 'innerHTML'
 					});
-					history.pushState({}, '', `/tasks/${taskId}?tab=chat&from=schedule`);
+					history.pushState({}, '', taskURL);
 				}
 			}
 

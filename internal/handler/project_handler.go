@@ -646,15 +646,16 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 
 	applog.Infof("[handler] ViewSchedule found %d tasks with schedules", len(tasks))
 
-	// Get agents for the new scheduled task form
+	// Keep model configurations and primary Agent definitions as separate choices.
 	agents, _ := h.llmConfigRepo.List(c.Request().Context())
+	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, nil)
 
 	// For HTMX requests, return just the schedule content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.ScheduleContent(currentProject, tasks, weekOffset, agents))
+		return render(c, http.StatusOK, pages.ScheduleContent(currentProject, tasks, weekOffset, agents, agentDefs))
 	}
 
-	return render(c, http.StatusOK, pages.Schedule(projects, currentProject, tasks, weekOffset, agents))
+	return render(c, http.StatusOK, pages.Schedule(projects, currentProject, tasks, weekOffset, agents, agentDefs))
 }
 
 func render(c echo.Context, status int, component templ.Component) error {

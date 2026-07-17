@@ -143,9 +143,9 @@ func (h *Handler) loadTaskGoal(ctx context.Context, taskID string) *models.TaskG
 	return goal
 }
 
-func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, currentAgentID *string) []models.Agent {
+func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID string, currentAgentID *string) []models.Agent {
 	agentDefs := h.listAgentDefinitions(ctx)
-	out := selectableTaskAgentDefinitions(agentDefs)
+	out := selectableTaskAgentDefinitionsForProject(agentDefs, projectID)
 	if currentAgentID == nil || *currentAgentID == "" {
 		return out
 	}
@@ -155,9 +155,31 @@ func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, currentAgent
 		}
 	}
 	for _, agent := range agentDefs {
-		if agent.ID == *currentAgentID && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil {
+		if agent.ID == *currentAgentID && agentDefinitionAvailableToProject(agent, projectID) && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil {
 			return append([]models.Agent{agent}, out...)
 		}
+	}
+	return out
+}
+
+func agentDefinitionAvailableToProject(agent models.Agent, projectID string) bool {
+	if agent.Scope == models.AgentScopeProject {
+		return agent.ProjectID != "" && agent.ProjectID == projectID
+	}
+	return true
+}
+
+func selectablePrimaryAgentDefinition(agent models.Agent) bool {
+	return agent.Enabled && agent.SelectableAsPrimary && agent.GeneratedStatus != models.AgentStatusArchived && agent.ArchivedAt == nil
+}
+
+func selectableTaskAgentDefinitionsForProject(agentDefs []models.Agent, projectID string) []models.Agent {
+	out := make([]models.Agent, 0, len(agentDefs))
+	for _, agent := range agentDefs {
+		if !selectablePrimaryAgentDefinition(agent) || !agentDefinitionAvailableToProject(agent, projectID) {
+			continue
+		}
+		out = append(out, agent)
 	}
 	return out
 }
@@ -165,15 +187,29 @@ func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, currentAgent
 func selectableTaskAgentDefinitions(agentDefs []models.Agent) []models.Agent {
 	out := make([]models.Agent, 0, len(agentDefs))
 	for _, agent := range agentDefs {
-		if !agent.Enabled || !agent.SelectableAsPrimary {
-			continue
+		if selectablePrimaryAgentDefinition(agent) {
+			out = append(out, agent)
 		}
-		if agent.GeneratedStatus == models.AgentStatusArchived || agent.ArchivedAt != nil {
-			continue
-		}
-		out = append(out, agent)
 	}
 	return out
+}
+
+func (h *Handler) resolvePrimaryAgentDefinition(ctx context.Context, projectID, agentDefinitionID string) (*string, error) {
+	agentDefinitionID = strings.TrimSpace(agentDefinitionID)
+	if agentDefinitionID == "" {
+		return nil, nil
+	}
+	if h.agentRepo == nil {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "primary agent is unavailable")
+	}
+	agent, err := h.agentRepo.GetByID(ctx, agentDefinitionID)
+	if err != nil {
+		return nil, err
+	}
+	if agent == nil || !selectablePrimaryAgentDefinition(*agent) || !agentDefinitionAvailableToProject(*agent, projectID) {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "invalid primary agent")
+	}
+	return &agent.ID, nil
 }
 
 func (h *Handler) renderKanbanBoard(c echo.Context, tasks []models.Task, projectID string, sortPrefs taskSortPreferences, llmModels []models.LLMConfig) error {
@@ -226,7 +262,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 	agents, _ := h.llmConfigRepo.List(c.Request().Context())
-	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), nil)
+	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, nil)
 
 	if isHTMX {
 		return render(c, http.StatusOK, pages.TasksContent(project, tasks, agents, agentDefs, sortPrefs.Backlog, sortPrefs.Completed))
@@ -277,9 +313,13 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	if agentID := c.FormValue("agent_id"); agentID != "" {
 		t.AgentID = &agentID
 	}
-	// Handle optional agent definition selection
+	// Handle optional primary Agent definition selection separately from the model config.
 	if agentDefID := c.FormValue("agent_definition_id"); agentDefID != "" {
-		t.AgentDefinitionID = &agentDefID
+		resolvedAgentDefID, err := h.resolvePrimaryAgentDefinition(c.Request().Context(), projectID, agentDefID)
+		if err != nil {
+			return err
+		}
+		t.AgentDefinitionID = resolvedAgentDefID
 	}
 	applog.Infof("[handler] CreateTask project=%s title=%q category=%s priority=%d tag=%s prompt_len=%d",
 		projectID, t.Title, t.Category, t.Priority, t.Tag, len(t.Prompt))
@@ -431,13 +471,14 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 		scheduledTasks, _ := h.taskSvc.GetTasksWithSchedulesByProject(c.Request().Context(), projectID)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
+		agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, t.AgentDefinitionID)
 		weekOffset := 0
 		if weekParam := c.QueryParam("week"); weekParam != "" {
 			if w, err := strconv.Atoi(weekParam); err == nil {
 				weekOffset = w
 			}
 		}
-		return render(c, http.StatusOK, pages.ScheduleContent(project, scheduledTasks, weekOffset, agents))
+		return render(c, http.StatusOK, pages.ScheduleContent(project, scheduledTasks, weekOffset, agents, agentDefs))
 	}
 
 	// Return the full kanban board
@@ -471,7 +512,7 @@ func (h *Handler) GetTask(c echo.Context) error {
 	schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
 	agents, _ := h.llmConfigRepo.List(c.Request().Context())
 	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.AgentDefinitionID)
+	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 	var reviewComments []models.ReviewComment
 	if h.reviewCommentRepo != nil {
 		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
@@ -538,7 +579,7 @@ func (h *Handler) GetTaskDetailStatus(c echo.Context) error {
 	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
 
 	agents, _ := h.llmConfigRepo.List(c.Request().Context())
-	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.AgentDefinitionID)
+	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 
 	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, executions, agents, agentDefs))
 }
@@ -1207,7 +1248,7 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.AgentDefinitionID)
+		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 		var rc []models.ReviewComment
 		if h.reviewCommentRepo != nil {
 			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
@@ -1862,7 +1903,7 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.AgentDefinitionID)
+		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 		var rc []models.ReviewComment
 		if h.reviewCommentRepo != nil {
 			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)

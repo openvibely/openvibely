@@ -469,11 +469,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						<div class="card-body p-4">
 							<form
 								method="post"
-								hx-post={ fmt.Sprintf("/tasks/%s/schedule", task.ID) }
+								action={ fmt.Sprintf("/tasks/%s/schedule?project_id=%s", task.ID, task.ProjectID) }
+								hx-post={ fmt.Sprintf("/tasks/%s/schedule?project_id=%s", task.ID, task.ProjectID) }
 								hx-target="#task-detail-content"
 								hx-swap="outerHTML"
 							>
-								<div class="grid grid-cols-2 gap-4 mb-4">
+								<div class="grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2">
 									<div class="form-control">
 										<label class="label">
 											<span class="label-text">Run At</span>
@@ -503,6 +504,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 										</select>
 									</div>
 								</div>
+								if schedulePrimaryAgentSelectionEditable(task.AgentDefinitionID, agentDefs) {
+									<div class="form-control mb-4 min-w-0">
+										<label class="label">
+											<span class="label-text">Primary Agent</span>
+										</label>
+										@SchedulePrimaryAgentSelector(task.AgentDefinitionID, agentDefs, "select select-bordered select-sm w-full max-w-full")
+										<label class="label"><span class="label-text-alt opacity-60">Agent definition used for scheduled runs; model configuration is unchanged</span></label>
+									</div>
+								}
 								<div class="form-control mb-4" id="repeat-interval-container">
 									<label class="label">
 										<span class="label-text">Repeat Every</span>
@@ -655,13 +665,14 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 									</div>
 									<!-- Schedule Edit Form -->
 									<div id={ fmt.Sprintf("schedule-edit-%s", s.ID) } class="hidden" data-schedule-id={ s.ID }>
-										<form
-											method="post"
-											hx-put={ fmt.Sprintf("/schedules/%s", s.ID) }
-											hx-target="#task-detail-content"
-											hx-swap="outerHTML"
-										>
-											<div class="grid grid-cols-2 gap-4 mb-4">
+									<form
+										method="post"
+										action={ fmt.Sprintf("/schedules/%s?project_id=%s", s.ID, task.ProjectID) }
+										hx-put={ fmt.Sprintf("/schedules/%s?project_id=%s", s.ID, task.ProjectID) }
+										hx-target="#task-detail-content"
+										hx-swap="outerHTML"
+									>
+										<input type="hidden" name="_method" value="PUT"/>											<div class="grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2">
 												<div class="form-control">
 													<label class="label">
 														<span class="label-text">Run At</span>
@@ -727,6 +738,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 													</select>
 												</div>
 											</div>
+											if schedulePrimaryAgentSelectionEditable(task.AgentDefinitionID, agentDefs) {
+												<div class="form-control mb-4 min-w-0">
+													<label class="label">
+														<span class="label-text">Primary Agent</span>
+													</label>
+													@SchedulePrimaryAgentSelector(task.AgentDefinitionID, agentDefs, "select select-bordered select-sm w-full max-w-full")
+													<label class="label"><span class="label-text-alt opacity-60">Agent definition used for scheduled runs; model configuration is unchanged</span></label>
+												</div>
+											}
 											<div class="form-control mb-4" id={ fmt.Sprintf("edit-repeat-interval-%s", s.ID) }>
 												<label class="label">
 													<span class="label-text">Repeat Every</span>
