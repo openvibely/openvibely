@@ -598,6 +598,49 @@ func TestChatContent_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testin
 	}
 }
 
+func TestChatContent_ReconnectReconcilesChangedTranscriptWithoutReplacingComposer(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+	history := []models.Execution{{ID: "done-1", Status: models.ExecCompleted, Output: "stable"}}
+
+	var buf bytes.Buffer
+	if err := renderChatContentForTest(agents, history, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	for _, required := range []string{
+		`data-chat-revision=`,
+		"if (!nextRevision || nextRevision === currentRevision) return;",
+		"if (window._chatStreamInProgress && hasActiveChatStream())",
+		"function waitForChatCatchup()",
+		"handleSharedLiveConnected({detail: {reconnected: true}})",
+		"target: '#chat-messages'",
+		"select: '#chat-messages'",
+		"swap: 'morph:outerHTML'",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("expected state-aware Chat reconnect contract %q", required)
+		}
+	}
+
+	if !strings.Contains(content, "var attachmentAction = document.getElementById('chat-form-primary-action');") || !strings.Contains(content, "var missedAction = document.getElementById('chat-form-primary-action');") {
+		t.Fatal("attachment-bearing and missed-completion recovery must reconcile action state without remounting the composer")
+	}
+	if strings.Contains(content, "target: chatContainer, swap: 'outerHTML'") {
+		t.Fatal("live reconnect and missed-message recovery must not replace the Chat composer root")
+	}
+
+	handlerStart := strings.Index(content, "var handleSharedLiveConnected = function(event) {")
+	handlerEnd := strings.Index(content[handlerStart:], "var handleSharedChatLiveEvent = function(event) {")
+	if handlerStart < 0 || handlerEnd < 0 {
+		t.Fatal("expected Chat reconnect handler boundaries")
+	}
+	handler := content[handlerStart : handlerStart+handlerEnd]
+	if strings.Contains(handler, "target: chatContainer, swap: 'outerHTML'") {
+		t.Fatal("focus reconnect must not replace chat-page-root and destroy composer draft or attachments")
+	}
+}
+
 func TestChatContent_ClosesChatStreamEventSourcesOnSwapAndNavigation(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 

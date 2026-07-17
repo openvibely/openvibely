@@ -23,6 +23,41 @@ func chatContentRevision(content string) string {
 	return fmt.Sprintf("%x-%016x", len(content), hash)
 }
 
+// ChatTranscriptRevision fingerprints the server-rendered transcript and pending-input
+// state so polling/reconnect paths can reject authoritative no-op responses before
+// touching the live DOM.
+func ChatTranscriptRevision(executions []models.Execution, pendingInputs []models.ThreadInput, extra string) string {
+	const offset64 = uint64(14695981039346656037)
+	const prime64 = uint64(1099511628211)
+	hash := offset64
+	write := func(value string) {
+		for i := 0; i < len(value); i++ {
+			hash ^= uint64(value[i])
+			hash *= prime64
+		}
+		hash ^= 0xff
+		hash *= prime64
+	}
+	write(extra)
+	for _, exec := range executions {
+		write(exec.ID)
+		write(string(exec.Status))
+		write(exec.PromptSent)
+		write(exec.Output)
+		write(exec.ErrorMessage)
+		write(fmt.Sprintf("%t", exec.IsFollowup))
+	}
+	for _, input := range pendingInputs {
+		write(input.ID)
+		write(string(input.InputMode))
+		write(string(input.InputStatus))
+		write(input.ExpectedTurnID)
+		write(input.Content)
+		write(input.AttachmentSessionID)
+	}
+	return fmt.Sprintf("%x-%016x", len(executions)+len(pendingInputs), hash)
+}
+
 // jsStringLength returns the JavaScript string.length for a Go string.
 // JS uses UTF-16 encoding, so characters outside the BMP (U+10000+) count as
 // 2 code units (surrogate pair), matching how JS .length works.
@@ -618,9 +653,11 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 								streamTerminalHandled = true;
 								var terminalStatus = event && event.data ? event.data : 'completed';
 								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-								function finishTerminalRender() {
-							finalizeEmptyTerminalBubble(terminalStatus);
-							// Hide streaming dots
+							function finishTerminalRender() {
+								finalizeEmptyTerminalBubble(terminalStatus);
+								var completedPair = container.closest('[data-execution-pair="true"]');
+								if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+								// Hide streaming dots
 							if (streamingDots) streamingDots.classList.add('hidden');
 							eventSource.close();
 						removeThreadEventSource(eventSource);
@@ -1049,8 +1086,10 @@ templ _initThreadStreamingScript() {
 							var terminalStatus = event && event.data ? event.data : 'completed';
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							function finishTerminalRender() {
-						finalizeEmptyTerminalBubble(terminalStatus);
-					if (streamingDots) streamingDots.classList.add('hidden');
+								finalizeEmptyTerminalBubble(terminalStatus);
+								var completedPair = container.closest('[data-execution-pair="true"]');
+								if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+								if (streamingDots) streamingDots.classList.add('hidden');
 					eventSource.close();
 					removeThreadEventSource(eventSource);
 					window._taskThreadStreamingActive = false;

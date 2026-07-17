@@ -331,8 +331,9 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			hx-swap="morph:outerHTML"
 			hx-on::config-request="if (event.target === this) event.detail.parameters.preserved_exec_ids = window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : ''"
 		}
-			data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) }
+		data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) }
 		data-task-id={ task.ID }
+		data-thread-revision={ ChatTranscriptRevision(executions, nil, fmt.Sprintf("%s|%s|%s", task.Status, task.Category, derefString(task.AgentID))) }
 	>
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
 		<div id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }>
@@ -475,14 +476,54 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				window._taskThreadSavedInput = '';
 			}
 
-			window.taskThreadPreservedExecutionIDs = function() {
-				var view = document.getElementById('task-thread-view');
-				if (!view) return '';
-				return Array.prototype.map.call(
-					view.querySelectorAll('#task-thread-messages > [data-execution-pair="true"][hx-preserve]'),
-					function(pair) { return pair.getAttribute('data-exec-id') || ''; }
-				).filter(function(id) { return id !== ''; }).join(',');
-			};
+				window.taskThreadPreservedExecutionIDs = function() {
+					var view = document.getElementById('task-thread-view');
+					if (!view) return '';
+					return Array.prototype.map.call(
+						view.querySelectorAll('#task-thread-messages > [data-execution-pair="true"][hx-preserve]'),
+						function(pair) { return pair.getAttribute('data-exec-id') || ''; }
+					).filter(function(id) { return id !== ''; }).join(',');
+				};
+
+				window.reconcileTaskThreadState = function(reconnectTaskId) {
+					var view = document.getElementById('task-thread-view');
+					if (!view || !reconnectTaskId || view.getAttribute('data-task-id') !== reconnectTaskId) return Promise.resolve(false);
+					var attachmentSession = document.getElementById('task-thread-form-session-id');
+					if (attachmentSession && attachmentSession.value) return Promise.resolve(true);
+					// A tracked per-execution stream owns durable offset catch-up. Do not
+					// replace its active bubble merely because the shared live SSE reconnected.
+					if (window._taskThreadStreamingActive) {
+						if (window._initThreadStreaming) window._initThreadStreaming();
+						window._taskThreadReconnectCatchupTimers = window._taskThreadReconnectCatchupTimers || {};
+						if (!window._taskThreadReconnectCatchupTimers[reconnectTaskId]) {
+							window._taskThreadReconnectCatchupTimers[reconnectTaskId] = setTimeout(function waitForActiveCatchup() {
+								var currentView = document.getElementById('task-thread-view');
+								if (!currentView || currentView.getAttribute('data-task-id') !== reconnectTaskId) {
+									delete window._taskThreadReconnectCatchupTimers[reconnectTaskId];
+									return;
+								}
+								if (window._taskThreadStreamingActive) {
+									window._taskThreadReconnectCatchupTimers[reconnectTaskId] = setTimeout(waitForActiveCatchup, 500);
+									return;
+								}
+								delete window._taskThreadReconnectCatchupTimers[reconnectTaskId];
+								window.reconcileTaskThreadState(reconnectTaskId);
+							}, 500);
+						}
+						return Promise.resolve(true);
+					}
+					if (view.dataset.reconcilePending === 'true' || typeof htmx === 'undefined') return Promise.resolve(false);
+					var messages = document.getElementById('task-thread-messages');
+					var limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';
+					var url = view.getAttribute('hx-get') || ('/tasks/' + encodeURIComponent(reconnectTaskId) + '/thread?poll=1&limit=' + encodeURIComponent(limit));
+					var preserved = window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : '';
+					url += (url.indexOf('?') === -1 ? '?' : '&') + 'preserved_exec_ids=' + encodeURIComponent(preserved);
+					view.dataset.reconcilePending = 'true';
+					return htmx.ajax('GET', url, {target: '#task-thread-view', swap: 'morph:outerHTML'}).finally(function() {
+						var current = document.getElementById('task-thread-view');
+						if (current && current.getAttribute('data-task-id') === reconnectTaskId) delete current.dataset.reconcilePending;
+					});
+				};
 
 				// Apply cleaning and scroll on load
 				(function() {
@@ -608,9 +649,28 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 						window._threadEventSources = [];
 					}
 
-					// Before swaps, capture scroll state and preserve textarea input
+					function _taskThreadResponseRevision(html) {
+						if (!html) return '';
+						var detached = document.createElement('template');
+						detached.innerHTML = html;
+						var nextView = detached.content.querySelector('#task-thread-view');
+						return nextView ? (nextView.getAttribute('data-thread-revision') || '') : '';
+					}
+
+					// Before swaps, reject unchanged authoritative snapshots before capturing
+					// state or closing streams, then preserve state for a real replacement.
 					document.body.addEventListener('htmx:beforeSwap', function(event) {
 						var target = event.detail.target;
+						if (target && target.id === 'task-thread-view') {
+							var currentRevision = target.getAttribute('data-thread-revision') || '';
+							var revisionXHR = event.detail.xhr;
+							var nextRevision = _taskThreadResponseRevision(revisionXHR ? (revisionXHR.responseText || '') : '');
+							if (currentRevision && nextRevision && currentRevision === nextRevision) {
+								event.detail.shouldSwap = false;
+								delete target.dataset.reconcilePending;
+								return;
+							}
+						}
 						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content')) {
 							var requestConfig = event.detail.requestConfig || {};
 						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
@@ -871,6 +931,8 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							}
 							streamContainer.classList.remove('hidden');
 							var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
+							var completedPair = streamContainer.closest('[data-execution-pair="true"]');
+							if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
 							if (bubble) {
 								var thinkingWrap = document.getElementById('streaming-thinking-' + execId) || document.getElementById('streaming-thinking-resume-' + execId);
 								if (thinkingWrap) {
@@ -1028,6 +1090,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						if (pendingContainer && typeof htmx !== 'undefined') {
 							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
 						}
+						if (window.reconcileTaskThreadState) window.reconcileTaskThreadState(taskId);
 					};				window._taskThreadReconnectHandlers = window._taskThreadReconnectHandlers || {};
 				if (window._taskThreadReconnectHandlers[taskId]) {
 					window.removeEventListener('sse-live-connected', window._taskThreadReconnectHandlers[taskId]);

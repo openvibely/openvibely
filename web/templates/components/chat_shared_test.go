@@ -3759,6 +3759,63 @@ func TestTaskThreadView_SkipsExpensiveWorkDuringNavigation(t *testing.T) {
 	}
 }
 
+func TestChatTranscriptRevision_ChangesForMissedExecutionState(t *testing.T) {
+	base := []models.Execution{{ID: "exec-1", Status: models.ExecRunning, PromptSent: "hello", Output: "partial"}}
+	if got, want := ChatTranscriptRevision(base, nil, "running"), ChatTranscriptRevision(base, nil, "running"); got != want {
+		t.Fatalf("identical transcript snapshots must have stable revisions: %q != %q", got, want)
+	}
+
+	updated := append([]models.Execution(nil), base...)
+	updated[0].Output = "partial plus missed output"
+	if ChatTranscriptRevision(base, nil, "running") == ChatTranscriptRevision(updated, nil, "running") {
+		t.Fatal("missed active execution output must invalidate the transcript snapshot")
+	}
+	updated[0].Status = models.ExecCompleted
+	if ChatTranscriptRevision(base, nil, "running") == ChatTranscriptRevision(updated, nil, "completed") {
+		t.Fatal("terminal execution/task transitions must invalidate the transcript snapshot")
+	}
+	updated = append(updated, models.Execution{ID: "exec-2", Status: models.ExecRunning, PromptSent: "queued promotion"})
+	if ChatTranscriptRevision(base, nil, "running") == ChatTranscriptRevision(updated, nil, "running") {
+		t.Fatal("a task start missed while hidden must invalidate the transcript snapshot")
+	}
+}
+
+func TestTaskThreadView_ReconnectSkipsUnchangedDOMAndKeepsActiveStreams(t *testing.T) {
+	task := &models.Task{
+		ID:        "thread-reconnect-stable",
+		ProjectID: "p1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+	executions := []models.Execution{{ID: "done-1", Status: models.ExecCompleted, Output: "stable"}}
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, executions, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task thread: %v", err)
+	}
+	content := buf.String()
+
+	for _, required := range []string{
+		`data-thread-revision=`,
+		"if (currentRevision && nextRevision && currentRevision === nextRevision)",
+		"event.detail.shouldSwap = false",
+		"if (window._taskThreadStreamingActive)",
+		"function waitForActiveCatchup()",
+		"window.reconcileTaskThreadState(reconnectTaskId);",
+		"window.reconcileTaskThreadState = function(reconnectTaskId)",
+		"preserved_exec_ids",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("expected reconnect DOM-stability contract %q", required)
+		}
+	}
+
+	noOp := strings.Index(content, "if (currentRevision && nextRevision && currentRevision === nextRevision)")
+	closeStreams := strings.Index(content, "_closeTaskThreadEventSources();")
+	if noOp < 0 || closeStreams < 0 || noOp > closeStreams {
+		t.Fatal("unchanged poll/reconnect responses must be rejected before tracked execution streams are closed")
+	}
+}
+
 func TestTaskThreadView_ClosesStreamsBeforeThreadRefresh(t *testing.T) {
 	task := &models.Task{
 		ID:        "t-stream-cleanup",

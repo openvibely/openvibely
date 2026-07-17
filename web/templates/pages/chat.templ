@@ -66,7 +66,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 
 // ChatContent renders just the chat content (for HTMX)
 templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int) {
-	<div id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full" data-project-id={ currentProjectID }>
+	<div id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full" data-project-id={ currentProjectID } data-chat-revision={ components.ChatTranscriptRevision(chatHistory, nil, currentProjectID) }>
 		@layout.PageTitle("Chat")
 		<div class="mb-4 flex items-center justify-between">
 			<div>
@@ -105,7 +105,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				@components.ChatEmptyState("Start a conversation by typing a message below")
 			} else {
 				for _, exec := range chatHistory {
-					<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+					<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled { hx-preserve="true" }>
 						if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
 							@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
 						} else {
@@ -635,8 +635,10 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							streamContainer.textContent = completedOutput;
 						}
 						streamContainer.classList.remove('hidden');
-						var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
-						if (bubble) {
+							var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
+							var completedPair = streamContainer.closest('[data-execution-pair="true"]');
+							if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+							if (bubble) {
 							var thinking = bubble.querySelector('.ov-loading-dots');
 							if (thinking && !thinking.closest('.hidden')) {
 								var thinkingWrap = thinking.closest('.flex.flex-col.items-start.gap-1');
@@ -782,9 +784,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						renderBufferedOutput(false);
 					};
 
-						eventSource.addEventListener('done', function() {
-							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-							renderBufferedOutput(true);
+							eventSource.addEventListener('done', function() {
+								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+								var completedPair = bubble.closest('[data-execution-pair="true"]');
+								if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+								renderBufferedOutput(true);
 						dots.classList.add('hidden');
 						eventSource.close();
 						if (window.unregisterChatStreamEventSource) {
@@ -892,41 +896,65 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						return pendingContainer;
 					};
 
-					var handleSharedLiveConnected = function(event) {
-						var detail = event.detail || {};
-						if (!detail.reconnected) return;
-						var chatContainer = document.getElementById('chat-page-root');
-						if (!chatContainer) return;
-						// Reconnection after tab was hidden — refresh chat to catch missed events,
-						// but avoid replacing an actively streaming bubble with stale partial state.
-						var pid = chatContainer.getAttribute('data-project-id');
-						if (window._chatStreamInProgress && hasActiveChatStream()) {
-							setTimeout(function() {
+						var handleSharedLiveConnected = function(event) {
+							var detail = event.detail || {};
+							if (!detail.reconnected) return;
+							var chatContainer = document.getElementById('chat-page-root');
+							if (!chatContainer) return;
+							var pid = chatContainer.getAttribute('data-project-id');
+							// Pending rows have their own authoritative compact fragment and never
+							// require remounting transcript bubbles or the composer.
+							if (pid && document.getElementById('pending-thread-inputs') && typeof htmx !== 'undefined') {
+								htmx.ajax('GET', '/chat/pending-inputs?project_id=' + encodeURIComponent(pid), {target: '#pending-thread-inputs', swap: 'outerHTML'});
+							}
+							// Known active executions catch up through their offset-aware stream.
+							if (window._chatStreamInProgress && hasActiveChatStream()) {
 								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-							}, 0);
-							// Still reconcile pending inputs even when streaming is active —
-							// a steering row may have been consumed while the tab was hidden.
-							if (pid && document.getElementById('pending-thread-inputs')) {
-								htmx.ajax('GET', '/chat/pending-inputs?project_id=' + encodeURIComponent(pid), {target: '#pending-thread-inputs', swap: 'outerHTML'});
+								if (!window._chatReconnectCatchupTimer) {
+									window._chatReconnectCatchupTimer = setTimeout(function waitForChatCatchup() {
+										var currentRoot = document.getElementById('chat-page-root');
+										if (!currentRoot || currentRoot.getAttribute('data-project-id') !== pid) {
+											window._chatReconnectCatchupTimer = null;
+											return;
+										}
+										if (window._chatStreamInProgress && hasActiveChatStream()) {
+											window._chatReconnectCatchupTimer = setTimeout(waitForChatCatchup, 500);
+											return;
+										}
+										window._chatReconnectCatchupTimer = null;
+										handleSharedLiveConnected({detail: {reconnected: true}});
+									}, 500);
+								}
+								return;
 							}
-							return;
-						}
-						var hasRenderedHistory = !!document.querySelector('#chat-messages .chat-bubble-user-msg, #chat-messages .chat-bubble-assistant-msg');
-						if (hasRenderedHistory) {
-							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-							// Refresh the pending-inputs container so any steering rows missed while
-							// the tab was hidden are reconciled. The server query excludes
-							// prepared/in-flight steering (expected_turn_id=NULL), so a stale
-							// "Steering pending" row will be correctly cleared.
-							if (pid && document.getElementById('pending-thread-inputs')) {
-								htmx.ajax('GET', '/chat/pending-inputs?project_id=' + encodeURIComponent(pid), {target: '#pending-thread-inputs', swap: 'outerHTML'});
-							}
-							return;
-						}
-						if (pid) {
-							htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
-						}
-					};
+							if (!pid || typeof fetch === 'undefined' || typeof htmx === 'undefined') return;
+							var url = '/chat?project_id=' + encodeURIComponent(pid);
+							var currentRevision = chatContainer.getAttribute('data-chat-revision') || '';
+							fetch(url, {headers: {'HX-Request': 'true'}}).then(function(response) {
+								if (!response.ok) throw new Error('HTTP ' + response.status);
+								return response.text();
+							}).then(function(html) {
+								var detached = document.createElement('template');
+								detached.innerHTML = html;
+								var nextRoot = detached.content.querySelector('#chat-page-root');
+								var nextRevision = nextRoot ? (nextRoot.getAttribute('data-chat-revision') || '') : '';
+								if (!nextRevision || nextRevision === currentRevision) return;
+								// Refresh only the authoritative transcript. The existing composer,
+								// draft, attachment session, and controls remain mounted.
+								if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
+								return htmx.ajax('GET', url, {
+									target: '#chat-messages',
+									select: '#chat-messages',
+									swap: 'morph:outerHTML'
+								}).then(function() {
+									var currentRoot = document.getElementById('chat-page-root');
+									if (currentRoot && currentRoot.getAttribute('data-project-id') === pid) currentRoot.setAttribute('data-chat-revision', nextRevision);
+									if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+								});
+							}).catch(function(err) {
+								console.error('[chat] reconnect reconciliation failed:', err);
+							});
+						};
 
 					var handleSharedChatLiveEvent = function(event) {
 						var data = event.detail || {};
@@ -999,7 +1027,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										var chatContainer = document.getElementById('chat-page-root');
 										var pid = chatContainer ? chatContainer.getAttribute('data-project-id') : projectId;
 										if (chatContainer && pid && typeof htmx !== 'undefined') {
-											htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
+											if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
+											htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: '#chat-messages', select: '#chat-messages', swap: 'morph:outerHTML'});
+											var attachmentAction = document.getElementById('chat-form-primary-action');
+											if (attachmentAction) htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {target: '#chat-form-primary-action', swap: 'outerHTML'});
+											chatContainer.setAttribute('data-chat-revision', '');
 										}
 										return;
 									}
@@ -1107,9 +1139,13 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var chatContainer = document.getElementById('chat-page-root');
 							if (chatContainer) {
 								var pid = chatContainer.getAttribute('data-project-id');
-								if (pid) {
-									htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
-								}
+									if (pid) {
+										if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
+										htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: '#chat-messages', select: '#chat-messages', swap: 'morph:outerHTML'});
+										var missedAction = document.getElementById('chat-form-primary-action');
+										if (missedAction) htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {target: '#chat-form-primary-action', swap: 'outerHTML'});
+										chatContainer.setAttribute('data-chat-revision', '');
+									}
 							}
 							return;
 						}

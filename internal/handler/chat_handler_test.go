@@ -3642,7 +3642,7 @@ func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneFallback(t *testing.T
 	// Shared live-event chat_response_done branch must invoke evaluatePlanCompletionPrompt.
 	doneHandlerIdx := strings.Index(body, "if (eventType === 'chat_response_done') {")
 	require.NotEqual(t, -1, doneHandlerIdx, "chat_response_done handler must exist")
-	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+1500]
+	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+2600]
 
 	assert.Contains(t, doneHandlerBody, "evaluatePlanCompletionPrompt",
 		"chat_response_done must invoke evaluatePlanCompletionPrompt as fallback")
@@ -3682,7 +3682,7 @@ func TestHandler_Chat_PlanCompletionPrompt_NewMessageSetsStreamingFlag(t *testin
 
 	newMsgIdx := strings.Index(body, "if (eventType === 'chat_new_message') {")
 	require.NotEqual(t, -1, newMsgIdx, "chat_new_message handler must exist")
-	newMsgBody := body[newMsgIdx : newMsgIdx+2000]
+	newMsgBody := body[newMsgIdx : newMsgIdx+3200]
 
 	assert.Contains(t, newMsgBody, "_chatStreamInProgress = !data.queued",
 		"chat_new_message must set streaming flag for active streams and leave queued inputs non-streaming")
@@ -3986,8 +3986,8 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 }
 
 func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
-	// Visibility reconnect should not force a full chat outerHTML refresh while
-	// a local streaming bubble is still active.
+	// Visibility reconnect should keep active streams and unchanged completed
+	// transcript DOM mounted, while still reconciling genuinely missed state.
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -4011,27 +4011,29 @@ func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
 
 	onConnectIdx := strings.Index(body, "var handleSharedLiveConnected = function(event) {")
 	require.NotEqual(t, -1, onConnectIdx, "visibility reconnect handler must exist")
-	// Use a wide window: the reconnect handler includes pending-inputs refresh branches
-	// for both the active-stream and rendered-history paths in addition to the full refresh.
-	onConnectBody := body[onConnectIdx : onConnectIdx+2400]
+	// Use a wide window for the complete revision-check and targeted morph path.
+	onConnectEnd := strings.Index(body[onConnectIdx:], "var handleSharedChatLiveEvent = function(event) {")
+	require.NotEqual(t, -1, onConnectEnd, "visibility reconnect handler must have a bounded body")
+	onConnectBody := body[onConnectIdx : onConnectIdx+onConnectEnd]
 
 	assert.Contains(t, onConnectBody, "window._chatStreamInProgress && hasActiveChatStream()",
-		"reconnect handler must detect active stream before triggering refresh")
-	assert.Contains(t, onConnectBody, "#chat-messages .chat-bubble-user-msg, #chat-messages .chat-bubble-assistant-msg",
-		"reconnect handler must detect static rendered history after hard refresh")
-	assert.Contains(t, onConnectBody, "if (hasRenderedHistory)",
-		"reconnect handler must skip destructive chat root refresh when history is already rendered")
-	assert.Contains(t, onConnectBody, "return;",
-		"reconnect handler should early-return when active stream or rendered history is present")
+		"reconnect handler must leave active offset-aware streams mounted")
+	assert.Contains(t, onConnectBody, "function waitForChatCatchup()",
+		"reconnect handler must reconcile a queued promotion missed while the prior stream catches up")
 	assert.Contains(t, onConnectBody, "/chat/pending-inputs",
 		"reconnect handler must refresh pending-inputs to reconcile stale steering rows")
-
-	ajaxIdx := strings.Index(onConnectBody, "htmx.ajax('GET', '/chat?project_id=")
-	historyIdx := strings.Index(onConnectBody, "if (hasRenderedHistory)")
-	require.NotEqual(t, -1, ajaxIdx, "reconnect handler must still refresh when no history is rendered")
-	require.NotEqual(t, -1, historyIdx, "rendered history guard must exist")
-	assert.Less(t, historyIdx, ajaxIdx,
-		"rendered history guard must run before issuing destructive chat root refresh")
+	assert.Contains(t, onConnectBody, "var currentRevision = chatContainer.getAttribute('data-chat-revision') || '';",
+		"reconnect handler must capture the current authoritative transcript revision")
+	assert.Contains(t, onConnectBody, "if (!nextRevision || nextRevision === currentRevision) return;",
+		"unchanged completed transcripts must not mutate the DOM")
+	assert.Contains(t, onConnectBody, "target: '#chat-messages'",
+		"changed reconnect state must target only the transcript")
+	assert.Contains(t, onConnectBody, "select: '#chat-messages'",
+		"changed reconnect state must select only the authoritative transcript fragment")
+	assert.Contains(t, onConnectBody, "swap: 'morph:outerHTML'",
+		"changed reconnect state must preserve stable execution nodes through morphing")
+	assert.NotContains(t, onConnectBody, "target: chatContainer, swap: 'outerHTML'",
+		"focus reconnect must not replace the composer, draft, or attachment session")
 }
 
 func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneCompletedOutput(t *testing.T) {

@@ -583,6 +583,35 @@ func TestTaskDetailContent_LiveConnectedHandler_SkipsInitialConnect(t *testing.T
 	}
 }
 
+func TestTaskDetailContent_LiveConnectedHandler_ReconcilesWithoutForcedThreadReload(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-live-stable",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+
+	if strings.Contains(output, "_refreshActiveThreadContent(taskId, true);") {
+		t.Fatal("focus reconnect must not blindly replace the loaded task thread")
+	}
+	for _, required := range []string{
+		"if (!taskId || !_isChatTabActive()) return;",
+		"threadContent.dataset.loaded !== 'true'",
+		"window.reconcileTaskThreadState(taskId)",
+	} {
+		if !strings.Contains(output, required) {
+			t.Fatalf("expected state-aware reconnect hook %q", required)
+		}
+	}
+}
+
 // TestTaskDetailContent_LiveConnectedHandler_PreservesPendingAttachmentOnReconnect
 // verifies that _taskDetailLiveConnectedHandler skips the full #thread-content reload
 // when the task-thread composer has a pending attachment upload session. Without this

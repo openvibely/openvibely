@@ -109,6 +109,28 @@ if (document.title !== 'History Task - OpenVibely') throw new Error('cache-miss 
 	}
 }
 
+func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "window._tabVisibility = (function() {")
+	end := strings.Index(html[start:], "// Track which element was focused before mousedown")
+	if start < 0 || end < 0 {
+		t.Fatal("tab visibility manager boundaries are missing")
+	}
+	manager := html[start : start+end]
+	if !strings.Contains(manager, "document.addEventListener('visibilitychange'") {
+		t.Fatal("hidden-to-visible transitions must remain owned by the visibility manager")
+	}
+	for _, forbidden := range []string{"window.addEventListener('focus'", "window.addEventListener('blur'", "window.addEventListener('pageshow'"} {
+		if strings.Contains(manager, forbidden) {
+			t.Fatalf("plain blur/focus/pageshow must not trigger transcript reconciliation: found %q", forbidden)
+		}
+	}
+}
+
 func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
