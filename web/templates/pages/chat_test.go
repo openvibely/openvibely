@@ -48,6 +48,33 @@ func TestChatContent_IncludesSharedTaskResultConverters(t *testing.T) {
 	}
 }
 
+func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T) {
+	var buf bytes.Buffer
+	if err := renderChatContentForTest(nil, []models.Execution{{ID: "exec-scroll", Status: models.ExecCompleted, Output: "later markdown"}}, "project-scroll", nil, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+		t.Fatal("global Chat must hide its initial transcript until hydration and scroll restoration settle")
+	}
+	for _, required := range []string{
+		"var chatScrollStateKey = 'chat-scroll-' + projectId;",
+		"window.saveChatTranscriptScrollState(chatScrollStateKey, chatMessages, window._chatPageTracker);",
+		"window.restoreChatTranscriptScroll({",
+		"stateKey: chatScrollStateKey",
+		"renderPromise: renderPromise",
+		"document.body.addEventListener('htmx:historyRestore'",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("global Chat navigation restoration is missing %q", required)
+		}
+	}
+	if strings.Contains(content, "// Scroll to bottom on page load to show latest messages") {
+		t.Fatal("global Chat must not unconditionally jump before transcript hydration finishes")
+	}
+}
+
 func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Very Long Agent Name That Should Not Push Send Button", Model: "very-long-model-name", Provider: models.ProviderAnthropic}}
 
@@ -584,14 +611,14 @@ func TestChatContent_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testin
 	}
 	content := buf.String()
 
-	if count := strings.Count(content, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker)"); count < 2 {
-		t.Fatalf("expected chat page to bind attachment image smart-scroll on initial render and HTMX swaps, got %d", count)
+	if count := strings.Count(content, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker)"); count != 1 {
+		t.Fatalf("expected one shared Chat initialization path to bind image smart-scroll for initial render and HTMX swaps, got %d", count)
 	}
 	if !strings.Contains(content, "var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;") {
-		t.Fatal("chat page should consume submit scroll intent after HTMX swaps so attachment sends bottom-align")
+		t.Fatal("chat page should consume submit scroll intent through the shared initialization path")
 	}
-	if !strings.Contains(content, "window.scrollChatToBottomAfterLayout(chatMessages, true)") {
-		t.Fatal("chat page should scroll after layout so variable-sized screenshots are visible")
+	if !strings.Contains(content, "return window.restoreChatTranscriptScroll({") {
+		t.Fatal("chat page should reconcile variable-sized attachments and later layout through the shared scroll coordinator")
 	}
 	if !strings.Contains(content, "if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {") {
 		t.Fatal("chat page should re-evaluate plan prompt after non-streaming swaps")

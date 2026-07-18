@@ -791,7 +791,7 @@ func TestChatContentRenderSchedulerSerializesAndRecovers(t *testing.T) {
 	}
 	script := "global.window = { _chatContentRenderTimeoutMS: 50 }; global.document = { createTextNode: function(text) { return { text: text }; } };\n" +
 		"window.renderChatMarkdownLargeFallback = function(text) { return { safe: text }; };\n" +
-		"function container(connected, raw) { return { isConnected: connected, hasRaw: raw !== undefined, raw: raw || '', dataset: new Proxy({}, { set: function() { throw new Error('render cache must not create data attributes'); } }), replacements: [], hasAttribute: function(name) { return name === 'data-raw-content' && this.hasRaw; }, getAttribute: function(name) { return name === 'data-raw-content' && this.hasRaw ? this.raw : null; }, replaceChildren: function(value) { this.replacements.push(value); } }; }\n" +
+		"function container(connected, raw) { return { isConnected: connected, hasRaw: raw !== undefined, raw: raw || '', attributes: {}, dataset: new Proxy({}, { set: function() { throw new Error('render cache must not create data attributes'); } }), replacements: [], hasAttribute: function(name) { return name === 'data-raw-content' && this.hasRaw; }, getAttribute: function(name) { if (name === 'data-raw-content' && this.hasRaw) return this.raw; return this.attributes[name] || null; }, setAttribute: function(name, value) { this.attributes[name] = String(value); }, removeAttribute: function(name) { delete this.attributes[name]; }, replaceChildren: function(value) { this.replacements.push(value); } }; }\n" +
 		scheduler + "\n" +
 		"const delay = ms => new Promise(resolve => setTimeout(resolve, ms));\n" +
 		"(async function() {\n" +
@@ -3902,11 +3902,11 @@ func TestTaskThreadView_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *tes
 	if !strings.Contains(content, "window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker)") {
 		t.Fatal("task thread message-target swaps must bind attachment image smart-scroll on the swapped element")
 	}
-	if !strings.Contains(content, "var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;") {
-		t.Fatal("task thread should consume submit scroll intent after HTMX swaps so attachment sends bottom-align")
+	if !strings.Contains(content, "if (window.consumeChatSendScrollIntent) window.consumeChatSendScrollIntent('task-thread-messages');") {
+		t.Fatal("task thread should consume submit scroll intent after HTMX swaps so attachment sends remain pinned")
 	}
-	if !strings.Contains(content, "window.scrollChatToBottomAfterLayout(target, true)") {
-		t.Fatal("task thread message swaps should scroll after layout so variable-sized screenshots are visible")
+	if !strings.Contains(content, "_finishTaskThreadRenderScroll(target, renderPromise);") {
+		t.Fatal("task thread message swaps should reconcile variable-sized screenshots through the shared render barrier")
 	}
 	fullRefreshIdx := strings.Index(content, "target && target.id === 'task-detail-content'")
 	if fullRefreshIdx < 0 {
@@ -3921,8 +3921,8 @@ func TestTaskThreadView_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *tes
 	if fullRefreshTrackerInit < 0 || fullRefreshTrackerInit > fullRefreshBind {
 		t.Fatal("task detail content refreshes must rebind the tracker before attachment image binding")
 	}
-	if !strings.Contains(fullRefreshBody, "window.scrollChatToBottomAfterLayout(chatMessages, true)") {
-		t.Fatal("task detail content refreshes should consume send intent and scroll after layout")
+	if !strings.Contains(fullRefreshBody, "_finishTaskThreadRenderScroll(chatMessages, renderPromise);") {
+		t.Fatal("task detail content refreshes should consume send intent and reconcile after rendering")
 	}
 }
 
@@ -4166,6 +4166,46 @@ func TestStreamingRenderSnapshotsPinnedStateBeforeDomGrowth(t *testing.T) {
 	}
 }
 
+func TestTranscriptScrollCoordinatorStabilizesInitialHydrationAndAsyncLayout(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatAutoScrollScript: %v", err)
+	}
+	content := buf.String()
+
+	for _, required := range []string{
+		"window.saveChatTranscriptScrollState = function(stateKey, messages, tracker)",
+		"window.restoreChatTranscriptScroll = function(options)",
+		"window.observeChatTranscriptLayout = function(options)",
+		"messages.style.visibility = 'hidden';",
+		"Promise.resolve(options.renderPromise)",
+		"messages.style.visibility = '';",
+		"if (!tracker || !tracker.shouldAutoScroll()) return;",
+		"new ResizeObserver",
+		"document.fonts.ready",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("shared transcript stabilization is missing %q", required)
+		}
+	}
+}
+
+func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testing.T) {
+	task := &models.Task{ID: "thread-stable-hydration", Status: models.StatusCompleted, Category: models.CategoryCompleted}
+	var buf bytes.Buffer
+	if err := TaskThreadView(task, []models.Execution{{ID: "exec-1", Status: models.ExecCompleted, Output: "# rendered later"}}, nil, nil, nil, nil, false, 30).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render TaskThreadView: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
+	}
+	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
+		t.Fatal("task thread must reveal and position the transcript through the shared render barrier")
+	}
+}
+
 // TestChatScrollTracker_DestroyRemovesAllListeners ensures the scroll listener
 // is torn down by destroy() to prevent leaks across morph swaps that recreate
 // the tracker.
@@ -4268,10 +4308,10 @@ func TestTaskThreadView_PinsAfterQueuedTranscriptRendering(t *testing.T) {
 		"resumeRenderPromises.push(Promise.resolve(renderPromise).catch(function()",
 		"initialRenderPromises = initialRenderPromises.concat(resumeRenderPromises);",
 		"_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises));",
-		"Promise.resolve(renderPromise).then(function()",
+		"return window.restoreChatTranscriptScroll({",
 		"var userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;",
-		"if (userScrolledUp || !window.chatAutoScroll) return;",
-		"window.chatAutoScroll.scrollToBottom(messages, false);",
+		"defaultPinned: !userScrolledUp,",
+		"renderPromise: renderPromise",
 	} {
 		if !strings.Contains(content, required) {
 			t.Fatalf("task thread must bottom-align after queued transcript rendering unless the user scrolled up; missing %q", required)
@@ -4296,6 +4336,10 @@ func TestCleanAssistantMessagesReturnsQueuedRenderCompletion(t *testing.T) {
 		"var scheduledRender = window.scheduleChatElementRender(el, raw);",
 		"renderPromises.push(scheduledRender);",
 		"if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);",
+		"var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';",
+		"if (renderedRevision === revision && hasRenderedContent) return;",
+		"container.setAttribute('data-rendered-revision', renderRevision);",
+		"el.setAttribute('data-rendered-revision', revision);",
 		"return Promise.all(renderPromises.map(function(promise)",
 	} {
 		if !strings.Contains(content, required) {
@@ -4420,7 +4464,10 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 		"earlierGestureLocked",
 		"earlierRequestLoading",
 		"window.finishChatEarlierRequest",
-		"else if (window.cleanAssistantMessages) window.cleanAssistantMessages(container)",
+		"else if (window.cleanAssistantMessages) hydrationPromise = window.cleanAssistantMessages(container)",
+		"container._chatEarlierHydrationPromise = Promise.resolve(hydrationPromise)",
+		"var hydrationPromise = container._chatEarlierHydrationPromise || Promise.resolve()",
+		"Promise.resolve(hydrationPromise).then(function()",
 		"!event.detail.successful",
 		"loader.setAttribute('hx-swap', 'outerHTML show:none')",
 	}
@@ -4446,6 +4493,118 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 	}
 	if strings.Contains(content, "loader.dataset.prevScrollHeight") || strings.Contains(content, "loader.dataset.anchorExecId") {
 		t.Fatal("prepend anchor state must live on the stable messages container, not the loader that HTMX replaces")
+	}
+}
+
+func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+	var chatScript bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &chatScript); err != nil {
+		t.Fatalf("render shared chat script: %v", err)
+	}
+
+	html := `<!doctype html><html><head><meta charset="utf-8"><style>
+		#fixture-root { width: 480px; }
+		.transcript { height: 200px; overflow-y: auto; visibility: hidden; }
+		.pair { height: 120px; }
+	</style><script>window.requestAnimationFrame = function(callback) { return setTimeout(callback, 0); }; window.cancelAnimationFrame = clearTimeout;</script></head><body><main id="fixture-root"><div id="messages" class="transcript" data-transcript-hydrating="true"><div class="pair" data-execution-pair="true"></div><div class="pair" data-execution-pair="true"></div></div></main>` + chatScript.String() + `<script>
+	window.addEventListener('DOMContentLoaded', function() {
+		var root = document.getElementById('fixture-root');
+		function fail(message) { throw new Error(message); }
+		function bottomDistance(messages) { return messages.scrollHeight - messages.scrollTop - messages.clientHeight; }
+		function pair(messages) { var child = document.createElement('div'); child.className = 'pair'; child.setAttribute('data-execution-pair', 'true'); messages.appendChild(child); }
+		function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+		var messages = document.getElementById('messages');
+		var tracker = new window.ChatScrollTracker(messages);
+		var resolveHydration;
+		var hydration = new Promise(function(resolve) { resolveHydration = resolve; });
+		var restored = window.restoreChatTranscriptScroll({messages: messages, tracker: tracker, stateKey: 'browser-chat', defaultPinned: true, renderPromise: hydration});
+		if (messages.style.visibility !== 'hidden') fail('initial transcript was revealed before hydration settled');
+		pair(messages); pair(messages); pair(messages);
+		resolveHydration();
+		Promise.resolve(restored).then(async function() {
+			if (messages.style.visibility === 'hidden' || messages.getAttribute('data-transcript-hydrating')) fail('initial transcript was not revealed after hydration');
+			if (bottomDistance(messages) > 1) fail('initial hydration did not settle at true bottom: ' + bottomDistance(messages));
+
+			window.saveChatTranscriptScrollState('browser-chat', messages, tracker);
+			messages.remove();
+			var replacement = document.createElement('div');
+			replacement.id = 'messages'; replacement.className = 'transcript'; replacement.style.visibility = 'hidden'; replacement.setAttribute('data-transcript-hydrating', 'true');
+			for (var i = 0; i < 6; i++) pair(replacement);
+			root.appendChild(replacement);
+			var replacementTracker = new window.ChatScrollTracker(replacement);
+			await window.restoreChatTranscriptScroll({messages: replacement, tracker: replacementTracker, stateKey: 'browser-chat', renderPromise: Promise.resolve()});
+			if (bottomDistance(replacement) > 1) fail('pinned navigation restoration missed true bottom: ' + bottomDistance(replacement));
+
+			pair(replacement);
+			await wait(100);
+			if (bottomDistance(replacement) > 1) fail('pinned async layout growth was not reconciled: ' + bottomDistance(replacement));
+
+			replacementTracker.userScrolledUp = true;
+			replacement.scrollTop = 75;
+			window.saveChatTranscriptScrollState('browser-chat', replacement, replacementTracker);
+			pair(replacement);
+			await wait(100);
+			if (Math.abs(replacement.scrollTop - 75) > 1) fail('async layout growth overrode intentional upward scroll: ' + replacement.scrollTop);
+
+			var readingState = window.getChatTranscriptScrollState('browser-chat');
+			replacement.remove();
+			var restoredReading = document.createElement('div');
+			restoredReading.id = 'messages'; restoredReading.className = 'transcript'; restoredReading.style.visibility = 'hidden'; restoredReading.setAttribute('data-transcript-hydrating', 'true');
+			for (var j = 0; j < 8; j++) pair(restoredReading);
+			root.appendChild(restoredReading);
+			var readingTracker = new window.ChatScrollTracker(restoredReading);
+			await window.restoreChatTranscriptScroll({messages: restoredReading, tracker: readingTracker, stateKey: 'browser-chat', state: readingState, renderPromise: Promise.resolve()});
+			if (Math.abs(restoredReading.scrollTop - 75) > 1 || !readingTracker.userScrolledUp) fail('navigation restoration lost intentional reading position');
+			root.setAttribute('data-test-result', 'pass');
+		}).catch(function(error) {
+			root.setAttribute('data-test-result', 'fail');
+			root.setAttribute('data-test-error', String(error && error.stack || error));
+		});
+	});
+	</script></body></html>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	stdoutPath := filepath.Join(t.TempDir(), "chrome-scroll.html")
+	stderrPath := filepath.Join(t.TempDir(), "chrome-scroll.log")
+	stdoutFile, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatalf("create Chrome stdout: %v", err)
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-scroll-profile"), "--virtual-time-budget=5000", "--dump-dom", server.URL)
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+	configureTestBrowserProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start Chrome scroll fixture: %v", err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	var result string
+	for time.Now().Before(deadline) {
+		if output, readErr := os.ReadFile(stdoutPath); readErr == nil {
+			result = string(output)
+			if strings.Contains(result, `data-test-result="pass"`) || strings.Contains(result, `data-test-result="fail"`) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stopTestBrowserProcess(cmd)
+	if !strings.Contains(result, `data-test-result="pass"`) {
+		state := regexp.MustCompile(`<main id="fixture-root"[^>]*>`).FindString(result)
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("transcript scroll browser fixture failed: %s\nDOM: %s\nChrome stderr: %s", state, result, stderr)
 	}
 }
 

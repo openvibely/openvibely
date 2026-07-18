@@ -97,7 +97,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			</div>
 		</div>
 		<!-- Chat Messages Container -->
-		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) }>
+			<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) }>
 			if hasEarlier && len(chatHistory) > 0 {
 				@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 			}
@@ -158,21 +158,48 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			@components.ChatAutoScrollScript()
 			@components.ChatStreamingResumeInitScript()
 			<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
-			<script>
-				// Scroll to bottom on page load to show latest messages
-				setTimeout(function() {
-					var chatMessages = document.getElementById('chat-messages');
-					if (chatMessages) {
-						if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
+				<script>
+					window.initializeChatTranscriptScroll = function() {
+						var chatRoot = document.getElementById('chat-page-root');
+						var chatMessages = document.getElementById('chat-messages');
+						if (!chatRoot || !chatMessages || !window.ChatScrollTracker) return Promise.resolve(false);
+						var projectId = chatRoot.getAttribute('data-project-id') || '';
+						var chatScrollStateKey = 'chat-scroll-' + projectId;
+						var savedState = window.getChatTranscriptScrollState ? window.getChatTranscriptScrollState(chatScrollStateKey) : null;
+						var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;
+						if (sentByUser) savedState = { scrollTop: 0, userScrolledUp: false, pinned: true };
+						if (!window._chatPageTracker || window._chatPageTracker.element !== chatMessages) {
+							if (window._chatPageTracker) window._chatPageTracker.destroy();
+							window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
+						}
+						window._chatPageTracker.userScrolledUp = savedState ? !!savedState.userScrolledUp : false;
+						var renderPromise = window.applyChatBubbleTransforms ? window.applyChatBubbleTransforms(chatMessages) : Promise.resolve([]);
 						if (window._initThreadStreaming) window._initThreadStreaming();
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
-						if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
 						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
 						if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();
+						if (!window.restoreChatTranscriptScroll) return Promise.resolve(renderPromise);
+						return window.restoreChatTranscriptScroll({
+							messages: chatMessages,
+							tracker: window._chatPageTracker,
+							getTracker: function() { return window._chatPageTracker; },
+							stateKey: chatScrollStateKey,
+							state: savedState,
+							defaultPinned: true,
+							renderPromise: renderPromise
+						});
+					};
+					setTimeout(function() { window.initializeChatTranscriptScroll(); }, 0);
+					if (!window._chatTranscriptHistoryRestoreBound) {
+						window._chatTranscriptHistoryRestoreBound = true;
+						document.body.addEventListener('htmx:historyRestore', function() {
+							setTimeout(function() {
+								if (document.getElementById('chat-page-root') && window.initializeChatTranscriptScroll) window.initializeChatTranscriptScroll();
+							}, 0);
+						});
 					}
-				}, 0);
 
-				// Draft message persistence (scoped per project)
+					// Draft message persistence (scoped per project)
 				(function() {
 				var chatRoot = document.getElementById('chat-page-root');
 				if (!chatRoot) return;
@@ -310,16 +337,20 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				};
 
 				window.applyChatBubbleTransforms = function(chatMessages) {
-					if (!chatMessages) return;
+					if (!chatMessages) return Promise.resolve([]);
 					// Re-hydrate assistant bubbles from raw content first (tool/thinking cards).
 					// This keeps hard-refresh behavior consistent with task-thread rendering
 					// and prevents transcript-control cleanup from stripping tool controls before
-					// tool-card rendering runs.
-					if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
-					chatMessages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
-						if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
-						if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-						if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+					// tool-card rendering runs. Post-render transforms run after the shared
+					// hydration barrier so task metadata inside newly rendered DOM is handled once.
+					var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);
+					return Promise.resolve(renderPromise).then(function() {
+						chatMessages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
+							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+						});
+						return true;
 					});
 				};
 
@@ -527,36 +558,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						chatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {
 							if (window._chatKnownExecIds) window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
 						});
-						if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
-						if (window._initThreadStreaming) window._initThreadStreaming();
-						// Re-attach tracker to possibly new element before binding image load handlers.
-						if (chatMessages !== (window._chatPageTracker && window._chatPageTracker.element)) {
-							if (window.ChatScrollTracker) {
-								if (window._chatPageTracker) window._chatPageTracker.destroy();
-								window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
+							if (window.initializeChatTranscriptScroll) window.initializeChatTranscriptScroll();
+							// During an active stream, this swap can carry partial persisted output.
+							if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {
+								window.maybeShowPlanCompletionPromptFromHistory();
 							}
-						}
-						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
-						// During an active stream, this swap can carry partial persisted output.
-						if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {
-							window.maybeShowPlanCompletionPromptFromHistory();
-						}
-						// Auto-scroll after swap: a deliberate send pins the next render to
-						// bottom even when attachment markup changes height; otherwise keep
-						// respecting explicit user scroll-up intent.
-						var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;
-						var tracker = window._chatPageTracker;
-						if (sentByUser || !tracker || tracker.shouldAutoScroll()) {
-							if (window.scrollChatToBottomAfterLayout) {
-								window.scrollChatToBottomAfterLayout(chatMessages, true);
-							} else {
-								requestAnimationFrame(function() {
-									if (chatMessages && window.chatAutoScroll) {
-										window.chatAutoScroll.scrollToBottom(chatMessages, true);
-									}
-								});
-							}
-						}
 					}
 				});
 			}
@@ -1287,10 +1293,17 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						window._chatLiveEventHandlers = null;
 					}
 				};
-				var handleChatBeforeSwap = function(event) {
-					var swapTarget = event.detail.target;
-					if (!swapTarget) return;
-					if (swapTarget.id === 'chat-page-root') {
+					var handleChatBeforeSwap = function(event) {
+						var swapTarget = event.detail.target;
+						if (!swapTarget) return;
+						var currentChatRoot = document.getElementById('chat-page-root');
+						var chatMessages = document.getElementById('chat-messages');
+						if (currentChatRoot && chatMessages && (swapTarget.id === 'chat-messages' || swapTarget.id === 'chat-page-root' || swapTarget.id === 'main-content')) {
+							var projectId = currentChatRoot.getAttribute('data-project-id') || '';
+							var chatScrollStateKey = 'chat-scroll-' + projectId;
+							if (window.saveChatTranscriptScrollState) window.saveChatTranscriptScrollState(chatScrollStateKey, chatMessages, window._chatPageTracker);
+						}
+						if (swapTarget.id === 'chat-page-root') {
 						if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
 						return;
 					}
