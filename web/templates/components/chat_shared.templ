@@ -124,6 +124,15 @@ func chatMessageHistoryStorageKey(config ChatInputFormConfig) string {
 	}
 	return "openvibely-chat-message-history"
 }
+func chatAttachmentStateKey(config ChatInputFormConfig) string {
+	if config.TaskID != "" {
+		return "openvibely-task-thread-attachments-" + config.TaskID
+	}
+	if config.ProjectID != "" {
+		return "openvibely-chat-attachments-" + config.ProjectID
+	}
+	return "openvibely-chat-attachments-" + config.FormID
+}
 func selectedAgentOrAuto(agentID string) string {
 	if agentID == "" {
 		return "auto"
@@ -888,13 +897,22 @@ templ ChatStreamingResumeInitScript() {
 				if (container._sseConnected) return;
 				container._sseConnected = true;
 
-				var execId = container.getAttribute('data-exec-id');
-				var messagesId = container.getAttribute('data-messages-container');
+					var execId = container.getAttribute('data-exec-id');
+					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
 					var cumulativeContent = container.getAttribute('data-raw-content') || '';
 					var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;
 					var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
 					function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
+					function persistResumeStreamState(active) {
+						container.setAttribute('data-raw-content', cumulativeContent);
+						container.setAttribute('data-initial-byte-length', String(streamOffset));
+						if (active) container.setAttribute('data-streaming-resume', 'true');
+						else {
+							container.removeAttribute('data-streaming-resume');
+							delete container._sseConnected;
+						}
+					}
 
 				// Find streaming dots by ID (reliable across morph swaps and inline script siblings)
 				var streamingDots = document.getElementById('streaming-dots-resume-' + execId);
@@ -1127,9 +1145,10 @@ templ ChatStreamingResumeInitScript() {
 							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
 							registerResumeEventSource(eventSource);
 
-						eventSource.onmessage = function(event) {
-							cumulativeContent += event.data;
-							streamOffset += utf8ByteLength(event.data);
+							eventSource.onmessage = function(event) {
+								cumulativeContent += event.data;
+								streamOffset += utf8ByteLength(event.data);
+								persistResumeStreamState(true);
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
 								thinkingIndicator.classList.add('hidden');
@@ -1147,6 +1166,7 @@ templ ChatStreamingResumeInitScript() {
 									delete container._authoritativeTerminalContent;
 									container.removeAttribute('data-authoritative-terminal-content');
 								}
+								persistResumeStreamState(false);
 								var terminalStatus = event && event.data ? event.data : 'completed';
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							function finishTerminalRender() {
@@ -1196,12 +1216,13 @@ templ ChatStreamingResumeInitScript() {
 							}
 							if (streamTerminalHandled) return;
 						streamTerminalHandled = true;
-						if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
-							cumulativeContent = String(container._authoritativeTerminalContent || '');
-							delete container._authoritativeTerminalContent;
-							container.removeAttribute('data-authoritative-terminal-content');
-						}
-						flushCumulativeContent();
+							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+								cumulativeContent = String(container._authoritativeTerminalContent || '');
+								delete container._authoritativeTerminalContent;
+								container.removeAttribute('data-authoritative-terminal-content');
+							}
+							persistResumeStreamState(false);
+							flushCumulativeContent();
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
 				container.classList.remove('hidden');
@@ -1475,6 +1496,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-input-id={ config.InputID }
 			data-clear-func-name={ config.FormID + "ClearAttachments" }
 			data-message-history-key={ chatMessageHistoryStorageKey(config) }
+			data-attachment-state-key={ chatAttachmentStateKey(config) }
 			class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"
 		>
 			<!-- Drop zone overlay -->
@@ -1904,15 +1926,119 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 			var attachmentUploadQueue = Promise.resolve();
 			var attachmentUploadGeneration = 0;
+			var attachmentStateKey = form.getAttribute('data-attachment-state-key') || '';
+			window._chatPendingAttachmentStates = window._chatPendingAttachmentStates || {};
+
+			function appendPendingAttachmentRow(targetList, attachment) {
+				if (!targetList || !attachment) return;
+				var filename = String(attachment.filename || '');
+				var size = parseInt(attachment.size || '0', 10) || 0;
+				var div = document.createElement('div');
+				div.className = 'flex items-center gap-2 text-sm';
+				div.setAttribute('data-pending-attachment', 'true');
+				div.setAttribute('data-pending-attachment-filename', filename);
+				div.setAttribute('data-pending-attachment-size', String(size));
+				div.innerHTML = '<svg class="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>';
+				var name = document.createElement('span');
+				name.className = 'font-medium';
+				name.textContent = filename;
+				div.appendChild(name);
+				var sizeLabel = document.createElement('span');
+				sizeLabel.className = 'text-xs opacity-60';
+				sizeLabel.textContent = formatBytes(size);
+				div.appendChild(sizeLabel);
+				targetList.appendChild(div);
+			}
+
+				function readPendingAttachmentState(targetForm) {
+					if (!targetForm) return null;
+					var targetSession = targetForm.querySelector('input[name="attachment_session_id"]');
+					var targetList = targetForm.querySelector('[id$="-attachments-list"]');
+					var sessionID = targetSession ? (targetSession.value || targetSession.getAttribute('value') || '') : '';
+					if (!sessionID) return null;
+					var attachments = [];
+					if (targetList) {
+						targetList.querySelectorAll('[data-pending-attachment="true"]').forEach(function(row) {
+							attachments.push({
+								filename: row.getAttribute('data-pending-attachment-filename') || '',
+								size: parseInt(row.getAttribute('data-pending-attachment-size') || '0', 10) || 0
+							});
+						});
+					}
+					return { sessionID: sessionID, attachments: attachments };
+				}
+
+				window.saveChatPendingAttachmentState = function(formOrID) {
+					var targetForm = typeof formOrID === 'string' ? document.getElementById(formOrID) : formOrID;
+					if (!targetForm) return null;
+					var key = targetForm.getAttribute('data-attachment-state-key') || '';
+					if (!key) return null;
+					var state = readPendingAttachmentState(targetForm);
+					if (!state) return null;
+					var targetSession = targetForm.querySelector('input[name="attachment_session_id"]');
+					if (targetSession) targetSession.setAttribute('value', state.sessionID);
+					window._chatPendingAttachmentStates[key] = state;
+					try { sessionStorage.setItem(key, JSON.stringify(state)); } catch (_) {}
+					return state;
+				};
+
+				window.restoreChatPendingAttachmentState = function(formOrID) {
+					var targetForm = typeof formOrID === 'string' ? document.getElementById(formOrID) : formOrID;
+					if (!targetForm) return false;
+					var key = targetForm.getAttribute('data-attachment-state-key') || '';
+					if (!key) return false;
+					var state = window._chatPendingAttachmentStates[key] || null;
+					if (!state) {
+						try {
+							var stored = sessionStorage.getItem(key);
+							state = stored ? JSON.parse(stored) : null;
+						} catch (_) { state = null; }
+					}
+					if (!state || !state.sessionID) return false;
+					var targetSession = targetForm.querySelector('input[name="attachment_session_id"]');
+					var targetPreview = targetForm.querySelector('[id$="-attachments-preview"]');
+					var targetList = targetForm.querySelector('[id$="-attachments-list"]');
+					if (!targetSession || !targetList) return false;
+					targetSession.value = state.sessionID;
+					targetSession.setAttribute('value', state.sessionID);
+					targetList.innerHTML = '';
+					(state.attachments || []).forEach(function(attachment) { appendPendingAttachmentRow(targetList, attachment); });
+					if (targetPreview) targetPreview.classList.toggle('hidden', (state.attachments || []).length === 0);
+					window._chatPendingAttachmentStates[key] = state;
+					return true;
+				};
 
 			// Clear attachments function (registered on window for onclick handlers)
-			window[clearFuncName] = function() {
-				attachmentUploadGeneration++;
-				if (preview) preview.classList.add('hidden');
-				if (listContainer) listContainer.innerHTML = '';
-				if (sessionInput) sessionInput.value = '';
-				if (fileInput) fileInput.value = '';
-			};
+				window[clearFuncName] = function() {
+					attachmentUploadGeneration++;
+					if (preview) preview.classList.add('hidden');
+					if (listContainer) listContainer.innerHTML = '';
+					if (sessionInput) {
+						sessionInput.value = '';
+						sessionInput.setAttribute('value', '');
+					}
+					if (fileInput) fileInput.value = '';
+					if (attachmentStateKey) {
+						delete window._chatPendingAttachmentStates[attachmentStateKey];
+						try { sessionStorage.removeItem(attachmentStateKey); } catch (_) {}
+					}
+				};
+				window.restoreChatPendingAttachmentState(form);
+				if (!window._chatPendingAttachmentHistoryBound) {
+					window._chatPendingAttachmentHistoryBound = true;
+					document.body.addEventListener('htmx:beforeHistorySave', function() {
+						document.querySelectorAll('form[data-attachment-state-key]').forEach(function(historyForm) {
+							if (window.saveChatPendingAttachmentState) window.saveChatPendingAttachmentState(historyForm);
+						});
+					});
+					document.body.addEventListener('htmx:historyRestore', function() {
+						setTimeout(function() {
+							document.querySelectorAll('form[data-attachment-state-key]').forEach(function(restoredForm) {
+								if (window.restoreChatPendingAttachmentState) window.restoreChatPendingAttachmentState(restoredForm);
+							});
+						}, 0);
+					});
+				}
 			// Wire up the Clear All button
 			if (clearBtn) {
 				clearBtn.onclick = function() { window[clearFuncName](); };
@@ -2065,12 +2191,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						if (sessionInput) sessionInput.value = result.session_id;
 						if (preview) preview.classList.remove('hidden');
 						result.attachments.forEach(function(att) {
-							var div = document.createElement('div');
-							div.className = 'flex items-center gap-2 text-sm';
-							div.setAttribute('data-pending-attachment', 'true');
-							div.innerHTML = '<svg class="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg><span class="font-medium">' + att.filename + '</span><span class="text-xs opacity-60">' + formatBytes(att.size) + '</span>';
-							if (listContainer) listContainer.appendChild(div);
+							appendPendingAttachmentRow(listContainer, att);
 						});
+						window.saveChatPendingAttachmentState(form);
 						// Auto-scroll to show the attachment preview after upload
 						requestAnimationFrame(function() {
 							// Find the chat messages container (works for both /chat and task thread)
@@ -2753,28 +2876,29 @@ templ ChatAutoScrollScript() {
 		//   - shouldAutoScroll() returns !userScrolledUp. Do NOT AND with
 		//     isNearBottom — during innerHTML refresh that creates a clamp-driven
 		//     "yes auto-scroll" pulse that yanks the user back down.
-		window.ChatScrollTracker = function(element) {
-			this.element = element;
-			this.userScrolledUp = false;
-			this._userInteracting = false;
-			this._pointerInteracting = false;
-			this._userInteractTimeout = null;
-			this._handlers = {};
-			this._init();
-		};
+			window.ChatScrollTracker = function(element) {
+				this.element = element;
+				this.userScrolledUp = false;
+				this.intentRevision = 0;
+				this._userInteracting = false;
+				this._pointerInteracting = false;
+				this._userInteractTimeout = null;
+				this._handlers = {};
+				this._init();
+			};
 
 		window.ChatScrollTracker.prototype = {
-			_init: function() {
-				var self = this;
-				if (!this.element) return;
+				_init: function() {
+					var self = this;
+					if (!this.element) return;
 
-				function markInteracting() {
-					self._userInteracting = true;
-					if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
-					self._userInteractTimeout = setTimeout(function() {
-						if (!self._pointerInteracting) self._userInteracting = false;
-					}, 250);
-				}
+					function markInteracting() {
+						self._userInteracting = true;
+						if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
+						self._userInteractTimeout = setTimeout(function() {
+							if (!self._pointerInteracting) self._userInteracting = false;
+						}, 250);
+					}
 
 				function endPointerInteraction() {
 					self._pointerInteracting = false;
@@ -2784,12 +2908,12 @@ templ ChatAutoScrollScript() {
 					}, 250);
 				}
 
-				this._handlers.wheel = function() { markInteracting(); };
-				this._handlers.touchmove = function() { markInteracting(); };
-				this._handlers.pointerdown = function() {
-					self._pointerInteracting = true;
-					markInteracting();
-				};
+					this._handlers.wheel = function(event) { markInteracting(event); };
+					this._handlers.touchmove = function(event) { markInteracting(event); };
+					this._handlers.pointerdown = function(event) {
+						self._pointerInteracting = true;
+						markInteracting(event);
+					};
 				this._handlers.pointerup = endPointerInteraction;
 				this._handlers.pointercancel = endPointerInteraction;
 				this._handlers.blur = endPointerInteraction;
@@ -2802,19 +2926,20 @@ templ ChatAutoScrollScript() {
 						k === 'ArrowUp' || k === 'ArrowDown' || k === ' ' || k === 'Spacebar') {
 						var t = e.target;
 						if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-						markInteracting();
+						markInteracting(e);
 					}
 				};
 
-				this._handlers.scroll = function() {
-					if (!self.element) return;
-					var isNear = window.chatAutoScroll.isNearBottom(self.element);
-					if (self._userInteracting) {
-						var wasScrolledUp = self.userScrolledUp;
-						self.userScrolledUp = !isNear;
-						if (wasScrolledUp !== self.userScrolledUp && typeof self.onIntentChange === 'function') self.onIntentChange();
-					}
-					// Programmatic / clamp scrolls: PRESERVE the flag. Do not clear it
+					this._handlers.scroll = function() {
+						if (!self.element || !self.element.isConnected) return;
+						var isNear = window.chatAutoScroll.isNearBottom(self.element);
+						if (self._userInteracting) {
+							window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
+							self.userScrolledUp = !isNear;
+							self.intentRevision = window._chatScrollIntentRevision;
+							if (typeof self.onIntentChange === 'function') self.onIntentChange();
+						}
+						// Programmatic / clamp scrolls: PRESERVE the flag. Do not clear it
 					// just because the viewport happens to be near the bottom after a
 					// DOM refresh — that would defeat user scroll-up during streaming.
 				};
@@ -2838,12 +2963,12 @@ templ ChatAutoScrollScript() {
 
 			// shouldAutoScroll: only the persisted flag governs auto-scroll. Once the
 			// user scrolls up they stay parked there until they themselves scroll back.
-			shouldAutoScroll: function() {
-				if (!this.element) return true;
-				return !this.userScrolledUp;
-			},
+				shouldAutoScroll: function() {
+					if (!this.element) return true;
+					return !this.userScrolledUp;
+				},
 
-			// Re-bind to a new element (e.g. after morph swap replaced #task-thread-messages
+				// Re-bind to a new element (e.g. after morph swap replaced #task-thread-messages
 			// or #chat-messages). Without this the tracker would hold a detached element
 			// whose scrollHeight is 0 -> isNearBottom is always true -> auto-scroll forever.
 			rebind: function(newElement) {
@@ -2865,11 +2990,13 @@ templ ChatAutoScrollScript() {
 				this.userScrolledUp = prevUserScrolledUp;
 			},
 
-			resetOnUserSend: function() {
-				this.userScrolledUp = false;
-				this._userInteracting = false;
-				this._pointerInteracting = false;
-				if (this._userInteractTimeout) clearTimeout(this._userInteractTimeout);
+				resetOnUserSend: function() {
+					this.userScrolledUp = false;
+					window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
+					this.intentRevision = window._chatScrollIntentRevision;
+					this._userInteracting = false;
+					this._pointerInteracting = false;
+					if (this._userInteractTimeout) clearTimeout(this._userInteractTimeout);
 				if (this.element) {
 					window.chatAutoScroll.scrollToBottom(this.element, false);
 				}
@@ -2912,9 +3039,17 @@ templ ChatAutoScrollScript() {
 			window.saveChatTranscriptScrollState = function(stateKey, messages, tracker) {
 				if (!stateKey || !messages) return null;
 				var userScrolledUp = tracker ? !!tracker.userScrolledUp : !window.chatAutoScroll.isNearBottom(messages);
+				var intentRevision = tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0);
+				var previous = window._chatTranscriptScrollStates[stateKey] || null;
+				if (previous && previous.userScrolledUp && !userScrolledUp && intentRevision <= (previous.intentRevision || 0)) {
+					if (tracker) tracker.userScrolledUp = true;
+					if (messages.isConnected) messages.scrollTop = Math.max(0, previous.scrollTop || 0);
+					return previous;
+				}
 				var state = tracker && typeof tracker.snapshot === 'function'
 					? tracker.snapshot()
 					: { scrollTop: messages.scrollTop || 0, userScrolledUp: userScrolledUp, pinned: !userScrolledUp };
+				state.intentRevision = intentRevision;
 				state.bottomDistance = Math.max(0, (messages.scrollHeight || 0) - (messages.scrollTop || 0) - (messages.clientHeight || 0));
 				window._chatTranscriptScrollStates[stateKey] = state;
 				return state;
@@ -2982,6 +3117,7 @@ templ ChatAutoScrollScript() {
 				var tracker = typeof options.getTracker === 'function' ? options.getTracker() : options.tracker;
 				var state = options.state || window.getChatTranscriptScrollState(options.stateKey);
 				var pinned = state ? state.pinned !== false && !state.userScrolledUp : options.defaultPinned !== false;
+				var initialIntentRevision = tracker ? tracker.intentRevision : 0;
 				if (tracker) tracker.userScrolledUp = !pinned;
 				if (messages.getAttribute('data-transcript-hydrating') === 'true') messages.style.visibility = 'hidden';
 
@@ -3000,9 +3136,11 @@ templ ChatAutoScrollScript() {
 				return Promise.resolve(options.renderPromise).catch(function() { return false; }).then(waitForFonts).then(waitForLayout).then(function() {
 					if (!messages.isConnected) return false;
 					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
+					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
+					if (intentChanged) pinned = !tracker.userScrolledUp;
 					if (pinned) messages.scrollTop = messages.scrollHeight;
-					else if (state) messages.scrollTop = Math.max(0, state.scrollTop || 0);
-					if (tracker) tracker.userScrolledUp = !pinned;
+					else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
+					if (tracker && !intentChanged) tracker.userScrolledUp = !pinned;
 					messages.style.visibility = '';
 					messages.removeAttribute('data-transcript-hydrating');
 					window.observeChatTranscriptLayout({

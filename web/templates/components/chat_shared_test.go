@@ -1028,7 +1028,7 @@ func TestChatInputForm_AttachmentUploadsAppendToCurrentSession(t *testing.T) {
 				"if (sessionInput && sessionInput.value) formData.append('attachment_session_id', sessionInput.value);",
 				"if (sessionInput) sessionInput.value = result.session_id;",
 				"div.setAttribute('data-pending-attachment', 'true');",
-				"if (listContainer) listContainer.appendChild(div);",
+				"appendPendingAttachmentRow(listContainer, att);",
 			}
 			for _, r := range required {
 				if !strings.Contains(content, r) {
@@ -1409,6 +1409,43 @@ func TestChatInputForm_MarksSendScrollIntentOnSubmit(t *testing.T) {
 	}
 	if !strings.Contains(content, "if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);") {
 		t.Fatal("submit handler should route through the shared send-scroll intent helper")
+	}
+}
+
+func TestChatInputForm_PersistsPendingAttachmentsAcrossNavigation(t *testing.T) {
+	if got := chatAttachmentStateKey(ChatInputFormConfig{TaskID: "task-attachments"}); got != "openvibely-task-thread-attachments-task-attachments" {
+		t.Fatalf("task-thread attachment state key = %q", got)
+	}
+	config := ChatInputFormConfig{
+		FormID:       "chat-form",
+		InputID:      "message-input",
+		PostEndpoint: "/chat/send",
+		TargetID:     "chat-messages",
+		ProjectID:    "project-attachments",
+	}
+
+	var buf bytes.Buffer
+	if err := ChatInputForm(config).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatInputForm: %v", err)
+	}
+	content := buf.String()
+	for _, required := range []string{
+		`data-attachment-state-key="openvibely-chat-attachments-project-attachments"`,
+		"window._chatPendingAttachmentStates = window._chatPendingAttachmentStates || {};",
+		"window.saveChatPendingAttachmentState = function(formOrID)",
+		"window.restoreChatPendingAttachmentState = function(formOrID)",
+		"targetSession.setAttribute('value', state.sessionID);",
+		"sessionStorage.setItem(key, JSON.stringify(state));",
+		"window.restoreChatPendingAttachmentState(form);",
+		"document.body.addEventListener('htmx:beforeHistorySave'",
+		"document.querySelectorAll('form[data-attachment-state-key]').forEach(function(restoredForm)",
+		"window.saveChatPendingAttachmentState(form);",
+		"delete window._chatPendingAttachmentStates[attachmentStateKey];",
+		"sessionStorage.removeItem(attachmentStateKey);",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("pending attachment navigation persistence is missing %q", required)
+		}
 	}
 }
 
@@ -3348,7 +3385,11 @@ func TestChatBubbleStreamingResume_SeedsRenderedContentAndOffset(t *testing.T) {
 		"var cumulativeContent = container.getAttribute('data-raw-content') || '';",
 		"var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;",
 		"new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset))",
+		"function persistResumeStreamState(active)",
 		"streamOffset += utf8ByteLength(event.data);",
+		"container.setAttribute('data-initial-byte-length', String(streamOffset));",
+		"persistResumeStreamState(true);",
+		"persistResumeStreamState(false);",
 	} {
 		if !strings.Contains(script, snippet) {
 			t.Fatalf("resume script missing offset snippet: %s", snippet)
@@ -3902,8 +3943,16 @@ func TestTaskThreadView_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *tes
 	if !strings.Contains(content, "window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker)") {
 		t.Fatal("task thread message-target swaps must bind attachment image smart-scroll on the swapped element")
 	}
-	if !strings.Contains(content, "if (window.consumeChatSendScrollIntent) window.consumeChatSendScrollIntent('task-thread-messages');") {
-		t.Fatal("task thread should consume submit scroll intent after HTMX swaps so attachment sends remain pinned")
+	for _, required := range []string{
+		"function _consumeTaskThreadSendScrollIntent()",
+		"window._taskThreadPageTracker.resetOnUserSend();",
+		"window._taskThreadUserScrolledUp = false;",
+		"delete window._taskThreadScrollStates[key];",
+		"_consumeTaskThreadSendScrollIntent();",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("task thread should reset stale reading state after deliberate sends; missing %q", required)
+		}
 	}
 	if !strings.Contains(content, "_finishTaskThreadRenderScroll(target, renderPromise);") {
 		t.Fatal("task thread message swaps should reconcile variable-sized screenshots through the shared render barrier")
@@ -4177,6 +4226,13 @@ func TestTranscriptScrollCoordinatorStabilizesInitialHydrationAndAsyncLayout(t *
 		"window.saveChatTranscriptScrollState = function(stateKey, messages, tracker)",
 		"window.restoreChatTranscriptScroll = function(options)",
 		"window.observeChatTranscriptLayout = function(options)",
+		"this.intentRevision = 0;",
+		"self.intentRevision = window._chatScrollIntentRevision;",
+		"if (!self.element || !self.element.isConnected) return;",
+		"var initialIntentRevision = tracker ? tracker.intentRevision : 0;",
+		"var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;",
+		"previous.userScrolledUp && !userScrolledUp && intentRevision <= (previous.intentRevision || 0)",
+		"if (typeof self.onIntentChange === 'function') self.onIntentChange();",
 		"messages.style.visibility = 'hidden';",
 		"Promise.resolve(options.renderPromise)",
 		"messages.style.visibility = '';",
@@ -4556,6 +4612,34 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 			var readingTracker = new window.ChatScrollTracker(restoredReading);
 			await window.restoreChatTranscriptScroll({messages: restoredReading, tracker: readingTracker, stateKey: 'browser-chat', state: readingState, renderPromise: Promise.resolve()});
 			if (Math.abs(restoredReading.scrollTop - 75) > 1 || !readingTracker.userScrolledUp) fail('navigation restoration lost intentional reading position');
+
+			restoredReading.remove();
+			var interactiveHydration = document.createElement('div');
+			interactiveHydration.id = 'messages'; interactiveHydration.className = 'transcript'; interactiveHydration.style.visibility = 'hidden'; interactiveHydration.setAttribute('data-transcript-hydrating', 'true');
+			for (var k = 0; k < 10; k++) pair(interactiveHydration);
+			root.appendChild(interactiveHydration);
+			var interactiveTracker = new window.ChatScrollTracker(interactiveHydration);
+			interactiveHydration.scrollTop = interactiveHydration.scrollHeight;
+			var resolveInteractiveHydration;
+			var interactiveRender = new Promise(function(resolve) { resolveInteractiveHydration = resolve; });
+			var interactiveRestore = window.restoreChatTranscriptScroll({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', defaultPinned: true, renderPromise: interactiveRender});
+			interactiveHydration.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
+			interactiveHydration.scrollTop = 110;
+			interactiveHydration.dispatchEvent(new Event('scroll'));
+			resolveInteractiveHydration();
+			await interactiveRestore;
+			if (Math.abs(interactiveHydration.scrollTop - 110) > 1 || !interactiveTracker.userScrolledUp) fail('render barrier overrode upward intent made during hydration');
+
+			var resolveReadingHydration;
+			var readingHydrationRender = new Promise(function(resolve) { resolveReadingHydration = resolve; });
+			var continuedReadingState = window.saveChatTranscriptScrollState('interactive-chat', interactiveHydration, interactiveTracker);
+			var continuedReadingRestore = window.restoreChatTranscriptScroll({messages: interactiveHydration, tracker: interactiveTracker, stateKey: 'interactive-chat', state: continuedReadingState, renderPromise: readingHydrationRender});
+			interactiveHydration.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
+			interactiveHydration.scrollTop = 60;
+			interactiveHydration.dispatchEvent(new Event('scroll'));
+			resolveReadingHydration();
+			await continuedReadingRestore;
+			if (Math.abs(interactiveHydration.scrollTop - 60) > 1 || !interactiveTracker.userScrolledUp) fail('render barrier restored a stale position after an already-scrolled-up user moved again');
 			root.setAttribute('data-test-result', 'pass');
 		}).catch(function(error) {
 			root.setAttribute('data-test-result', 'fail');

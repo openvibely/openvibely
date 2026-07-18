@@ -334,7 +334,10 @@ window.addEventListener('DOMContentLoaded', async function() {
     if (window._chatReconnectCatchupTimer) fail('Chat revision sync left a stale reconnect timer');
     if (document.getElementById('chat-execution-chat-done') !== completedNode || document.getElementById('chat-execution-chat-live') !== liveNode) fail('automatic Chat revision sync replaced execution nodes');
     messages = document.getElementById('chat-messages');
+    messages.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
     messages.scrollTop = 37;
+    messages.dispatchEvent(new Event('scroll'));
+    if (!window._chatPageTracker || !window._chatPageTracker.userScrolledUp) fail('Chat fixture did not establish intentional upward scroll state');
     var terminalVisibilityTransition = window.__hiddenToVisible();
     if (!terminalVisibilityTransition.paused || !terminalVisibilityTransition.resumed) fail('terminal Chat visibility transition did not resume managed realtime state');
     await window.__wait(80);
@@ -344,7 +347,8 @@ window.addEventListener('DOMContentLoaded', async function() {
     if (document.getElementById('chat-expanded-tool') !== tool || tool.getAttribute('aria-expanded') !== 'true') fail('Chat tool state was lost');
     if (document.getElementById('message-input') !== draft || draft.value !== 'unsent draft') fail('Chat draft was lost');
     if (document.getElementById('chat-form-session-id') !== session || session.value !== 'pending-session') fail('Chat attachment session was lost');
-    if (document.getElementById('chat-messages').scrollTop !== 37) fail('Chat scroll position changed');
+    var finalMessages = document.getElementById('chat-messages');
+    if (finalMessages.scrollTop !== 37) fail('Chat scroll position changed: actual=' + finalMessages.scrollTop + '; height=' + finalMessages.scrollHeight + '; client=' + finalMessages.clientHeight + '; trackerUp=' + !!(window._chatPageTracker && window._chatPageTracker.userScrolledUp) + '; intent=' + (window._chatPageTracker && window._chatPageTracker.intentRevision));
     result.setAttribute('data-test-result', 'pass');
   } catch (error) {
     result.setAttribute('data-test-result', 'fail');

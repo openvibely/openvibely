@@ -165,6 +165,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (!chatRoot || !chatMessages || !window.ChatScrollTracker) return Promise.resolve(false);
 						var projectId = chatRoot.getAttribute('data-project-id') || '';
 						var chatScrollStateKey = 'chat-scroll-' + projectId;
+						var chatForm = document.getElementById('chat-form');
+						if (chatForm && window.restoreChatPendingAttachmentState) window.restoreChatPendingAttachmentState(chatForm);
 						var savedState = window.getChatTranscriptScrollState ? window.getChatTranscriptScrollState(chatScrollStateKey) : null;
 						var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;
 						if (sentByUser) savedState = { scrollTop: 0, userScrolledUp: false, pinned: true };
@@ -172,7 +174,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							if (window._chatPageTracker) window._chatPageTracker.destroy();
 							window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
 						}
-						window._chatPageTracker.userScrolledUp = savedState ? !!savedState.userScrolledUp : false;
+							if (sentByUser && window._chatPageTracker.resetOnUserSend) window._chatPageTracker.resetOnUserSend();
+							else window._chatPageTracker.userScrolledUp = savedState ? !!savedState.userScrolledUp : false;
 						var renderPromise = window.applyChatBubbleTransforms ? window.applyChatBubbleTransforms(chatMessages) : Promise.resolve([]);
 						if (window._initThreadStreaming) window._initThreadStreaming();
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
@@ -195,6 +198,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						document.body.addEventListener('htmx:historyRestore', function() {
 							setTimeout(function() {
 								if (document.getElementById('chat-page-root') && window.initializeChatTranscriptScroll) window.initializeChatTranscriptScroll();
+								if (document.getElementById('chat-page-root') && window.restoreChatLiveEventHandlers) window.restoreChatLiveEventHandlers();
 							}, 0);
 						});
 					}
@@ -704,6 +708,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					innerDiv.className = 'chat-bubble-inner';
 
 						var thinking = document.createElement('div');
+						thinking.id = 'streaming-thinking-resume-' + execId;
 						thinking.className = 'flex flex-col items-start gap-1';
 						thinking.innerHTML = '<span class="block h-5" aria-hidden="true"></span><span class="ov-loading-dots ov-loading-dots-sm" aria-hidden="true"><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span></span>';
 
@@ -714,13 +719,18 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						progressDiv.setAttribute('role', 'status');
 						progressDiv.setAttribute('aria-live', 'polite');
 
-							var contentDiv = document.createElement('div');
+						var contentDiv = document.createElement('div');
 						contentDiv.id = 'streaming-message-' + execId;
 						contentDiv.className = 'whitespace-pre-wrap leading-relaxed text-sm hidden';
 						contentDiv.style.wordWrap = 'break-word';
 						contentDiv.setAttribute('data-exec-id', execId);
-					var dots = document.createElement('div');
-					dots.className = 'hidden flex items-center gap-1 mt-2 opacity-40';
+						contentDiv.setAttribute('data-streaming-resume', 'true');
+						contentDiv.setAttribute('data-initial-byte-length', '0');
+						contentDiv.setAttribute('data-messages-container', 'chat-messages');
+						contentDiv.setAttribute('data-raw-content', '');
+						var dots = document.createElement('div');
+						dots.id = 'streaming-dots-resume-' + execId;
+						dots.className = 'hidden flex items-center gap-1 mt-2 opacity-40';
 					dots.innerHTML = '<span class="loading loading-dots loading-xs"></span>';
 
 						innerDiv.appendChild(thinking);
@@ -730,10 +740,18 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					bubble.appendChild(roleDiv);
 					bubble.appendChild(innerDiv);
 
-					// Set up streaming via EventSource
-					var textBuffer = '';
-					var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
-					function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
+						var textBuffer = '';
+						var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
+						function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
+						function persistLiveStreamState(active) {
+							contentDiv.setAttribute('data-raw-content', textBuffer);
+							contentDiv.setAttribute('data-initial-byte-length', String(utf8ByteLength(textBuffer)));
+							if (active) contentDiv.setAttribute('data-streaming-resume', 'true');
+							else {
+								contentDiv.removeAttribute('data-streaming-resume');
+								delete contentDiv._sseConnected;
+							}
+						}
 						var renderScheduled = false;
 						var renderFrame = null;
 						var renderGeneration = 0;
@@ -793,12 +811,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 
 					var streamRetryCount = 0;
 					var eventSource = null;
-					function connectChatExecutionStream() {
-						var streamOffset = utf8ByteLength(textBuffer);
-						eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
-						if (window.registerChatStreamEventSource) {
-							window.registerChatStreamEventSource(execId, eventSource);
-						}
+						function connectChatExecutionStream() {
+							var streamOffset = utf8ByteLength(textBuffer);
+							contentDiv._sseConnected = true;
+							contentDiv.setAttribute('data-initial-byte-length', String(streamOffset));
+							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
+							if (window.registerChatStreamEventSource) {
+								window.registerChatStreamEventSource(execId, eventSource);
+							}
 
 						eventSource.onmessage = function(event) {
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
@@ -807,10 +827,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							contentDiv.classList.remove('hidden');
 							dots.classList.remove('hidden');
 						}
-						textBuffer += event.data;
-						// Persist raw stream content for completion fallback logic
-						contentDiv.setAttribute('data-raw-content', textBuffer);
-						renderBufferedOutput(false);
+							textBuffer += event.data;
+							// Persist raw stream content and its UTF-8 offset in serializable DOM
+							// attributes so HTMX history restoration can resume this live-created bubble.
+							persistLiveStreamState(true);
+							renderBufferedOutput(false);
 					};
 
 							eventSource.addEventListener('done', function(event) {
@@ -820,6 +841,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									delete contentDiv._authoritativeTerminalContent;
 									contentDiv.removeAttribute('data-authoritative-terminal-content');
 								}
+								persistLiveStreamState(false);
 								var completedPair = bubble.closest('[data-execution-pair="true"]');
 								if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, event && event.data ? event.data : 'completed');
 									else if (completedPair) {
@@ -866,13 +888,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
 								return;
 							}
-							if (Object.prototype.hasOwnProperty.call(contentDiv, '_authoritativeTerminalContent')) {
-								textBuffer = String(contentDiv._authoritativeTerminalContent || '');
-								delete contentDiv._authoritativeTerminalContent;
-								contentDiv.removeAttribute('data-authoritative-terminal-content');
-								renderBufferedOutput(true);
-							}
-							thinking.classList.add('hidden');
+								if (Object.prototype.hasOwnProperty.call(contentDiv, '_authoritativeTerminalContent')) {
+									textBuffer = String(contentDiv._authoritativeTerminalContent || '');
+									delete contentDiv._authoritativeTerminalContent;
+									contentDiv.removeAttribute('data-authoritative-terminal-content');
+									renderBufferedOutput(true);
+								}
+								persistLiveStreamState(false);
+								thinking.classList.add('hidden');
 							dots.classList.add('hidden');
 							contentDiv.classList.remove('hidden');
 							var failedPair = bubble.closest('[data-execution-pair="true"]');
@@ -1290,7 +1313,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						document.body.removeEventListener('htmx:afterSwap', handleChatAfterSwap);
 						document.body.removeEventListener('htmx:beforeSwap', handleChatBeforeSwap);
 						if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
-						window._chatLiveEventHandlers = null;
 					}
 				};
 					var handleChatBeforeSwap = function(event) {
@@ -1302,6 +1324,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var projectId = currentChatRoot.getAttribute('data-project-id') || '';
 							var chatScrollStateKey = 'chat-scroll-' + projectId;
 							if (window.saveChatTranscriptScrollState) window.saveChatTranscriptScrollState(chatScrollStateKey, chatMessages, window._chatPageTracker);
+							var chatForm = document.getElementById('chat-form');
+							if (chatForm && window.saveChatPendingAttachmentState) window.saveChatPendingAttachmentState(chatForm);
 						}
 						if (swapTarget.id === 'chat-page-root') {
 						if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
@@ -1321,6 +1345,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					connected: handleSharedLiveConnected,
 					afterSwap: handleChatAfterSwap,
 					beforeSwap: handleChatBeforeSwap
+				};
+				window.restoreChatLiveEventHandlers = function() {
+					var handlers = window._chatLiveEventHandlers;
+					if (!handlers) return;
+					if (handlers.chatEvent) window.addEventListener('sse-chat-live-event', handlers.chatEvent);
+					if (handlers.connected) window.addEventListener('sse-live-connected', handlers.connected);
+					if (handlers.afterSwap) document.body.addEventListener('htmx:afterSwap', handlers.afterSwap);
+					if (handlers.beforeSwap) document.body.addEventListener('htmx:beforeSwap', handlers.beforeSwap);
 				};
 			})();
 		</script>

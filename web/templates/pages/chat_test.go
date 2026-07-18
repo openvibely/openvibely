@@ -65,10 +65,15 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		"stateKey: chatScrollStateKey",
 		"renderPromise: renderPromise",
 		"document.body.addEventListener('htmx:historyRestore'",
+		"window.restoreChatLiveEventHandlers = function()",
+		"if (document.getElementById('chat-page-root') && window.restoreChatLiveEventHandlers) window.restoreChatLiveEventHandlers();",
 	} {
 		if !strings.Contains(content, required) {
 			t.Fatalf("global Chat navigation restoration is missing %q", required)
 		}
+	}
+	if strings.Contains(content, "window._chatPageTracker.suspendIntent") {
+		t.Fatal("global Chat must not suspend scroll tracking before HTMX confirms a swap; cancelled revision/no-op swaps must keep accepting user intent")
 	}
 	if strings.Contains(content, "// Scroll to bottom on page load to show latest messages") {
 		t.Fatal("global Chat must not unconditionally jump before transcript hydration finishes")
@@ -235,6 +240,29 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	bubbleSection := content[bubbleStart : bubbleStart+bubbleEnd]
 	if !strings.Contains(bubbleSection, "contentDiv.id = 'streaming-message-' + execId;") {
 		t.Fatal("live-created assistant stream node must use the same stable id as server-rendered streaming bubbles")
+	}
+	for _, required := range []string{
+		"contentDiv.setAttribute('data-streaming-resume', 'true');",
+		"contentDiv.setAttribute('data-initial-byte-length', '0');",
+		"contentDiv.setAttribute('data-messages-container', 'chat-messages');",
+		"thinking.id = 'streaming-thinking-resume-' + execId;",
+		"dots.id = 'streaming-dots-resume-' + execId;",
+	} {
+		if !strings.Contains(bubbleSection, required) {
+			t.Fatalf("live-created assistant stream must use the shared resumable DOM contract; missing %q", required)
+		}
+	}
+	if !strings.Contains(bubbleSection, "contentDiv._sseConnected = true;") ||
+		!strings.Contains(bubbleSection, "function persistLiveStreamState(active)") ||
+		!strings.Contains(bubbleSection, "persistLiveStreamState(true);") ||
+		!strings.Contains(bubbleSection, "persistLiveStreamState(false);") {
+		t.Fatal("live-created assistant streams must have one owner and persist/remove their resumable state across active and terminal phases")
+	}
+	if !strings.Contains(content, "function persistResumeStreamState(active)") ||
+		!strings.Contains(content, "container.setAttribute('data-initial-byte-length', String(streamOffset));") ||
+		!strings.Contains(content, "container.setAttribute('data-raw-content', cumulativeContent);") ||
+		!strings.Contains(content, "container.removeAttribute('data-streaming-resume');") {
+		t.Fatal("shared streams must persist the current raw UTF-8 offset while active and remove resumable state at terminal completion")
 	}
 	if !strings.Contains(bubbleSection, "function utf8ByteLength(value)") ||
 		!strings.Contains(bubbleSection, "var streamOffset = utf8ByteLength(textBuffer);") ||

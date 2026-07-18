@@ -435,6 +435,19 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				return true;
 			}
 
+			function _consumeTaskThreadSendScrollIntent() {
+				var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;
+				if (!sentByUser) return false;
+				if (window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {
+					window._taskThreadPageTracker.resetOnUserSend();
+				}
+				window._taskThreadUserScrolledUp = false;
+				window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+				var key = _taskThreadScrollStateKey(_taskThreadTaskId());
+				if (key) delete window._taskThreadScrollStates[key];
+				return true;
+			}
+
 				function _finishTaskThreadRenderScroll(messages, renderPromise) {
 					if (!messages) return Promise.resolve(false);
 					var taskId = _taskThreadTaskId();
@@ -805,10 +818,9 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 									if (window.initChatEarlierLoader) window.initChatEarlierLoader(target);
 									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(target);
 									if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
-									// A deliberate send already resets the tracker to pinned. The shared
-									// render barrier handles final positioning and later layout growth.
-									if (window.consumeChatSendScrollIntent) window.consumeChatSendScrollIntent('task-thread-messages');
-									_finishTaskThreadRenderScroll(target, renderPromise);
+								// A deliberate send resets both the live tracker and stale saved reading state.
+								_consumeTaskThreadSendScrollIntent();
+								_finishTaskThreadRenderScroll(target, renderPromise);
 							}
 							// Handle polling updates to task-thread-view (e.g., task completion status)
 							else if (target && target.id === 'task-thread-view') {
@@ -829,7 +841,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 										if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 										if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 										if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
-										if (window.consumeChatSendScrollIntent) window.consumeChatSendScrollIntent('task-thread-messages');
+										_consumeTaskThreadSendScrollIntent();
 										_finishTaskThreadRenderScroll(chatMessages, renderPromise);
 									}
 									if (window._initThreadStreaming) window._initThreadStreaming();
@@ -851,7 +863,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 									if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 									if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
-									if (window.consumeChatSendScrollIntent) window.consumeChatSendScrollIntent('task-thread-messages');
+									_consumeTaskThreadSendScrollIntent();
 									_finishTaskThreadRenderScroll(chatMessages, renderPromise);
 							}
 						}
