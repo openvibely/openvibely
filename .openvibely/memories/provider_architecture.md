@@ -2,7 +2,7 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-07-17
+updated: 2026-07-18
 source: consolidation
 source_id: memory_consolidation_2026_07_17
 confidence: high
@@ -90,6 +90,7 @@ OAuth and model-specific facts:
 - Provider 401 recovery reloads the model config from DB and may refresh/persist rotated tokens; it does not reread OAuth token material from disk, keychain, or environment variables.
 - Anthropic refresh-token expiry should be treated as opaque/server-controlled, not a fixed duration.
 - Anthropic OAuth refresh failures with provider `invalid_grant` are permanent reauthorization failures: mark model config `oauth_needs_reauth`, surface `needs_reauth`/“Re-auth Required,” and clear the flag after successful refresh.
+- Current incident (2026-07-18): configured Anthropic `Claude Opus 4.8` and `Claude Sonnet 5` model configs have each failed OAuth token refresh with HTTP 400 on repeated task-agent attempts, preventing repository work or validation. Pending task runs should use a working non-failing provider/model configuration or repair/re-authorize the affected Anthropic configurations rather than treating the blocked attempts as implementation evidence.
 - Claude Fable 5 (`claude-fable-5`) and Claude Mythos 5 (`claude-mythos-5`) are supported Anthropic model IDs and should remain selectable where Anthropic model options are listed. They should not be preselected, recommended, or first-position defaults for new Anthropic model configs; use a broadly stable Anthropic default. They default to a 1M context window, support up to 128k output tokens, require adaptive thinking without fixed `budget_tokens`, do not return raw thinking blocks, and can return HTTP 200 refusal responses that should surface as unsuccessful/refusal results.
 
 Provider-native tools and runtime tools:

@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-07-17
-source: consolidation
-source_id: memory_consolidation_2026_07_17
+updated: 2026-07-18
+source: task_completion
+source_id: 16d1fc08e25702035a1e87cdbe0c2e68
 confidence: high
 title: Integrations and Channels
 ---
@@ -18,8 +18,8 @@ Durable channel direction:
 - Shared generic channel image validation, pending-session ID generation, unique temp filenames, MIME sniffing, and decoder imports belong in neutral channel ingress code rather than Slack/Discord/Telegram/Email-specific files.
 - `internal/service/chat_action_runtime.go` centralizes generic channel runtime handlers for task creation/edit/execution, task goals, task thread viewing/sending, project switching/listing, schedule/personality/model/project utilities, channel completion, and shared alert/capability formatting.
 - GitHub issue #16 tracks remaining four-way duplication in Slack, Telegram, Discord, and Email runtime assembly: each channel separately registers equivalent `get_current_project`, fixed `get_chat_mode`, and unsupported `set_chat_mode` handlers adjacent to the existing shared project-switch abstraction. The intended scope is to centralize that common policy without broad channel-runtime refactoring.
-- Telegram, GitHub, Slack, Discord, and Email removal handlers share one ordered settings-reset helper. Required reset failures return a controlled server error without a successful Channels refresh/redirect, while each handler retains its explicit reset list and existing stop/disconnect and authorization lifecycle behavior. Slack removal preserves `SlackSettingBotTokenSource=oauth`; Discord removal also clears the current project's authorized-user allowlist and supports the service-unavailable fallback.
-- Slack, Discord, Telegram, and Email authorization forms share two templ primitives: one owns the authorization fragment's empty/list branch, row/remove layout, confirmation, and modal-scoped target/swap wiring; the other owns hidden `project_id`, primary/display-name inputs, and Add wiring. Wrappers remain channel-specific for copy, identity formatting, endpoints, input semantics, parsing, validation, and repository behavior.
+- Telegram, GitHub, Slack, Discord, and Email removal handlers share one ordered settings-reset helper. Required reset failures return a controlled server error without a successful Channels refresh/redirect, while each handler retains its explicit reset list and existing stop/disconnect and authorization lifecycle behavior. Slack removal preserves `SlackSettingBotTokenSource=oauth`. Discord removal always runs its explicit helper-based reset after local disconnect, whether the Discord service is present or unavailable, and clears the current project's authorized-user allowlist.
+- Slack, Discord, Telegram, and Email authorization forms share two templ primitives: one owns the authorization fragment's container ID, empty/list branch, row/remove layout, confirmation, and modal-scoped target/swap wiring; the other owns hidden `project_id`, primary/display-name inputs, and Add wiring while deriving the Add target from that same container ID. Wrappers remain channel-specific for copy, identity formatting, endpoints, input semantics, parsing, validation, and repository behavior. Keeping the container ID in the shared list shell as the single source prevents Add/Remove target drift and ensures fragment swaps stay inside the open modal.
 - Slack, Telegram, Discord, and Email channel runtimes must handle advertised runtime tools through shared channel action handling. Channel-origin `create_swarm_task` creates real swarm parents with channel origin/context metadata and uses the active authorized channel project rather than any tool-supplied `project_id`.
 - Attachment-bearing Chat turns should choose the model config after channel downloads and byte classification where bytes are available, so persisted execution or `thread_inputs.AgentConfigID` matches the runner/promotion config.
 - Slack and Telegram runtime goal actions are wired through durable `TaskGoalService` behavior rather than surface-specific stubs.
