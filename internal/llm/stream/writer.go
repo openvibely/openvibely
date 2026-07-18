@@ -8,6 +8,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/events"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -150,6 +151,9 @@ func (w *Writer) Write(p []byte) (int, error) {
 		}
 	}
 	w.mu.Unlock()
+	if n > 0 {
+		llmcontracts.NotifyActivity(w.ctx)
+	}
 	if event != nil {
 		w.publisher.Publish(*event)
 	}

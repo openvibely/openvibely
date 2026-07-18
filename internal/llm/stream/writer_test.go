@@ -7,10 +7,31 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestStreamingWriterReportsActivity(t *testing.T) {
+	activity := 0
+	ctx := llmcontracts.WithActivityCallback(context.Background(), func() { activity++ })
+	sw := newWriterWithOutputRepo("", "", nil, ctx, time.Hour, nil)
+	defer sw.Stop()
+
+	if _, err := sw.Write([]byte("progress")); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+	if activity != 1 {
+		t.Fatalf("activity callback calls = %d, want 1", activity)
+	}
+	if _, err := sw.Write(nil); err != nil {
+		t.Fatalf("empty write failed: %v", err)
+	}
+	if activity != 1 {
+		t.Fatalf("empty write reported activity; calls = %d, want 1", activity)
+	}
+}
 
 func TestStreamingWriter_PeriodicFlush(t *testing.T) {
 

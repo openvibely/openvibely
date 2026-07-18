@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	chatProcessingTimeout     = 30 * time.Minute // Timeout for LLM processing in background goroutines
+	chatProcessingTimeout     = 30 * time.Minute // Inactivity timeout for LLM processing in background goroutines
 	chatHistoryLimit          = 50               // Number of recent chat messages to load for conversation context
 	taskThreadHistoryLimit    = 21               // Load at most 20 prior turns plus the current execution for filtering
 	maxFileSize               = 10 << 20         // 10 MB per file
@@ -124,7 +124,8 @@ func streamingTransportScope(params streamingResponseParams) string {
 //
 // Uses context.Background() for the base context since this goroutine should
 // complete independently of the HTTP request (which may be canceled when the
-// client disconnects). The timeout ensures we don't run forever.
+// client disconnects). The inactivity timeout is reset by streamed model text,
+// thinking, tool starts, and tool results so active work can continue.
 //
 // Error handling: All errors in the completion path are logged but don't fail the
 // function since we're in a background goroutine. Failed completions leave tasks
@@ -174,7 +175,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if ctx != nil {
 			return
 		}
-		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		var resetInactivity func()
+		ctx, cancel, resetInactivity = withInactivityTimeout(context.Background(), timeout)
+		ctx = llmcontracts.WithActivityCallback(ctx, resetInactivity)
 		h.registerTaskCancellation(params.TaskID, cancel)
 		runtimeCancelRegistered = true
 		cancelWaitOnly()

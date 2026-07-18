@@ -717,10 +717,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							</label>
 						</div>
 						<div class="form-control">
-							<label class="label"><span class="label-text">Timeout (seconds)</span></label>
+							<label class="label"><span class="label-text">Inactivity timeout (seconds)</span></label>
 							<input type="text" inputmode="numeric" pattern="[0-9]*" id="model_worker_timeout" name="worker_timeout" class="input input-bordered" value="0" placeholder="0"/>
 							<label class="label">
-								<span class="label-text-alt opacity-70">0 = no override</span>
+								<span class="label-text-alt opacity-70">Resets on model and tool activity. 0 = 30-minute default</span>
 							</label>
 						</div>
 					</div>
