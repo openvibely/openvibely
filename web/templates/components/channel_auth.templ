@@ -16,7 +16,6 @@ type channelAuthorizationRow struct {
 }
 
 type channelAuthorizationAddConfig struct {
-	ContainerID      string
 	ProjectID        string
 	Endpoint         string
 	InputType        string
@@ -53,12 +52,12 @@ templ channelAuthorizationList(config channelAuthorizationListConfig, rows []cha
 		if config.AddHelp != "" {
 			<p class="text-xs opacity-60 mb-2">{ config.AddHelp }</p>
 		}
-		@channelAuthorizationAddControls(addConfig)
+		@channelAuthorizationAddControls(config.ContainerID, addConfig)
 	</div>
 }
 
-templ channelAuthorizationAddControls(config channelAuthorizationAddConfig) {
-	<div class="flex gap-2" id={ config.ContainerID + "-add-controls" }>
+templ channelAuthorizationAddControls(containerID string, config channelAuthorizationAddConfig) {
+	<div class="flex gap-2" id={ containerID + "-add-controls" }>
 		<input type="hidden" name="project_id" value={ config.ProjectID }/>
 		<input
 			type={ config.InputType }
@@ -76,9 +75,9 @@ templ channelAuthorizationAddControls(config channelAuthorizationAddConfig) {
 			type="button"
 			class="btn btn-primary btn-sm"
 			hx-post={ config.Endpoint }
-			hx-target={ "#" + config.ContainerID }
+			hx-target={ "#" + containerID }
 			hx-swap="outerHTML"
-			hx-include={ "#" + config.ContainerID + "-add-controls" }
+			hx-include={ "#" + containerID + "-add-controls" }
 		>
 			Add
 		</button>

@@ -45,7 +45,6 @@ func SlackAuthorizedUsersList(users []models.SlackAuthorizedUser, projectID stri
 			},
 			slackAuthorizationRows(users, projectID),
 			channelAuthorizationAddConfig{
-				ContainerID:      "slack-authorized-users",
 				ProjectID:        projectID,
 				Endpoint:         "/channels/slack/authorized-users",
 				InputType:        "text",
@@ -99,7 +98,7 @@ func slackAuthorizedUserIdentity(user models.SlackAuthorizedUser) templ.Componen
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(user.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 46, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 45, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -112,7 +111,7 @@ func slackAuthorizedUserIdentity(user models.SlackAuthorizedUser) templ.Componen
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("ID: %s", user.SlackUserID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 47, Col: 76}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/slack_auth.templ`, Line: 46, Col: 76}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {

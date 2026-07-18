@@ -17,7 +17,6 @@ templ EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, project
 		},
 		emailAuthorizationRows(senders, projectID),
 		channelAuthorizationAddConfig{
-			ContainerID: "email-authorized-senders",
 			ProjectID: projectID,
 			Endpoint: "/channels/email/authorized-senders",
 			InputType: "email",

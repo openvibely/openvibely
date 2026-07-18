@@ -17,7 +17,6 @@ templ TelegramAuthorizedUsersList(users []models.TelegramAuthorizedUser, project
 		},
 		telegramAuthorizationRows(users, projectID),
 		channelAuthorizationAddConfig{
-			ContainerID: "telegram-authorized-users",
 			ProjectID: projectID,
 			Endpoint: "/channels/telegram/authorized-users",
 			InputType: "text",
