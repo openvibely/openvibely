@@ -4578,6 +4578,10 @@ window.addEventListener('DOMContentLoaded', function() {
 
     var largeToggle = toggles.find(function(button) { return button.textContent === 'Show output (' + largeLineCount + ' lines)'; });
     if (!largeToggle || largeToggle.tagName !== 'BUTTON' || largeToggle.type !== 'button') fail('large output toggle is not an accessible native button');
+    var largeOutputContainer = largeToggle.closest('.stream-tool-output-container');
+    var largeToolName = largeToggle.closest('.stream-tool').querySelector('.tool-name-text');
+    if (!largeOutputContainer || largeOutputContainer !== largeToggle.closest('.stream-tool-body-content')) fail('large output toggle is not contained by the OUT surface');
+    if (!largeToolName || window.getComputedStyle(largeToggle).color !== window.getComputedStyle(largeToolName).color) fail('dark output toggle foreground does not match its tool call');
     var largePreview = largeToggle.closest('.stream-tool-body-content').querySelector('pre.stream-tool-output-preview');
     var previewStyle = window.getComputedStyle(largePreview);
     var previewFontSignature = [previewStyle.fontFamily, previewStyle.fontSize, previewStyle.fontWeight, previewStyle.fontStyle, previewStyle.lineHeight, previewStyle.letterSpacing].join('|');
@@ -4626,6 +4630,8 @@ window.addEventListener('DOMContentLoaded', function() {
     await Promise.resolve(window.renderStreamingContent(container, transcript, true));
     largeToggle = Array.from(container.querySelectorAll('.stream-tool-output-toggle')).find(function(button) { return button.textContent === 'Show output (' + largeLineCount + ' lines)'; });
     if (!largeToggle || largeToggle.closest('.stream-tool-body-content').querySelector('.stream-tool-body-scroll')) fail('rerender did not preserve collapsed state');
+    largeToolName = largeToggle.closest('.stream-tool').querySelector('.tool-name-text');
+    if (!largeToolName || window.getComputedStyle(largeToggle).color !== window.getComputedStyle(largeToolName).color) fail('light output toggle foreground does not match its tool call');
 
     result.setAttribute('data-test-result', 'pass');
     result.setAttribute('data-hydration-ms', hydrationMS.toFixed(1));
@@ -4747,6 +4753,7 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"el.scrollTop = state.scrollTop",
 		"var outputText = seg.resultOutput ? seg.resultOutput.trim() : ''",
 		"var hasOut = outputText !== ''",
+		"outVal.className = 'stream-tool-body-content stream-tool-output-container'",
 		"function toolOutputLineCount(text)",
 		"function toolOutputPreview(text)",
 		"var maxLines = 6",

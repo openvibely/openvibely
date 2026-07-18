@@ -1026,7 +1026,7 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 	}
 }
 
-func TestToolOutputToggleCSS_UsesCompactThemeSafeControlWithoutRestylingContainer(t *testing.T) {
+func TestToolOutputToggleCSS_UsesCompactInheritedToolCallColorWithoutRestylingContainer(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("failed to render Base: %v", err)
@@ -1034,24 +1034,17 @@ func TestToolOutputToggleCSS_UsesCompactThemeSafeControlWithoutRestylingContaine
 	html := buf.String()
 
 	expected := []string{
-		"[data-theme=\"light\"] .stream-tool-output-toggle {",
-		"background: transparent;",
-		"color: #4b5563;",
 		"[data-theme=\"light\"] .stream-tool-output-toggle:hover {",
 		"background: #e5e7eb;",
-		"color: #1f2937;",
 		"[data-theme=\"light\"] .stream-tool-output-toggle:active {",
 		"background: #d1d5db;",
-		"[data-theme=\"dark\"] .stream-tool-body-content {",
+		"[data-theme=\"dark\"] .stream-tool-output-container {",
 		"background: rgba(0, 0, 0, 0.2);",
-		"[data-theme=\"dark\"] .stream-tool-body-content .stream-tool-output-text {",
+		"[data-theme=\"dark\"] .stream-tool-output-container .stream-tool-output-text {",
 		"background: transparent;",
 		"border: none;",
-		"[data-theme=\"dark\"] .stream-tool-output-toggle {",
-		"color: #cbd5e1;",
 		"[data-theme=\"dark\"] .stream-tool-output-toggle:hover {",
 		"background: rgba(255, 255, 255, 0.1);",
-		"color: #f3f4f6;",
 		"[data-theme=\"dark\"] .stream-tool-output-toggle:active {",
 		"background: rgba(255, 255, 255, 0.16);",
 		"appearance: none;",
@@ -1059,6 +1052,8 @@ func TestToolOutputToggleCSS_UsesCompactThemeSafeControlWithoutRestylingContaine
 		"min-height: 1.25rem;",
 		"padding: 0.0625rem 0.25rem;",
 		"border: 0;",
+		"background: transparent;",
+		"color: inherit;",
 		"font-weight: 500;",
 		"transition: background-color 120ms ease, color 120ms ease;",
 		".stream-tool-output-toggle:focus-visible {",
@@ -1070,8 +1065,16 @@ func TestToolOutputToggleCSS_UsesCompactThemeSafeControlWithoutRestylingContaine
 		}
 	}
 
-	if strings.Contains(html, "[data-theme=\"dark\"] .stream-tool-body {") {
-		t.Error("tool output toggle styling must not restyle the dark tool container")
+	for _, fragment := range []string{
+		"[data-theme=\"light\"] .stream-tool-output-toggle {",
+		"[data-theme=\"dark\"] .stream-tool-output-toggle {",
+		"[data-theme=\"dark\"] .stream-tool-body {",
+		"[data-theme=\"dark\"] .stream-tool-body-content {",
+		"[data-theme=\"dark\"] .stream-tool-body-content .stream-tool-output-text {",
+	} {
+		if strings.Contains(html, fragment) {
+			t.Errorf("tool output toggle styling must inherit the tool-call foreground without restyling its container; found %q", fragment)
+		}
 	}
 }
 
