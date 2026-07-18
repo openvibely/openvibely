@@ -181,3 +181,218 @@ type AutomationCard struct {
 	NextRun    *time.Time                  `json:"next_run,omitempty"`
 	LastRun    *time.Time                  `json:"last_run,omitempty"`
 }
+
+type AutomationInvocationStatus string
+type AutomationWorkItemStatus string
+type AutomationPositionState string
+type AutomationActivityStatus string
+type AutomationTransitionState string
+
+const (
+	AutomationInvocationClaimed    AutomationInvocationStatus = "claimed"
+	AutomationInvocationDispatched AutomationInvocationStatus = "dispatched"
+	AutomationInvocationRunning    AutomationInvocationStatus = "running"
+	AutomationInvocationCompleted  AutomationInvocationStatus = "completed"
+	AutomationInvocationFailed     AutomationInvocationStatus = "failed"
+	AutomationInvocationCancelled  AutomationInvocationStatus = "cancelled"
+	AutomationInvocationSkipped    AutomationInvocationStatus = "skipped"
+
+	AutomationWorkItemActive    AutomationWorkItemStatus = "active"
+	AutomationWorkItemWaiting   AutomationWorkItemStatus = "waiting"
+	AutomationWorkItemBlocked   AutomationWorkItemStatus = "blocked"
+	AutomationWorkItemFailed    AutomationWorkItemStatus = "failed"
+	AutomationWorkItemCompleted AutomationWorkItemStatus = "completed"
+	AutomationWorkItemCancelled AutomationWorkItemStatus = "cancelled"
+
+	AutomationPositionActive  AutomationPositionState = "active"
+	AutomationPositionWaiting AutomationPositionState = "waiting"
+	AutomationPositionBlocked AutomationPositionState = "blocked"
+	AutomationPositionFailed  AutomationPositionState = "failed"
+
+	AutomationActivityPending   AutomationActivityStatus = "pending"
+	AutomationActivityRunning   AutomationActivityStatus = "running"
+	AutomationActivityWaiting   AutomationActivityStatus = "waiting"
+	AutomationActivityCompleted AutomationActivityStatus = "completed"
+	AutomationActivityFailed    AutomationActivityStatus = "failed"
+	AutomationActivityCancelled AutomationActivityStatus = "cancelled"
+
+	AutomationTransitionEntered   AutomationTransitionState = "entered"
+	AutomationTransitionWaiting   AutomationTransitionState = "waiting"
+	AutomationTransitionCompleted AutomationTransitionState = "completed"
+	AutomationTransitionFailed    AutomationTransitionState = "failed"
+	AutomationTransitionBlocked   AutomationTransitionState = "blocked"
+	AutomationTransitionCancelled AutomationTransitionState = "cancelled"
+)
+
+type AutomationBinding struct {
+	AutomationID string `json:"automation_id"`
+	VersionID    string `json:"version_id"`
+	InvocationID string `json:"invocation_id,omitempty"`
+	NodeID       string `json:"node_id"`
+	WorkItemID   string `json:"work_item_id,omitempty"`
+}
+
+type AutomationContext struct {
+	ProjectID string              `json:"project_id"`
+	Bindings  []AutomationBinding `json:"bindings"`
+}
+
+type AutomationDispatchEnvelope struct {
+	DispatchID string            `json:"dispatch_id"`
+	Task       Task              `json:"task"`
+	Context    AutomationContext `json:"context"`
+}
+
+type AutomationInvocation struct {
+	ID                  string                     `json:"id"`
+	ProjectID           string                     `json:"project_id"`
+	AutomationID        string                     `json:"automation_id"`
+	VersionID           string                     `json:"version_id"`
+	TriggerNodeID       string                     `json:"trigger_node_id"`
+	TriggerResourceType string                     `json:"trigger_resource_type"`
+	TriggerResourceID   string                     `json:"trigger_resource_id"`
+	OccurrenceKey       string                     `json:"occurrence_key"`
+	ScheduledFor        *time.Time                 `json:"scheduled_for,omitempty"`
+	Status              AutomationInvocationStatus `json:"status"`
+	SkippedReason       string                     `json:"skipped_reason,omitempty"`
+	StartedAt           *time.Time                 `json:"started_at,omitempty"`
+	CompletedAt         *time.Time                 `json:"completed_at,omitempty"`
+	CreatedAt           time.Time                  `json:"created_at"`
+	UpdatedAt           time.Time                  `json:"updated_at"`
+	ErrorMessage        string                     `json:"error_message,omitempty"`
+}
+
+type AutomationDispatch struct {
+	ID             string     `json:"id"`
+	InvocationID   string     `json:"invocation_id"`
+	TaskID         string     `json:"task_id"`
+	ExecutionID    string     `json:"execution_id,omitempty"`
+	Status         string     `json:"status"`
+	Attempts       int        `json:"attempts"`
+	ClaimedBy      string     `json:"claimed_by,omitempty"`
+	ClaimExpiresAt *time.Time `json:"claim_expires_at,omitempty"`
+	NextAttemptAt  time.Time  `json:"next_attempt_at"`
+	LastError      string     `json:"last_error,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+type AutomationWorkItem struct {
+	ID                 string                   `json:"id"`
+	ProjectID          string                   `json:"project_id"`
+	AutomationID       string                   `json:"automation_id"`
+	OriginVersionID    string                   `json:"origin_version_id"`
+	OriginInvocationID string                   `json:"origin_invocation_id,omitempty"`
+	ParentWorkItemID   string                   `json:"parent_work_item_id,omitempty"`
+	WorkItemKey        string                   `json:"work_item_key"`
+	Kind               string                   `json:"kind"`
+	Title              string                   `json:"title"`
+	Status             AutomationWorkItemStatus `json:"status"`
+	CreatedAt          time.Time                `json:"created_at"`
+	UpdatedAt          time.Time                `json:"updated_at"`
+	CompletedAt        *time.Time               `json:"completed_at,omitempty"`
+}
+
+type AutomationWorkItemPosition struct {
+	WorkItemID   string                  `json:"work_item_id"`
+	ProjectID    string                  `json:"project_id"`
+	AutomationID string                  `json:"automation_id"`
+	VersionID    string                  `json:"version_id"`
+	NodeID       string                  `json:"node_id"`
+	State        AutomationPositionState `json:"state"`
+	EnteredAt    time.Time               `json:"entered_at"`
+	UpdatedAt    time.Time               `json:"updated_at"`
+}
+
+type AutomationActivity struct {
+	ID           string                   `json:"id"`
+	ProjectID    string                   `json:"project_id"`
+	AutomationID string                   `json:"automation_id"`
+	VersionID    string                   `json:"version_id"`
+	NodeID       string                   `json:"node_id"`
+	InvocationID string                   `json:"invocation_id,omitempty"`
+	WorkItemID   string                   `json:"work_item_id,omitempty"`
+	ActivityKey  string                   `json:"activity_key"`
+	ActivityType string                   `json:"activity_type"`
+	Status       AutomationActivityStatus `json:"status"`
+	StartedAt    time.Time                `json:"started_at"`
+	CompletedAt  *time.Time               `json:"completed_at,omitempty"`
+	ErrorMessage string                   `json:"error_message,omitempty"`
+}
+
+type AutomationActivityResource struct {
+	ID           string    `json:"id"`
+	ActivityID   string    `json:"activity_id"`
+	ResourceType string    `json:"resource_type"`
+	ResourceID   string    `json:"resource_id"`
+	Relation     string    `json:"relation"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type AutomationTransition struct {
+	ID           string                    `json:"id"`
+	ProjectID    string                    `json:"project_id"`
+	AutomationID string                    `json:"automation_id"`
+	VersionID    string                    `json:"version_id"`
+	WorkItemID   string                    `json:"work_item_id"`
+	InvocationID string                    `json:"invocation_id,omitempty"`
+	ActivityID   string                    `json:"activity_id,omitempty"`
+	FromNodeID   string                    `json:"from_node_id,omitempty"`
+	ToNodeID     string                    `json:"to_node_id"`
+	EdgeID       string                    `json:"edge_id,omitempty"`
+	EventKey     string                    `json:"event_key"`
+	State        AutomationTransitionState `json:"state"`
+	MetadataJSON string                    `json:"metadata_json"`
+	OccurredAt   time.Time                 `json:"occurred_at"`
+}
+
+type AutomationNodeResource struct {
+	NodeID       string    `json:"node_id"`
+	ActivityID   string    `json:"activity_id"`
+	ResourceType string    `json:"resource_type"`
+	ResourceID   string    `json:"resource_id"`
+	Relation     string    `json:"relation"`
+	Name         string    `json:"name"`
+	Status       string    `json:"status"`
+	URL          string    `json:"url"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type AutomationNodeCounts struct {
+	Running           int `json:"running"`
+	Waiting           int `json:"waiting"`
+	Blocked           int `json:"blocked"`
+	Failed            int `json:"failed"`
+	CompletedRecently int `json:"completed_recently"`
+}
+
+type AutomationLiveNode struct {
+	AutomationNode
+	Counts       AutomationNodeCounts `json:"counts"`
+	DisplayState string               `json:"display_state"`
+}
+
+type AutomationLiveEdge struct {
+	AutomationEdge
+	TransitionCount       int  `json:"transition_count"`
+	RecentTransitionCount int  `json:"recent_transition_count"`
+	Highlighted           bool `json:"highlighted"`
+}
+
+type AutomationLegacyWorkGroup struct {
+	VersionID string `json:"version_id"`
+	Version   int    `json:"version"`
+	Count     int    `json:"count"`
+}
+
+type AutomationLiveGraph struct {
+	Automation        Automation                  `json:"automation"`
+	Version           AutomationVersion           `json:"version"`
+	Nodes             []AutomationLiveNode        `json:"nodes"`
+	Edges             []AutomationLiveEdge        `json:"edges"`
+	Resources         []AutomationResourceSummary `json:"resources"`
+	ActiveInvocations int                         `json:"active_invocations"`
+	ActiveWorkItems   int                         `json:"active_work_items"`
+	RecentCutoff      time.Time                   `json:"recent_cutoff"`
+	LegacyWork        []AutomationLegacyWorkGroup `json:"legacy_work,omitempty"`
+}

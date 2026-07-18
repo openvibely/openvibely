@@ -26,15 +26,16 @@ type SwarmPlannerStarter interface {
 }
 
 type SchedulerService struct {
-	scheduleRepo  *repository.ScheduleRepo
-	taskRepo      *repository.TaskRepo
-	workerSvc     *WorkerService
-	worktreeSvc   *WorktreeService
-	swarmStarter  SwarmPlannerStarter
-	interval      time.Duration
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	lastCleanupAt time.Time
+	scheduleRepo   *repository.ScheduleRepo
+	taskRepo       *repository.TaskRepo
+	automationRepo *repository.AutomationRepo
+	workerSvc      *WorkerService
+	worktreeSvc    *WorktreeService
+	swarmStarter   SwarmPlannerStarter
+	interval       time.Duration
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	lastCleanupAt  time.Time
 }
 
 func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *repository.TaskRepo, workerSvc *WorkerService) *SchedulerService {
@@ -47,6 +48,10 @@ func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *reposi
 }
 
 // SetWorktreeService sets the worktree service for automatic cleanup.
+func (s *SchedulerService) SetAutomationRepo(repo *repository.AutomationRepo) {
+	s.automationRepo = repo
+}
+
 func (s *SchedulerService) SetWorktreeService(wts *WorktreeService) {
 	s.worktreeSvc = wts
 }
@@ -116,6 +121,27 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 	applog.Infof("[scheduler] checkDueTasks found %d due schedules", len(schedules))
 
 	for _, sched := range schedules {
+		if s.automationRepo != nil {
+			owner, ownerErr := s.automationRepo.GetTriggerOwner(ctx, sched.ID)
+			if ownerErr != nil {
+				applog.Infof("[scheduler] automation trigger owner lookup failed schedule=%s: %v", sched.ID, ownerErr)
+				continue
+			}
+			if owner != nil {
+				nextRun := sched.ComputeNextRun(now)
+				invocation, dispatch, claimErr := s.automationRepo.ClaimScheduledOccurrence(ctx, sched, now, nextRun)
+				if claimErr != nil {
+					if claimErr != repository.ErrAutomationScheduleChanged {
+						applog.Infof("[scheduler] automation occurrence claim failed schedule=%s automation=%s: %v", sched.ID, owner.AutomationID, claimErr)
+					}
+					continue
+				}
+				if invocation != nil {
+					applog.Infof("[scheduler] automation occurrence claimed automation=%s invocation=%s status=%s dispatch=%v", owner.AutomationID, invocation.ID, invocation.Status, dispatch != nil)
+				}
+				continue
+			}
+		}
 		task, err := s.taskRepo.GetByID(ctx, sched.TaskID)
 		if err != nil || task == nil {
 			applog.Infof("[scheduler] checkDueTasks error getting task %s: %v", sched.TaskID, err)

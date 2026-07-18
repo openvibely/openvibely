@@ -64,7 +64,7 @@ type channelTaskActionHandlerOptions struct {
 	SwarmSvc       *SwarmService
 	LLMConfigRepo  *repository.LLMConfigRepo
 	Collector      *channelActionSummaryCollector
-	OnTasksCreated func(context.Context, []models.Task)
+	OnTasksCreated func(context.Context, []TaskCreationRequest, []models.Task) error
 }
 
 // channelCreateSwarmTaskInput mirrors the canonical create_swarm_task runtime
@@ -162,7 +162,9 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			}
 			createdTasks, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, opts.ProjectID, opts.TaskSvc, agents)
 			if opts.OnTasksCreated != nil && len(createdTasks) > 0 {
-				opts.OnTasksCreated(ctx, createdTasks)
+				if err := opts.OnTasksCreated(ctx, []TaskCreationRequest{req}, createdTasks); err != nil {
+					return "", err
+				}
 			}
 			if opts.Collector != nil {
 				opts.Collector.addCreated(summary)
@@ -208,7 +210,9 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 				return "", err
 			}
 			if opts.OnTasksCreated != nil {
-				opts.OnTasksCreated(ctx, []models.Task{*parent})
+				if err := opts.OnTasksCreated(ctx, nil, []models.Task{*parent}); err != nil {
+					return "", err
+				}
 			}
 			plannerMessage := "Planner starts when the swarm parent is Active."
 			summary := fmt.Sprintf("Created swarm task: %s.\n%s\n- \"%s\" (%s) [TASK_ID:%s]", parent.Title, plannerMessage, parent.Title, parent.Category, parent.ID)

@@ -115,13 +115,16 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						let newUrl;
 						if (currentPath.includes('/dashboard-mockup')) {
 							newUrl = '/dashboard-mockup?project_id=' + newProjectId;
+						} else if (currentPath.includes('/automations')) {
+							newUrl = '/automations?project_id=' + newProjectId;
 						} else if (currentPath.includes('/schedule')) {
 							newUrl = '/schedule?project_id=' + newProjectId;
-							} else if (currentPath.includes('/agents')) {
-								newUrl = '/agents?project_id=' + newProjectId;
-							} else if (currentPath.includes('/skills')) {
-								newUrl = '/skills?project_id=' + newProjectId;
-							} else if (currentPath.includes('/models')) {							newUrl = '/models?project_id=' + newProjectId;
+						} else if (currentPath.includes('/agents')) {
+							newUrl = '/agents?project_id=' + newProjectId;
+						} else if (currentPath.includes('/skills')) {
+							newUrl = '/skills?project_id=' + newProjectId;
+						} else if (currentPath.includes('/models')) {
+							newUrl = '/models?project_id=' + newProjectId;
 						} else if (currentPath.includes('/chat')) {
 							newUrl = '/chat?project_id=' + newProjectId;
 						} else if (currentPath.includes('/upcoming')) {
@@ -169,8 +172,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							const eventType = data.type || event.type;
 							if (!eventType) return;
 
-									if (eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_cancelled' || eventType === 'alert_created') {								// Dispatch to task-oriented page listeners.
+							if (eventType === 'task_status_changed' || eventType === 'task_category_changed' || eventType === 'task_thread_execution_started' || eventType === 'task_thread_input_applied' || eventType === 'task_thread_input_queued' || eventType === 'task_thread_input_cancelled' || eventType === 'alert_created' || eventType.indexOf('automation_') === 0) {
 								window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
+								if (eventType.indexOf('automation_') === 0) {
+									window._tabVisibility.dispatchSSEEvent('sse-automation-event', data);
+								}
 
 								// Only refresh alert badge if this is an alert_created event for the current project.
 								if (eventType === 'alert_created' && projectSelector) {
@@ -196,12 +202,13 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 								return;
 							}
 
-										if (eventType === 'chat_new_message' || eventType === 'chat_response_done' || eventType === 'chat_turn_steered' || eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled' || eventType === 'mixture_progress') {								window._tabVisibility.dispatchSSEEvent('sse-chat-live-event', data);
-									if (eventType === 'mixture_progress') {
-										window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
-									}
-									return;
+							if (eventType === 'chat_new_message' || eventType === 'chat_response_done' || eventType === 'chat_turn_steered' || eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled' || eventType === 'mixture_progress') {
+								window._tabVisibility.dispatchSSEEvent('sse-chat-live-event', data);
+								if (eventType === 'mixture_progress') {
+									window._tabVisibility.dispatchSSEEvent('sse-task-event', data);
 								}
+								return;
+							}
 
 							if (eventType === 'diff_snapshot' || eventType === 'file_modified' || eventType === 'file_deleted') {
 								window._tabVisibility.dispatchSSEEvent('sse-file-change-event', data);
@@ -223,20 +230,28 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							console.error('[SSE-Live] Connection error:', err);
 						},
 						listeners: {
-								'task_status_changed': handleLiveEvent,
-								'task_category_changed': handleLiveEvent,
-											'task_thread_execution_started': handleLiveEvent,
-											'task_thread_input_applied': handleLiveEvent,
-											'task_thread_input_queued': handleLiveEvent,
-											'task_thread_input_cancelled': handleLiveEvent,
-											'alert_created': handleLiveEvent,									'chat_new_message': handleLiveEvent,
-									'chat_response_done': handleLiveEvent,
-												'chat_turn_steered': handleLiveEvent,
-												'chat_thread_input_applied': handleLiveEvent,
-											'chat_thread_input_cancelled': handleLiveEvent,
-											'mixture_progress': handleLiveEvent,
-											'file_modified': handleLiveEvent,									'file_deleted': handleLiveEvent,
-								'diff_snapshot': handleLiveEvent
+							'task_status_changed': handleLiveEvent,
+							'task_category_changed': handleLiveEvent,
+							'task_thread_execution_started': handleLiveEvent,
+							'task_thread_input_applied': handleLiveEvent,
+							'task_thread_input_queued': handleLiveEvent,
+							'task_thread_input_cancelled': handleLiveEvent,
+							'alert_created': handleLiveEvent,
+							'automation_definition_updated': handleLiveEvent,
+							'automation_invocation_started': handleLiveEvent,
+							'automation_invocation_updated': handleLiveEvent,
+							'automation_work_item_updated': handleLiveEvent,
+							'automation_transition_created': handleLiveEvent,
+							'automation_resource_linked': handleLiveEvent,
+							'chat_new_message': handleLiveEvent,
+							'chat_response_done': handleLiveEvent,
+							'chat_turn_steered': handleLiveEvent,
+							'chat_thread_input_applied': handleLiveEvent,
+							'chat_thread_input_cancelled': handleLiveEvent,
+							'mixture_progress': handleLiveEvent,
+							'file_modified': handleLiveEvent,
+							'file_deleted': handleLiveEvent,
+							'diff_snapshot': handleLiveEvent
 						}
 					});
 

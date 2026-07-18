@@ -51,6 +51,12 @@ func (s *AlertService) CreateActionable(ctx context.Context, a *models.Alert) (*
 	if strings.TrimSpace(a.Source) == "" {
 		a.Source = "agent"
 	}
+	if automationContext, ok := AutomationContextFromContext(ctx); ok && automationContext.ProjectID == a.ProjectID {
+		a.AutomationContext = &automationContext
+		if _, executionID, executionOK := AutomationExecutionFromContext(ctx); executionOK {
+			a.ExecutionID = &executionID
+		}
+	}
 	created, err := s.alertRepo.CreateIdempotent(ctx, a)
 	if err != nil {
 		return nil, err

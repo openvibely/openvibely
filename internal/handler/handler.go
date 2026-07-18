@@ -552,7 +552,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Automations (project-scoped via ?project_id= query param)
 	e.GET("/automations", h.ListAutomations)
-	e.GET("/automations/:automationId", h.GetAutomationDefinition)
+	e.GET("/automations/:automationId", h.GetAutomationLive)
+	e.GET("/automations/:automationId/definition", h.GetAutomationDefinition)
+	e.GET("/automations/:automationId/nodes/:nodeId/resources", h.GetAutomationNodeResources)
 
 	// Tasks (project-scoped via ?project_id= query param)
 	e.GET("/tasks", h.ListTasks)

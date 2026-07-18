@@ -452,6 +452,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	agentRepo := repository.NewAgentRepo(db)
 	alertRepo := repository.NewAlertRepo(db)
 	automationRepo := repository.NewAutomationRepo(db)
+	automationRepo.SetBroadcaster(broadcaster)
+	execRepo.SetAutomationRepo(automationRepo)
+	alertRepo.SetAutomationRepo(automationRepo)
 	upcomingRepo := repository.NewUpcomingRepo(db)
 
 	// Services
@@ -463,6 +466,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workerSvc.SetTaskRepo(taskRepo)
 	workerSvc.SetLLMConfigRepo(llmConfigRepo)
 	workerSvc.SetExecutionRepo(execRepo)
+	workerSvc.SetAutomationRepo(automationRepo)
 
 	projectSvc := service.NewProjectService(projectRepo)
 	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, broadcaster)
@@ -472,11 +476,15 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	llmSvc.SetTaskGoalService(taskGoalSvc)
 	workerSvc.SetTaskGoalService(taskGoalSvc)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	schedulerSvc.SetAutomationRepo(automationRepo)
+	automationDispatcher := service.NewAutomationDispatcher(automationRepo, taskRepo, workerSvc)
+	automationReconciler := service.NewAutomationReconciler(automationRepo, execRepo, workerSvc)
 	alertSvc := service.NewAlertService(alertRepo, broadcaster)
 	automationRegistry := service.NewAutomationAdapterRegistry()
 	automationRegistrationSvc := service.NewAutomationRegistrationService(automationRepo, automationRegistry)
 	automationGraphSvc := service.NewAutomationGraphService(automationRepo)
 	llmSvc.SetAutomationRegistrationService(automationRegistrationSvc)
+	llmSvc.SetAutomationRepo(automationRepo)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
 	workflowRepo := repository.NewWorkflowRepo(db)
 	workflowSvc := service.NewWorkflowService(workflowRepo, llmConfigRepo, taskRepo, llmSvc)
@@ -859,6 +867,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 
 	workerSvc.Start(srvCtx)
+	automationReconciler.Start(srvCtx)
+	automationDispatcher.Start(srvCtx)
 	schedulerSvc.Start(srvCtx)
 
 	// HTTP Server
@@ -1008,8 +1018,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		if hostedPendingStore != nil {
 			hostedPendingStore.Close()
 		}
-		workerSvc.Stop()
 		schedulerSvc.Stop()
+		automationDispatcher.Stop()
+		automationReconciler.Stop()
+		workerSvc.Stop()
 		if telegramSvc != nil {
 			telegramSvc.Stop()
 		}

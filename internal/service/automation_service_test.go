@@ -69,6 +69,13 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	require.Equal(t, native.Version.ID, again.Version.ID, "identical setup reruns must not create versions")
 	require.Equal(t, "Updated Native Automation", again.Automation.Name)
 
+	_, _, err = service.Register(ctx, AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC,
+		StableKey: nativeReq.StableKey, Resources: []models.AutomationResourceBinding{
+			{NodeKey: "inbox_trigger", ResourceType: "schedule", ResourceID: githubSchedule.ID},
+			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: sharedTask.ID, Relation: "shared"},
+		}})
+	require.ErrorContains(t, err, "adapter cannot change")
+
 	githubReq := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/default", Resources: []models.AutomationResourceBinding{
 		{NodeKey: "inbox_trigger", ResourceType: "schedule", ResourceID: githubSchedule.ID},
 		{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: sharedTask.ID, Relation: "shared"},

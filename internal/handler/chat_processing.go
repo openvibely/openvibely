@@ -79,7 +79,8 @@ type streamingResponseParams struct {
 	// uses these tools for this turn instead of rebuilding the generic handler
 	// runtime, so switch_project and other channel-sensitive tools execute through
 	// the channel service handler rather than the informational web/API path.
-	RuntimeTools *llmcontracts.RuntimeTools
+	RuntimeTools      *llmcontracts.RuntimeTools
+	AutomationContext *models.AutomationContext
 
 	// DeferHistoryLoad signals processStreamingResponse to load ChatHistory,
 	// SystemContext, and WorkDir lazily after acquiring worker slots. Set by
@@ -277,6 +278,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	}
 
 	startRuntimeCancellation()
+	if params.AutomationContext != nil {
+		ctx = service.WithAutomationContext(ctx, *params.AutomationContext)
+	}
 	defer cleanupRuntimeCancellation()
 	if ctx.Err() != nil {
 		applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled before model preparation: %v", params.ExecID, params.TaskID, ctx.Err())
@@ -1427,21 +1431,30 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
 		return nil
 	}
+	var automationContext *models.AutomationContext
+	if h.automationGraphSvc != nil {
+		if value, contextErr := h.automationGraphSvc.ContextForThreadInput(ctx, task.ProjectID, input.ID); contextErr != nil {
+			applog.Infof("[handler] startQueuedTaskThreadInput input=%s automation context load failed: %v", input.ID, contextErr)
+		} else if len(value.Bindings) > 0 {
+			automationContext = &value
+		}
+	}
 	go h.processStreamingResponse(streamingResponseParams{
-		ExecID:           exec.ID,
-		TaskID:           exec.TaskID,
-		Message:          input.Content,
-		Agent:            *agent,
-		AgentDefinition:  agentDef,
-		ChatHistory:      priorHistory,
-		ProjectID:        task.ProjectID,
-		SystemContext:    combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:          workDir,
-		ImageAttachments: imageAttachments,
-		IsTaskFollowup:   true,
-		ChannelReply:     channelReplyFromThreadInput(input),
-		InputOrigin:      string(input.Source),
-		InputOriginAgent: input.OriginAgent,
+		ExecID:            exec.ID,
+		TaskID:            exec.TaskID,
+		Message:           input.Content,
+		Agent:             *agent,
+		AgentDefinition:   agentDef,
+		ChatHistory:       priorHistory,
+		ProjectID:         task.ProjectID,
+		SystemContext:     combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:           workDir,
+		ImageAttachments:  imageAttachments,
+		IsTaskFollowup:    true,
+		ChannelReply:      channelReplyFromThreadInput(input),
+		InputOrigin:       string(input.Source),
+		InputOriginAgent:  input.OriginAgent,
+		AutomationContext: automationContext,
 	})
 	return nil
 }
@@ -3499,7 +3512,11 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 		queued.EmailSubject = reply.EmailSubject
 		queued.EmailSessionKey = reply.EmailSessionKey
 	}
-	if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+	if automationContext, ok := service.AutomationContextFromContext(ctx); ok && automationContext.ProjectID == task.ProjectID {
+		if err := h.threadInputRepo.CreateQueuedWithAutomationContext(ctx, queued, automationContext, "causal"); err != nil {
+			return nil, err
+		}
+	} else if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 		return nil, err
 	}
 	if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(ctx, queued); err != nil {

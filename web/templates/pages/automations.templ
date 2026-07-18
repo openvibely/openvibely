@@ -62,6 +62,115 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 	</div>
 }
 
+templ AutomationLive(projects []models.Project, currentProjectID string, graph models.AutomationLiveGraph) {
+	@layout.Base(graph.Automation.Name, projects, currentProjectID) {
+		@automationLiveContent(graph, currentProjectID)
+	}
+}
+
+templ AutomationLiveContent(graph models.AutomationLiveGraph, currentProjectID string) {
+	@automationLiveContent(graph, currentProjectID)
+}
+
+templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID string) {
+	<div id="automation-live" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
+		hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }
+		hx-trigger="every 20s [document.visibilityState === 'visible']" hx-target="this" hx-swap="outerHTML">
+		@layout.PageTitle(graph.Automation.Name)
+		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true">← Automations</a>
+		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+			<div class="min-w-0"><h2 class="break-words text-2xl font-bold">{ graph.Automation.Name }</h2><p class="mt-1 max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p></div>
+			<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">Definition</a></div>
+		</div>
+		<div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+			<div class="stat rounded-box bg-base-200/60 p-3"><div class="stat-title text-xs">Active invocations</div><div class="stat-value text-xl">{ fmt.Sprintf("%d", graph.ActiveInvocations) }</div></div>
+			<div class="stat rounded-box bg-base-200/60 p-3"><div class="stat-title text-xs">Open work items</div><div class="stat-value text-xl">{ fmt.Sprintf("%d", graph.ActiveWorkItems) }</div></div>
+			<div class="stat rounded-box bg-base-200/60 p-3"><div class="stat-title text-xs">Topology</div><div class="stat-value text-sm">v{ fmt.Sprintf("%d", graph.Version.Version) }</div></div>
+			<div class="stat rounded-box bg-base-200/60 p-3"><div class="stat-title text-xs">Recent since</div><div class="stat-value text-sm">{ graph.RecentCutoff.Local().Format("Jan 2, 3:04 PM") }</div></div>
+		</div>
+		if len(graph.LegacyWork) > 0 {
+			<div class="mb-4 rounded-box border border-warning/40 bg-warning/10 px-4 py-3" aria-label="Legacy automation work">
+				<h3 class="text-sm font-semibold">Legacy work</h3>
+				<div class="mt-2 flex flex-wrap gap-2">
+					for _, group := range graph.LegacyWork {
+						<span class="badge badge-warning badge-outline">v{ fmt.Sprintf("%d", group.Version) }: { fmt.Sprintf("%d", group.Count) } unmapped</span>
+					}
+				</div>
+			</div>
+		}
+		<div class="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+			<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0">
+				<div class="mb-3 flex flex-wrap gap-2 text-xs" aria-label="Graph status legend">
+					for _, state := range []string{"failed", "blocked", "waiting_human", "running", "recently_completed", "idle"} {
+						<span class="badge badge-ghost">{ automationStateLabel(state) }</span>
+					}
+				</div>
+				<div class="w-full overflow-auto" role="region" aria-label="Live automation graph">
+					<svg viewBox={ fmt.Sprintf("0 0 %d %d", automationLiveGraphWidth(graph.Nodes), automationLiveGraphHeight(graph.Nodes)) } class="min-h-[420px] min-w-[900px] w-full" role="img" aria-label={ graph.Automation.Name + " live automation graph" }>
+						<defs><marker id="automation-live-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="fill-base-content/35"></path></marker></defs>
+					for _, edge := range graph.Edges {
+						if source, target, ok := automationLiveEdgeNodes(graph.Nodes, edge.AutomationEdge); ok {
+							<line x1={ fmt.Sprintf("%.0f", source.PositionX+145) } y1={ fmt.Sprintf("%.0f", source.PositionY+55) } x2={ fmt.Sprintf("%.0f", target.PositionX+15) } y2={ fmt.Sprintf("%.0f", target.PositionY+55) } class={ templ.KV("stroke-primary", edge.Highlighted), templ.KV("stroke-base-content/35", !edge.Highlighted) } stroke-width="2" marker-end="url(#automation-live-arrow)" aria-label={ fmt.Sprintf("%s, %d transitions, %d recent", edge.Label, edge.TransitionCount, edge.RecentTransitionCount) }></line>
+						}
+					}
+					for _, node := range graph.Nodes {
+							<a href="#automation-node-resources" tabindex="0" aria-label={ automationLiveNodeAria(node) } hx-get={ fmt.Sprintf("/automations/%s/nodes/%s/resources?project_id=%s", graph.Automation.ID, node.ID, currentProjectID) } hx-target="#automation-node-resources" hx-swap="innerHTML">
+								<rect x={ fmt.Sprintf("%.0f", node.PositionX+10) } y={ fmt.Sprintf("%.0f", node.PositionY+20) } width="140" height="76" rx="10" class={ automationLiveNodeClass(node.DisplayState) } stroke-width="3"></rect>
+								<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+47) } text-anchor="middle" class="fill-base-content text-[12px] font-semibold">{ automationNodeLabel(node.Name, 20) }</text>
+								<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+66) } text-anchor="middle" class="fill-base-content/70 text-[10px]">{ automationStateLabel(node.DisplayState) }</text>
+								<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+83) } text-anchor="middle" class="fill-base-content/60 text-[9px]">{ automationNodeCountLabel(node.Counts) }</text>
+							</a>
+						}
+					</svg>
+				</div>
+			</div>
+			<aside id="automation-node-resources" class="rounded-box border border-base-300 bg-base-100 p-4" aria-live="polite"><h3 class="font-semibold">Node resources</h3><p class="mt-2 text-sm text-base-content/60">Select a node to inspect bounded task, execution, Alert, issue, and pull request links.</p></aside>
+		</div>
+	</div>
+	<script>
+		(function() {
+			if (window._automationLiveEventBound) return;
+			window._automationLiveEventBound = true;
+			window.addEventListener('sse-automation-event', function(event) {
+				var root = document.getElementById('automation-live');
+				if (!root || !event.detail) return;
+				if (event.detail.project_id && event.detail.project_id !== root.dataset.projectId) return;
+				if (event.detail.automation_id && event.detail.automation_id !== root.dataset.automationId) return;
+				clearTimeout(window._automationLiveRefreshTimer);
+				window._automationLiveRefreshTimer = setTimeout(function() { if (document.getElementById('automation-live')) htmx.ajax('GET', root.getAttribute('hx-get'), {target: '#automation-live', swap: 'outerHTML'}); }, 250);
+			});
+		})();
+	</script>
+}
+
+templ AutomationNodeResources(resources []models.AutomationNodeResource) {
+	<h3 class="font-semibold">Node resources</h3>
+	if len(resources) == 0 {
+		<p class="mt-2 text-sm text-base-content/60">No recent runtime resources.</p>
+	} else {
+		<div class="mt-3 space-y-2">
+			for _, resource := range resources {
+				if resource.URL != "" {
+					<a class="block rounded-lg bg-base-200/60 p-3 hover:bg-base-200" href={ templ.URL(resource.URL) }>
+						<div class="flex items-start justify-between gap-2"><span class="min-w-0 break-words text-sm font-medium">{ resource.Name }</span><span class="badge badge-sm">{ resource.Status }</span></div>
+						<p class="mt-1 text-xs text-base-content/55">{ resource.ResourceType }</p>
+					</a>
+				} else {
+					<div class="rounded-lg bg-base-200/60 p-3"><div class="flex items-start justify-between gap-2"><span class="min-w-0 break-words text-sm font-medium">{ resource.Name }</span><span class="badge badge-sm">{ resource.Status }</span></div><p class="mt-1 text-xs text-base-content/55">{ resource.ResourceType }</p></div>
+				}
+			}
+		</div>
+	}
+}
+
+func automationLiveGraphWidth(nodes []models.AutomationLiveNode) int { max := 900.0; for _, n := range nodes { if n.PositionX+180 > max { max = n.PositionX+180 } }; return int(max) }
+func automationLiveGraphHeight(nodes []models.AutomationLiveNode) int { max := 420.0; for _, n := range nodes { if n.PositionY+140 > max { max = n.PositionY+140 } }; return int(max) }
+func automationLiveEdgeNodes(nodes []models.AutomationLiveNode, edge models.AutomationEdge) (models.AutomationLiveNode, models.AutomationLiveNode, bool) { var source, target models.AutomationLiveNode; var foundSource, foundTarget bool; for _, n := range nodes { if n.ID == edge.SourceNodeID { source, foundSource = n, true }; if n.ID == edge.TargetNodeID { target, foundTarget = n, true } }; return source, target, foundSource && foundTarget }
+func automationLiveNodeClass(state string) string { base := "fill-base-200 stroke-base-content/30"; switch state { case "failed": return "fill-error/15 stroke-error"; case "blocked": return "fill-warning/15 stroke-warning"; case "waiting_human": return "fill-info/15 stroke-info"; case "running": return "fill-primary/15 stroke-primary"; case "recently_completed": return "fill-success/15 stroke-success" }; return base }
+func automationStateLabel(state string) string { return strings.ReplaceAll(strings.Title(strings.ReplaceAll(state, "_", " ")), "Human", "human") }
+func automationNodeCountLabel(c models.AutomationNodeCounts) string { return fmt.Sprintf("%d run · %d wait · %d block · %d fail · %d done", c.Running, c.Waiting, c.Blocked, c.Failed, c.CompletedRecently) }
+func automationLiveNodeAria(node models.AutomationLiveNode) string { return node.Name + ", " + automationStateLabel(node.DisplayState) + ", " + automationNodeCountLabel(node.Counts) }
+
 templ AutomationDefinition(projects []models.Project, currentProjectID string, definition models.AutomationDefinition, resources []models.AutomationResourceSummary) {
 	@layout.Base(definition.Automation.Name, projects, currentProjectID) {
 		@automationDefinitionContent(definition, resources, currentProjectID)

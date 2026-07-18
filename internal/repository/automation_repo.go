@@ -8,15 +8,22 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
 var ErrAutomationTriggerOwned = errors.New("automation trigger schedule is already owned")
 
-type AutomationRepo struct{ db *sql.DB }
+type AutomationRepo struct {
+	db          *sql.DB
+	broadcaster *events.Broadcaster
+}
 
 func NewAutomationRepo(db *sql.DB) *AutomationRepo { return &AutomationRepo{db: db} }
 func (r *AutomationRepo) DB() *sql.DB              { return r.db }
+func (r *AutomationRepo) SetBroadcaster(b *events.Broadcaster) {
+	r.broadcaster = b
+}
 
 func (r *AutomationRepo) ListByProject(ctx context.Context, projectID string, limit int) ([]models.Automation, error) {
 	if limit <= 0 || limit > 100 {
@@ -93,6 +100,14 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		return nil, false, err
 	}
 	if a != nil && a.PublishedVersionID != nil {
+		var publishedAdapter string
+		if err := conn.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
+			WHERE id = ? AND automation_id = ? AND project_id = ?`, *a.PublishedVersionID, a.ID, in.ProjectID).Scan(&publishedAdapter); err != nil {
+			return nil, false, fmt.Errorf("loading published automation adapter: %w", err)
+		}
+		if publishedAdapter != in.AdapterKey {
+			return nil, false, fmt.Errorf("published automation adapter cannot change from %q to %q", publishedAdapter, in.AdapterKey)
+		}
 		same, err := registeredPublicationMatches(ctx, conn, *a.PublishedVersionID, in.AdapterKey, in.Resources)
 		if err != nil {
 			return nil, false, err
@@ -270,6 +285,7 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		return nil, false, fmt.Errorf("committing automation publication: %w", err)
 	}
 	committed = true
+	r.PublishInvalidation(events.AutomationDefinitionUpdated, in.ProjectID, models.AutomationBinding{AutomationID: def.Automation.ID, VersionID: def.Version.ID})
 	return def, false, nil
 }
 

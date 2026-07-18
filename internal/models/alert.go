@@ -69,6 +69,7 @@ type Alert struct {
 	IsRead               bool                 `json:"is_read"`
 	CreatedAt            time.Time            `json:"created_at"`
 	UpdatedAt            time.Time            `json:"updated_at"`
+	AutomationContext    *AutomationContext   `json:"-"`
 }
 
 type AlertListFilter struct {

@@ -406,10 +406,11 @@ func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallbac
 		TaskSvc:       NewTaskService(taskRepo, nil, nil),
 		LLMConfigRepo: llmConfigRepo,
 		Collector:     collector,
-		OnTasksCreated: func(_ context.Context, tasks []models.Task) {
+		OnTasksCreated: func(_ context.Context, _ []TaskCreationRequest, tasks []models.Task) error {
 			for _, task := range tasks {
 				callbackTaskIDs = append(callbackTaskIDs, task.ID)
 			}
+			return nil
 		},
 	})
 	payload, err := json.Marshal(TaskCreationRequest{Title: "Shared action task", Prompt: "Do shared work"})
@@ -446,10 +447,11 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 		ProjectID: project.ID,
 		TaskSvc:   taskSvc,
 		Collector: collector,
-		OnTasksCreated: func(_ context.Context, tasks []models.Task) {
+		OnTasksCreated: func(_ context.Context, _ []TaskCreationRequest, tasks []models.Task) error {
 			for _, task := range tasks {
 				callbackTaskIDs = append(callbackTaskIDs, task.ID)
 			}
+			return nil
 		},
 	})
 	payload, err := json.Marshal(channelCreateSwarmTaskInput{Title: "Shared swarm", Prompt: "Split this across workers", ProjectID: foreignProject.ID, Category: string(models.CategoryBacklog)})

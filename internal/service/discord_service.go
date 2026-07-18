@@ -697,7 +697,7 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		TaskSvc:       s.taskSvc,
 		LLMConfigRepo: s.llmConfigRepo,
 		Collector:     collector,
-		OnTasksCreated: func(ctx context.Context, createdTasks []models.Task) {
+		OnTasksCreated: func(ctx context.Context, _ []TaskCreationRequest, createdTasks []models.Task) error {
 			for _, t := range createdTasks {
 				if s.taskRepo != nil {
 					if err := s.taskRepo.UpdateDiscordOrigin(ctx, t.ID); err != nil {
@@ -708,6 +708,7 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 					_ = s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: t.ID, DiscordChannelID: actionCtx.ChannelID, DiscordThreadID: actionCtx.ThreadID, DiscordMessageID: actionCtx.MessageID, DiscordUserID: actionCtx.UserID})
 				}
 			}
+			return nil
 		},
 	})
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskGoalSvc}))

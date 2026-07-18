@@ -122,8 +122,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 113 {
-		t.Fatalf("max goose version = %d, want 113", maxVersion)
+	if maxVersion != 114 {
+		t.Fatalf("max goose version = %d, want 114", maxVersion)
 	}
 }
 
@@ -274,8 +274,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 113 {
-		t.Fatalf("max goose version = %d, want 113", maxVersion)
+	if maxVersion != 114 {
+		t.Fatalf("max goose version = %d, want 114", maxVersion)
 	}
 }
 
@@ -761,8 +761,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 113 {
-		t.Fatalf("max goose version = %d, want 113", maxVersion)
+	if maxVersion != 114 {
+		t.Fatalf("max goose version = %d, want 114", maxVersion)
 	}
 }
 
@@ -1113,8 +1113,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 113 {
-		t.Fatalf("max goose version = %d, want 113", maxVersion)
+	if maxVersion != 114 {
+		t.Fatalf("max goose version = %d, want 114", maxVersion)
 	}
 }
 
@@ -1345,5 +1345,64 @@ func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("expected table %s removed after migration down", table)
 		}
+	}
+}
+
+func TestMigration114AutomationRuntimeUpAndDown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automations-114.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 114); err != nil {
+		t.Fatal(err)
+	}
+	tables := []string{"automation_invocations", "automation_dispatch_outbox", "automation_task_run_reservations", "automation_work_items", "automation_work_item_positions", "automation_thread_input_bindings", "automation_activities", "automation_activity_resources", "automation_transitions"}
+	for _, table := range tables {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("expected runtime table %s after up migration: count=%d err=%v", table, count, err)
+		}
+	}
+	var dispatchColumn int
+	rows, err := db.Query(`PRAGMA table_info(executions)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, kind string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatal(err)
+		}
+		if name == "dispatch_id" {
+			dispatchColumn++
+		}
+	}
+	_ = rows.Close()
+	if dispatchColumn != 1 {
+		t.Fatal("expected executions.dispatch_id after migration 114")
+	}
+	if err := goose.DownTo(db, ".", 113); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range tables {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("expected runtime table %s removed after down migration: count=%d err=%v", table, count, err)
+		}
+	}
+	var definitions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='automations'`).Scan(&definitions); err != nil || definitions != 1 {
+		t.Fatalf("phase 1 definition tables must remain after migration 114 down: count=%d err=%v", definitions, err)
 	}
 }

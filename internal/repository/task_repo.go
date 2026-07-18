@@ -476,7 +476,9 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 	}
 
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE tasks SET status = 'running', updated_at = datetime('now') WHERE id = ? AND status = 'pending'`,
+		`UPDATE tasks SET status = 'running', updated_at = datetime('now')
+		 WHERE id = ? AND status = 'pending'
+		   AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`,
 		id)
 	if err != nil {
 		return false, fmt.Errorf("claiming task: %w", err)
@@ -712,6 +714,7 @@ func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error)
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE category = 'active' AND status = 'pending'
+		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		 ORDER BY priority DESC, display_order ASC, created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing active pending tasks: %w", err)
@@ -871,7 +874,13 @@ func (r *TaskRepo) CountPendingByProject(ctx context.Context) (map[string]int, e
 func (r *TaskRepo) ResetOrphanedRunning(ctx context.Context) (int, error) {
 	result, err := r.db.ExecContext(ctx,
 		`UPDATE tasks SET status = 'pending', updated_at = datetime('now')
-		 WHERE status = 'running'`)
+		 WHERE status = 'running'
+		   AND NOT EXISTS (
+		     SELECT 1 FROM automation_task_run_reservations r
+		     JOIN automation_dispatch_outbox d ON d.id = r.dispatch_id
+		     JOIN executions e ON e.dispatch_id = d.id AND e.task_id = tasks.id
+		     WHERE r.task_id = tasks.id AND d.status IN ('processing','submitted') AND e.status = 'running'
+		   )`)
 	if err != nil {
 		return 0, fmt.Errorf("resetting orphaned running tasks: %w", err)
 	}

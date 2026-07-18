@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -157,6 +158,87 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 		cards = append(cards, card)
 	}
 	return cards, nil
+}
+
+func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automationID string, now time.Time) (*models.AutomationLiveGraph, error) {
+	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
+	if err != nil || definition == nil {
+		return nil, err
+	}
+	cutoff := now.UTC().Add(-24 * time.Hour)
+	counts, activeInvocations, activeWorkItems, err := s.repo.LiveNodeCounts(ctx, projectID, automationID, definition.Version.ID, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	olderCounts, legacyWork, err := s.repo.LiveOlderVersionPositions(ctx, projectID, automationID, definition.Version.ID)
+	if err != nil {
+		return nil, err
+	}
+	edgeCounts, err := s.repo.LiveEdgeCounts(ctx, projectID, automationID, definition.Version.ID, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	resources, err := s.repo.ListResourceSummaries(ctx, projectID, automationID, definition.Version.ID, 50)
+	if err != nil {
+		return nil, err
+	}
+	graph := &models.AutomationLiveGraph{Automation: definition.Automation, Version: definition.Version,
+		Resources: resources, ActiveInvocations: activeInvocations,
+		ActiveWorkItems: activeWorkItems, RecentCutoff: cutoff, LegacyWork: legacyWork}
+	for _, edge := range definition.Edges {
+		values := edgeCounts[edge.ID]
+		graph.Edges = append(graph.Edges, models.AutomationLiveEdge{AutomationEdge: edge,
+			TransitionCount: values[0], RecentTransitionCount: values[1], Highlighted: values[1] > 0})
+	}
+	for _, node := range definition.Nodes {
+		nodeCounts := counts[node.ID]
+		older := olderCounts[node.ID]
+		nodeCounts.Running += older.Running
+		nodeCounts.Waiting += older.Waiting
+		nodeCounts.Blocked += older.Blocked
+		nodeCounts.Failed += older.Failed
+		display := "idle"
+		switch {
+		case nodeCounts.Failed > 0:
+			display = "failed"
+		case nodeCounts.Blocked > 0:
+			display = "blocked"
+		case nodeCounts.Waiting > 0:
+			display = "waiting_human"
+		case nodeCounts.Running > 0:
+			display = "running"
+		case nodeCounts.CompletedRecently > 0:
+			display = "recently_completed"
+		}
+		graph.Nodes = append(graph.Nodes, models.AutomationLiveNode{AutomationNode: node, Counts: nodeCounts, DisplayState: display})
+	}
+	return graph, nil
+}
+
+func (s *AutomationGraphService) ListNodeResources(ctx context.Context, projectID, automationID, nodeID string, limit int) ([]models.AutomationNodeResource, error) {
+	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
+	if err != nil || definition == nil {
+		return nil, err
+	}
+	found := false
+	for _, node := range definition.Nodes {
+		if node.ID == nodeID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, nil
+	}
+	return s.repo.ListNodeRuntimeResources(ctx, projectID, automationID, definition.Version.ID, nodeID, limit)
+}
+
+func (s *AutomationGraphService) ContextForThreadInput(ctx context.Context, projectID, inputID string) (models.AutomationContext, error) {
+	return s.repo.ContextForThreadInput(ctx, projectID, inputID)
+}
+
+func (s *AutomationGraphService) ContextForExecution(ctx context.Context, projectID, executionID string) (models.AutomationContext, error) {
+	return s.repo.ContextForExecution(ctx, projectID, executionID)
 }
 
 func (s *AutomationGraphService) GetDefinition(ctx context.Context, projectID, automationID string) (*models.AutomationDefinition, []models.AutomationResourceSummary, error) {
