@@ -150,7 +150,6 @@ window.addEventListener('DOMContentLoaded', function() {
     var draft = document.getElementById('message-input');
     draft.value = 'unsent browser draft';
     draft.dispatchEvent(new Event('input', {bubbles: true}));
-    await wait(600);
 
     window.dispatchEvent(new CustomEvent('sse-chat-live-event', {detail: {
       type: 'chat_new_message', project_id: 'project-browser', exec_id: 'exec-live', message: 'stream this response', queued: false
@@ -216,6 +215,20 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function() { return rawStream().length > 500; }, 'post-restoration stream growth');
     await wait(150);
     if (Math.abs(messages().scrollTop - restoredTop) > 2) fail('stream growth overrode intentional upward reading position: ' + messages().scrollTop + ' vs ' + restoredTop);
+
+    var submittedDraft = document.getElementById('message-input');
+    submittedDraft.value = 'submitted browser draft';
+    submittedDraft.dispatchEvent(new Event('input', {bubbles: true}));
+    var submittedForm = document.getElementById('chat-form');
+    submittedForm.dispatchEvent(new CustomEvent('htmx:afterRequest', {bubbles: true, detail: {
+      elt: submittedForm,
+      successful: true,
+      xhr: {responseText: '<div>accepted</div>'}
+    }}));
+    await wait(600);
+    if (submittedDraft.value !== '' || localStorage.getItem('chat-draft-project-browser') !== null) {
+      fail('successful send did not clear the live draft and cancel its pending debounce');
+    }
 
     var root = document.getElementById('chat-page-root');
     root.setAttribute('data-test-result', 'pass');

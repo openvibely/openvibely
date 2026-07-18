@@ -65,6 +65,9 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		"stateKey: chatScrollStateKey",
 		"renderPromise: renderPromise",
 		"document.body.addEventListener('htmx:historyRestore'",
+		"window.saveChatDraftState = function(root)",
+		"document.body.addEventListener('htmx:beforeHistorySave'",
+		"if (window.saveChatDraftState) window.saveChatDraftState(currentChatRoot);",
 		"window.restoreChatLiveEventHandlers = function()",
 		"if (document.getElementById('chat-page-root') && window.restoreChatLiveEventHandlers) window.restoreChatLiveEventHandlers();",
 	} {
@@ -546,8 +549,11 @@ func TestChatContent_FormDraftClearingIgnoresNestedHTMXControls(t *testing.T) {
 	if !strings.Contains(branch, "event.detail.elt !== chatForm") {
 		t.Fatal("chat form draft clearing must ignore bubbled HTMX events from nested stop/queued controls")
 	}
-	if !strings.Contains(branch, "localStorage.removeItem(draftKey)") {
-		t.Fatal("chat form draft clearing should still remove the draft after a real send")
+	if !strings.Contains(branch, "responseText.trim() !== ''") || !strings.Contains(branch, "window.clearChatDraftState(chatRoot)") {
+		t.Fatal("chat form draft clearing should cancel pending persistence and clear only after an accepted non-empty real send")
+	}
+	if !strings.Contains(content, "clearTimeout(window._chatDraftSaveTimers[key])") {
+		t.Fatal("successful send clearing must cancel a pending debounced draft write")
 	}
 }
 

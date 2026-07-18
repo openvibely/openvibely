@@ -253,36 +253,88 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						swap: 'outerHTML'
 					});
 				};
-				var draftKey = 'chat-draft-' + projectId;
-				var messageInput = document.getElementById('message-input');
-				var chatForm = document.getElementById('chat-form');
-				if (!messageInput || !chatForm) return;
-
-				var savedDraft = localStorage.getItem(draftKey);
-				if (savedDraft && savedDraft.trim() !== '') {
-					messageInput.value = savedDraft;
-				}
-
-				var saveTimeout;
-				messageInput.addEventListener('input', function() {
-					clearTimeout(saveTimeout);
-					saveTimeout = setTimeout(function() {
-						var value = messageInput.value.trim();
-						if (value !== '') {
-							localStorage.setItem(draftKey, messageInput.value);
-						} else {
-							localStorage.removeItem(draftKey);
+					window._chatDraftSaveTimers = window._chatDraftSaveTimers || {};
+					window.chatDraftStorageKey = function(root) {
+						root = root || document.getElementById('chat-page-root');
+						var pid = root ? (root.getAttribute('data-project-id') || '') : '';
+						return pid ? 'chat-draft-' + pid : '';
+					};
+					window.saveChatDraftState = function(root) {
+						root = root || document.getElementById('chat-page-root');
+						var key = window.chatDraftStorageKey(root);
+						var input = root ? root.querySelector('#message-input') : null;
+						if (!key || !input) return false;
+						if (window._chatDraftSaveTimers[key]) {
+							clearTimeout(window._chatDraftSaveTimers[key]);
+							delete window._chatDraftSaveTimers[key];
 						}
-					}, 500);
-				});
+						input.defaultValue = input.value;
+						if (input.value.trim() !== '') localStorage.setItem(key, input.value);
+						else localStorage.removeItem(key);
+						return true;
+					};
+					window.restoreChatDraftState = function(root) {
+						root = root || document.getElementById('chat-page-root');
+						var key = window.chatDraftStorageKey(root);
+						var input = root ? root.querySelector('#message-input') : null;
+						if (!key || !input) return false;
+						var saved = localStorage.getItem(key) || '';
+						if (saved.trim() !== '') {
+							input.value = saved;
+							input.defaultValue = saved;
+						}
+						return true;
+					};
+					window.clearChatDraftState = function(root) {
+						root = root || document.getElementById('chat-page-root');
+						var key = window.chatDraftStorageKey(root);
+						var input = root ? root.querySelector('#message-input') : null;
+						if (!key) return false;
+						if (window._chatDraftSaveTimers[key]) {
+							clearTimeout(window._chatDraftSaveTimers[key]);
+							delete window._chatDraftSaveTimers[key];
+						}
+						localStorage.removeItem(key);
+						if (input) {
+							input.value = '';
+							input.defaultValue = '';
+						}
+						return true;
+					};
+
+					var draftKey = window.chatDraftStorageKey(chatRoot);
+					var messageInput = document.getElementById('message-input');
+					var chatForm = document.getElementById('chat-form');
+					if (!messageInput || !chatForm) return;
+
+					window.restoreChatDraftState(chatRoot);
+
+					messageInput.addEventListener('input', function() {
+						if (window._chatDraftSaveTimers[draftKey]) clearTimeout(window._chatDraftSaveTimers[draftKey]);
+						window._chatDraftSaveTimers[draftKey] = setTimeout(function() {
+							window.saveChatDraftState(chatRoot);
+						}, 500);
+					});
+
+					if (!window._chatDraftHistoryBound) {
+						window._chatDraftHistoryBound = true;
+						document.body.addEventListener('htmx:beforeHistorySave', function() {
+							if (window.saveChatDraftState) window.saveChatDraftState();
+						});
+						document.body.addEventListener('htmx:historyRestore', function() {
+							setTimeout(function() {
+								if (window.restoreChatDraftState) window.restoreChatDraftState();
+							}, 0);
+						});
+					}
 
 					chatForm.addEventListener('htmx:afterRequest', function(event) {
 						if (!event.detail || event.detail.elt !== chatForm) return;
-						if (event.detail.successful) {
-							localStorage.removeItem(draftKey);
-						}
+						if (!event.detail.successful) return;
+						var xhr = event.detail.xhr;
+						var responseText = xhr ? (xhr.responseText || '') : '';
+						if (responseText.trim() !== '') window.clearChatDraftState(chatRoot);
 					});			})();
-
 			// Detect <proposed_plan> marker in raw assistant content.
 			// Checks raw XML tags only; does not match HTML-escaped variants
 			// (&lt;proposed_plan&gt;) since raw content is stored unescaped in
@@ -1324,6 +1376,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var projectId = currentChatRoot.getAttribute('data-project-id') || '';
 							var chatScrollStateKey = 'chat-scroll-' + projectId;
 							if (window.saveChatTranscriptScrollState) window.saveChatTranscriptScrollState(chatScrollStateKey, chatMessages, window._chatPageTracker);
+							if (window.saveChatDraftState) window.saveChatDraftState(currentChatRoot);
 							var chatForm = document.getElementById('chat-form');
 							if (chatForm && window.saveChatPendingAttachmentState) window.saveChatPendingAttachmentState(chatForm);
 						}
