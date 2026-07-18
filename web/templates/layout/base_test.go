@@ -1026,7 +1026,7 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 	}
 }
 
-func TestToolOutputContainerCSS_Matches4c1f4846Styling(t *testing.T) {
+func TestToolOutputContainerCSS_UsesSeparateLightInputAndOutputSurfaces(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("failed to render Base: %v", err)
@@ -1042,10 +1042,8 @@ func TestToolOutputContainerCSS_Matches4c1f4846Styling(t *testing.T) {
 		`[data-theme="light"] .stream-tool-body-label {`,
 		"color: var(--ov-l-text-muted);",
 		`[data-theme="light"] .stream-tool-body-content {`,
-		"background: var(--ov-l-surface);",
-		`[data-theme="light"] .stream-tool-body-scroll pre {`,
-		`[data-theme="light"] .stream-tool-body-content,`,
-		`[data-theme="light"] .stream-tool-body-scroll pre {`,
+		"background: transparent;",
+		"color: var(--ov-l-text-strong);",
 		"border: 0.5px solid hsl(var(--bc) / 0.1);",
 		"background: hsl(var(--b2, var(--b1)) / 0.4);",
 		"border-radius: 5px;",
@@ -1056,12 +1054,13 @@ func TestToolOutputContainerCSS_Matches4c1f4846Styling(t *testing.T) {
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
-			t.Errorf("expected 4c1f4846 tool container CSS fragment %q", fragment)
+			t.Errorf("expected separate tool surface CSS fragment %q", fragment)
 		}
 	}
 
 	for _, fragment := range []string{
 		`.stream-tool-output-container`,
+		`[data-theme="light"] .stream-tool-body-scroll pre {`,
 		`[data-theme="dark"] .stream-tool-body {`,
 		`[data-theme="dark"] .stream-tool-body-label,`,
 		`[data-theme="dark"] .stream-tool-body-label {`,
@@ -1069,12 +1068,12 @@ func TestToolOutputContainerCSS_Matches4c1f4846Styling(t *testing.T) {
 		`[data-theme="dark"] .stream-tool-body-content {`,
 	} {
 		if strings.Contains(html, fragment) {
-			t.Errorf("tool output control styling must not override the 4c1f4846 container; found %q", fragment)
+			t.Errorf("tool output styling must preserve separate input/output surfaces; found %q", fragment)
 		}
 	}
 }
 
-func TestToolOutputToggleCSS_UsesCompactInheritedToolCallColorWithoutRestylingContainer(t *testing.T) {
+func TestToolOutputToggleCSS_UsesCompactThemeSafeColorWithoutRestylingContainer(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("failed to render Base: %v", err)
@@ -1089,7 +1088,7 @@ func TestToolOutputToggleCSS_UsesCompactInheritedToolCallColorWithoutRestylingCo
 		"[data-theme=\"light\"] .stream-tool-output-toggle:active {",
 		"background: #d1d5db;",
 		"[data-theme=\"dark\"] .stream-tool-output-toggle {",
-		"color: #ffffff;",
+		"color: #b8c0cc;",
 		"[data-theme=\"dark\"] .stream-tool-output-toggle:hover {",
 		"background: rgba(255, 255, 255, 0.1);",
 		"[data-theme=\"dark\"] .stream-tool-output-toggle:active {",
@@ -1137,7 +1136,7 @@ func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 		".stream-tool-output-preview {",
 		".stream-tool-body-content .stream-tool-output-text {",
 		"white-space: pre;",
-		"[data-theme=\"light\"] .stream-tool-body-scroll pre {",
+		"[data-theme=\"light\"] .stream-tool-body-content {",
 		".stream-tool-body-scroll + .stream-tool-output-toggle {",
 		".stream-tool-body-scroll {",
 		"overflow-x: auto;",

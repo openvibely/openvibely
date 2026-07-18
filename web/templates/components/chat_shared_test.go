@@ -4581,7 +4581,8 @@ window.addEventListener('DOMContentLoaded', function() {
     var largeOutputContainer = largeToggle.closest('.stream-tool-body-content');
     var largeToolName = largeToggle.closest('.stream-tool').querySelector('.tool-name-text');
     if (!largeOutputContainer || largeOutputContainer.className !== 'stream-tool-body-content') fail('large output toggle is not contained by the original OUT cell');
-    if (!largeToolName || window.getComputedStyle(largeToggle).color !== window.getComputedStyle(largeToolName).color) fail('dark output toggle foreground does not match its tool call: toggle=' + window.getComputedStyle(largeToggle).color + ', tool=' + (largeToolName ? window.getComputedStyle(largeToolName).color : 'missing'));
+    var darkToggleColor = window.getComputedStyle(largeToggle).color;
+    if (darkToggleColor === 'rgb(255, 255, 255)' || darkToggleColor === 'rgba(255, 255, 255, 1)') fail('dark output toggle foreground must be muted rather than white');
     var largePreview = largeToggle.closest('.stream-tool-body-content').querySelector('pre.stream-tool-output-preview');
     var largeToolBody = largeToggle.closest('.stream-tool-body');
     var darkToolBodyStyle = window.getComputedStyle(largeToolBody);
@@ -4638,7 +4639,16 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!largeToolName || window.getComputedStyle(largeToggle).color !== window.getComputedStyle(largeToolName).color) fail('light output toggle foreground does not match its tool call');
     largePreview = largeToggle.closest('.stream-tool-body-content').querySelector('pre.stream-tool-output-preview');
     previewStyle = window.getComputedStyle(largePreview);
-    if (previewStyle.borderTopStyle === 'none' || parseFloat(previewStyle.borderTopLeftRadius) <= 0) fail('light collapsed OUT preview lost the original bordered rounded surface');
+    if (previewStyle.borderTopStyle === 'none' || parseFloat(previewStyle.borderTopLeftRadius) <= 0) fail('light collapsed OUT preview lost its separate bordered rounded surface');
+    var lightOutputContent = largeToggle.closest('.stream-tool-body-content');
+    var lightOutputContentStyle = window.getComputedStyle(lightOutputContent);
+    var lightInputPre = container.querySelector('.stream-tool-body-scroll[data-tool-row="in"] > pre');
+    var lightInputStyle = window.getComputedStyle(lightInputPre);
+    var lightToggleStyle = window.getComputedStyle(largeToggle);
+    if (lightOutputContentStyle.backgroundColor !== 'rgba(0, 0, 0, 0)') fail('light OUT content cell still paints a shared background behind preview and toggle: ' + lightOutputContentStyle.backgroundColor);
+    if (lightInputStyle.borderTopStyle === 'none' || parseFloat(lightInputStyle.borderTopLeftRadius) <= 0) fail('light IN output lost its separate bordered rounded surface');
+    if (lightInputStyle.backgroundColor === 'rgba(0, 0, 0, 0)' || previewStyle.backgroundColor === 'rgba(0, 0, 0, 0)') fail('light IN/OUT surfaces must remain visually separate from the transparent content cell');
+    if (lightToggleStyle.backgroundColor !== 'rgba(0, 0, 0, 0)') fail('light resting output toggle must remain visually outside the IN/OUT surfaces');
 
     result.setAttribute('data-test-result', 'pass');
     result.setAttribute('data-hydration-ms', hydrationMS.toFixed(1));

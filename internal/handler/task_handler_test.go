@@ -629,26 +629,26 @@ func TestHandler_TaskThread_LightModeToolCallContrastStyles(t *testing.T) {
 	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-content {`) {
 		t.Error("expected light-theme tool content block style in thread view response")
 	}
-	if !strings.Contains(body, `background: var(--ov-l-surface);`) {
-		t.Error("expected light-theme tool content block to own the stable output surface")
+	if !strings.Contains(body, `background: transparent;`) {
+		t.Error("expected light-theme tool content block to remain transparent around separate IN/OUT surfaces")
 	}
 	if !strings.Contains(body, `border: none;`) {
 		t.Error("expected light-theme tool outer content block to avoid extra border")
 	}
-	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-scroll pre`) {
-		t.Error("expected original light-theme tool output pre style in thread view response")
+	if !strings.Contains(body, `[data-theme="light"] .chat-bubble-assistant-msg pre {`) {
+		t.Error("expected light-theme tool IN/OUT pre surfaces in thread view response")
 	}
-	if !strings.Contains(body, `background: transparent;`) {
-		t.Error("expected light-theme tool inner content to avoid a second scrolling surface")
+	if !strings.Contains(body, `background-color: var(--ov-l-surface);`) || !strings.Contains(body, `border-color: var(--ov-l-border);`) {
+		t.Error("expected separate light-theme tool IN/OUT surface colors in thread view response")
+	}
+	if strings.Contains(body, `[data-theme="light"] .stream-tool-body-scroll pre`) {
+		t.Error("light-theme tool output must not flatten IN/OUT pre surfaces")
 	}
 	if !strings.Contains(body, `overflow: hidden;`) {
 		t.Error("expected tool body shell/content to clip child backgrounds to rounded corners")
 	}
 	if !strings.Contains(body, `[data-theme="light"] .tool-status-done`) {
 		t.Error("expected light-theme tool status icon style in thread view response")
-	}
-	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-scroll pre`) {
-		t.Error("expected original light-theme tool output text color style in thread view response")
 	}
 	if strings.Contains(body, `[data-theme="dark"] .stream-tool-body {`) || strings.Contains(body, `[data-theme="dark"] .stream-tool-body-content`) {
 		t.Error("tool output control styling must not override the original dark tool container")
