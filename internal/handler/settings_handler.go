@@ -779,16 +779,14 @@ func (h *Handler) handleDiscordRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
 	projectID, _ := h.getCurrentProjectID(c)
-	var resetErr error
 	if h.discordSvc != nil {
 		_ = h.discordSvc.Disconnect(c.Request().Context())
-	} else {
-		resetErr = applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
-			{key: service.DiscordSettingBotToken, value: ""},
-			{key: service.DiscordSettingBotUserID, value: ""},
-			{key: service.DiscordSettingSendResponses, value: ""},
-		})
 	}
+	resetErr := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, []channelSettingReset{
+		{key: service.DiscordSettingBotToken, value: ""},
+		{key: service.DiscordSettingBotUserID, value: ""},
+		{key: service.DiscordSettingSendResponses, value: ""},
+	})
 	if h.discordAuthRepo != nil && projectID != "" {
 		_ = h.discordAuthRepo.DeleteByProject(c.Request().Context(), projectID)
 	}
