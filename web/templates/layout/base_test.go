@@ -1026,7 +1026,7 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 	}
 }
 
-func TestToolOutputToggleCSS_UsesThemeSafeIntegratedControls(t *testing.T) {
+func TestToolOutputToggleCSS_UsesCompactThemeSafeControlWithoutRestylingContainer(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("failed to render Base: %v", err)
@@ -1035,31 +1035,38 @@ func TestToolOutputToggleCSS_UsesThemeSafeIntegratedControls(t *testing.T) {
 
 	expected := []string{
 		"[data-theme=\"light\"] .stream-tool-output-toggle {",
-		"background: #e2e4e8;",
-		"color: #24272c;",
-		"border-color: #7f8794;",
+		"background: transparent;",
+		"color: #4b5563;",
 		"[data-theme=\"light\"] .stream-tool-output-toggle:hover {",
-		"background: #d5d8de;",
-		"[data-theme=\"dark\"] .stream-tool-body {",
-		"background: #252a32;",
-		"border-color: #414854;",
+		"background: #e5e7eb;",
+		"color: #1f2937;",
+		"[data-theme=\"light\"] .stream-tool-output-toggle:active {",
+		"background: #d1d5db;",
 		"[data-theme=\"dark\"] .stream-tool-output-toggle {",
-		"background: #343b46;",
-		"color: #f3f4f6;",
-		"border-color: #6b7689;",
+		"color: #cbd5e1;",
 		"[data-theme=\"dark\"] .stream-tool-output-toggle:hover {",
-		"background: #414a57;",
+		"background: rgba(255, 255, 255, 0.1);",
+		"color: #f3f4f6;",
+		"[data-theme=\"dark\"] .stream-tool-output-toggle:active {",
+		"background: rgba(255, 255, 255, 0.16);",
 		"appearance: none;",
 		"max-width: 100%;",
-		"border: 1px solid;",
-		"transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;",
+		"min-height: 1.25rem;",
+		"padding: 0.0625rem 0.25rem;",
+		"border: 0;",
+		"font-weight: 500;",
+		"transition: background-color 120ms ease, color 120ms ease;",
 		".stream-tool-output-toggle:focus-visible {",
 		"outline: 2px solid var(--ov-link-color);",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
-			t.Errorf("expected integrated tool output toggle CSS fragment %q", fragment)
+			t.Errorf("expected compact tool output toggle CSS fragment %q", fragment)
 		}
+	}
+
+	if strings.Contains(html, "[data-theme=\"dark\"] .stream-tool-body {") {
+		t.Error("tool output toggle styling must not restyle the dark tool container")
 	}
 }
 

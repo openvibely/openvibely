@@ -1376,46 +1376,26 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						color: var(--ov-l-text-strong);
 					}
 					[data-theme="light"] .stream-tool-output-toggle {
-						background: #e2e4e8;
-						color: #24272c;
-						border-color: #7f8794;
+						background: transparent;
+						color: #4b5563;
 					}
 					[data-theme="light"] .stream-tool-output-toggle:hover {
-						background: #d5d8de;
-						color: #17191d;
-						border-color: #68717f;
+						background: #e5e7eb;
+						color: #1f2937;
 					}
 					[data-theme="light"] .stream-tool-output-toggle:active {
-						background: #c9cdd5;
-					}
-					[data-theme="dark"] .stream-tool-body {
-						background: #252a32;
-						border-color: #414854;
-					}
-					[data-theme="dark"] .stream-tool-body-label,
-					[data-theme="dark"] .stream-tool-body-content {
-						border-top-color: #414854;
-					}
-					[data-theme="dark"] .stream-tool-body-label {
-						color: #aeb5c0;
-						opacity: 1;
-					}
-					[data-theme="dark"] .stream-tool-body-content,
-					[data-theme="dark"] .stream-tool-body-content .stream-tool-output-text {
-						color: #f3f4f6;
+						background: #d1d5db;
 					}
 					[data-theme="dark"] .stream-tool-output-toggle {
-						background: #343b46;
-						color: #f3f4f6;
-						border-color: #6b7689;
+						background: transparent;
+						color: #cbd5e1;
 					}
 					[data-theme="dark"] .stream-tool-output-toggle:hover {
-						background: #414a57;
-						color: #ffffff;
-						border-color: #8490a2;
+						background: rgba(255, 255, 255, 0.1);
+						color: #f3f4f6;
 					}
 					[data-theme="dark"] .stream-tool-output-toggle:active {
-						background: #4b5563;
+						background: rgba(255, 255, 255, 0.16);
 					}
 					[data-theme="light"] .tool-status-done {
 						color: var(--ov-l-success);
@@ -1774,19 +1754,19 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					justify-content: center;
 					box-sizing: border-box;
 					max-width: 100%;
-					min-height: 1.75rem;
-					padding: 0.2rem 0.45rem;
+					min-height: 1.25rem;
+					padding: 0.0625rem 0.25rem;
 					appearance: none;
-					border: 1px solid;
-					border-radius: 0.3rem;
+					border: 0;
+					border-radius: 0.25rem;
 					background: transparent;
 					color: inherit;
 					font-family: ui-monospace, SFMono-Regular, monospace;
 					font-size: 0.85em;
-					font-weight: 600;
+					font-weight: 500;
 					line-height: 1.25;
 					cursor: pointer;
-					transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+					transition: background-color 120ms ease, color 120ms ease;
 				}
 				.stream-tool-output-toggle:focus-visible {
 					outline: 2px solid var(--ov-link-color);
