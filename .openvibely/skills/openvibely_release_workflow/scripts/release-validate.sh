@@ -195,7 +195,8 @@ EOF
 done
 
 check_entrypoint_rejects_before_work() {
-    local script="$1" invalid_dist="${ENTRYPOINT_TMP}/invalid-${script%.sh}"
+    local script="$1" invalid_input="$2"
+    local invalid_dist="${ENTRYPOINT_TMP}/invalid-${script%.sh}"
     local before_lines after_lines output status
     before_lines="$(wc -l < "$INVALID_WORK_LOG" | tr -d ' ')"
     rm -rf "$invalid_dist"
@@ -203,17 +204,17 @@ check_entrypoint_rejects_before_work() {
     case "$script" in
         release-preflight.sh|release.sh)
             output="$(RELEASE_WORK_LOG="$INVALID_WORK_LOG" DIST_DIR="$invalid_dist" \
-                PATH="${INVALID_MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/${script}" invalid 2>&1)"
+                PATH="${INVALID_MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/${script}" "$invalid_input" 2>&1)"
             status=$?
             ;;
         release-build.sh|release-publish.sh)
             output="$(RELEASE_WORK_LOG="$INVALID_WORK_LOG" PATH="${INVALID_MOCK_BIN}:$PATH" \
-                bash "${SCRIPT_DIR}/${script}" invalid "$invalid_dist" 2>&1)"
+                bash "${SCRIPT_DIR}/${script}" "$invalid_input" "$invalid_dist" 2>&1)"
             status=$?
             ;;
         release-notes.sh)
             output="$(RELEASE_WORK_LOG="$INVALID_WORK_LOG" PATH="${INVALID_MOCK_BIN}:$PATH" \
-                bash "${SCRIPT_DIR}/${script}" invalid "" "$invalid_dist" 2>&1)"
+                bash "${SCRIPT_DIR}/${script}" "$invalid_input" "" "$invalid_dist" 2>&1)"
             status=$?
             ;;
     esac
@@ -221,14 +222,16 @@ check_entrypoint_rejects_before_work() {
     after_lines="$(wc -l < "$INVALID_WORK_LOG" | tr -d ' ')"
     if [[ $status -ne 0 ]] && grep -Fq "Invalid semver" <<< "$output" \
         && [[ "$before_lines" == "$after_lines" ]] && [[ ! -e "$invalid_dist" ]]; then
-        pass "entrypoint: $script rejects invalid input before release work"
+        pass "entrypoint: $script rejects '$invalid_input' before release work"
     else
-        fail "entrypoint: $script performed work or did not reject invalid input first"
+        fail "entrypoint: $script performed work or did not reject '$invalid_input' first"
     fi
 }
 
 for script in release-preflight.sh release-build.sh release-notes.sh release-publish.sh release.sh; do
-    check_entrypoint_rejects_before_work "$script"
+    for invalid_input in "" "v" "0.4" "0.4.1-alpha" "0.4.1+build" "vv0.4.1" "0.4.1.2" "abc"; do
+        check_entrypoint_rejects_before_work "$script" "$invalid_input"
+    done
 done
 
 rm -rf "$ENTRYPOINT_TMP"
