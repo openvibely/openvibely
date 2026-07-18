@@ -351,9 +351,10 @@ func TestHandleTelegramRemoveMissingSettingsRepoReturnsError(t *testing.T) {
 
 func TestChannelRemovalResetsAllSettings(t *testing.T) {
 	tests := []struct {
-		name   string
-		path   string
-		resets map[string]string
+		name             string
+		path             string
+		resets           map[string]string
+		configureHandler func(*Handler)
 	}{
 		{
 			name: "telegram",
@@ -395,6 +396,18 @@ func TestChannelRemovalResetsAllSettings(t *testing.T) {
 			},
 		},
 		{
+			name: "discord",
+			path: "/channels/discord/remove",
+			resets: map[string]string{
+				service.DiscordSettingBotToken:      "",
+				service.DiscordSettingBotUserID:     "",
+				service.DiscordSettingSendResponses: "",
+			},
+			configureHandler: func(h *Handler) {
+				h.SetDiscordService(&fakeDiscordService{disconnectFn: func(context.Context) error { return nil }})
+			},
+		},
+		{
 			name: "discord service unavailable fallback",
 			path: "/channels/discord/remove",
 			resets: map[string]string{
@@ -425,6 +438,9 @@ func TestChannelRemovalResetsAllSettings(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			h, e, _ := setupTestHandler(t)
+			if tc.configureHandler != nil {
+				tc.configureHandler(h)
+			}
 			for key := range tc.resets {
 				require.NoError(t, h.settingsRepo.Set(context.Background(), key, "configured"))
 			}
@@ -516,14 +532,24 @@ func (s *removalEmailService) Stop() {
 
 func TestChannelRemovalSettingFailureDoesNotReportSuccess(t *testing.T) {
 	tests := []struct {
-		name     string
-		path     string
-		firstKey string
-		failKey  string
+		name             string
+		path             string
+		firstKey         string
+		failKey          string
+		configureHandler func(*Handler)
 	}{
 		{name: "telegram", path: "/channels/telegram/remove", firstKey: service.TelegramSettingBotToken, failKey: service.TelegramSettingSendResponses},
 		{name: "github", path: "/channels/github/remove", firstKey: service.GitHubSettingAppID, failKey: service.GitHubSettingAppSlug},
 		{name: "slack", path: "/channels/slack/remove", firstKey: service.SlackSettingClientID, failKey: service.SlackSettingClientSecret},
+		{
+			name:     "discord",
+			path:     "/channels/discord/remove",
+			firstKey: service.DiscordSettingBotToken,
+			failKey:  service.DiscordSettingBotUserID,
+			configureHandler: func(h *Handler) {
+				h.SetDiscordService(&fakeDiscordService{disconnectFn: func(context.Context) error { return nil }})
+			},
+		},
 		{name: "discord fallback", path: "/channels/discord/remove", firstKey: service.DiscordSettingBotToken, failKey: service.DiscordSettingBotUserID},
 		{name: "email", path: "/channels/email/remove", firstKey: service.EmailSettingProvider, failKey: service.EmailSettingAddress},
 	}
@@ -531,6 +557,9 @@ func TestChannelRemovalSettingFailureDoesNotReportSuccess(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			h, e, _, db := setupTestHandlerWithDB(t)
+			if tc.configureHandler != nil {
+				tc.configureHandler(h)
+			}
 			require.NoError(t, h.settingsRepo.Set(context.Background(), tc.firstKey, "configured"))
 			require.NoError(t, h.settingsRepo.Set(context.Background(), tc.failKey, "configured"))
 			trigger := fmt.Sprintf(`CREATE TRIGGER fail_channel_setting_reset
