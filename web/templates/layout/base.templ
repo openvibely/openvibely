@@ -1332,6 +1332,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background-color: var(--ov-l-surface);
 						border-color: var(--ov-l-border);
 					}
+					[data-theme="light"] .stream-thinking summary {
+						color: var(--ov-l-text-muted);
+					}
+					[data-theme="light"] .stream-thinking[open] summary,
+					[data-theme="light"] .stream-thinking summary:hover {
+						color: var(--ov-l-text-strong);
+					}
+					[data-theme="light"] .stream-thinking .stream-thinking-body {
+						color: var(--ov-l-text);
+					}
 					/* Light mode chat input */
 					[data-theme="light"] .chat-input-container {
 						background-color: #FFFFFF;
@@ -1367,6 +1377,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background: transparent;
 						border: none;
 						color: var(--ov-l-text-strong);
+					}
+					[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {
+						border: none;
 					}
 					[data-theme="light"] .stream-tool-output-toggle {
 						color: var(--ov-l-text-strong);
@@ -1646,6 +1659,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					font-size: 0.8125rem;
 				}
 				.stream-thinking summary::-webkit-details-marker { display: none; }
+				.stream-thinking summary:focus-visible {
+					outline: 2px solid var(--ov-link-color);
+					outline-offset: 2px;
+					border-radius: 0.2rem;
+				}
 				.stream-thinking .thinking-toggle {
 					width: 16px; height: 16px;
 					margin-left: 0;

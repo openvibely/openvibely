@@ -4639,16 +4639,25 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!largeToolName || window.getComputedStyle(largeToggle).color !== window.getComputedStyle(largeToolName).color) fail('light output toggle foreground does not match its tool call');
     largePreview = largeToggle.closest('.stream-tool-body-content').querySelector('pre.stream-tool-output-preview');
     previewStyle = window.getComputedStyle(largePreview);
-    if (previewStyle.borderTopStyle === 'none' || parseFloat(previewStyle.borderTopLeftRadius) <= 0) fail('light collapsed OUT preview lost its separate bordered rounded surface');
+    if (previewStyle.borderTopStyle !== 'none' || parseFloat(previewStyle.borderTopWidth) !== 0) fail('light collapsed OUT preview retained border emphasis');
     var lightOutputContent = largeToggle.closest('.stream-tool-body-content');
     var lightOutputContentStyle = window.getComputedStyle(lightOutputContent);
     var lightInputPre = container.querySelector('.stream-tool-body-scroll[data-tool-row="in"] > pre');
     var lightInputStyle = window.getComputedStyle(lightInputPre);
     var lightToggleStyle = window.getComputedStyle(largeToggle);
     if (lightOutputContentStyle.backgroundColor !== 'rgba(0, 0, 0, 0)') fail('light OUT content cell still paints a shared background behind preview and toggle: ' + lightOutputContentStyle.backgroundColor);
-    if (lightInputStyle.borderTopStyle === 'none' || parseFloat(lightInputStyle.borderTopLeftRadius) <= 0) fail('light IN output lost its separate bordered rounded surface');
+    if (lightInputStyle.borderTopStyle !== 'none' || parseFloat(lightInputStyle.borderTopWidth) !== 0) fail('light IN surface retained border emphasis');
+    if (parseFloat(lightInputStyle.borderTopLeftRadius) <= 0 || parseFloat(previewStyle.borderTopLeftRadius) <= 0) fail('light IN/OUT surfaces lost their separate rounded geometry');
     if (lightInputStyle.backgroundColor === 'rgba(0, 0, 0, 0)' || previewStyle.backgroundColor === 'rgba(0, 0, 0, 0)') fail('light IN/OUT surfaces must remain visually separate from the transparent content cell');
     if (lightToggleStyle.backgroundColor !== 'rgba(0, 0, 0, 0)') fail('light resting output toggle must remain visually outside the IN/OUT surfaces');
+    var lightThinking = container.querySelector('details.stream-thinking');
+    var lightThinkingSummary = lightThinking && lightThinking.querySelector('summary');
+    var lightThinkingBody = lightThinking && lightThinking.querySelector('.stream-thinking-body');
+    if (!lightThinkingSummary || !lightThinkingBody) fail('light Thinking control did not render');
+    if (window.getComputedStyle(lightThinkingSummary).color !== 'rgb(97, 97, 97)') fail('collapsed light Thinking label is not readable muted text: ' + window.getComputedStyle(lightThinkingSummary).color);
+    lightThinking.open = true;
+    if (window.getComputedStyle(lightThinkingSummary).color !== 'rgb(31, 31, 31)') fail('expanded light Thinking label is not readable strong text: ' + window.getComputedStyle(lightThinkingSummary).color);
+    if (window.getComputedStyle(lightThinkingBody).color !== 'rgb(59, 59, 59)') fail('expanded light Thinking content is not readable: ' + window.getComputedStyle(lightThinkingBody).color);
 
     result.setAttribute('data-test-result', 'pass');
     result.setAttribute('data-hydration-ms', hydrationMS.toFixed(1));

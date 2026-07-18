@@ -1026,7 +1026,7 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 	}
 }
 
-func TestToolOutputContainerCSS_UsesSeparateLightInputAndOutputSurfaces(t *testing.T) {
+func TestToolOutputContainerCSS_UsesSeparateBorderlessLightInputAndOutputSurfaces(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("failed to render Base: %v", err)
@@ -1044,7 +1044,8 @@ func TestToolOutputContainerCSS_UsesSeparateLightInputAndOutputSurfaces(t *testi
 		`[data-theme="light"] .stream-tool-body-content {`,
 		"background: transparent;",
 		"color: var(--ov-l-text-strong);",
-		"border: 0.5px solid hsl(var(--bc) / 0.1);",
+		`[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {`,
+		"border: none;",
 		"background: hsl(var(--b2, var(--b1)) / 0.4);",
 		"border-radius: 5px;",
 		"grid-template-columns: max-content minmax(0, 1fr);",
@@ -1069,6 +1070,30 @@ func TestToolOutputContainerCSS_UsesSeparateLightInputAndOutputSurfaces(t *testi
 	} {
 		if strings.Contains(html, fragment) {
 			t.Errorf("tool output styling must preserve separate input/output surfaces; found %q", fragment)
+		}
+	}
+}
+
+func TestThinkingCSS_UsesReadableLightThemeForegrounds(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, fragment := range []string{
+		`[data-theme="light"] .stream-thinking summary {`,
+		"color: var(--ov-l-text-muted);",
+		`[data-theme="light"] .stream-thinking[open] summary,`,
+		`[data-theme="light"] .stream-thinking summary:hover {`,
+		"color: var(--ov-l-text-strong);",
+		`[data-theme="light"] .stream-thinking .stream-thinking-body {`,
+		"color: var(--ov-l-text);",
+		`.stream-thinking summary:focus-visible {`,
+		"outline: 2px solid var(--ov-link-color);",
+	} {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected readable light thinking CSS fragment %q", fragment)
 		}
 	}
 }

@@ -641,6 +641,12 @@ func TestHandler_TaskThread_LightModeToolCallContrastStyles(t *testing.T) {
 	if !strings.Contains(body, `background-color: var(--ov-l-surface);`) || !strings.Contains(body, `border-color: var(--ov-l-border);`) {
 		t.Error("expected separate light-theme tool IN/OUT surface colors in thread view response")
 	}
+	if !strings.Contains(body, `[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {`) {
+		t.Error("expected light-theme tool IN/OUT surfaces to remove border emphasis")
+	}
+	if !strings.Contains(body, `[data-theme="light"] .stream-thinking summary {`) || !strings.Contains(body, `[data-theme="light"] .stream-thinking .stream-thinking-body {`) {
+		t.Error("expected readable light-theme Thinking foreground styles")
+	}
 	if strings.Contains(body, `[data-theme="light"] .stream-tool-body-scroll pre`) {
 		t.Error("light-theme tool output must not flatten IN/OUT pre surfaces")
 	}
