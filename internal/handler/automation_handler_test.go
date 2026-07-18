@@ -53,6 +53,10 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Contains(t, detail.Body.String(), "Active invocations")
 	require.Contains(t, detail.Body.String(), "Node resources")
 	require.Contains(t, detail.Body.String(), "Live automation graph")
+	require.Contains(t, detail.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
+	require.Contains(t, detail.Body.String(), `class="automation-graph-label automation-graph-label--primary`)
+	require.NotContains(t, detail.Body.String(), "fill-base-content")
+	require.NotContains(t, detail.Body.String(), "fill-base-200")
 	require.Contains(t, detail.Body.String(), "sse-automation-event")
 	require.NotContains(t, detail.Body.String(), task.Prompt)
 
@@ -64,6 +68,10 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Equal(t, 200, definitionView.Code)
 	require.Contains(t, definitionView.Body.String(), "Published definition")
 	require.Contains(t, definitionView.Body.String(), "Native Producer")
+	require.Contains(t, definitionView.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
+	require.Contains(t, definitionView.Body.String(), `class="automation-graph-label automation-graph-label--primary`)
+	require.NotContains(t, definitionView.Body.String(), "fill-base-content")
+	require.NotContains(t, definitionView.Body.String(), "fill-base-200")
 
 	producerNode := definition.Nodes[0]
 	for _, node := range definition.Nodes {
@@ -187,11 +195,16 @@ func TestAutomationBuilderWebFlowIsExplicitDraftOnlyAndProjectScoped(t *testing.
 	require.Equal(t, 200, created.Code)
 	require.Contains(t, created.Body.String(), `id="automation-builder"`)
 	require.Contains(t, created.Body.String(), "Nothing is active until publication completes")
+	require.Contains(t, created.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
+	require.Contains(t, created.Body.String(), `class="automation-graph-label automation-graph-label--primary`)
+	require.NotContains(t, created.Body.String(), "fill-base-content")
+	require.NotContains(t, created.Body.String(), "fill-base-200")
 	require.Zero(t, tableCountHandler(t, tc, "tasks"))
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 
 	var automationID, versionID string
 	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
+	require.Equal(t, fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID), created.Header().Get("HX-Push-Url"), "draft creation must give HTMX history the canonical builder URL")
 	planPage := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, 200, planPage.Code)
 	require.Contains(t, planPage.Body.String(), "Publication preview")
@@ -223,6 +236,7 @@ func TestAutomationBuilderWebFlowIsExplicitDraftOnlyAndProjectScoped(t *testing.
 	require.Equal(t, 1, draftCount)
 	var clonedVersionID string
 	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&clonedVersionID))
+	require.Equal(t, fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, clonedVersionID, project.ID), cloned.Header().Get("HX-Push-Url"), "cloning must not cache draft DOM under the published automation URL")
 
 	foreign := tc.HTTP().Post("/automations/" + automationID + "/drafts?project_id=" + other.ID).WithForm(url.Values{"project_id": {other.ID}}).Execute()
 	require.Equal(t, 404, foreign.Code)

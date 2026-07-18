@@ -68,6 +68,7 @@ func (h *Handler) CreateAutomationDraftWeb(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	h.setAutomationDraftPushURL(c, result, projectID)
 	return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *result})
 }
 
@@ -86,6 +87,7 @@ func (h *Handler) CloneAutomationDraftWeb(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	h.setAutomationDraftPushURL(c, result, projectID)
 	return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *result})
 }
 
@@ -247,6 +249,18 @@ func (h *Handler) loadAutomationDraftWeb(c echo.Context) (*models.AutomationDraf
 		return nil, echo.NewHTTPError(http.StatusNotFound, "automation draft not found")
 	}
 	return result, nil
+}
+
+func (h *Handler) setAutomationDraftPushURL(c echo.Context, result *models.AutomationDraftResult, projectID string) {
+	if !isHTMX(c) || result == nil || result.Definition == nil {
+		return
+	}
+	automationID := strings.TrimSpace(result.Definition.Automation.ID)
+	versionID := strings.TrimSpace(result.Definition.Version.ID)
+	if automationID == "" || versionID == "" {
+		return
+	}
+	c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"/drafts/"+versionID+"?project_id="+projectID)
 }
 
 func (h *Handler) renderAutomationBuilder(c echo.Context, page models.AutomationBuilderPage) error {

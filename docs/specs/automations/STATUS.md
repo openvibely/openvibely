@@ -203,6 +203,13 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 16. Idempotency: confirmation replay, leased publication, ambiguous task recovery, schedule journaling, trigger ownership, dispatch, work-item/activity/event keys, and concurrent polling tests cover retries/crashes.
 17. Validation breadth: migration, repository, service, handler, Chat registry/executor, runtime, SSE/live UI, accessibility/status, restart, generated-template, desktop, and full repository suites pass.
 
+## Post-Completion UI Repairs
+
+- Replaced unsupported SVG `fill-*`/`stroke-*` theme utilities with Automation graph classes backed directly by DaisyUI theme variables across Live, Definition, invocation, replay, and draft graphs. Dark-mode node surfaces and labels no longer fall back to black-on-black, and status colors remain non-color-labeled and keyboard-focusable.
+- Repaired Automation navigation after HTMX history restoration: portfolio cards, `New Automation`, and every `← Automations` control now use the shared `openVibelyNavigate` history owner, while draft create/clone responses push the canonical persisted draft URL instead of caching draft DOM under the source page URL.
+- Added handler assertions for theme-safe SVG markup and canonical draft `HX-Push-Url`, plus `TestAutomationGraphThemeAndHistoryNavigationInChrome`, which verifies computed graph contrast, browser Back restoration, in-page return, and repeated card navigation using production HTMX 2.0.4.
+- Validation passed: `templ generate`, `go build ./cmd/server`, focused Automation handler tests, the Chrome navigation regression, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`.
+
 ## Open Findings Or Blockers
 
 - No code, validation, or Definition of Done blockers remain.
