@@ -17,7 +17,6 @@ templ SlackAuthorizedUsersList(users []models.SlackAuthorizedUser, projectID str
 		},
 		slackAuthorizationRows(users, projectID),
 		channelAuthorizationAddConfig{
-			ContainerID: "slack-authorized-users",
 			ProjectID: projectID,
 			Endpoint: "/channels/slack/authorized-users",
 			InputType: "text",

@@ -45,7 +45,6 @@ func EmailAuthorizedSendersList(senders []models.EmailAuthorizedSender, projectI
 			},
 			emailAuthorizationRows(senders, projectID),
 			channelAuthorizationAddConfig{
-				ContainerID:      "email-authorized-senders",
 				ProjectID:        projectID,
 				Endpoint:         "/channels/email/authorized-senders",
 				InputType:        "email",
@@ -99,7 +98,7 @@ func emailAuthorizedSenderIdentity(sender models.EmailAuthorizedSender) templ.Co
 		var templ_7745c5c3_Var3 string
 		templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(sender.DisplayName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 46, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 45, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 		if templ_7745c5c3_Err != nil {
@@ -112,7 +111,7 @@ func emailAuthorizedSenderIdentity(sender models.EmailAuthorizedSender) templ.Co
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(sender.EmailAddress)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 47, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/email_auth.templ`, Line: 46, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
