@@ -753,7 +753,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 								return;
 							}
 						}
-						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content')) {
+						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content' || target.id === 'main-content')) {
 							var requestConfig = event.detail.requestConfig || {};
 						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
 						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
@@ -784,21 +784,17 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 							window._taskThreadStreamingActive = false;
 						}
 
-						// Clean up thread state when navigating away via sidebar
-						// (sidebar replaces main-content, removing the thread view)
-						if (target && target.id === 'main-content') {
-							var leavingTaskId = _taskThreadTaskId();
-							var leavingScrollKey = _taskThreadScrollStateKey(leavingTaskId);
-							window._taskThreadScrollStates = window._taskThreadScrollStates || {};
-							if (leavingScrollKey) delete window._taskThreadScrollStates[leavingScrollKey];
-							window._taskThreadUserScrolledUp = false;
-							window._taskThreadSavedInput = '';
-							if (window._taskThreadPageTracker) {
-								window._taskThreadPageTracker.destroy();
-								window._taskThreadPageTracker = null;
+							// Release detached task-thread runtime owners when navigating away. The
+							// task-keyed scroll snapshot and pin intent were captured above and must
+							// survive direct HTMX return and browser Back/Forward restoration.
+							if (target && target.id === 'main-content') {
+								window._taskThreadSavedInput = '';
+								if (window._taskThreadPageTracker) {
+									window._taskThreadPageTracker.destroy();
+									window._taskThreadPageTracker = null;
+								}
 							}
-						}
-				});
+					});
 
 						document.body.addEventListener('htmx:afterSwap', function(event) {
 							var target = event.detail.target;

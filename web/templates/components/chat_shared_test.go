@@ -4322,7 +4322,7 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 	}
 }
 
-func TestTaskThreadView_ClearsScrollStateWhenLeavingTaskDetail(t *testing.T) {
+func TestTaskThreadView_PreservesScrollStateWhenLeavingTaskDetail(t *testing.T) {
 	task := &models.Task{
 		ID:        "thread-scroll-leave",
 		ProjectID: "p1",
@@ -4336,15 +4336,27 @@ func TestTaskThreadView_ClearsScrollStateWhenLeavingTaskDetail(t *testing.T) {
 	}
 	content := buf.String()
 
-	for _, required := range []string{
-		"if (target && target.id === 'main-content')",
-		"var leavingTaskId = _taskThreadTaskId();",
-		"var leavingScrollKey = _taskThreadScrollStateKey(leavingTaskId);",
-		"if (leavingScrollKey) delete window._taskThreadScrollStates[leavingScrollKey];",
+	if !strings.Contains(content, "target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content' || target.id === 'main-content'") {
+		t.Fatal("main-content navigation must synchronously capture the current per-task scroll snapshot")
+	}
+	mainContentStart := strings.Index(content, "if (target && target.id === 'main-content')")
+	if mainContentStart < 0 {
+		t.Fatal("task-detail navigation must release the detached task-thread tracker")
+	}
+	mainContentEnd := strings.Index(content[mainContentStart:], "\n\t\t\t\t\t\t}")
+	if mainContentEnd < 0 {
+		t.Fatal("could not isolate task-detail main-content navigation cleanup")
+	}
+	mainContentBlock := content[mainContentStart : mainContentStart+mainContentEnd]
+	if !strings.Contains(mainContentBlock, "window._taskThreadPageTracker.destroy();") {
+		t.Fatal("task-detail navigation must release the detached task-thread tracker")
+	}
+	for _, forbidden := range []string{
+		"delete window._taskThreadScrollStates",
 		"window._taskThreadUserScrolledUp = false;",
 	} {
-		if !strings.Contains(content, required) {
-			t.Fatalf("expected task-detail navigation cleanup to include %q", required)
+		if strings.Contains(mainContentBlock, forbidden) {
+			t.Fatalf("task-detail navigation must preserve per-task reading intent; found %q", forbidden)
 		}
 	}
 }
