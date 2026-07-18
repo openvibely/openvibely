@@ -4583,7 +4583,11 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!largeOutputContainer || largeOutputContainer.className !== 'stream-tool-body-content') fail('large output toggle is not contained by the original OUT cell');
     if (!largeToolName || window.getComputedStyle(largeToggle).color !== window.getComputedStyle(largeToolName).color) fail('dark output toggle foreground does not match its tool call: toggle=' + window.getComputedStyle(largeToggle).color + ', tool=' + (largeToolName ? window.getComputedStyle(largeToolName).color : 'missing'));
     var largePreview = largeToggle.closest('.stream-tool-body-content').querySelector('pre.stream-tool-output-preview');
+    var largeToolBody = largeToggle.closest('.stream-tool-body');
+    var darkToolBodyStyle = window.getComputedStyle(largeToolBody);
+    if (darkToolBodyStyle.backgroundColor === 'rgb(37, 42, 50)' || darkToolBodyStyle.borderTopColor === 'rgb(65, 72, 84)') fail('dark tool container retained the task-added outer card styling');
     var previewStyle = window.getComputedStyle(largePreview);
+    if (previewStyle.borderTopStyle === 'none' || parseFloat(previewStyle.borderTopLeftRadius) <= 0) fail('dark collapsed OUT preview lost the original bordered rounded surface');
     var previewFontSignature = [previewStyle.fontFamily, previewStyle.fontSize, previewStyle.fontWeight, previewStyle.fontStyle, previewStyle.lineHeight, previewStyle.letterSpacing].join('|');
     var renderVersion = container._streamRenderVersion;
     var expansionStarted = performance.now();
@@ -4632,6 +4636,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!largeToggle || largeToggle.closest('.stream-tool-body-content').querySelector('.stream-tool-body-scroll')) fail('rerender did not preserve collapsed state');
     largeToolName = largeToggle.closest('.stream-tool').querySelector('.tool-name-text');
     if (!largeToolName || window.getComputedStyle(largeToggle).color !== window.getComputedStyle(largeToolName).color) fail('light output toggle foreground does not match its tool call');
+    largePreview = largeToggle.closest('.stream-tool-body-content').querySelector('pre.stream-tool-output-preview');
+    previewStyle = window.getComputedStyle(largePreview);
+    if (previewStyle.borderTopStyle === 'none' || parseFloat(previewStyle.borderTopLeftRadius) <= 0) fail('light collapsed OUT preview lost the original bordered rounded surface');
 
     result.setAttribute('data-test-result', 'pass');
     result.setAttribute('data-hydration-ms', hydrationMS.toFixed(1));

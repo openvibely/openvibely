@@ -1367,12 +1367,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background: var(--ov-l-surface);
 						border: none;
 					}
-					[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {
+					[data-theme="light"] .stream-tool-body-scroll pre {
 						background: transparent;
 						border: none;
 					}
 					[data-theme="light"] .stream-tool-body-content,
-					[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {
+					[data-theme="light"] .stream-tool-body-scroll pre {
 						color: var(--ov-l-text-strong);
 					}
 					[data-theme="light"] .stream-tool-output-toggle {
@@ -1383,22 +1383,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					[data-theme="light"] .stream-tool-output-toggle:active {
 						background: #d1d5db;
-					}
-					[data-theme="dark"] .stream-tool-body {
-						background: #252a32;
-						border-color: #414854;
-					}
-					[data-theme="dark"] .stream-tool-body-label,
-					[data-theme="dark"] .stream-tool-body-content {
-						border-top-color: #414854;
-					}
-					[data-theme="dark"] .stream-tool-body-label {
-						color: #aeb5c0;
-						opacity: 1;
-					}
-					[data-theme="dark"] .stream-tool-body-content,
-					[data-theme="dark"] .stream-tool-body-content .stream-tool-output-text {
-						color: #f3f4f6;
 					}
 					[data-theme="dark"] .stream-tool-output-toggle {
 						color: #ffffff;

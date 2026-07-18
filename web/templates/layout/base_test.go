@@ -1026,7 +1026,7 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 	}
 }
 
-func TestToolOutputContainerCSS_MatchesPreTaskThemeStyling(t *testing.T) {
+func TestToolOutputContainerCSS_Matches4c1f4846Styling(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("failed to render Base: %v", err)
@@ -1043,27 +1043,34 @@ func TestToolOutputContainerCSS_MatchesPreTaskThemeStyling(t *testing.T) {
 		"color: var(--ov-l-text-muted);",
 		`[data-theme="light"] .stream-tool-body-content {`,
 		"background: var(--ov-l-surface);",
-		`[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {`,
-		`[data-theme="dark"] .stream-tool-body {`,
-		"background: #252a32;",
-		"border-color: #414854;",
-		`[data-theme="dark"] .stream-tool-body-label,`,
-		`[data-theme="dark"] .stream-tool-body-content {`,
-		"border-top-color: #414854;",
-		`[data-theme="dark"] .stream-tool-body-label {`,
-		"color: #aeb5c0;",
-		`[data-theme="dark"] .stream-tool-body-content,`,
-		`[data-theme="dark"] .stream-tool-body-content .stream-tool-output-text {`,
-		"color: #f3f4f6;",
+		`[data-theme="light"] .stream-tool-body-scroll pre {`,
+		`[data-theme="light"] .stream-tool-body-content,`,
+		`[data-theme="light"] .stream-tool-body-scroll pre {`,
+		"border: 0.5px solid hsl(var(--bc) / 0.1);",
+		"background: hsl(var(--b2, var(--b1)) / 0.4);",
+		"border-radius: 5px;",
+		"grid-template-columns: max-content minmax(0, 1fr);",
+		"border-top: 0.5px solid hsl(var(--bc) / 0.1);",
+		"padding: 4px 8px 4px 4px;",
+		"padding: 4px;",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {
-			t.Errorf("expected pre-task tool container CSS fragment %q", fragment)
+			t.Errorf("expected 4c1f4846 tool container CSS fragment %q", fragment)
 		}
 	}
 
-	if strings.Contains(html, ".stream-tool-output-container") {
-		t.Error("tool output control styling must not add a separate output-container surface")
+	for _, fragment := range []string{
+		`.stream-tool-output-container`,
+		`[data-theme="dark"] .stream-tool-body {`,
+		`[data-theme="dark"] .stream-tool-body-label,`,
+		`[data-theme="dark"] .stream-tool-body-label {`,
+		`[data-theme="dark"] .stream-tool-body-content,`,
+		`[data-theme="dark"] .stream-tool-body-content {`,
+	} {
+		if strings.Contains(html, fragment) {
+			t.Errorf("tool output control styling must not override the 4c1f4846 container; found %q", fragment)
+		}
 	}
 }
 
@@ -1130,7 +1137,7 @@ func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 		".stream-tool-output-preview {",
 		".stream-tool-body-content .stream-tool-output-text {",
 		"white-space: pre;",
-		"[data-theme=\"light\"] .stream-tool-body-content .stream-tool-output-text {",
+		"[data-theme=\"light\"] .stream-tool-body-scroll pre {",
 		".stream-tool-body-scroll + .stream-tool-output-toggle {",
 		".stream-tool-body-scroll {",
 		"overflow-x: auto;",
