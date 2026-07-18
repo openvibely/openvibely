@@ -41,37 +41,38 @@ type LLMCaller interface {
 }
 
 type LLMService struct {
-	llmConfigRepo            *repository.LLMConfigRepo
-	execRepo                 *repository.ExecutionRepo
-	taskRepo                 *repository.TaskRepo
-	projectRepo              *repository.ProjectRepo
-	scheduleRepo             *repository.ScheduleRepo
-	attachmentRepo           *repository.AttachmentRepo
-	agentRepo                *repository.AgentRepo
-	lifecycleRepo            *repository.LifecycleRepo
-	mutationRecorder         func(models.Task) agentlibrary.MutationRecorder
-	alertSvc                 *AlertService
-	taskSvc                  *TaskService
-	taskGoalSvc              *TaskGoalService
-	worktreeSvc              *WorktreeService
-	telegramSvc              *TelegramService
-	slackSvc                 *SlackService
-	discordSvc               *DiscordService
-	llmCaller                LLMCaller
-	providerAdapters         map[models.LLMProvider]ProviderAdapter
-	routing                  *agentRoutingStrategy
-	fileChangeBroadcaster    *events.FileChangeBroadcaster
-	threadInputRepo          *repository.ThreadInputRepo
-	usageRepo                *repository.UsageRepo
-	skillAnalyticsRepo       *repository.SkillAnalyticsRepo
-	broadcaster              *events.Broadcaster
-	executionStreamHub       *events.ExecutionStreamHub
-	queuedTaskThreadPromoter func(taskID string)
-	channelMessageRouter     *ChannelMessageRouter
-	githubIssueRuntime       GitHubIssueRuntimeProvider
-	githubAuthRepo           *repository.GitHubAuthRepo
-	taskPullRequestRepo      *repository.TaskPullRequestRepo
-	githubPRFeedbackRepo     *repository.GitHubPRFeedbackRepo
+	llmConfigRepo             *repository.LLMConfigRepo
+	execRepo                  *repository.ExecutionRepo
+	taskRepo                  *repository.TaskRepo
+	projectRepo               *repository.ProjectRepo
+	scheduleRepo              *repository.ScheduleRepo
+	attachmentRepo            *repository.AttachmentRepo
+	agentRepo                 *repository.AgentRepo
+	lifecycleRepo             *repository.LifecycleRepo
+	mutationRecorder          func(models.Task) agentlibrary.MutationRecorder
+	alertSvc                  *AlertService
+	taskSvc                   *TaskService
+	taskGoalSvc               *TaskGoalService
+	worktreeSvc               *WorktreeService
+	telegramSvc               *TelegramService
+	slackSvc                  *SlackService
+	discordSvc                *DiscordService
+	llmCaller                 LLMCaller
+	providerAdapters          map[models.LLMProvider]ProviderAdapter
+	routing                   *agentRoutingStrategy
+	fileChangeBroadcaster     *events.FileChangeBroadcaster
+	threadInputRepo           *repository.ThreadInputRepo
+	usageRepo                 *repository.UsageRepo
+	skillAnalyticsRepo        *repository.SkillAnalyticsRepo
+	broadcaster               *events.Broadcaster
+	executionStreamHub        *events.ExecutionStreamHub
+	queuedTaskThreadPromoter  func(taskID string)
+	channelMessageRouter      *ChannelMessageRouter
+	githubIssueRuntime        GitHubIssueRuntimeProvider
+	githubAuthRepo            *repository.GitHubAuthRepo
+	taskPullRequestRepo       *repository.TaskPullRequestRepo
+	githubPRFeedbackRepo      *repository.GitHubPRFeedbackRepo
+	automationRegistrationSvc *AutomationRegistrationService
 	// globalSkillRoot is the parent directory holding <root>/agents for global
 	// agents/skills. It is used for catalog construction and bounded skill
 	// mutation writes; agents themselves remain user-managed.
@@ -199,6 +200,10 @@ func (s *LLMService) SetGitHubAuthRepo(repo *repository.GitHubAuthRepo) {
 	s.githubAuthRepo = repo
 }
 
+func (s *LLMService) SetAutomationRegistrationService(registration *AutomationRegistrationService) {
+	s.automationRegistrationSvc = registration
+}
+
 func (s *LLMService) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
 	s.taskPullRequestRepo = repo
 }
@@ -232,7 +237,7 @@ func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts
 	}
 }
 
-func (s *LLMService) taskActionRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
+func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
 	if s == nil {
 		return nil
 	}
@@ -247,7 +252,64 @@ func (s *LLMService) taskActionRuntimeTools(task models.Task) *llmcontracts.Runt
 		GitHub:                   s.githubIssueRuntime,
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
 	})
-	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools)
+	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+}
+
+func (s *LLMService) AutomationBootstrapRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
+	return s.automationBootstrapRuntimeTools(ctx, task)
+}
+
+func (s *LLMService) automationBootstrapRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
+	if s == nil || s.automationRegistrationSvc == nil || strings.TrimSpace(task.ProjectID) == "" {
+		return nil
+	}
+	allowedAdapters := map[string]bool{}
+	for _, handle := range SelectedSkillHandlesFromContext(ctx) {
+		switch handle {
+		case "openvibely_native_autonomous_sdlc_bootstrap":
+			allowedAdapters[AutomationAdapterNativeSDLC] = true
+		case "openvibely_github_autonomous_sdlc_bootstrap":
+			allowedAdapters[AutomationAdapterGitHubSDLC] = true
+		}
+	}
+	if len(allowedAdapters) == 0 {
+		return nil
+	}
+	definition := llmcontracts.RuntimeToolDefinition{
+		Name:        "register_automation_resources",
+		Description: "Register the visible tasks and schedules created by this maintained bootstrap as a published Automation. Use actual resource IDs and canonical node keys; the current task project is enforced server-side.",
+		Access:      llmcontracts.RuntimeToolAccessWrite,
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"adapter_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"stable_key":{"type":"string"},"name":{"type":"string"},"resources":{"type":"array","minItems":2,"maxItems":100,"items":{"type":"object","properties":{"node_key":{"type":"string"},"resource_type":{"type":"string","enum":["task","schedule"]},"resource_id":{"type":"string"},"relation":{"type":"string","enum":["owned","shared"]}},"required":["node_key","resource_type","resource_id"],"additionalProperties":false}}},"required":["adapter_key","stable_key","resources"],"additionalProperties":false}`),
+	}
+	return &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{definition}, Executor: func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		if name != "register_automation_resources" {
+			return "", false, false, nil
+		}
+		var request AutomationRegistrationRequest
+		if err := json.Unmarshal(input, &request); err != nil {
+			return "", true, true, fmt.Errorf("invalid automation registration input: %w", err)
+		}
+		if !allowedAdapters[request.AdapterKey] {
+			return "", true, true, fmt.Errorf("adapter %q is unavailable for the selected maintained bootstrap", request.AdapterKey)
+		}
+		request.ProjectID = task.ProjectID
+		request.CreatedVia = "bootstrap"
+		definition, reused, err := s.automationRegistrationSvc.Register(toolCtx, request)
+		if err != nil {
+			return "", true, true, err
+		}
+		result, err := json.Marshal(map[string]any{
+			"automation_id": definition.Automation.ID,
+			"version_id":    definition.Version.ID,
+			"status":        definition.Automation.LifecycleState,
+			"reused":        reused,
+			"url":           fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, task.ProjectID),
+		})
+		if err != nil {
+			return "", true, true, err
+		}
+		return string(result), true, false, nil
+	}}
 }
 
 func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
@@ -766,7 +828,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	runtimeToolsSupported := SupportsRuntimeChatActionTools(callCtx, s.llmConfigRepo, agent)
 	var taskActionTools *llmcontracts.RuntimeTools
 	if runtimeToolsSupported {
-		taskActionTools = s.taskActionRuntimeTools(task)
+		taskActionTools = s.taskActionRuntimeTools(callCtx, task)
 	}
 	if runtimeToolsSupported || agent.Provider != models.ProviderMixture {
 		if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {

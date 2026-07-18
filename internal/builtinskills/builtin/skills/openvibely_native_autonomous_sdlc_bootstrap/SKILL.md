@@ -23,7 +23,8 @@ Human approval authorizes creation of an OpenVibely implementation task only. It
 3. Schedule the notification inbox, commonly hourly. Its prompt must call `list_alerts` with `decision_state=approved`, then inspect each result with `get_alert` before attempting `claim_alert`.
 4. For each claimed notification, call `create_alert_implementation_task`. This operation atomically creates and links one Backlog task, and is idempotent on retries. Put the notification ID, reviewed body, metadata, acceptance criteria, and the approval boundary in the task prompt.
 5. After successful linkage, call `complete_alert_processing`. If work cannot be linked, call `fail_alert_processing` with a concise retry diagnostic. Use `release_alert_claim` only when no implementation task was linked and another scan should retry immediately.
-6. Report the visible tasks and schedules created, plus any missing runtime-tool or model capability.
+6. After both tasks and schedules exist, call `register_automation_resources` once with `adapter_key: native_sdlc`, stable key `native-sdlc/default`, and the actual IDs. Bind the producer schedule to `suggestion_trigger`, producer task to `suggestion_producer`, inbox schedule to `inbox_trigger`, and inbox task to `inbox`. Do not pass topology JSON or infer old resources. A setup rerun reuses the same Automation identity.
+7. Report the visible tasks and schedules created, the returned Automation URL, plus any missing runtime-tool or model capability.
 
 Do not supply another project's `project_id`. Runtime tools bind to the executing task's persisted project and reject mismatches. Do not derive project ownership from the active browser project.
 

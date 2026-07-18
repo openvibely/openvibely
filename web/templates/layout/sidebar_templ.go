@@ -132,14 +132,14 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2\"></path></svg> <span class=\"sidebar-text\">Tasks</span></a></li><li><a data-nav-base=\"/schedule\" data-tip=\"Schedule\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2\"></path></svg> <span class=\"sidebar-text\">Tasks</span></a></li><li><a data-nav-base=\"/automations\" data-tip=\"Automations\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var8 templ.SafeURL
-		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/schedule?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 426, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 426, Col: 88}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
@@ -150,22 +150,22 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var9 string
-		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedule?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 427, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 427, Col: 75}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z\"></path></svg> <span class=\"sidebar-text\">Schedule</span></a></li><!-- Divider --><li class=\"my-1 sidebar-divider\"><hr class=\"border-base-300 opacity-30\"></li><!-- Insights Section --><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">Insights</span></li><li><a data-nav-base=\"/insights\" data-tip=\"Grades\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 6h4m8 0h4M8 6a2 2 0 104 0 2 2 0 10-4 0zm4 12h4m-8 0H4m8 0a2 2 0 104 0 2 2 0 10-4 0zM12 8v8\"></path></svg> <span class=\"sidebar-text\">Automations</span></a></li><li><a data-nav-base=\"/schedule\" data-tip=\"Schedule\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 templ.SafeURL
-		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/insights?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/schedule?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 449, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 440, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
@@ -176,22 +176,22 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var11 string
-		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/insights?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedule?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 450, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 441, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z\"></path></svg> <span class=\"sidebar-text\">Grades</span></a></li><li><a data-nav-base=\"/upcoming\" data-tip=\"Pulse\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z\"></path></svg> <span class=\"sidebar-text\">Schedule</span></a></li><!-- Divider --><li class=\"my-1 sidebar-divider\"><hr class=\"border-base-300 opacity-30\"></li><!-- Insights Section --><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">Insights</span></li><li><a data-nav-base=\"/insights\" data-tip=\"Grades\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var12 templ.SafeURL
-		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/insights?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 464, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 463, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {
@@ -202,22 +202,22 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var13 string
-		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/insights?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 465, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 464, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01\"></path></svg> <span class=\"sidebar-text\">Pulse</span></a></li><li><a data-nav-base=\"/history\" data-tip=\"Reflection\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z\"></path></svg> <span class=\"sidebar-text\">Grades</span></a></li><li><a data-nav-base=\"/upcoming\" data-tip=\"Pulse\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var14 templ.SafeURL
-		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/history?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 479, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 478, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 		if templ_7745c5c3_Err != nil {
@@ -228,22 +228,22 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var15 string
-		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/history?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 480, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 479, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z\"></path></svg> <span class=\"sidebar-text\">Reflection</span></a></li><li><a data-nav-base=\"/analytics\" data-tip=\"Analytics\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01\"></path></svg> <span class=\"sidebar-text\">Pulse</span></a></li><li><a data-nav-base=\"/history\" data-tip=\"Reflection\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var16 templ.SafeURL
-		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/analytics?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/history?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 494, Col: 85}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 493, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 		if templ_7745c5c3_Err != nil {
@@ -254,22 +254,22 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var17 string
-		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/analytics?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/history?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 495, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 494, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z\"></path></svg> <span class=\"sidebar-text\">Analytics</span></a></li><!-- Divider --><li class=\"my-1 sidebar-divider\"><hr class=\"border-base-300 opacity-30\"></li><!-- System Section: configuration and infrastructure --><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">System</span></li><li><a data-nav-base=\"/alerts\" data-tip=\"Alerts\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z\"></path></svg> <span class=\"sidebar-text\">Reflection</span></a></li><li><a data-nav-base=\"/analytics\" data-tip=\"Analytics\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var18 templ.SafeURL
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/alerts?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/analytics?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 517, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 508, Col: 85}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 		if templ_7745c5c3_Err != nil {
@@ -280,61 +280,61 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
-		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/analytics?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 518, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 509, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9\"></path></svg> <span class=\"sidebar-text\">Alerts</span> <span id=\"alert-badge\" class=\"sidebar-text\" hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z\"></path></svg> <span class=\"sidebar-text\">Analytics</span></a></li><!-- Divider --><li class=\"my-1 sidebar-divider\"><hr class=\"border-base-300 opacity-30\"></li><!-- System Section: configuration and infrastructure --><li class=\"menu-title sidebar-hide-collapsed\"><span class=\"text-xs uppercase tracking-wider opacity-50 font-semibold\">System</span></li><li><a data-nav-base=\"/alerts\" data-tip=\"Alerts\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/unread-count?project_id=%s", currentProjectID))
+		var templ_7745c5c3_Var20 templ.SafeURL
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/alerts?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 529, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 531, Col: 82}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-trigger=\"load, every 30s, alertUpdate from:body\" hx-swap=\"innerHTML\" hx-target=\"this\" hx-push-url=\"false\"></span></a></li><li><a data-nav-base=\"/models\" data-tip=\"Models\" href=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var21 templ.SafeURL
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/models?project_id=%s", currentProjectID)))
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 541, Col: 82}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" hx-get=\"")
+		var templ_7745c5c3_Var21 string
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 532, Col: 69}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9\"></path></svg> <span class=\"sidebar-text\">Alerts</span> <span id=\"alert-badge\" class=\"sidebar-text\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
-		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/models?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/unread-count?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 542, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 543, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> <span class=\"sidebar-text\">Models</span></a></li><li><a data-nav-base=\"/agents\" data-tip=\"Agents\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" hx-trigger=\"load, every 30s, alertUpdate from:body\" hx-swap=\"innerHTML\" hx-target=\"this\" hx-push-url=\"false\"></span></a></li><li><a data-nav-base=\"/models\" data-tip=\"Models\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var23 templ.SafeURL
-		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/agents?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/models?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 556, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 555, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 		if templ_7745c5c3_Err != nil {
@@ -345,22 +345,22 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var24 string
-		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/agents?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/models?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 557, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 556, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z\"></path></svg> <span class=\"sidebar-text\">Agents</span></a></li><li><a data-nav-base=\"/skills\" data-tip=\"Skills\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z\"></path></svg> <span class=\"sidebar-text\">Models</span></a></li><li><a data-nav-base=\"/agents\" data-tip=\"Agents\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var25 templ.SafeURL
-		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/skills?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/agents?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 571, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 570, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 		if templ_7745c5c3_Err != nil {
@@ -371,22 +371,22 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var26 string
-		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/skills?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/agents?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 572, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 571, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253\"></path></svg> <span class=\"sidebar-text\">Skills</span></a></li><li><a data-nav-base=\"/workers\" data-tip=\"Workers\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z\"></path></svg> <span class=\"sidebar-text\">Agents</span></a></li><li><a data-nav-base=\"/skills\" data-tip=\"Skills\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var27 templ.SafeURL
-		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/skills?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 585, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 585, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 		if templ_7745c5c3_Err != nil {
@@ -397,7 +397,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var28 string
-		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/workers?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/skills?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
 			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 586, Col: 70}
 		}
@@ -405,14 +405,14 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.11 2.37-2.37.996.608 2.296.07 2.572-1.065z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path></svg> <span class=\"sidebar-text\">Workers</span></a></li><li><a data-nav-base=\"/channels\" data-tip=\"Channels\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253\"></path></svg> <span class=\"sidebar-text\">Skills</span></a></li><li><a data-nav-base=\"/workers\" data-tip=\"Workers\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var29 templ.SafeURL
-		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/channels?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 601, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 599, Col: 108}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
@@ -423,22 +423,22 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var30 string
-		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/channels?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/workers?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 602, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 600, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1\"></path></svg> <span class=\"sidebar-text\">Channels</span></a></li><li><a data-nav-base=\"/personality\" data-tip=\"Personality\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.11 2.37-2.37.996.608 2.296.07 2.572-1.065z\"></path> <path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 12a3 3 0 11-6 0 3 3 0 016 0z\"></path></svg> <span class=\"sidebar-text\">Workers</span></a></li><li><a data-nav-base=\"/channels\" data-tip=\"Channels\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var31 templ.SafeURL
-		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/personality?project_id=%s", currentProjectID)))
+		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/channels?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 616, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 615, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
@@ -449,15 +449,41 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var32 string
-		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/personality?project_id=%s", currentProjectID))
+		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/channels?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 617, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 616, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0\"></path></svg> <span class=\"sidebar-text\">Personality</span></a></li></ul></div><!-- Footer: user info + theme toggle pinned to bottom of sidebar --><div class=\"sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2\"><div id=\"sidebar-auth-user\" class=\"hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto\"><div class=\"dropdown dropdown-top w-full\"><button id=\"sidebar-user-menu-trigger\" type=\"button\" class=\"sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case\" aria-haspopup=\"menu\" aria-label=\"Open user menu\"><div class=\"avatar placeholder\"><div class=\"bg-base-300 text-base-content rounded-full w-6 flex items-center justify-center\"><span id=\"sidebar-auth-avatar\" class=\"text-xs font-semibold leading-none\">U</span></div></div><div id=\"sidebar-auth-name\" class=\"text-xs font-medium truncate leading-none\">User</div></button><ul id=\"sidebar-user-menu\" tabindex=\"0\" class=\"dropdown-content menu p-2 shadow bg-base-100 rounded-box w-44 z-[120] border border-base-300\" role=\"menu\" aria-label=\"User menu\"><li role=\"none\"><form method=\"POST\" action=\"/logout\" class=\"w-full\" role=\"none\"><button id=\"sidebar-logout-label\" type=\"submit\" class=\"text-sm\" role=\"menuitem\">Logout</button></form></li></ul></div></div><label class=\"theme-toggle-pill sidebar-hide-collapsed\" title=\"Toggle light/dark mode\" onclick=\"window.toggleTheme()\"><span class=\"theme-toggle-icon theme-toggle-sun\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" width=\"11\" height=\"11\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z\"></path></svg></span> <span class=\"theme-toggle-icon theme-toggle-moon\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" width=\"11\" height=\"11\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z\"></path></svg></span> <span class=\"theme-toggle-thumb\"></span></label> <a class=\"theme-toggle-collapsed-btn\" data-tip=\"Toggle theme\" onclick=\"window.toggleTheme(); return false;\" href=\"#\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0 theme-collapsed-sun\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z\"></path></svg> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0 theme-collapsed-moon\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z\"></path></svg></a></div><style>\n\t\t\t/* Sidebar collapse toggle button */\n\t\t\t.sidebar-toggle-btn {\n\t\t\t\topacity: 0.7;\n\t\t\t\ttransition: opacity 0.15s, background-color 0.15s;\n\t\t\t}\n\t\t\t\t.sidebar-toggle-btn:hover {\n\t\t\t\t\topacity: 1;\n\t\t\t\t\tbackground-color: hsl(var(--b2));\n\t\t\t\t}\n\t\t\t\n\t\t\t.sidebar-theme-toggle-container {\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tmin-height: 3.25rem;\n\t\t\t\talign-items: center;\n\t\t\t}\n\t\t\t.sidebar-user-trigger {\n\t\t\t\theight: 24px !important;\n\t\t\t\tmin-height: 24px !important;\n\t\t\t\tmax-height: 24px !important;\n\t\t\t\tdisplay: flex !important;\n\t\t\t\talign-items: center !important;\n\t\t\t\tpadding: 0 0.5rem !important;\n\t\t\t\tpadding-top: 0 !important;\n\t\t\t\tpadding-bottom: 0 !important;\n\t\t\t\tmargin: 0 !important;\n\t\t\t\tborder: 0 !important;\n\t\t\t\tborder-radius: 0.5rem;\n\t\t\t\tline-height: 1 !important;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.sidebar-user-trigger .avatar,\n\t\t\t.sidebar-user-trigger #sidebar-auth-name {\n\t\t\t\tmargin: 0 !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:hover {\n\t\t\t\tbackground-color: transparent !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:focus-visible,\n\t\t\t[data-theme=\"dark\"] .sidebar-user-trigger:focus-visible {\n\t\t\t\tbox-shadow: 0 0 0 2px hsl(var(--bc) / 0.4);\n\t\t\t}\n\t\t\t/* Collapsed-only theme toggle icon button */\n\t\t\t.theme-toggle-collapsed-btn {\n\t\t\t\tdisplay: none;  /* Hidden by default in expanded sidebar */\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\twidth: 2rem;\n\t\t\t\theight: 2rem;\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tcursor: pointer;\n\t\t\t\topacity: 0.6;\n\t\t\t\ttransition: opacity 0.15s, background-color 0.15s;\n\t\t\t}\n\t\t\t.theme-toggle-collapsed-btn:hover {\n\t\t\t\topacity: 1;\n\t\t\t}\n\t\t\t.sidebar-collapsed .theme-toggle-collapsed-btn {\n\t\t\t\tdisplay: flex;\n\t\t\t}\n\t\t\t/* Light mode: show sun, hide moon */\n\t\t\t.theme-collapsed-moon {\n\t\t\t\tdisplay: none;\n\t\t\t}\n\t\t\t.theme-collapsed-sun {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Dark mode: show moon, hide sun */\n\t\t\t[data-theme=\"dark\"] .theme-collapsed-sun {\n\t\t\t\tdisplay: none;\n\t\t\t}\n\t\t\t[data-theme=\"dark\"] .theme-collapsed-moon {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Project selector: keep single border in nav, avoid extra outer ring */\n\t\t\t.sidebar-project-select,\n\t\t\t.sidebar-project-select:hover,\n\t\t\t.sidebar-project-select:focus,\n\t\t\t.sidebar-project-select:active {\n\t\t\t\toutline: none;\n\t\t\t\tbox-shadow: none;\n\t\t\t\t--tw-ring-shadow: 0 0 #0000;\n\t\t\t}\n\t\t\t.sidebar-project-select:focus-visible {\n\t\t\t\toutline: none;\n\t\t\t\tbox-shadow: 0 0 0 2px hsl(var(--p) / 0.28);\n\t\t\t}\n\t\t\t[data-theme=\"dark\"] .sidebar-project-select:focus-visible {\n\t\t\t\tbox-shadow: 0 0 0 2px hsl(var(--bc) / 0.35);\n\t\t\t}\n\t\t</style><!-- New Project Dialog Container (loaded via HTMX) --><div id=\"new-project-container\"></div><script>\n\t\t\t\t(function() {\n\t\t\t\t\tfetch('/auth/me', { credentials: 'same-origin' })\t\t\t\t\t\t.then(function(resp) {\n\t\t\t\t\t\t\tif (!resp.ok) return null;\n\t\t\t\t\t\t\treturn resp.json();\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.then(function(data) {\n\t\t\t\t\t\t\tif (!data || !data.authenticated || !data.username) return;\n\t\t\t\t\t\t\tvar user = document.getElementById('sidebar-auth-user');\n\t\t\t\t\t\t\tvar userCollapsed = document.getElementById('sidebar-auth-user-collapsed');\n\t\t\t\t\t\t\tvar name = document.getElementById('sidebar-auth-name');\n\t\t\t\t\t\t\tvar avatar = document.getElementById('sidebar-auth-avatar');\n\t\t\t\t\t\t\tvar avatarCollapsed = document.getElementById('sidebar-auth-avatar-collapsed');\n\t\t\t\t\t\t\tvar logoutLabel = document.getElementById('sidebar-logout-label');\n\t\t\t\t\t\t\tif (user) user.classList.remove('hidden');\n\t\t\t\t\t\t\tif (userCollapsed) userCollapsed.classList.remove('hidden');\n\t\t\t\t\t\t\tif (name) name.textContent = data.display || data.username;\n\t\t\t\t\t\t\tvar initial = ((data.display || data.username || 'U').trim().charAt(0) || 'U').toUpperCase();\n\t\t\t\t\t\t\tif (avatar) avatar.textContent = initial;\n\t\t\t\t\t\t\tif (avatarCollapsed) avatarCollapsed.textContent = initial;\n\t\t\t\t\t\t\tif (logoutLabel && data.auth_source === 'hosted_sso') logoutLabel.textContent = 'Log out of this workspace';\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.catch(function() {});\n\t\t\t\t})();\n\n\t\t\t\t(function() {\n\t\t\t\t\tvar btn = document.getElementById('new-project-btn');\n\t\t\t\t\tif (!btn) return;\n\t\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tvar container = document.getElementById('new-project-container');\n\t\t\t\t\t\thtmx.ajax('GET', '/projects/new', {\n\t\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t})();\t\t</script><!-- Project Settings Dialog Container (loaded via HTMX) --><div id=\"project-settings-container\"></div><script>\n\t\t\t(function() {\n\t\t\t\tconst btn = document.getElementById('project-settings-btn');\n\t\t\t\tif (!btn) return;\n\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\te.preventDefault();\n\t\t\t\t\tconst sel = document.getElementById('project-selector');\n\t\t\t\t\tif (!sel || !sel.value) return;\n\t\t\t\t\tconst container = document.getElementById('project-settings-container');\n\t\t\t\t\thtmx.ajax('GET', '/projects/' + sel.value + '/edit', {\n\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t})();\n\t\t</script></aside>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1\"></path></svg> <span class=\"sidebar-text\">Channels</span></a></li><li><a data-nav-base=\"/personality\" data-tip=\"Personality\" href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var33 templ.SafeURL
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/personality?project_id=%s", currentProjectID)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 630, Col: 87}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\" hx-get=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var34 string
+		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/personality?project_id=%s", currentProjectID))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 631, Col: 74}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0\"></path></svg> <span class=\"sidebar-text\">Personality</span></a></li></ul></div><!-- Footer: user info + theme toggle pinned to bottom of sidebar --><div class=\"sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2\"><div id=\"sidebar-auth-user\" class=\"hidden min-w-0 flex-1 flex items-center self-center sidebar-hide-collapsed mr-auto\"><div class=\"dropdown dropdown-top w-full\"><button id=\"sidebar-user-menu-trigger\" type=\"button\" class=\"sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case\" aria-haspopup=\"menu\" aria-label=\"Open user menu\"><div class=\"avatar placeholder\"><div class=\"bg-base-300 text-base-content rounded-full w-6 flex items-center justify-center\"><span id=\"sidebar-auth-avatar\" class=\"text-xs font-semibold leading-none\">U</span></div></div><div id=\"sidebar-auth-name\" class=\"text-xs font-medium truncate leading-none\">User</div></button><ul id=\"sidebar-user-menu\" tabindex=\"0\" class=\"dropdown-content menu p-2 shadow bg-base-100 rounded-box w-44 z-[120] border border-base-300\" role=\"menu\" aria-label=\"User menu\"><li role=\"none\"><form method=\"POST\" action=\"/logout\" class=\"w-full\" role=\"none\"><button id=\"sidebar-logout-label\" type=\"submit\" class=\"text-sm\" role=\"menuitem\">Logout</button></form></li></ul></div></div><label class=\"theme-toggle-pill sidebar-hide-collapsed\" title=\"Toggle light/dark mode\" onclick=\"window.toggleTheme()\"><span class=\"theme-toggle-icon theme-toggle-sun\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" width=\"11\" height=\"11\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z\"></path></svg></span> <span class=\"theme-toggle-icon theme-toggle-moon\"><svg xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\" width=\"11\" height=\"11\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z\"></path></svg></span> <span class=\"theme-toggle-thumb\"></span></label> <a class=\"theme-toggle-collapsed-btn\" data-tip=\"Toggle theme\" onclick=\"window.toggleTheme(); return false;\" href=\"#\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0 theme-collapsed-sun\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z\"></path></svg> <svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0 theme-collapsed-moon\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" stroke-width=\"2\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" d=\"M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z\"></path></svg></a></div><style>\n\t\t\t/* Sidebar collapse toggle button */\n\t\t\t.sidebar-toggle-btn {\n\t\t\t\topacity: 0.7;\n\t\t\t\ttransition: opacity 0.15s, background-color 0.15s;\n\t\t\t}\n\t\t\t\t.sidebar-toggle-btn:hover {\n\t\t\t\t\topacity: 1;\n\t\t\t\t\tbackground-color: hsl(var(--b2));\n\t\t\t\t}\n\t\t\t\n\t\t\t.sidebar-theme-toggle-container {\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tmin-height: 3.25rem;\n\t\t\t\talign-items: center;\n\t\t\t}\n\t\t\t.sidebar-user-trigger {\n\t\t\t\theight: 24px !important;\n\t\t\t\tmin-height: 24px !important;\n\t\t\t\tmax-height: 24px !important;\n\t\t\t\tdisplay: flex !important;\n\t\t\t\talign-items: center !important;\n\t\t\t\tpadding: 0 0.5rem !important;\n\t\t\t\tpadding-top: 0 !important;\n\t\t\t\tpadding-bottom: 0 !important;\n\t\t\t\tmargin: 0 !important;\n\t\t\t\tborder: 0 !important;\n\t\t\t\tborder-radius: 0.5rem;\n\t\t\t\tline-height: 1 !important;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.sidebar-user-trigger .avatar,\n\t\t\t.sidebar-user-trigger #sidebar-auth-name {\n\t\t\t\tmargin: 0 !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:hover {\n\t\t\t\tbackground-color: transparent !important;\n\t\t\t}\n\t\t\t.sidebar-user-trigger:focus-visible,\n\t\t\t[data-theme=\"dark\"] .sidebar-user-trigger:focus-visible {\n\t\t\t\tbox-shadow: 0 0 0 2px hsl(var(--bc) / 0.4);\n\t\t\t}\n\t\t\t/* Collapsed-only theme toggle icon button */\n\t\t\t.theme-toggle-collapsed-btn {\n\t\t\t\tdisplay: none;  /* Hidden by default in expanded sidebar */\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\twidth: 2rem;\n\t\t\t\theight: 2rem;\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tcursor: pointer;\n\t\t\t\topacity: 0.6;\n\t\t\t\ttransition: opacity 0.15s, background-color 0.15s;\n\t\t\t}\n\t\t\t.theme-toggle-collapsed-btn:hover {\n\t\t\t\topacity: 1;\n\t\t\t}\n\t\t\t.sidebar-collapsed .theme-toggle-collapsed-btn {\n\t\t\t\tdisplay: flex;\n\t\t\t}\n\t\t\t/* Light mode: show sun, hide moon */\n\t\t\t.theme-collapsed-moon {\n\t\t\t\tdisplay: none;\n\t\t\t}\n\t\t\t.theme-collapsed-sun {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Dark mode: show moon, hide sun */\n\t\t\t[data-theme=\"dark\"] .theme-collapsed-sun {\n\t\t\t\tdisplay: none;\n\t\t\t}\n\t\t\t[data-theme=\"dark\"] .theme-collapsed-moon {\n\t\t\t\tdisplay: block;\n\t\t\t}\n\t\t\t/* Project selector: keep single border in nav, avoid extra outer ring */\n\t\t\t.sidebar-project-select,\n\t\t\t.sidebar-project-select:hover,\n\t\t\t.sidebar-project-select:focus,\n\t\t\t.sidebar-project-select:active {\n\t\t\t\toutline: none;\n\t\t\t\tbox-shadow: none;\n\t\t\t\t--tw-ring-shadow: 0 0 #0000;\n\t\t\t}\n\t\t\t.sidebar-project-select:focus-visible {\n\t\t\t\toutline: none;\n\t\t\t\tbox-shadow: 0 0 0 2px hsl(var(--p) / 0.28);\n\t\t\t}\n\t\t\t[data-theme=\"dark\"] .sidebar-project-select:focus-visible {\n\t\t\t\tbox-shadow: 0 0 0 2px hsl(var(--bc) / 0.35);\n\t\t\t}\n\t\t</style><!-- New Project Dialog Container (loaded via HTMX) --><div id=\"new-project-container\"></div><script>\n\t\t\t\t(function() {\n\t\t\t\t\tfetch('/auth/me', { credentials: 'same-origin' })\t\t\t\t\t\t.then(function(resp) {\n\t\t\t\t\t\t\tif (!resp.ok) return null;\n\t\t\t\t\t\t\treturn resp.json();\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.then(function(data) {\n\t\t\t\t\t\t\tif (!data || !data.authenticated || !data.username) return;\n\t\t\t\t\t\t\tvar user = document.getElementById('sidebar-auth-user');\n\t\t\t\t\t\t\tvar userCollapsed = document.getElementById('sidebar-auth-user-collapsed');\n\t\t\t\t\t\t\tvar name = document.getElementById('sidebar-auth-name');\n\t\t\t\t\t\t\tvar avatar = document.getElementById('sidebar-auth-avatar');\n\t\t\t\t\t\t\tvar avatarCollapsed = document.getElementById('sidebar-auth-avatar-collapsed');\n\t\t\t\t\t\t\tvar logoutLabel = document.getElementById('sidebar-logout-label');\n\t\t\t\t\t\t\tif (user) user.classList.remove('hidden');\n\t\t\t\t\t\t\tif (userCollapsed) userCollapsed.classList.remove('hidden');\n\t\t\t\t\t\t\tif (name) name.textContent = data.display || data.username;\n\t\t\t\t\t\t\tvar initial = ((data.display || data.username || 'U').trim().charAt(0) || 'U').toUpperCase();\n\t\t\t\t\t\t\tif (avatar) avatar.textContent = initial;\n\t\t\t\t\t\t\tif (avatarCollapsed) avatarCollapsed.textContent = initial;\n\t\t\t\t\t\t\tif (logoutLabel && data.auth_source === 'hosted_sso') logoutLabel.textContent = 'Log out of this workspace';\n\t\t\t\t\t\t})\n\t\t\t\t\t\t.catch(function() {});\n\t\t\t\t})();\n\n\t\t\t\t(function() {\n\t\t\t\t\tvar btn = document.getElementById('new-project-btn');\n\t\t\t\t\tif (!btn) return;\n\t\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\t\te.preventDefault();\n\t\t\t\t\t\tvar container = document.getElementById('new-project-container');\n\t\t\t\t\t\thtmx.ajax('GET', '/projects/new', {\n\t\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t})();\t\t</script><!-- Project Settings Dialog Container (loaded via HTMX) --><div id=\"project-settings-container\"></div><script>\n\t\t\t(function() {\n\t\t\t\tconst btn = document.getElementById('project-settings-btn');\n\t\t\t\tif (!btn) return;\n\t\t\t\tbtn.addEventListener('click', function(e) {\n\t\t\t\t\te.preventDefault();\n\t\t\t\t\tconst sel = document.getElementById('project-selector');\n\t\t\t\t\tif (!sel || !sel.value) return;\n\t\t\t\t\tconst container = document.getElementById('project-settings-container');\n\t\t\t\t\thtmx.ajax('GET', '/projects/' + sel.value + '/edit', {\n\t\t\t\t\t\ttarget: container,\n\t\t\t\t\t\tswap: 'innerHTML'\n\t\t\t\t\t});\n\t\t\t\t});\n\t\t\t})();\n\t\t</script></aside>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -47,6 +47,11 @@ func lifecycleTurnFromContext(ctx context.Context) lifecycleTurnContext {
 	return turn
 }
 
+func SelectedSkillHandlesFromContext(ctx context.Context) []string {
+	turn := lifecycleTurnFromContext(ctx)
+	return append([]string(nil), turn.SelectedSkillHandles...)
+}
+
 func WithTaskThreadLifecycleTurn(ctx context.Context) context.Context {
 	return WithTaskThreadLifecycleTurnPrompt(ctx, "")
 }

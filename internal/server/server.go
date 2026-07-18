@@ -451,6 +451,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
 	alertRepo := repository.NewAlertRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
 	upcomingRepo := repository.NewUpcomingRepo(db)
 
 	// Services
@@ -472,6 +473,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workerSvc.SetTaskGoalService(taskGoalSvc)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 	alertSvc := service.NewAlertService(alertRepo, broadcaster)
+	automationRegistry := service.NewAutomationAdapterRegistry()
+	automationRegistrationSvc := service.NewAutomationRegistrationService(automationRepo, automationRegistry)
+	automationGraphSvc := service.NewAutomationGraphService(automationRepo)
+	llmSvc.SetAutomationRegistrationService(automationRegistrationSvc)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
 	workflowRepo := repository.NewWorkflowRepo(db)
 	workflowSvc := service.NewWorkflowService(workflowRepo, llmConfigRepo, taskRepo, llmSvc)
@@ -884,6 +889,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetChatBroadcaster(chatBroadcaster)
 	h.SetExecutionStreamHub(executionStreamHub)
 	h.SetTaskGoalService(taskGoalSvc)
+	h.SetAutomationServices(automationGraphSvc, automationRegistrationSvc)
 	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	h.SetTelegramAuthRepo(telegramAuthRepo)

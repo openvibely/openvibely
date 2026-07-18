@@ -365,6 +365,12 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			applog.Infof("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
 				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
 		}
+		if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
+			bootstrapRT := h.llmSvc.AutomationBootstrapRuntimeTools(ctx, *params.Task)
+			if bootstrapRT != nil {
+				ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), bootstrapRT))
+			}
+		}
 	}
 	// Lazy-load chat history, system context, and work dir for task-thread
 	// follow-ups that set DeferHistoryLoad. TaskThreadSend sets this flag so

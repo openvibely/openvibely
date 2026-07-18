@@ -122,8 +122,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 112 {
-		t.Fatalf("max goose version = %d, want 112", maxVersion)
+	if maxVersion != 113 {
+		t.Fatalf("max goose version = %d, want 113", maxVersion)
 	}
 }
 
@@ -274,8 +274,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 112 {
-		t.Fatalf("max goose version = %d, want 112", maxVersion)
+	if maxVersion != 113 {
+		t.Fatalf("max goose version = %d, want 113", maxVersion)
 	}
 }
 
@@ -761,8 +761,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 112 {
-		t.Fatalf("max goose version = %d, want 112", maxVersion)
+	if maxVersion != 113 {
+		t.Fatalf("max goose version = %d, want 113", maxVersion)
 	}
 }
 
@@ -1113,8 +1113,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 112 {
-		t.Fatalf("max goose version = %d, want 112", maxVersion)
+	if maxVersion != 113 {
+		t.Fatalf("max goose version = %d, want 113", maxVersion)
 	}
 }
 
@@ -1308,5 +1308,42 @@ func TestMigration110_GitHubAuthorizationAndProjectInbox(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO github_project_inboxes (project_id, github_login) VALUES ('github-inbox-project-two', 'DEV-BOT')`); err != nil {
 		t.Fatalf("same GitHub inbox login should be reusable by another project: %v", err)
+	}
+}
+
+func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automations-113.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 113); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"automations", "automation_versions", "automation_nodes", "automation_edges", "automation_definition_resources", "automation_trigger_owners"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s after migration up", table)
+		}
+	}
+	if err := goose.DownTo(db, ".", 112); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"automation_trigger_owners", "automation_definition_resources", "automation_edges", "automation_nodes", "automation_versions", "automations"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("expected table %s removed after migration down", table)
+		}
 	}
 }

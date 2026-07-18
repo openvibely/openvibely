@@ -35,6 +35,8 @@ type Handler struct {
 	trendSvc                   *service.TrendIntelligenceService
 	templateSvc                *service.TemplateService
 	patternSvc                 *service.PatternService
+	automationGraphSvc         *service.AutomationGraphService
+	automationRegistrationSvc  *service.AutomationRegistrationService
 	llmConfigRepo              *repository.LLMConfigRepo
 	taskRepo                   *repository.TaskRepo
 	scheduleRepo               *repository.ScheduleRepo
@@ -547,6 +549,10 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.PUT("/projects/:id", h.UpdateProject)
 	e.DELETE("/projects/:id", h.DeleteProject)
 	e.GET("/projects/:id/edit", h.EditProjectDialog)
+
+	// Automations (project-scoped via ?project_id= query param)
+	e.GET("/automations", h.ListAutomations)
+	e.GET("/automations/:automationId", h.GetAutomationDefinition)
 
 	// Tasks (project-scoped via ?project_id= query param)
 	e.GET("/tasks", h.ListTasks)

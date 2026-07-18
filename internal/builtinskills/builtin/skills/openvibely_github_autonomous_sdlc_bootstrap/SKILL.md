@@ -35,7 +35,8 @@ Keep the setup generic. Use existing OpenVibely tasks, schedules, task threads, 
 5. Create recurring schedules with `schedule_task`; usually daily for suggestion/finder/scanner tasks, hourly for Dev Inbox, and weekly for auditor tasks. Reuse the same task IDs/titles for schedules rather than duplicating tasks.
 6. Put the behavior in each task prompt. Prompts should tell the agent which generic GitHub tools to call, which labels/auth checks to apply, what to skip, and what visible task/comment/PR updates to make.
 7. Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues, or when the user explicitly asks for a goal-driven task. Do not use persisted goals to make scheduled loop tasks recur.
-8. Report exactly which tasks, schedules, labels, and GitHub credential/settings dependencies were created or still need user action.
+8. After all maintained setup tasks and schedules exist, call `register_automation_resources` once with `adapter_key: github_sdlc`, stable key `github-sdlc/default`, and their actual IDs. Use these task/schedule node pairs where present: `vision_suggestions`/`vision_trigger`, `bug_finder`/`bug_trigger`, `optimization_finder`/`optimization_trigger`, `redundancy_finder`/`redundancy_trigger`, `dev_inbox`/`inbox_trigger`, and `auditor`/`auditor_trigger`. Mark intentionally reused worker tasks as `shared`. Do not pass topology JSON or infer pre-feature resources. A setup rerun reuses the same Automation identity.
+9. Report exactly which tasks, schedules, labels, and GitHub credential/settings dependencies were created or still need user action, plus the returned Automation URL.
 
 ## Suggested Visible Tasks
 
