@@ -35,7 +35,11 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 	if strings.TrimSpace(req.ProjectID) == "" {
 		return nil, false, errors.New("automation project is required")
 	}
-	adapter, ok := s.registry.Get(strings.TrimSpace(req.AdapterKey))
+	adapterKey := strings.TrimSpace(req.AdapterKey)
+	if adapterKey != AutomationAdapterNativeSDLC && adapterKey != AutomationAdapterGitHubSDLC {
+		return nil, false, fmt.Errorf("unsupported maintained automation adapter %q", req.AdapterKey)
+	}
+	adapter, ok := s.registry.Get(adapterKey)
 	if !ok {
 		return nil, false, fmt.Errorf("unsupported maintained automation adapter %q", req.AdapterKey)
 	}

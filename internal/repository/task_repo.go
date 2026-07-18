@@ -37,6 +37,28 @@ func (r *TaskRepo) ListByProject(ctx context.Context, projectID string, category
 	return r.ListByProjectWithSort(ctx, projectID, category, "")
 }
 
+func (r *TaskRepo) ListAutomationReusableTasks(ctx context.Context, projectID string, limit int) ([]models.Task, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT id, project_id, title, category, status
+		FROM tasks WHERE project_id = ? AND category IN ('backlog','scheduled','active')
+		ORDER BY title ASC, id ASC LIMIT ?`, projectID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing reusable automation tasks: %w", err)
+	}
+	defer rows.Close()
+	var tasks []models.Task
+	for rows.Next() {
+		var task models.Task
+		if err := rows.Scan(&task.ID, &task.ProjectID, &task.Title, &task.Category, &task.Status); err != nil {
+			return nil, fmt.Errorf("scanning reusable automation task: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
 func (r *TaskRepo) ListByProjectWithSort(ctx context.Context, projectID string, category string, sortBy string) ([]models.Task, error) {
 	return r.ListByProjectWithCategorySorts(ctx, projectID, category, sortBy, "")
 }

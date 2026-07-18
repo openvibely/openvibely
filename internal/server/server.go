@@ -552,9 +552,20 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	customPersonalityRepo := repository.NewCustomPersonalityRepo(db)
 
 	settingsRepo := repository.NewSettingsRepo(db)
+	automationDraftSvc := service.NewAutomationDraftService(automationRepo, automationRegistry)
+	automationCapabilitySvc := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, settingsRepo)
+	automationPlanner := service.NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, automationRegistry, automationDraftSvc)
+	automationCompiler := service.NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, automationPlanner)
+	automationLifecycleSvc := service.NewAutomationLifecycleService(automationRepo, scheduleRepo)
+	automationConfirmationSecret, confirmationSecretErr := service.LoadOrCreateAutomationConfirmationSecret(context.Background(), settingsRepo)
+	if confirmationSecretErr != nil {
+		return nil, fmt.Errorf("initializing automation confirmation secret: %w", confirmationSecretErr)
+	}
+	automationConfirmationSvc := service.NewAutomationConfirmationService(automationRepo, execRepo, automationConfirmationSecret)
 	taskPullRequestRepo := repository.NewTaskPullRequestRepo(db)
 	githubPRFeedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	automationPlanner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	webhookRepo := repository.NewWebhookRepo(db)
 
 	// Seed Slack settings from env when provided (useful for bootstrapping local setup).
@@ -900,6 +911,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetExecutionStreamHub(executionStreamHub)
 	h.SetTaskGoalService(taskGoalSvc)
 	h.SetAutomationServices(automationGraphSvc, automationRegistrationSvc)
+	h.SetAutomationBuilderServices(automationDraftSvc, automationCapabilitySvc, automationPlanner, automationCompiler, automationConfirmationSvc, automationLifecycleSvc)
 	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	h.SetTelegramAuthRepo(telegramAuthRepo)

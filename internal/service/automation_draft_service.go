@@ -1,0 +1,577 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+)
+
+const (
+	automationDraftSchemaVersion = 1
+	maxAutomationDraftBytes      = 64 * 1024
+	maxAutomationDraftNodes      = 50
+	maxAutomationDraftEdges      = 100
+)
+
+type AutomationDraftService struct {
+	repo     *repository.AutomationRepo
+	registry *AutomationAdapterRegistry
+}
+
+type AutomationDraftCreateRequest struct {
+	ProjectID  string
+	Source     string
+	CreatedVia string
+	StableKey  string
+	Candidate  models.AutomationDraftCandidate
+}
+
+func NewAutomationDraftService(repo *repository.AutomationRepo, registry *AutomationAdapterRegistry) *AutomationDraftService {
+	if registry == nil {
+		registry = NewAutomationAdapterRegistry()
+	}
+	return &AutomationDraftService{repo: repo, registry: registry}
+}
+
+func DecodeAutomationDraftCandidate(raw []byte) (models.AutomationDraftCandidate, error) {
+	if len(raw) == 0 || len(raw) > maxAutomationDraftBytes {
+		return models.AutomationDraftCandidate{}, errors.New("automation draft candidate must be between 1 byte and 64 KiB")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	decoder.UseNumber()
+	var candidate models.AutomationDraftCandidate
+	if err := decoder.Decode(&candidate); err != nil {
+		return candidate, fmt.Errorf("invalid automation draft candidate: %w", err)
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return candidate, err
+	}
+	return candidate, nil
+}
+
+func ensureJSONEOF(decoder *json.Decoder) error {
+	var extra any
+	if err := decoder.Decode(&extra); err == io.EOF {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("invalid automation draft candidate: %w", err)
+	}
+	return errors.New("automation draft candidate contains trailing JSON")
+}
+
+func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
+	adapter, ok := s.registry.Get(strings.TrimSpace(adapterKey))
+	if !ok {
+		return models.AutomationDraftCandidate{}, fmt.Errorf("unsupported automation template %q", adapterKey)
+	}
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion:  automationDraftSchemaVersion,
+		Name:           adapter.DefaultName,
+		Description:    adapter.Description,
+		AutomationType: adapter.AutomationType,
+		AdapterKey:     adapter.Key,
+	}
+	for _, node := range adapter.Nodes {
+		config := map[string]any{}
+		if node.AllowedResources["task"] {
+			config["prompt"] = defaultAutomationNodePrompt(adapter.Key, node.Role)
+			config["category"] = string(models.CategoryBacklog)
+			config["priority"] = 2
+		}
+		if node.AllowedResources["schedule"] {
+			config["target_node_key"] = adapterScheduleTarget(adapter, node.Key)
+			config["run_at"] = "09:00"
+			config["repeat_type"] = string(models.RepeatDaily)
+			config["repeat_interval"] = 1
+			config["enabled"] = true
+			if strings.Contains(node.Key, "inbox") {
+				config["repeat_type"] = string(models.RepeatHours)
+				config["repeat_interval"] = 1
+			}
+		}
+		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{
+			Key: node.Key, Name: node.Name, Type: models.AutomationNodeType(node.Type), Role: node.Role,
+			Config: config, Position: &models.AutomationDraftPoint{X: node.X, Y: node.Y},
+		})
+	}
+	for i := range candidate.Nodes {
+		if !adapterNodeAccepts(adapter, candidate.Nodes[i].Key, "schedule") {
+			continue
+		}
+		target := adapterScheduleTarget(adapter, candidate.Nodes[i].Key)
+		for j := range candidate.Nodes {
+			if candidate.Nodes[j].Key == target {
+				candidate.Nodes[j].Config["category"] = string(models.CategoryScheduled)
+			}
+		}
+	}
+	for _, edge := range adapter.Edges {
+		condition := map[string]any{}
+		if strings.TrimSpace(edge.Condition) != "" {
+			_ = json.Unmarshal([]byte(edge.Condition), &condition)
+		}
+		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: edge.Key, From: edge.From, To: edge.To, Label: edge.Label, Condition: condition})
+	}
+	return candidate, nil
+}
+
+func (s *AutomationDraftService) BlankCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
+	if strings.TrimSpace(adapterKey) == "" {
+		adapterKey = AutomationAdapterVisionDriver
+	}
+	candidate, err := s.TemplateCandidate(adapterKey)
+	if err != nil {
+		return candidate, err
+	}
+	candidate.Name = "Untitled Automation"
+	candidate.Description = ""
+	for i := range candidate.Nodes {
+		if _, ok := candidate.Nodes[i].Config["prompt"]; ok {
+			candidate.Nodes[i].Config["prompt"] = ""
+		}
+	}
+	return candidate, nil
+}
+
+func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationDraftCandidate) (models.AutomationDraftCandidate, error) {
+	adapter, ok := s.registry.Get(strings.TrimSpace(candidate.AdapterKey))
+	if !ok {
+		return candidate, fmt.Errorf("unsupported automation adapter %q", candidate.AdapterKey)
+	}
+	candidate.SchemaVersion = automationDraftSchemaVersion
+	candidate.Name = strings.TrimSpace(candidate.Name)
+	candidate.Description = strings.TrimSpace(candidate.Description)
+	candidate.AutomationType = adapter.AutomationType
+	candidate.AdapterKey = adapter.Key
+	adapterNodes := make(map[string]AutomationAdapterNode, len(adapter.Nodes))
+	for _, node := range adapter.Nodes {
+		adapterNodes[node.Key] = node
+	}
+	for i := range candidate.Nodes {
+		node := &candidate.Nodes[i]
+		node.Key = strings.TrimSpace(node.Key)
+		node.Name = strings.TrimSpace(node.Name)
+		node.Role = strings.TrimSpace(node.Role)
+		if node.Config == nil {
+			node.Config = map[string]any{}
+		}
+		if canonical, exists := adapterNodes[node.Key]; exists {
+			if node.Name == "" {
+				node.Name = canonical.Name
+			}
+			node.Position = &models.AutomationDraftPoint{X: canonical.X, Y: canonical.Y}
+		}
+	}
+	for i := range candidate.Edges {
+		candidate.Edges[i].Key = strings.TrimSpace(candidate.Edges[i].Key)
+		candidate.Edges[i].From = strings.TrimSpace(candidate.Edges[i].From)
+		candidate.Edges[i].To = strings.TrimSpace(candidate.Edges[i].To)
+		candidate.Edges[i].Label = strings.TrimSpace(candidate.Edges[i].Label)
+		if candidate.Edges[i].Condition == nil {
+			candidate.Edges[i].Condition = map[string]any{}
+		}
+	}
+	candidate.Assumptions = normalizeDraftMessages(candidate.Assumptions)
+	candidate.Warnings = normalizeDraftMessages(candidate.Warnings)
+	return candidate, nil
+}
+
+func normalizeDraftMessages(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] || len(out) >= 20 {
+			continue
+		}
+		if len(value) > 500 {
+			value = value[:500]
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDraftCandidate) []models.AutomationValidationIssue {
+	var issues []models.AutomationValidationIssue
+	encoded, encodeErr := json.Marshal(candidate)
+	if encodeErr != nil {
+		issues = append(issues, models.AutomationValidationIssue{Code: "invalid_json", Message: "Automation configuration contains a non-finite or unsupported JSON value."})
+	} else if len(encoded) > maxAutomationDraftBytes {
+		issues = append(issues, models.AutomationValidationIssue{Code: "graph_size", Message: "Automation graph exceeds the 64 KiB supported payload size."})
+	}
+	adapter, ok := s.registry.Get(candidate.AdapterKey)
+	if !ok {
+		return []models.AutomationValidationIssue{{Code: "unsupported_adapter", Message: "The selected topology is not supported by a registered adapter."}}
+	}
+	if candidate.SchemaVersion != automationDraftSchemaVersion {
+		issues = append(issues, models.AutomationValidationIssue{Code: "schema_version", Message: "Unsupported automation draft schema version."})
+	}
+	if candidate.Name == "" || len(candidate.Name) > 200 {
+		issues = append(issues, models.AutomationValidationIssue{Code: "name", Message: "Automation name must be between 1 and 200 characters."})
+	}
+	if len(candidate.Description) > 2000 {
+		issues = append(issues, models.AutomationValidationIssue{Code: "description", Message: "Automation description exceeds 2000 characters."})
+	}
+	if len(candidate.Nodes) > maxAutomationDraftNodes || len(candidate.Edges) > maxAutomationDraftEdges {
+		issues = append(issues, models.AutomationValidationIssue{Code: "graph_size", Message: "Automation graph exceeds the supported size."})
+	}
+
+	canonicalNodes := make(map[string]AutomationAdapterNode, len(adapter.Nodes))
+	for _, node := range adapter.Nodes {
+		canonicalNodes[node.Key] = node
+	}
+	seenNodes := map[string]bool{}
+	for _, node := range candidate.Nodes {
+		canonical, exists := canonicalNodes[node.Key]
+		if !exists || seenNodes[node.Key] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Graph nodes must match the selected registered template."})
+			continue
+		}
+		seenNodes[node.Key] = true
+		if node.Name == "" || len(node.Name) > 200 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "node_name", Message: "Node name must be between 1 and 200 characters."})
+		}
+		if node.Type != models.AutomationNodeType(canonical.Type) || node.Role != canonical.Role {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Node type and role are fixed by the registered adapter."})
+		}
+		issues = append(issues, validateAutomationNodeConfig(adapter, canonical, node)...)
+	}
+	for key := range canonicalNodes {
+		if !seenNodes[key] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "unsupported_topology", Message: "The registered adapter requires this node."})
+		}
+	}
+
+	canonicalEdges := make(map[string]AutomationAdapterEdge, len(adapter.Edges))
+	for _, edge := range adapter.Edges {
+		canonicalEdges[edge.Key] = edge
+	}
+	seenEdges := map[string]bool{}
+	for _, edge := range candidate.Edges {
+		canonical, exists := canonicalEdges[edge.Key]
+		if !exists || seenEdges[edge.Key] || edge.From != canonical.From || edge.To != canonical.To {
+			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_topology", Message: "Graph edges must match the selected registered template."})
+			continue
+		}
+		seenEdges[edge.Key] = true
+		if !seenNodes[edge.From] || !seenNodes[edge.To] || edge.From == edge.To {
+			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Graph edge references an invalid node."})
+		}
+		expectedCondition := map[string]any{}
+		if strings.TrimSpace(canonical.Condition) != "" {
+			_ = json.Unmarshal([]byte(canonical.Condition), &expectedCondition)
+		}
+		actualJSON, actualErr := json.Marshal(edge.Condition)
+		expectedJSON, _ := json.Marshal(expectedCondition)
+		if actualErr != nil || !bytes.Equal(actualJSON, expectedJSON) {
+			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Edge conditions are fixed by the registered adapter."})
+		}
+	}
+	for key := range canonicalEdges {
+		if !seenEdges[key] {
+			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_topology", Message: "The registered adapter requires every template edge."})
+		}
+	}
+	sort.SliceStable(issues, func(i, j int) bool {
+		if issues[i].NodeKey != issues[j].NodeKey {
+			return issues[i].NodeKey < issues[j].NodeKey
+		}
+		if issues[i].Code != issues[j].Code {
+			return issues[i].Code < issues[j].Code
+		}
+		return issues[i].Message < issues[j].Message
+	})
+	return issues
+}
+
+func validateAutomationNodeConfig(adapter AutomationAdapter, canonical AutomationAdapterNode, node models.AutomationDraftNode) []models.AutomationValidationIssue {
+	allowed := map[string]bool{}
+	if canonical.AllowedResources["task"] {
+		allowed = map[string]bool{"prompt": true, "category": true, "priority": true}
+	}
+	if canonical.AllowedResources["schedule"] {
+		allowed = map[string]bool{"target_node_key": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
+	}
+	var issues []models.AutomationValidationIssue
+	for key, value := range node.Config {
+		if !allowed[key] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unknown_config", Message: fmt.Sprintf("Configuration field %q is not supported for this node.", key)})
+			continue
+		}
+		if unsafeAutomationConfigValue(key, value) {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsafe_config", Message: fmt.Sprintf("Configuration field %q contains an unsupported value.", key)})
+		}
+	}
+	if canonical.AllowedResources["task"] {
+		prompt, promptOK := node.Config["prompt"].(string)
+		if !promptOK || strings.TrimSpace(prompt) == "" {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Task nodes require a prompt before publication."})
+		}
+		category, categoryOK := node.Config["category"].(string)
+		if !categoryOK || (category != string(models.CategoryBacklog) && category != string(models.CategoryScheduled)) {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "Automation task category must be backlog or scheduled."})
+		}
+		priority, priorityOK := draftInt(node.Config["priority"])
+		if !priorityOK || priority < 1 || priority > 4 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "priority", Message: "Task priority must be between 1 and 4."})
+		}
+	}
+	if canonical.AllowedResources["schedule"] {
+		target, targetOK := node.Config["target_node_key"].(string)
+		if !targetOK || target == "" || target != adapterScheduleTarget(adapter, node.Key) {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "schedule_target", Message: "Trigger target is fixed by the registered adapter."})
+		}
+		runAt, runAtOK := node.Config["run_at"].(string)
+		if !runAtOK {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
+		} else if _, err := time.Parse("15:04", runAt); err != nil {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
+		}
+		repeat, repeatOK := node.Config["repeat_type"].(string)
+		if !repeatOK || !map[string]bool{"once": true, "minutes": true, "hours": true, "daily": true, "weekly": true, "monthly": true}[repeat] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_type", Message: "Unsupported schedule repeat type."})
+		}
+		interval, ok := draftInt(node.Config["repeat_interval"])
+		if !ok || interval < 1 || interval > 365 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
+		}
+		if _, ok := node.Config["enabled"].(bool); !ok {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Trigger enabled state must be true or false."})
+		}
+	}
+	return issues
+}
+
+func unsafeAutomationConfigValue(key string, value any) bool {
+	if strings.Contains(strings.ToLower(key), "url") || strings.Contains(strings.ToLower(key), "sql") || strings.Contains(strings.ToLower(key), "code") || strings.Contains(strings.ToLower(key), "tool") || strings.HasSuffix(strings.ToLower(key), "_id") {
+		return true
+	}
+	text, ok := value.(string)
+	if !ok {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(text))
+	if len(text) > 20000 || strings.Contains(lower, "http://") || strings.Contains(lower, "https://") || strings.Contains(lower, "```") || strings.Contains(lower, "<script") {
+		return true
+	}
+	for _, executable := range []string{"#!/bin/", "#!/usr/bin/", "rm -rf ", "drop table ", "delete from ", "insert into ", "alter table ", "truncate table "} {
+		if strings.Contains(lower, executable) {
+			return true
+		}
+	}
+	return false
+}
+
+func draftInt(value any) (int, bool) {
+	switch number := value.(type) {
+	case int:
+		return number, true
+	case float64:
+		if number != float64(int(number)) {
+			return 0, false
+		}
+		return int(number), true
+	case json.Number:
+		parsed, err := number.Int64()
+		return int(parsed), err == nil
+	default:
+		return 0, false
+	}
+}
+
+func adapterNodeAccepts(adapter AutomationAdapter, nodeKey, resourceType string) bool {
+	for _, node := range adapter.Nodes {
+		if node.Key == nodeKey {
+			return node.AllowedResources[resourceType]
+		}
+	}
+	return false
+}
+
+func adapterScheduleTarget(adapter AutomationAdapter, triggerKey string) string {
+	for _, edge := range adapter.Edges {
+		if edge.From != triggerKey {
+			continue
+		}
+		for _, node := range adapter.Nodes {
+			if node.Key == edge.To && node.AllowedResources["task"] {
+				return node.Key
+			}
+		}
+	}
+	return ""
+}
+
+func defaultAutomationNodePrompt(adapterKey, role string) string {
+	return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " "))
+}
+
+func (s *AutomationDraftService) CreateDraft(ctx context.Context, request AutomationDraftCreateRequest) (*models.AutomationDraftResult, error) {
+	if s.repo == nil {
+		return nil, errors.New("automation repository is unavailable")
+	}
+	if strings.TrimSpace(request.ProjectID) == "" {
+		return nil, errors.New("project is required")
+	}
+	candidate, err := s.NormalizeCandidate(request.Candidate)
+	if err != nil {
+		return nil, err
+	}
+	issues := s.ValidateCandidate(candidate)
+	for _, issue := range issues {
+		if issue.Code != "missing_prompt" {
+			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
+		}
+	}
+	definition, err := s.repo.CreateAutomationDraft(ctx, repository.AutomationDraftWrite{
+		ProjectID: request.ProjectID, StableKey: request.StableKey, Source: request.Source,
+		CreatedVia: request.CreatedVia, Candidate: candidate, ValidationErrors: issues,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &models.AutomationDraftResult{
+		Definition: definition, Candidate: candidate, Assumptions: candidate.Assumptions,
+		Warnings: candidate.Warnings, ValidationErrors: issues,
+		Summary: automationDraftSummary(candidate),
+		URL:     fmt.Sprintf("/automations/%s?project_id=%s&view=definition&version=%s", definition.Automation.ID, request.ProjectID, definition.Version.ID),
+	}, nil
+}
+
+func (s *AutomationDraftService) GetDraft(ctx context.Context, projectID, automationID, versionID string) (*models.AutomationDraftResult, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("automation repository is unavailable")
+	}
+	definition, err := s.repo.GetDefinitionVersion(ctx, projectID, automationID, versionID)
+	if err != nil || definition == nil {
+		return nil, err
+	}
+	metadata, err := s.repo.GetAutomationDraftMetadata(ctx, projectID, automationID, versionID)
+	if err != nil || metadata == nil {
+		return nil, err
+	}
+	candidate, err := metadata.Candidate()
+	if err != nil {
+		return nil, err
+	}
+	result := draftPreviewResult(candidate, definition)
+	result.Assumptions = metadata.Assumptions
+	result.Warnings = metadata.Warnings
+	result.ValidationErrors = metadata.ValidationErrors
+	result.URL = fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, projectID)
+	return result, nil
+}
+
+func (s *AutomationDraftService) UpdateDraft(ctx context.Context, automationID, versionID, projectID string, candidate models.AutomationDraftCandidate) (*models.AutomationDraftResult, error) {
+	if s.repo == nil {
+		return nil, errors.New("automation repository is unavailable")
+	}
+	candidate, err := s.NormalizeCandidate(candidate)
+	if err != nil {
+		return nil, err
+	}
+	issues := s.ValidateCandidate(candidate)
+	for _, issue := range issues {
+		if automationDraftIssuePreventsPersistence(issue.Code) {
+			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
+		}
+	}
+	definition, err := s.repo.ReplaceAutomationDraft(ctx, repository.AutomationDraftWrite{
+		ProjectID: projectID, AutomationID: automationID, VersionID: versionID,
+		Candidate: candidate, ValidationErrors: issues,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if definition == nil {
+		return nil, errors.New("automation draft not found")
+	}
+	result := draftPreviewResult(candidate, definition)
+	result.ValidationErrors = issues
+	result.URL = fmt.Sprintf("/automations/%s?project_id=%s&view=definition&version=%s", automationID, projectID, versionID)
+	return result, nil
+}
+
+func automationDraftIssuePreventsPersistence(code string) bool {
+	switch code {
+	case "unsupported_adapter", "schema_version", "graph_size", "invalid_json", "unsupported_topology", "invalid_edge", "unsupported_condition", "unknown_config", "unsafe_config":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *AutomationDraftService) ClonePublishedVersion(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("automation repository is unavailable")
+	}
+	published, err := s.repo.GetDefinition(ctx, projectID, automationID)
+	if err != nil {
+		return nil, err
+	}
+	if published == nil || published.Version.State != models.AutomationVersionPublished {
+		return nil, errors.New("published automation not found")
+	}
+	candidate := models.AutomationDraftCandidate{SchemaVersion: automationDraftSchemaVersion,
+		Name: published.Automation.Name, Description: published.Automation.Description,
+		AutomationType: published.Automation.AutomationType, AdapterKey: published.Version.AdapterKey}
+	nodeKeys := make(map[string]string, len(published.Nodes))
+	for _, node := range published.Nodes {
+		var config map[string]any
+		if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
+			return nil, err
+		}
+		if config == nil {
+			config = map[string]any{}
+		}
+		nodeKeys[node.ID] = node.NodeKey
+		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: node.NodeKey, Name: node.Name,
+			Type: node.NodeType, Role: node.Role, Config: config,
+			Position: &models.AutomationDraftPoint{X: node.PositionX, Y: node.PositionY}})
+	}
+	for _, edge := range published.Edges {
+		var condition map[string]any
+		if err := json.Unmarshal([]byte(edge.ConditionJSON), &condition); err != nil {
+			return nil, err
+		}
+		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: edge.EdgeKey,
+			From: nodeKeys[edge.SourceNodeID], To: nodeKeys[edge.TargetNodeID], Label: edge.Label, Condition: condition})
+	}
+	candidate, err = s.NormalizeCandidate(candidate)
+	if err != nil {
+		return nil, err
+	}
+	issues := s.ValidateCandidate(candidate)
+	definition, err := s.repo.CreateAutomationDraftVersion(ctx, repository.AutomationDraftWrite{ProjectID: projectID,
+		AutomationID: automationID, Source: "manual", Candidate: candidate, ValidationErrors: issues})
+	if err != nil {
+		return nil, err
+	}
+	result := draftPreviewResult(candidate, definition)
+	result.ValidationErrors = issues
+	result.URL = fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, definition.Version.ID, projectID)
+	return result, nil
+}
+
+func automationDraftSummary(candidate models.AutomationDraftCandidate) string {
+	names := make([]string, 0, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		names = append(names, node.Name)
+	}
+	return strings.Join(names, " -> ")
+}

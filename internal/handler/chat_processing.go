@@ -60,6 +60,7 @@ type streamingResponseParams struct {
 	AgentDefinition             *models.Agent
 	ChatHistory                 []models.Execution
 	ProjectID                   string
+	PrincipalID                 string
 	SystemContext               string
 	WorkDir                     string
 	ImageAttachments            []models.Attachment
@@ -323,6 +324,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 	}
 
+	actionCollector := newChatActionSummaryCollector()
 	// Inject request-scoped action tools when the provider supports runtime tool
 	// calling. Tool definitions are derived from the canonical chatcontrol registry
 	// filtered by mode and surface. In plan mode only read actions are available.
@@ -358,13 +360,13 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			// covered by the channel runtime fall through to the handler's generic
 			// executor. This correctly handles both complete channel runtimes
 			// (Discord, Slack, Telegram) and partial ones (Email: project tools only).
-			genericRT := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
+			genericRT := h.buildChatActionToolRuntimeFromDefs(params, actionCollector, defs, chatMode, surface)
 			merged := llmcontracts.CompositeRuntimeTools(params.RuntimeTools, genericRT)
 			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), merged))
 			applog.Infof("[handler] processStreamingResponse exec=%s injected channel+generic runtime action tools surface=%s followup=%v channel_defs=%d generic_defs=%d",
 				params.ExecID, surface, params.IsTaskFollowup, len(params.RuntimeTools.Definitions), len(defs))
 		} else if len(defs) > 0 {
-			rt := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
+			rt := h.buildChatActionToolRuntimeFromDefs(params, actionCollector, defs, chatMode, surface)
 			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), rt))
 			applog.Infof("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
 				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
@@ -374,6 +376,17 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			if bootstrapRT != nil {
 				ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), bootstrapRT))
 			}
+		}
+	}
+	if !params.IsTaskFollowup && h.automationConfirmationSvc != nil && params.TaskID != "" && params.ExecID != "" {
+		principal := automationActionPrincipal(params)
+		pending, confirmationErr := h.automationConfirmationSvc.PrepareChatConfirmation(ctx, params.ProjectID, principal, params.TaskID, params.ExecID, params.Message)
+		if confirmationErr != nil {
+			applog.Infof("[handler] processStreamingResponse exec=%s automation confirmation preparation failed: %v", params.ExecID, confirmationErr)
+		} else if pending != nil {
+			controlContext := fmt.Sprintf("Pending Automation publication confirmation was marked affirmative by the Chat host. Call publish_automation_draft with automation_id=%q, version_id=%q, plan_revision=%q, confirmation_token=%q, and confirming_user_input_id=%q. Do not substitute any scope value.",
+				pending.AutomationID, pending.VersionID, pending.PlanRevision, pending.Token, pending.ConfirmingUserInputID)
+			params.SystemContext = combineContexts(params.SystemContext, controlContext)
 		}
 	}
 	// Lazy-load chat history, system context, and work dir for task-thread
@@ -520,7 +533,7 @@ modelLoop:
 		applog.Infof("[handler] processStreamingResponse exec=%s prepared %d steering inputs for continuation", params.ExecID, pendingSteering.count())
 	}
 	durationMs := time.Since(start).Milliseconds()
-	output := result.Output
+	output := actionCollector.appendAutomationPlans(result.Output)
 	textOnlyOutput := result.TextOnlyOutput
 	tokensUsed := result.Usage.TotalTokens
 
@@ -574,6 +587,7 @@ modelLoop:
 
 	completionOutcome := h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 	if completionOutcome == repository.CompleteSuccessCompleted {
+		h.issueStoredAutomationPlanConfirmations(ctx, actionCollector)
 		h.recordStreamingUsage(ctx, params, result, string(models.ExecCompleted), "", durationMs)
 	}
 	if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
@@ -629,6 +643,17 @@ modelLoop:
 	}
 
 	h.finalizeStreamingTurn(params, output)
+}
+
+func (h *Handler) issueStoredAutomationPlanConfirmations(ctx context.Context, collector *chatActionSummaryCollector) {
+	if h == nil || h.automationConfirmationSvc == nil || collector == nil {
+		return
+	}
+	for _, pending := range collector.pendingAutomationPlan {
+		if _, err := h.automationConfirmationSvc.Issue(ctx, pending.Issue); err != nil {
+			applog.Infof("[handler] automation plan receipt issue failed automation=%s version=%s: %v", pending.Issue.AutomationID, pending.Issue.VersionID, err)
+		}
+	}
 }
 
 type preparedSteeringBatch struct {

@@ -122,8 +122,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 114 {
-		t.Fatalf("max goose version = %d, want 114", maxVersion)
+	if maxVersion != 115 {
+		t.Fatalf("max goose version = %d, want 115", maxVersion)
 	}
 }
 
@@ -274,8 +274,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 114 {
-		t.Fatalf("max goose version = %d, want 114", maxVersion)
+	if maxVersion != 115 {
+		t.Fatalf("max goose version = %d, want 115", maxVersion)
 	}
 }
 
@@ -761,8 +761,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 114 {
-		t.Fatalf("max goose version = %d, want 114", maxVersion)
+	if maxVersion != 115 {
+		t.Fatalf("max goose version = %d, want 115", maxVersion)
 	}
 }
 
@@ -1113,8 +1113,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 114 {
-		t.Fatalf("max goose version = %d, want 114", maxVersion)
+	if maxVersion != 115 {
+		t.Fatalf("max goose version = %d, want 115", maxVersion)
 	}
 }
 
@@ -1345,6 +1345,77 @@ func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
 		if count != 0 {
 			t.Fatalf("expected table %s removed after migration down", table)
 		}
+	}
+}
+
+func TestMigration115AutomationPublicationUpAndDown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automations-115.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 115); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"automation_draft_metadata", "automation_publication_attempts", "automation_publication_steps", "automation_chat_confirmation_receipts", "automation_chat_confirmation_inputs"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("expected publication table %s after up migration: count=%d err=%v", table, count, err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('publication-project', 'Publication', '', '')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state) VALUES ('publication-automation', 'publication-project', 'draft/test', 'Draft', 'draft')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key) VALUES ('publication-version', 'publication-project', 'publication-automation', 1, 'draft', 'manual', 'native_sdlc')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_draft_metadata (version_id, project_id, automation_id, candidate_json) VALUES ('publication-version', 'publication-project', 'publication-automation', '{"schema_version":1}')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_publication_attempts (id, project_id, automation_id, version_id, plan_revision, status) VALUES ('publication-attempt', 'publication-project', 'publication-automation', 'publication-version', 'revision', 'publishing')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_publication_steps (attempt_id, step_key, operation, target_key, status) VALUES ('publication-attempt', 'task:one', 'create', 'task:one', 'pending')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_chat_confirmation_receipts (token_id, project_id, automation_id, version_id, plan_revision, principal_id, thread_id, plan_message_id, expires_at) VALUES ('token', 'publication-project', 'publication-automation', 'publication-version', 'revision', 'principal', 'thread', 'plan-message', datetime('now', '+30 minutes'))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_chat_confirmation_receipts (token_id, project_id, automation_id, version_id, plan_revision, principal_id, thread_id, plan_message_id, expires_at, consumed_at) VALUES ('invalid-token', 'publication-project', 'publication-automation', 'publication-version', 'revision', 'principal', 'thread', 'plan-message', datetime('now', '+30 minutes'), CURRENT_TIMESTAMP)`); err == nil {
+		t.Fatal("expected partial consumed confirmation state to be rejected")
+	}
+	if _, err := db.Exec(`DELETE FROM projects WHERE id = 'publication-project'`); err != nil {
+		t.Fatalf("project deletion must cascade publication metadata: %v", err)
+	}
+	for _, table := range []string{"automation_draft_metadata", "automation_publication_attempts", "automation_publication_steps", "automation_chat_confirmation_receipts", "automation_chat_confirmation_inputs"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("expected project cascade to clear %s: count=%d err=%v", table, count, err)
+		}
+	}
+	if err := goose.DownTo(db, ".", 114); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"automation_draft_metadata", "automation_publication_attempts", "automation_publication_steps", "automation_chat_confirmation_receipts", "automation_chat_confirmation_inputs"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("expected publication table %s removed after down migration: count=%d err=%v", table, count, err)
+		}
+	}
+	var definitions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='automations'`).Scan(&definitions); err != nil || definitions != 1 {
+		t.Fatalf("definition tables must remain after migration 115 down: count=%d err=%v", definitions, err)
 	}
 }
 

@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	AutomationAdapterNativeSDLC = "native_sdlc"
-	AutomationAdapterGitHubSDLC = "github_sdlc"
+	AutomationAdapterNativeSDLC   = "native_sdlc"
+	AutomationAdapterGitHubSDLC   = "github_sdlc"
+	AutomationAdapterVisionDriver = "vision_driver"
 )
 
 type AutomationAdapterNode struct {
@@ -41,7 +42,7 @@ type AutomationAdapterRegistry struct{ adapters map[string]AutomationAdapter }
 
 func NewAutomationAdapterRegistry() *AutomationAdapterRegistry {
 	registry := &AutomationAdapterRegistry{adapters: make(map[string]AutomationAdapter)}
-	for _, adapter := range []AutomationAdapter{nativeSDLCAdapter(), githubSDLCAdapter()} {
+	for _, adapter := range []AutomationAdapter{nativeSDLCAdapter(), githubSDLCAdapter(), visionDriverAdapter()} {
 		registry.adapters[adapter.Key] = adapter
 	}
 	return registry
@@ -105,6 +106,28 @@ func nativeSDLCAdapter() AutomationAdapter {
 			{Key: "inbox_trigger_to_inbox", From: "inbox_trigger", To: "inbox"},
 			{Key: "approval_to_inbox", From: "approval", To: "inbox", Label: "approved", Condition: `{"state":"approved"}`},
 			{Key: "inbox_to_implementation", From: "inbox", To: "implementation"},
+			{Key: "implementation_to_completed", From: "implementation", To: "completed"},
+		},
+	}
+}
+
+func visionDriverAdapter() AutomationAdapter {
+	return AutomationAdapter{
+		Key: AutomationAdapterVisionDriver, AutomationType: "vision_driver", DefaultName: "Vision Driver",
+		Description: "Review project vision, propose improvements for approval, and create visible implementation work.",
+		Nodes: []AutomationAdapterNode{
+			{Key: "vision_trigger", Name: "Vision Schedule", Type: "trigger", Role: "fixed_schedule", AllowedResources: resourceTypes("schedule"), X: 0, Y: 0},
+			{Key: "vision_driver", Name: "Vision Driver", Type: "agent_task", Role: "vision_driver", AllowedResources: resourceTypes("task"), X: 180, Y: 0},
+			{Key: "notification", Name: "Improvement Proposal", Type: "action", Role: "create_notification", AllowedResources: resourceTypes(), X: 360, Y: 0},
+			{Key: "approval", Name: "Human Approval", Type: "human_gate", Role: "native_approval", AllowedResources: resourceTypes(), X: 540, Y: 0},
+			{Key: "implementation", Name: "Implementation", Type: "agent_task", Role: "implementation", AllowedResources: resourceTypes(), X: 720, Y: 0},
+			{Key: "completed", Name: "Completed", Type: "outcome", Role: "completed", AllowedResources: resourceTypes(), X: 900, Y: 0},
+		},
+		Edges: []AutomationAdapterEdge{
+			{Key: "trigger_to_driver", From: "vision_trigger", To: "vision_driver"},
+			{Key: "driver_to_notification", From: "vision_driver", To: "notification"},
+			{Key: "notification_to_approval", From: "notification", To: "approval"},
+			{Key: "approval_to_implementation", From: "approval", To: "implementation", Label: "approved", Condition: `{"state":"approved"}`},
 			{Key: "implementation_to_completed", From: "implementation", To: "completed"},
 		},
 	}

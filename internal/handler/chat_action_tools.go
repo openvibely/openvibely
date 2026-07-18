@@ -26,9 +26,16 @@ func (h *Handler) supportsChatActionTools(ctx context.Context, agent models.LLMC
 	return service.SupportsRuntimeChatActionTools(ctx, h.llmConfigRepo, agent)
 }
 
+type pendingAutomationPlanConfirmation struct {
+	Issue service.AutomationConfirmationIssue
+	Plan  models.AutomationPublicationPlan
+	Name  string
+}
+
 type chatActionSummaryCollector struct {
-	createdLines []string
-	editedLines  []string
+	createdLines          []string
+	editedLines           []string
+	pendingAutomationPlan []pendingAutomationPlanConfirmation
 }
 
 func newChatActionSummaryCollector() *chatActionSummaryCollector {
@@ -36,6 +43,37 @@ func newChatActionSummaryCollector() *chatActionSummaryCollector {
 		createdLines: []string{},
 		editedLines:  []string{},
 	}
+}
+
+func (c *chatActionSummaryCollector) addAutomationPlan(pending pendingAutomationPlanConfirmation) {
+	if c == nil {
+		return
+	}
+	c.pendingAutomationPlan = append(c.pendingAutomationPlan, pending)
+}
+
+func (c *chatActionSummaryCollector) appendAutomationPlans(output string) string {
+	if c == nil || len(c.pendingAutomationPlan) == 0 {
+		return output
+	}
+	var blocks []string
+	for _, pending := range c.pendingAutomationPlan {
+		var lines []string
+		for _, effect := range pending.Plan.Effects {
+			line := fmt.Sprintf("- %s %s: %s", effect.Operation, effect.ResourceType, effect.Name)
+			if effect.ResourceID != "" {
+				line += " (" + effect.ResourceID + ")"
+			}
+			lines = append(lines, line)
+		}
+		blocks = append(blocks, fmt.Sprintf("Automation publication plan for %s (revision %s):\n%s\nNothing has been created or activated. To confirm after reviewing this stored plan, reply exactly: publish %s",
+			pending.Name, pending.Plan.PlanRevision, strings.Join(lines, "\n"), pending.Name))
+	}
+	summary := "\n\n---\n" + strings.Join(blocks, "\n\n")
+	if strings.Contains(output, summary) {
+		return output
+	}
+	return output + summary
 }
 
 func (c *chatActionSummaryCollector) addCreated(summary string) {
@@ -200,6 +238,18 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		ProjectID: params.ProjectID, CallerTaskID: params.TaskID, Source: "agent", AlertSvc: h.alertSvc, TaskRepo: h.taskRepo,
 	})
 	return map[string]chatcontrol.RuntimeActionHandler{
+		"preview_automation_description": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeAutomationPreviewAction(ctx, params, input)
+		},
+		"create_automation_draft": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeAutomationCreateDraftAction(ctx, params, input)
+		},
+		"plan_automation_publication": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeAutomationPlanAction(ctx, params, input, collector)
+		},
+		"publish_automation_draft": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeAutomationPublishAction(ctx, params, input)
+		},
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeCreateSwarmTaskTool(ctx, params, input, collector)
 		},

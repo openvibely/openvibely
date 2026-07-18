@@ -75,11 +75,41 @@ func TestRegistry_AllActionsHaveDescription(t *testing.T) {
 	}
 }
 
+func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
+	readActions := []string{"preview_automation_description", "plan_automation_publication"}
+	writeActions := []string{"create_automation_draft", "publish_automation_draft"}
+	for _, name := range append(readActions, writeActions...) {
+		def := Get(name)
+		if def == nil || def.Domain != DomainAutomations {
+			t.Fatalf("expected %s in automations domain", name)
+		}
+		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceWeb); err != nil {
+			t.Fatalf("expected %s in web orchestrate mode: %v", name, err)
+		}
+		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceAPI); err != nil {
+			t.Fatalf("expected %s on project-aware API surface: %v", name, err)
+		}
+		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceSlack); err == nil {
+			t.Fatalf("expected %s unavailable on channel surfaces", name)
+		}
+	}
+	for _, name := range readActions {
+		if err := IsAllowed(name, models.ChatModePlan, SurfaceWeb); err != nil {
+			t.Fatalf("expected read action %s in plan mode: %v", name, err)
+		}
+	}
+	for _, name := range writeActions {
+		if err := IsAllowed(name, models.ChatModePlan, SurfaceWeb); err == nil {
+			t.Fatalf("expected write action %s denied in plan mode", name)
+		}
+	}
+}
+
 func TestRegistry_AllActionsHaveDomain(t *testing.T) {
 	validDomains := map[Domain]bool{
 		DomainTasks: true, DomainSchedules: true, DomainAlerts: true,
 		DomainPersonality: true, DomainModels: true, DomainAgents: true,
-		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainMemory: true, DomainChat: true,
+		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainAutomations: true, DomainMemory: true, DomainChat: true,
 	}
 	for _, a := range Registry() {
 		if !validDomains[a.Domain] {

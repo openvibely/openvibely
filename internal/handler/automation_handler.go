@@ -16,6 +16,15 @@ func (h *Handler) SetAutomationServices(graph *service.AutomationGraphService, r
 	h.automationRegistrationSvc = registration
 }
 
+func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftService, capabilities *service.AutomationCapabilitySnapshotBuilder, planner *service.AutomationPublicationPlanner, compiler *service.AutomationCompiler, confirmation *service.AutomationConfirmationService, lifecycle *service.AutomationLifecycleService) {
+	h.automationDraftSvc = drafts
+	h.automationCapabilitySvc = capabilities
+	h.automationPlanner = planner
+	h.automationCompiler = compiler
+	h.automationConfirmationSvc = confirmation
+	h.automationLifecycleSvc = lifecycle
+}
+
 func (h *Handler) ListAutomations(c echo.Context) error {
 	if h.automationGraphSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automations unavailable")

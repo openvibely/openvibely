@@ -1560,6 +1560,20 @@ func (s *LLMService) CallAgentDirectWithDefinitionNoTools(ctx context.Context, m
 	return s.callAgentDirectWithDefinition(ctx, message, attachments, agent, workDir, agentDef, true)
 }
 
+type directUsageProjectContextKey struct{}
+
+func WithDirectUsageProject(ctx context.Context, projectID string) context.Context {
+	return context.WithValue(ctx, directUsageProjectContextKey{}, strings.TrimSpace(projectID))
+}
+
+func directUsageProjectFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(directUsageProjectContextKey{}).(string)
+	return strings.TrimSpace(value)
+}
+
 // CallAgentDirectNoTools calls the agent directly and explicitly suppresses
 // tool/plugin execution. Use this for strict JSON-generation helpers.
 func (s *LLMService) CallAgentDirectNoTools(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string) (string, int, error) {
@@ -1613,7 +1627,10 @@ func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message 
 		status = string(models.ExecFailed)
 		errMsg = err.Error()
 	}
-	projectID := s.projectIDForWorkDir(context.Background(), workDir)
+	projectID := directUsageProjectFromContext(ctx)
+	if projectID == "" {
+		projectID = s.projectIDForWorkDir(context.Background(), workDir)
+	}
 	RecordUsageFromResult(context.Background(), s.usageRepo, UsageCapture{ProjectID: projectID, Operation: string(llmcontracts.OperationDirect), Status: status, ErrorMessage: errMsg, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, res)
 	if err != nil {
 		if res.StopReason == "max_tokens" {

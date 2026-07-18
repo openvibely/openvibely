@@ -2,11 +2,34 @@
 
 ## Current Phase
 
-Phase 3: History, Replay, And Metrics (complete).
+Complete: Phases 1-4 and final Definition of Done audit.
 
 ## Status
 
-Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 complete at checkpoint `2a8f511`. Phase 3 implementation, validation, fresh contract audit, and repairs completed on 2026-07-18.
+Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phase 4 implementation, phase validation, repository-wide validation, and the concrete Definition of Done audit completed on 2026-07-18; this ledger is part of the final Phase 4 checkpoint candidate.
+
+## Phase 4 Checklist
+
+- [x] Add publication attempts, publication steps, and Chat confirmation receipts with composite Automation/version ownership, idempotent attempt/step keys, transactional receipt consumption, indexes, project cascade, and migration up/down coverage.
+- [x] Add a strict versioned structured draft candidate/schema with bounded known fields; reject generated database/project IDs, URLs, executable code, SQL, arbitrary tools, unknown configuration, duplicate keys, dangling/cross-version edges, unsupported cycles, and oversized graphs/configuration.
+- [x] Add canonical Native SDLC, GitHub SDLC, and Vision Driver templates accepted by registered adapters; every publishable topology must map to one adapter and no generic Automation edge interpreter may be introduced.
+- [x] Build a bounded, deterministic, project-scoped capability snapshot for agents, skills, integrations, source files, and reusable resources without credentials, prompts, worktree contents, private messages, provider identity, or unbounded listings.
+- [x] Normalize Template, Describe It, Blank, fixed Chat candidate, and active-version clone inputs through one deterministic draft service with server-generated IDs/layout and shared validation.
+- [x] Use the provider-neutral existing no-tools model and usage path for described generation, strict JSON output, and at most one bounded repair attempt; preview must remain ephemeral and draft creation must persist only definition data.
+- [x] Persist mutable draft versions/nodes/edges while keeping published topology immutable; clone active versions into new drafts and retain all historical invocation/work-item version references.
+- [x] Add constrained schema-driven node/edge editing and validation with explicit affected-node and summary errors; saving or validating a draft must create no task, schedule, Alert, issue, execution, goal, Workflow, or PR.
+- [x] Build exact canonical publication plans with create/reuse/update/disable/unchanged effects and SHA-256 revisions over normalized topology, adapter/compiler versions, dependencies, integrations, and ordered effects while excluding volatile runtime state.
+- [x] Add golden canonical-plan revision fixtures and reject non-finite/unknown values, changed drafts/dependencies, stale revisions, and unsupported topologies before publication mutation.
+- [x] Add a resumable idempotent compiler journal that persists each step before mutation, reconciles pending/running/ambiguous/failed steps by stable target key, uses existing Task/TaskRepo, ScheduleRepo cadence, Alert/goal/Workflow/GitHub boundaries, and never duplicates runtime resources after retries/crashes.
+- [x] Publish only after every required resource and membership exists; failed publication must keep the draft unpublished and prior version active while returning exact created/reused resources.
+- [x] Add safe pause/resume/archive behavior that disables/enables only exclusively owned trigger schedules, retains paused ownership, never disables shared worker/inbox resources, and preserves all history.
+- [x] Add host-issued 30-minute signed Chat confirmation receipts bound to project, automation, version, plan revision, principal, thread, stored plan message, and a later affirmative user input; reject same-turn, expired, stale, cross-scope, ambiguous, negative, and replayed confirmations.
+- [x] Register `DomainAutomations` plus `preview_automation_description`, `create_automation_draft`, `plan_automation_publication`, and `publish_automation_draft` in the canonical Chat registry with project-aware surface/mode policies and the existing typed handler map; ordinary task agents receive no definition mutation capability.
+- [x] Ensure preview/planning do not persist definitions/runtime resources or invoke ordinary mutation actions; draft creation persists no runtime resources; publish reports success only after resources and published version are durable.
+- [x] Add Automations-page `New Automation` with Template, Describe It, and Blank paths only, draft graph/editor, assumptions/warnings/errors, publish preview, explicit web confirmation, failure preservation, and success navigation to Live.
+- [x] Add direct-load/HTMX-safe builder behavior, accessible keyboard/status labels, responsive/mobile/Wails layouts, reduced-motion behavior, bounded payloads, and generated templ output.
+- [x] Add migration/repository/service/compiler/handler/Chat registry/executor/UI tests for all draft sources, deterministic normalization, no-mutation boundaries, stale/failed/idempotent publication, confirmation attacks, project isolation, adapter ownership, lifecycle safety, and page/Chat parity using one fixed candidate.
+- [x] Run Phase 4 and full validation chains, perform a fresh phase and Definition of Done audit against concrete code/tests, repair every material finding, update this file and managed memory, and create the final checkpoint.
 
 ## Phase 3 Checklist
 
@@ -84,6 +107,14 @@ Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 complete at checkpoint `2a8f51
 - Added immutable-version invocation graphs, set-based touched-node projection, cross-invocation work-item timelines, and deterministic replay frames derived only from append-only persisted transitions.
 - Added set-based funnel, first-arrival-to-next-transition duration, recent-failure, and current bottleneck metrics plus persisted health evaluation independent from lifecycle state.
 - Added direct-load and HTMX History, invocation, and work-item views with Chart.js lifecycle cleanup, activity/transition paging, replay controls, compact escaped payloads, empty/partial states, and project isolation.
+- Added migration `115_automation_publication.sql` with draft metadata, leased publication attempts, ordered idempotent steps, host confirmation receipts/input markers, composite ownership, indexes, project cascade, and reversible down behavior.
+- Added one strict deterministic draft schema/service shared by Template, Describe It, Blank, fixed Chat candidates, and published-version cloning, with canonical Native/GitHub/Vision templates, server layout, bounded capability snapshots, no-tools model generation, one repair, and unsafe/oversized/non-finite rejection.
+- Added mutable draft persistence and constrained builder editing without runtime mutation, immutable published topology retention, exact canonical publication plans and golden revisions, stale draft/dependency protection, and volatile-state exclusion.
+- Added leased resumable compilation through existing TaskService/TaskRepo and ScheduleRepo behavior, disabled-until-published trigger creation, stable target reconciliation, partial-resource evidence, atomic membership/ownership publication, prior-version preservation, and immediate Live topology switching.
+- Added safe pause/resume/archive semantics that touch only exclusive trigger owners, preserve configured-disabled triggers, retain paused ownership, release archived ownership, and leave shared worker/inbox resources untouched.
+- Added 30-minute host-signed Chat/web confirmation receipts, durable post-plan issuance, exact later-command marking, scope/expiry/replay enforcement, and canonical registry/executor actions for preview, draft, plan, and confirmed publish.
+- Added Automations-page Template, Describe It, and Blank paths only, generation progress/errors, draft graph/editor, assumptions/warnings, explicit publication preview/confirmation, partial-failure preservation, HTMX/direct-load behavior, and successful Live navigation.
+- Kept maintained setup registration explicitly restricted to Native/GitHub even though Vision Driver is a registered draft-publication adapter; no Register Existing, detection, inference, migration, scoring, or backfill path exists.
 
 ## Changed Files
 
@@ -92,6 +123,7 @@ Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 complete at checkpoint `2a8f51
 - Runtime/services/wiring: Scheduler ownership routing, prepared Worker submission, dispatcher/reconciler, execution finalization, server-derived context propagation, Alert and GitHub runtime provenance, compact broadcaster events, and server lifecycle wiring.
 - UI/handlers: project-scoped live/definition/node-resource handlers, Automation tests, portfolio/live/definition templates and generated output, sidebar navigation/project switching/SSE forwarding.
 - Phase 3 history/replay/metrics: Automation history models and repository, graph-service history methods, reconciler health evaluation, History/invocation/work-item handlers and routes, History/replay/Chart.js templates, generated output, and focused service/handler tests.
+- Phase 4 definition/publication: migration 115, draft/publication/confirmation models and repositories, capability/draft/generation/planner/compiler/confirmation/lifecycle services, canonical Chat registry/executor wiring, builder/lifecycle handlers and routes, server wiring, task/schedule/agent bounded repository extensions, Automations templates/generated output, and migration/service/handler/registry regressions.
 - Maintained setup guidance and schemas: Native/GitHub bootstrap skill bodies and exact GitHub source-issue fields on the existing `create_task` action.
 
 ## Current Decisions
@@ -113,6 +145,9 @@ Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 complete at checkpoint `2a8f51
 - Phase 3 focused `go test ./internal/service -run 'TestAutomationHistory' -count=1 -timeout 120s` and `go test ./internal/handler -run 'TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject' -count=1 -timeout 120s`: passed after audit repairs.
 - Phase 3 `go test ./internal/repository ./internal/service ./internal/handler -run 'TestAutomation' -count=1 -timeout 180s`: passed.
 - Phase 3 final `templ generate`, `go build ./cmd/server`, and `go test ./internal/... -count=1 -timeout 60s`: passed every package; `internal/handler` completed in 40.104s and `internal/service` in 42.678s.
+- Phase 4 focused `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol -run 'TestMigration115|TestAutomation' -count=1 -timeout 180s`: passed.
+- Phase 4 final `templ generate`, `go build ./cmd/server`, and `go test ./internal/... -count=1 -timeout 60s`: passed every package; `internal/handler` completed in 41.289s and `internal/service` in 44.097s.
+- Final checkpoint revalidation after interrupted response: `templ generate`, `go build ./cmd/server`, focused `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol -run 'TestMigration115|TestAutomation' -count=1 -timeout 180s`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`: passed every package. The macOS desktop linker emitted only the documented newer-SDK warning and exited successfully.
 
 ## Audit Findings And Repairs
 
@@ -136,18 +171,50 @@ Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 complete at checkpoint `2a8f51
 - Added stable tie-pagination and cursor-binding coverage for invocations, work items, activities, and transitions; invalid cursors/status filters now return controlled 400 responses.
 - Decoupled invocation graph highlighting from paginated rows through one bounded set-based touched-node query and exposed independent activity pagination for invocation/work-item history.
 - Added direct-load and HTMX assertions for all three History surfaces, Chart.js cleanup, replay controls, empty states, compact payloads, and foreign-project 404 isolation.
+- Repaired publication concurrency by acquiring the existing durable attempt lease before compiler effects; concurrent compilers now serialize and retries reuse the completed attempt.
+- Preserved already-journaled resource IDs on ambiguous status updates and reconciled committed tasks by stable compiler identity, so partial failures report exact visible resources and retry without duplication.
+- Repaired lifecycle resume to restore each published trigger's configured enabled state instead of enabling every owned schedule.
+- Added failed replacement evidence proving the prior published version and trigger remain active, then verified successful retry creates one new cadence-specific trigger, disables/releases the superseded trigger, and reuses the task.
+- Expanded canonical plan dependencies to include GitHub inbox enabled state, added GitHub and Vision golden hashes, and proved layout/messages/next-run/last-run do not change a revision while compilation configuration does.
+- Enforced one shared 64 KiB candidate bound for raw and in-memory/page inputs, rejected non-finite JSON plus URL/executable/SQL values, and retained strict unknown-field/topology/config rejection.
+- Added independent tampered-token, project, version, principal, thread, same-turn, ambiguous-command, unmarked-input, replay, and expiry confirmation assertions.
+- Added end-to-end canonical runtime execution of all four Automation Chat actions through the shared handler/executor, including no-tools preview, draft-only persistence, durably stored plan, host-marked later confirmation, and truthful durable publication.
+- Added visible described-generation progress and in-page validation failure rendering, project-scoped draft/plan/publish 404 isolation, and partial publication resource rendering.
+- Repaired the maintained registration boundary after Vision Driver joined the shared adapter registry: registration remains Native/GitHub-only, while Vision is available only through explicit draft publication.
+- Reconfirmed no generic edge interpreter or parallel task/worker/queue/Workflow/Alert/GitHub system was introduced.
+
+## Definition Of Done Audit
+
+1. Multiple project graphs: `TestAutomationRegistrationExplicitIdentityAndIsolation` and portfolio handler assertions cover multiple independent cards.
+2. Explicit Native/GitHub registration: maintained adapter/runtime tests use actual IDs and reject Vision/custom registration; no title-derived identity exists.
+3. Concurrent Live states: `TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters` and overlapping-invocation tests cover running, waiting-human, blocked, failed, and recent completion.
+4. Resource drill-down: Automation page and node-resource handler tests link compact native/GitHub resources to their authoritative surfaces.
+5. Reload/restart durability: atomic dispatch, acknowledged-prepared-execution, and terminal reconciliation tests rebuild exact persisted positions.
+6. Immutable historical versions: clone, invocation-history, work-item lifetime, and replay tests retain origin/version topology.
+7. Shared provenance: shared-inbox, multi-binding, old-work-item/new-invocation, child, and thread-input tests preserve causal identity.
+8. Project isolation: definition/live/history/draft/plan/publish plus composite-constraint and foreign-ID tests reject cross-project access.
+9. Human boundaries: Native Alert and GitHub assignment/PR provenance tests preserve existing approval, review, merge, release, and deployment authorization.
+10. Existing primitives: Scheduler, TaskRepo, ThreadInputRepo, WorkerService, AlertService, goal/lineage, GitHub linkage, and broadcaster paths are extended; no hidden engine exists.
+11. Shared definition model: all templates and builder publication persist the same versions/nodes/edges used by Live and History.
+12. Explicit creation paths: builder tests expose only Template, Describe It, and Blank; maintained registration remains Native/GitHub-only.
+13. Chat creation/confirmation: canonical runtime and confirmation attack tests cover persisted draft, visible plan, later exact command, and activation.
+14. Page/Chat parity: fixed-candidate handler assertions and shared draft/planner/compiler services prove identical normalization/validation/publication behavior.
+15. Registered topology ownership: all three templates validate through registered adapters; arbitrary nodes, edges, conditions, cycles/topologies, tools, code, SQL, URLs, and unknown config are rejected.
+16. Idempotency: confirmation replay, leased publication, ambiguous task recovery, schedule journaling, trigger ownership, dispatch, work-item/activity/event keys, and concurrent polling tests cover retries/crashes.
+17. Validation breadth: migration, repository, service, handler, Chat registry/executor, runtime, SSE/live UI, accessibility/status, restart, generated-template, desktop, and full repository suites pass.
 
 ## Open Findings Or Blockers
 
-- None for Phases 1-3.
+- No code, validation, or Definition of Done blockers remain.
+- The selected managed-memory surface is read-only in this task runtime; this repository status ledger contains the current authoritative completion evidence.
 
 ## Remaining Phases
 
-- Phase 4: Templates And Visual Builder.
+- None.
 
 ## Exact Next Action
 
-Inspect current task/schedule creation services, Chat control registry/executor confirmation paths, existing model usage accounting, and Automation registration publication transactions; initialize the Phase 4 checklist before adding draft/publication journal tables, shared Template/Describe It/Blank normalization, constrained editing, confirmed compilation, and lifecycle controls.
+Verify the final Phase 4 checkpoint commit and clean worktree, then allow Goal Agent to evaluate the persisted goal against the concrete implementation and validation evidence.
 
 ## Update Contract
 

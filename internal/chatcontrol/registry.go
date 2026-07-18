@@ -90,6 +90,7 @@ const (
 	DomainSettings    Domain = "settings"
 	DomainMessaging   Domain = "messaging"
 	DomainGitHub      Domain = "github"
+	DomainAutomations Domain = "automations"
 	DomainMemory      Domain = "memory"
 	DomainChat        Domain = "chat"
 )
@@ -727,6 +728,48 @@ var registry = []ActionDef{
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"handle":{"type":"string","description":"Selected memory handle/file, e.g. provider_architecture.md"}},"required":["handle"],"additionalProperties":false}`),
+	},
+
+	// --- Automations domain (project-scoped definition control) ---
+	{
+		Name:         "preview_automation_description",
+		Description:  "Generate and validate an ephemeral Automation graph candidate from a description. This does not persist a draft or create runtime resources.",
+		Domain:       DomainAutomations,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"description":{"type":"string","minLength":1,"maxLength":4000}},"required":["description"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "create_automation_draft",
+		Description:  "Persist an unpublished Automation draft from a registered template, a description, Blank, or a fixed structured candidate. This creates no runtime resources.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank","candidate"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc","vision_driver"]},"description":{"type":"string","maxLength":4000},"candidate":{"type":"object"}},"required":["source"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "plan_automation_publication",
+		Description:  "Revalidate an Automation draft and return the exact create, reuse, update, disable, and unchanged publication plan. This creates no runtime resources.",
+		Domain:       DomainAutomations,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"automation_id":{"type":"string"},"version_id":{"type":"string"}},"required":["automation_id","version_id"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "publish_automation_draft",
+		Description:  "Publish a previously displayed Automation plan only after a later exact user confirmation in the same thread.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"automation_id":{"type":"string"},"version_id":{"type":"string"},"plan_revision":{"type":"string"},"confirmation_token":{"type":"string"},"confirming_user_input_id":{"type":"string"}},"required":["automation_id","version_id","plan_revision","confirmation_token","confirming_user_input_id"],"additionalProperties":false}`),
 	},
 
 	// --- Chat domain ---

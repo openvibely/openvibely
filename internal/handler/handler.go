@@ -37,6 +37,12 @@ type Handler struct {
 	patternSvc                 *service.PatternService
 	automationGraphSvc         *service.AutomationGraphService
 	automationRegistrationSvc  *service.AutomationRegistrationService
+	automationDraftSvc         *service.AutomationDraftService
+	automationCapabilitySvc    *service.AutomationCapabilitySnapshotBuilder
+	automationPlanner          *service.AutomationPublicationPlanner
+	automationCompiler         *service.AutomationCompiler
+	automationConfirmationSvc  *service.AutomationConfirmationService
+	automationLifecycleSvc     *service.AutomationLifecycleService
 	llmConfigRepo              *repository.LLMConfigRepo
 	taskRepo                   *repository.TaskRepo
 	scheduleRepo               *repository.ScheduleRepo
@@ -552,6 +558,16 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Automations (project-scoped via ?project_id= query param)
 	e.GET("/automations", h.ListAutomations)
+	e.GET("/automations/new", h.NewAutomationBuilder)
+	e.POST("/automations/drafts", h.CreateAutomationDraftWeb)
+	e.POST("/automations/:automationId/drafts", h.CloneAutomationDraftWeb)
+	e.GET("/automations/:automationId/drafts/:versionId", h.GetAutomationDraftWeb)
+	e.POST("/automations/:automationId/drafts/:versionId", h.UpdateAutomationDraftWeb)
+	e.POST("/automations/:automationId/drafts/:versionId/plan", h.PlanAutomationDraftWeb)
+	e.POST("/automations/:automationId/drafts/:versionId/publish", h.PublishAutomationDraftWeb)
+	e.POST("/automations/:automationId/pause", h.PauseAutomation)
+	e.POST("/automations/:automationId/resume", h.ResumeAutomation)
+	e.POST("/automations/:automationId/archive", h.ArchiveAutomation)
 	e.GET("/automations/:automationId", h.GetAutomationLive)
 	e.GET("/automations/:automationId/history", h.GetAutomationHistory)
 	e.GET("/automations/:automationId/invocations/:invocationId", h.GetAutomationInvocationHistory)
