@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-07-16
+updated: 2026-07-17
 source: consolidation
-source_id: memory_consolidation_2026_07_15
+source_id: memory_consolidation_2026_07_17
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -61,5 +61,5 @@ Current release facts and boundaries:
 - Recorded release state: latest public release was `v0.3.0` (2026-06-24), whose canonical annotated tag targets `bfcc37d479e4f5f2c6784a900f5a6672ec754bdb`. `origin/main` was later fast-forwarded to the `v0.4.0` candidate `a13ab410c84a9ff26128d72ff6165841bcabfbf7`, but no `v0.4.0` tag or GitHub release had been created at the last recorded state. Verify live refs and GitHub release state before resuming release work.
 - The recorded `v0.4.0` themes are multi-agent swarms, Discord/Email and project-scoped outbound messaging, autonomous GitHub issue-to-PR workflows, and Mixture of Models.
 - Release artifacts normally cover macOS desktop bundles and darwin/linux/Windows server archives with checksums. Windows desktop packaging requires a MinGW cross-compiler; Docker publishing remains pending when credentials are unavailable.
-- GitHub issue #29 was implemented in PR #35 on 2026-07-15: `.openvibely/skills/openvibely_release_workflow/scripts/release-version.sh` is now the side-effect-free shared `X.Y.Z`/optional-leading-`v` policy used by all five release entrypoints and `release-validate.sh`. The validation suite exercises the production helper and verifies accepted forms, early invalid-version rejection, and source safety without cwd or caller shell-option mutation.
+- Release version policy is centralized in `.openvibely/skills/openvibely_release_workflow/scripts/release-version.sh`: all release entrypoints and validation use the same side-effect-free `X.Y.Z`/optional-leading-`v` rules and reject invalid versions before performing release work.
 - Release-build invariants include preserving `OpenVibely.app` as the zip root, making dry runs fully non-writing, avoiding managed worktree cleanup paths for real builds, and using script-default or absolute dist paths.

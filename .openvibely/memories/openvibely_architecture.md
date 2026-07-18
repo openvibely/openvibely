@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-07-03
+updated: 2026-07-17
 source: consolidation
-source_id: memory_consolidation_2026_07_06
+source_id: memory_consolidation_2026_07_17
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -34,6 +34,12 @@ Storage and runtime-state pitfalls:
 - Release binaries use stable app-owned storage rather than source-checkout/current-working-directory paths such as `./openvibely.db` or `./repos`.
 - Web/server and desktop local runs are expected to use the same database by default unless env vars explicitly separate them.
 - Local runtime-state diagnosis depends on the active process, port, and database path because multiple local/server/desktop instances may use different configured storage roots.
+
+Worker capacity settings:
+- The canonical representation for an unlimited global worker limit is `worker_settings.max_workers = 0`. Fresh database initialization and repository fallback use `0`; queued-worker dispatch and task-thread follow-up admission treat it as unbounded rather than zero capacity, API serialization retains `max_workers: 0` while reporting capacity available, and Settings surfaces it as “Unlimited” and round-trips `0`.
+- Existing persisted finite limits, including `1`, must remain unchanged. There is intentionally no upgrade migration from `1` to `0` because historical implicit defaults cannot be distinguished reliably from an explicit user selection.
+- No environment/config override exists for the global worker limit; it is persisted in settings.
+- Task-thread follow-ups enforce finite global worker limits by atomically reserving global and project capacity before provider execution, while preserving cancellable queue waits, exact counter cleanup, and `0 = unlimited` behavior.
 
 OAuth and hosted deployment facts:
 - Model OAuth initiate/callback resolves absolute app URLs through shared URL-building behavior: `APP_BASE_URL` first, then forwarded/request host fallback.

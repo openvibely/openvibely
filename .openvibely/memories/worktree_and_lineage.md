@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-07-15
-source: github_bug_finder
-source_id: 7aa83462a27399272b03aa9dbcfded2d:9bf596fbcb71e795
+updated: 2026-07-17
+source: consolidation
+source_id: memory_consolidation_2026_07_17
 confidence: high
 title: Worktree and Lineage
 ---

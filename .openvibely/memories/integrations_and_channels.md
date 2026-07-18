@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-07-16
-source: task_completion
-source_id: 88990168c8b392137cec566b9d72be8b
+updated: 2026-07-17
+source: consolidation
+source_id: memory_consolidation_2026_07_17
 confidence: high
 title: Integrations and Channels
 ---
@@ -17,9 +17,9 @@ Durable channel direction:
 - `internal/service/channel_chat_ingress.go` owns the reusable production inbound Chat flow for Slack, Discord, Telegram, and Email, including attachment staging/linking, model selection after downloaded/sniffed attachment classification, active-chat lookup/queue branching, first-turn task/execution creation, reply-context persistence, Chat Page broadcast, context/history assembly, runner invocation, and queued-chat promotion.
 - Shared generic channel image validation, pending-session ID generation, unique temp filenames, MIME sniffing, and decoder imports belong in neutral channel ingress code rather than Slack/Discord/Telegram/Email-specific files.
 - `internal/service/chat_action_runtime.go` centralizes generic channel runtime handlers for task creation/edit/execution, task goals, task thread viewing/sending, project switching/listing, schedule/personality/model/project utilities, channel completion, and shared alert/capability formatting.
-- GitHub issue #16 tracks the remaining four-way duplication in Slack, Telegram, Discord, and Email runtime assembly: each channel separately registers equivalent `get_current_project`, fixed `get_chat_mode`, and unsupported `set_chat_mode` handlers adjacent to the existing shared project-switch abstraction. The intended scope is to centralize that common policy without broad channel-runtime refactoring. As of 2026-07-16 an implementation task was started (task `d3d22b9a301bc5ccda9d59ea07686cb0`), labeled `task-created`/`in-progress`, with no PR yet.
-- GitHub issue #24 was implemented in PR #36 with one ordered handler-level settings reset helper shared by Telegram, GitHub, Slack, Discord, and Email removal handlers. Required reset write failures now return a controlled server error without a successful Channels refresh/redirect, while each handler retains its explicit reset list and existing stop/disconnect and authorization lifecycle behavior. Slack removal preserves `SlackSettingBotTokenSource=oauth`; Discord removal still clears the current project's authorized-user allowlist and supports the service-unavailable fallback.
-- GitHub issue #27 was implemented in PR #33 with exactly two shared templ primitives in `web/templates/components/channel_auth.templ`: one owns the authorization fragment's empty/list branch, row/remove layout, confirmation, and modal-scoped target/swap wiring; the other owns hidden `project_id`, primary/display-name inputs, and Add wiring. Slack, Discord, Telegram, and Email wrappers remain thin and channel-specific for copy, identity formatting, endpoints, input semantics, parsing, validation, and repository behavior. Regression coverage locks each wrapper's fragment ID, add/delete routes, input contract, empty state, modal-only swaps, and Telegram username/numeric-ID rendering.
+- GitHub issue #16 tracks remaining four-way duplication in Slack, Telegram, Discord, and Email runtime assembly: each channel separately registers equivalent `get_current_project`, fixed `get_chat_mode`, and unsupported `set_chat_mode` handlers adjacent to the existing shared project-switch abstraction. The intended scope is to centralize that common policy without broad channel-runtime refactoring.
+- Telegram, GitHub, Slack, Discord, and Email removal handlers share one ordered settings-reset helper. Required reset failures return a controlled server error without a successful Channels refresh/redirect, while each handler retains its explicit reset list and existing stop/disconnect and authorization lifecycle behavior. Slack removal preserves `SlackSettingBotTokenSource=oauth`; Discord removal also clears the current project's authorized-user allowlist and supports the service-unavailable fallback.
+- Slack, Discord, Telegram, and Email authorization forms share two templ primitives: one owns the authorization fragment's empty/list branch, row/remove layout, confirmation, and modal-scoped target/swap wiring; the other owns hidden `project_id`, primary/display-name inputs, and Add wiring. Wrappers remain channel-specific for copy, identity formatting, endpoints, input semantics, parsing, validation, and repository behavior.
 - Slack, Telegram, Discord, and Email channel runtimes must handle advertised runtime tools through shared channel action handling. Channel-origin `create_swarm_task` creates real swarm parents with channel origin/context metadata and uses the active authorized channel project rather than any tool-supplied `project_id`.
 - Attachment-bearing Chat turns should choose the model config after channel downloads and byte classification where bytes are available, so persisted execution or `thread_inputs.AgentConfigID` matches the runner/promotion config.
 - Slack and Telegram runtime goal actions are wired through durable `TaskGoalService` behavior rather than surface-specific stubs.
