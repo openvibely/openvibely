@@ -60,6 +60,7 @@ func defaultSkillBodyTemplate() string {
 
 templ skillsContent(skills []SkillCard, canManage bool) {
 	<div id="skills-container" data-search-container>
+		@layout.PageTitle("Skills")
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Skills</h2>
 			<div class="dropdown dropdown-end">

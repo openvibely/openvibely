@@ -24,6 +24,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 		hx-target="this"
 		hx-swap="outerHTML"
 	>
+		@layout.PageTitle("Alerts")
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">
 				Alerts
@@ -91,11 +92,10 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 	<!-- Task Detail Dialog Container -->
 	<script>
 		function openAlertTaskDialog(taskId) {
-			htmx.ajax('GET', '/tasks/' + taskId + '?tab=history&from=alerts', {
-				target: '#main-content',
-				swap: 'innerHTML'
-			});
-			history.pushState({}, '', '/tasks/' + taskId + '?from=alerts');
+			window.openVibelyNavigate(
+				'/tasks/' + taskId + '?tab=history&from=alerts',
+				'/tasks/' + taskId + '?from=alerts'
+			);
 		}
 
 		function deleteAlerts(url, target) {

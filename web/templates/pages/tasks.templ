@@ -25,6 +25,7 @@ templ Tasks(projects []models.Project, project *models.Project, tasks []models.T
 
 templ TasksContent(project *models.Project, tasks []models.Task, agents []models.LLMConfig, agentDefs []models.Agent, backlogSort string, completedSort string) {
 	<div class="flex flex-col h-full min-h-0 overflow-x-hidden overflow-y-hidden">
+		@layout.PageTitle("Tasks")
 		<div class="flex items-center justify-between mb-6 flex-shrink-0">
 			<h2 class="text-2xl font-bold">Tasks</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewTaskModal()">
@@ -202,11 +203,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					const taskId = urlParams.get('task_id');
 					if (taskId) {
 						// Navigate to the task detail page
-						htmx.ajax('GET', '/tasks/' + taskId, {
-							target: '#main-content',
-							swap: 'innerHTML'
-						});
-						history.pushState({}, '', '/tasks/' + taskId);
+						window.openVibelyNavigate('/tasks/' + taskId);
 					}
 				})();
 

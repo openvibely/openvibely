@@ -2435,8 +2435,7 @@ templ ChatAutoScrollScript() {
 						link.onclick = function(e) {
 							e.preventDefault();
 							e.stopPropagation();
-							htmx.ajax('GET', '/tasks/' + encodedTaskId + '?from=chat', { target: '#main-content', swap: 'innerHTML' }).catch(function(err) { console.error('[chat] Failed to load task detail:', err); });
-							history.pushState({}, '', '/tasks/' + encodedTaskId + '?from=chat');
+							window.openVibelyNavigate('/tasks/' + encodedTaskId + '?from=chat').catch(function(err) { console.error('[chat] Failed to load task detail:', err); });
 						};
 						linkWrapper.appendChild(link);
 						if (category) {
@@ -2560,8 +2559,7 @@ templ ChatAutoScrollScript() {
 							link.textContent = '"' + taskTitle + '"';
 						link.onclick = function(e) {
 							e.preventDefault();
-							htmx.ajax('GET', '/tasks/' + encodedTaskId + '?from=chat', { target: '#main-content', swap: 'innerHTML' });
-							history.pushState({}, '', '/tasks/' + encodedTaskId + '?from=chat');
+							window.openVibelyNavigate('/tasks/' + encodedTaskId + '?from=chat');
 						};
 						linkWrapper.appendChild(link);
 						linkWrapper.appendChild(document.createTextNode(' (updated: ' + updatedFields + ')'));

@@ -438,6 +438,7 @@ templ ScheduleContent(currentProject *models.Project, tasks []repository.TaskWit
 
 templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOffset int, agents []models.LLMConfig, agentDefs []models.Agent) {
 	<div id="schedule-content" class="flex flex-col h-full" data-project-id={ projectID(currentProject) }>
+		@layout.PageTitle("Schedule")
 		<!-- Header: Row 1 – Title + New Task button -->
 		<div class="flex-shrink-0 sticky top-0 z-30 pb-2 md:relative md:z-auto">
 			<div class="flex justify-between items-center mb-3">
@@ -918,11 +919,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					var projectId = scheduleRoot ? (scheduleRoot.dataset.projectId || '') : '';
 					var taskURL = '/tasks/' + encodeURIComponent(taskId) + '?tab=chat&from=schedule';
 					if (projectId) taskURL += '&project_id=' + encodeURIComponent(projectId);
-					htmx.ajax('GET', taskURL, {
-						target: '#main-content',
-						swap: 'innerHTML'
-					});
-					history.pushState({}, '', taskURL);
+					window.openVibelyNavigate(taskURL);
 				}
 			}
 

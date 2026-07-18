@@ -12,6 +12,22 @@ import (
 
 func stringPtr(s string) *string { return &s }
 
+func TestTaskDetailContentIncludesAuthoritativeDynamicPageTitle(t *testing.T) {
+	task := &models.Task{ID: "task-title", ProjectID: "project-title", Title: "Investigate <title> & history"}
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail content: %v", err)
+	}
+
+	html := buf.String()
+	if strings.Contains(html, "history.pushState") {
+		t.Fatal("task detail must use centralized HTMX-managed navigation instead of manual history.pushState")
+	}
+	if !strings.Contains(html, `data-openvibely-page-title="Investigate &lt;title&gt; &amp; history - OpenVibely"`) {
+		t.Fatalf("task detail fragment missing escaped authoritative title marker: %s", html)
+	}
+}
+
 func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 	tests := []struct {
 		name               string

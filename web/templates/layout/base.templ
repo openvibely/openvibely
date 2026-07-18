@@ -2,13 +2,24 @@ package layout
 
 import "github.com/openvibely/openvibely/internal/models"
 
+func documentTitle(title string) string {
+	if title == "" {
+		return "OpenVibely"
+	}
+	return title + " - OpenVibely"
+}
+
+templ PageTitle(title string) {
+	<span class="hidden" aria-hidden="true" data-openvibely-page-title={ documentTitle(title) }></span>
+}
+
 templ Base(title string, projects []models.Project, currentProjectID string) {
 	<!DOCTYPE html>
 	<html lang="en" data-theme="dark">
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-			<title>{ title } - OpenVibely</title>
+			<title>{ documentTitle(title) }</title>
 			<!-- Theme init: must run before any CSS to prevent flash -->
 			<script>
 				(function() {
@@ -2499,11 +2510,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					// Normal click on card body → navigate to task detail page
 					if (taskID) {
-						htmx.ajax('GET', '/tasks/' + taskID, {
-							target: '#main-content',
-							swap: 'innerHTML'
-						});
-						history.pushState({}, '', '/tasks/' + taskID);
+						window.openVibelyNavigate('/tasks/' + taskID);
 					}
 				}
 
@@ -2821,6 +2828,44 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					clearSelection();
 				}
 
+					window.openVibelyNavigate = function(url, historyURL) {
+						var source = document.createElement('a');
+						source.className = 'hidden';
+						source.setAttribute('aria-hidden', 'true');
+						source.setAttribute('tabindex', '-1');
+						source.setAttribute('href', url);
+						source.setAttribute('hx-get', url);
+						source.setAttribute('hx-target', '#main-content');
+						source.setAttribute('hx-swap', 'innerHTML');
+						source.setAttribute('hx-push-url', historyURL || 'true');
+						document.body.appendChild(source);
+						var request = htmx.ajax('GET', url, {
+							source: source,
+							target: '#main-content',
+							swap: 'innerHTML'
+						});
+						request.then(function() { source.remove(); }, function() { source.remove(); });
+						return request;
+					};
+
+					window.syncOpenVibelyPageTitle = function(root) {
+						if (!root) return;
+						var marker = root.matches && root.matches('[data-openvibely-page-title]')
+							? root
+							: root.querySelector && root.querySelector('[data-openvibely-page-title]');
+						if (!marker) return;
+						document.title = marker.getAttribute('data-openvibely-page-title');
+					};
+
+					function syncOpenVibelyTitleFromHTMX(event) {
+						var target = event && event.detail && event.detail.target;
+						if (!target) target = document.getElementById('main-content');
+						window.syncOpenVibelyPageTitle(target);
+					}
+
+					document.addEventListener('htmx:afterSwap', syncOpenVibelyTitleFromHTMX);
+					document.addEventListener('htmx:historyRestore', syncOpenVibelyTitleFromHTMX);
+
 				// Scroll position restoration for drop zones
 				let savedScrollPositions = new Map();
 
@@ -3093,13 +3138,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								event.preventDefault();
 								event.stopPropagation();
 								closeOpenModalsForToastNavigation();
-								htmx.ajax('GET', linkURL, {
-									target: '#main-content',
-									swap: 'innerHTML'
-								}).catch(function(err) {
+								window.openVibelyNavigate(linkURL).catch(function(err) {
 									console.error('[toast] Failed to load link URL:', err);
 								});
-								history.pushState({}, '', linkURL);
 								dismissToast(toast);
 							});
 							containerEl.appendChild(link);
@@ -3110,13 +3151,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (taskId) {
 						toast.addEventListener('click', function() {
 							closeOpenModalsForToastNavigation();
-							htmx.ajax('GET', '/tasks/' + taskId, {
-								target: '#main-content',
-								swap: 'innerHTML'
-							}).catch(function(err) {
+							window.openVibelyNavigate('/tasks/' + taskId).catch(function(err) {
 								console.error('[toast] Failed to load task detail:', err);
 							});
-							history.pushState({}, '', '/tasks/' + taskId);
 							dismissToast(toast);
 						});
 					}

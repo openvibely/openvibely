@@ -40,6 +40,7 @@ script removeEditAttachment(attID string) {
 
 templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []models.Execution, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []models.Agent, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
 	<div id="task-detail-content" class="h-full flex flex-col">
+		@layout.PageTitle(task.Title)
 		<!-- Breadcrumb navigation -->
 		<div class="flex items-center gap-2 mb-6 flex-shrink-0 min-w-0">
 			<a
@@ -1195,17 +1196,19 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 							});
 						}
 
-						window._openTaskThreadAfterRun = function(taskId) {
-							taskId = taskId || _currentTaskIdFromPath();
-							if (!taskId) return;
-							switchTaskTab('chat');
-							var nextURL = '/tasks/' + taskId + '?tab=chat';
-							if (window.location.pathname !== '/tasks/' + taskId || window.location.search !== '?tab=chat') {
-								history.pushState({}, '', nextURL);
-							}
-							_refreshActiveThreadContent(taskId, true, '', 0);
-						};
-
+							window._openTaskThreadAfterRun = function(taskId) {
+								taskId = taskId || _currentTaskIdFromPath();
+								if (!taskId) return;
+								switchTaskTab('chat');
+								var nextURL = '/tasks/' + taskId + '?tab=chat';
+								if (window.location.pathname !== '/tasks/' + taskId || window.location.search !== '?tab=chat') {
+									window.openVibelyNavigate(nextURL).catch(function(err) {
+										console.error('[task-thread] Failed to open task thread:', err);
+									});
+									return;
+								}
+								_refreshActiveThreadContent(taskId, true, '', 0);
+							};
 					function switchTaskTab(tabName) {
 					var container = document.getElementById('task-detail-content');
 					if (!container) return;

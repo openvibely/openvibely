@@ -67,6 +67,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 // ChatContent renders just the chat content (for HTMX)
 templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int) {
 	<div id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full" data-project-id={ currentProjectID }>
+		@layout.PageTitle("Chat")
 		<div class="mb-4 flex items-center justify-between">
 			<div>
 				<h2 class="text-2xl font-bold">Chat</h2>

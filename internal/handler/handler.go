@@ -476,9 +476,11 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	return "", nil
 }
 
-// isHTMX returns true if the request was initiated by HTMX.
+// isHTMX returns true for ordinary HTMX fragment requests. History cache misses
+// request a complete document so HTMX can restore the application shell and title.
 func isHTMX(c echo.Context) bool {
-	return c.Request().Header.Get("HX-Request") == "true"
+	return c.Request().Header.Get("HX-Request") == "true" &&
+		c.Request().Header.Get("HX-History-Restore-Request") != "true"
 }
 
 // parseIntClamped parses a form value as an integer and clamps it to [min, max].

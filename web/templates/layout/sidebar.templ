@@ -152,14 +152,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/tasks?project_id=' + newProjectId;
 						}
 
-						// HTMX swap for main content (no full page reload)
-						htmx.ajax('GET', newUrl, {
-							target: '#main-content',
-							swap: 'innerHTML'
-						});
-
-							// Update URL bar
-							history.pushState({}, '', newUrl);
+						// HTMX owns the content swap, URL update, and history cache.
+						window.openVibelyNavigate(newUrl);
 						});
 				})();
 

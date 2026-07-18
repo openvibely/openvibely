@@ -13,6 +13,102 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestBaseProvidesCentralClientSidePageTitleAndHistorySynchronization(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Initial", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, expected := range []string{
+		"window.openVibelyNavigate = function",
+		"hx-push-url",
+		"window.syncOpenVibelyPageTitle = function",
+		"[data-openvibely-page-title]",
+		"document.title = marker.getAttribute('data-openvibely-page-title')",
+		"htmx:afterSwap",
+		"htmx:historyRestore",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Errorf("base layout missing client-side title/history synchronization contract %q", expected)
+		}
+	}
+	if strings.Contains(html, "history.pushState") {
+		t.Fatal("base layout and sidebar must use HTMX-managed navigation instead of manual history.pushState")
+	}
+
+	start := strings.Index(html, "window.openVibelyNavigate = function")
+	if start < 0 {
+		t.Fatal("could not find rendered client-side navigation script")
+	}
+	end := strings.Index(html[start:], "// Scroll position restoration for drop zones")
+	if end < 0 {
+		t.Fatal("could not extract rendered client-side navigation and page title script")
+	}
+	scriptBody := html[start : start+end]
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the rendered page title synchronization script")
+	}
+	script := `
+const listeners = {};
+const ajaxCalls = [];
+let historyRoot;
+let navigationSource;
+global.window = {};
+global.document = {
+  title: 'Initial - OpenVibely',
+  body: { appendChild: function(element) { navigationSource = element; } },
+  addEventListener: function(name, handler) { listeners[name] = handler; },
+  getElementById: function(id) {
+    if (id === 'main-content') return historyRoot;
+    return null;
+  },
+  createElement: function() {
+    const attributes = {};
+    return {
+      setAttribute: function(name, value) { attributes[name] = String(value); },
+      getAttribute: function(name) { return attributes[name] || null; },
+      remove: function() {}
+    };
+  }
+};
+global.htmx = {
+  ajax: function(method, url, context) {
+    if (navigationSource !== context.source) throw new Error('programmatic navigation source was not connected before the HTMX request');
+    ajaxCalls.push({ method: method, url: url, context: context });
+    return Promise.resolve();
+  }
+};
+const swapMarker = { getAttribute: function() { return 'Tasks - OpenVibely'; } };
+const cacheHitMarker = { getAttribute: function() { return 'Chat - OpenVibely'; } };
+const cacheMissMarker = { getAttribute: function() { return 'History Task - OpenVibely'; } };
+const swapRoot = { matches: function() { return false; }, querySelector: function() { return swapMarker; } };
+const cacheHitRoot = { matches: function() { return false; }, querySelector: function() { return cacheHitMarker; } };
+const cacheMissRoot = { matches: function() { return false; }, querySelector: function() { return cacheMissMarker; } };
+historyRoot = cacheHitRoot;
+` + scriptBody + `
+window.openVibelyNavigate('/tasks/task-1?from=chat');
+if (ajaxCalls.length !== 1) throw new Error('programmatic navigation did not issue one HTMX request');
+const navigation = ajaxCalls[0];
+if (navigation.method !== 'GET' || navigation.url !== '/tasks/task-1?from=chat') throw new Error('programmatic navigation used the wrong request');
+if (navigation.context.target !== '#main-content' || navigation.context.swap !== 'innerHTML') throw new Error('programmatic navigation changed the main-content swap contract');
+if (!navigation.context.source || navigation.context.source.getAttribute('hx-push-url') !== 'true') throw new Error('programmatic navigation did not opt into HTMX-managed history');
+window.openVibelyNavigate('/tasks/task-2?tab=history', '/tasks/task-2');
+if (ajaxCalls.length !== 2 || ajaxCalls[1].context.source.getAttribute('hx-push-url') !== '/tasks/task-2') throw new Error('programmatic navigation did not preserve an explicit history URL');
+listeners['htmx:afterSwap']({ detail: { target: swapRoot } });
+if (document.title !== 'Tasks - OpenVibely') throw new Error('afterSwap did not apply destination title: ' + document.title);
+listeners['htmx:historyRestore']({ detail: { item: { title: 'Chat - OpenVibely' } } });
+if (document.title !== 'Chat - OpenVibely') throw new Error('cache-hit history restore did not apply restored title: ' + document.title);
+historyRoot = cacheMissRoot;
+listeners['htmx:historyRestore']({ detail: { cacheMiss: true, serverResponse: '<!doctype html><title>History Task - OpenVibely</title>' } });
+if (document.title !== 'History Task - OpenVibely') throw new Error('cache-miss history restore did not apply restored title: ' + document.title);
+`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("rendered client-side title/history synchronization failed: %v\n%s", err, output)
+	}
+}
+
 func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {

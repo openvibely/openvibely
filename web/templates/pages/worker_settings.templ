@@ -42,6 +42,7 @@ templ WorkerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 
 templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
 	<div id="worker-settings-content">
+		@layout.PageTitle("Workers")
 		<h2 class="text-2xl font-bold mb-6">Workers</h2>
 
 		<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
