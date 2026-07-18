@@ -1026,6 +1026,47 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 	}
 }
 
+func TestToolOutputContainerCSS_MatchesPreTaskThemeStyling(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	expected := []string{
+		`[data-theme="light"] .stream-tool-body {`,
+		"border: none;",
+		"background: transparent;",
+		`[data-theme="light"] .stream-tool-body-row {`,
+		"border-top-color: transparent;",
+		`[data-theme="light"] .stream-tool-body-label {`,
+		"color: var(--ov-l-text-muted);",
+		`[data-theme="light"] .stream-tool-body-content {`,
+		"background: var(--ov-l-surface);",
+		`[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {`,
+		`[data-theme="dark"] .stream-tool-body {`,
+		"background: #252a32;",
+		"border-color: #414854;",
+		`[data-theme="dark"] .stream-tool-body-label,`,
+		`[data-theme="dark"] .stream-tool-body-content {`,
+		"border-top-color: #414854;",
+		`[data-theme="dark"] .stream-tool-body-label {`,
+		"color: #aeb5c0;",
+		`[data-theme="dark"] .stream-tool-body-content,`,
+		`[data-theme="dark"] .stream-tool-body-content .stream-tool-output-text {`,
+		"color: #f3f4f6;",
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected pre-task tool container CSS fragment %q", fragment)
+		}
+	}
+
+	if strings.Contains(html, ".stream-tool-output-container") {
+		t.Error("tool output control styling must not add a separate output-container surface")
+	}
+}
+
 func TestToolOutputToggleCSS_UsesCompactInheritedToolCallColorWithoutRestylingContainer(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
@@ -1034,15 +1075,14 @@ func TestToolOutputToggleCSS_UsesCompactInheritedToolCallColorWithoutRestylingCo
 	html := buf.String()
 
 	expected := []string{
+		"[data-theme=\"light\"] .stream-tool-output-toggle {",
+		"color: var(--ov-l-text-strong);",
 		"[data-theme=\"light\"] .stream-tool-output-toggle:hover {",
 		"background: #e5e7eb;",
 		"[data-theme=\"light\"] .stream-tool-output-toggle:active {",
 		"background: #d1d5db;",
-		"[data-theme=\"dark\"] .stream-tool-output-container {",
-		"background: rgba(0, 0, 0, 0.2);",
-		"[data-theme=\"dark\"] .stream-tool-output-container .stream-tool-output-text {",
-		"background: transparent;",
-		"border: none;",
+		"[data-theme=\"dark\"] .stream-tool-output-toggle {",
+		"color: #ffffff;",
 		"[data-theme=\"dark\"] .stream-tool-output-toggle:hover {",
 		"background: rgba(255, 255, 255, 0.1);",
 		"[data-theme=\"dark\"] .stream-tool-output-toggle:active {",
@@ -1065,16 +1105,8 @@ func TestToolOutputToggleCSS_UsesCompactInheritedToolCallColorWithoutRestylingCo
 		}
 	}
 
-	for _, fragment := range []string{
-		"[data-theme=\"light\"] .stream-tool-output-toggle {",
-		"[data-theme=\"dark\"] .stream-tool-output-toggle {",
-		"[data-theme=\"dark\"] .stream-tool-body {",
-		"[data-theme=\"dark\"] .stream-tool-body-content {",
-		"[data-theme=\"dark\"] .stream-tool-body-content .stream-tool-output-text {",
-	} {
-		if strings.Contains(html, fragment) {
-			t.Errorf("tool output toggle styling must inherit the tool-call foreground without restyling its container; found %q", fragment)
-		}
+	if strings.Contains(html, ".stream-tool-output-container") {
+		t.Error("tool output toggle styling must use the original tool container without adding a new surface")
 	}
 }
 

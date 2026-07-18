@@ -4217,7 +4217,7 @@ templ ChatAutoScrollScript() {
 					outLbl.className = 'stream-tool-body-label';
 					outLbl.textContent = 'OUT';
 					var outVal = document.createElement('div');
-					outVal.className = 'stream-tool-body-content stream-tool-output-container';
+					outVal.className = 'stream-tool-body-content';
 					var lineCount = toolOutputLineCount(outputText);
 					var shouldCollapse = lineCount > 1 && lineCount > resolveToolOutputLineCapacity();
 					var stateKey = rowStateKey('out');

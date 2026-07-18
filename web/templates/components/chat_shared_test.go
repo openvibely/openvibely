@@ -4476,7 +4476,7 @@ func TestLargeToolOutputHydrationIsLazyAndStatefulInChrome(t *testing.T) {
 	}
 
 	styles := strings.Join(regexp.MustCompile(`(?s)<style>.*?</style>`).FindAllString(baseHTML.String(), -1), "")
-	html := `<!DOCTYPE html><html lang="en" data-theme="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">` + styles + `</head><body>`
+	html := `<!DOCTYPE html><html lang="en" data-theme="dark" style="--bc: 0.746477 0.0216 264.436"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">` + styles + `<style>html[data-theme="dark"] body { color: oklch(var(--bc)); }</style></head><body>`
 	fixture := `<main id="fixture-root"><div id="streaming-message-large-fixture" class="chat-stream-content chat-bubble-assistant-msg"></div></main><script>` + renderedBaseMarkdownCodeHelpers(t) + `</script>` + chatScript.String() + `<script>
 window.addEventListener('DOMContentLoaded', function() {
   var result = document.getElementById('fixture-root');
@@ -4578,10 +4578,10 @@ window.addEventListener('DOMContentLoaded', function() {
 
     var largeToggle = toggles.find(function(button) { return button.textContent === 'Show output (' + largeLineCount + ' lines)'; });
     if (!largeToggle || largeToggle.tagName !== 'BUTTON' || largeToggle.type !== 'button') fail('large output toggle is not an accessible native button');
-    var largeOutputContainer = largeToggle.closest('.stream-tool-output-container');
+    var largeOutputContainer = largeToggle.closest('.stream-tool-body-content');
     var largeToolName = largeToggle.closest('.stream-tool').querySelector('.tool-name-text');
-    if (!largeOutputContainer || largeOutputContainer !== largeToggle.closest('.stream-tool-body-content')) fail('large output toggle is not contained by the OUT surface');
-    if (!largeToolName || window.getComputedStyle(largeToggle).color !== window.getComputedStyle(largeToolName).color) fail('dark output toggle foreground does not match its tool call');
+    if (!largeOutputContainer || largeOutputContainer.className !== 'stream-tool-body-content') fail('large output toggle is not contained by the original OUT cell');
+    if (!largeToolName || window.getComputedStyle(largeToggle).color !== window.getComputedStyle(largeToolName).color) fail('dark output toggle foreground does not match its tool call: toggle=' + window.getComputedStyle(largeToggle).color + ', tool=' + (largeToolName ? window.getComputedStyle(largeToolName).color : 'missing'));
     var largePreview = largeToggle.closest('.stream-tool-body-content').querySelector('pre.stream-tool-output-preview');
     var previewStyle = window.getComputedStyle(largePreview);
     var previewFontSignature = [previewStyle.fontFamily, previewStyle.fontSize, previewStyle.fontWeight, previewStyle.fontStyle, previewStyle.lineHeight, previewStyle.letterSpacing].join('|');
@@ -4753,7 +4753,7 @@ func TestChatAutoScrollScript_ToolOutputRendersAllTypesAndPreservesScroll(t *tes
 		"el.scrollTop = state.scrollTop",
 		"var outputText = seg.resultOutput ? seg.resultOutput.trim() : ''",
 		"var hasOut = outputText !== ''",
-		"outVal.className = 'stream-tool-body-content stream-tool-output-container'",
+		"outVal.className = 'stream-tool-body-content'",
 		"function toolOutputLineCount(text)",
 		"function toolOutputPreview(text)",
 		"var maxLines = 6",

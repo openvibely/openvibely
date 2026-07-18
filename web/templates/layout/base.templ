@@ -1375,18 +1375,33 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {
 						color: var(--ov-l-text-strong);
 					}
+					[data-theme="light"] .stream-tool-output-toggle {
+						color: var(--ov-l-text-strong);
+					}
 					[data-theme="light"] .stream-tool-output-toggle:hover {
 						background: #e5e7eb;
 					}
 					[data-theme="light"] .stream-tool-output-toggle:active {
 						background: #d1d5db;
 					}
-					[data-theme="dark"] .stream-tool-output-container {
-						background: rgba(0, 0, 0, 0.2);
+					[data-theme="dark"] .stream-tool-body {
+						background: #252a32;
+						border-color: #414854;
 					}
-					[data-theme="dark"] .stream-tool-output-container .stream-tool-output-text {
-						background: transparent;
-						border: none;
+					[data-theme="dark"] .stream-tool-body-label,
+					[data-theme="dark"] .stream-tool-body-content {
+						border-top-color: #414854;
+					}
+					[data-theme="dark"] .stream-tool-body-label {
+						color: #aeb5c0;
+						opacity: 1;
+					}
+					[data-theme="dark"] .stream-tool-body-content,
+					[data-theme="dark"] .stream-tool-body-content .stream-tool-output-text {
+						color: #f3f4f6;
+					}
+					[data-theme="dark"] .stream-tool-output-toggle {
+						color: #ffffff;
 					}
 					[data-theme="dark"] .stream-tool-output-toggle:hover {
 						background: rgba(255, 255, 255, 0.1);
