@@ -396,3 +396,99 @@ type AutomationLiveGraph struct {
 	RecentCutoff      time.Time                   `json:"recent_cutoff"`
 	LegacyWork        []AutomationLegacyWorkGroup `json:"legacy_work,omitempty"`
 }
+
+type AutomationInvocationPage struct {
+	Items      []AutomationInvocation `json:"items"`
+	NextCursor string                 `json:"next_cursor,omitempty"`
+}
+
+type AutomationWorkItemPage struct {
+	Items      []AutomationWorkItem `json:"items"`
+	NextCursor string               `json:"next_cursor,omitempty"`
+}
+
+type AutomationTransitionPage struct {
+	Items      []AutomationTransition `json:"items"`
+	NextCursor string                 `json:"next_cursor,omitempty"`
+}
+
+type AutomationActivityPage struct {
+	Items      []AutomationActivity `json:"items"`
+	NextCursor string               `json:"next_cursor,omitempty"`
+}
+
+type AutomationReplayPosition struct {
+	NodeID string                  `json:"node_id"`
+	State  AutomationPositionState `json:"state"`
+}
+
+type AutomationReplayFrame struct {
+	State      AutomationTransitionState  `json:"state"`
+	OccurredAt time.Time                  `json:"occurred_at"`
+	Positions  []AutomationReplayPosition `json:"positions"`
+}
+
+type AutomationInvocationHistory struct {
+	Invocation     AutomationInvocation     `json:"invocation"`
+	Definition     AutomationDefinition     `json:"definition"`
+	Activities     AutomationActivityPage   `json:"activities"`
+	Transitions    AutomationTransitionPage `json:"transitions"`
+	TouchedNodeIDs []string                 `json:"touched_node_ids"`
+}
+
+type AutomationWorkItemHistory struct {
+	WorkItem    AutomationWorkItem       `json:"work_item"`
+	Definition  AutomationDefinition     `json:"definition"`
+	Activities  AutomationActivityPage   `json:"activities"`
+	Transitions AutomationTransitionPage `json:"transitions"`
+	Replay      []AutomationReplayFrame  `json:"replay"`
+}
+
+type AutomationFunnelPoint struct {
+	NodeID            string  `json:"node_id"`
+	NodeName          string  `json:"node_name"`
+	EnteredCount      int     `json:"entered_count"`
+	ConversionPercent float64 `json:"conversion_percent"`
+}
+
+type AutomationDurationPoint struct {
+	NodeID         string  `json:"node_id"`
+	NodeName       string  `json:"node_name"`
+	SampleCount    int     `json:"sample_count"`
+	AverageSeconds float64 `json:"average_seconds"`
+}
+
+type AutomationFailureSummary struct {
+	NodeID      string    `json:"node_id"`
+	NodeName    string    `json:"node_name"`
+	Count       int       `json:"count"`
+	LastFailure time.Time `json:"last_failure"`
+}
+
+type AutomationBottleneckSummary struct {
+	NodeID   string `json:"node_id"`
+	NodeName string `json:"node_name"`
+	Waiting  int    `json:"waiting"`
+	Blocked  int    `json:"blocked"`
+}
+
+type AutomationMetrics struct {
+	Funnel      []AutomationFunnelPoint       `json:"funnel"`
+	Durations   []AutomationDurationPoint     `json:"durations"`
+	Failures    []AutomationFailureSummary    `json:"failures"`
+	Bottlenecks []AutomationBottleneckSummary `json:"bottlenecks"`
+}
+
+type AutomationHealth struct {
+	State       AutomationHealthState `json:"state"`
+	Reason      string                `json:"reason"`
+	EvaluatedAt time.Time             `json:"evaluated_at"`
+}
+
+type AutomationHistoryDashboard struct {
+	Automation  Automation               `json:"automation"`
+	Invocations AutomationInvocationPage `json:"invocations"`
+	WorkItems   AutomationWorkItemPage   `json:"work_items"`
+	Metrics     AutomationMetrics        `json:"metrics"`
+	Health      AutomationHealth         `json:"health"`
+}

@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -80,7 +81,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true">← Automations</a>
 		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
 			<div class="min-w-0"><h2 class="break-words text-2xl font-bold">{ graph.Automation.Name }</h2><p class="mt-1 max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p></div>
-			<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">Definition</a></div>
+			<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">History</a><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">Definition</a></div>
 		</div>
 		<div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
 			<div class="stat rounded-box bg-base-200/60 p-3"><div class="stat-title text-xs">Active invocations</div><div class="stat-value text-xl">{ fmt.Sprintf("%d", graph.ActiveInvocations) }</div></div>
@@ -194,6 +195,8 @@ templ automationDefinitionContent(definition models.AutomationDefinition, resour
 				<span class="badge badge-primary badge-outline">{ string(definition.Automation.LifecycleState) }</span>
 				<span class="badge badge-ghost">{ definition.Version.AdapterKey }</span>
 				<span class="badge badge-ghost">v{ fmt.Sprintf("%d", definition.Version.Version) }</span>
+				<a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">Live</a>
+				<a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">History</a>
 			</div>
 		</div>
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
@@ -235,6 +238,263 @@ templ automationDefinitionContent(definition models.AutomationDefinition, resour
 		</div>
 	</div>
 }
+
+templ AutomationHistory(projects []models.Project, currentProjectID string, dashboard models.AutomationHistoryDashboard, workItemStatus string) {
+	@layout.Base(dashboard.Automation.Name+" History", projects, currentProjectID) {
+		@automationHistoryContent(dashboard, currentProjectID, workItemStatus)
+	}
+}
+
+templ AutomationHistoryContent(dashboard models.AutomationHistoryDashboard, currentProjectID string, workItemStatus string) {
+	@automationHistoryContent(dashboard, currentProjectID, workItemStatus)
+}
+
+templ automationHistoryContent(dashboard models.AutomationHistoryDashboard, currentProjectID string, workItemStatus string) {
+	<div id="automation-history" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-metrics={ templ.JSONString(automationMetricsJSON(dashboard.Metrics)) }>
+		@layout.PageTitle(dashboard.Automation.Name + " History")
+		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true">← Automations</a>
+		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+			<div><h2 class="text-2xl font-bold">{ dashboard.Automation.Name }</h2><p class="mt-1 text-sm text-base-content/65">Persisted invocation and work-item history.</p></div>
+			<div class="flex flex-wrap items-center gap-2"><span class={ automationHealthBadgeClass(dashboard.Health.State) }>{ string(dashboard.Health.State) }</span><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", dashboard.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", dashboard.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">Live</a><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", dashboard.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", dashboard.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">Definition</a></div>
+		</div>
+		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
+			<div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">Automation health</h3><p class="mt-1 text-sm text-base-content/65">{ dashboard.Health.Reason }</p></div><span class="text-xs text-base-content/55">Evaluated { dashboard.Health.EvaluatedAt.Local().Format("Jan 2, 3:04 PM") }</span></div>
+		</div>
+		<div class="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-2">
+			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Conversion funnel</h3><p class="mt-1 text-xs text-base-content/55">Entered work items relative to the first node with a persisted entry.</p><div class="mt-3 h-72"><canvas id="automation-funnel-chart" aria-label="Automation conversion funnel"></canvas></div></div>
+			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Average node duration</h3><p class="mt-1 text-xs text-base-content/55">First entry into a node until the next persisted transition for the same work item.</p><div class="mt-3 h-72"><canvas id="automation-duration-chart" aria-label="Average automation node duration"></canvas></div></div>
+		</div>
+			<div class="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-2">
+				<div class="rounded-box border border-base-300 bg-base-100 p-4">
+					<h3 class="font-semibold">Recent failures</h3>
+					if len(dashboard.Metrics.Failures) == 0 {
+						<p class="mt-2 text-sm text-base-content/55">No persisted failures in the last 30 days.</p>
+					} else {
+						<div class="mt-3 space-y-2">
+							for _, failure := range dashboard.Metrics.Failures {
+								<div class="flex items-center justify-between gap-3 rounded-lg bg-base-200/60 px-3 py-2 text-sm"><span>{ failure.NodeName }</span><span class="badge badge-error badge-outline">{ fmt.Sprintf("%d", failure.Count) }</span></div>
+							}
+						</div>
+					}
+				</div>
+				<div class="rounded-box border border-base-300 bg-base-100 p-4">
+					<h3 class="font-semibold">Current bottlenecks</h3>
+					if len(dashboard.Metrics.Bottlenecks) == 0 {
+						<p class="mt-2 text-sm text-base-content/55">No waiting or blocked positions.</p>
+					} else {
+						<div class="mt-3 space-y-2">
+							for _, item := range dashboard.Metrics.Bottlenecks {
+								<div class="flex items-center justify-between gap-3 rounded-lg bg-base-200/60 px-3 py-2 text-sm"><span>{ item.NodeName }</span><span class="text-xs">{ fmt.Sprintf("%d waiting · %d blocked", item.Waiting, item.Blocked) }</span></div>
+							}
+						</div>
+					}
+				</div>
+			</div>
+			<div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
+				<section class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Invocations</h3>
+					if len(dashboard.Invocations.Items) == 0 {
+						<p class="mt-2 text-sm text-base-content/55">No invocation history.</p>
+					} else {
+						<div class="mt-3 space-y-2">
+							for _, invocation := range dashboard.Invocations.Items {
+								<a class="block rounded-lg bg-base-200/60 p-3 hover:bg-base-200" href={ templ.URL(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s", dashboard.Automation.ID, invocation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s", dashboard.Automation.ID, invocation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true"><div class="flex items-center justify-between gap-3"><span class="text-sm font-medium">{ automationInvocationLabel(invocation) }</span><span class="badge badge-sm">{ string(invocation.Status) }</span></div><p class="mt-1 text-xs text-base-content/55">{ automationInvocationHistoryTime(invocation).Local().Format("Jan 2, 3:04 PM") }</p></a>
+							}
+						</div>
+					}
+					if dashboard.Invocations.NextCursor != "" {
+						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s&invocation_cursor=%s", dashboard.Automation.ID, currentProjectID, dashboard.Invocations.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s&invocation_cursor=%s", dashboard.Automation.ID, currentProjectID, dashboard.Invocations.NextCursor) } hx-target="#main-content" hx-push-url="true">Next invocations</a>
+					}
+			</section>
+				<section class="rounded-box border border-base-300 bg-base-100 p-4">
+					<div class="flex flex-wrap items-center justify-between gap-3">
+						<h3 class="font-semibold">Work items</h3>
+						<form method="get" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/history", dashboard.Automation.ID)) } hx-get={ fmt.Sprintf("/automations/%s/history", dashboard.Automation.ID) } hx-target="#main-content" hx-push-url="true" class="flex gap-2">
+							<input type="hidden" name="project_id" value={ currentProjectID }/>
+							<select name="work_item_status" class="select select-bordered select-xs">
+								<option value="" selected?={ workItemStatus == "" }>All states</option>
+								for _, state := range []string{"active", "waiting", "blocked", "failed", "completed", "cancelled"} {
+									<option value={ state } selected?={ workItemStatus == state }>{ state }</option>
+								}
+							</select>
+							<button class="btn btn-ghost btn-xs" type="submit">Filter</button>
+						</form>
+					</div>
+					if len(dashboard.WorkItems.Items) == 0 {
+						<p class="mt-2 text-sm text-base-content/55">No work-item history.</p>
+					} else {
+						<div class="mt-3 space-y-2">
+							for _, item := range dashboard.WorkItems.Items {
+								<a class="block rounded-lg bg-base-200/60 p-3 hover:bg-base-200" href={ templ.URL(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s", dashboard.Automation.ID, item.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s", dashboard.Automation.ID, item.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true"><div class="flex items-center justify-between gap-3"><span class="min-w-0 break-words text-sm font-medium">{ automationWorkItemLabel(item) }</span><span class="badge badge-sm">{ string(item.Status) }</span></div><p class="mt-1 text-xs text-base-content/55">Started { item.CreatedAt.Local().Format("Jan 2, 3:04 PM") }</p></a>
+							}
+						</div>
+					}
+					if dashboard.WorkItems.NextCursor != "" {
+						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s&work_item_status=%s&work_item_cursor=%s", dashboard.Automation.ID, currentProjectID, workItemStatus, dashboard.WorkItems.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s&work_item_status=%s&work_item_cursor=%s", dashboard.Automation.ID, currentProjectID, workItemStatus, dashboard.WorkItems.NextCursor) } hx-target="#main-content" hx-push-url="true">Next work items</a>
+					}
+				</section>		</div>
+	</div>
+	<script>
+		(function() {
+			function destroyAutomationHistoryCharts() { var charts = window._automationHistoryCharts || {}; Object.keys(charts).forEach(function(key) { if (charts[key]) charts[key].destroy(); }); window._automationHistoryCharts = {}; }
+			function loadAutomationChartJS() { if (window.Chart) return Promise.resolve(); if (window._automationChartLoader) return window._automationChartLoader; window._automationChartLoader = new Promise(function(resolve, reject) { var script = document.createElement('script'); script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'; script.onload = resolve; script.onerror = reject; document.head.appendChild(script); }); return window._automationChartLoader; }
+			function initAutomationHistoryCharts() { var root = document.getElementById('automation-history'); if (!root) return; var metrics = {}; try { metrics = JSON.parse(root.dataset.automationMetrics || '{}'); } catch (_) { return; } loadAutomationChartJS().then(function() { if (!document.getElementById('automation-history')) return; destroyAutomationHistoryCharts(); var charts = window._automationHistoryCharts; var funnel = metrics.funnel || []; var durations = metrics.durations || []; var funnelCanvas = document.getElementById('automation-funnel-chart'); var durationCanvas = document.getElementById('automation-duration-chart'); if (funnelCanvas) charts.funnel = new Chart(funnelCanvas.getContext('2d'), {type:'bar',data:{labels:funnel.map(function(p){return p.node_name;}),datasets:[{label:'Conversion %',data:funnel.map(function(p){return p.conversion_percent;}),backgroundColor:'rgba(59,130,246,.5)',borderColor:'rgb(59,130,246)',borderWidth:1}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100}},plugins:{legend:{position:'bottom'}}}}); if (durationCanvas) charts.duration = new Chart(durationCanvas.getContext('2d'), {type:'bar',data:{labels:durations.map(function(p){return p.node_name;}),datasets:[{label:'Average seconds',data:durations.map(function(p){return p.average_seconds;}),backgroundColor:'rgba(20,184,166,.5)',borderColor:'rgb(20,184,166)',borderWidth:1}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true}},plugins:{legend:{position:'bottom'}}}}); }).catch(function() {}); }
+			window.initAutomationHistoryCharts = initAutomationHistoryCharts;
+			if (!window._automationHistoryCleanupBound) { window._automationHistoryCleanupBound = true; document.body.addEventListener('htmx:beforeSwap', function(event) { var target = event.detail && event.detail.target; if (target && (target.id === 'main-content' || target.id === 'automation-history' || (target.querySelector && target.querySelector('#automation-history')))) destroyAutomationHistoryCharts(); }); }
+			initAutomationHistoryCharts();
+		})();
+	</script>
+}
+
+templ AutomationInvocationHistory(projects []models.Project, currentProjectID string, history models.AutomationInvocationHistory) {
+	@layout.Base(history.Definition.Automation.Name+" Invocation", projects, currentProjectID) {
+		@automationInvocationHistoryContent(history, currentProjectID)
+	}
+}
+
+templ AutomationInvocationHistoryContent(history models.AutomationInvocationHistory, currentProjectID string) {
+	@automationInvocationHistoryContent(history, currentProjectID)
+}
+
+templ automationInvocationHistoryContent(history models.AutomationInvocationHistory, currentProjectID string) {
+	<div id="automation-invocation-history" class="h-full overflow-y-auto min-w-0 max-w-full">
+		@layout.PageTitle(history.Definition.Automation.Name + " Invocation")
+		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">← History</a>
+		<div class="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-2xl font-bold">Invocation</h2><p class="mt-1 text-sm text-base-content/60">{ automationInvocationLabel(history.Invocation) } · topology v{ fmt.Sprintf("%d", history.Definition.Version.Version) }</p></div><span class="badge">{ string(history.Invocation.Status) }</span></div>
+		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
+			<h3 class="font-semibold">Invocation graph</h3><p class="mt-1 text-xs text-base-content/55">Immutable topology with nodes touched only by this occurrence highlighted.</p>
+			<div class="mt-3 w-full overflow-auto">
+				<svg viewBox={ fmt.Sprintf("0 0 %d %d", automationGraphWidth(history.Definition.Nodes), automationGraphHeight(history.Definition.Nodes)) } class="min-h-[420px] min-w-[900px] w-full" role="img" aria-label="Invocation graph">
+					for _, edge := range history.Definition.Edges {
+						if source, target, ok := automationEdgeNodes(history.Definition.Nodes, edge); ok {
+							<line x1={ fmt.Sprintf("%.0f", source.PositionX+145) } y1={ fmt.Sprintf("%.0f", source.PositionY+55) } x2={ fmt.Sprintf("%.0f", target.PositionX+15) } y2={ fmt.Sprintf("%.0f", target.PositionY+55) } class="stroke-base-content/30" stroke-width="2"></line>
+						}
+					}
+					for _, node := range history.Definition.Nodes {
+						<rect x={ fmt.Sprintf("%.0f", node.PositionX+10) } y={ fmt.Sprintf("%.0f", node.PositionY+20) } width="140" height="70" rx="10" class={ automationInvocationNodeClass(history, node.ID) } stroke-width="3"></rect>
+						<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+55) } text-anchor="middle" class="fill-base-content text-[12px] font-semibold">{ automationNodeLabel(node.Name, 20) }</text>
+					}
+				</svg>
+			</div>
+		</div>
+		<div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
+				<section class="rounded-box border border-base-300 bg-base-100 p-4">
+					<h3 class="font-semibold">Occurrence activities</h3>
+					if len(history.Activities.Items) == 0 {
+						<p class="mt-2 text-sm text-base-content/55">No activities for this occurrence.</p>
+					} else {
+						<div class="mt-3 space-y-2">
+							for _, activity := range history.Activities.Items {
+								<div class="rounded-lg bg-base-200/60 p-3"><div class="flex justify-between gap-3"><span class="text-sm font-medium">{ activity.ActivityType }</span><span class="badge badge-sm">{ string(activity.Status) }</span></div><p class="mt-1 text-xs text-base-content/55">{ activity.StartedAt.Local().Format("Jan 2, 3:04 PM") }</p></div>
+							}
+						</div>
+					}
+					if history.Activities.NextCursor != "" {
+						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Activities.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Activities.NextCursor) } hx-target="#main-content" hx-push-url="true">Next activities</a>
+					}
+				</section>
+			<section class="rounded-box border border-base-300 bg-base-100 p-4">
+				<h3 class="font-semibold">Occurrence transitions</h3>
+				@automationTransitionTimeline(history.Transitions.Items, history.Definition.Nodes)
+				if history.Transitions.NextCursor != "" {
+					<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Transitions.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Transitions.NextCursor) } hx-target="#main-content" hx-push-url="true">Next transitions</a>
+				}
+			</section>
+		</div>
+	</div>
+}
+
+templ AutomationWorkItemHistory(projects []models.Project, currentProjectID string, history models.AutomationWorkItemHistory) {
+	@layout.Base(history.Definition.Automation.Name+" Work Item", projects, currentProjectID) {
+		@automationWorkItemHistoryContent(history, currentProjectID)
+	}
+}
+
+templ AutomationWorkItemHistoryContent(history models.AutomationWorkItemHistory, currentProjectID string) {
+	@automationWorkItemHistoryContent(history, currentProjectID)
+}
+
+templ automationWorkItemHistoryContent(history models.AutomationWorkItemHistory, currentProjectID string) {
+	<div id="automation-work-item-history" class="h-full overflow-y-auto min-w-0 max-w-full" data-replay={ templ.JSONString(automationReplayJSON(history.Replay)) }>
+		@layout.PageTitle(history.Definition.Automation.Name + " Work Item")
+		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">← History</a>
+		<div class="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 class="break-words text-2xl font-bold">{ automationWorkItemLabel(history.WorkItem) }</h2><p class="mt-1 text-sm text-base-content/60">Cross-invocation lifetime · topology v{ fmt.Sprintf("%d", history.Definition.Version.Version) }</p></div><span class="badge">{ string(history.WorkItem.Status) }</span></div>
+		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<div><h3 class="font-semibold">Transition replay</h3><p class="mt-1 text-xs text-base-content/55">Frames come only from append-only persisted transitions.</p></div>
+				if len(history.Replay) > 0 {
+					<span id="automation-replay-label" class="text-xs text-base-content/60"></span>
+				}
+			</div>
+			if len(history.Replay) == 0 {
+				<p class="mt-3 text-sm text-base-content/55">No transitions to replay.</p>
+			} else {
+				<input id="automation-replay-slider" class="range range-primary range-sm mt-4" type="range" min="0" max={ fmt.Sprintf("%d", len(history.Replay)-1) } value="0" aria-label="Replay transition"/>
+				<div class="mt-3 w-full overflow-auto">
+					<svg viewBox={ fmt.Sprintf("0 0 %d %d", automationGraphWidth(history.Definition.Nodes), automationGraphHeight(history.Definition.Nodes)) } class="min-h-[420px] min-w-[900px] w-full" role="img" aria-label="Work item transition replay">
+						for _, edge := range history.Definition.Edges {
+							if source, target, ok := automationEdgeNodes(history.Definition.Nodes, edge); ok {
+								<line x1={ fmt.Sprintf("%.0f", source.PositionX+145) } y1={ fmt.Sprintf("%.0f", source.PositionY+55) } x2={ fmt.Sprintf("%.0f", target.PositionX+15) } y2={ fmt.Sprintf("%.0f", target.PositionY+55) } class="stroke-base-content/30" stroke-width="2"></line>
+							}
+						}
+						for _, node := range history.Definition.Nodes {
+							<rect data-replay-node={ node.ID } x={ fmt.Sprintf("%.0f", node.PositionX+10) } y={ fmt.Sprintf("%.0f", node.PositionY+20) } width="140" height="70" rx="10" class="fill-base-200 stroke-base-content/25" stroke-width="3"></rect>
+							<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+55) } text-anchor="middle" class="fill-base-content text-[12px] font-semibold">{ automationNodeLabel(node.Name, 20) }</text>
+						}
+					</svg>
+				</div>
+			}
+		</div>
+		<div class="grid grid-cols-1 gap-5 xl:grid-cols-2">
+				<section class="rounded-box border border-base-300 bg-base-100 p-4">
+					<h3 class="font-semibold">Activities across invocations</h3>
+					if len(history.Activities.Items) == 0 {
+						<p class="mt-2 text-sm text-base-content/55">No activities.</p>
+					} else {
+						<div class="mt-3 space-y-2">
+							for _, activity := range history.Activities.Items {
+								<div class="rounded-lg bg-base-200/60 p-3"><div class="flex justify-between gap-3"><span class="text-sm font-medium">{ activity.ActivityType }</span><span class="badge badge-sm">{ string(activity.Status) }</span></div><p class="mt-1 text-xs text-base-content/55">{ activity.StartedAt.Local().Format("Jan 2, 3:04 PM") }</p></div>
+							}
+						</div>
+					}
+					if history.Activities.NextCursor != "" {
+						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Activities.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Activities.NextCursor) } hx-target="#main-content" hx-push-url="true">Next activities</a>
+					}
+				</section>
+			<section class="rounded-box border border-base-300 bg-base-100 p-4">
+				<h3 class="font-semibold">Transition timeline</h3>
+				@automationTransitionTimeline(history.Transitions.Items, history.Definition.Nodes)
+				if history.Transitions.NextCursor != "" {
+					<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Transitions.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Transitions.NextCursor) } hx-target="#main-content" hx-push-url="true">Next transitions</a>
+				}
+			</section>
+		</div>
+	</div>
+	<script>
+		(function() { var root = document.getElementById('automation-work-item-history'); if (!root) return; var frames = []; try { frames = JSON.parse(root.dataset.replay || '[]'); } catch (_) {} var slider = document.getElementById('automation-replay-slider'); var label = document.getElementById('automation-replay-label'); function nodeClass(state) { if (state === 'failed') return 'fill-error/15 stroke-error'; if (state === 'blocked') return 'fill-warning/15 stroke-warning'; if (state === 'waiting') return 'fill-info/15 stroke-info'; if (state === 'active') return 'fill-primary/15 stroke-primary'; return 'fill-base-200 stroke-base-content/25'; } function render(index) { var frame = frames[index]; if (!frame) return; var states = {}; (frame.positions || []).forEach(function(p) { states[p.node_id] = p.state; }); root.querySelectorAll('[data-replay-node]').forEach(function(node) { node.setAttribute('class', nodeClass(states[node.dataset.replayNode] || '')); }); if (label) label.textContent = (index + 1) + ' / ' + frames.length + ' · ' + frame.state; } if (slider) { slider.addEventListener('input', function() { render(Number(slider.value)); }); render(0); } })();
+	</script>
+}
+
+templ automationTransitionTimeline(transitions []models.AutomationTransition, nodes []models.AutomationNode) {
+	if len(transitions) == 0 {
+		<p class="mt-2 text-sm text-base-content/55">No transitions.</p>
+	} else {
+		<ol class="mt-3 space-y-3">
+			for _, transition := range transitions {
+				<li class="border-l-2 border-base-300 pl-3"><div class="flex flex-wrap items-center justify-between gap-2"><span class="text-sm font-medium">{ automationNodeName(nodes, transition.ToNodeID) }</span><span class="badge badge-sm">{ string(transition.State) }</span></div><p class="mt-1 text-xs text-base-content/55">{ transition.OccurredAt.Local().Format("Jan 2, 3:04:05 PM") }</p></li>
+			}
+		</ol>
+	}
+}
+
+func automationMetricsJSON(metrics models.AutomationMetrics) string { value, _ := json.Marshal(metrics); return string(value) }
+func automationReplayJSON(frames []models.AutomationReplayFrame) string { value, _ := json.Marshal(frames); return string(value) }
+func automationHealthBadgeClass(state models.AutomationHealthState) string { switch state { case models.AutomationHealthHealthy: return "badge badge-success badge-outline"; case models.AutomationHealthDegraded: return "badge badge-warning badge-outline"; case models.AutomationHealthUnhealthy: return "badge badge-error badge-outline" }; return "badge badge-ghost" }
+func automationInvocationHistoryTime(invocation models.AutomationInvocation) time.Time { if invocation.ScheduledFor != nil { return *invocation.ScheduledFor }; if invocation.StartedAt != nil { return *invocation.StartedAt }; return invocation.CreatedAt }
+func automationInvocationLabel(invocation models.AutomationInvocation) string { if invocation.ScheduledFor != nil { return "Scheduled occurrence" }; return "Invocation " + automationShortID(invocation.ID) }
+func automationWorkItemLabel(item models.AutomationWorkItem) string { if strings.TrimSpace(item.Title) != "" { return item.Title }; return item.Kind + " " + automationShortID(item.ID) }
+func automationShortID(value string) string { if len(value) <= 8 { return value }; return value[:8] }
+func automationNodeName(nodes []models.AutomationNode, nodeID string) string { for _, node := range nodes { if node.ID == nodeID { return node.Name } }; return "Unknown node" }
+func automationInvocationNodeClass(history models.AutomationInvocationHistory, nodeID string) string { for _, touchedNodeID := range history.TouchedNodeIDs { if touchedNodeID == nodeID { return "fill-primary/15 stroke-primary" } }; return "fill-base-200 stroke-base-content/25" }
 
 func automationCardSearchText(card models.AutomationCard) string { return strings.Join([]string{card.Automation.Name, card.Automation.Description, card.Version.AdapterKey, string(card.Automation.LifecycleState), string(card.Automation.HealthState)}, " ") }
 func automationTime(value *time.Time, empty string) string { if value == nil { return empty }; return value.Local().Format("Jan 2, 3:04 PM") }

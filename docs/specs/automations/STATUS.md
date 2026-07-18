@@ -2,11 +2,27 @@
 
 ## Current Phase
 
-Phase 2: Invocations, Work Items, And Live Position (complete).
+Phase 3: History, Replay, And Metrics (complete).
 
 ## Status
 
-Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 implementation, validation, fresh contract audit, and clean checkpoint completed on 2026-07-18.
+Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 complete at checkpoint `2a8f511`. Phase 3 implementation, validation, fresh contract audit, and repairs completed on 2026-07-18.
+
+## Phase 3 Checklist
+
+- [x] Add project-scoped, bounded invocation history ordered by effective occurrence time `COALESCE(scheduled_for, started_at, created_at), id` with an opaque stable cursor and a maximum initial page of 50.
+- [x] Add project-scoped, bounded work-item history ordered by `(created_at, id)`, optional status filtering, and an opaque stable cursor.
+- [x] Add project-scoped invocation graph detail that includes only activities and transitions carrying the selected invocation ID while retaining the invocation's immutable version topology.
+- [x] Add project-scoped work-item history spanning every related invocation, with bounded activities and stable cursor-paginated transitions ordered by `(occurred_at, id)`.
+- [x] Add transition replay frames derived solely from persisted append-only transitions; do not query current Task, Alert, execution, issue, or PR state to reconstruct historical positions.
+- [x] Define funnel conversion as persisted `entered` transitions at each version node divided by the first topology node with a persisted entry, and define node duration as the elapsed time from the first persisted transition into a node to the next persisted transition for that work item.
+- [x] Add bounded set-based funnel, average-duration, recent-failure, and bottleneck summaries with no per-node or per-work-item query loop.
+- [x] Compute and persist Automation health independently from lifecycle: unknown before a completed invocation, healthy after successful trigger/dispatch with no active systemic condition, degraded for isolated recent failures/blocked work, and unhealthy for repeated trigger/dispatch failures.
+- [x] Render History navigation, invocation selection, cross-invocation work-item selection, replay controls/timeline, failure and bottleneck summaries, and Chart.js funnel/duration charts with direct-load and HTMX-safe initialization/cleanup.
+- [x] Keep all payloads compact and escaped; omit prompts, model output, diffs, Alert bodies, credentials, and provider identity metadata.
+- [x] Reject foreign-project automation/invocation/work-item IDs and invalid/tampered cursors according to existing handler conventions.
+- [x] Add repository/service/handler/UI tests for stable pagination under ties, occurrence isolation, cross-invocation lifetime, persisted-transition replay, defined metric boundaries, health/lifecycle independence, empty/partial states, and project isolation.
+- [x] Run Phase 3 generation/build/tests, perform a fresh contract audit, repair all material findings, update this file with concrete evidence, and create a checkpoint commit before Phase 4.
 
 ## Phase 2 Checklist
 
@@ -64,6 +80,10 @@ Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 implementation, validation, fr
 - Added transactional Native Alert provenance from creation through approval, claim/release/reclaim, implementation linkage, processing, execution, and completion while retaining Alert authority and approval semantics.
 - Added repository-qualified GitHub issue/PR identities, pre-call external activity reservation, ambiguous-mutation refusal, exact discovered-issue-to-task binding, issue-to-implementation-to-review transitions, and no prompt/title/URL inference.
 - Added set-based live graph counters/edge activity, deterministic display precedence, compatible prior-version mapping plus visible unmapped work, bounded node resources, compact Automation events, direct/HTMX live UI, event debounce, and visible-page periodic refresh.
+- Added bounded project-scoped invocation, work-item, activity, and transition history with collection/filter-bound opaque cursors and stable tie ordering.
+- Added immutable-version invocation graphs, set-based touched-node projection, cross-invocation work-item timelines, and deterministic replay frames derived only from append-only persisted transitions.
+- Added set-based funnel, first-arrival-to-next-transition duration, recent-failure, and current bottleneck metrics plus persisted health evaluation independent from lifecycle state.
+- Added direct-load and HTMX History, invocation, and work-item views with Chart.js lifecycle cleanup, activity/transition paging, replay controls, compact escaped payloads, empty/partial states, and project isolation.
 
 ## Changed Files
 
@@ -71,6 +91,7 @@ Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 implementation, validation, fr
 - Phase 2 migration/model/repository: `114_automation_runtime.sql`, Automation runtime models/repositories, execution/task/thread-input integration, Alert projection transactions, and migration/runtime tests.
 - Runtime/services/wiring: Scheduler ownership routing, prepared Worker submission, dispatcher/reconciler, execution finalization, server-derived context propagation, Alert and GitHub runtime provenance, compact broadcaster events, and server lifecycle wiring.
 - UI/handlers: project-scoped live/definition/node-resource handlers, Automation tests, portfolio/live/definition templates and generated output, sidebar navigation/project switching/SSE forwarding.
+- Phase 3 history/replay/metrics: Automation history models and repository, graph-service history methods, reconciler health evaluation, History/invocation/work-item handlers and routes, History/replay/Chart.js templates, generated output, and focused service/handler tests.
 - Maintained setup guidance and schemas: Native/GitHub bootstrap skill bodies and exact GitHub source-issue fields on the existing `create_task` action.
 
 ## Current Decisions
@@ -89,6 +110,9 @@ Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 implementation, validation, fr
 - Phase 2 focused `go test ./internal/database ./internal/repository ./internal/service ./internal/handler -run 'TestMigration114|TestAutomation' -count=1 -timeout 180s`: passed.
 - Phase 2 `templ generate` and `go build ./cmd/server`: passed after all audit repairs.
 - Phase 2 full `go test ./internal/... -count=1 -timeout 60s`: passed. The first broad attempt found a touched GitHub bootstrap wording assertion; restoring the required sentence while retaining explicit source-issue fields repaired it, and the fresh full rerun passed every package.
+- Phase 3 focused `go test ./internal/service -run 'TestAutomationHistory' -count=1 -timeout 120s` and `go test ./internal/handler -run 'TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject' -count=1 -timeout 120s`: passed after audit repairs.
+- Phase 3 `go test ./internal/repository ./internal/service ./internal/handler -run 'TestAutomation' -count=1 -timeout 180s`: passed.
+- Phase 3 final `templ generate`, `go build ./cmd/server`, and `go test ./internal/... -count=1 -timeout 60s`: passed every package; `internal/handler` completed in 40.104s and `internal/service` in 42.678s.
 
 ## Audit Findings And Repairs
 
@@ -105,19 +129,25 @@ Phase 1 complete at checkpoint `6ff0e9a`. Phase 2 implementation, validation, fr
 - Added concurrent schedule-poller and shared-task reservation coverage, post-ack reconciler resubmission coverage, actual issue-linked implementation PR coverage, thread-input project-cascade evidence, and direct-load plus HTMX live-page evidence.
 - Repaired Automations project switching and normalized the touched shared SSE listener while retaining existing task/chat/file event behavior.
 - Restored the established GitHub bootstrap instruction required by catalog tests while keeping exact source issue/repository provenance fields.
+- Repaired health evaluation so stale historical failures do not keep an automation degraded after newer successful terminal invocations; health now uses the latest three terminal results plus current blocked/failed positions without changing lifecycle.
+- Repaired aggregate failure timestamp scanning from SQLite text and added recent-failure plus waiting-bottleneck assertions.
+- Repaired duration metrics to start at the first persisted arrival of any state, so waiting/blocked human-gate time is measured until the next work-item transition.
+- Reduced replay JSON to state, occurrence time, and positions so transition metadata, event keys, and internal resource identifiers do not enter the browser DOM.
+- Added stable tie-pagination and cursor-binding coverage for invocations, work items, activities, and transitions; invalid cursors/status filters now return controlled 400 responses.
+- Decoupled invocation graph highlighting from paginated rows through one bounded set-based touched-node query and exposed independent activity pagination for invocation/work-item history.
+- Added direct-load and HTMX assertions for all three History surfaces, Chart.js cleanup, replay controls, empty states, compact payloads, and foreign-project 404 isolation.
 
 ## Open Findings Or Blockers
 
-- None for Phases 1-2.
+- None for Phases 1-3.
 
 ## Remaining Phases
 
-- Phase 3: History, Replay, And Metrics.
 - Phase 4: Templates And Visual Builder.
 
 ## Exact Next Action
 
-Inspect the current Automation live projection, Analytics/Chart.js patterns, pagination handlers, and persisted transition queries; convert Phase 3 history/replay/metrics/health requirements into an explicit checklist before implementing invocation list/detail, work-item timeline, replay, funnel/duration metrics, and health projections.
+Inspect current task/schedule creation services, Chat control registry/executor confirmation paths, existing model usage accounting, and Automation registration publication transactions; initialize the Phase 4 checklist before adding draft/publication journal tables, shared Template/Describe It/Blank normalization, constrained editing, confirmed compilation, and lifecycle controls.
 
 ## Update Contract
 

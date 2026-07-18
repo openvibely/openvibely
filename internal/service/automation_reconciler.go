@@ -124,5 +124,5 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 		}
 		applog.Infof("[automation-reconciler] resubmitted prepared dispatch=%s execution=%s", dispatch.ID, dispatch.ExecutionID)
 	}
-	return nil
+	return r.automationRepo.RecomputeAutomationHealthForAll(ctx, time.Now().UTC(), 100)
 }

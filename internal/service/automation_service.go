@@ -249,3 +249,97 @@ func (s *AutomationGraphService) GetDefinition(ctx context.Context, projectID, a
 	resources, err := s.repo.ListResourceSummaries(ctx, projectID, automationID, definition.Version.ID, 100)
 	return definition, resources, err
 }
+
+func (s *AutomationGraphService) ListInvocations(ctx context.Context, projectID, automationID string, limit int, cursor string) (models.AutomationInvocationPage, error) {
+	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
+	if err != nil || definition == nil {
+		return models.AutomationInvocationPage{}, err
+	}
+	return s.repo.ListAutomationInvocations(ctx, projectID, automationID, limit, cursor)
+}
+
+func (s *AutomationGraphService) ListWorkItems(ctx context.Context, projectID, automationID, status string, limit int, cursor string) (models.AutomationWorkItemPage, error) {
+	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
+	if err != nil || definition == nil {
+		return models.AutomationWorkItemPage{}, err
+	}
+	return s.repo.ListAutomationWorkItems(ctx, projectID, automationID, status, limit, cursor)
+}
+
+func (s *AutomationGraphService) GetInvocationHistory(ctx context.Context, projectID, automationID, invocationID string, limit int, transitionCursor, activityCursor string) (*models.AutomationInvocationHistory, error) {
+	invocation, err := s.repo.GetAutomationInvocation(ctx, projectID, automationID, invocationID)
+	if err != nil || invocation == nil {
+		return nil, err
+	}
+	definition, err := s.repo.GetDefinitionVersion(ctx, projectID, automationID, invocation.VersionID)
+	if err != nil || definition == nil {
+		return nil, err
+	}
+	activities, err := s.repo.ListAutomationActivities(ctx, projectID, automationID, invocationID, "", limit, activityCursor)
+	if err != nil {
+		return nil, err
+	}
+	transitions, err := s.repo.ListAutomationTransitions(ctx, projectID, automationID, invocationID, "", limit, transitionCursor)
+	if err != nil {
+		return nil, err
+	}
+	touchedNodeIDs, err := s.repo.ListAutomationInvocationNodeIDs(ctx, projectID, automationID, invocationID, 100)
+	if err != nil {
+		return nil, err
+	}
+	return &models.AutomationInvocationHistory{Invocation: *invocation, Definition: *definition, Activities: activities,
+		Transitions: transitions, TouchedNodeIDs: touchedNodeIDs}, nil
+}
+
+func (s *AutomationGraphService) GetWorkItemHistory(ctx context.Context, projectID, automationID, workItemID string, limit int, transitionCursor, activityCursor string) (*models.AutomationWorkItemHistory, error) {
+	item, err := s.repo.GetAutomationWorkItem(ctx, projectID, automationID, workItemID)
+	if err != nil || item == nil {
+		return nil, err
+	}
+	definition, err := s.repo.GetDefinitionVersion(ctx, projectID, automationID, item.OriginVersionID)
+	if err != nil || definition == nil {
+		return nil, err
+	}
+	activities, err := s.repo.ListAutomationActivities(ctx, projectID, automationID, "", workItemID, limit, activityCursor)
+	if err != nil {
+		return nil, err
+	}
+	transitions, err := s.repo.ListAutomationTransitions(ctx, projectID, automationID, "", workItemID, limit, transitionCursor)
+	if err != nil {
+		return nil, err
+	}
+	replay, err := s.repo.ReplayAutomationTransitionPage(ctx, projectID, automationID, workItemID, transitionCursor, transitions.Items)
+	if err != nil {
+		return nil, err
+	}
+	return &models.AutomationWorkItemHistory{WorkItem: *item, Definition: *definition, Activities: activities,
+		Transitions: transitions, Replay: replay}, nil
+}
+
+func (s *AutomationGraphService) GetHistoryDashboard(ctx context.Context, projectID, automationID, invocationCursor, workItemStatus, workItemCursor string, now time.Time) (*models.AutomationHistoryDashboard, error) {
+	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
+	if err != nil || definition == nil {
+		return nil, err
+	}
+	invocations, err := s.repo.ListAutomationInvocations(ctx, projectID, automationID, 20, invocationCursor)
+	if err != nil {
+		return nil, err
+	}
+	workItems, err := s.repo.ListAutomationWorkItems(ctx, projectID, automationID, workItemStatus, 20, workItemCursor)
+	if err != nil {
+		return nil, err
+	}
+	metrics, err := s.repo.GetAutomationMetrics(ctx, projectID, automationID, definition.Version.ID, now)
+	if err != nil {
+		return nil, err
+	}
+	health, err := s.repo.RecomputeAutomationHealth(ctx, projectID, automationID, now)
+	if err != nil {
+		return nil, err
+	}
+	definition.Automation.HealthState = health.State
+	definition.Automation.HealthReason = health.Reason
+	definition.Automation.HealthEvaluatedAt = &health.EvaluatedAt
+	return &models.AutomationHistoryDashboard{Automation: definition.Automation, Invocations: invocations,
+		WorkItems: workItems, Metrics: metrics, Health: health}, nil
+}

@@ -32,6 +32,12 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	}})
 	require.NoError(t, err)
 
+	emptyHistory := tc.HTTP().Get(fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, project.ID)).Execute()
+	require.Equal(t, 200, emptyHistory.Code)
+	require.Contains(t, emptyHistory.Body.String(), "No invocation history")
+	require.Contains(t, emptyHistory.Body.String(), "No work-item history")
+	require.Contains(t, emptyHistory.Body.String(), "No terminal invocation yet")
+
 	portfolio := tc.HTTP().Get(fmt.Sprintf("/automations?project_id=%s", project.ID)).Execute()
 	require.Equal(t, 200, portfolio.Code)
 	require.Contains(t, portfolio.Body.String(), "Native SDLC")
@@ -62,7 +68,7 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 		}
 	}
 	binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: producerNode.ID}
-	_, _, err = automationRepo.RecordProjectionEvent(context.Background(), repository.AutomationProjectionEvent{
+	item, _, err := automationRepo.RecordProjectionEvent(context.Background(), repository.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 		WorkItemKey: "handler:item", ActivityKey: "handler:activity", ActivityType: "test", ActivityStatus: models.AutomationActivityRunning,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}},
@@ -72,6 +78,74 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Equal(t, 200, resources.Code)
 	require.Contains(t, resources.Body.String(), "Native Producer")
 	require.NotContains(t, resources.Body.String(), task.Prompt)
+
+	triggerNode := definition.Nodes[0]
+	for _, node := range definition.Nodes {
+		if node.NodeKey == "suggestion_trigger" {
+			triggerNode = node
+		}
+	}
+	var invocationID string
+	require.NoError(t, tc.db.QueryRow(`INSERT INTO automation_invocations
+		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
+		 occurrence_key, status, started_at, completed_at)
+		VALUES (?, ?, ?, ?, 'schedule', ?, 'handler-history', 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		RETURNING id`, project.ID, definition.Automation.ID, definition.Version.ID, triggerNode.ID, schedule.ID).Scan(&invocationID))
+	invocationBinding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
+		InvocationID: invocationID, NodeID: producerNode.ID, WorkItemID: item.ID}
+	_, _, err = automationRepo.RecordProjectionEvent(context.Background(), repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{invocationBinding}}, Binding: invocationBinding,
+		WorkItemKey: "handler:item", ActivityKey: "handler:history", ActivityType: "history", ActivityStatus: models.AutomationActivityCompleted,
+		EventKey: "handler:history:entered", ToNodeID: producerNode.ID, Transition: models.AutomationTransitionEntered,
+		MetadataJSON: `{"provider_token":"must-not-render"}`,
+	})
+	require.NoError(t, err)
+
+	history := tc.HTTP().Get(fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, project.ID)).Execute()
+	require.Equal(t, 200, history.Code)
+	require.Contains(t, history.Body.String(), "Conversion funnel")
+	require.Contains(t, history.Body.String(), "Average node duration")
+	require.Contains(t, history.Body.String(), "initAutomationHistoryCharts")
+	require.Contains(t, history.Body.String(), "destroyAutomationHistoryCharts")
+	require.NotContains(t, history.Body.String(), task.Prompt)
+	historyPartial := tc.HTMX().Get(fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, project.ID)).Execute()
+	require.Equal(t, 200, historyPartial.Code)
+	require.Contains(t, historyPartial.Body.String(), `id="automation-history"`)
+	require.NotContains(t, historyPartial.Body.String(), "<!DOCTYPE html>")
+
+	invocationHistory := tc.HTTP().Get(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s", definition.Automation.ID, invocationID, project.ID)).Execute()
+	require.Equal(t, 200, invocationHistory.Code)
+	require.Contains(t, invocationHistory.Body.String(), "Occurrence activities")
+	require.Contains(t, invocationHistory.Body.String(), "Invocation graph")
+	require.NotContains(t, invocationHistory.Body.String(), task.Prompt)
+	invocationPartial := tc.HTMX().Get(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s", definition.Automation.ID, invocationID, project.ID)).Execute()
+	require.Equal(t, 200, invocationPartial.Code)
+	require.Contains(t, invocationPartial.Body.String(), `id="automation-invocation-history"`)
+	require.NotContains(t, invocationPartial.Body.String(), "<!DOCTYPE html>")
+	workItemHistory := tc.HTTP().Get(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s", definition.Automation.ID, item.ID, project.ID)).Execute()
+	require.Equal(t, 200, workItemHistory.Code)
+	require.Contains(t, workItemHistory.Body.String(), "Cross-invocation lifetime")
+	require.Contains(t, workItemHistory.Body.String(), "Frames come only from append-only persisted transitions")
+	require.Contains(t, workItemHistory.Body.String(), "automation-replay-slider")
+	require.NotContains(t, workItemHistory.Body.String(), "must-not-render")
+	require.NotContains(t, workItemHistory.Body.String(), task.Prompt)
+	workItemPartial := tc.HTMX().Get(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s", definition.Automation.ID, item.ID, project.ID)).Execute()
+	require.Equal(t, 200, workItemPartial.Code)
+	require.Contains(t, workItemPartial.Body.String(), `id="automation-work-item-history"`)
+	require.NotContains(t, workItemPartial.Body.String(), "<!DOCTYPE html>")
+
+	badCursor := tc.HTTP().Get(fmt.Sprintf("/automations/%s/history?project_id=%s&invocation_cursor=tampered", definition.Automation.ID, project.ID)).Execute()
+	require.Equal(t, 400, badCursor.Code)
+	badStatus := tc.HTTP().Get(fmt.Sprintf("/automations/%s/history?project_id=%s&work_item_status=not-a-status", definition.Automation.ID, project.ID)).Execute()
+	require.Equal(t, 400, badStatus.Code)
+	badActivityCursor := tc.HTTP().Get(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&activity_cursor=tampered", definition.Automation.ID, invocationID, project.ID)).Execute()
+	require.Equal(t, 400, badActivityCursor.Code)
+	foreignHistory := tc.HTTP().Get(fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, other.ID)).Execute()
+	require.Equal(t, 404, foreignHistory.Code)
+	foreignInvocation := tc.HTTP().Get(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s", definition.Automation.ID, invocationID, other.ID)).Execute()
+	require.Equal(t, 404, foreignInvocation.Code)
+	foreignWorkItem := tc.HTTP().Get(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s", definition.Automation.ID, item.ID, other.ID)).Execute()
+	require.Equal(t, 404, foreignWorkItem.Code)
 
 	foreign := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, other.ID)).Execute()
 	require.Equal(t, 404, foreign.Code)
