@@ -39,6 +39,7 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 	cards := []models.AutomationCard{
 		{Automation: models.Automation{ID: "automation-a", Name: "Automation A", Description: "First", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"}},
 		{Automation: models.Automation{ID: "automation-b", Name: "Automation B", Description: "Second", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"}},
+		{Automation: models.Automation{ID: "automation-draft", Name: "Visual Draft", Description: "Working design", LifecycleState: models.AutomationDraft}, Version: models.AutomationVersion{ID: "version-draft", Version: 1, State: models.AutomationVersionDraft, AdapterKey: "vision_driver"}},
 	}
 	renderPortfolio := func() string {
 		var out bytes.Buffer
@@ -212,8 +213,16 @@ window.addEventListener('DOMContentLoaded', function() {
 	    await report('progress', 'add-node-submitted');
 	    await waitFor(function() { return !!document.querySelector('[data-node-key="first_step"]'); }, 'new node on blank canvas');
 
-	    await window.openVibelyNavigate('/automations/automation-draft/drafts/version-draft?project_id=project-browser');
-	    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder');
+	    click('#automation-builder > a[href^="/automations?"]', 'Automations back link from blank builder');
+	    await waitFor(portfolioReady, 'portfolio before draft selection');
+	    click('a[href^="/automations/automation-draft/drafts/version-draft?"]', 'draft Automation card');
+	    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder selected from portfolio');
+	    var automationName = document.querySelector('[name="automation_name"]');
+	    if (!automationName) fail('selected draft did not expose an Automation name field');
+	    automationName.value = 'Browser Named Automation';
+	    automationName.dispatchEvent(new Event('input', {bubbles:true}));
+	    var namedCandidate = JSON.parse(document.querySelector('[data-automation-draft-form] [data-candidate-json]').value);
+	    if (namedCandidate.name !== 'Browser Named Automation') fail('Automation name was not synchronized into the saved design');
 	    var draftForm = document.querySelector('[data-automation-draft-form]');
 	    var connectionSubmissions = 0;
 	    draftForm.addEventListener('submit', function(event) {
@@ -254,10 +263,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		    if (!connectedCandidate.edges.some(function(edge) { return edge.from === 'result' && edge.to === 'vision_driver'; })) fail('dragging an existing endpoint did not reconnect the edge');
 			    click('[data-edge-key][data-from="vision_trigger"][data-to="vision_driver"] [data-edge-hit]', 'connection to disconnect');
 			    var disconnect = document.querySelector('[data-automation-disconnect-edge]');
-			    if (!disconnect || disconnect.disabled) fail('selected connection did not enable the visible disconnect action');
+			    if (!disconnect || disconnect.disabled) fail('selected connection did not enable the visible delete action');
+			    if (!disconnect.textContent.includes('Delete connection')) fail('selected connection action is not clearly labeled');
 			    disconnect.click();
 			    connectedCandidate = JSON.parse(candidateInput.value);
-			    if (connectedCandidate.edges.some(function(edge) { return edge.from === 'vision_trigger' && edge.to === 'vision_driver'; })) fail('visible disconnect action did not update the design');
+			    if (connectedCandidate.edges.some(function(edge) { return edge.from === 'vision_trigger' && edge.to === 'vision_driver'; })) fail('visible delete action did not update the design');
 			    var draftNode = document.querySelector('[data-node-key="vision_trigger"]');
 		    var beforeX = JSON.parse(candidateInput.value).nodes[0].position.x;
 		    draftNode.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));

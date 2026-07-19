@@ -36,7 +36,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 		} else {
 			<div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3" data-card-search>
 				for _, card := range cards {
-					<a class="card min-w-0 border border-base-300 bg-base-100 shadow-sm transition hover:border-primary/50 hover:shadow-md" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", card.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", card.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-search-card data-search-text={ automationCardSearchText(card) }>
+					<a class="card min-w-0 border border-base-300 bg-base-100 shadow-sm transition hover:border-primary/50 hover:shadow-md" href={ templ.URL(automationCardURL(card, currentProjectID)) } hx-get={ automationCardURL(card, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-search-card data-search-text={ automationCardSearchText(card) }>
 						<div class="card-body min-w-0 p-5">
 							<div class="flex min-w-0 items-start justify-between gap-3">
 								<div class="min-w-0">
@@ -616,12 +616,13 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 	<div id="automation-builder" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-draft>
 		@layout.PageTitle(page.Result.Candidate.Name)
 		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
-		<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-			<div><h2 class="break-words text-2xl font-bold">{ page.Result.Candidate.Name }</h2>
+		<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
+			<div class="min-w-0 flex-1">
+				<label class="form-control max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
 				if page.Result.Definition.Automation.PublishedVersionID != nil {
-					<p class="mt-1 text-sm text-base-content/65">Editing this Automation. Save the design here, then apply executable changes when ready.</p>
+					<p class="mt-2 text-sm text-base-content/65">Editing this Automation. Save the design here, then apply executable changes when ready.</p>
 				} else {
-					<p class="mt-1 text-sm text-base-content/65">Build the design, save your work, then apply it when it is ready to run.</p>
+					<p class="mt-2 text-sm text-base-content/65">Build the design, save your work, then apply it when it is ready to run.</p>
 				}
 			</div>
 			<div class="flex flex-wrap gap-2"><button class="btn btn-primary btn-sm" type="submit" form="automation-design-form">Save changes</button></div>
@@ -666,12 +667,12 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			}
 			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 				<div class="flex flex-wrap items-start justify-between gap-3">
-					<div><h3 class="font-semibold">Canvas</h3><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect from either side:</span> drag either dot on one node to either dot on another. Click a connection to rewire or delete it.</p></div>
+					<div><h3 class="font-semibold">Canvas</h3><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect from either side:</span> drag either dot on one node to either dot on another. Select a line, then use Delete connection or drag an endpoint to reconnect it.</p></div>
 					<div class="flex flex-wrap items-center gap-2" aria-label="Canvas controls">
 						<div data-automation-node-tool>
 							<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
 						</div>
-						<button class="btn btn-outline btn-sm" type="button" data-automation-disconnect-edge disabled>Disconnect selected</button>
+						<button class="btn btn-outline btn-sm" type="button" data-automation-disconnect-edge disabled title="Select a connection line first">Delete connection</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button><button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button>
 					</div>
 				</div>
@@ -788,7 +789,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					function nodeGroup(key) { return svg.querySelector('[data-node-key="' + CSS.escape(key) + '"]'); }
 					function nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }
 					function syncCandidate() {
-					(candidate.nodes || []).forEach(function(node) {
+						var automationName = builder.querySelector('[data-automation-name]');
+						if (automationName) candidate.name = automationName.value;
+						(candidate.nodes || []).forEach(function(node) {
 						var prefix = 'node_' + node.key + '_';
 						var name = builder.querySelector('[name="' + prefix + 'name"]');
 						if (name) node.name = name.value;
@@ -895,7 +898,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						selectedEdgeKey = group ? group.dataset.edgeKey : '';
 						svg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); });
 						if (disconnectEdge) disconnectEdge.disabled = !selectedEdgeKey;
-						if (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or choose Disconnect selected.';
+						if (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or choose Delete connection.';
 					}
 					function beginReconnect(group, handle, event) {
 						if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection(); var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!points) return;
@@ -1018,9 +1021,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					svg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); });
 					renderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox();
 				});
-				builder.addEventListener('htmx:beforeCleanupElement', function(event) {
-					if (event.target === builder) clearActiveConnection();
-				});
+					builder.addEventListener('htmx:beforeCleanupElement', function(event) {
+						if (event.target === builder) clearActiveConnection();
+					});
+					var automationName = builder.querySelector('[data-automation-name]');
+					if (automationName) automationName.addEventListener('input', syncCandidate);
 					builder.addEventListener('submit', syncCandidate);
 					renderEdges(); syncCandidate();
 				})();
@@ -1090,6 +1095,12 @@ func automationShortID(value string) string { if len(value) <= 8 { return value 
 func automationNodeName(nodes []models.AutomationNode, nodeID string) string { for _, node := range nodes { if node.ID == nodeID { return node.Name } }; return "Unknown node" }
 func automationInvocationNodeClass(history models.AutomationInvocationHistory, nodeID string) string { for _, touchedNodeID := range history.TouchedNodeIDs { if touchedNodeID == nodeID { return "automation-graph-node automation-graph-node--running" } }; return "automation-graph-node automation-graph-node--idle" }
 
+func automationCardURL(card models.AutomationCard, currentProjectID string) string {
+	if card.Automation.PublishedVersionID == nil && card.Version.ID != "" {
+		return fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", card.Automation.ID, card.Version.ID, currentProjectID)
+	}
+	return fmt.Sprintf("/automations/%s?project_id=%s", card.Automation.ID, currentProjectID)
+}
 func automationCardSearchText(card models.AutomationCard) string { return strings.Join([]string{card.Automation.Name, card.Automation.Description, card.Version.AdapterKey, string(card.Automation.LifecycleState), string(card.Automation.HealthState)}, " ") }
 func automationTime(value *time.Time, empty string) string { if value == nil { return empty }; return value.Local().Format("Jan 2, 3:04 PM") }
 func automationGraphViewBox(nodes []models.AutomationNode) string { if len(nodes) == 0 { return "-60 -60 900 540" }; minX, minY := automationGraphLayoutX(nodes[0].PositionX), automationGraphLayoutY(nodes[0].PositionY); maxX, maxY := minX+automationGraphNodeWidth, minY+automationGraphNodeHeight; for _, node := range nodes { x, y := automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY); if x < minX { minX = x }; if y < minY { minY = y }; if x+automationGraphNodeWidth > maxX { maxX = x+automationGraphNodeWidth }; if y+automationGraphNodeHeight > maxY { maxY = y+automationGraphNodeHeight } }; return fmt.Sprintf("%.0f %.0f %.0f %.0f", minX-automationGraphPadding, minY-automationGraphPadding, maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding) }

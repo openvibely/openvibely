@@ -379,6 +379,37 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 - Fresh audit confirmed Add node submits through the existing Automation draft handler/service, line removal only changes draft candidate geometry, custom topology remains non-executable until accepted by a registered adapter, and no identity inference, Register Existing, backfill, migration, or parallel runtime system was introduced.
 - Remaining work for this repair: none; create the clean checkpoint and allow Goal Agent evaluation.
 
+## Post-Completion Draft Selection, Naming, And Connection Deletion Repair
+
+### Repair Checklist
+
+- [x] Make unpublished Automation portfolio cards resolve their latest persisted working version and open its canonical builder URL instead of an empty Live `v0` graph.
+- [x] Make stale or copied `/automations/:id` URLs for unpublished Automations resolve to the same builder: render with canonical `HX-Push-Url` for HTMX and redirect full-page requests.
+- [x] Keep published Automation cards and detail URLs on Live, and preserve project isolation for both draft detail and canonical builder routes.
+- [x] Add an always-visible Automation name field to the builder and persist it through the existing draft update path without losing nodes, edges, positions, or port metadata.
+- [x] Synchronize name edits into every candidate payload so node creation and direct graph manipulation cannot overwrite a newly entered name.
+- [x] Replace ambiguous connection-removal copy with an always-present `Delete connection` canvas action that enables after selecting a line; retain selected-edge endpoint rewiring, on-edge delete, and Delete/Backspace behavior.
+- [x] Add handler and real-Chrome regressions that enter through the portfolio, select an unpublished Automation, mount its persisted nodes and edge, rename it, select and delete a connection, and retain the remaining direct-manipulation behavior.
+- [x] Run generation, build, focused Automation validation, full repository validation, and a fresh routing/accessibility/identity audit; repair every material finding and checkpoint the clean phase.
+
+### Changed Files
+
+- Draft-card version resolution and current-working-design lookup: `internal/service/automation_service.go` and `internal/service/automation_draft_service.go`.
+- Draft-only detail routing and Automation-name form persistence: `internal/handler/automation_handler.go` and `internal/handler/automation_builder_handler.go`.
+- Canonical card links, visible name editing, explicit selected-connection deletion, candidate synchronization, and generated output: `web/templates/pages/automations.templ` and `web/templates/pages/automations_templ.go`.
+- Exact-route handler and production-browser regressions: `internal/handler/automation_handler_test.go` and `web/templates/pages/automations_navigation_browser_test.go`.
+
+### Validation And Audit
+
+- The regression-first handler test failed against checkpoint `fba6883` because the unpublished card linked to `/automations/:id`; that route rendered an empty Live graph with no published topology, no builder controls, and no editable name.
+- Focused handler coverage now proves the portfolio emits the canonical draft URL, full-page and HTMX stale-detail fallbacks resolve to the same persisted builder, published cards remain on Live, foreign-project access fails closed, renaming persists, and the graph is not lost.
+- The production Chrome fixture now returns from an actually empty Blank builder to the portfolio, clicks a real unpublished Automation card, verifies the graph mounts, changes the visible Automation name, and then exercises multi-edge cycles, selection, rewiring, `Delete connection`, node deletion, ordinary wheel pass-through, and pinch zoom in the same mounted design.
+- `templ generate`, `git diff --check`, `go build ./cmd/server`, Automation-focused validation, the exact handler regressions, and `TestAutomationGraphThemeAndHistoryNavigationInChrome`: passed.
+- Final repository validation passed: `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`; every package passed and the desktop linker emitted only the documented non-failing newer-SDK warning.
+- Fresh routing audit confirmed only draft-only Automations are redirected; published Automations with or without a separate working design retain immutable published Live, History, and Definition surfaces.
+- Fresh safety audit confirmed the change only resolves explicit persisted Automation/draft IDs through project-scoped repositories. It adds no Register Existing, detection, inference, confidence scoring, migration, graph backfill, generic execution engine, or replacement task/worker/queue/Workflow/Alert/GitHub system.
+- Remaining work for this repair: none; create the clean checkpoint and allow Goal Agent evaluation.
+
 ## Open Findings Or Blockers
 
 - No code, validation, or Definition of Done blockers remain.
@@ -390,7 +421,7 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 
 ## Exact Next Action
 
-Allow Goal Agent to evaluate the persisted goal against the clean committed implementation, validation, phase-audit, and Definition of Done evidence.
+Allow Goal Agent to evaluate the persisted goal against the clean committed implementation, validation, reopened Phase 4 audit, and concrete Definition of Done evidence.
 
 ## Update Contract
 

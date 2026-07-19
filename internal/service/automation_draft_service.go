@@ -542,6 +542,17 @@ func (s *AutomationDraftService) CreateDraft(ctx context.Context, request Automa
 	}, nil
 }
 
+func (s *AutomationDraftService) GetCurrentDraft(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("automation repository is unavailable")
+	}
+	metadata, err := s.repo.GetLatestAutomationDraftMetadata(ctx, projectID, automationID)
+	if err != nil || metadata == nil {
+		return nil, err
+	}
+	return s.GetDraft(ctx, projectID, automationID, metadata.VersionID)
+}
+
 func (s *AutomationDraftService) GetDraft(ctx context.Context, projectID, automationID, versionID string) (*models.AutomationDraftResult, error) {
 	if s == nil || s.repo == nil {
 		return nil, errors.New("automation repository is unavailable")

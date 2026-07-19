@@ -127,6 +127,9 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 	if candidate == nil {
 		return
 	}
+	if value, exists := automationDraftFormValue(c, "automation_name"); exists && strings.TrimSpace(value) != "" {
+		candidate.Name = strings.TrimSpace(value)
+	}
 	for i := range candidate.Nodes {
 		node := &candidate.Nodes[i]
 		prefix := "node_" + node.Key + "_"

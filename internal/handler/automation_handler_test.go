@@ -52,6 +52,7 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	portfolio := tc.HTTP().Get(fmt.Sprintf("/automations?project_id=%s", project.ID)).Execute()
 	require.Equal(t, 200, portfolio.Code)
 	require.Contains(t, portfolio.Body.String(), "Native SDLC")
+	require.Contains(t, portfolio.Body.String(), fmt.Sprintf(`href="/automations/%s?project_id=%s"`, definition.Automation.ID, project.ID), "published Automations must continue to open Live")
 	require.Contains(t, portfolio.Body.String(), "Published autonomous processes")
 	require.NotContains(t, portfolio.Body.String(), "Register Existing")
 
@@ -185,6 +186,65 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 
 	foreign := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, other.ID)).Execute()
 	require.Equal(t, 404, foreign.Code)
+}
+
+func TestAutomationDraftPortfolioSelectionOpensBuilderAndNamePersists(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Draft Selection Project").Build()
+	other := tc.CreateProject().WithName("Draft Selection Other").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	drafts := service.NewAutomationDraftService(automationRepo, service.NewAutomationAdapterRegistry())
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, nil)
+
+	candidate, err := drafts.BlankCandidate("")
+	require.NoError(t, err)
+	candidate.Name = "Customer Intake"
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "collect", Name: "Collect request", Type: models.AutomationNodeHumanGate, Role: "custom_human_gate", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
+		{Key: "review", Name: "Review request", Type: models.AutomationNodeAgentTask, Role: "custom_agent_task", Config: map[string]any{"prompt": "Review the request", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 280, Y: 0}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{{Key: "collect_review", From: "collect", To: "review", Condition: map[string]any{}}}
+	created, err := drafts.CreateDraft(context.Background(), service.AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	canonicalURL := fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", created.Definition.Automation.ID, created.Definition.Version.ID, project.ID)
+
+	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, 200, portfolio.Code)
+	require.Contains(t, portfolio.Body.String(), canonicalURL, "selecting an unpublished Automation must open its working graph")
+	require.NotContains(t, portfolio.Body.String(), fmt.Sprintf(`href="/automations/%s?project_id=%s"`, created.Definition.Automation.ID, project.ID))
+
+	direct := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", created.Definition.Automation.ID, project.ID)).Execute()
+	require.Equal(t, 303, direct.Code)
+	require.Equal(t, canonicalURL, direct.Header().Get("Location"), "copied draft detail URLs must resolve to the builder")
+
+	selected := tc.HTMX().Get(fmt.Sprintf("/automations/%s?project_id=%s", created.Definition.Automation.ID, project.ID)).Execute()
+	require.Equal(t, 200, selected.Code)
+	require.Equal(t, canonicalURL, selected.Header().Get("HX-Push-Url"))
+	require.Contains(t, selected.Body.String(), `id="automation-builder"`)
+	require.Contains(t, selected.Body.String(), `data-node-key="collect"`)
+	require.Contains(t, selected.Body.String(), `data-edge-key="collect_review"`)
+	require.Contains(t, selected.Body.String(), `name="automation_name"`)
+	require.Contains(t, selected.Body.String(), "Delete connection")
+
+	foreignDetail := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", created.Definition.Automation.ID, other.ID)).Execute()
+	require.Equal(t, 404, foreignDetail.Code)
+	foreignDraft := tc.HTTP().Get(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", created.Definition.Automation.ID, created.Definition.Version.ID, other.ID)).Execute()
+	require.Equal(t, 404, foreignDraft.Code)
+
+	rawCandidate, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	renamed := tc.HTMX().Post(canonicalURL).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(rawCandidate)}, "automation_name": {"Support Triage"},
+	}).Execute()
+	require.Equal(t, 200, renamed.Code)
+	require.Contains(t, renamed.Body.String(), `value="Support Triage"`)
+	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	saved, err := metadata.Candidate()
+	require.NoError(t, err)
+	require.Equal(t, "Support Triage", saved.Name)
+	require.Len(t, saved.Edges, 1, "renaming must preserve the graph")
 }
 
 func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testing.T) {

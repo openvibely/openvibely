@@ -136,6 +136,21 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 		if definition == nil {
 			continue
 		}
+		if definition.Version.ID == "" {
+			metadata, err := s.repo.GetLatestAutomationDraftMetadata(ctx, projectID, automation.ID)
+			if err != nil {
+				return nil, err
+			}
+			if metadata != nil {
+				definition, err = s.repo.GetDefinitionVersion(ctx, projectID, automation.ID, metadata.VersionID)
+				if err != nil {
+					return nil, err
+				}
+				if definition == nil {
+					continue
+				}
+			}
+		}
 		card := models.AutomationCard{Automation: definition.Automation, Version: definition.Version}
 		if definition.Version.ID != "" {
 			card.Resources, err = s.repo.ListResourceSummaries(ctx, projectID, automation.ID, definition.Version.ID, 12)
