@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Post-completion contract repair is reopened after the 2026-07-19 read-only audit. Phases 1-4 remain checkpointed, but Definition of Done completion is not currently proven until the five material findings below are repaired and a fresh read-only audit passes.
+Post-completion graph-editor UX follow-up is complete in the working tree. Phases 1-4 and the five Definition of Done safety repairs remain checkpointed; the connector-preview repair now requires a clean checkpoint followed by the still-pending separate read-only full-objective audit.
 
 ## Status
 
-Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phase 4 implementation and subsequent graph-editor repairs are checkpointed through `00729f7`. The prior full-suite evidence remains historical, but the latest audit invalidated the prior “no blockers” conclusion. This turn is implementing regression-first repairs without weakening explicit Automation identity or adding excluded legacy inference/backfill paths.
+Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phase 4, graph-editor UX repairs, and Definition of Done safety repairs are checkpointed through `221b8d9`. The latest follow-up makes the in-progress drag connector unmistakably visible and adds production-browser evidence without changing graph persistence, publication, runtime behavior, Automation identity, or any stated exclusion.
 
 ## Phase 4 Checklist
 
@@ -454,6 +454,32 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 
 - Safety repair checkpoint `48b7583` is complete; perform the required separate read-only full-objective audit.
 
+## Post-Completion Drag Connector Preview Repair
+
+### Contract Checklist
+
+- [x] Show a connector line immediately after pointer-down and update its endpoint with every matching pointer move until drop or cancellation.
+- [x] Make the in-progress connector visually distinct and easy to see with a thick primary-color stroke and matching directional arrowhead.
+- [x] Paint the preview above existing edges but below graph nodes and ports so crossings remain visible without obscuring endpoints.
+- [x] Keep the preview non-interactive so it cannot intercept or block the destination port during a drop.
+- [x] Cover the exact production Blank/visual-builder pointer drag in real Chrome, including visibility, nonzero geometry, computed stroke width/color, non-interception, consecutive connections, and cycles.
+- [x] Preserve direct two-sided connections, reconnection/deletion, ordinary wheel pass-through, pinch zoom, inert unsupported topology, explicit Automation identity, and all stated exclusions.
+
+### Changed Files
+
+- Connector preview layering, primary arrowhead, visible stroke, and generated output: `web/templates/pages/automations.templ` and `web/templates/pages/automations_templ.go`.
+- Production-browser drag-preview regression: `web/templates/pages/automations_navigation_browser_test.go`.
+
+### Validation And Audit
+
+- Regression-first `go test ./web/templates/pages -run TestAutomationGraphThemeAndHistoryNavigationInChrome -count=1 -timeout 60s` failed against `221b8d9` with `connector preview is too thin to see while dragging`.
+- After repair, `templ generate`, `gofmt`, `git diff --check`, `go build ./cmd/server`, and the focused production Chrome regression passed.
+- Automation-wide validation passed: `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./web/templates/pages -run 'TestMigration11[345]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`.
+- Full repository validation passed: `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`; every package passed and desktop emitted only the documented non-failing newer-SDK linker warning.
+- Fresh diff audit confirmed the preview is painted after durable edge groups and before node groups, carries `pointer-events: none`, uses a non-scaling 4px primary stroke and primary arrowhead, and is cleared through the existing drop/cancel/HTMX cleanup path.
+- The change is presentation and browser coverage only. It adds no persistence/runtime behavior, generic graph executor, parallel task/worker/queue/Workflow/Alert/GitHub system, Register Existing, legacy detection, heuristic inference, migration of old resources, confidence scoring, or graph backfill.
+- Remaining work: create the clean connector-preview checkpoint, then perform the required separate read-only full-objective audit.
+
 ## Open Findings Or Blockers
 
 - No known code or validation blocker remains after implementation audit; qualifying read-only audit is pending.
@@ -464,7 +490,7 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 
 ## Exact Next Action
 
-Start a strict edit-free audit from checkpoint `48b7583`, verify every Definition of Done item and the explicit identity exclusions against current code/tests, and report any material finding without repairing it in that audit pass.
+Create the clean drag-connector-preview checkpoint, then start a strict edit-free audit from that checkpoint, verify every phase contract and Definition of Done item plus explicit identity exclusions against current code/tests, and report any material finding without repairing it in that audit pass.
 ## Update Contract
 
 After every implementation phase, record:

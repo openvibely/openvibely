@@ -719,8 +719,10 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				<div class="automation-canvas-shell relative mt-3 min-h-[calc(100dvh-15rem)] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30" role="region" aria-label="Automation graph builder">
 					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class="h-[calc(100dvh-15rem)] min-h-[42rem] w-full touch-none select-none" role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
 						@automationGraphThemeStyles()
-						<defs><marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker></defs>
-						<line data-automation-edge-preview x1="0" y1="0" x2="0" y2="0" class="automation-graph-edge automation-graph-edge--preview" stroke-width="2" marker-end="url(#automation-draft-arrow)" hidden></line>
+						<defs>
+							<marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker>
+							<marker id="automation-draft-preview-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-preview-arrow"></path></marker>
+						</defs>
 						for _, edge := range page.Result.Candidate.Edges {
 							if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
 								<g class="automation-draft-edge" data-edge-key={ edge.Key } data-from={ edge.From } data-to={ edge.To } tabindex="0" role="group" aria-label={ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) + " connection" }>
@@ -732,6 +734,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								</g>
 							}
 						}
+						<line data-automation-edge-preview x1="0" y1="0" x2="0" y2="0" class="automation-graph-edge automation-graph-edge--preview" marker-end="url(#automation-draft-preview-arrow)" hidden></line>
 						for _, node := range page.Result.Candidate.Nodes {
 							if node.Position != nil {
 								<g class="automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing" data-node-key={ node.Key } data-node-x={ fmt.Sprintf("%.0f", node.Position.X) } data-node-y={ fmt.Sprintf("%.0f", node.Position.Y) } data-default-x={ fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)) } data-default-y={ fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)) } transform={ fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y) } tabindex="0" role="group" aria-label={ node.Name + ", " + string(node.Type) + ", use arrow keys to move" }>
@@ -1128,8 +1131,9 @@ templ automationGraphThemeStyles() {
 	<style>
 		.automation-graph-edge { fill: none; stroke: oklch(var(--bc) / 0.35); vector-effect: non-scaling-stroke; }
 			.automation-graph-edge--highlighted { stroke: oklch(var(--p)); }
-			.automation-graph-edge--preview { stroke: oklch(var(--p)); stroke-dasharray: 6 4; }
-		.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }
+			.automation-graph-edge--preview { stroke: oklch(var(--p)); stroke-width: 4; stroke-linecap: round; vector-effect: non-scaling-stroke; pointer-events: none; }
+			.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }
+			.automation-graph-preview-arrow { fill: oklch(var(--p)); }
 		.automation-graph-node { fill: oklch(var(--b2)); stroke: oklch(var(--bc) / 0.3); vector-effect: non-scaling-stroke; }
 		.automation-graph-node--failed { fill: oklch(var(--er) / 0.15); stroke: oklch(var(--er)); }
 		.automation-graph-node--blocked { fill: oklch(var(--wa) / 0.15); stroke: oklch(var(--wa)); }

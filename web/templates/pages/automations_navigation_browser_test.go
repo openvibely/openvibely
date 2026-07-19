@@ -230,17 +230,24 @@ window.addEventListener('DOMContentLoaded', function() {
 	      event.preventDefault();
 	      event.stopImmediatePropagation();
 	    });
-		    function port(node, side) { return document.querySelector('[data-connect-port="' + node + '"][data-port-side="' + side + '"]'); }
-		    function dragConnection(from, fromSide, to, toSide, pointerId) {
-		      var sourceHandle = port(from, fromSide);
-		      var targetHandle = port(to, toSide);
-		      if (!sourceHandle || !targetHandle) fail('missing two-sided drag connector for ' + from + ' to ' + to);
-		      var sourceRect = sourceHandle.getBoundingClientRect();
-		      var targetRect = targetHandle.getBoundingClientRect();
-		      sourceHandle.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:sourceRect.left+sourceRect.width/2, clientY:sourceRect.top+sourceRect.height/2}));
-		      targetHandle.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
-		      targetHandle.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
-		    }
+	    function port(node, side) { return document.querySelector('[data-connect-port="' + node + '"][data-port-side="' + side + '"]'); }
+	    function dragConnection(from, fromSide, to, toSide, pointerId) {
+	      var sourceHandle = port(from, fromSide);
+	      var targetHandle = port(to, toSide);
+	      if (!sourceHandle || !targetHandle) fail('missing two-sided drag connector for ' + from + ' to ' + to);
+	      var sourceRect = sourceHandle.getBoundingClientRect();
+	      var targetRect = targetHandle.getBoundingClientRect();
+	      sourceHandle.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:sourceRect.left+sourceRect.width/2, clientY:sourceRect.top+sourceRect.height/2}));
+	      targetHandle.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
+	      var preview = document.querySelector('[data-automation-edge-preview]');
+	      if (!preview || preview.hidden) fail('connector preview is not visible while dragging');
+	      if (preview.getAttribute('x1') === preview.getAttribute('x2') && preview.getAttribute('y1') === preview.getAttribute('y2')) fail('connector preview did not follow the pointer');
+	      var previewStyle = getComputedStyle(preview);
+	      if (previewStyle.stroke === 'none' || previewStyle.stroke === 'transparent' || previewStyle.opacity === '0') fail('connector preview has no visible stroke');
+	      if (parseFloat(previewStyle.strokeWidth) < 3) fail('connector preview is too thin to see while dragging');
+	      if (previewStyle.pointerEvents !== 'none') fail('connector preview can block the destination port');
+	      targetHandle.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
+	    }
 		    dragConnection('vision_trigger', 'left', 'vision_driver', 'right', 11);
 		    dragConnection('vision_driver', 'right', 'result', 'left', 12);
 		    dragConnection('result', 'left', 'vision_trigger', 'right', 13);	    var candidateInput = document.querySelector('[data-automation-draft-form] [data-candidate-json]');
