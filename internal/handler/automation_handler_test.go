@@ -254,7 +254,7 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
 	newPage := tc.HTTP().Get("/automations/new?project_id=" + project.ID).Execute()
 	require.Equal(t, 200, newPage.Code)
@@ -282,6 +282,9 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	require.Contains(t, created.Body.String(), `min-h-[calc(100dvh-15rem)]`, "builder canvas must use the available viewport")
 	require.NotContains(t, created.Body.String(), `xl:grid-cols-[minmax(0,1fr)_18rem]`, "node creation must not permanently narrow the canvas")
 	require.Contains(t, created.Body.String(), "Save changes")
+	require.Contains(t, created.Body.String(), `data-delete-automation-open`, "unpublished builders must expose Automation deletion")
+	require.Contains(t, created.Body.String(), `id="delete-automation-modal"`)
+	require.Contains(t, created.Body.String(), `/automations/`, "delete confirmation must submit through the project-scoped lifecycle route")
 	require.NotContains(t, created.Body.String(), "Save draft")
 	require.NotContains(t, created.Body.String(), "Suggested nodes", "blank drafts must not show a template-derived node list")
 	require.Contains(t, created.Body.String(), `data-automation-create-node`, "blank drafts must create named nodes directly")
@@ -294,6 +297,7 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 
 	var automationID, versionID string
 	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
+	require.Contains(t, created.Body.String(), fmt.Sprintf(`/automations/%s/delete?project_id=%s`, automationID, project.ID))
 	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
 	require.NoError(t, err)
 	candidate, err := metadata.Candidate()
@@ -364,6 +368,13 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	candidate, err = metadata.Candidate()
 	require.NoError(t, err)
 	require.Equal(t, "Keep this transition label", candidate.Edges[0].Label, "palette actions must preserve fields absent from their submitted form")
+
+	deleted := tc.HTMX().Post(fmt.Sprintf("/automations/%s/delete?project_id=%s", automationID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	require.Equal(t, 204, deleted.Code)
+	require.Equal(t, "/automations?project_id="+project.ID, deleted.Header().Get("HX-Redirect"))
+	gone, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
+	require.NoError(t, err)
+	require.Nil(t, gone)
 }
 
 func TestAutomationBuilderCreatesCustomNodesAndCyclicDraftConnections(t *testing.T) {

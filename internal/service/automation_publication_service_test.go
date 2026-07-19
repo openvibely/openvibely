@@ -210,6 +210,7 @@ func TestAutomationPublicationPlanGoldenGitHubDependenciesAndConfigurationChange
 	require.NoError(t, err)
 	settingsRepo := repository.NewSettingsRepo(db)
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "github-golden-token"))
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 	userID := int64(42)
 	inbox := &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "dev-inbox", GitHubUserID: &userID, Enabled: true}
@@ -228,13 +229,83 @@ func TestAutomationPublicationPlanGoldenGitHubDependenciesAndConfigurationChange
 	planner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	first, err := planner.Plan(ctx, project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "bb7c0e44c397649f45b852d98cbf590a1dbe3b216544d3bfa29888a4f1a506ca", first.PlanRevision)
+	require.Equal(t, "6189fde192627f42457bf42e532304594cba7a623bb367eba3378679ae368e80", first.PlanRevision)
 
 	inbox.Enabled = false
 	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
 	second, err := planner.Plan(ctx, project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.NotEqual(t, first.PlanRevision, second.PlanRevision, "GitHub inbox enabled state is a compilation dependency")
+	require.Empty(t, second.Effects)
+	require.Equal(t, "github_approval_inbox_unavailable", second.Validation[0].Code)
+}
+
+func TestAutomationGitHubPublicationRequiresExecutableIntegrationAndApprovalCapabilities(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "GitHub publication readiness")
+	project.RepoURL = "https://github.com/example/automation-readiness"
+	require.NoError(t, projectRepo.Update(ctx, &project))
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
+	require.NoError(t, err)
+	planner := NewAutomationPublicationPlanner(automationRepo, repository.NewTaskRepo(db, nil), repository.NewScheduleRepo(db), registry, drafts)
+	planner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
+
+	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Empty(t, plan.Effects, "an unavailable integration must produce no publication effects")
+	require.Equal(t, "github_auth_unavailable", plan.Validation[0].Code)
+
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "configured-token"))
+	plan, err = planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Empty(t, plan.Effects)
+	require.Equal(t, "github_approval_inbox_unavailable", plan.Validation[0].Code)
+
+	inbox := &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "approver", Enabled: false}
+	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
+	plan, err = planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Empty(t, plan.Effects)
+	require.Equal(t, "github_approval_inbox_unavailable", plan.Validation[0].Code)
+
+	inbox.Enabled = true
+	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
+	project.RepoURL = ""
+	require.NoError(t, projectRepo.Update(ctx, &project))
+	plan, err = planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Empty(t, plan.Effects)
+	require.Equal(t, "github_repository_unavailable", plan.Validation[0].Code)
+
+	project.RepoURL = "https://github.com/example/automation-readiness"
+	require.NoError(t, projectRepo.Update(ctx, &project))
+	plan, err = planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Empty(t, plan.Validation)
+	require.NotEmpty(t, plan.Effects)
+
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModeApp))
+	plan, err = planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Empty(t, plan.Effects)
+	require.Equal(t, "github_auth_unavailable", plan.Validation[0].Code)
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAppID, "123"))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAppSlug, "automation-app"))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAppPrivateKey, "configured-private-key"))
+	require.NoError(t, settingsRepo.Set(ctx, githubSettingInstallationID, "456"))
+	plan, err = planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Empty(t, plan.Validation)
+	require.NotEmpty(t, plan.Effects)
 }
 
 func TestAutomationPublicationScheduleIsJournaledDisabledBeforePublish(t *testing.T) {
@@ -418,20 +489,9 @@ func TestAutomationResumePreservesConfiguredDisabledTrigger(t *testing.T) {
 	require.False(t, stored.Enabled, "resume must restore the published trigger configuration, not enable every owner row")
 }
 
-type failUpdateAutomationTaskMutationService struct {
-	inner automationTaskMutationService
-}
-
-func (s *failUpdateAutomationTaskMutationService) Create(ctx context.Context, task *models.Task) error {
-	return s.inner.Create(ctx, task)
-}
-
-func (s *failUpdateAutomationTaskMutationService) Update(context.Context, *models.Task) error {
-	return errors.New("simulated task update failure")
-}
-
-func TestAutomationReplacementFailureKeepsPriorVersionAndSuccessfulRetrySwitchesTrigger(t *testing.T) {
+func TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwitchesTrigger(t *testing.T) {
 	db := testutil.NewTestDB(t)
+	ctx := context.Background()
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Replacement publication")
 	automationRepo := repository.NewAutomationRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -440,25 +500,29 @@ func TestAutomationReplacementFailureKeepsPriorVersionAndSuccessfulRetrySwitches
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
-	created, err := drafts.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
+	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
 	require.NoError(t, err)
 	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
-	realTaskService := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
-	compiler := NewAutomationCompiler(automationRepo, realTaskService, taskRepo, scheduleRepo, planner)
-	plan, err := planner.Plan(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	taskService := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	compiler := NewAutomationCompiler(automationRepo, taskService, taskRepo, scheduleRepo, planner)
+	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
 	require.NoError(t, err)
-	first, err := compiler.Publish(context.Background(), AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+	first, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
 	require.NoError(t, err)
 	firstScheduleID := publishedScheduleID(t, first)
-
-	cloned, err := drafts.ClonePublishedVersion(context.Background(), project.ID, created.Definition.Automation.ID)
+	firstTaskID := publishedTaskID(t, first)
+	priorTask, err := taskRepo.GetByID(ctx, firstTaskID)
 	require.NoError(t, err)
-	operationalBaseline, err := planner.Plan(context.Background(), project.ID, created.Definition.Automation.ID, cloned.Definition.Version.ID)
+	priorPrompt := priorTask.Prompt
+
+	cloned, err := drafts.ClonePublishedVersion(ctx, project.ID, created.Definition.Automation.ID)
+	require.NoError(t, err)
+	operationalBaseline, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, cloned.Definition.Version.ID)
 	require.NoError(t, err)
 	lastRun := time.Now().UTC()
 	nextRun := lastRun.Add(24 * time.Hour)
-	require.NoError(t, scheduleRepo.MarkRan(context.Background(), firstScheduleID, lastRun, &nextRun))
-	operationalUpdate, err := planner.Plan(context.Background(), project.ID, created.Definition.Automation.ID, cloned.Definition.Version.ID)
+	require.NoError(t, scheduleRepo.MarkRan(ctx, firstScheduleID, lastRun, &nextRun))
+	operationalUpdate, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, cloned.Definition.Version.ID)
 	require.NoError(t, err)
 	require.Equal(t, operationalBaseline.PlanRevision, operationalUpdate.PlanRevision, "volatile next-run and last-run state must not stale a publication plan")
 	for i := range cloned.Candidate.Nodes {
@@ -469,32 +533,48 @@ func TestAutomationReplacementFailureKeepsPriorVersionAndSuccessfulRetrySwitches
 			cloned.Candidate.Nodes[i].Config["run_at"] = "10:30"
 		}
 	}
-	cloned, err = drafts.UpdateDraft(context.Background(), created.Definition.Automation.ID, cloned.Definition.Version.ID, project.ID, cloned.Candidate)
+	cloned, err = drafts.UpdateDraft(ctx, created.Definition.Automation.ID, cloned.Definition.Version.ID, project.ID, cloned.Candidate)
 	require.NoError(t, err)
-	replacementPlan, err := planner.Plan(context.Background(), project.ID, created.Definition.Automation.ID, cloned.Definition.Version.ID)
+	replacementPlan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, cloned.Definition.Version.ID)
 	require.NoError(t, err)
-	failingCompiler := NewAutomationCompiler(automationRepo, &failUpdateAutomationTaskMutationService{inner: realTaskService}, taskRepo, scheduleRepo, planner)
-	failed, err := failingCompiler.Publish(context.Background(), AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: cloned.Definition.Version.ID, PlanRevision: replacementPlan.PlanRevision})
-	require.ErrorContains(t, err, "task update failure")
+
+	_, err = db.ExecContext(ctx, `CREATE TRIGGER fail_automation_replacement_schedule
+		BEFORE INSERT ON schedules BEGIN SELECT RAISE(ABORT, 'simulated schedule failure'); END`)
+	require.NoError(t, err)
+	failed, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: cloned.Definition.Version.ID, PlanRevision: replacementPlan.PlanRevision})
+	require.ErrorContains(t, err, "simulated schedule failure")
 	require.NotNil(t, failed)
-	current, err := automationRepo.GetDefinition(context.Background(), project.ID, created.Definition.Automation.ID)
+	current, err := automationRepo.GetDefinition(ctx, project.ID, created.Definition.Automation.ID)
 	require.NoError(t, err)
 	require.Equal(t, first.Definition.Version.ID, current.Version.ID)
-	firstSchedule, err := scheduleRepo.GetByID(context.Background(), firstScheduleID)
+	stillPriorTask, err := taskRepo.GetByID(ctx, firstTaskID)
+	require.NoError(t, err)
+	require.Equal(t, priorPrompt, stillPriorTask.Prompt, "failed replacement must not mutate behavior used by the active version")
+	var stagedTaskStatus string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM automation_publication_steps WHERE attempt_id = ? AND step_key LIKE 'task:%'`, failed.Attempt.ID).Scan(&stagedTaskStatus))
+	require.Equal(t, "running", stagedTaskStatus, "a task update remains staged until version publication commits")
+	firstSchedule, err := scheduleRepo.GetByID(ctx, firstScheduleID)
 	require.NoError(t, err)
 	require.True(t, firstSchedule.Enabled)
 
-	second, err := compiler.Publish(context.Background(), AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: cloned.Definition.Version.ID, PlanRevision: replacementPlan.PlanRevision})
+	_, err = db.ExecContext(ctx, `DROP TRIGGER fail_automation_replacement_schedule`)
+	require.NoError(t, err)
+	second, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: cloned.Definition.Version.ID, PlanRevision: replacementPlan.PlanRevision})
 	require.NoError(t, err)
 	require.Equal(t, cloned.Definition.Version.ID, second.Definition.Version.ID)
 	require.Equal(t, 1, tableCount(t, db, "tasks"), "replacement reuses the owned task")
+	updatedTask, err := taskRepo.GetByID(ctx, firstTaskID)
+	require.NoError(t, err)
+	require.NotEqual(t, priorPrompt, updatedTask.Prompt)
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM automation_publication_steps WHERE attempt_id = ? AND step_key LIKE 'task:%'`, second.Attempt.ID).Scan(&stagedTaskStatus))
+	require.Equal(t, "completed", stagedTaskStatus)
 	require.Equal(t, 2, tableCount(t, db, "schedules"), "cadence changes create a new exclusive trigger")
-	firstSchedule, err = scheduleRepo.GetByID(context.Background(), firstScheduleID)
+	firstSchedule, err = scheduleRepo.GetByID(ctx, firstScheduleID)
 	require.NoError(t, err)
 	require.False(t, firstSchedule.Enabled)
 	newScheduleID := publishedScheduleID(t, second)
 	require.NotEqual(t, firstScheduleID, newScheduleID)
-	owner, err := automationRepo.GetTriggerOwner(context.Background(), newScheduleID)
+	owner, err := automationRepo.GetTriggerOwner(ctx, newScheduleID)
 	require.NoError(t, err)
 	require.NotNil(t, owner)
 	require.Equal(t, second.Definition.Version.ID, owner.VersionID)
@@ -505,6 +585,17 @@ func tableCount(t *testing.T, db interface{ QueryRow(string, ...any) *sql.Row },
 	var count int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM `+table).Scan(&count))
 	return count
+}
+
+func publishedTaskID(t *testing.T, result *AutomationPublishResult) string {
+	t.Helper()
+	for _, resource := range result.Resources {
+		if resource.ResourceType == "task" {
+			return resource.ResourceID
+		}
+	}
+	t.Fatal("published result did not include a task")
+	return ""
 }
 
 func publishedScheduleID(t *testing.T, result *AutomationPublishResult) string {

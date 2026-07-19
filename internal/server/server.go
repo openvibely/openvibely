@@ -602,6 +602,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.GitHubAppPrivateKey,
 		cfg.ProjectRepoRoot,
 	)
+	automationPlanner.SetGitHubConnectionProvider(githubSvc)
 	llmSvc.SetGitHubIssueRuntimeProvider(githubSvc)
 	llmSvc.SetGitHubAuthRepo(githubAuthRepo)
 	llmSvc.SetTaskPullRequestRepo(taskPullRequestRepo)

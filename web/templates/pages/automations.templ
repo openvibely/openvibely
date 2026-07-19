@@ -625,8 +625,24 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<p class="mt-2 text-sm text-base-content/65">Build the design, save your work, then apply it when it is ready to run.</p>
 				}
 			</div>
-			<div class="flex flex-wrap gap-2"><button class="btn btn-primary btn-sm" type="submit" form="automation-design-form">Save changes</button></div>
+			<div class="flex flex-wrap gap-2">
+				<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form">Save changes</button>
+				<button class="btn btn-ghost btn-sm text-error" type="button" data-delete-automation-open onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button>
+			</div>
 		</div>
+		<dialog id="delete-automation-modal" class="modal">
+			<div class="modal-box">
+				@ModalCloseButton("delete-automation-modal", "Close delete automation confirmation")
+				<h3 class="pr-10 text-lg font-bold text-error">Delete automation</h3>
+				<p class="py-4">Delete <strong>{ page.Result.Candidate.Name }</strong>? This permanently deletes this Automation graph and its saved design.</p>
+				<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Existing tasks and schedules remain. Any Automation-owned trigger schedules will be disabled. This cannot be undone.</div>
+				<div class="modal-action">
+					<button class="btn" type="button" onclick="document.getElementById('delete-automation-modal').close()">Cancel</button>
+					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/delete?project_id=%s", page.Result.Definition.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/delete?project_id=%s", page.Result.Definition.Automation.ID, currentProjectID) } hx-swap="none"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-error" type="submit">Delete automation</button></form>
+				</div>
+			</div>
+			<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
+		</dialog>
 		if page.Error != "" {
 			<div class="alert alert-error mb-4" role="alert">{ page.Error }</div>
 		}

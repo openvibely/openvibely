@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Post-completion Phase 4 free-form graph-editor repair is implemented and in final validation. Phases 1-4 and the Definition of Done audit remain complete.
+Post-completion contract repair is reopened after the 2026-07-19 read-only audit. Phases 1-4 remain checkpointed, but Definition of Done completion is not currently proven until the five material findings below are repaired and a fresh read-only audit passes.
 
 ## Status
 
-Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phase 4 implementation, phase validation, repository-wide validation, and the concrete Definition of Done audit completed on 2026-07-18. Subsequent visual-builder, graph-theme/history, persistent-view-navigation, direct-connection, and confirmed-delete repairs are complete with focused Chrome coverage and a passing full repository suite. A reopened Phase 4 editor repair now replaces the constrained click-to-connect interaction with direct free-form draft manipulation while retaining registered-adapter publication boundaries.
+Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phase 4 implementation and subsequent graph-editor repairs are checkpointed through `00729f7`. The prior full-suite evidence remains historical, but the latest audit invalidated the prior “no blockers” conclusion. This turn is implementing regression-first repairs without weakening explicit Automation identity or adding excluded legacy inference/backfill paths.
 
 ## Phase 4 Checklist
 
@@ -410,19 +410,61 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 - Fresh safety audit confirmed the change only resolves explicit persisted Automation/draft IDs through project-scoped repositories. It adds no Register Existing, detection, inference, confidence scoring, migration, graph backfill, generic execution engine, or replacement task/worker/queue/Workflow/Alert/GitHub system.
 - Remaining work for this repair: none; create the clean checkpoint and allow Goal Agent evaluation.
 
+## Reopened Definition Of Done Repair
+
+### Contract Checklist
+
+- [x] Reject GitHub Automation publication unless the selected PAT/App authentication mode is actually configured, the project has an explicit GitHub repository, and the project approval inbox exists and is enabled; return validation with no effects and cover each unavailable capability plus the valid path.
+- [x] Stage replacement task configuration and commit it atomically with successful version publication so any schedule/resource/publication failure leaves the still-active prior version's task behavior unchanged; preserve resumable/idempotent publication.
+- [x] Reject Automation deletion while any owned invocation/dispatch is nonterminal, preserving outbox, reservation, task, and execution recovery state; allow deletion after deterministic terminal reconciliation.
+- [x] Expose the existing confirmed Automation Delete action from unpublished builders and prove draft-only project-scoped deletion through the visible route.
+- [x] Count one failed Live work item once when its failed activity and failed position represent the same provenance; retain failed invocation-only activity visibility.
+- [x] Run formatting/generation, build, focused regression suites, Automation-wide validation, and the full repository suite; record exact evidence.
+- [ ] Perform a separate fresh read-only audit against all phase contracts, Definition of Done items, explicit identity boundaries, and stated exclusions; repair any material finding in a later implementation pass before another audit.
+
+### Regression Evidence
+
+- Regression-first focused execution passed the build but failed all five new contracts against `00729f7`: GitHub planning returned twelve effects with no credential; a forced late schedule failure left the active task prompt changed; deletion succeeded with a submitted dispatch; the Live node reported two failures for one work item; and the Blank builder omitted the Delete control.
+- `TestAutomationGitHubPublicationRequiresExecutableIntegrationAndApprovalCapabilities` now covers missing PAT, absent/disabled inbox, missing project GitHub repository, valid PAT, missing App setup, and valid connected App setup. Invalid plans contain the exact capability validation and no effects.
+- `TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwitchesTrigger` uses a real SQLite schedule-insert failure after the task step is staged. It proves the active task prompt and trigger remain unchanged, the task journal remains `running`, retry reuses resources, and task update plus version switch commit together with journal completion.
+- `TestAutomationDeleteRejectsInFlightDispatchAndPreservesRestartRecovery` creates a leased/submitted dispatch and dispatch-bound execution, proves deletion preserves definition/outbox/reservation/execution state and generic recovery exclusion, then completes through the existing reconciler and proves deletion succeeds only afterward.
+- `TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions` now proves the visible confirmed Delete control and exact project-scoped route remove an unpublished Automation.
+- `TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters` now proves one failed work item represented by both activity and position counts once while a separate invocation-only failed activity remains visible.
+- Focused repaired regressions passed: `go test ./internal/service ./internal/handler -run 'TestAutomationGitHubPublicationRequiresExecutableIntegrationAndApprovalCapabilities|TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwitchesTrigger|TestAutomationDeleteRejectsInFlightDispatchAndPreservesRestartRecovery|TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters|TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions|TestAutomationPublicationPlanGoldenGitHubDependenciesAndConfigurationChanges' -count=1 -timeout 180s`.
+- Automation-wide validation passed: `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./web/templates/pages -run 'TestMigration11[345]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`.
+- Full validation passed: `templ generate`, `git diff --check`, `go build ./...`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`. Every package passed; desktop emitted only the documented non-failing newer-SDK linker warning.
+
+### Changed Files
+
+- GitHub readiness validation and production connection-status wiring: `internal/service/automation_publication_planner.go`, `internal/server/server.go`, and `internal/service/automation_publication_service_test.go`.
+- Atomic replacement task staging/publication: `internal/service/automation_compiler.go`, `internal/repository/automation_publication_repo.go`, and `internal/service/automation_publication_service_test.go`.
+- In-flight deletion guard and restart recovery coverage: `internal/repository/automation_publication_repo.go` and `internal/service/automation_runtime_test.go`.
+- Draft-only confirmed deletion UI and generated output: `web/templates/pages/automations.templ`, `web/templates/pages/automations_templ.go`, and `internal/handler/automation_handler_test.go`.
+- Provenance-deduplicated Live failure counts: `internal/repository/automation_runtime_repo.go` and `internal/service/automation_runtime_test.go`.
+
+### Implementation Audit
+
+- GitHub capability checks run before effect planning, use the configured production `GitHubService` connection status without persisting credentials into the plan, and fail closed on missing approval inbox/repository.
+- Existing-task update steps remain staged as `running`; the repository validates every staged step, applies limited task configuration fields, marks the step complete, switches schedules/ownership/version, and completes the attempt in one `BEGIN IMMEDIATE` transaction.
+- Deletion checks nonterminal invocation/outbox state and dispatch-bound running executions in the same transaction before disabling schedules or deleting metadata.
+- Live failure counts use a set-based union keyed by work-item provenance, with activity identity only for invocation-only failures; no current task/execution/GitHub read was introduced.
+- Source audit found no new generic graph executor, parallel task/worker/queue/Workflow/Alert/GitHub system, Register Existing, legacy detection, heuristic inference, migration of old resources, confidence scoring, or graph backfill.
+
+### Remaining Work
+
+- Create the clean checkpoint, then perform the required separate read-only full-objective audit.
+
 ## Open Findings Or Blockers
 
-- No code, validation, or Definition of Done blockers remain.
-- The selected managed-memory surface is read-only in this task runtime; this repository status ledger contains the current authoritative completion evidence.
+- No known code or validation blocker remains after implementation audit; qualifying read-only audit is pending.
 
 ## Remaining Phases
 
-- None.
+- Fresh read-only Definition of Done audit only.
 
 ## Exact Next Action
 
-Allow Goal Agent to evaluate the persisted goal against the clean committed implementation, validation, reopened Phase 4 audit, and concrete Definition of Done evidence.
-
+Verify the generated candidate and test symbols in the final diff, create the checkpoint commit, then start a strict edit-free audit pass from that commit.
 ## Update Contract
 
 After every implementation phase, record:

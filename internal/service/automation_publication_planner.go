@@ -19,15 +19,20 @@ const (
 	automationCompilerContractVersion = 1
 )
 
+type automationGitHubConnectionProvider interface {
+	GetConnectionStatus(context.Context) (GitHubConnectionStatus, error)
+}
+
 type AutomationPublicationPlanner struct {
-	automationRepo *repository.AutomationRepo
-	taskRepo       *repository.TaskRepo
-	scheduleRepo   *repository.ScheduleRepo
-	registry       *AutomationAdapterRegistry
-	drafts         *AutomationDraftService
-	projectRepo    *repository.ProjectRepo
-	settingsRepo   *repository.SettingsRepo
-	githubAuthRepo *repository.GitHubAuthRepo
+	automationRepo   *repository.AutomationRepo
+	taskRepo         *repository.TaskRepo
+	scheduleRepo     *repository.ScheduleRepo
+	registry         *AutomationAdapterRegistry
+	drafts           *AutomationDraftService
+	projectRepo      *repository.ProjectRepo
+	settingsRepo     *repository.SettingsRepo
+	githubAuthRepo   *repository.GitHubAuthRepo
+	githubConnection automationGitHubConnectionProvider
 }
 
 func NewAutomationPublicationPlanner(automationRepo *repository.AutomationRepo, taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, registry *AutomationAdapterRegistry, drafts *AutomationDraftService) *AutomationPublicationPlanner {
@@ -38,6 +43,10 @@ func (p *AutomationPublicationPlanner) SetCapabilityDependencies(projectRepo *re
 	p.projectRepo = projectRepo
 	p.settingsRepo = settingsRepo
 	p.githubAuthRepo = githubAuthRepo
+}
+
+func (p *AutomationPublicationPlanner) SetGitHubConnectionProvider(provider automationGitHubConnectionProvider) {
+	p.githubConnection = provider
 }
 
 type automationPlanCanonical struct {
@@ -115,6 +124,14 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 		return plan, nil
 	}
 	adapter, _ := p.registry.Get(candidate.AdapterKey)
+	dependencies, capabilityIssues, err := p.capabilityDependencies(ctx, projectID, candidate.AdapterKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(capabilityIssues) > 0 {
+		plan.Validation = append(plan.Validation, capabilityIssues...)
+		return plan, nil
+	}
 	published, err := p.automationRepo.GetDefinition(ctx, projectID, automationID)
 	if err != nil {
 		return nil, err
@@ -129,7 +146,6 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 	for _, node := range candidate.Nodes {
 		candidateNodes[node.Key] = node
 	}
-	var dependencies []automationPlanDependency
 	for _, node := range adapter.Nodes {
 		candidateNode := candidateNodes[node.Key]
 		if node.AllowedResources["task"] {
@@ -160,11 +176,6 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 			plan.Effects = append(plan.Effects, models.AutomationPublicationEffect{StepKey: "disable:schedule:" + node.Key, Operation: "disable", TargetKey: "schedule:" + node.Key + ":previous", ResourceType: "schedule", Name: node.Name, ResourceID: dependency.ID})
 		}
 	}
-	capabilityDependencies, err := p.capabilityDependencies(ctx, projectID, candidate.AdapterKey)
-	if err != nil {
-		return nil, err
-	}
-	dependencies = append(dependencies, capabilityDependencies...)
 	sort.SliceStable(dependencies, func(i, j int) bool {
 		if dependencies[i].Type != dependencies[j].Type {
 			return dependencies[i].Type < dependencies[j].Type
@@ -186,45 +197,98 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 	return plan, nil
 }
 
-func (p *AutomationPublicationPlanner) capabilityDependencies(ctx context.Context, projectID, adapterKey string) ([]automationPlanDependency, error) {
+func (p *AutomationPublicationPlanner) capabilityDependencies(ctx context.Context, projectID, adapterKey string) ([]automationPlanDependency, []models.AutomationValidationIssue, error) {
 	var dependencies []automationPlanDependency
+	var issues []models.AutomationValidationIssue
+	var project *models.Project
 	if p.projectRepo != nil {
-		project, err := p.projectRepo.GetByID(ctx, projectID)
+		var err error
+		project, err = p.projectRepo.GetByID(ctx, projectID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if project == nil {
-			return nil, errors.New("project not found")
+			return nil, nil, errors.New("project not found")
 		}
 		dependencies = append(dependencies, automationPlanDependency{Type: "project", ID: project.ID,
 			ProjectID: project.ID, NodeKey: "", Configured: map[string]any{"repository_url": strings.TrimSpace(project.RepoURL)}})
 	}
 	if adapterKey != AutomationAdapterGitHubSDLC {
-		return dependencies, nil
+		return dependencies, nil, nil
 	}
-	configured := map[string]any{"auth_mode": "", "inbox_login": "", "inbox_user_id": nil, "inbox_enabled": false}
+
+	configured := map[string]any{"auth_mode": "", "auth_configured": false, "inbox_login": "", "inbox_user_id": nil, "inbox_enabled": false}
+	authConfigured := false
 	if p.settingsRepo != nil {
 		mode, err := p.settingsRepo.Get(ctx, GitHubSettingAuthMode)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		mode = strings.ToLower(strings.TrimSpace(mode))
 		configured["auth_mode"] = mode
+		switch mode {
+		case GitHubAuthModePAT:
+			pat, getErr := p.settingsRepo.Get(ctx, GitHubSettingPAT)
+			if getErr != nil {
+				return nil, nil, getErr
+			}
+			authConfigured = strings.TrimSpace(pat) != ""
+		case GitHubAuthModeApp:
+			appID, getErr := p.settingsRepo.Get(ctx, GitHubSettingAppID)
+			if getErr != nil {
+				return nil, nil, getErr
+			}
+			appSlug, getErr := p.settingsRepo.Get(ctx, GitHubSettingAppSlug)
+			if getErr != nil {
+				return nil, nil, getErr
+			}
+			privateKey, getErr := p.settingsRepo.Get(ctx, GitHubSettingAppPrivateKey)
+			if getErr != nil {
+				return nil, nil, getErr
+			}
+			installationID, getErr := p.settingsRepo.Get(ctx, githubSettingInstallationID)
+			if getErr != nil {
+				return nil, nil, getErr
+			}
+			authConfigured = strings.TrimSpace(appID) != "" && strings.TrimSpace(appSlug) != "" && strings.TrimSpace(privateKey) != "" && strings.TrimSpace(installationID) != ""
+		}
 	}
+	if p.githubConnection != nil {
+		status, err := p.githubConnection.GetConnectionStatus(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		configured["auth_mode"] = status.AuthMode
+		authConfigured = status.Configured && status.Connected
+	}
+	configured["auth_configured"] = authConfigured
+	if !authConfigured {
+		issues = append(issues, models.AutomationValidationIssue{Code: "github_auth_unavailable", Message: "Configure the selected GitHub authentication mode before publishing this Automation."})
+	}
+
+	inboxReady := false
 	if p.githubAuthRepo != nil {
 		inbox, err := p.githubAuthRepo.GetProjectInbox(ctx, projectID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if inbox != nil {
 			configured["inbox_login"] = inbox.GitHubLogin
 			configured["inbox_enabled"] = inbox.Enabled
+			inboxReady = inbox.Enabled && strings.TrimSpace(inbox.GitHubLogin) != ""
 			if inbox.GitHubUserID != nil {
 				configured["inbox_user_id"] = *inbox.GitHubUserID
 			}
 		}
 	}
+	if !inboxReady {
+		issues = append(issues, models.AutomationValidationIssue{Code: "github_approval_inbox_unavailable", Message: "Enable a project GitHub approval inbox before publishing this Automation."})
+	}
+	if project == nil || strings.TrimSpace(project.RepoURL) == "" {
+		issues = append(issues, models.AutomationValidationIssue{Code: "github_repository_unavailable", Message: "Configure an explicit GitHub repository for this project before publishing this Automation."})
+	}
 	dependencies = append(dependencies, automationPlanDependency{Type: "integration", ID: "github", ProjectID: projectID, Configured: configured})
-	return dependencies, nil
+	return dependencies, issues, nil
 }
 
 func canonicalAutomationPlanCandidate(candidate models.AutomationDraftCandidate) automationPlanCandidateCanonical {

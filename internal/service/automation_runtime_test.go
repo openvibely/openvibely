@@ -150,6 +150,47 @@ func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.
 	require.Zero(t, reservations)
 }
 
+func TestAutomationDeleteRejectsInFlightDispatchAndPreservesRestartRecovery(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, now, fixture.schedule.ComputeNextRun(now))
+	require.NoError(t, err)
+	require.NotNil(t, dispatch)
+	leased, err := fixture.repo.LeaseNextDispatch(ctx, "deleting-process", now, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, dispatch.ID, leased.ID)
+	execution, err := fixture.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "deleting-process")
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.MarkDispatchSubmitted(ctx, dispatch.ID, "deleting-process", execution.ID))
+
+	lifecycle := NewAutomationLifecycleService(fixture.repo, fixture.schedRepo)
+	err = lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID)
+	require.ErrorContains(t, err, "in-flight")
+	definition, err := fixture.repo.GetDefinition(ctx, fixture.project.ID, fixture.definition.Automation.ID)
+	require.NoError(t, err)
+	require.NotNil(t, definition, "rejected deletion must preserve Automation recovery ownership")
+	var outboxRows, reservationRows, executionRows int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&outboxRows))
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservationRows))
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM executions WHERE id = ? AND dispatch_id = ?`, execution.ID, dispatch.ID).Scan(&executionRows))
+	require.Equal(t, 1, outboxRows)
+	require.Equal(t, 1, reservationRows)
+	require.Equal(t, 1, executionRows)
+	recovered, err := repository.NewExecutionRepo(fixture.repo.DB()).RecoverStaleRunningTaskExecutions(ctx)
+	require.NoError(t, err)
+	require.Zero(t, recovered, "generic recovery must leave the preserved dispatch to Automation reconciliation")
+
+	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Complete(ctx, execution.ID, models.ExecCompleted, "ok", "", 1, 1))
+	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCompleted))
+	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
+	require.NoError(t, reconciler.ReconcileOnce(ctx))
+	var outboxStatus string
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&outboxStatus))
+	require.Equal(t, "completed", outboxStatus)
+	require.NoError(t, lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID), "terminal reconciliation must make deletion safe")
+}
+
 func TestAutomationRuntimeSchedulerRoutesOwnedTriggerAtomically(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	require.NoError(t, fixture.taskRepo.UpdateCategory(context.Background(), fixture.task.ID, models.CategoryActive))
@@ -955,6 +996,15 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 		})
 		require.NoError(t, err)
 	}
+	invocation, _, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	invocationBinding := binding
+	invocationBinding.InvocationID = invocation.ID
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{invocationBinding}}, Binding: invocationBinding,
+		ActivityKey: "mixed:invocation-only-failure", ActivityType: "test", ActivityStatus: models.AutomationActivityFailed,
+	})
+	require.NoError(t, err)
 	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
 	require.NoError(t, err)
 	for _, node := range graph.Nodes {
@@ -964,7 +1014,7 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 		require.Greater(t, node.Counts.Running, 0)
 		require.Greater(t, node.Counts.Waiting, 0)
 		require.Greater(t, node.Counts.Blocked, 0)
-		require.Greater(t, node.Counts.Failed, 0)
+		require.Equal(t, 2, node.Counts.Failed, "one failed work item must count once while an invocation-only failure remains visible")
 		require.Equal(t, "failed", node.DisplayState)
 	}
 }

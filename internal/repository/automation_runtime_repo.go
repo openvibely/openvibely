@@ -1004,7 +1004,7 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 	rows, err := r.db.QueryContext(ctx, `SELECT node_id,
 		SUM(CASE WHEN status IN ('pending','running') THEN 1 ELSE 0 END),
 		SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END),
+		0,
 		SUM(CASE WHEN status = 'completed' AND completed_at >= ? THEN 1 ELSE 0 END)
 		FROM automation_activities WHERE project_id = ? AND automation_id = ? AND version_id = ?
 		GROUP BY node_id`, recentCutoff.UTC(), projectID, automationID, versionID)
@@ -1025,8 +1025,7 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 	}
 	positionRows, err := r.db.QueryContext(ctx, `SELECT node_id,
 		SUM(CASE WHEN state = 'waiting' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END)
+		SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END)
 		FROM automation_work_item_positions WHERE project_id = ? AND automation_id = ? AND version_id = ?
 		GROUP BY node_id`, projectID, automationID, versionID)
 	if err != nil {
@@ -1034,18 +1033,43 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 	}
 	for positionRows.Next() {
 		var nodeID string
-		var waiting, blocked, failed int
-		if err := positionRows.Scan(&nodeID, &waiting, &blocked, &failed); err != nil {
+		var waiting, blocked int
+		if err := positionRows.Scan(&nodeID, &waiting, &blocked); err != nil {
 			_ = positionRows.Close()
 			return nil, 0, 0, err
 		}
 		value := counts[nodeID]
 		value.Waiting += waiting
 		value.Blocked += blocked
-		value.Failed += failed
 		counts[nodeID] = value
 	}
 	if err := positionRows.Close(); err != nil {
+		return nil, 0, 0, err
+	}
+	failedRows, err := r.db.QueryContext(ctx, `SELECT node_id, COUNT(*) FROM (
+		SELECT node_id, CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END AS failure_key
+		FROM automation_activities
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND status = 'failed'
+		UNION
+		SELECT node_id, 'work:' || work_item_id AS failure_key
+		FROM automation_work_item_positions
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state = 'failed'
+	) GROUP BY node_id`, projectID, automationID, versionID, projectID, automationID, versionID)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	for failedRows.Next() {
+		var nodeID string
+		var failed int
+		if err := failedRows.Scan(&nodeID, &failed); err != nil {
+			_ = failedRows.Close()
+			return nil, 0, 0, err
+		}
+		value := counts[nodeID]
+		value.Failed = failed
+		counts[nodeID] = value
+	}
+	if err := failedRows.Close(); err != nil {
 		return nil, 0, 0, err
 	}
 	transitionRows, err := r.db.QueryContext(ctx, `SELECT to_node_id, COUNT(*) FROM automation_transitions

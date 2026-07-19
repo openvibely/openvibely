@@ -128,12 +128,20 @@ func (c *AutomationCompiler) Publish(ctx context.Context, request AutomationPubl
 			_ = c.automationRepo.MarkPublicationStep(ctx, snapshot.Attempt.ID, step.StepKey, "ambiguous", ambiguousResourceID, compileErr.Error())
 			return c.failPublication(ctx, request, snapshot.Attempt.ID, compileErr)
 		}
-		if err := c.automationRepo.MarkPublicationStep(ctx, snapshot.Attempt.ID, step.StepKey, "completed", resourceID, ""); err != nil {
+		completedStatus := "completed"
+		if effect.ResourceType == "task" && effect.Operation == "update" {
+			completedStatus = "running"
+		}
+		if err := c.automationRepo.MarkPublicationStep(ctx, snapshot.Attempt.ID, step.StepKey, completedStatus, resourceID, ""); err != nil {
 			return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
 		}
 		resources[step.StepKey] = resourceID
 	}
-	published, err := c.automationRepo.PublishDraftVersion(ctx, snapshot.Attempt.ID)
+	taskUpdates, err := publicationTaskUpdates(definition, candidate, effects, resources)
+	if err != nil {
+		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
+	}
+	published, err := c.automationRepo.PublishDraftVersion(ctx, snapshot.Attempt.ID, taskUpdates)
 	if err != nil {
 		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
 	}
@@ -204,15 +212,36 @@ func (c *AutomationCompiler) compileTask(ctx context.Context, request Automation
 		return "", errors.New("publication task reconciliation found unrelated work")
 	}
 	if effect.Operation == "update" {
-		task.Title = automationTaskTitle(definition.Automation, node)
-		task.Prompt = prompt
-		task.Category = models.TaskCategory(category)
-		task.Priority = priority
-		if err := c.taskSvc.Update(ctx, task); err != nil {
-			return "", err
-		}
+		// Existing task behavior belongs to the active published version until the
+		// replacement version is durable. The desired fields are applied inside
+		// PublishDraftVersion's transaction after every external resource step has
+		// completed, so a failed or crashed attempt cannot partially switch behavior.
+		return task.ID, nil
 	}
 	return task.ID, nil
+}
+
+func publicationTaskUpdates(definition *models.AutomationDefinition, candidate models.AutomationDraftCandidate, effects map[string]models.AutomationPublicationEffect, resources map[string]string) ([]repository.AutomationPublicationTaskUpdate, error) {
+	var updates []repository.AutomationPublicationTaskUpdate
+	for _, node := range candidate.Nodes {
+		stepKey := "task:" + node.Key
+		effect, ok := effects[stepKey]
+		if !ok || effect.ResourceType != "task" || effect.Operation != "update" {
+			continue
+		}
+		taskID := resources[stepKey]
+		if taskID == "" {
+			return nil, fmt.Errorf("publication task update %q has no reconciled resource", stepKey)
+		}
+		prompt, _ := node.Config["prompt"].(string)
+		category, _ := node.Config["category"].(string)
+		priority, _ := draftInt(node.Config["priority"])
+		updates = append(updates, repository.AutomationPublicationTaskUpdate{
+			StepKey: stepKey, TaskID: taskID, Title: automationTaskTitle(definition.Automation, node),
+			Prompt: prompt, Category: models.TaskCategory(category), Priority: priority,
+		})
+	}
+	return updates, nil
 }
 
 func (c *AutomationCompiler) compileSchedule(ctx context.Context, attemptID string, request AutomationPublishRequest, node models.AutomationDraftNode, effect models.AutomationPublicationEffect, resources map[string]string) (string, error) {

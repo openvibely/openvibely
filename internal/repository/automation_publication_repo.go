@@ -18,7 +18,17 @@ type AutomationPublicationSnapshot struct {
 	Steps   []models.AutomationPublicationStep
 }
 
+type AutomationPublicationTaskUpdate struct {
+	StepKey  string
+	TaskID   string
+	Title    string
+	Prompt   string
+	Category models.TaskCategory
+	Priority int
+}
+
 var ErrAutomationPublicationInProgress = errors.New("automation publication is already in progress")
+var ErrAutomationDispatchInFlight = errors.New("automation has in-flight dispatch work")
 
 func (r *AutomationRepo) AcquirePublicationAttempt(ctx context.Context, attemptID, owner string, now time.Time, lease time.Duration) error {
 	if attemptID == "" || owner == "" || lease <= 0 {
@@ -183,7 +193,7 @@ func AutomationCompilerTaskCreatedVia(automationID, nodeKey string) string {
 	return "automation:" + automationID + ":" + nodeKey
 }
 
-func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID string) (*models.AutomationDefinition, error) {
+func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID string, taskUpdates []AutomationPublicationTaskUpdate) (*models.AutomationDefinition, error) {
 	conn, err := r.db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -220,7 +230,8 @@ func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID stri
 		return definition, nil
 	}
 	for _, step := range snapshot.Steps {
-		if step.Status != "completed" {
+		stagedTaskUpdate := step.Operation == "update" && step.ResourceType == "task" && step.Status == "running" && step.ResourceID != ""
+		if step.Status != "completed" && !stagedTaskUpdate {
 			return nil, fmt.Errorf("publication step %q is not complete", step.StepKey)
 		}
 	}
@@ -265,6 +276,41 @@ func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID stri
 	for _, node := range candidate.Nodes {
 		if enabled, ok := node.Config["enabled"].(bool); ok {
 			scheduleEnabled[node.Key] = enabled
+		}
+	}
+	stepsByKey := make(map[string]models.AutomationPublicationStep, len(snapshot.Steps))
+	for _, step := range snapshot.Steps {
+		stepsByKey[step.StepKey] = step
+	}
+	appliedTaskUpdates := make(map[string]bool, len(taskUpdates))
+	for _, update := range taskUpdates {
+		step, ok := stepsByKey[update.StepKey]
+		if !ok || step.Operation != "update" || step.ResourceType != "task" || step.Status != "running" || step.ResourceID == "" || step.ResourceID != update.TaskID {
+			return nil, fmt.Errorf("publication task update %q does not match a staged update step", update.StepKey)
+		}
+		result, updateErr := conn.ExecContext(ctx, `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND project_id = ?`, update.Title, update.Prompt, update.Category, update.Priority, update.TaskID, snapshot.Attempt.ProjectID)
+		if updateErr != nil {
+			if strings.Contains(updateErr.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
+				return nil, ErrDuplicateTask
+			}
+			return nil, fmt.Errorf("applying publication task update: %w", updateErr)
+		}
+		if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
+			return nil, rowsErr
+		} else if affected != 1 {
+			return nil, errors.New("publication task update target is unavailable")
+		}
+		if _, updateErr := conn.ExecContext(ctx, `UPDATE automation_publication_steps
+			SET status = 'completed', error_message = '', updated_at = CURRENT_TIMESTAMP
+			WHERE attempt_id = ? AND step_key = ? AND status = 'running'`, attemptID, update.StepKey); updateErr != nil {
+			return nil, updateErr
+		}
+		appliedTaskUpdates[update.StepKey] = true
+	}
+	for _, step := range snapshot.Steps {
+		if step.Operation == "update" && step.ResourceType == "task" && step.Status == "running" && !appliedTaskUpdates[step.StepKey] {
+			return nil, fmt.Errorf("staged publication task update %q is missing", step.StepKey)
 		}
 	}
 	newSchedules := map[string]bool{}
@@ -510,6 +556,19 @@ func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automa
 			return errors.New("automation not found")
 		}
 		return err
+	}
+	var inFlight int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*)
+		FROM automation_invocations i
+		LEFT JOIN automation_dispatch_outbox d ON d.invocation_id = i.id
+		WHERE i.project_id = ? AND i.automation_id = ?
+		  AND (i.status IN ('claimed','dispatched','running')
+		    OR d.status IN ('pending','processing','submitted')
+		    OR EXISTS (SELECT 1 FROM executions e WHERE e.dispatch_id = d.id AND e.status = 'running'))`, projectID, automationID).Scan(&inFlight); err != nil {
+		return err
+	}
+	if inFlight > 0 {
+		return ErrAutomationDispatchInFlight
 	}
 	if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = 0, updated_at = CURRENT_TIMESTAMP
 		WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ?)`, projectID, automationID); err != nil {
