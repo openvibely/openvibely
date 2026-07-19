@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
@@ -85,6 +86,9 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 		if err := r.automationRepo.CompleteDispatch(ctx, dispatch.ID, execution.ID, execution.Status, execution.ErrorMessage); err != nil {
 			return err
 		}
+		automationobs.Event("automation.reconciliation.dispatch_finalized",
+			automationobs.String("dispatch_id", dispatch.ID), automationobs.String("invocation_id", dispatch.InvocationID),
+			automationobs.String("execution_id", execution.ID), automationobs.String("status", string(execution.Status)))
 		applog.Infof("[automation-reconciler] finalized dispatch=%s execution=%s", dispatch.ID, execution.ID)
 	}
 
@@ -96,6 +100,9 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 		if err := r.automationRepo.RepairExecutionProjection(ctx, repair); err != nil {
 			return err
 		}
+		automationobs.Event("automation.reconciliation.projection_repaired",
+			automationobs.String("project_id", repair.ProjectID), automationobs.String("execution_id", repair.ExecutionID),
+			automationobs.String("status", string(repair.Status)))
 		applog.Infof("[automation-reconciler] repaired execution projection execution=%s", repair.ExecutionID)
 	}
 	if completed, err := r.automationRepo.ReconcileInvocationCompletions(ctx, 100); err != nil {
@@ -122,6 +129,9 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 			}
 			return err
 		}
+		automationobs.Event("automation.reconciliation.dispatch_resubmitted",
+			automationobs.String("dispatch_id", dispatch.ID), automationobs.String("invocation_id", dispatch.InvocationID),
+			automationobs.String("execution_id", dispatch.ExecutionID))
 		applog.Infof("[automation-reconciler] resubmitted prepared dispatch=%s execution=%s", dispatch.ID, dispatch.ExecutionID)
 	}
 	return r.automationRepo.RecomputeAutomationHealthForAll(ctx, time.Now().UTC(), 100)

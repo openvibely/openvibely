@@ -3,6 +3,7 @@ package chatcontrol
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -102,6 +103,25 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 		if err := IsAllowed(name, models.ChatModePlan, SurfaceWeb); err == nil {
 			t.Fatalf("expected write action %s denied in plan mode", name)
 		}
+	}
+
+	create := Get("create_automation_draft")
+	var schema struct {
+		Properties struct {
+			Source struct {
+				Enum []string `json:"enum"`
+			} `json:"source"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(create.Parameters, &schema); err != nil {
+		t.Fatalf("decode create Automation schema: %v", err)
+	}
+	want := []string{"template", "describe", "blank"}
+	if !reflect.DeepEqual(want, schema.Properties.Source.Enum) {
+		t.Fatalf("create Automation source enum = %v, want %v", schema.Properties.Source.Enum, want)
+	}
+	if strings.Contains(string(create.Parameters), `"candidate"`) || strings.Contains(create.Description, "structured candidate") {
+		t.Fatal("public create Automation action must not expose a candidate creation identity")
 	}
 }
 

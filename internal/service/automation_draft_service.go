@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -216,6 +217,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		issues = append(issues, models.AutomationValidationIssue{Code: "invalid_json", Message: "Automation configuration contains a non-finite or unsupported JSON value."})
 	} else if len(encoded) > maxAutomationDraftBytes {
 		issues = append(issues, models.AutomationValidationIssue{Code: "graph_size", Message: "Automation graph exceeds the 64 KiB supported payload size."})
+		automationobs.Event("automation.graph.limit_reached", automationobs.String("adapter_key", candidate.AdapterKey), automationobs.String("limit", "payload_bytes"))
 	}
 	adapter, ok := s.registry.Get(candidate.AdapterKey)
 	if !ok {
@@ -232,6 +234,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 	}
 	if len(candidate.Nodes) > maxAutomationDraftNodes || len(candidate.Edges) > maxAutomationDraftEdges {
 		issues = append(issues, models.AutomationValidationIssue{Code: "graph_size", Message: "Automation graph exceeds the supported size."})
+		automationobs.Event("automation.graph.limit_reached", automationobs.String("adapter_key", candidate.AdapterKey), automationobs.String("limit", "nodes_or_edges"))
 	}
 
 	canonicalNodes := make(map[string]AutomationAdapterNode, len(adapter.Nodes))
@@ -307,7 +310,11 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		if strings.TrimSpace(canonical.Condition) != "" {
 			_ = json.Unmarshal([]byte(canonical.Condition), &expectedCondition)
 		}
-		actualJSON, actualErr := json.Marshal(edge.Condition)
+		actualCondition := edge.Condition
+		if actualCondition == nil {
+			actualCondition = map[string]any{}
+		}
+		actualJSON, actualErr := json.Marshal(actualCondition)
 		expectedJSON, _ := json.Marshal(expectedCondition)
 		if actualErr != nil || !bytes.Equal(actualJSON, expectedJSON) {
 			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Edge conditions are fixed by the registered adapter."})
@@ -534,6 +541,11 @@ func (s *AutomationDraftService) CreateDraft(ctx context.Context, request Automa
 	if err != nil {
 		return nil, err
 	}
+	automationobs.Event("automation.draft.created",
+		automationobs.String("project_id", request.ProjectID),
+		automationobs.String("automation_id", definition.Automation.ID),
+		automationobs.String("version_id", definition.Version.ID),
+		automationobs.String("adapter_key", candidate.AdapterKey))
 	return &models.AutomationDraftResult{
 		Definition: definition, Candidate: candidate, Assumptions: candidate.Assumptions,
 		Warnings: candidate.Warnings, ValidationErrors: issues,
@@ -601,6 +613,9 @@ func (s *AutomationDraftService) UpdateDraft(ctx context.Context, automationID, 
 	if definition == nil {
 		return nil, errors.New("automation draft not found")
 	}
+	automationobs.Event("automation.draft.updated",
+		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+		automationobs.String("version_id", versionID), automationobs.String("adapter_key", candidate.AdapterKey))
 	result := draftPreviewResult(candidate, definition)
 	result.ValidationErrors = issues
 	result.URL = fmt.Sprintf("/automations/%s?project_id=%s&view=definition&version=%s", automationID, projectID, versionID)

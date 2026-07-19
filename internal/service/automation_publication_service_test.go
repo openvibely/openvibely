@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -15,6 +16,7 @@ import (
 )
 
 func TestAutomationPublicationPlanIsDeterministicAndCompilerIsIdempotent(t *testing.T) {
+	automationobs.ResetForTest()
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)
 	project := automationTestProject(t, projectRepo, "Publish")
@@ -44,6 +46,7 @@ func TestAutomationPublicationPlanIsDeterministicAndCompilerIsIdempotent(t *test
 	require.Equal(t, models.AutomationActive, published.Definition.Automation.LifecycleState)
 	require.Equal(t, models.AutomationVersionPublished, published.Definition.Version.State)
 	require.NotEmpty(t, published.Resources)
+	require.Greater(t, automationobs.Snapshot()["automation.publication.completed"].Count, uint64(0))
 	storedSchedule, err := scheduleRepo.GetByID(context.Background(), publishedScheduleID(t, published))
 	require.NoError(t, err)
 	require.True(t, storedSchedule.Enabled, "trigger becomes runnable only with the published version")

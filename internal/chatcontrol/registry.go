@@ -743,13 +743,13 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "create_automation_draft",
-		Description:  "Persist an unpublished Automation draft from a registered template, a description, Blank, or a fixed structured candidate. This creates no runtime resources.",
+		Description:  "Persist an unpublished Automation draft from a registered template, a description, or Blank. This creates no runtime resources.",
 		Domain:       DomainAutomations,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank","candidate"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc","vision_driver"]},"description":{"type":"string","maxLength":4000},"candidate":{"type":"object"}},"required":["source"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc","vision_driver"]},"description":{"type":"string","maxLength":4000}},"required":["source"],"additionalProperties":false}`),
 	},
 	{
 		Name:         "plan_automation_publication",

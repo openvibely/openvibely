@@ -203,6 +203,25 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 	switch action {
 	case "create_node":
 		name := strings.TrimSpace(c.FormValue("node_name"))
+		runtimeNodeKey := strings.TrimSpace(c.FormValue("runtime_node_key"))
+		if runtimeNodeKey != "" {
+			for _, existing := range candidate.Nodes {
+				if existing.Key == runtimeNodeKey {
+					return nil
+				}
+			}
+			for _, node := range palette.Nodes {
+				if node.Key != runtimeNodeKey {
+					continue
+				}
+				if name != "" {
+					node.Name = name
+				}
+				candidate.Nodes = append(candidate.Nodes, node)
+				return nil
+			}
+			return echo.NewHTTPError(http.StatusBadRequest, "unsupported runtime behavior")
+		}
 		nodeType := models.AutomationNodeType(strings.TrimSpace(c.FormValue("node_type")))
 		if name == "" || len(name) > 200 || !automationDraftEditableNodeType(nodeType) {
 			return echo.NewHTTPError(http.StatusBadRequest, "node name and type are required")

@@ -358,6 +358,11 @@ type AutomationNodeResource struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type AutomationNodeResourcePage struct {
+	Items      []AutomationNodeResource `json:"items"`
+	NextCursor string                   `json:"next_cursor,omitempty"`
+}
+
 type AutomationNodeCounts struct {
 	Running           int `json:"running"`
 	Waiting           int `json:"waiting"`

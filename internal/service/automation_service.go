@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -31,7 +33,13 @@ func NewAutomationRegistrationService(repo *repository.AutomationRepo, registry 
 	return &AutomationRegistrationService{repo: repo, registry: registry}
 }
 
-func (s *AutomationRegistrationService) Register(ctx context.Context, req AutomationRegistrationRequest) (*models.AutomationDefinition, bool, error) {
+func (s *AutomationRegistrationService) Register(ctx context.Context, req AutomationRegistrationRequest) (definition *models.AutomationDefinition, created bool, returnErr error) {
+	defer func() {
+		if returnErr != nil {
+			automationobs.Event("automation.registration.validation_failure",
+				automationobs.String("project_id", req.ProjectID), automationobs.String("adapter_key", req.AdapterKey))
+		}
+	}()
 	if strings.TrimSpace(req.ProjectID) == "" {
 		return nil, false, errors.New("automation project is required")
 	}
@@ -109,11 +117,19 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 	if createdVia == "" {
 		createdVia = "bootstrap"
 	}
-	return s.repo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
+	definition, created, returnErr = s.repo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
 		ProjectID: req.ProjectID, StableKey: stableKey, Name: name, Description: adapter.Description,
 		AutomationType: adapter.AutomationType, AdapterKey: adapter.Key, CreatedVia: createdVia,
 		Nodes: nodes, Edges: edges, Resources: resources,
 	})
+	if returnErr == nil && definition != nil {
+		automationobs.Event("automation.registration.completed",
+			automationobs.String("automation_id", definition.Automation.ID),
+			automationobs.String("version_id", definition.Version.ID),
+			automationobs.String("project_id", req.ProjectID),
+			automationobs.String("created", fmt.Sprintf("%t", created)))
+	}
+	return definition, created, returnErr
 }
 
 type AutomationGraphService struct{ repo *repository.AutomationRepo }
@@ -180,6 +196,7 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 }
 
 func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automationID string, now time.Time) (*models.AutomationLiveGraph, error) {
+	queryStarted := time.Now()
 	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
 	if err != nil || definition == nil {
 		return nil, err
@@ -231,10 +248,17 @@ func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automat
 		}
 		graph.Nodes = append(graph.Nodes, models.AutomationLiveNode{AutomationNode: node, Counts: nodeCounts, DisplayState: display})
 	}
+	encoded, _ := json.Marshal(graph)
+	automationobs.Observe("automation.graph.query_duration_ms", time.Since(queryStarted).Milliseconds(),
+		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+		automationobs.String("version_id", definition.Version.ID))
+	automationobs.Observe("automation.graph.payload_bytes", int64(len(encoded)),
+		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+		automationobs.String("version_id", definition.Version.ID))
 	return graph, nil
 }
 
-func (s *AutomationGraphService) ListNodeResources(ctx context.Context, projectID, automationID, nodeID string, limit int) ([]models.AutomationNodeResource, error) {
+func (s *AutomationGraphService) ListNodeResources(ctx context.Context, projectID, automationID, nodeID string, limit int, cursor string) (*models.AutomationNodeResourcePage, error) {
 	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
 	if err != nil || definition == nil {
 		return nil, err
@@ -249,7 +273,8 @@ func (s *AutomationGraphService) ListNodeResources(ctx context.Context, projectI
 	if !found {
 		return nil, nil
 	}
-	return s.repo.ListNodeRuntimeResources(ctx, projectID, automationID, definition.Version.ID, nodeID, limit)
+	page, err := s.repo.ListNodeRuntimeResources(ctx, projectID, automationID, definition.Version.ID, nodeID, limit, cursor)
+	return &page, err
 }
 
 func (s *AutomationGraphService) ContextForThreadInput(ctx context.Context, projectID, inputID string) (models.AutomationContext, error) {

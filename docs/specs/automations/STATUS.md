@@ -482,15 +482,48 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 
 ## Open Findings Or Blockers
 
-- No known code or validation blocker remains after implementation audit; qualifying read-only audit is pending.
+- No known implementation or validation blocker remains after the reopened repair pass; the required separate strict read-only full-objective audit is pending from the clean checkpoint.
+
+## Reopened Full-Objective Audit Repair
+
+### Contract Checklist
+
+- [x] Let an actually empty Blank draft add the selected registered adapter's supported node semantics one node at a time, connect its canonical transitions, and reach a publishable topology without presenting or preloading a template; keep custom nodes/connections and loops safe, inert, and unpublishable.
+- [x] Remove `candidate` from the public canonical Chat schema and action handler so draft creation has only Template, Describe It, and Blank identities; retain fixed-candidate page/Chat parity through mocked structured Describe It output rather than a public candidate input.
+- [x] Replace the fixed node-resource list with a project/node/version-scoped, opaque, stable keyset cursor; return at most 50 rows, expose the next page in the HTMX panel, reject malformed/cross-scope cursors, preserve resource sanitization, and add matching indexes/query-plan evidence.
+- [x] Add required safe Automation observability and local metrics for lifecycle identifiers/state changes, validation failures, projection/transition failures, dispatch recovery/skips/retries/age, confirmation rejection/replay, ambiguous GitHub mutations, reconciler repairs, graph query duration/payload size, and graph limits without logging content, credentials, or confirmation tokens.
+- [x] Run generation/formatting, focused regressions, Automation-wide validation, build, and the uncached full repository suite; repair every failure and record exact evidence.
+- [ ] Create a clean checkpoint, then perform a separate strict read-only audit against every phase, all 17 Definition of Done items, explicit identity boundaries, and all exclusions.
+
+### Requirements And Files
+
+- Blank now stays actually empty while its Add node dialog identifies the selected registered runtime adapter and offers each missing canonical runtime behavior one at a time. The server copies only adapter-owned node keys, roles, types, configuration, and positions; custom visual nodes remain design-only. Incremental persistence now treats absent and empty canonical edge conditions equivalently, so an assembled topology survives each save and reaches the existing planner without weakening adapter validation. Implemented in `internal/handler/automation_builder_handler.go`, `internal/service/automation_draft_service.go`, `web/templates/pages/automations.templ`, and generated `web/templates/pages/automations_templ.go`.
+- Public Chat draft creation now accepts only `template`, `describe`, and `blank`; the typed handler no longer accepts a candidate payload. Fixed structured parity runs through mocked Describe It output in handler/runtime tests. Implemented in `internal/chatcontrol/registry.go`, `internal/handler/automation_chat_actions.go`, and their tests.
+- Node resources now use a bounded 50-row `(started_at DESC, activity_id DESC, resource_link_id DESC)` keyset page with the existing opaque cursor contract scoped to automation/version/node. The HTMX panel exposes Next resources, malformed and cross-node cursors fail closed, and migration `116_automation_node_resource_pagination.sql` adds the activity/resource indexes selected by `EXPLAIN QUERY PLAN`. Implemented across the Automation model, repository, graph service, handler, template, migration, and handler regression.
+- `internal/automationobs` now records safe structured Automation events plus process-local counters/aggregates through a fixed non-content field allowlist and bounded values. Registration/publication validation and outcomes, draft/graph limits, lifecycle projections, transition failures, dispatch retry/recovery/age, Chat confirmation rejection/replay, ambiguous GitHub mutations, reconciliation repairs, and graph duration/payload metrics are wired through existing repositories/services without content, credentials, or tokens.
+
+### Regression, Validation, And Audit Evidence
+
+- Regression-first focused tests cover `TestAutomationBlankCanAssembleRegisteredTopologyWithoutTemplate`, `TestAutomationChatDraftCreationRejectsCandidateIdentity`, public registry source enumeration, mocked Describe It page/Chat parity, `TestAutomationNodeResourcesUseStableBoundedPagination`, safe observer fields, publication metrics, reconciliation repair metrics, transition failures, graph duration/payload size, and publication validation failures.
+- The Blank regression found and repaired persisted empty canonical conditions decoding as `nil` and being compared as JSON `null` against `{}`; the final assembled graph validates and produces publication effects through the registered Vision Driver adapter.
+- Pagination proves 50/1 page boundaries with no overlap, stable newest-first ordering, resource-name sanitization, malformed/cross-node/project rejection, and both migration indexes in the production-shaped SQLite query plan.
+- Focused generation/build/regressions passed: `templ generate`, `git diff --check`, `go build ./cmd/server`, and the named handler/service/Chat/observer tests.
+- Automation-wide validation passed: `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./internal/automationobs ./web/templates/pages -run 'TestMigration11[3-6]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`, including the production Chrome graph fixture.
+- The first full suite correctly found four stale latest-migration assertions expecting `115`; all were advanced to `116`, and the focused migration tests passed.
+- Final validation passed: `templ generate`, `git diff --check`, `go build ./...`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`. Every package passed; desktop emitted only the documented non-failing newer-SDK linker warnings.
+- Fresh implementation diff audit found no remaining call-site, project-isolation, cursor-scope, identity, secret-logging, or adapter-ownership defect. It confirmed no Register Existing, legacy detection, heuristic inference, migration/backfill of prior resources, confidence scoring, or parallel graph runtime was added.
+
+### Remaining Work
+
+- Treat the repair commit containing this evidence as the clean checkpoint, then perform the separate qualifying strict read-only full-objective audit from that immutable commit.
 
 ## Remaining Phases
 
-- Fresh read-only Definition of Done audit only.
+- Final strict read-only Definition of Done audit only.
 
 ## Exact Next Action
 
-Create the clean drag-connector-preview checkpoint, then start a strict edit-free audit from that checkpoint, verify every phase contract and Definition of Done item plus explicit identity exclusions against current code/tests, and report any material finding without repairing it in that audit pass.
+Use the repair commit containing this evidence as the clean checkpoint, then audit every phase, all 17 Definition of Done items, the three public creation identities plus maintained registration, and every explicit exclusion without editing the checkpoint.
 ## Update Contract
 
 After every implementation phase, record:

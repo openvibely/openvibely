@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -121,6 +122,9 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 	plan := &models.AutomationPublicationPlan{ProjectID: projectID, AutomationID: automationID, VersionID: versionID, Validation: issues,
 		WillNot: []string{"merge pull requests", "release software", "deploy software"}}
 	if len(issues) > 0 {
+		automationobs.Event("automation.publication.validation_failure",
+			automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+			automationobs.String("version_id", versionID), automationobs.String("adapter_key", candidate.AdapterKey))
 		return plan, nil
 	}
 	adapter, _ := p.registry.Get(candidate.AdapterKey)
@@ -130,6 +134,9 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 	}
 	if len(capabilityIssues) > 0 {
 		plan.Validation = append(plan.Validation, capabilityIssues...)
+		automationobs.Event("automation.publication.validation_failure",
+			automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+			automationobs.String("version_id", versionID), automationobs.String("adapter_key", candidate.AdapterKey))
 		return plan, nil
 	}
 	published, err := p.automationRepo.GetDefinition(ctx, projectID, automationID)
@@ -194,6 +201,9 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 	}
 	hash := sha256.Sum256(encoded)
 	plan.PlanRevision = hex.EncodeToString(hash[:])
+	automationobs.Event("automation.publication.planned",
+		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+		automationobs.String("version_id", versionID), automationobs.String("adapter_key", candidate.AdapterKey))
 	return plan, nil
 }
 

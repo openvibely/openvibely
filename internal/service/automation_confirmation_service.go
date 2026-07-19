@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -132,7 +133,15 @@ func (s *AutomationConfirmationService) Issue(ctx context.Context, input Automat
 	return s.signToken(tokenID), nil
 }
 
-func (s *AutomationConfirmationService) ConfirmChat(ctx context.Context, input AutomationChatConfirmation) (*repository.AutomationPublicationSnapshot, error) {
+func (s *AutomationConfirmationService) ConfirmChat(ctx context.Context, input AutomationChatConfirmation) (snapshot *repository.AutomationPublicationSnapshot, returnErr error) {
+	defer func() {
+		if returnErr != nil {
+			automationobs.Event("automation.confirmation.rejected",
+				automationobs.String("project_id", input.ProjectID), automationobs.String("automation_id", input.AutomationID),
+				automationobs.String("version_id", input.VersionID), automationobs.String("thread_id", input.ThreadID),
+				automationobs.String("confirming_input_id", input.ConfirmingUserInputID))
+		}
+	}()
 	if s == nil || s.repo == nil || s.execRepo == nil || len(s.secret) < 16 {
 		return nil, errors.New("automation confirmation service is unavailable")
 	}
@@ -183,11 +192,18 @@ func (s *AutomationConfirmationService) ConfirmChat(ctx context.Context, input A
 	if !marked {
 		return nil, errors.New("confirming user input was not marked affirmative by the Chat host")
 	}
-	return s.repo.ConsumeAutomationConfirmationAndReserve(ctx, repository.AutomationConfirmationConsume{
+	if receipt.ConsumedAt != nil {
+		automationobs.Event("automation.confirmation.replayed",
+			automationobs.String("project_id", input.ProjectID), automationobs.String("automation_id", input.AutomationID),
+			automationobs.String("version_id", input.VersionID), automationobs.String("thread_id", input.ThreadID),
+			automationobs.String("confirming_input_id", input.ConfirmingUserInputID))
+	}
+	snapshot, returnErr = s.repo.ConsumeAutomationConfirmationAndReserve(ctx, repository.AutomationConfirmationConsume{
 		TokenID: tokenID, ProjectID: input.ProjectID, AutomationID: input.AutomationID, VersionID: input.VersionID,
 		PlanRevision: input.PlanRevision, PrincipalID: input.PrincipalID, ThreadID: input.ThreadID,
 		ConfirmingUserInputID: input.ConfirmingUserInputID, Method: "command", Now: now, Effects: input.Effects,
 	})
+	return snapshot, returnErr
 }
 
 func (s *AutomationConfirmationService) ConfirmWeb(ctx context.Context, token, projectID, automationID, versionID, planRevision, principalID string, effects []models.AutomationPublicationEffect) (*repository.AutomationPublicationSnapshot, error) {

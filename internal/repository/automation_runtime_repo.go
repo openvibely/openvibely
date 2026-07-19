@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -239,6 +240,22 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 		return nil, nil, err
 	}
 	committed = true
+	automationobs.Event("automation.invocation.created",
+		automationobs.String("project_id", owner.ProjectID), automationobs.String("automation_id", owner.AutomationID),
+		automationobs.String("version_id", owner.VersionID), automationobs.String("invocation_id", invocation.ID),
+		automationobs.String("node_id", owner.NodeID), automationobs.String("status", string(invocation.Status)))
+	if skippedReason != "" {
+		automationobs.Event("automation.invocation.skipped",
+			automationobs.String("automation_id", owner.AutomationID), automationobs.String("version_id", owner.VersionID),
+			automationobs.String("invocation_id", invocation.ID), automationobs.String("node_id", owner.NodeID),
+			automationobs.String("reason", skippedReason))
+	}
+	if dispatch != nil {
+		automationobs.Event("automation.dispatch.created",
+			automationobs.String("automation_id", owner.AutomationID), automationobs.String("version_id", owner.VersionID),
+			automationobs.String("invocation_id", invocation.ID), automationobs.String("dispatch_id", dispatch.ID),
+			automationobs.String("node_id", owner.NodeID))
+	}
 	if dispatch != nil && r.broadcaster != nil {
 		if taskStatus != models.StatusPending {
 			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: taskID, TaskName: taskTitle,
@@ -298,6 +315,13 @@ func (r *AutomationRepo) LeaseNextDispatch(ctx context.Context, claimant string,
 	}
 	if err != nil {
 		return nil, fmt.Errorf("leasing automation dispatch: %w", err)
+	}
+	automationobs.Observe("automation.dispatch.outbox_age_seconds", int64(now.UTC().Sub(dispatch.CreatedAt.UTC()).Seconds()),
+		automationobs.String("dispatch_id", dispatch.ID), automationobs.String("invocation_id", dispatch.InvocationID))
+	if dispatch.Attempts > 1 {
+		automationobs.Event("automation.dispatch.recovered",
+			automationobs.String("dispatch_id", dispatch.ID), automationobs.String("invocation_id", dispatch.InvocationID),
+			automationobs.String("attempts", strconv.Itoa(dispatch.Attempts)))
 	}
 	return dispatch, nil
 }
@@ -404,6 +428,15 @@ func (r *AutomationRepo) FailDispatch(ctx context.Context, dispatchID, claimant,
 		return err
 	}
 	committed = true
+	if attempts >= maxAttempts {
+		automationobs.Event("automation.dispatch.failed",
+			automationobs.String("dispatch_id", dispatchID), automationobs.String("invocation_id", invocationID),
+			automationobs.String("attempts", strconv.Itoa(attempts)))
+	} else {
+		automationobs.Event("automation.dispatch.retry_scheduled",
+			automationobs.String("dispatch_id", dispatchID), automationobs.String("invocation_id", invocationID),
+			automationobs.String("attempts", strconv.Itoa(attempts)))
+	}
 	return nil
 }
 
@@ -469,8 +502,9 @@ func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, execu
 		claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, dispatchStatus, dispatchID); err != nil {
 		return err
 	}
-	if _, err := conn.ExecContext(ctx, `UPDATE automation_activities SET status = ?, completed_at = CURRENT_TIMESTAMP,
-		error_message = ? WHERE invocation_id = ? AND activity_key = ?`, activityStatus, strings.TrimSpace(message), invocationID, "dispatch:"+dispatchID+":execute"); err != nil {
+	var activityID string
+	if err := conn.QueryRowContext(ctx, `UPDATE automation_activities SET status = ?, completed_at = CURRENT_TIMESTAMP,
+		error_message = ? WHERE invocation_id = ? AND activity_key = ? RETURNING id`, activityStatus, strings.TrimSpace(message), invocationID, "dispatch:"+dispatchID+":execute").Scan(&activityID); err != nil {
 		return err
 	}
 	if status == models.ExecCompleted {
@@ -501,6 +535,17 @@ func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, execu
 		return err
 	}
 	committed = true
+	automationobs.Event("automation.activity.completed",
+		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+		automationobs.String("version_id", versionID), automationobs.String("invocation_id", invocationID),
+		automationobs.String("activity_id", activityID), automationobs.String("node_id", nodeID),
+		automationobs.String("status", string(activityStatus)))
+	if terminalInvocation {
+		automationobs.Event("automation.invocation.completed",
+			automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+			automationobs.String("version_id", versionID), automationobs.String("invocation_id", invocationID),
+			automationobs.String("node_id", nodeID), automationobs.String("status", string(invocationStatus)))
+	}
 	r.PublishInvalidation(events.AutomationInvocationUpdated, projectID, models.AutomationBinding{
 		AutomationID: automationID, VersionID: versionID, InvocationID: invocationID, NodeID: nodeID,
 	})
@@ -626,6 +671,10 @@ func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projec
 			return err
 		}
 		if err := appendAutomationTransition(ctx, conn, event, value.binding, item, nil); err != nil {
+			automationobs.Event("automation.transition.append_failure",
+				automationobs.String("project_id", projectID), automationobs.String("automation_id", value.binding.AutomationID),
+				automationobs.String("version_id", value.binding.VersionID), automationobs.String("invocation_id", value.binding.InvocationID),
+				automationobs.String("node_id", value.binding.NodeID), automationobs.String("work_item_id", value.binding.WorkItemID))
 			return err
 		}
 		changed = append(changed, value.binding)
@@ -660,6 +709,15 @@ func (r *AutomationRepo) RecordProjectionEvent(ctx context.Context, in Automatio
 	}()
 	workItem, activity, err := recordProjectionEventWithExecutor(ctx, conn, in)
 	if err != nil {
+		if strings.TrimSpace(in.EventKey) != "" {
+			automationobs.Event("automation.transition.append_failure",
+				automationobs.String("project_id", in.Context.ProjectID),
+				automationobs.String("automation_id", in.Binding.AutomationID),
+				automationobs.String("version_id", in.Binding.VersionID),
+				automationobs.String("invocation_id", in.Binding.InvocationID),
+				automationobs.String("node_id", in.Binding.NodeID),
+				automationobs.String("work_item_id", in.Binding.WorkItemID))
+		}
 		return nil, nil, err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
@@ -670,6 +728,42 @@ func (r *AutomationRepo) RecordProjectionEvent(ctx context.Context, in Automatio
 	if workItem != nil {
 		binding.WorkItemID = workItem.ID
 		binding.VersionID = workItem.OriginVersionID
+		automationobs.DebugEvent("automation.work_item.created_or_updated",
+			automationobs.String("project_id", in.Context.ProjectID), automationobs.String("automation_id", binding.AutomationID),
+			automationobs.String("version_id", binding.VersionID), automationobs.String("invocation_id", binding.InvocationID),
+			automationobs.String("node_id", binding.NodeID), automationobs.String("work_item_id", workItem.ID),
+			automationobs.String("status", string(workItem.Status)))
+		if workItem.Status == models.AutomationWorkItemCompleted || workItem.Status == models.AutomationWorkItemFailed || workItem.Status == models.AutomationWorkItemCancelled {
+			automationobs.Event("automation.work_item.completed",
+				automationobs.String("project_id", in.Context.ProjectID), automationobs.String("automation_id", binding.AutomationID),
+				automationobs.String("version_id", binding.VersionID), automationobs.String("invocation_id", binding.InvocationID),
+				automationobs.String("node_id", binding.NodeID), automationobs.String("work_item_id", workItem.ID),
+				automationobs.String("status", string(workItem.Status)))
+		}
+	}
+	activityID := ""
+	if activity != nil {
+		activityID = activity.ID
+		automationobs.DebugEvent("automation.activity.created_or_updated",
+			automationobs.String("project_id", in.Context.ProjectID), automationobs.String("automation_id", binding.AutomationID),
+			automationobs.String("version_id", binding.VersionID), automationobs.String("invocation_id", binding.InvocationID),
+			automationobs.String("activity_id", activity.ID), automationobs.String("node_id", binding.NodeID),
+			automationobs.String("work_item_id", binding.WorkItemID), automationobs.String("status", string(activity.Status)))
+		if activity.Status == models.AutomationActivityCompleted || activity.Status == models.AutomationActivityFailed || activity.Status == models.AutomationActivityCancelled {
+			automationobs.Event("automation.activity.completed",
+				automationobs.String("project_id", in.Context.ProjectID), automationobs.String("automation_id", binding.AutomationID),
+				automationobs.String("version_id", binding.VersionID), automationobs.String("invocation_id", binding.InvocationID),
+				automationobs.String("activity_id", activity.ID), automationobs.String("node_id", binding.NodeID),
+				automationobs.String("work_item_id", binding.WorkItemID), automationobs.String("status", string(activity.Status)))
+		}
+	}
+	if strings.TrimSpace(in.EventKey) != "" {
+		automationobs.DebugEvent("automation.transition.appended",
+			automationobs.String("project_id", in.Context.ProjectID), automationobs.String("automation_id", binding.AutomationID),
+			automationobs.String("version_id", binding.VersionID), automationobs.String("invocation_id", binding.InvocationID),
+			automationobs.String("activity_id", activityID),
+			automationobs.String("node_id", binding.NodeID), automationobs.String("work_item_id", binding.WorkItemID),
+			automationobs.String("state", string(in.Transition)))
 	}
 	eventType := events.AutomationResourceLinked
 	if strings.TrimSpace(in.EventKey) != "" {
@@ -1244,6 +1338,11 @@ func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID 
 		return resourceID, nil
 	}
 	if !created {
+		automationobs.Event("automation.github.ambiguous_mutation",
+			automationobs.String("project_id", projectID), automationobs.String("automation_id", binding.AutomationID),
+			automationobs.String("version_id", binding.VersionID), automationobs.String("invocation_id", binding.InvocationID),
+			automationobs.String("activity_id", activityID), automationobs.String("node_id", binding.NodeID),
+			automationobs.String("resource_type", resourceType))
 		return "", ErrAutomationExternalReconciliation
 	}
 	return "", nil
@@ -1421,35 +1520,60 @@ func (r *AutomationRepo) ListTerminalUnfinalizedDispatches(ctx context.Context, 
 	return out, rows.Err()
 }
 
-func (r *AutomationRepo) ListNodeRuntimeResources(ctx context.Context, projectID, automationID, versionID, nodeID string, limit int) ([]models.AutomationNodeResource, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 50
+func (r *AutomationRepo) ListNodeRuntimeResources(ctx context.Context, projectID, automationID, versionID, nodeID string, limit int, cursorValue string) (models.AutomationNodeResourcePage, error) {
+	limit = automationPageLimit(limit)
+	kind := automationCursorKind("node_resources", automationID, versionID, nodeID)
+	cursor, err := decodeAutomationCursor(kind, cursorValue)
+	if err != nil {
+		return models.AutomationNodeResourcePage{}, err
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT a.node_id, a.id, ar.resource_type, ar.resource_id, ar.relation,
+	query := `SELECT a.node_id, a.id, ar.resource_type, ar.resource_id, ar.relation,
 		CASE ar.resource_type
 		 WHEN 'task' THEN COALESCE((SELECT title FROM tasks WHERE id = ar.resource_id AND project_id = a.project_id), '')
 		 WHEN 'execution' THEN 'Execution'
 		 WHEN 'alert' THEN COALESCE((SELECT title FROM alerts WHERE id = ar.resource_id AND project_id = a.project_id), '')
 		 ELSE ar.resource_id END,
-		a.status, a.started_at
+		a.status, a.started_at, ar.id
 		FROM automation_activities a JOIN automation_activity_resources ar ON ar.activity_id = a.id
-		WHERE a.project_id = ? AND a.automation_id = ? AND a.version_id = ? AND a.node_id = ?
-		ORDER BY a.started_at DESC, a.id DESC, ar.id LIMIT ?`, projectID, automationID, versionID, nodeID, limit)
+		WHERE a.project_id = ? AND a.automation_id = ? AND a.version_id = ? AND a.node_id = ?`
+	args := []any{projectID, automationID, versionID, nodeID}
+	if cursor != nil {
+		parts := strings.Split(cursor.ID, ".")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return models.AutomationNodeResourcePage{}, ErrAutomationCursor
+		}
+		query += ` AND (datetime(a.started_at) < datetime(?) OR (datetime(a.started_at) = datetime(?) AND
+			(a.id < ? OR (a.id = ? AND ar.id < ?))))`
+		args = append(args, automationCursorSQLTime(cursor.Time), automationCursorSQLTime(cursor.Time), parts[0], parts[0], parts[1])
+	}
+	query += ` ORDER BY a.started_at DESC, a.id DESC, ar.id DESC LIMIT ?`
+	args = append(args, limit+1)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return models.AutomationNodeResourcePage{}, err
 	}
 	defer rows.Close()
-	var out []models.AutomationNodeResource
+	page := models.AutomationNodeResourcePage{}
+	linkIDs := make([]string, 0, limit+1)
 	for rows.Next() {
 		var value models.AutomationNodeResource
+		var linkID string
 		if err := rows.Scan(&value.NodeID, &value.ActivityID, &value.ResourceType, &value.ResourceID,
-			&value.Relation, &value.Name, &value.Status, &value.UpdatedAt); err != nil {
-			return nil, err
+			&value.Relation, &value.Name, &value.Status, &value.UpdatedAt, &linkID); err != nil {
+			return models.AutomationNodeResourcePage{}, err
 		}
 		value.URL = automationRuntimeResourceURL(value.ResourceType, value.ResourceID)
-		out = append(out, value)
+		page.Items = append(page.Items, value)
+		linkIDs = append(linkIDs, linkID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return models.AutomationNodeResourcePage{}, err
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.NextCursor = encodeAutomationCursor(kind, page.Items[limit-1].UpdatedAt, page.Items[limit-1].ActivityID+"."+linkIDs[limit-1])
+	}
+	return page, nil
 }
 
 func automationRuntimeResourceURL(resourceType, resourceID string) string {

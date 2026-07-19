@@ -91,14 +91,14 @@ func (h *Handler) GetAutomationNodeResources(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	resources, err := h.automationGraphSvc.ListNodeResources(ctx, projectID, c.Param("automationId"), c.Param("nodeId"), 50)
+	resources, err := h.automationGraphSvc.ListNodeResources(ctx, projectID, c.Param("automationId"), c.Param("nodeId"), 50, c.QueryParam("cursor"))
 	if err != nil {
-		return err
+		return automationHistoryError(err)
 	}
 	if resources == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "automation node not found")
 	}
-	return render(c, http.StatusOK, pages.AutomationNodeResources(resources))
+	return render(c, http.StatusOK, pages.AutomationNodeResources(*resources, projectID, c.Param("automationId"), c.Param("nodeId")))
 }
 
 func automationHistoryError(err error) error {

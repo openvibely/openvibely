@@ -16,10 +16,9 @@ type automationPreviewActionInput struct {
 }
 
 type automationCreateDraftActionInput struct {
-	Source      string          `json:"source"`
-	TemplateKey string          `json:"template_key"`
-	Description string          `json:"description"`
-	Candidate   json.RawMessage `json:"candidate"`
+	Source      string `json:"source"`
+	TemplateKey string `json:"template_key"`
+	Description string `json:"description"`
 }
 
 type automationPlanActionInput struct {
@@ -79,15 +78,8 @@ func (h *Handler) executeAutomationCreateDraftAction(ctx context.Context, params
 		}
 		candidate = preview.Candidate
 		source = "manual"
-	case "candidate":
-		decoded, err := service.DecodeAutomationDraftCandidate(request.Candidate)
-		if err != nil {
-			return "", err
-		}
-		candidate = decoded
-		source = "manual"
 	default:
-		return "", errors.New("automation draft source must be template, describe, blank, or candidate")
+		return "", errors.New("automation draft source must be template, describe, or blank")
 	}
 	result, err := h.automationDraftSvc.CreateDraft(ctx, service.AutomationDraftCreateRequest{ProjectID: params.ProjectID, Source: source, CreatedVia: "chat", Candidate: candidate})
 	if err != nil {

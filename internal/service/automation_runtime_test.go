@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -430,6 +431,7 @@ func TestAutomationRuntimeReconcilerResubmitsAcknowledgedPreparedExecution(t *te
 }
 
 func TestAutomationRuntimeReconcilesTerminalExecutionProjectionAfterCrash(t *testing.T) {
+	automationobs.ResetForTest()
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	inbox := automationNodeByKey(t, fixture.definition, "inbox")
@@ -470,6 +472,7 @@ func TestAutomationRuntimeReconcilesTerminalExecutionProjectionAfterCrash(t *tes
 	var externalStatus string
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_activities WHERE activity_key = ?`, "execution:"+execution.ID+":external-action").Scan(&externalStatus))
 	require.Equal(t, "completed", externalStatus, "execution reconciliation must not rewrite a successful domain action")
+	require.Greater(t, automationobs.Snapshot()["automation.reconciliation.projection_repaired"].Count, uint64(0))
 }
 
 func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T) {
@@ -971,6 +974,58 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	var waitingReview int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions p JOIN automation_nodes n ON n.id = p.node_id WHERE p.automation_id = ? AND n.node_key = 'review' AND p.state = 'waiting'`, fixture.definition.Automation.ID).Scan(&waitingReview))
 	require.Equal(t, 1, waitingReview)
+}
+
+func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T) {
+	automationobs.ResetForTest()
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	registration := NewAutomationRegistrationService(fixture.repo, NewAutomationAdapterRegistry())
+	_, _, err := registration.Register(ctx, AutomationRegistrationRequest{ProjectID: fixture.project.ID, AdapterKey: "unsupported", StableKey: "invalid", Resources: []models.AutomationResourceBinding{{}}})
+	require.Error(t, err)
+
+	now := time.Now().UTC()
+	next := fixture.schedule.ComputeNextRun(now)
+	invocation, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, now, next)
+	require.NoError(t, err)
+	require.NotNil(t, invocation)
+	require.NotNil(t, dispatch)
+
+	producer := automationNodeByKey(t, fixture.definition, "suggestion_producer")
+	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: producer.ID}
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "observability:item", ActivityKey: "observability:activity", ActivityType: "test", ActivityStatus: models.AutomationActivityRunning,
+		EventKey: "observability:bad-transition", ToNodeID: "missing-node", Transition: models.AutomationTransitionEntered,
+	})
+	require.Error(t, err)
+
+	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
+	require.NoError(t, err)
+	require.NotNil(t, graph)
+
+	drafts := NewAutomationDraftService(fixture.repo, NewAutomationAdapterRegistry())
+	blank, err := drafts.BlankCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: fixture.project.ID, Source: "manual", CreatedVia: "web", Candidate: blank})
+	require.NoError(t, err)
+	planner := NewAutomationPublicationPlanner(fixture.repo, fixture.taskRepo, fixture.schedRepo, NewAutomationAdapterRegistry(), drafts)
+	plan, err := planner.Plan(ctx, fixture.project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, plan.Validation)
+
+	metrics := automationobs.Snapshot()
+	for _, name := range []string{
+		"automation.registration.validation_failure",
+		"automation.invocation.created",
+		"automation.transition.append_failure",
+		"automation.publication.validation_failure",
+		"automation.graph.query_duration_ms",
+		"automation.graph.payload_bytes",
+	} {
+		require.Greater(t, metrics[name].Count, uint64(0), "missing local metric %s", name)
+	}
+	require.Greater(t, metrics["automation.graph.payload_bytes"].Max, int64(0))
 }
 
 func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T) {

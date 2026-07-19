@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -149,11 +150,17 @@ func (c *AutomationCompiler) Publish(ctx context.Context, request AutomationPubl
 	if err != nil {
 		return nil, err
 	}
+	automationobs.Event("automation.publication.completed",
+		automationobs.String("project_id", request.ProjectID), automationobs.String("automation_id", request.AutomationID),
+		automationobs.String("version_id", request.VersionID), automationobs.String("attempt_id", snapshot.Attempt.ID))
 	return publishResult(published, completed), nil
 }
 
 func (c *AutomationCompiler) failPublication(ctx context.Context, request AutomationPublishRequest, attemptID string, cause error) (*AutomationPublishResult, error) {
 	_ = c.automationRepo.MarkPublicationAttemptFailed(ctx, attemptID, cause)
+	automationobs.Event("automation.publication.failed",
+		automationobs.String("project_id", request.ProjectID), automationobs.String("automation_id", request.AutomationID),
+		automationobs.String("version_id", request.VersionID), automationobs.String("attempt_id", attemptID))
 	snapshot, snapshotErr := c.automationRepo.GetPublicationAttempt(ctx, request.ProjectID, request.AutomationID, request.VersionID, request.PlanRevision)
 	if snapshotErr != nil {
 		return nil, cause
