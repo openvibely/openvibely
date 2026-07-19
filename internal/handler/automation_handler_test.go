@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +44,9 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Contains(t, emptyHistory.Body.String(), "No terminal invocation yet")
 	require.Contains(t, emptyHistory.Body.String(), "getComputedStyle(root).color")
 	require.Contains(t, emptyHistory.Body.String(), "labels: { color: theme.text }")
+	require.Contains(t, emptyHistory.Body.String(), `aria-label="Automation views"`)
+	require.Contains(t, emptyHistory.Body.String(), `data-automation-view="history"`)
+	require.Contains(t, emptyHistory.Body.String(), `aria-selected="true"`)
 
 	portfolio := tc.HTTP().Get(fmt.Sprintf("/automations?project_id=%s", project.ID)).Execute()
 	require.Equal(t, 200, portfolio.Code)
@@ -65,6 +69,14 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.NotContains(t, detail.Body.String(), "fill-base-content")
 	require.NotContains(t, detail.Body.String(), "fill-base-200")
 	require.Contains(t, detail.Body.String(), "sse-automation-event")
+	require.Contains(t, detail.Body.String(), `aria-label="Automation views"`)
+	require.Contains(t, detail.Body.String(), `data-automation-view="live"`)
+	require.Contains(t, detail.Body.String(), `aria-selected="true"`)
+	require.Contains(t, detail.Body.String(), `id="delete-automation-modal"`)
+	require.Contains(t, detail.Body.String(), "Delete automation")
+	require.Contains(t, detail.Body.String(), "owned trigger schedules will be disabled")
+	require.NotContains(t, detail.Body.String(), ">Archive<")
+	require.NotContains(t, detail.Body.String(), "/archive?")
 	require.NotContains(t, detail.Body.String(), task.Prompt)
 
 	livePartial := tc.HTMX().Get(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, project.ID)).Execute()
@@ -78,6 +90,9 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Contains(t, definitionView.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
 	require.Contains(t, definitionView.Body.String(), `class="automation-node-content"`)
 	require.Contains(t, definitionView.Body.String(), `viewBox="-`)
+	require.Contains(t, definitionView.Body.String(), `aria-label="Automation views"`)
+	require.Contains(t, definitionView.Body.String(), `data-automation-view="definition"`)
+	require.Contains(t, definitionView.Body.String(), `aria-selected="true"`)
 	require.NotContains(t, definitionView.Body.String(), "fill-base-content")
 	require.NotContains(t, definitionView.Body.String(), "fill-base-200")
 
@@ -195,6 +210,12 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	require.Contains(t, created.Body.String(), `data-automation-reset`)
 	require.Contains(t, created.Body.String(), `name="candidate_json"`)
 	require.Contains(t, created.Body.String(), "Add nodes")
+	require.Contains(t, created.Body.String(), "Connect nodes")
+	require.Contains(t, created.Body.String(), "6 required nodes remain")
+	require.Contains(t, created.Body.String(), "5 required connections remain")
+	require.Equal(t, 1, strings.Count(created.Body.String(), "required nodes remain"))
+	require.Equal(t, 1, strings.Count(created.Body.String(), "required connections remain"))
+	require.NotContains(t, created.Body.String(), "Add transitions")
 	require.NotContains(t, created.Body.String(), `class="automation-draft-node"`, "blank canvas must not start with template nodes")
 
 	var automationID, versionID string
@@ -227,10 +248,23 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	require.NoError(t, err)
 	candidate, err = metadata.Candidate()
 	require.NoError(t, err)
+	require.Contains(t, added.Body.String(), `data-connect-source="vision_trigger"`)
+	require.Contains(t, added.Body.String(), `data-connect-target="vision_driver"`)
+	candidateJSON, err = json.Marshal(candidate)
+	require.NoError(t, err)
+	invalidConnection := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"connect_nodes"}, "from_key": {"vision_trigger"}, "to_key": {"vision_trigger"},
+	}).Execute()
+	require.Equal(t, 400, invalidConnection.Code)
+	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+	require.NoError(t, err)
+	candidate, err = metadata.Candidate()
+	require.NoError(t, err)
+	require.Empty(t, candidate.Edges, "invalid endpoint pairs must not persist arbitrary transitions")
 	candidateJSON, err = json.Marshal(candidate)
 	require.NoError(t, err)
 	connected := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"add_edge"}, "edge_key": {"trigger_to_driver"},
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"connect_nodes"}, "from_key": {"vision_trigger"}, "to_key": {"vision_driver"},
 	}).Execute()
 	require.Equal(t, 200, connected.Code)
 	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
@@ -338,6 +372,29 @@ func TestAutomationBuilderWebFlowIsExplicitDraftOnlyAndProjectScoped(t *testing.
 	require.Equal(t, 404, foreignPlan.Code)
 	foreignPublish := tc.HTTP().Post(fmt.Sprintf("/automations/%s/drafts/%s/publish?project_id=%s", automationID, clonedVersionID, other.ID)).WithForm(url.Values{"project_id": {other.ID}, "plan_revision": {"foreign"}, "confirmation_token": {"foreign"}}).Execute()
 	require.Equal(t, 404, foreignPublish.Code)
+
+	var ownedScheduleID string
+	require.NoError(t, tc.db.QueryRow(`SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?`, automationID).Scan(&ownedScheduleID))
+	taskCountBeforeDelete := tableCountHandler(t, tc, "tasks")
+	scheduleCountBeforeDelete := tableCountHandler(t, tc, "schedules")
+	foreignDelete := tc.HTMX().Post(fmt.Sprintf("/automations/%s/delete?project_id=%s", automationID, other.ID)).WithForm(url.Values{"project_id": {other.ID}}).Execute()
+	require.Equal(t, 404, foreignDelete.Code)
+	stillPresent, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
+	require.NoError(t, err)
+	require.NotNil(t, stillPresent)
+
+	deleted := tc.HTMX().Post(fmt.Sprintf("/automations/%s/delete?project_id=%s", automationID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	require.Equal(t, 204, deleted.Code)
+	require.Equal(t, "/automations?project_id="+project.ID, deleted.Header().Get("HX-Redirect"))
+	gone, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
+	require.NoError(t, err)
+	require.Nil(t, gone)
+	require.Equal(t, taskCountBeforeDelete, tableCountHandler(t, tc, "tasks"), "deleting an Automation must preserve existing tasks")
+	require.Equal(t, scheduleCountBeforeDelete, tableCountHandler(t, tc, "schedules"), "deleting an Automation must preserve existing schedules")
+	ownedSchedule, err := tc.scheduleRepo.GetByID(context.Background(), ownedScheduleID)
+	require.NoError(t, err)
+	require.NotNil(t, ownedSchedule)
+	require.False(t, ownedSchedule.Enabled, "deleting an Automation must disable its owned trigger schedule")
 }
 
 func tableCountHandler(t *testing.T, tc *TestContext, table string) int {

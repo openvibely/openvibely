@@ -79,20 +79,19 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 		hx-trigger="every 20s [document.visibilityState === 'visible']" hx-target="this" hx-swap="outerHTML">
 		@layout.PageTitle(graph.Automation.Name)
 		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
-		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
-			<div class="min-w-0"><h2 class="break-words text-2xl font-bold">{ graph.Automation.Name }</h2><p class="mt-1 max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p></div>
-			<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">History</a><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Definition</a><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-outline btn-xs" type="submit">Edit as new draft</button></form>
-				if graph.Automation.LifecycleState == models.AutomationActive {
-					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-xs" type="submit">Pause</button></form>
-				}
-				if graph.Automation.LifecycleState == models.AutomationPaused {
-					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-xs" type="submit">Resume</button></form>
-				}
-				if graph.Automation.LifecycleState != models.AutomationArchived {
-					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/archive?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-xs text-error" type="submit">Archive</button></form>
-				}
+			<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+				<div class="min-w-0"><h2 class="break-words text-2xl font-bold">{ graph.Automation.Name }</h2><p class="mt-1 max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p></div>
+				<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-outline btn-sm" type="submit">Edit as new draft</button></form>
+					if graph.Automation.LifecycleState == models.AutomationActive {
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-sm" type="submit">Pause</button></form>
+					}
+					if graph.Automation.LifecycleState == models.AutomationPaused {
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-sm" type="submit">Resume</button></form>
+					}
+					<button class="btn btn-ghost btn-sm text-error" type="button" onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button>
+				</div>
 			</div>
-		</div>
+			@automationViewTabs(graph.Automation.ID, currentProjectID, "live")
 		<div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
 			<div class="stat rounded-box bg-base-200/60 p-3"><div class="stat-title text-xs">Active invocations</div><div class="stat-value text-xl">{ fmt.Sprintf("%d", graph.ActiveInvocations) }</div></div>
 			<div class="stat rounded-box bg-base-200/60 p-3"><div class="stat-title text-xs">Open work items</div><div class="stat-value text-xl">{ fmt.Sprintf("%d", graph.ActiveWorkItems) }</div></div>
@@ -140,9 +139,22 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					</svg>
 				</div>
 			</div>
-			<aside id="automation-node-resources" class="rounded-box border border-base-300 bg-base-100 p-4" aria-live="polite"><h3 class="font-semibold">Node resources</h3><p class="mt-2 text-sm text-base-content/60">Select a node to inspect bounded task, execution, Alert, issue, and pull request links.</p></aside>
+				<aside id="automation-node-resources" class="rounded-box border border-base-300 bg-base-100 p-4" aria-live="polite"><h3 class="font-semibold">Node resources</h3><p class="mt-2 text-sm text-base-content/60">Select a node to inspect bounded task, execution, Alert, issue, and pull request links.</p></aside>
+			</div>
+			<dialog id="delete-automation-modal" class="modal">
+				<div class="modal-box">
+					@ModalCloseButton("delete-automation-modal", "Close delete automation confirmation")
+					<h3 class="pr-10 text-lg font-bold text-error">Delete automation</h3>
+					<p class="py-4">Delete <strong>{ graph.Automation.Name }</strong>? This permanently deletes the Automation graph, versions, invocation and work-item history, and publication records.</p>
+					<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Existing tasks and schedules remain. Automation-owned trigger schedules will be disabled. This cannot be undone.</div>
+					<div class="modal-action">
+						<button class="btn" type="button" onclick="document.getElementById('delete-automation-modal').close()">Cancel</button>
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/delete?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/delete?project_id=%s", graph.Automation.ID, currentProjectID) } hx-swap="none"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-error" type="submit">Delete automation</button></form>
+					</div>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
+			</dialog>
 		</div>
-	</div>
 		<script>
 			(function() {
 				if (!window._automationLiveEventBound) {
@@ -232,14 +244,13 @@ templ automationDefinitionContent(definition models.AutomationDefinition, resour
 				<h2 class="break-words text-2xl font-bold">{ definition.Automation.Name }</h2>
 				<p class="mt-1 max-w-3xl text-sm text-base-content/65">{ definition.Automation.Description }</p>
 			</div>
-			<div class="flex flex-wrap gap-2">
-				<span class="badge badge-primary badge-outline">{ string(definition.Automation.LifecycleState) }</span>
-				<span class="badge badge-ghost">{ definition.Version.AdapterKey }</span>
-				<span class="badge badge-ghost">v{ fmt.Sprintf("%d", definition.Version.Version) }</span>
-				<a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Live</a>
-				<a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">History</a>
+				<div class="flex flex-wrap gap-2">
+					<span class="badge badge-primary badge-outline">{ string(definition.Automation.LifecycleState) }</span>
+					<span class="badge badge-ghost">{ definition.Version.AdapterKey }</span>
+					<span class="badge badge-ghost">v{ fmt.Sprintf("%d", definition.Version.Version) }</span>
+				</div>
 			</div>
-		</div>
+			@automationViewTabs(definition.Automation.ID, currentProjectID, "definition")
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 			<div class="mb-3 flex items-center justify-between gap-3"><h3 class="font-semibold">Published definition</h3><span class="text-xs text-base-content/60">Read-only</span></div>
 			<div class="automation-canvas-shell h-[30rem] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Automation definition graph">
@@ -293,10 +304,11 @@ templ automationHistoryContent(dashboard models.AutomationHistoryDashboard, curr
 	<div id="automation-history" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-metrics={ templ.JSONString(automationMetricsJSON(dashboard.Metrics)) }>
 		@layout.PageTitle(dashboard.Automation.Name + " History")
 		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
-		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
-			<div><h2 class="text-2xl font-bold">{ dashboard.Automation.Name }</h2><p class="mt-1 text-sm text-base-content/65">Persisted invocation and work-item history.</p></div>
-			<div class="flex flex-wrap items-center gap-2"><span class={ automationHealthBadgeClass(dashboard.Health.State) }>{ string(dashboard.Health.State) }</span><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", dashboard.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", dashboard.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Live</a><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", dashboard.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", dashboard.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Definition</a></div>
-		</div>
+			<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+				<div><h2 class="text-2xl font-bold">{ dashboard.Automation.Name }</h2><p class="mt-1 text-sm text-base-content/65">Persisted invocation and work-item history.</p></div>
+				<span class={ automationHealthBadgeClass(dashboard.Health.State) }>{ string(dashboard.Health.State) }</span>
+			</div>
+			@automationViewTabs(dashboard.Automation.ID, currentProjectID, "history")
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 			<div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">Automation health</h3><p class="mt-1 text-sm text-base-content/65">{ dashboard.Health.Reason }</p></div><span class="text-xs text-base-content/55">Evaluated { dashboard.Health.EvaluatedAt.Local().Format("Jan 2, 3:04 PM") }</span></div>
 		</div>
@@ -633,16 +645,16 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				</ul></div>
 			</div>
 		}
-		if len(page.Result.ValidationErrors) > 0 {
-			<div class="alert alert-warning mb-4"><div><h3 class="font-semibold">Draft needs attention</h3><ul class="mt-1 list-disc pl-5 text-sm">
-				for _, issue := range page.Result.ValidationErrors {
-					<li>{ issue.Message }</li>
-				}
-			</ul></div></div>
-		}
-		<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-4" data-automation-draft-canvas>
-			<div class="flex flex-wrap items-start justify-between gap-3">
-				<div><h3 class="font-semibold">Draft canvas</h3><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them. Drag empty canvas space to pan; use the mouse wheel or controls to zoom.</p></div>
+			if len(page.Result.ValidationErrors) > 0 {
+				<div class="alert alert-warning mb-4"><div><h3 class="font-semibold">Draft needs attention</h3><ul class="mt-1 list-disc pl-5 text-sm">
+					for _, message := range automationValidationMessages(page.Result.ValidationErrors, page.NodePalette) {
+						<li>{ message }</li>
+					}
+				</ul></div></div>
+			}
+			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
+				<div class="flex flex-wrap items-start justify-between gap-3">
+					<div><h3 class="font-semibold">Draft canvas</h3><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them. Drag empty canvas space to pan; use the mouse wheel or controls to zoom.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect nodes:</span> select the right connector on a source node, then the left connector on a highlighted target.</p></div>
 				<div class="flex flex-wrap gap-2" aria-label="Canvas controls"><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button><button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button></div>
 			</div>
 			<div class="mt-4 grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
@@ -657,9 +669,15 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						}
 						for _, node := range page.Result.Candidate.Nodes {
 							if node.Position != nil {
-								<g class="automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing" data-node-key={ node.Key } data-node-x={ fmt.Sprintf("%.0f", node.Position.X) } data-node-y={ fmt.Sprintf("%.0f", node.Position.Y) } data-default-x={ fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)) } data-default-y={ fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)) } transform={ fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y) } tabindex="0" role="button" aria-label={ node.Name + ", " + string(node.Type) }>
+								<g class="automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing" data-node-key={ node.Key } data-node-x={ fmt.Sprintf("%.0f", node.Position.X) } data-node-y={ fmt.Sprintf("%.0f", node.Position.Y) } data-default-x={ fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)) } data-default-y={ fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)) } transform={ fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y) } tabindex="0" role="group" aria-label={ node.Name + ", " + string(node.Type) + ", use arrow keys to move" }>
 									<rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class="automation-graph-node automation-graph-node--idle" stroke-width="2"></rect>
 									<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span>{ automationNodeTypeLabel(node.Type) }</span></div></foreignObject>
+									if automationDraftCanConnectTo(page.EdgePalette, page.Result.Candidate.Edges, page.Result.Candidate.Nodes, node.Key) {
+										<circle cx="0" cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--target" data-connect-target={ node.Key } tabindex="0" role="button" aria-label={ "Connect into " + node.Name }></circle>
+									}
+									if automationDraftCanConnectFrom(page.EdgePalette, page.Result.Candidate.Edges, page.Result.Candidate.Nodes, node.Key) {
+										<circle cx={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--source" data-connect-source={ node.Key } tabindex="0" role="button" aria-label={ "Connect from " + node.Name }></circle>
+									}
 								</g>
 							}
 						}
@@ -674,14 +692,10 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							}
 						}
 					</div>
-					<h4 class="mt-5 font-semibold">Add transitions</h4>
-					<div class="mt-3 space-y-2">
-						for _, edge := range page.EdgePalette {
-							if automationDraftHasNode(page.Result.Candidate.Nodes, edge.From) && automationDraftHasNode(page.Result.Candidate.Nodes, edge.To) && !automationDraftHasEdge(page.Result.Candidate.Edges, edge.Key) {
-								<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_edge"/><input type="hidden" name="edge_key" value={ edge.Key }/><button class="btn btn-ghost min-h-11 w-full justify-start text-left text-xs" type="submit">{ automationDraftNodeName(page.NodePalette, edge.From) } → { automationDraftNodeName(page.NodePalette, edge.To) }</button></form>
-							}
-						}
-					</div>
+						<div class="mt-5 rounded-lg border border-primary/25 bg-primary/5 p-3">
+							<h4 class="font-semibold">Connect nodes</h4>
+							<ol class="mt-2 list-decimal space-y-1 pl-4 text-xs text-base-content/70"><li>Select the right dot on the source node.</li><li>Select the highlighted left dot on the target node.</li><li>The supported transition is saved immediately.</li></ol>
+						</div>
 				</aside>
 			</div>
 		</section>
@@ -690,7 +704,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
 			<input type="hidden" name="builder_action" value="" data-builder-action/>
 			<input type="hidden" name="node_key" value="" data-builder-node-key/>
-			<input type="hidden" name="edge_key" value="" data-builder-edge-key/>
+				<input type="hidden" name="edge_key" value="" data-builder-edge-key/>
+				<input type="hidden" name="from_key" value="" data-builder-from-key/>
+				<input type="hidden" name="to_key" value="" data-builder-to-key/>
 			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
 				for _, node := range page.Result.Candidate.Nodes {
 					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Remove</button></div></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
@@ -721,9 +737,14 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				var svg = root && root.querySelector('[data-automation-canvas]');
 				var source = builder && builder.querySelector('[data-candidate-json]');
 				if (!root || !builder || !svg || !source) return;
-				var candidate;
-				try { candidate = JSON.parse(source.value); } catch (_) { return; }
-				var initialViewBox = svg.getAttribute('viewBox').split(/\s+/).map(Number);
+					var candidate;
+					try { candidate = JSON.parse(source.value); } catch (_) { return; }
+					var edgePalette = [];
+					try { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }
+					var draftForm = builder.querySelector('[data-automation-draft-form]');
+					var connectStatus = root.querySelector('[data-automation-connect-status]');
+					var selectedSourceKey = '';
+					var initialViewBox = svg.getAttribute('viewBox').split(/\s+/).map(Number);
 				var viewBox = initialViewBox.slice();
 				function nodeCandidate(key) { return (candidate.nodes || []).find(function(node) { return node.key === key; }); }
 				function syncCandidate() {
@@ -734,8 +755,39 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				function applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }
 				function graphPoint(event) { var point = svg.createSVGPoint(); point.x = event.clientX; point.y = event.clientY; return point.matrixTransform(svg.getScreenCTM().inverse()); }
 				function renderNode(group, x, y) { group.dataset.nodeX = String(x); group.dataset.nodeY = String(y); group.setAttribute('transform', 'translate(' + x + ' ' + y + ')'); var node = nodeCandidate(group.dataset.nodeKey); if (node) node.position = {x:x, y:y}; }
-				function renderEdges() { svg.querySelectorAll('[data-edge-key]').forEach(function(line) { var from = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.from) + '"]'); var to = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.to) + '"]'); if (!from || !to) return; var fx = Number(from.dataset.nodeX), fy = Number(from.dataset.nodeY), tx = Number(to.dataset.nodeX), ty = Number(to.dataset.nodeY); line.setAttribute('x1', fx + 170); line.setAttribute('y1', fy + 52); line.setAttribute('x2', tx); line.setAttribute('y2', ty + 52); }); }
-				svg.querySelectorAll('.automation-draft-node').forEach(function(group) {
+					function renderEdges() { svg.querySelectorAll('[data-edge-key]').forEach(function(line) { var from = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.from) + '"]'); var to = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.to) + '"]'); if (!from || !to) return; var fx = Number(from.dataset.nodeX), fy = Number(from.dataset.nodeY), tx = Number(to.dataset.nodeX), ty = Number(to.dataset.nodeY); line.setAttribute('x1', fx + 170); line.setAttribute('y1', fy + 52); line.setAttribute('x2', tx); line.setAttribute('y2', ty + 52); }); }
+					function edgeExists(key) { return (candidate.edges || []).some(function(edge) { return edge.key === key; }); }
+					function availableConnection(from, to) { return edgePalette.find(function(edge) { return edge.from === from && edge.to === to && !edgeExists(edge.key); }); }
+					function clearConnectionSelection() {
+						selectedSourceKey = '';
+						svg.querySelectorAll('[data-connect-source]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--selected'); });
+						svg.querySelectorAll('[data-connect-target]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--eligible'); handle.setAttribute('aria-disabled', 'true'); });
+					}
+					function selectConnectionSource(key) {
+						clearConnectionSelection(); selectedSourceKey = key;
+						var sourceHandle = svg.querySelector('[data-connect-source="' + CSS.escape(key) + '"]'); if (sourceHandle) sourceHandle.classList.add('automation-connect-handle--selected');
+						var targets = 0;
+						edgePalette.forEach(function(edge) { if (edge.from !== key || edgeExists(edge.key)) return; var target = svg.querySelector('[data-connect-target="' + CSS.escape(edge.to) + '"]'); if (!target) return; target.classList.add('automation-connect-handle--eligible'); target.setAttribute('aria-disabled', 'false'); targets++; });
+						if (connectStatus) connectStatus.textContent = targets ? 'Now select a highlighted left connector.' : 'This node has no unconnected supported targets.';
+					}
+					function connectToTarget(key) {
+						if (!selectedSourceKey) { if (connectStatus) connectStatus.textContent = 'Select a source node’s right connector first.'; return; }
+						var edge = availableConnection(selectedSourceKey, key);
+						if (!edge) { if (connectStatus) connectStatus.textContent = 'That connection is not supported by this automation type.'; return; }
+						syncCandidate();
+						draftForm.querySelector('[data-builder-action]').value = 'connect_nodes';
+						draftForm.querySelector('[data-builder-from-key]').value = selectedSourceKey;
+						draftForm.querySelector('[data-builder-to-key]').value = key;
+						if (connectStatus) connectStatus.textContent = 'Connecting nodes…';
+						draftForm.requestSubmit();
+					}
+					svg.querySelectorAll('[data-connect-source], [data-connect-target]').forEach(function(handle) {
+						handle.addEventListener('pointerdown', function(event) { event.preventDefault(); event.stopPropagation(); });
+						handle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); if (handle.dataset.connectSource) selectConnectionSource(handle.dataset.connectSource); else connectToTarget(handle.dataset.connectTarget); });
+						handle.addEventListener('keydown', function(event) { event.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault(); handle.click(); });
+					});
+					clearConnectionSelection();
+					svg.querySelectorAll('.automation-draft-node').forEach(function(group) {
 					group.addEventListener('pointerdown', function(event) {
 						if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); group.setPointerCapture(event.pointerId); var start = graphPoint(event); var originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);
 						function move(moveEvent) { var point = graphPoint(moveEvent); renderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges(); syncCandidate(); }
@@ -780,12 +832,34 @@ const (
 )
 
 func automationDraftCandidateJSON(candidate models.AutomationDraftCandidate) string { value, _ := json.Marshal(candidate); return string(value) }
+func automationDraftEdgesJSON(edges []models.AutomationDraftEdge) string { value, _ := json.Marshal(edges); return string(value) }
+func automationValidationMessages(issues []models.AutomationValidationIssue, palette []models.AutomationDraftNode) []string {
+	missingNodes := []string{}
+	missingEdges := 0
+	messages := []string{}
+	seen := map[string]bool{}
+	for _, issue := range issues {
+		switch issue.Code {
+		case "missing_node":
+			missingNodes = append(missingNodes, automationDraftNodeName(palette, issue.NodeKey))
+		case "missing_edge":
+			missingEdges++
+		default:
+			if !seen[issue.Message] { messages = append(messages, issue.Message); seen[issue.Message] = true }
+		}
+	}
+	if len(missingNodes) > 0 { messages = append([]string{fmt.Sprintf("%d required nodes remain: %s.", len(missingNodes), strings.Join(missingNodes, ", "))}, messages...) }
+	if missingEdges > 0 { messages = append([]string{fmt.Sprintf("%d required connections remain.", missingEdges)}, messages...) }
+	return messages
+}
 func automationDraftHasConfig(node models.AutomationDraftNode, key string) bool { _, ok := node.Config[key]; return ok }
 func automationDraftStringConfig(node models.AutomationDraftNode, key string) string { value, _ := node.Config[key].(string); return value }
 func automationDraftIntConfig(node models.AutomationDraftNode, key string) int { switch value := node.Config[key].(type) { case int: return value; case float64: return int(value); case json.Number: parsed, _ := value.Int64(); return int(parsed) }; return 0 }
 func automationDraftBoolConfig(node models.AutomationDraftNode, key string) bool { value, _ := node.Config[key].(bool); return value }
 func automationDraftHasNode(nodes []models.AutomationDraftNode, key string) bool { for _, node := range nodes { if node.Key == key { return true } }; return false }
 func automationDraftHasEdge(edges []models.AutomationDraftEdge, key string) bool { for _, edge := range edges { if edge.Key == key { return true } }; return false }
+func automationDraftCanConnectFrom(palette []models.AutomationDraftEdge, existing []models.AutomationDraftEdge, nodes []models.AutomationDraftNode, key string) bool { for _, edge := range palette { if edge.From == key && automationDraftHasNode(nodes, edge.To) && !automationDraftHasEdge(existing, edge.Key) { return true } }; return false }
+func automationDraftCanConnectTo(palette []models.AutomationDraftEdge, existing []models.AutomationDraftEdge, nodes []models.AutomationDraftNode, key string) bool { for _, edge := range palette { if edge.To == key && automationDraftHasNode(nodes, edge.From) && !automationDraftHasEdge(existing, edge.Key) { return true } }; return false }
 func automationDraftNodeName(nodes []models.AutomationDraftNode, key string) string { for _, node := range nodes { if node.Key == key { return node.Name } }; return key }
 func automationDraftDefaultX(nodes []models.AutomationDraftNode, key string) float64 { for _, node := range nodes { if node.Key == key && node.Position != nil { return node.Position.X } }; return 0 }
 func automationDraftDefaultY(nodes []models.AutomationDraftNode, key string) float64 { for _, node := range nodes { if node.Key == key && node.Position != nil { return node.Position.Y } }; return 0 }
@@ -843,8 +917,22 @@ templ automationGraphThemeStyles() {
 		.automation-canvas-shell svg { cursor: grab; }
 		.automation-canvas-shell svg:active { cursor: grabbing; }
 		.automation-canvas-shell .automation-draft-node { cursor: grab; }
-		.automation-canvas-shell .automation-draft-node:active { cursor: grabbing; }
-		.automation-graph-link:focus-visible .automation-graph-node,
+			.automation-canvas-shell .automation-draft-node:active { cursor: grabbing; }
+			.automation-connect-handle { fill: oklch(var(--b1)); stroke: oklch(var(--bc) / 0.55); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }
+			.automation-connect-handle--source { fill: oklch(var(--p) / 0.7); stroke: oklch(var(--p)); }
+			.automation-connect-handle--target { opacity: 0.5; }
+			.automation-connect-handle--selected { fill: oklch(var(--p)); stroke-width: 4; }
+			.automation-connect-handle--eligible { fill: oklch(var(--su)); stroke: oklch(var(--su)); opacity: 1; stroke-width: 4; }
+			.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--p)); stroke-width: 5; }
+			.automation-graph-link:focus-visible .automation-graph-node,
 		.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }
 	</style>
+}
+
+templ automationViewTabs(automationID string, currentProjectID string, active string) {
+	<nav class="tabs tabs-boxed mb-5 w-fit max-w-full overflow-x-auto bg-base-200/70 p-1" role="tablist" aria-label="Automation views">
+		<a role="tab" class={ "tab min-h-11 px-5", templ.KV("tab-active", active == "live") } aria-selected={ fmt.Sprintf("%t", active == "live") } data-automation-view="live" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Live</a>
+		<a role="tab" class={ "tab min-h-11 px-5", templ.KV("tab-active", active == "history") } aria-selected={ fmt.Sprintf("%t", active == "history") } data-automation-view="history" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">History</a>
+		<a role="tab" class={ "tab min-h-11 px-5", templ.KV("tab-active", active == "definition") } aria-selected={ fmt.Sprintf("%t", active == "definition") } data-automation-view="definition" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Definition</a>
+	</nav>
 }

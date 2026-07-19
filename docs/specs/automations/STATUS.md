@@ -6,7 +6,7 @@ Complete: Phases 1-4 and final Definition of Done audit.
 
 ## Status
 
-Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phase 4 implementation, phase validation, repository-wide validation, and the concrete Definition of Done audit completed on 2026-07-18; this ledger is part of the final Phase 4 checkpoint candidate.
+Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phase 4 implementation, phase validation, repository-wide validation, and the concrete Definition of Done audit completed on 2026-07-18. Subsequent visual-builder, graph-theme/history, persistent-view-navigation, direct-connection, and confirmed-delete repairs are complete with focused Chrome coverage and a passing full repository suite.
 
 ## Phase 4 Checklist
 
@@ -242,6 +242,45 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 - Follow-up Automation contract validation passed: `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./web/templates/pages -run 'TestMigration11[345]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`.
 - Final repository validation passed: `templ generate`, `go build ./cmd/server`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`; the macOS desktop linker emitted only the documented newer-SDK warning and exited successfully.
 - Fresh follow-up audit found synchronized generated output, no unsupported registration/inference/backfill path, no cross-surface raw HTMX history owner, and no material Definition of Done regression.
+
+## Post-Completion Navigation, Connection, And Delete Repair
+
+### Repair Checklist
+
+- [x] Render one persistent Live, History, and Definition tab strip on all three published Automation surfaces, with an explicit active tab and shared `openVibelyNavigate` ownership.
+- [x] Add real-Chrome coverage for Live to History to Live, Live to Definition to Live, browser Back restoration, and repeated Automation navigation after history restoration.
+- [x] Replace the separate transition palette with direct canvas connectors: select a source node's right connector, then a highlighted target node's left connector.
+- [x] Expose connector handles only when both endpoints are present and an unmade adapter-supported transition exists; retain keyboard activation and accessible endpoint labels.
+- [x] Submit source/target keys to the existing draft update handler and resolve them only through the registered adapter's canonical edge palette; reject missing endpoints and arbitrary pairs without persistence.
+- [x] Collapse repeated incomplete-Blank validation bullets into one named missing-node summary and one remaining-connection count.
+- [x] Replace the published Automation Archive control and route with Delete plus a native DaisyUI confirmation dialog, explicit irreversible scope, Cancel/backdrop/close controls, and HTMX/native return to the portfolio.
+- [x] Delete project-scoped Automation definitions and all Automation metadata/history transactionally while first disabling exclusively owned trigger schedules; preserve existing tasks, schedules, executions, Alerts, issues, and other authoritative domain resources.
+- [x] Reject cross-project deletion without changing the Automation or its trigger schedule.
+- [x] Preserve explicit Automation identity and all exclusions: no Register Existing, detection, inference, confidence scoring, migration, or graph backfill was added.
+- [x] Run focused Automation validation, a fresh contract/accessibility audit, and the full repository validation chain; repair every touched-scope finding.
+
+### Product Contract Decision
+
+- The original Phase 1/4 runbook specified no ordinary delete and archive-with-history retention. The latest explicit product decision replaces the web Archive action with a confirmed permanent Automation delete.
+- The compatible safety boundary is explicit: deleting removes only the Automation graph, versions, provenance/history, draft/publication records, and trigger ownership. Existing domain resources remain authoritative and are not deleted; schedules exclusively owned as Automation triggers are disabled before metadata deletion.
+- The internal archive lifecycle operation remains available to existing service-level contracts, but there is no Automation archive route or control in the web product.
+
+### Changed Files
+
+- Lifecycle repository/service and web route: `internal/repository/automation_publication_repo.go`, `internal/service/automation_compiler.go`, `internal/handler/automation_builder_handler.go`, and `internal/handler/handler.go`.
+- Handler/service regressions: `internal/handler/automation_handler_test.go` and `internal/service/automation_publication_service_test.go`.
+- Navigation, confirmed delete dialog, validation summary, direct connectors, canvas interaction, generated output, and Chrome regression: `web/templates/pages/automations.templ`, `web/templates/pages/automations_templ.go`, and `web/templates/pages/automations_navigation_browser_test.go`.
+
+### Validation And Audit
+
+- Regression-first focused tests initially failed because shared tabs, connector actions, and Delete did not exist; the real-Chrome fixture could not find a stable History tab.
+- `templ generate` and `go build ./cmd/server`: passed.
+- `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./web/templates/pages -run 'TestMigration11[345]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`: passed.
+- `go test ./web/templates/pages -run 'TestAutomationGraphThemeAndHistoryNavigationInChrome' -count=1 -timeout 180s`: passed with direct connector highlighting/payload, graph containment/theme, persistent tabs, Back/Forward, and return-navigation coverage.
+- The first full `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` found the new delete dialog lacked the repository-standard labeled close control. Adding `ModalCloseButton` repaired the only touched-scope audit failure.
+- The fresh full rerun `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passed every package; the desktop linker emitted only the documented non-failing newer-SDK warning.
+- Fresh route/UI search found no Automation archive route/control and no new identity inference/backfill path. Transactional deletion tests prove project isolation, Automation-history cascade, preserved tasks/schedules, disabled owned triggers, and released ownership.
+- Remaining work for this repair: none; create the clean checkpoint and allow Goal Agent evaluation.
 
 ## Open Findings Or Blockers
 

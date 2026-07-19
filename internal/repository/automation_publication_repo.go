@@ -484,3 +484,50 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: published.String})
 	return nil
 }
+
+// DeleteAutomation permanently removes one project-scoped Automation definition and
+// its Automation-owned metadata. Existing domain resources remain authoritative;
+// trigger schedules owned by the Automation are disabled before ownership cascades.
+func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automationID string) error {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	var versionID sql.NullString
+	if err := conn.QueryRowContext(ctx, `SELECT published_version_id FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&versionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("automation not found")
+		}
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = 0, updated_at = CURRENT_TIMESTAMP
+		WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ?)`, projectID, automationID); err != nil {
+		return err
+	}
+	result, err := conn.ExecContext(ctx, `DELETE FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return errors.New("automation not found")
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: versionID.String})
+	return nil
+}

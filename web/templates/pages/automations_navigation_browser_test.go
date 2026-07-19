@@ -90,8 +90,9 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 	renderBuilder := func() string {
 		trigger := models.AutomationDraftNode{Key: "vision_trigger", Name: "Vision Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"target_node_key": "vision_driver", "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}}
 		driver := models.AutomationDraftNode{Key: "vision_driver", Name: "Vision Driver", Type: models.AutomationNodeAgentTask, Role: "vision_driver", Config: map[string]any{"prompt": "Review vision", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 180, Y: 0}}
-		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Visual Draft", AutomationType: "vision_driver", AdapterKey: "vision_driver", Nodes: []models.AutomationDraftNode{trigger, driver}, Edges: []models.AutomationDraftEdge{{Key: "trigger_to_driver", From: "vision_trigger", To: "vision_driver"}}}
-		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate, Definition: &models.AutomationDefinition{Automation: models.Automation{ID: "automation-draft", Name: "Visual Draft"}, Version: models.AutomationVersion{ID: "version-draft", AdapterKey: "vision_driver"}}}, NodePalette: []models.AutomationDraftNode{trigger, driver}, EdgePalette: candidate.Edges}
+		edge := models.AutomationDraftEdge{Key: "trigger_to_driver", From: "vision_trigger", To: "vision_driver"}
+		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Visual Draft", AutomationType: "vision_driver", AdapterKey: "vision_driver", Nodes: []models.AutomationDraftNode{trigger, driver}}
+		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate, Definition: &models.AutomationDefinition{Automation: models.Automation{ID: "automation-draft", Name: "Visual Draft"}, Version: models.AutomationVersion{ID: "version-draft", AdapterKey: "vision_driver"}}}, NodePalette: []models.AutomationDraftNode{trigger, driver}, EdgePalette: []models.AutomationDraftEdge{edge}}
 		var out bytes.Buffer
 		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Automation builder: %v", err)
@@ -116,7 +117,8 @@ window.addEventListener('DOMContentLoaded', function() {
   function click(selector, label) {
     var element = document.querySelector(selector);
     if (!element) fail('missing ' + label);
-    element.click();
+    if (typeof element.click === 'function') element.click();
+    else element.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
   }
   function liveID() { var root = document.getElementById('automation-live'); return root && root.dataset.automationId; }
   function historyReady() { return !!document.getElementById('automation-history'); }
@@ -147,24 +149,23 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (labelRect.left < nodeRect.left - 1 || labelRect.right > nodeRect.right + 1 || labelRect.top < nodeRect.top - 1 || labelRect.bottom > nodeRect.bottom + 1) fail('node label escapes its node bounds');
 	    if (getComputedStyle(label).overflow !== 'hidden') fail('long node label is not visibly bounded');
 	    if (!document.body.textContent.includes('No active work')) fail('zero counters did not collapse to a readable summary');
-    click('#automation-live a[href*="/history?"]', 'History tab from Live');
+    click('[data-automation-view="history"]', 'History tab from Live');
     await waitFor(historyReady, 'History from Live');
     await report('progress', 'history-loaded');
+    click('[data-automation-view="live"]', 'Live tab from History');
+    await waitFor(function() { return liveID() === 'automation-a'; }, 'Live from History');
+    click('[data-automation-view="definition"]', 'Definition tab from Live');
+    await waitFor(definitionReady, 'Definition from Live');
+    await report('progress', 'definition-loaded');
+    click('[data-automation-view="live"]', 'Live tab from Definition');
+    await waitFor(function() { return liveID() === 'automation-a'; }, 'Live from Definition');
+    click('[data-automation-view="history"]', 'History tab before browser Back');
+    await waitFor(historyReady, 'History before browser Back');
     history.back();
     await waitFor(function() { return liveID() === 'automation-a'; }, 'Live after browser Back from History');
     await report('progress', 'history-browser-back-restored');
-    click('#automation-live a[href*="/history?"]', 'History tab after browser Back');
+    click('[data-automation-view="history"]', 'History tab after browser Back');
     await waitFor(historyReady, 'History after browser Back');
-    click('#automation-history a[href*="/definition?"]', 'Definition tab from History');
-    await waitFor(definitionReady, 'Definition from History');
-    await report('progress', 'definition-loaded');
-    history.back();
-    await waitFor(historyReady, 'History after browser Back from Definition');
-    click('#automation-history a[href^="/automations/automation-a?"]', 'Live tab after browser Back');
-    await waitFor(function() { return liveID() === 'automation-a'; }, 'Live after browser Back from Definition');
-
-    history.back();
-    await waitFor(historyReady, 'History before portfolio return');
     click('#automation-history > a[href^="/automations?"]', 'in-page Automations back link from History');
     await waitFor(portfolioReady, 'portfolio after History back link');
     await report('progress', 'history-in-page-back-restored');
@@ -183,6 +184,22 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	    await window.openVibelyNavigate('/automations/automation-draft/drafts/version-draft?project_id=project-browser');
 	    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder');
+	    var connectionSubmission = null;
+	    var draftForm = document.querySelector('[data-automation-draft-form]');
+	    draftForm.addEventListener('submit', function(event) {
+	      connectionSubmission = {
+	        action: draftForm.querySelector('[data-builder-action]').value,
+	        from: draftForm.querySelector('[data-builder-from-key]').value,
+	        to: draftForm.querySelector('[data-builder-to-key]').value
+	      };
+	      event.preventDefault();
+	      event.stopImmediatePropagation();
+	    }, {once:true});
+	    click('[data-connect-source="vision_trigger"]', 'source connector');
+	    var targetConnector = document.querySelector('[data-connect-target="vision_driver"]');
+	    if (!targetConnector || !targetConnector.classList.contains('automation-connect-handle--eligible')) fail('valid target connector was not highlighted');
+	    click('[data-connect-target="vision_driver"]', 'target connector');
+	    if (!connectionSubmission || connectionSubmission.action !== 'connect_nodes' || connectionSubmission.from !== 'vision_trigger' || connectionSubmission.to !== 'vision_driver') fail('connector interaction did not submit canonical endpoints');
 	    var draftNode = document.querySelector('[data-node-key="vision_trigger"]');
 	    var candidateInput = document.querySelector('[data-automation-draft-form] [data-candidate-json]');
 	    var beforeX = JSON.parse(candidateInput.value).nodes[0].position.x;

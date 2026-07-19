@@ -112,6 +112,68 @@ func TestAutomationPublicationRejectsStalePlanAndLifecycleTouchesOwnedTriggersOn
 	require.ErrorContains(t, lifecycle.Resume(context.Background(), project.ID, created.Definition.Automation.ID), "archived")
 }
 
+func TestAutomationDeleteDisablesOwnedTriggersAndRemovesOnlyAutomationRecords(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Delete Automation")
+	other := automationTestProject(t, projectRepo, "Delete Automation Other")
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Delete-owned trigger")
+	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
+	definition, _, err := registration.Register(ctx, AutomationRegistrationRequest{
+		ProjectID:  project.ID,
+		AdapterKey: AutomationAdapterNativeSDLC,
+		StableKey:  "native-sdlc/delete-test",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: schedule.ID},
+			{NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: task.ID},
+		},
+	})
+	require.NoError(t, err)
+	var triggerNodeID string
+	for _, node := range definition.Nodes {
+		if node.NodeKey == "suggestion_trigger" {
+			triggerNodeID = node.ID
+		}
+	}
+	require.NotEmpty(t, triggerNodeID)
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_invocations
+		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, completed_at)
+		VALUES (?, ?, ?, ?, 'schedule', ?, 'delete-history', 'completed', CURRENT_TIMESTAMP)`, project.ID, definition.Automation.ID, definition.Version.ID, triggerNodeID, schedule.ID)
+	require.NoError(t, err)
+
+	lifecycle := NewAutomationLifecycleService(automationRepo, scheduleRepo)
+	require.ErrorContains(t, lifecycle.Delete(ctx, other.ID, definition.Automation.ID), "not found")
+	stillOwned, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.True(t, stillOwned.Enabled, "cross-project delete must not touch the owned trigger")
+
+	require.NoError(t, lifecycle.Delete(ctx, project.ID, definition.Automation.ID))
+	gone, err := automationRepo.GetDefinition(ctx, project.ID, definition.Automation.ID)
+	require.NoError(t, err)
+	require.Nil(t, gone)
+	require.Zero(t, tableCountWhere(t, db, "automation_versions", "automation_id", definition.Automation.ID))
+	require.Zero(t, tableCountWhere(t, db, "automation_invocations", "automation_id", definition.Automation.ID))
+	require.Equal(t, 1, tableCountWhere(t, db, "tasks", "id", task.ID), "existing tasks remain authoritative")
+	require.Equal(t, 1, tableCountWhere(t, db, "schedules", "id", schedule.ID), "existing schedules remain authoritative")
+	preservedSchedule, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.False(t, preservedSchedule.Enabled)
+	owner, err := automationRepo.GetTriggerOwner(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.Nil(t, owner)
+}
+
+func tableCountWhere(t *testing.T, db *sql.DB, table, column, value string) int {
+	t.Helper()
+	var count int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE `+column+` = ?`, value).Scan(&count))
+	return count
+}
+
 func TestAutomationPublicationPlanGoldenRevisionExcludesLayoutAndMessages(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Golden")

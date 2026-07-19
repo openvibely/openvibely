@@ -313,3 +313,10 @@ func (s *AutomationLifecycleService) Archive(ctx context.Context, projectID, aut
 	}
 	return s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationArchived)
 }
+
+func (s *AutomationLifecycleService) Delete(ctx context.Context, projectID, automationID string) error {
+	if s == nil || s.repo == nil {
+		return errors.New("automation lifecycle service is unavailable")
+	}
+	return s.repo.DeleteAutomation(ctx, projectID, automationID)
+}

@@ -232,6 +232,25 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		}
 		candidate.Edges = edges
 		return nil
+	case "connect_nodes":
+		fromKey := strings.TrimSpace(c.FormValue("from_key"))
+		toKey := strings.TrimSpace(c.FormValue("to_key"))
+		if !automationDraftContainsNode(candidate.Nodes, fromKey) || !automationDraftContainsNode(candidate.Nodes, toKey) {
+			return echo.NewHTTPError(http.StatusBadRequest, "transition endpoints must be on the canvas")
+		}
+		for _, edge := range palette.Edges {
+			if edge.From != fromKey || edge.To != toKey {
+				continue
+			}
+			for _, existing := range candidate.Edges {
+				if existing.Key == edge.Key {
+					return nil
+				}
+			}
+			candidate.Edges = append(candidate.Edges, edge)
+			return nil
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "these nodes do not have a supported transition")
 	case "add_edge":
 		key := strings.TrimSpace(c.FormValue("edge_key"))
 		for _, edge := range candidate.Edges {
@@ -341,8 +360,27 @@ func (h *Handler) PauseAutomation(c echo.Context) error {
 func (h *Handler) ResumeAutomation(c echo.Context) error {
 	return h.changeAutomationLifecycle(c, "resume")
 }
-func (h *Handler) ArchiveAutomation(c echo.Context) error {
-	return h.changeAutomationLifecycle(c, "archive")
+
+func (h *Handler) DeleteAutomation(c echo.Context) error {
+	if h.automationLifecycleSvc == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation lifecycle unavailable")
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if err := h.automationLifecycleSvc.Delete(c.Request().Context(), projectID, c.Param("automationId")); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	url := "/automations?project_id=" + projectID
+	if isHTMX(c) {
+		c.Response().Header().Set("HX-Redirect", url)
+		return c.NoContent(http.StatusNoContent)
+	}
+	return c.Redirect(http.StatusSeeOther, url)
 }
 
 func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error {
@@ -356,8 +394,6 @@ func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error
 		err = h.automationLifecycleSvc.Pause(c.Request().Context(), projectID, c.Param("automationId"))
 	case "resume":
 		err = h.automationLifecycleSvc.Resume(c.Request().Context(), projectID, c.Param("automationId"))
-	case "archive":
-		err = h.automationLifecycleSvc.Archive(c.Request().Context(), projectID, c.Param("automationId"))
 	}
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
