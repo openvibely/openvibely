@@ -62,6 +62,31 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 		return out.String()
 	}
 
+	renderHistory := func(id, name string) string {
+		dashboard := models.AutomationHistoryDashboard{
+			Automation: models.Automation{ID: id, Name: name, HealthState: models.AutomationHealthUnknown},
+			Health:     models.AutomationHealth{State: models.AutomationHealthUnknown, Reason: "No terminal invocation yet", EvaluatedAt: time.Unix(1, 0)},
+		}
+		var out bytes.Buffer
+		if err := AutomationHistoryContent(dashboard, projectID, "").Render(context.Background(), &out); err != nil {
+			t.Fatalf("render Automation history: %v", err)
+		}
+		return out.String()
+	}
+	renderDefinition := func(id, name string) string {
+		node := models.AutomationNode{ID: id + "-node", Name: "Readable node", NodeType: models.AutomationNodeAgentTask, PositionX: 20, PositionY: 20}
+		definition := models.AutomationDefinition{
+			Automation: models.Automation{ID: id, Name: name, Description: "Theme and navigation fixture", LifecycleState: models.AutomationActive},
+			Version:    models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"},
+			Nodes:      []models.AutomationNode{node},
+		}
+		var out bytes.Buffer
+		if err := AutomationDefinitionContent(definition, nil, projectID).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render Automation definition: %v", err)
+		}
+		return out.String()
+	}
+
 	runner := `<script>
 window.addEventListener('DOMContentLoaded', function() {
   function fail(message) { throw new Error(message); }
@@ -82,6 +107,8 @@ window.addEventListener('DOMContentLoaded', function() {
     element.click();
   }
   function liveID() { var root = document.getElementById('automation-live'); return root && root.dataset.automationId; }
+  function historyReady() { return !!document.getElementById('automation-history'); }
+  function definitionReady() { return !!document.getElementById('automation-definition'); }
   function portfolioReady() { return !!document.getElementById('automations-container'); }
   function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method: 'POST'}); }
   function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
@@ -102,11 +129,29 @@ window.addEventListener('DOMContentLoaded', function() {
     if (nodeFill === 'rgb(0, 0, 0)' || nodeFill === 'rgba(0, 0, 0, 0)') fail('node fill fell back to black: ' + nodeFill);
     if (labelFill === 'rgb(0, 0, 0)') fail('label fill fell back to black: ' + labelFill);
 
+    click('#automation-live a[href*="/history?"]', 'History tab from Live');
+    await waitFor(historyReady, 'History from Live');
+    await report('progress', 'history-loaded');
     history.back();
-    await waitFor(portfolioReady, 'portfolio after browser Back');
-    await report('progress', 'browser-back-restored');
-    click('a[href^="/automations/automation-b?"]', 'Automation B card after browser Back');
-    await waitFor(function() { return liveID() === 'automation-b'; }, 'Automation B after browser Back');
+    await waitFor(function() { return liveID() === 'automation-a'; }, 'Live after browser Back from History');
+    await report('progress', 'history-browser-back-restored');
+    click('#automation-live a[href*="/history?"]', 'History tab after browser Back');
+    await waitFor(historyReady, 'History after browser Back');
+    click('#automation-history a[href*="/definition?"]', 'Definition tab from History');
+    await waitFor(definitionReady, 'Definition from History');
+    await report('progress', 'definition-loaded');
+    history.back();
+    await waitFor(historyReady, 'History after browser Back from Definition');
+    click('#automation-history a[href^="/automations/automation-a?"]', 'Live tab after browser Back');
+    await waitFor(function() { return liveID() === 'automation-a'; }, 'Live after browser Back from Definition');
+
+    history.back();
+    await waitFor(historyReady, 'History before portfolio return');
+    click('#automation-history > a[href^="/automations?"]', 'in-page Automations back link from History');
+    await waitFor(portfolioReady, 'portfolio after History back link');
+    await report('progress', 'history-in-page-back-restored');
+    click('a[href^="/automations/automation-b?"]', 'Automation B card after History return');
+    await waitFor(function() { return liveID() === 'automation-b'; }, 'Automation B after History return');
     await report('progress', 'automation-b-clicked');
 
     click('#automation-live > a[href^="/automations?"]', 'in-page Automations back link');
@@ -122,10 +167,9 @@ window.addEventListener('DOMContentLoaded', function() {
 });
 </script>`
 	style := `<style>
-:root { --bc: 220 14% 90%; --b2: 220 16% 16%; --p: 235 85% 68%; --er: 0 75% 60%; --wa: 40 90% 60%; --in: 200 90% 60%; --su: 145 65% 48%; }
-.hidden { display: none !important; }
-</style>`
-
+	:root { --bc: 0.746477 0.0216 264.436; --b2: 0.253267 0.015896 252.417; --p: 0.6569 0.196 275.75; --er: 0.7176 0.221 22.18; --wa: 0.8471 0.199 83.87; --in: 0.7206 0.191 231.6; --su: 0.648 0.15 160; }
+	.hidden { display: none !important; }
+	</style>`
 	browserResult := make(chan string, 16)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -148,6 +192,10 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>%s</script>%s%s</head><body><main id="main-content" hx-history-elt>%s</main></body></html>`, navigationScript, style, runner, fragment)
 		case "/automations/automation-a":
 			_, _ = w.Write([]byte(renderLive("automation-a", "Automation A")))
+		case "/automations/automation-a/history":
+			_, _ = w.Write([]byte(renderHistory("automation-a", "Automation A")))
+		case "/automations/automation-a/definition":
+			_, _ = w.Write([]byte(renderDefinition("automation-a", "Automation A")))
 		case "/automations/automation-b":
 			_, _ = w.Write([]byte(renderLive("automation-b", "Automation B")))
 		case "/browser-result":

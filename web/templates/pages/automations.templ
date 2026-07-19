@@ -81,7 +81,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
 		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
 			<div class="min-w-0"><h2 class="break-words text-2xl font-bold">{ graph.Automation.Name }</h2><p class="mt-1 max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p></div>
-			<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">History</a><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">Definition</a><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-outline btn-xs" type="submit">Edit as new draft</button></form>
+			<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">History</a><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Definition</a><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-outline btn-xs" type="submit">Edit as new draft</button></form>
 				if graph.Automation.LifecycleState == models.AutomationActive {
 					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-xs" type="submit">Pause</button></form>
 				}
@@ -205,8 +205,8 @@ templ automationDefinitionContent(definition models.AutomationDefinition, resour
 				<span class="badge badge-primary badge-outline">{ string(definition.Automation.LifecycleState) }</span>
 				<span class="badge badge-ghost">{ definition.Version.AdapterKey }</span>
 				<span class="badge badge-ghost">v{ fmt.Sprintf("%d", definition.Version.Version) }</span>
-				<a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">Live</a>
-				<a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">History</a>
+				<a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Live</a>
+				<a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">History</a>
 			</div>
 		</div>
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
@@ -266,7 +266,7 @@ templ automationHistoryContent(dashboard models.AutomationHistoryDashboard, curr
 		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
 		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
 			<div><h2 class="text-2xl font-bold">{ dashboard.Automation.Name }</h2><p class="mt-1 text-sm text-base-content/65">Persisted invocation and work-item history.</p></div>
-			<div class="flex flex-wrap items-center gap-2"><span class={ automationHealthBadgeClass(dashboard.Health.State) }>{ string(dashboard.Health.State) }</span><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", dashboard.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", dashboard.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">Live</a><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", dashboard.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", dashboard.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">Definition</a></div>
+			<div class="flex flex-wrap items-center gap-2"><span class={ automationHealthBadgeClass(dashboard.Health.State) }>{ string(dashboard.Health.State) }</span><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", dashboard.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", dashboard.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Live</a><a class="btn btn-ghost btn-xs" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", dashboard.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", dashboard.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Definition</a></div>
 		</div>
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 			<div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">Automation health</h3><p class="mt-1 text-sm text-base-content/65">{ dashboard.Health.Reason }</p></div><span class="text-xs text-base-content/55">Evaluated { dashboard.Health.EvaluatedAt.Local().Format("Jan 2, 3:04 PM") }</span></div>
@@ -308,12 +308,12 @@ templ automationHistoryContent(dashboard models.AutomationHistoryDashboard, curr
 					} else {
 						<div class="mt-3 space-y-2">
 							for _, invocation := range dashboard.Invocations.Items {
-								<a class="block rounded-lg bg-base-200/60 p-3 hover:bg-base-200" href={ templ.URL(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s", dashboard.Automation.ID, invocation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s", dashboard.Automation.ID, invocation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true"><div class="flex items-center justify-between gap-3"><span class="text-sm font-medium">{ automationInvocationLabel(invocation) }</span><span class="badge badge-sm">{ string(invocation.Status) }</span></div><p class="mt-1 text-xs text-base-content/55">{ automationInvocationHistoryTime(invocation).Local().Format("Jan 2, 3:04 PM") }</p></a>
+								<a class="block rounded-lg bg-base-200/60 p-3 hover:bg-base-200" href={ templ.URL(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s", dashboard.Automation.ID, invocation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s", dashboard.Automation.ID, invocation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;"><div class="flex items-center justify-between gap-3"><span class="text-sm font-medium">{ automationInvocationLabel(invocation) }</span><span class="badge badge-sm">{ string(invocation.Status) }</span></div><p class="mt-1 text-xs text-base-content/55">{ automationInvocationHistoryTime(invocation).Local().Format("Jan 2, 3:04 PM") }</p></a>
 							}
 						</div>
 					}
 					if dashboard.Invocations.NextCursor != "" {
-						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s&invocation_cursor=%s", dashboard.Automation.ID, currentProjectID, dashboard.Invocations.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s&invocation_cursor=%s", dashboard.Automation.ID, currentProjectID, dashboard.Invocations.NextCursor) } hx-target="#main-content" hx-push-url="true">Next invocations</a>
+						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s&invocation_cursor=%s", dashboard.Automation.ID, currentProjectID, dashboard.Invocations.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s&invocation_cursor=%s", dashboard.Automation.ID, currentProjectID, dashboard.Invocations.NextCursor) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Next invocations</a>
 					}
 			</section>
 				<section class="rounded-box border border-base-300 bg-base-100 p-4">
@@ -335,12 +335,12 @@ templ automationHistoryContent(dashboard models.AutomationHistoryDashboard, curr
 					} else {
 						<div class="mt-3 space-y-2">
 							for _, item := range dashboard.WorkItems.Items {
-								<a class="block rounded-lg bg-base-200/60 p-3 hover:bg-base-200" href={ templ.URL(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s", dashboard.Automation.ID, item.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s", dashboard.Automation.ID, item.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true"><div class="flex items-center justify-between gap-3"><span class="min-w-0 break-words text-sm font-medium">{ automationWorkItemLabel(item) }</span><span class="badge badge-sm">{ string(item.Status) }</span></div><p class="mt-1 text-xs text-base-content/55">Started { item.CreatedAt.Local().Format("Jan 2, 3:04 PM") }</p></a>
+								<a class="block rounded-lg bg-base-200/60 p-3 hover:bg-base-200" href={ templ.URL(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s", dashboard.Automation.ID, item.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s", dashboard.Automation.ID, item.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;"><div class="flex items-center justify-between gap-3"><span class="min-w-0 break-words text-sm font-medium">{ automationWorkItemLabel(item) }</span><span class="badge badge-sm">{ string(item.Status) }</span></div><p class="mt-1 text-xs text-base-content/55">Started { item.CreatedAt.Local().Format("Jan 2, 3:04 PM") }</p></a>
 							}
 						</div>
 					}
 					if dashboard.WorkItems.NextCursor != "" {
-						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s&work_item_status=%s&work_item_cursor=%s", dashboard.Automation.ID, currentProjectID, workItemStatus, dashboard.WorkItems.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s&work_item_status=%s&work_item_cursor=%s", dashboard.Automation.ID, currentProjectID, workItemStatus, dashboard.WorkItems.NextCursor) } hx-target="#main-content" hx-push-url="true">Next work items</a>
+						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s&work_item_status=%s&work_item_cursor=%s", dashboard.Automation.ID, currentProjectID, workItemStatus, dashboard.WorkItems.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s&work_item_status=%s&work_item_cursor=%s", dashboard.Automation.ID, currentProjectID, workItemStatus, dashboard.WorkItems.NextCursor) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Next work items</a>
 					}
 				</section>		</div>
 	</div>
@@ -348,7 +348,39 @@ templ automationHistoryContent(dashboard models.AutomationHistoryDashboard, curr
 		(function() {
 			function destroyAutomationHistoryCharts() { var charts = window._automationHistoryCharts || {}; Object.keys(charts).forEach(function(key) { if (charts[key]) charts[key].destroy(); }); window._automationHistoryCharts = {}; }
 			function loadAutomationChartJS() { if (window.Chart) return Promise.resolve(); if (window._automationChartLoader) return window._automationChartLoader; window._automationChartLoader = new Promise(function(resolve, reject) { var script = document.createElement('script'); script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'; script.onload = resolve; script.onerror = reject; document.head.appendChild(script); }); return window._automationChartLoader; }
-			function initAutomationHistoryCharts() { var root = document.getElementById('automation-history'); if (!root) return; var metrics = {}; try { metrics = JSON.parse(root.dataset.automationMetrics || '{}'); } catch (_) { return; } loadAutomationChartJS().then(function() { if (!document.getElementById('automation-history')) return; destroyAutomationHistoryCharts(); var charts = window._automationHistoryCharts; var funnel = metrics.funnel || []; var durations = metrics.durations || []; var funnelCanvas = document.getElementById('automation-funnel-chart'); var durationCanvas = document.getElementById('automation-duration-chart'); if (funnelCanvas) charts.funnel = new Chart(funnelCanvas.getContext('2d'), {type:'bar',data:{labels:funnel.map(function(p){return p.node_name;}),datasets:[{label:'Conversion %',data:funnel.map(function(p){return p.conversion_percent;}),backgroundColor:'rgba(59,130,246,.5)',borderColor:'rgb(59,130,246)',borderWidth:1}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100}},plugins:{legend:{position:'bottom'}}}}); if (durationCanvas) charts.duration = new Chart(durationCanvas.getContext('2d'), {type:'bar',data:{labels:durations.map(function(p){return p.node_name;}),datasets:[{label:'Average seconds',data:durations.map(function(p){return p.average_seconds;}),backgroundColor:'rgba(20,184,166,.5)',borderColor:'rgb(20,184,166)',borderWidth:1}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,scales:{x:{beginAtZero:true}},plugins:{legend:{position:'bottom'}}}}); }).catch(function() {}); }
+			function automationChartTheme(root) {
+				var textColor = getComputedStyle(root).color || 'rgb(148, 163, 184)';
+				var channels = textColor.match(/[\d.]+/g) || [];
+				var gridColor = channels.length >= 3 ? 'rgba(' + channels.slice(0, 3).join(',') + ',0.16)' : textColor;
+				return { text: textColor, grid: gridColor };
+			}
+			function initAutomationHistoryCharts() {
+				var root = document.getElementById('automation-history');
+				if (!root) return;
+				var metrics = {};
+				try { metrics = JSON.parse(root.dataset.automationMetrics || '{}'); } catch (_) { return; }
+				loadAutomationChartJS().then(function() {
+					if (!document.getElementById('automation-history')) return;
+					destroyAutomationHistoryCharts();
+					var charts = window._automationHistoryCharts;
+					var theme = automationChartTheme(root);
+					var funnel = metrics.funnel || [];
+					var durations = metrics.durations || [];
+					var funnelCanvas = document.getElementById('automation-funnel-chart');
+					var durationCanvas = document.getElementById('automation-duration-chart');
+					var legend = { position: 'bottom', labels: { color: theme.text } };
+					if (funnelCanvas) charts.funnel = new Chart(funnelCanvas.getContext('2d'), {
+						type: 'bar',
+						data: { labels: funnel.map(function(p) { return p.node_name; }), datasets: [{ label: 'Conversion %', data: funnel.map(function(p) { return p.conversion_percent; }), backgroundColor: 'rgba(59,130,246,.5)', borderColor: 'rgb(59,130,246)', borderWidth: 1 }] },
+						options: { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: theme.text }, grid: { color: theme.grid } }, y: { beginAtZero: true, max: 100, ticks: { color: theme.text }, grid: { color: theme.grid } } }, plugins: { legend: legend } }
+					});
+					if (durationCanvas) charts.duration = new Chart(durationCanvas.getContext('2d'), {
+						type: 'bar',
+						data: { labels: durations.map(function(p) { return p.node_name; }), datasets: [{ label: 'Average seconds', data: durations.map(function(p) { return p.average_seconds; }), backgroundColor: 'rgba(20,184,166,.5)', borderColor: 'rgb(20,184,166)', borderWidth: 1 }] },
+						options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, ticks: { color: theme.text }, grid: { color: theme.grid } }, y: { ticks: { color: theme.text }, grid: { color: theme.grid } } }, plugins: { legend: legend } }
+					});
+				}).catch(function() {});
+			}
 			window.initAutomationHistoryCharts = initAutomationHistoryCharts;
 			if (!window._automationHistoryCleanupBound) { window._automationHistoryCleanupBound = true; document.body.addEventListener('htmx:beforeSwap', function(event) { var target = event.detail && event.detail.target; if (target && (target.id === 'main-content' || target.id === 'automation-history' || (target.querySelector && target.querySelector('#automation-history')))) destroyAutomationHistoryCharts(); }); }
 			initAutomationHistoryCharts();
@@ -369,7 +401,7 @@ templ AutomationInvocationHistoryContent(history models.AutomationInvocationHist
 templ automationInvocationHistoryContent(history models.AutomationInvocationHistory, currentProjectID string) {
 	<div id="automation-invocation-history" class="h-full overflow-y-auto min-w-0 max-w-full">
 		@layout.PageTitle(history.Definition.Automation.Name + " Invocation")
-		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">← History</a>
+		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← History</a>
 		<div class="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-2xl font-bold">Invocation</h2><p class="mt-1 text-sm text-base-content/60">{ automationInvocationLabel(history.Invocation) } · topology v{ fmt.Sprintf("%d", history.Definition.Version.Version) }</p></div><span class="badge">{ string(history.Invocation.Status) }</span></div>
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 			<h3 class="font-semibold">Invocation graph</h3><p class="mt-1 text-xs text-base-content/55">Immutable topology with nodes touched only by this occurrence highlighted.</p>
@@ -401,14 +433,14 @@ templ automationInvocationHistoryContent(history models.AutomationInvocationHist
 						</div>
 					}
 					if history.Activities.NextCursor != "" {
-						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Activities.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Activities.NextCursor) } hx-target="#main-content" hx-push-url="true">Next activities</a>
+						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Activities.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Activities.NextCursor) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Next activities</a>
 					}
 				</section>
 			<section class="rounded-box border border-base-300 bg-base-100 p-4">
 				<h3 class="font-semibold">Occurrence transitions</h3>
 				@automationTransitionTimeline(history.Transitions.Items, history.Definition.Nodes)
 				if history.Transitions.NextCursor != "" {
-					<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Transitions.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Transitions.NextCursor) } hx-target="#main-content" hx-push-url="true">Next transitions</a>
+					<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Transitions.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/invocations/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.Invocation.ID, currentProjectID, history.Transitions.NextCursor) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Next transitions</a>
 				}
 			</section>
 		</div>
@@ -428,7 +460,7 @@ templ AutomationWorkItemHistoryContent(history models.AutomationWorkItemHistory,
 templ automationWorkItemHistoryContent(history models.AutomationWorkItemHistory, currentProjectID string) {
 	<div id="automation-work-item-history" class="h-full overflow-y-auto min-w-0 max-w-full" data-replay={ templ.JSONString(automationReplayJSON(history.Replay)) }>
 		@layout.PageTitle(history.Definition.Automation.Name + " Work Item")
-		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true">← History</a>
+		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← History</a>
 		<div class="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 class="break-words text-2xl font-bold">{ automationWorkItemLabel(history.WorkItem) }</h2><p class="mt-1 text-sm text-base-content/60">Cross-invocation lifetime · topology v{ fmt.Sprintf("%d", history.Definition.Version.Version) }</p></div><span class="badge">{ string(history.WorkItem.Status) }</span></div>
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 			<div class="flex flex-wrap items-center justify-between gap-3">
@@ -470,14 +502,14 @@ templ automationWorkItemHistoryContent(history models.AutomationWorkItemHistory,
 						</div>
 					}
 					if history.Activities.NextCursor != "" {
-						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Activities.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Activities.NextCursor) } hx-target="#main-content" hx-push-url="true">Next activities</a>
+						<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Activities.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&activity_cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Activities.NextCursor) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Next activities</a>
 					}
 				</section>
 			<section class="rounded-box border border-base-300 bg-base-100 p-4">
 				<h3 class="font-semibold">Transition timeline</h3>
 				@automationTransitionTimeline(history.Transitions.Items, history.Definition.Nodes)
 				if history.Transitions.NextCursor != "" {
-					<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Transitions.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Transitions.NextCursor) } hx-target="#main-content" hx-push-url="true">Next transitions</a>
+					<a class="btn btn-ghost btn-sm mt-3" href={ templ.URL(fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Transitions.NextCursor)) } hx-get={ fmt.Sprintf("/automations/%s/work-items/%s?project_id=%s&cursor=%s", history.Definition.Automation.ID, history.WorkItem.ID, currentProjectID, history.Transitions.NextCursor) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Next transitions</a>
 				}
 			</section>
 		</div>
@@ -663,19 +695,19 @@ func resourcesForAutomationNode(resources []models.AutomationResourceSummary, no
 
 templ automationGraphThemeStyles() {
 	<style>
-		.automation-graph-edge { fill: none; stroke: hsl(var(--bc) / 0.35); vector-effect: non-scaling-stroke; }
-		.automation-graph-edge--highlighted { stroke: hsl(var(--p)); }
-		.automation-graph-arrow { fill: hsl(var(--bc) / 0.45); }
-		.automation-graph-node { fill: hsl(var(--b2)); stroke: hsl(var(--bc) / 0.3); vector-effect: non-scaling-stroke; }
-		.automation-graph-node--failed { fill: hsl(var(--er) / 0.15); stroke: hsl(var(--er)); }
-		.automation-graph-node--blocked { fill: hsl(var(--wa) / 0.15); stroke: hsl(var(--wa)); }
-		.automation-graph-node--waiting { fill: hsl(var(--in) / 0.15); stroke: hsl(var(--in)); }
-		.automation-graph-node--running { fill: hsl(var(--p) / 0.15); stroke: hsl(var(--p)); }
-		.automation-graph-node--completed { fill: hsl(var(--su) / 0.15); stroke: hsl(var(--su)); }
-		.automation-graph-label { fill: hsl(var(--bc)); pointer-events: none; }
-		.automation-graph-label--primary { fill: hsl(var(--bc)); }
-		.automation-graph-label--secondary { fill: hsl(var(--bc) / 0.7); }
-		.automation-graph-label--muted { fill: hsl(var(--bc) / 0.6); }
+		.automation-graph-edge { fill: none; stroke: oklch(var(--bc) / 0.35); vector-effect: non-scaling-stroke; }
+		.automation-graph-edge--highlighted { stroke: oklch(var(--p)); }
+		.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }
+		.automation-graph-node { fill: oklch(var(--b2)); stroke: oklch(var(--bc) / 0.3); vector-effect: non-scaling-stroke; }
+		.automation-graph-node--failed { fill: oklch(var(--er) / 0.15); stroke: oklch(var(--er)); }
+		.automation-graph-node--blocked { fill: oklch(var(--wa) / 0.15); stroke: oklch(var(--wa)); }
+		.automation-graph-node--waiting { fill: oklch(var(--in) / 0.15); stroke: oklch(var(--in)); }
+		.automation-graph-node--running { fill: oklch(var(--p) / 0.15); stroke: oklch(var(--p)); }
+		.automation-graph-node--completed { fill: oklch(var(--su) / 0.15); stroke: oklch(var(--su)); }
+		.automation-graph-label { fill: oklch(var(--bc)); pointer-events: none; }
+		.automation-graph-label--primary { fill: oklch(var(--bc)); }
+		.automation-graph-label--secondary { fill: oklch(var(--bc) / 0.7); }
+		.automation-graph-label--muted { fill: oklch(var(--bc) / 0.6); }
 		.automation-graph-link:focus-visible .automation-graph-node,
 		.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }
 	</style>

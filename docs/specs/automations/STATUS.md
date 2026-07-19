@@ -206,9 +206,13 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 ## Post-Completion UI Repairs
 
 - Replaced unsupported SVG `fill-*`/`stroke-*` theme utilities with Automation graph classes backed directly by DaisyUI theme variables across Live, Definition, invocation, replay, and draft graphs. Dark-mode node surfaces and labels no longer fall back to black-on-black, and status colors remain non-color-labeled and keyboard-focusable.
-- Repaired Automation navigation after HTMX history restoration: portfolio cards, `New Automation`, and every `← Automations` control now use the shared `openVibelyNavigate` history owner, while draft create/clone responses push the canonical persisted draft URL instead of caching draft DOM under the source page URL.
-- Added handler assertions for theme-safe SVG markup and canonical draft `HX-Push-Url`, plus `TestAutomationGraphThemeAndHistoryNavigationInChrome`, which verifies computed graph contrast, browser Back restoration, in-page return, and repeated card navigation using production HTMX 2.0.4.
-- Validation passed: `templ generate`, `go build ./cmd/server`, focused Automation handler tests, the Chrome navigation regression, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`.
+- Corrected those graph classes from `hsl(var(--…))` to DaisyUI v4's actual `oklch(var(--…))` channel contract, changed the Chrome fixture to real OKLCH channel values so invalid color functions cannot falsely pass, and derived Chart.js legend, axis, and grid colors from the rendered theme.
+- Repaired Automation navigation after HTMX history restoration: portfolio cards, `New Automation`, and every cross-surface Automation navigation control now use the shared `openVibelyNavigate` history owner, while draft create/clone responses push the canonical persisted draft URL instead of caching draft DOM under the source page URL.
+- Expanded `TestAutomationGraphThemeAndHistoryNavigationInChrome` to verify computed graph contrast, Live-to-History-to-Definition navigation, browser Back restoration at each surface, in-page portfolio return, and repeated card navigation using production HTMX 2.0.4.
+- Follow-up focused validation passed: `templ generate`, `go build ./cmd/server`, `go test ./internal/handler -run 'TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject' -count=1 -timeout 180s`, and `go test ./web/templates/pages -run 'TestAutomationGraphThemeAndHistoryNavigationInChrome' -count=1 -timeout 180s`.
+- Follow-up Automation contract validation passed: `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./web/templates/pages -run 'TestMigration11[345]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`.
+- Final repository validation passed: `templ generate`, `go build ./cmd/server`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`; the macOS desktop linker emitted only the documented newer-SDK warning and exited successfully.
+- Fresh follow-up audit found synchronized generated output, no unsupported registration/inference/backfill path, no cross-surface raw HTMX history owner, and no material Definition of Done regression.
 
 ## Open Findings Or Blockers
 
@@ -221,7 +225,7 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 
 ## Exact Next Action
 
-Verify the final Phase 4 checkpoint commit and clean worktree, then allow Goal Agent to evaluate the persisted goal against the concrete implementation and validation evidence.
+Allow Goal Agent to evaluate the persisted goal against the clean committed implementation, validation, phase-audit, and Definition of Done evidence.
 
 ## Update Contract
 

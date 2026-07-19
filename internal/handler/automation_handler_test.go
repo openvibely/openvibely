@@ -41,6 +41,8 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Contains(t, emptyHistory.Body.String(), "No invocation history")
 	require.Contains(t, emptyHistory.Body.String(), "No work-item history")
 	require.Contains(t, emptyHistory.Body.String(), "No terminal invocation yet")
+	require.Contains(t, emptyHistory.Body.String(), "getComputedStyle(root).color")
+	require.Contains(t, emptyHistory.Body.String(), "labels: { color: theme.text }")
 
 	portfolio := tc.HTTP().Get(fmt.Sprintf("/automations?project_id=%s", project.ID)).Execute()
 	require.Equal(t, 200, portfolio.Code)
@@ -55,6 +57,8 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Contains(t, detail.Body.String(), "Live automation graph")
 	require.Contains(t, detail.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
 	require.Contains(t, detail.Body.String(), `class="automation-graph-label automation-graph-label--primary`)
+	require.Contains(t, detail.Body.String(), `fill: oklch(var(--b2));`)
+	require.Contains(t, detail.Body.String(), `fill: oklch(var(--bc));`)
 	require.NotContains(t, detail.Body.String(), "fill-base-content")
 	require.NotContains(t, detail.Body.String(), "fill-base-200")
 	require.Contains(t, detail.Body.String(), "sse-automation-event")
