@@ -452,7 +452,7 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 
 ### Remaining Work
 
-- Create the clean checkpoint, then perform the required separate read-only full-objective audit.
+- Safety repair checkpoint `48b7583` is complete; perform the required separate read-only full-objective audit.
 
 ## Open Findings Or Blockers
 
@@ -464,7 +464,7 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 
 ## Exact Next Action
 
-Verify the generated candidate and test symbols in the final diff, create the checkpoint commit, then start a strict edit-free audit pass from that commit.
+Start a strict edit-free audit from checkpoint `48b7583`, verify every Definition of Done item and the explicit identity exclusions against current code/tests, and report any material finding without repairing it in that audit pass.
 ## Update Contract
 
 After every implementation phase, record:
