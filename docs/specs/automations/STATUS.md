@@ -351,6 +351,34 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 - Fresh safety audit confirmed custom loops and arbitrary topology remain inert saved designs with `unsupported_topology`; planning returns no effects, published versions remain immutable, and no generic runtime, task/worker/queue/Workflow/Alert/GitHub replacement, Register Existing, detection, inference, migration, confidence scoring, or graph backfill was introduced.
 - Remaining work for this repair: none; create the clean checkpoint and allow Goal Agent evaluation.
 
+## Post-Completion Blank Builder And Connection Repair
+
+### Repair Checklist
+
+- [x] Replace the Blank builder's fragile Add node details dropdown with an obvious toolbar button that opens a native dialog.
+- [x] Put a large Add first node action in the center of a truly empty canvas so node creation remains discoverable before any graph content exists.
+- [x] Keep node creation on the existing project-scoped draft update handler and preserve the six safe node types, candidate bounds, and inert unsupported-topology behavior.
+- [x] Make connection removal explicit with an always-present Disconnect selected toolbar action that becomes enabled when a line is selected.
+- [x] Keep selected-line endpoint handles available for direct start/end rewiring and update the canvas guidance with the exact interaction.
+- [x] Add rendered-handler and real-Chrome regressions that start from zero nodes, open the dialog, submit a named node through HTMX, select a line, disconnect it, and verify serialized candidate state.
+- [x] Run generation, build, focused Automation validation, full repository validation, and a fresh accessibility/identity audit; repair every material finding.
+
+### Changed Files
+
+- Blank canvas, add-node dialog, explicit connection selection/disconnect behavior, and generated output: `web/templates/pages/automations.templ` and `web/templates/pages/automations_templ.go`.
+- Empty-builder rendered contract and production browser interaction coverage: `internal/handler/automation_handler_test.go` and `web/templates/pages/automations_navigation_browser_test.go`.
+
+### Validation And Audit
+
+- Regression-first handler coverage failed because the prior markup had only a details dropdown and no empty-canvas first-node action, native dialog, or explicit disconnect control.
+- The production Chrome fixture now starts from a zero-node Blank Automation, opens the node dialog from the canvas, submits a named agent-task node through the real HTMX form path, and waits for the node to appear after replacement.
+- The same Chrome fixture selects a painted connection, verifies Disconnect selected becomes enabled, removes the edge without replacing the builder, and confirms the edge is absent from `candidate_json`; endpoint-drag rewiring remains covered in the same mounted graph.
+- `templ generate`, `go build ./cmd/server`, and Automation-focused validation passed: `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./web/templates/pages -run 'TestMigration11[345]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`.
+- The first full repository run found one dialog accessibility-contract failure because the close helper appeared after nested modal markup. Moving the labeled close control to the top of the modal box repaired the finding; `TestTemplateDialogsHaveConsistentCloseControls`, the Blank handler regression, and the Chrome fixture then passed.
+- Final repository validation passed: `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`; every package passed and the desktop linker emitted only the documented non-failing newer-SDK warning.
+- Fresh audit confirmed Add node submits through the existing Automation draft handler/service, line removal only changes draft candidate geometry, custom topology remains non-executable until accepted by a registered adapter, and no identity inference, Register Existing, backfill, migration, or parallel runtime system was introduced.
+- Remaining work for this repair: none; create the clean checkpoint and allow Goal Agent evaluation.
+
 ## Open Findings Or Blockers
 
 - No code, validation, or Definition of Done blockers remain.

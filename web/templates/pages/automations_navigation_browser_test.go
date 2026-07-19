@@ -87,6 +87,19 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 		return out.String()
 	}
 
+	renderBlankBuilder := func(withNode bool) string {
+		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Blank Automation", AutomationType: "vision_driver", AdapterKey: "vision_driver"}
+		if withNode {
+			candidate.Nodes = []models.AutomationDraftNode{{Key: "first_step", Name: "First step", Type: models.AutomationNodeAgentTask, Role: "custom_agent_task", Config: map[string]any{"prompt": "Describe the work this node should perform.", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}}}
+		}
+		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate, Definition: &models.AutomationDefinition{Automation: models.Automation{ID: "automation-blank", Name: "Blank Automation"}, Version: models.AutomationVersion{ID: "version-blank", AdapterKey: "vision_driver"}}}}
+		var out bytes.Buffer
+		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render blank Automation builder: %v", err)
+		}
+		return out.String()
+	}
+
 	renderBuilder := func() string {
 		trigger := models.AutomationDraftNode{Key: "vision_trigger", Name: "Vision Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"target_node_key": "vision_driver", "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}}
 		driver := models.AutomationDraftNode{Key: "vision_driver", Name: "Vision Driver", Type: models.AutomationNodeAgentTask, Role: "vision_driver", Config: map[string]any{"prompt": "Review vision", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 240, Y: 0}}
@@ -183,6 +196,22 @@ window.addEventListener('DOMContentLoaded', function() {
     await report('progress', 'automation-a-reclicked');
 	    await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A after in-page back');
 
+	    await window.openVibelyNavigate('/automations/automation-blank/drafts/version-blank?project_id=project-browser');
+	    await waitFor(function() { return !!document.querySelector('[data-automation-add-first-node]'); }, 'empty Blank Automation canvas');
+	    await report('progress', 'blank-canvas-loaded');
+	    click('[data-automation-add-first-node]', 'Add first node action');
+	    var nodeDialog = document.querySelector('[data-automation-node-dialog]');
+	    if (!nodeDialog || !nodeDialog.open) fail('Add first node did not open the node dialog');
+	    await report('progress', 'add-node-dialog-opened');
+	    nodeDialog.querySelector('[name="node_name"]').value = 'First step';
+	    nodeDialog.querySelector('[name="node_type"]').value = 'agent_task';
+	    var nodeForm = nodeDialog.querySelector('form[hx-post]');
+	    if (!nodeForm || !nodeForm.checkValidity()) fail('Add node form is not submittable: ' + (nodeDialog.querySelector(':invalid') && nodeDialog.querySelector(':invalid').validationMessage));
+	    htmx.process(nodeForm);
+	    nodeForm.requestSubmit(nodeDialog.querySelector('[data-automation-create-node]'));
+	    await report('progress', 'add-node-submitted');
+	    await waitFor(function() { return !!document.querySelector('[data-node-key="first_step"]'); }, 'new node on blank canvas');
+
 	    await window.openVibelyNavigate('/automations/automation-draft/drafts/version-draft?project_id=project-browser');
 	    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder');
 	    var draftForm = document.querySelector('[data-automation-draft-form]');
@@ -223,10 +252,13 @@ window.addEventListener('DOMContentLoaded', function() {
 		    reconnectTarget.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:14, clientX:reconnectTargetRect.left+reconnectTargetRect.width/2, clientY:reconnectTargetRect.top+reconnectTargetRect.height/2}));
 		    connectedCandidate = JSON.parse(candidateInput.value);
 		    if (!connectedCandidate.edges.some(function(edge) { return edge.from === 'result' && edge.to === 'vision_driver'; })) fail('dragging an existing endpoint did not reconnect the edge');
-		    click('[data-edge-key][data-from="vision_trigger"][data-to="vision_driver"] [data-delete-edge]', 'connection delete control');
-		    connectedCandidate = JSON.parse(candidateInput.value);
-		    if (connectedCandidate.edges.some(function(edge) { return edge.from === 'vision_trigger' && edge.to === 'vision_driver'; })) fail('connection delete control did not update the design');
-		    var draftNode = document.querySelector('[data-node-key="vision_trigger"]');
+			    click('[data-edge-key][data-from="vision_trigger"][data-to="vision_driver"] [data-edge-hit]', 'connection to disconnect');
+			    var disconnect = document.querySelector('[data-automation-disconnect-edge]');
+			    if (!disconnect || disconnect.disabled) fail('selected connection did not enable the visible disconnect action');
+			    disconnect.click();
+			    connectedCandidate = JSON.parse(candidateInput.value);
+			    if (connectedCandidate.edges.some(function(edge) { return edge.from === 'vision_trigger' && edge.to === 'vision_driver'; })) fail('visible disconnect action did not update the design');
+			    var draftNode = document.querySelector('[data-node-key="vision_trigger"]');
 		    var beforeX = JSON.parse(candidateInput.value).nodes[0].position.x;
 		    draftNode.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
 	    var afterX = JSON.parse(candidateInput.value).nodes[0].position.x;
@@ -262,7 +294,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.Header.Get("HX-Request") == "true" {
 			select {
-			case browserResult <- "progress:server-" + r.URL.Path:
+			case browserResult <- "progress:server-" + r.Method + "-" + r.URL.Path:
 			default:
 			}
 		}
@@ -285,6 +317,8 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = w.Write([]byte(renderDefinition("automation-a", "Automation A")))
 		case "/automations/automation-b":
 			_, _ = w.Write([]byte(renderLive("automation-b", "Automation B")))
+		case "/automations/automation-blank/drafts/version-blank":
+			_, _ = w.Write([]byte(renderBlankBuilder(r.Method == http.MethodPost)))
 		case "/automations/automation-draft/drafts/version-draft":
 			_, _ = w.Write([]byte(renderBuilder()))
 		case "/browser-result":

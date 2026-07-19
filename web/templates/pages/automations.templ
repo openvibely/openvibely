@@ -668,32 +668,38 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				<div class="flex flex-wrap items-start justify-between gap-3">
 					<div><h3 class="font-semibold">Canvas</h3><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect from either side:</span> drag either dot on one node to either dot on another. Click a connection to rewire or delete it.</p></div>
 					<div class="flex flex-wrap items-center gap-2" aria-label="Canvas controls">
-						<details class="dropdown dropdown-end" data-automation-node-tool>
-							<summary class="btn btn-primary btn-sm">Add node</summary>
-							<div class="dropdown-content z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-box border border-base-300 bg-base-100 p-4 shadow-xl">
-								<form class="space-y-3" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content">
-									<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
-									<label class="form-control"><span class="label-text">Name</span><input class="input input-bordered input-sm" name="node_name" maxlength="200" placeholder="Review result" required/></label>
-									<label class="form-control"><span class="label-text">Type</span><select class="select select-bordered select-sm" name="node_type"><option value="agent_task">Agent task</option><option value="trigger">Trigger</option><option value="human_gate">Human gate</option><option value="condition">Condition</option><option value="action">Action</option><option value="outcome">Outcome</option></select></label>
-									<button class="btn btn-primary btn-sm w-full" type="submit" data-automation-create-node>Add node</button>
-								</form>
-								if page.Result.Definition.Version.Source == "template" {
-									<details class="mt-4"><summary class="cursor-pointer text-sm font-semibold">Suggested nodes</summary><p class="mt-1 text-xs text-base-content/60">Quick-add nodes understood by this Automation’s runtime.</p>
-										<div class="mt-2 space-y-1">
-											for _, node := range page.NodePalette {
-												if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
-													<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
-												}
-											}
-										</div>
-									</details>
-								}
-							</div>
-						</details>
+						<div data-automation-node-tool>
+							<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
+						</div>
+						<button class="btn btn-outline btn-sm" type="button" data-automation-disconnect-edge disabled>Disconnect selected</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button><button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button>
 					</div>
 				</div>
-				<div class="automation-canvas-shell mt-3 min-h-[calc(100dvh-15rem)] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30" role="region" aria-label="Automation graph builder">
+				<dialog id="automation-node-dialog" class="modal" data-automation-node-dialog>
+					<div class="modal-box relative max-w-md">
+						<div class="absolute right-4 top-4">@ModalCloseButton("document.getElementById('automation-node-dialog')", "Close add node dialog")</div>
+						<div class="pr-10"><h3 class="text-lg font-semibold">Add node</h3><p class="mt-1 text-sm text-base-content/65">Create a node, then drag it anywhere on the canvas.</p></div>
+					<form class="mt-5 space-y-4" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content">
+						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
+						<label class="form-control"><span class="label-text">Name</span><input class="input input-bordered" name="node_name" maxlength="200" placeholder="Review result" required autofocus/></label>
+						<label class="form-control"><span class="label-text">Type</span><select class="select select-bordered" name="node_type"><option value="agent_task">Agent task</option><option value="trigger">Trigger</option><option value="human_gate">Human gate</option><option value="condition">Condition</option><option value="action">Action</option><option value="outcome">Outcome</option></select></label>
+						<div class="modal-action"><button class="btn btn-ghost" type="button" onclick="document.getElementById('automation-node-dialog').close()">Cancel</button><button class="btn btn-primary" type="submit" data-automation-create-node>Add node</button></div>
+					</form>
+					if page.Result.Definition.Version.Source == "template" {
+						<details class="mt-5 border-t border-base-300 pt-4"><summary class="cursor-pointer text-sm font-semibold">Suggested nodes</summary><p class="mt-1 text-xs text-base-content/60">Quick-add nodes understood by this Automation’s runtime.</p>
+							<div class="mt-2 space-y-1">
+								for _, node := range page.NodePalette {
+									if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
+										<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
+									}
+								}
+							</div>
+						</details>
+					}
+					</div>
+					<form method="dialog" class="modal-backdrop"><button aria-label="Close add node dialog">close</button></form>
+				</dialog>
+				<div class="automation-canvas-shell relative mt-3 min-h-[calc(100dvh-15rem)] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30" role="region" aria-label="Automation graph builder">
 					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class="h-[calc(100dvh-15rem)] min-h-[42rem] w-full touch-none select-none" role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
 						@automationGraphThemeStyles()
 						<defs><marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker></defs>
@@ -721,6 +727,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							}
 						}
 					</svg>
+					if len(page.Result.Candidate.Nodes) == 0 {
+						<div class="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+							<div class="pointer-events-auto max-w-sm rounded-box border border-base-300 bg-base-100/95 p-6 text-center shadow-xl"><h4 class="text-lg font-semibold">Start your graph</h4><p class="mt-2 text-sm text-base-content/65">Add a node, drag it into place, then connect its side dots to other nodes.</p><button class="btn btn-primary mt-4" type="button" data-automation-add-first-node onclick="document.getElementById('automation-node-dialog').showModal()">Add first node</button></div>
+						</div>
+					}
 				</div>
 			</section>
 			<details class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
@@ -763,7 +774,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				var edgePalette = [];
 				try { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }
 				var connectStatus = root.querySelector('[data-automation-connect-status]');
+				var disconnectEdge = root.querySelector('[data-automation-disconnect-edge]');
 				var preview = svg.querySelector('[data-automation-edge-preview]');
+					var selectedEdgeKey = '';
 					var keyboardSource = null;
 					var activeConnection = null;
 					var initialViewBox = svg.getAttribute('viewBox').split(/\s+/).map(Number);
@@ -871,9 +884,19 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						if (canonical) { edge.key = canonical.key; edge.label = canonical.label || ''; edge.condition = canonical.condition || {}; } else if (edgePalette.some(function(item) { return item.key === edge.key; })) { edge.key = uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), oldKey); edge.condition = {}; }
 						var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(oldKey) + '"]'); if (group) { group.dataset.edgeKey = edge.key; renderEdge(group); } syncCandidate(); if (connectStatus) connectStatus.textContent = 'Reconnected ' + nodeName(from) + ' to ' + nodeName(to) + '.';
 					}
-					function removeEdge(key) { candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.key !== key; }); var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(key) + '"]'); if (group) group.remove(); syncCandidate(); if (connectStatus) connectStatus.textContent = 'Connection deleted. Draw a new one from either side when ready.'; }
-					function removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }
-					function selectEdge(group) { svg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); }); }
+					function removeEdge(key) {
+						candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.key !== key; });
+						var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(key) + '"]'); if (group) group.remove();
+						if (selectedEdgeKey === key) selectEdge(null);
+						syncCandidate(); if (connectStatus) connectStatus.textContent = 'Connection disconnected. Draw a new one from either side when ready.';
+					}
+					function removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); if (selectedEdgeKey && !edgeCandidate(selectedEdgeKey)) selectEdge(null); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }
+					function selectEdge(group) {
+						selectedEdgeKey = group ? group.dataset.edgeKey : '';
+						svg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); });
+						if (disconnectEdge) disconnectEdge.disabled = !selectedEdgeKey;
+						if (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or choose Disconnect selected.';
+					}
 					function beginReconnect(group, handle, event) {
 						if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection(); var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!points) return;
 						var endpoint = handle.dataset.edgeEndpoint, start = endpoint === 'from' ? points.start : points.finish; activeConnection = {reconnectKey: edge.key, endpoint: endpoint, pointerId: event.pointerId}; preview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.hidden = false;
@@ -925,6 +948,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						showConnectionTargets(activeConnection.from, activeConnection.fromSide); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);
 					}
 					svg.querySelectorAll('.automation-draft-edge').forEach(bindEdgeGroup);
+					if (disconnectEdge) disconnectEdge.addEventListener('click', function() { if (selectedEdgeKey) removeEdge(selectedEdgeKey); });
 					svg.querySelectorAll('[data-connect-port]').forEach(function(handle) {
 						handle.addEventListener('pointerdown', function(event) { beginConnection(handle, event); });
 						handle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });
