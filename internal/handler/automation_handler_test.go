@@ -56,7 +56,10 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Contains(t, detail.Body.String(), "Node resources")
 	require.Contains(t, detail.Body.String(), "Live automation graph")
 	require.Contains(t, detail.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
-	require.Contains(t, detail.Body.String(), `class="automation-graph-label automation-graph-label--primary`)
+	require.Contains(t, detail.Body.String(), `class="automation-node-content"`)
+	require.Contains(t, detail.Body.String(), "No active work")
+	require.Contains(t, detail.Body.String(), `viewBox="-`)
+	require.NotContains(t, detail.Body.String(), "0 run · 0 wait · 0 block · 0 fail · 0 done")
 	require.Contains(t, detail.Body.String(), `fill: oklch(var(--b2));`)
 	require.Contains(t, detail.Body.String(), `fill: oklch(var(--bc));`)
 	require.NotContains(t, detail.Body.String(), "fill-base-content")
@@ -73,7 +76,8 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Contains(t, definitionView.Body.String(), "Published definition")
 	require.Contains(t, definitionView.Body.String(), "Native Producer")
 	require.Contains(t, definitionView.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
-	require.Contains(t, definitionView.Body.String(), `class="automation-graph-label automation-graph-label--primary`)
+	require.Contains(t, definitionView.Body.String(), `class="automation-node-content"`)
+	require.Contains(t, definitionView.Body.String(), `viewBox="-`)
 	require.NotContains(t, definitionView.Body.String(), "fill-base-content")
 	require.NotContains(t, definitionView.Body.String(), "fill-base-200")
 
@@ -167,6 +171,89 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Equal(t, 404, foreign.Code)
 }
 
+func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Blank Builder Project").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, nil)
+
+	newPage := tc.HTTP().Get("/automations/new?project_id=" + project.ID).Execute()
+	require.Equal(t, 200, newPage.Code)
+	require.NotContains(t, newPage.Body.String(), `aria-label="Blank topology"`)
+	require.NotContains(t, newPage.Body.String(), `<option value="vision_driver">Vision Driver</option><option value="native_sdlc">Native SDLC</option>`)
+
+	created := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"blank"},
+	}).Execute()
+	require.Equal(t, 200, created.Code)
+	require.Contains(t, created.Body.String(), `data-automation-draft-canvas`)
+	require.Contains(t, created.Body.String(), `data-automation-add-node`)
+	require.Contains(t, created.Body.String(), `data-automation-fit`)
+	require.Contains(t, created.Body.String(), `data-automation-reset`)
+	require.Contains(t, created.Body.String(), `name="candidate_json"`)
+	require.Contains(t, created.Body.String(), "Add nodes")
+	require.NotContains(t, created.Body.String(), `class="automation-draft-node"`, "blank canvas must not start with template nodes")
+
+	var automationID, versionID string
+	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
+	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+	require.NoError(t, err)
+	candidate, err := metadata.Candidate()
+	require.NoError(t, err)
+	candidateJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+
+	added := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"add_node"}, "node_key": {"vision_trigger"},
+	}).Execute()
+	require.Equal(t, 200, added.Code)
+	require.Contains(t, added.Body.String(), `data-node-key="vision_trigger"`)
+	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+	require.NoError(t, err)
+	candidate, err = metadata.Candidate()
+	require.NoError(t, err)
+	require.Len(t, candidate.Nodes, 1)
+
+	candidateJSON, err = json.Marshal(candidate)
+	require.NoError(t, err)
+	added = tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"add_node"}, "node_key": {"vision_driver"},
+	}).Execute()
+	require.Equal(t, 200, added.Code)
+	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+	require.NoError(t, err)
+	candidate, err = metadata.Candidate()
+	require.NoError(t, err)
+	candidateJSON, err = json.Marshal(candidate)
+	require.NoError(t, err)
+	connected := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"add_edge"}, "edge_key": {"trigger_to_driver"},
+	}).Execute()
+	require.Equal(t, 200, connected.Code)
+	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+	require.NoError(t, err)
+	candidate, err = metadata.Candidate()
+	require.NoError(t, err)
+	require.Len(t, candidate.Nodes, 2)
+	require.Len(t, candidate.Edges, 1)
+
+	candidate.Edges[0].Label = "Keep this transition label"
+	candidateJSON, err = json.Marshal(candidate)
+	require.NoError(t, err)
+	unchanged := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"add_node"}, "node_key": {"vision_driver"},
+	}).Execute()
+	require.Equal(t, 200, unchanged.Code)
+	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+	require.NoError(t, err)
+	candidate, err = metadata.Candidate()
+	require.NoError(t, err)
+	require.Equal(t, "Keep this transition label", candidate.Edges[0].Label, "palette actions must preserve fields absent from their submitted form")
+}
+
 func TestAutomationBuilderWebFlowIsExplicitDraftOnlyAndProjectScoped(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Builder Project").Build()
@@ -200,7 +287,8 @@ func TestAutomationBuilderWebFlowIsExplicitDraftOnlyAndProjectScoped(t *testing.
 	require.Contains(t, created.Body.String(), `id="automation-builder"`)
 	require.Contains(t, created.Body.String(), "Nothing is active until publication completes")
 	require.Contains(t, created.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
-	require.Contains(t, created.Body.String(), `class="automation-graph-label automation-graph-label--primary`)
+	require.Contains(t, created.Body.String(), `class="automation-node-content"`)
+	require.Contains(t, created.Body.String(), `class="automation-draft-node`)
 	require.NotContains(t, created.Body.String(), "fill-base-content")
 	require.NotContains(t, created.Body.String(), "fill-base-200")
 	require.Zero(t, tableCountHandler(t, tc, "tasks"))

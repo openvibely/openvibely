@@ -205,6 +205,35 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 
 ## Post-Completion UI Repairs
 
+### Reopened Phase 4 Visual Builder Contract
+
+- [x] Make Blank creation open a genuinely empty canvas without a topology/template selector or pre-populated nodes and transitions.
+- [x] Expose only nodes and transitions supported by the draft's registered adapter; permit add/remove operations while rejecting unknown nodes, arbitrary edges, and transitions whose endpoints are absent.
+- [x] Persist incomplete safe drafts with explicit `missing_node`/`missing_edge` validation, while continuing to block publication until the registered topology and required configuration are complete.
+- [x] Preserve user-authored node positions through normalization and update, with drag and keyboard-arrow movement plus Reset layout to canonical adapter positions.
+- [x] Add canvas pan, wheel/button zoom, Fit, and Reset controls without introducing a generic edge interpreter or independent execution engine.
+- [x] Bound node content inside larger cards with wrapped/clamped names, compact semantic type/state labels, nonzero-only work summaries, and accessible node focus/labels.
+- [x] Compute padded, negative-coordinate-aware graph view boxes and increase canonical spacing so top nodes, labels, and connected cards are not clipped or overlapped.
+- [x] Replace the badge-like state row with a semantic color-key legend explaining that each node shows its highest-priority current state.
+- [x] Preserve HTMX/browser history ownership and reinitialize canvas controls after authoritative fragment swaps without duplicate global SSE listeners.
+- [x] Add service, handler, rendered-markup, and real-Chrome regressions for empty Blank creation, constrained add/connect actions, persisted layout, absent-form value preservation, text containment, negative-coordinate clipping, pan/zoom/reset controls, and navigation.
+
+### Reopened Phase 4 Changed Files
+
+- Draft contract and persistence: `internal/models/automation_draft.go`, `internal/service/automation_draft_service.go`, and `internal/service/automation_draft_service_test.go`.
+- Builder HTTP actions and regressions: `internal/handler/automation_builder_handler.go` and `internal/handler/automation_handler_test.go`.
+- Graph/editor UI and browser coverage: `web/templates/pages/automations.templ`, generated `web/templates/pages/automations_templ.go`, and `web/templates/pages/automations_navigation_browser_test.go`.
+
+### Reopened Phase 4 Validation And Audit
+
+- `gofmt`, `templ generate`, and `go build ./cmd/server`: passed.
+- Focused `go test ./internal/service ./internal/handler ./web/templates/pages -run 'TestAutomation' -count=1 -timeout 180s`: passed, including the production Chrome graph/navigation fixture.
+- Final repository validation passed: `templ generate`, `go build ./cmd/server`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`; every package passed and the macOS desktop linker emitted only the documented non-failing newer-SDK warning.
+- Fresh audit found and repaired one palette-submit data-loss path: absent transition-label fields no longer overwrite labels already carried by strict `candidate_json`; a handler regression proves the preserved value.
+- Fresh audit confirmed generated output is synchronized, graph geometry has no remaining 140-pixel legacy node cards or all-zero count strings, negative coordinates receive view-box padding, and Blank has no topology selector.
+- The builder remains deliberately constrained to registered adapter palettes and canonical edges. It does not add arbitrary executable nodes, generic graph execution semantics, Register Existing, legacy detection, heuristic inference, migration, confidence scoring, or graph backfill.
+- Remaining work for this repair: none; the candidate is ready for its clean checkpoint commit.
+
 - Replaced unsupported SVG `fill-*`/`stroke-*` theme utilities with Automation graph classes backed directly by DaisyUI theme variables across Live, Definition, invocation, replay, and draft graphs. Dark-mode node surfaces and labels no longer fall back to black-on-black, and status colors remain non-color-labeled and keyboard-focusable.
 - Corrected those graph classes from `hsl(var(--…))` to DaisyUI v4's actual `oklch(var(--…))` channel contract, changed the Chrome fixture to real OKLCH channel values so invalid color functions cannot falsely pass, and derived Chart.js legend, axis, and grid colors from the rendered theme.
 - Repaired Automation navigation after HTMX history restoration: portfolio cards, `New Automation`, and every cross-surface Automation navigation control now use the shared `openVibelyNavigate` history owner, while draft create/clone responses push the canonical persisted draft URL instead of caching draft DOM under the source page URL.

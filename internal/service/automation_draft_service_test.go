@@ -28,6 +28,34 @@ func TestAutomationDraftServiceNormalizesRegisteredTemplatesDeterministically(t 
 	}
 }
 
+func TestAutomationBlankDraftStartsEmptyAndPersistsUserLayout(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Visual blank")
+	repo := repository.NewAutomationRepo(db)
+	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
+
+	blank, err := svc.BlankCandidate("")
+	require.NoError(t, err)
+	require.Equal(t, AutomationAdapterVisionDriver, blank.AdapterKey)
+	require.Empty(t, blank.Nodes, "Blank must start with an empty canvas, not a populated template")
+	require.Empty(t, blank.Edges)
+	require.Contains(t, issueCodes(svc.ValidateCandidate(blank)), "missing_node")
+
+	created, err := svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: blank})
+	require.NoError(t, err)
+	require.Empty(t, created.Candidate.Nodes)
+	require.NotEmpty(t, created.ValidationErrors)
+
+	palette, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	dragged := palette.Nodes[0]
+	dragged.Position = &models.AutomationDraftPoint{X: 37, Y: 83}
+	created.Candidate.Nodes = append(created.Candidate.Nodes, dragged)
+	updated, err := svc.UpdateDraft(context.Background(), created.Definition.Automation.ID, created.Definition.Version.ID, project.ID, created.Candidate)
+	require.NoError(t, err)
+	require.Equal(t, &models.AutomationDraftPoint{X: 37, Y: 83}, updated.Candidate.Nodes[0].Position, "normalization must preserve user-positioned nodes")
+}
+
 func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t *testing.T) {
 	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)

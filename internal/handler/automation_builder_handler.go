@@ -40,7 +40,7 @@ func (h *Handler) CreateAutomationDraftWeb(c echo.Context) error {
 	case "template":
 		candidate, err = h.automationDraftSvc.TemplateCandidate(templateKey)
 	case "blank":
-		candidate, err = h.automationDraftSvc.BlankCandidate(templateKey)
+		candidate, err = h.automationDraftSvc.BlankCandidate("")
 	case "describe":
 		var preview *models.AutomationDraftResult
 		preview, err = h.previewAutomationDescription(ctx, projectID, c.FormValue("description"))
@@ -105,30 +105,15 @@ func (h *Handler) UpdateAutomationDraftWeb(c echo.Context) error {
 		return err
 	}
 	candidate := result.Candidate
-	for i := range candidate.Nodes {
-		node := &candidate.Nodes[i]
-		prefix := "node_" + node.Key + "_"
-		if value := strings.TrimSpace(c.FormValue(prefix + "name")); value != "" {
-			node.Name = value
-		}
-		if _, ok := node.Config["prompt"]; ok {
-			node.Config["prompt"] = c.FormValue(prefix + "prompt")
-			node.Config["category"] = c.FormValue(prefix + "category")
-			if priority, parseErr := strconv.Atoi(c.FormValue(prefix + "priority")); parseErr == nil {
-				node.Config["priority"] = priority
-			}
-		}
-		if _, ok := node.Config["run_at"]; ok {
-			node.Config["run_at"] = c.FormValue(prefix + "run_at")
-			node.Config["repeat_type"] = c.FormValue(prefix + "repeat_type")
-			if interval, parseErr := strconv.Atoi(c.FormValue(prefix + "repeat_interval")); parseErr == nil {
-				node.Config["repeat_interval"] = interval
-			}
-			node.Config["enabled"] = c.FormValue(prefix+"enabled") == "true"
+	if raw := strings.TrimSpace(c.FormValue("candidate_json")); raw != "" {
+		candidate, err = service.DecodeAutomationDraftCandidate([]byte(raw))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 	}
-	for i := range candidate.Edges {
-		candidate.Edges[i].Label = strings.TrimSpace(c.FormValue("edge_" + candidate.Edges[i].Key + "_label"))
+	applyAutomationDraftFormValues(c, &candidate)
+	if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	projectID, _ := h.getCurrentProjectID(c)
 	updated, err := h.automationDraftSvc.UpdateDraft(c.Request().Context(), c.Param("automationId"), c.Param("versionId"), projectID, candidate)
@@ -136,6 +121,156 @@ func (h *Handler) UpdateAutomationDraftWeb(c echo.Context) error {
 		return err
 	}
 	return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *updated})
+}
+
+func applyAutomationDraftFormValues(c echo.Context, candidate *models.AutomationDraftCandidate) {
+	if candidate == nil {
+		return
+	}
+	for i := range candidate.Nodes {
+		node := &candidate.Nodes[i]
+		prefix := "node_" + node.Key + "_"
+		if value, exists := automationDraftFormValue(c, prefix+"name"); exists && strings.TrimSpace(value) != "" {
+			node.Name = strings.TrimSpace(value)
+		}
+		if _, ok := node.Config["prompt"]; ok {
+			if value, exists := automationDraftFormValue(c, prefix+"prompt"); exists {
+				node.Config["prompt"] = value
+			}
+			if value, exists := automationDraftFormValue(c, prefix+"category"); exists {
+				node.Config["category"] = value
+			}
+			if value, exists := automationDraftFormValue(c, prefix+"priority"); exists {
+				if priority, parseErr := strconv.Atoi(value); parseErr == nil {
+					node.Config["priority"] = priority
+				}
+			}
+		}
+		if _, ok := node.Config["run_at"]; ok {
+			if value, exists := automationDraftFormValue(c, prefix+"run_at"); exists {
+				node.Config["run_at"] = value
+			}
+			if value, exists := automationDraftFormValue(c, prefix+"repeat_type"); exists {
+				node.Config["repeat_type"] = value
+			}
+			if value, exists := automationDraftFormValue(c, prefix+"repeat_interval"); exists {
+				if interval, parseErr := strconv.Atoi(value); parseErr == nil {
+					node.Config["repeat_interval"] = interval
+				}
+			}
+			if _, exists := automationDraftFormValue(c, prefix+"enabled"); exists || strings.TrimSpace(c.FormValue("builder_action")) == "" {
+				node.Config["enabled"] = c.FormValue(prefix+"enabled") == "true"
+			}
+		}
+	}
+	for i := range candidate.Edges {
+		key := "edge_" + candidate.Edges[i].Key + "_label"
+		if value, exists := automationDraftFormValue(c, key); exists {
+			candidate.Edges[i].Label = strings.TrimSpace(value)
+		}
+	}
+}
+
+func automationDraftFormValue(c echo.Context, key string) (string, bool) {
+	if err := c.Request().ParseForm(); err != nil {
+		return "", false
+	}
+	values, ok := c.Request().Form[key]
+	if !ok || len(values) == 0 {
+		return "", false
+	}
+	return values[0], true
+}
+
+func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models.AutomationDraftCandidate) error {
+	action := strings.TrimSpace(c.FormValue("builder_action"))
+	if action == "" && strings.TrimSpace(c.FormValue("remove_node")) != "" {
+		action = "remove_node"
+	}
+	if action == "" && strings.TrimSpace(c.FormValue("remove_edge")) != "" {
+		action = "remove_edge"
+	}
+	if action == "" || candidate == nil {
+		return nil
+	}
+	palette, err := h.automationDraftSvc.TemplateCandidate(candidate.AdapterKey)
+	if err != nil {
+		return err
+	}
+	switch action {
+	case "add_node":
+		key := strings.TrimSpace(c.FormValue("node_key"))
+		for _, node := range candidate.Nodes {
+			if node.Key == key {
+				return nil
+			}
+		}
+		for _, node := range palette.Nodes {
+			if node.Key == key {
+				candidate.Nodes = append(candidate.Nodes, node)
+				return nil
+			}
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "unsupported node")
+	case "remove_node":
+		key := strings.TrimSpace(c.FormValue("remove_node"))
+		if key == "" {
+			key = strings.TrimSpace(c.FormValue("node_key"))
+		}
+		nodes := candidate.Nodes[:0]
+		for _, node := range candidate.Nodes {
+			if node.Key != key {
+				nodes = append(nodes, node)
+			}
+		}
+		candidate.Nodes = nodes
+		edges := candidate.Edges[:0]
+		for _, edge := range candidate.Edges {
+			if edge.From != key && edge.To != key {
+				edges = append(edges, edge)
+			}
+		}
+		candidate.Edges = edges
+		return nil
+	case "add_edge":
+		key := strings.TrimSpace(c.FormValue("edge_key"))
+		for _, edge := range candidate.Edges {
+			if edge.Key == key {
+				return nil
+			}
+		}
+		for _, edge := range palette.Edges {
+			if edge.Key == key && automationDraftContainsNode(candidate.Nodes, edge.From) && automationDraftContainsNode(candidate.Nodes, edge.To) {
+				candidate.Edges = append(candidate.Edges, edge)
+				return nil
+			}
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "transition endpoints must be on the canvas")
+	case "remove_edge":
+		key := strings.TrimSpace(c.FormValue("remove_edge"))
+		if key == "" {
+			key = strings.TrimSpace(c.FormValue("edge_key"))
+		}
+		edges := candidate.Edges[:0]
+		for _, edge := range candidate.Edges {
+			if edge.Key != key {
+				edges = append(edges, edge)
+			}
+		}
+		candidate.Edges = edges
+		return nil
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, "unsupported builder action")
+	}
+}
+
+func automationDraftContainsNode(nodes []models.AutomationDraftNode, key string) bool {
+	for _, node := range nodes {
+		if node.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) PlanAutomationDraftWeb(c echo.Context) error {
@@ -265,6 +400,12 @@ func (h *Handler) setAutomationDraftPushURL(c echo.Context, result *models.Autom
 
 func (h *Handler) renderAutomationBuilder(c echo.Context, page models.AutomationBuilderPage) error {
 	projectID, _ := h.getCurrentProjectID(c)
+	if h.automationDraftSvc != nil {
+		if palette, err := h.automationDraftSvc.TemplateCandidate(page.Result.Candidate.AdapterKey); err == nil {
+			page.NodePalette = palette.Nodes
+			page.EdgePalette = palette.Edges
+		}
+	}
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationBuilderContent(page, projectID))
 	}

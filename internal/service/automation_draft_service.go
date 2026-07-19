@@ -129,18 +129,19 @@ func (s *AutomationDraftService) BlankCandidate(adapterKey string) (models.Autom
 	if strings.TrimSpace(adapterKey) == "" {
 		adapterKey = AutomationAdapterVisionDriver
 	}
-	candidate, err := s.TemplateCandidate(adapterKey)
-	if err != nil {
-		return candidate, err
+	adapter, ok := s.registry.Get(strings.TrimSpace(adapterKey))
+	if !ok {
+		return models.AutomationDraftCandidate{}, fmt.Errorf("unsupported automation template %q", adapterKey)
 	}
-	candidate.Name = "Untitled Automation"
-	candidate.Description = ""
-	for i := range candidate.Nodes {
-		if _, ok := candidate.Nodes[i].Config["prompt"]; ok {
-			candidate.Nodes[i].Config["prompt"] = ""
-		}
-	}
-	return candidate, nil
+	return models.AutomationDraftCandidate{
+		SchemaVersion:  automationDraftSchemaVersion,
+		Name:           "Untitled Automation",
+		Description:    "",
+		AutomationType: adapter.AutomationType,
+		AdapterKey:     adapter.Key,
+		Nodes:          []models.AutomationDraftNode{},
+		Edges:          []models.AutomationDraftEdge{},
+	}, nil
 }
 
 func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationDraftCandidate) (models.AutomationDraftCandidate, error) {
@@ -169,7 +170,9 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 			if node.Name == "" {
 				node.Name = canonical.Name
 			}
-			node.Position = &models.AutomationDraftPoint{X: canonical.X, Y: canonical.Y}
+			if node.Position == nil {
+				node.Position = &models.AutomationDraftPoint{X: canonical.X, Y: canonical.Y}
+			}
 		}
 	}
 	for i := range candidate.Edges {
@@ -253,7 +256,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 	}
 	for key := range canonicalNodes {
 		if !seenNodes[key] {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "unsupported_topology", Message: "The registered adapter requires this node."})
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "missing_node", Message: "Add this required node before publication."})
 		}
 	}
 
@@ -284,7 +287,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 	}
 	for key := range canonicalEdges {
 		if !seenEdges[key] {
-			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_topology", Message: "The registered adapter requires every template edge."})
+			issues = append(issues, models.AutomationValidationIssue{Code: "missing_edge", Message: "Add every required transition before publication."})
 		}
 	}
 	sort.SliceStable(issues, func(i, j int) bool {
@@ -434,7 +437,7 @@ func (s *AutomationDraftService) CreateDraft(ctx context.Context, request Automa
 	}
 	issues := s.ValidateCandidate(candidate)
 	for _, issue := range issues {
-		if issue.Code != "missing_prompt" {
+		if automationDraftIssuePreventsPersistence(issue.Code) {
 			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
 		}
 	}

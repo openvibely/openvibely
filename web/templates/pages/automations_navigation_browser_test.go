@@ -48,7 +48,7 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 		return out.String()
 	}
 	renderLive := func(id, name string) string {
-		node := models.AutomationNode{ID: id + "-node", Name: "Readable node", NodeType: models.AutomationNodeAgentTask, PositionX: 20, PositionY: 20}
+		node := models.AutomationNode{ID: id + "-node", Name: "A very long automation node name that must wrap safely", NodeType: models.AutomationNodeAgentTask, PositionX: 20, PositionY: -90}
 		graph := models.AutomationLiveGraph{
 			Automation:   models.Automation{ID: id, Name: name, Description: "Theme and navigation fixture", LifecycleState: models.AutomationActive},
 			Version:      models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"},
@@ -83,6 +83,18 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 		var out bytes.Buffer
 		if err := AutomationDefinitionContent(definition, nil, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Automation definition: %v", err)
+		}
+		return out.String()
+	}
+
+	renderBuilder := func() string {
+		trigger := models.AutomationDraftNode{Key: "vision_trigger", Name: "Vision Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"target_node_key": "vision_driver", "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}}
+		driver := models.AutomationDraftNode{Key: "vision_driver", Name: "Vision Driver", Type: models.AutomationNodeAgentTask, Role: "vision_driver", Config: map[string]any{"prompt": "Review vision", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 180, Y: 0}}
+		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Visual Draft", AutomationType: "vision_driver", AdapterKey: "vision_driver", Nodes: []models.AutomationDraftNode{trigger, driver}, Edges: []models.AutomationDraftEdge{{Key: "trigger_to_driver", From: "vision_trigger", To: "vision_driver"}}}
+		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate, Definition: &models.AutomationDefinition{Automation: models.Automation{ID: "automation-draft", Name: "Visual Draft"}, Version: models.AutomationVersion{ID: "version-draft", AdapterKey: "vision_driver"}}}, NodePalette: []models.AutomationDraftNode{trigger, driver}, EdgePalette: candidate.Edges}
+		var out bytes.Buffer
+		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render Automation builder: %v", err)
 		}
 		return out.String()
 	}
@@ -122,13 +134,19 @@ window.addEventListener('DOMContentLoaded', function() {
     await report('progress', 'automation-a-clicked');
     await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A');
     await report('progress', 'automation-a-loaded');
-    var node = document.querySelector('.automation-graph-node');
-    var label = document.querySelector('.automation-graph-label--primary');
-    var nodeFill = getComputedStyle(node).fill;
-    var labelFill = getComputedStyle(label).fill;
-    if (nodeFill === 'rgb(0, 0, 0)' || nodeFill === 'rgba(0, 0, 0, 0)') fail('node fill fell back to black: ' + nodeFill);
-    if (labelFill === 'rgb(0, 0, 0)') fail('label fill fell back to black: ' + labelFill);
-
+	    var node = document.querySelector('.automation-graph-node');
+	    var label = document.querySelector('.automation-node-content strong');
+	    var nodeFill = getComputedStyle(node).fill;
+	    var labelColor = getComputedStyle(label).color;
+	    if (nodeFill === 'rgb(0, 0, 0)' || nodeFill === 'rgba(0, 0, 0, 0)') fail('node fill fell back to black: ' + nodeFill);
+	    if (labelColor === 'rgb(0, 0, 0)') fail('label color fell back to black: ' + labelColor);
+	    var canvasRect = document.querySelector('[data-automation-canvas]').getBoundingClientRect();
+	    var nodeRect = node.getBoundingClientRect();
+	    if (nodeRect.top < canvasRect.top - 1 || nodeRect.bottom > canvasRect.bottom + 1) fail('negative-position node is clipped by graph viewport');
+	    var labelRect = label.getBoundingClientRect();
+	    if (labelRect.left < nodeRect.left - 1 || labelRect.right > nodeRect.right + 1 || labelRect.top < nodeRect.top - 1 || labelRect.bottom > nodeRect.bottom + 1) fail('node label escapes its node bounds');
+	    if (getComputedStyle(label).overflow !== 'hidden') fail('long node label is not visibly bounded');
+	    if (!document.body.textContent.includes('No active work')) fail('zero counters did not collapse to a readable summary');
     click('#automation-live a[href*="/history?"]', 'History tab from Live');
     await waitFor(historyReady, 'History from Live');
     await report('progress', 'history-loaded');
@@ -161,9 +179,23 @@ window.addEventListener('DOMContentLoaded', function() {
     await wait(100);
     click('a[href^="/automations/automation-a?"]', 'Automation A card after in-page back');
     await report('progress', 'automation-a-reclicked');
-    await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A after in-page back');
-    await report('pass', '');
-  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+	    await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A after in-page back');
+
+	    await window.openVibelyNavigate('/automations/automation-draft/drafts/version-draft?project_id=project-browser');
+	    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder');
+	    var draftNode = document.querySelector('[data-node-key="vision_trigger"]');
+	    var candidateInput = document.querySelector('[data-automation-draft-form] [data-candidate-json]');
+	    var beforeX = JSON.parse(candidateInput.value).nodes[0].position.x;
+	    draftNode.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
+	    var afterX = JSON.parse(candidateInput.value).nodes[0].position.x;
+	    if (afterX !== beforeX + 10) fail('keyboard node movement did not persist into candidate JSON');
+	    var draftSVG = document.querySelector('[data-automation-draft-canvas] [data-automation-canvas]');
+	    var beforeZoom = draftSVG.getAttribute('viewBox');
+	    click('[data-automation-draft-canvas] [data-automation-zoom-in]', 'builder zoom in');
+	    if (draftSVG.getAttribute('viewBox') === beforeZoom) fail('builder zoom control did not change viewBox');
+	    click('[data-automation-draft-canvas] [data-automation-reset]', 'builder reset layout');
+	    if (JSON.parse(candidateInput.value).nodes[0].position.x !== beforeX) fail('builder reset did not restore canonical position');
+	    await report('pass', '');  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
 	style := `<style>
@@ -198,6 +230,8 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = w.Write([]byte(renderDefinition("automation-a", "Automation A")))
 		case "/automations/automation-b":
 			_, _ = w.Write([]byte(renderLive("automation-b", "Automation B")))
+		case "/automations/automation-draft/drafts/version-draft":
+			_, _ = w.Write([]byte(renderBuilder()))
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)

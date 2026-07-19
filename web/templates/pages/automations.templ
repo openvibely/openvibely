@@ -110,48 +110,76 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 			</div>
 		}
 		<div class="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
-			<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0">
-				<div class="mb-3 flex flex-wrap gap-2 text-xs" aria-label="Graph status legend">
-					for _, state := range []string{"failed", "blocked", "waiting_human", "running", "recently_completed", "idle"} {
-						<span class="badge badge-ghost">{ automationStateLabel(state) }</span>
-					}
+			<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0" data-automation-readonly-canvas>
+				<div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+					<div><h3 class="text-sm font-semibold">Node states</h3><p class="mt-1 text-xs text-base-content/55">A node’s border and label show the highest-priority work state currently present.</p></div>
+					<div class="flex gap-2"><button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-xs" type="button" data-automation-fit>Fit</button></div>
 				</div>
-				<div class="w-full overflow-auto" role="region" aria-label="Live automation graph">
-					<svg viewBox={ fmt.Sprintf("0 0 %d %d", automationLiveGraphWidth(graph.Nodes), automationLiveGraphHeight(graph.Nodes)) } class="min-h-[420px] min-w-[900px] w-full" role="img" aria-label={ graph.Automation.Name + " live automation graph" }>
+				<ul class="mb-3 flex flex-wrap gap-x-4 gap-y-2 text-xs" aria-label="Graph status legend">
+					for _, state := range []string{"failed", "blocked", "waiting_human", "running", "recently_completed", "idle"} {
+						<li class="inline-flex items-center gap-1.5"><span class={ automationStateDotClass(state) } aria-hidden="true"></span><span>{ automationStateLabel(state) }</span></li>
+					}
+				</ul>
+				<div class="automation-canvas-shell h-[34rem] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Live automation graph">
+					<svg data-automation-canvas viewBox={ automationLiveGraphViewBox(graph.Nodes) } class="h-full w-full touch-none select-none" role="img" aria-label={ graph.Automation.Name + " live automation graph" }>
 						@automationGraphThemeStyles()
 						<defs><marker id="automation-live-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker></defs>
 						for _, edge := range graph.Edges {
 							if source, target, ok := automationLiveEdgeNodes(graph.Nodes, edge.AutomationEdge); ok {
-								<line x1={ fmt.Sprintf("%.0f", source.PositionX+145) } y1={ fmt.Sprintf("%.0f", source.PositionY+55) } x2={ fmt.Sprintf("%.0f", target.PositionX+15) } y2={ fmt.Sprintf("%.0f", target.PositionY+55) } class={ templ.KV("automation-graph-edge", true), templ.KV("automation-graph-edge--highlighted", edge.Highlighted) } stroke-width="2" marker-end="url(#automation-live-arrow)" aria-label={ fmt.Sprintf("%s, %d transitions, %d recent", edge.Label, edge.TransitionCount, edge.RecentTransitionCount) }></line>
+								<line x1={ fmt.Sprintf("%.0f", automationGraphLayoutX(source.PositionX)+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", automationGraphLayoutY(source.PositionY)+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", automationGraphLayoutX(target.PositionX)) } y2={ fmt.Sprintf("%.0f", automationGraphLayoutY(target.PositionY)+automationGraphNodeHeight/2) } class={ templ.KV("automation-graph-edge", true), templ.KV("automation-graph-edge--highlighted", edge.Highlighted) } stroke-width="2" marker-end="url(#automation-live-arrow)" aria-label={ fmt.Sprintf("%s, %d transitions, %d recent", edge.Label, edge.TransitionCount, edge.RecentTransitionCount) }></line>
 							}
 						}
 						for _, node := range graph.Nodes {
 							<a class="automation-graph-link" href="#automation-node-resources" tabindex="0" aria-label={ automationLiveNodeAria(node) } hx-get={ fmt.Sprintf("/automations/%s/nodes/%s/resources?project_id=%s", graph.Automation.ID, node.ID, currentProjectID) } hx-target="#automation-node-resources" hx-swap="innerHTML">
-								<rect x={ fmt.Sprintf("%.0f", node.PositionX+10) } y={ fmt.Sprintf("%.0f", node.PositionY+20) } width="140" height="76" rx="10" class={ automationLiveNodeClass(node.DisplayState) } stroke-width="3"></rect>
-								<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+47) } text-anchor="middle" class="automation-graph-label automation-graph-label--primary text-[12px] font-semibold">{ automationNodeLabel(node.Name, 20) }</text>
-								<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+66) } text-anchor="middle" class="automation-graph-label automation-graph-label--secondary text-[10px]">{ automationStateLabel(node.DisplayState) }</text>
-								<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+83) } text-anchor="middle" class="automation-graph-label automation-graph-label--muted text-[9px]">{ automationNodeCountLabel(node.Counts) }</text>
+								<g transform={ fmt.Sprintf("translate(%.0f %.0f)", automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY)) }>
+									<rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class={ automationLiveNodeClass(node.DisplayState) } stroke-width="3"></rect>
+									<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span class={ automationStateTextClass(node.DisplayState) }>{ automationStateLabel(node.DisplayState) }</span><small>{ automationNodeCountLabel(node.Counts) }</small></div></foreignObject>
+								</g>
 							</a>
-						}					</svg>
+						}
+					</svg>
 				</div>
 			</div>
 			<aside id="automation-node-resources" class="rounded-box border border-base-300 bg-base-100 p-4" aria-live="polite"><h3 class="font-semibold">Node resources</h3><p class="mt-2 text-sm text-base-content/60">Select a node to inspect bounded task, execution, Alert, issue, and pull request links.</p></aside>
 		</div>
 	</div>
-	<script>
-		(function() {
-			if (window._automationLiveEventBound) return;
-			window._automationLiveEventBound = true;
-			window.addEventListener('sse-automation-event', function(event) {
-				var root = document.getElementById('automation-live');
-				if (!root || !event.detail) return;
-				if (event.detail.project_id && event.detail.project_id !== root.dataset.projectId) return;
-				if (event.detail.automation_id && event.detail.automation_id !== root.dataset.automationId) return;
-				clearTimeout(window._automationLiveRefreshTimer);
-				window._automationLiveRefreshTimer = setTimeout(function() { if (document.getElementById('automation-live')) htmx.ajax('GET', root.getAttribute('hx-get'), {target: '#automation-live', swap: 'outerHTML'}); }, 250);
-			});
-		})();
-	</script>
+		<script>
+			(function() {
+				if (!window._automationLiveEventBound) {
+					window._automationLiveEventBound = true;
+					window.addEventListener('sse-automation-event', function(event) {
+						var root = document.getElementById('automation-live');
+						if (!root || !event.detail) return;
+						if (event.detail.project_id && event.detail.project_id !== root.dataset.projectId) return;
+						if (event.detail.automation_id && event.detail.automation_id !== root.dataset.automationId) return;
+						clearTimeout(window._automationLiveRefreshTimer);
+						window._automationLiveRefreshTimer = setTimeout(function() {
+							if (document.getElementById('automation-live')) {
+								htmx.ajax('GET', root.getAttribute('hx-get'), {target: '#automation-live', swap: 'outerHTML'});
+							}
+						}, 250);
+					});
+				}
+				var canvasRoot = document.querySelector('[data-automation-readonly-canvas]');
+				var svg = canvasRoot && canvasRoot.querySelector('[data-automation-canvas]');
+				if (canvasRoot && svg) {
+					var original = svg.getAttribute('viewBox').split(/\s+/).map(Number);
+					var box = original.slice();
+					var pan = null;
+					function apply() { svg.setAttribute('viewBox', box.join(' ')); }
+					function point(event) { var value = svg.createSVGPoint(); value.x = event.clientX; value.y = event.clientY; return value.matrixTransform(svg.getScreenCTM().inverse()); }
+					function zoom(factor) { var cx=box[0]+box[2]/2, cy=box[1]+box[3]/2; box[2]=Math.max(300,Math.min(4000,box[2]*factor)); box[3]=Math.max(200,Math.min(2500,box[3]*factor)); box[0]=cx-box[2]/2; box[1]=cy-box[3]/2; apply(); }
+					svg.addEventListener('wheel', function(event) { event.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : .88); }, {passive:false});
+					svg.addEventListener('pointerdown', function(event) { if (event.target !== svg || event.button !== 0) return; var p=point(event); pan={x:p.x,y:p.y,box:box.slice()}; svg.setPointerCapture(event.pointerId); });
+					svg.addEventListener('pointermove', function(event) { if (!pan) return; var p=point(event); box[0]=pan.box[0]+pan.x-p.x; box[1]=pan.box[1]+pan.y-p.y; apply(); });
+					svg.addEventListener('pointerup', function(){pan=null;});
+					svg.addEventListener('pointercancel', function(){pan=null;});
+					canvasRoot.querySelector('[data-automation-zoom-in]').addEventListener('click', function(){zoom(.82);});
+					canvasRoot.querySelector('[data-automation-zoom-out]').addEventListener('click', function(){zoom(1.22);});
+					canvasRoot.querySelector('[data-automation-fit]').addEventListener('click', function(){box=original.slice();apply();});
+				}
+			})();
+		</script>
 }
 
 templ AutomationNodeResources(resources []models.AutomationNodeResource) {
@@ -174,12 +202,15 @@ templ AutomationNodeResources(resources []models.AutomationNodeResource) {
 	}
 }
 
-func automationLiveGraphWidth(nodes []models.AutomationLiveNode) int { max := 900.0; for _, n := range nodes { if n.PositionX+180 > max { max = n.PositionX+180 } }; return int(max) }
-func automationLiveGraphHeight(nodes []models.AutomationLiveNode) int { max := 420.0; for _, n := range nodes { if n.PositionY+140 > max { max = n.PositionY+140 } }; return int(max) }
+func automationGraphLayoutX(value float64) float64 { return value * 1.25 }
+func automationGraphLayoutY(value float64) float64 { return value * 1.15 }
+func automationLiveGraphViewBox(nodes []models.AutomationLiveNode) string { if len(nodes) == 0 { return "-60 -60 900 540" }; minX, minY := automationGraphLayoutX(nodes[0].PositionX), automationGraphLayoutY(nodes[0].PositionY); maxX, maxY := minX+automationGraphNodeWidth, minY+automationGraphNodeHeight; for _, node := range nodes { x, y := automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY); if x < minX { minX = x }; if y < minY { minY = y }; if x+automationGraphNodeWidth > maxX { maxX = x+automationGraphNodeWidth }; if y+automationGraphNodeHeight > maxY { maxY = y+automationGraphNodeHeight } }; return fmt.Sprintf("%.0f %.0f %.0f %.0f", minX-automationGraphPadding, minY-automationGraphPadding, maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding) }
 func automationLiveEdgeNodes(nodes []models.AutomationLiveNode, edge models.AutomationEdge) (models.AutomationLiveNode, models.AutomationLiveNode, bool) { var source, target models.AutomationLiveNode; var foundSource, foundTarget bool; for _, n := range nodes { if n.ID == edge.SourceNodeID { source, foundSource = n, true }; if n.ID == edge.TargetNodeID { target, foundTarget = n, true } }; return source, target, foundSource && foundTarget }
 func automationLiveNodeClass(state string) string { base := "automation-graph-node automation-graph-node--idle"; switch state { case "failed": return "automation-graph-node automation-graph-node--failed"; case "blocked": return "automation-graph-node automation-graph-node--blocked"; case "waiting_human": return "automation-graph-node automation-graph-node--waiting"; case "running": return "automation-graph-node automation-graph-node--running"; case "recently_completed": return "automation-graph-node automation-graph-node--completed" }; return base }
 func automationStateLabel(state string) string { return strings.ReplaceAll(strings.Title(strings.ReplaceAll(state, "_", " ")), "Human", "human") }
-func automationNodeCountLabel(c models.AutomationNodeCounts) string { return fmt.Sprintf("%d run · %d wait · %d block · %d fail · %d done", c.Running, c.Waiting, c.Blocked, c.Failed, c.CompletedRecently) }
+func automationStateDotClass(state string) string { return "automation-state-dot automation-state-dot--" + strings.ReplaceAll(state, "_human", "") }
+func automationStateTextClass(state string) string { return "automation-node-state automation-node-state--" + strings.ReplaceAll(state, "_human", "") }
+func automationNodeCountLabel(c models.AutomationNodeCounts) string { values := []string{}; if c.Running > 0 { values = append(values, fmt.Sprintf("%d running", c.Running)) }; if c.Waiting > 0 { values = append(values, fmt.Sprintf("%d waiting", c.Waiting)) }; if c.Blocked > 0 { values = append(values, fmt.Sprintf("%d blocked", c.Blocked)) }; if c.Failed > 0 { values = append(values, fmt.Sprintf("%d failed", c.Failed)) }; if c.CompletedRecently > 0 { values = append(values, fmt.Sprintf("%d recent", c.CompletedRecently)) }; if len(values) == 0 { return "No active work" }; return strings.Join(values, " · ") }
 func automationLiveNodeAria(node models.AutomationLiveNode) string { return node.Name + ", " + automationStateLabel(node.DisplayState) + ", " + automationNodeCountLabel(node.Counts) }
 
 templ AutomationDefinition(projects []models.Project, currentProjectID string, definition models.AutomationDefinition, resources []models.AutomationResourceSummary) {
@@ -211,20 +242,18 @@ templ automationDefinitionContent(definition models.AutomationDefinition, resour
 		</div>
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 			<div class="mb-3 flex items-center justify-between gap-3"><h3 class="font-semibold">Published definition</h3><span class="text-xs text-base-content/60">Read-only</span></div>
-			<div class="w-full overflow-x-auto" role="region" aria-label="Automation definition graph">
-				<svg viewBox={ fmt.Sprintf("0 0 %d %d", automationGraphWidth(definition.Nodes), automationGraphHeight(definition.Nodes)) } class="min-h-[420px] min-w-[900px] w-full" role="img" aria-label={ definition.Automation.Name + " automation graph" }>
+			<div class="automation-canvas-shell h-[30rem] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Automation definition graph">
+				<svg viewBox={ automationGraphViewBox(definition.Nodes) } class="h-full w-full" role="img" aria-label={ definition.Automation.Name + " automation graph" }>
 					@automationGraphThemeStyles()
 					<defs><marker id="automation-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker></defs>
 					for _, edge := range definition.Edges {
 						if source, target, ok := automationEdgeNodes(definition.Nodes, edge); ok {
-							<line x1={ fmt.Sprintf("%.0f", source.PositionX+145) } y1={ fmt.Sprintf("%.0f", source.PositionY+55) } x2={ fmt.Sprintf("%.0f", target.PositionX+15) } y2={ fmt.Sprintf("%.0f", target.PositionY+55) } class="automation-graph-edge" stroke-width="2" marker-end="url(#automation-arrow)"></line>
+							<line x1={ fmt.Sprintf("%.0f", automationGraphLayoutX(source.PositionX)+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", automationGraphLayoutY(source.PositionY)+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", automationGraphLayoutX(target.PositionX)) } y2={ fmt.Sprintf("%.0f", automationGraphLayoutY(target.PositionY)+automationGraphNodeHeight/2) } class="automation-graph-edge" stroke-width="2" marker-end="url(#automation-arrow)"></line>
 						}
 					}
 					for _, node := range definition.Nodes {
 						<a class="automation-graph-link" href={ templ.SafeURL("#automation-node-" + node.ID) } aria-label={ node.Name + ", " + string(node.NodeType) }>
-							<rect x={ fmt.Sprintf("%.0f", node.PositionX+10) } y={ fmt.Sprintf("%.0f", node.PositionY+20) } width="140" height="70" rx="10" class="automation-graph-node automation-graph-node--idle" stroke-width="2"></rect>
-							<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+50) } text-anchor="middle" class="automation-graph-label automation-graph-label--primary text-[12px] font-semibold">{ automationNodeLabel(node.Name, 20) }</text>
-							<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+70) } text-anchor="middle" class="automation-graph-label automation-graph-label--muted text-[10px]">{ string(node.NodeType) }</text>
+							<g transform={ fmt.Sprintf("translate(%.0f %.0f)", automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY)) }><rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class="automation-graph-node automation-graph-node--idle" stroke-width="2"></rect><foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span>{ automationNodeTypeLabel(node.NodeType) }</span></div></foreignObject></g>
 						</a>
 					}
 				</svg>
@@ -405,17 +434,16 @@ templ automationInvocationHistoryContent(history models.AutomationInvocationHist
 		<div class="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-2xl font-bold">Invocation</h2><p class="mt-1 text-sm text-base-content/60">{ automationInvocationLabel(history.Invocation) } · topology v{ fmt.Sprintf("%d", history.Definition.Version.Version) }</p></div><span class="badge">{ string(history.Invocation.Status) }</span></div>
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 			<h3 class="font-semibold">Invocation graph</h3><p class="mt-1 text-xs text-base-content/55">Immutable topology with nodes touched only by this occurrence highlighted.</p>
-			<div class="mt-3 w-full overflow-auto">
-				<svg viewBox={ fmt.Sprintf("0 0 %d %d", automationGraphWidth(history.Definition.Nodes), automationGraphHeight(history.Definition.Nodes)) } class="min-h-[420px] min-w-[900px] w-full" role="img" aria-label="Invocation graph">
+			<div class="mt-3 automation-canvas-shell h-[30rem] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/20">
+				<svg viewBox={ automationGraphViewBox(history.Definition.Nodes) } class="h-full w-full" role="img" aria-label="Invocation graph">
 					@automationGraphThemeStyles()
 					for _, edge := range history.Definition.Edges {
 						if source, target, ok := automationEdgeNodes(history.Definition.Nodes, edge); ok {
-							<line x1={ fmt.Sprintf("%.0f", source.PositionX+145) } y1={ fmt.Sprintf("%.0f", source.PositionY+55) } x2={ fmt.Sprintf("%.0f", target.PositionX+15) } y2={ fmt.Sprintf("%.0f", target.PositionY+55) } class="automation-graph-edge" stroke-width="2"></line>
+							<line x1={ fmt.Sprintf("%.0f", automationGraphLayoutX(source.PositionX)+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", automationGraphLayoutY(source.PositionY)+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", automationGraphLayoutX(target.PositionX)) } y2={ fmt.Sprintf("%.0f", automationGraphLayoutY(target.PositionY)+automationGraphNodeHeight/2) } class="automation-graph-edge" stroke-width="2"></line>
 						}
 					}
 					for _, node := range history.Definition.Nodes {
-						<rect x={ fmt.Sprintf("%.0f", node.PositionX+10) } y={ fmt.Sprintf("%.0f", node.PositionY+20) } width="140" height="70" rx="10" class={ automationInvocationNodeClass(history, node.ID) } stroke-width="3"></rect>
-						<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+55) } text-anchor="middle" class="automation-graph-label automation-graph-label--primary text-[12px] font-semibold">{ automationNodeLabel(node.Name, 20) }</text>
+						<g transform={ fmt.Sprintf("translate(%.0f %.0f)", automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY)) }><rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class={ automationInvocationNodeClass(history, node.ID) } stroke-width="3"></rect><foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span>{ automationNodeTypeLabel(node.NodeType) }</span></div></foreignObject></g>
 					}
 				</svg>
 			</div>
@@ -473,17 +501,16 @@ templ automationWorkItemHistoryContent(history models.AutomationWorkItemHistory,
 				<p class="mt-3 text-sm text-base-content/55">No transitions to replay.</p>
 			} else {
 				<input id="automation-replay-slider" class="range range-primary range-sm mt-4" type="range" min="0" max={ fmt.Sprintf("%d", len(history.Replay)-1) } value="0" aria-label="Replay transition"/>
-				<div class="mt-3 w-full overflow-auto">
-					<svg viewBox={ fmt.Sprintf("0 0 %d %d", automationGraphWidth(history.Definition.Nodes), automationGraphHeight(history.Definition.Nodes)) } class="min-h-[420px] min-w-[900px] w-full" role="img" aria-label="Work item transition replay">
+				<div class="mt-3 automation-canvas-shell h-[30rem] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/20">
+					<svg viewBox={ automationGraphViewBox(history.Definition.Nodes) } class="h-full w-full" role="img" aria-label="Work item transition replay">
 						@automationGraphThemeStyles()
 						for _, edge := range history.Definition.Edges {
 							if source, target, ok := automationEdgeNodes(history.Definition.Nodes, edge); ok {
-								<line x1={ fmt.Sprintf("%.0f", source.PositionX+145) } y1={ fmt.Sprintf("%.0f", source.PositionY+55) } x2={ fmt.Sprintf("%.0f", target.PositionX+15) } y2={ fmt.Sprintf("%.0f", target.PositionY+55) } class="automation-graph-edge" stroke-width="2"></line>
+								<line x1={ fmt.Sprintf("%.0f", automationGraphLayoutX(source.PositionX)+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", automationGraphLayoutY(source.PositionY)+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", automationGraphLayoutX(target.PositionX)) } y2={ fmt.Sprintf("%.0f", automationGraphLayoutY(target.PositionY)+automationGraphNodeHeight/2) } class="automation-graph-edge" stroke-width="2"></line>
 							}
 						}
 						for _, node := range history.Definition.Nodes {
-							<rect data-replay-node={ node.ID } x={ fmt.Sprintf("%.0f", node.PositionX+10) } y={ fmt.Sprintf("%.0f", node.PositionY+20) } width="140" height="70" rx="10" class="automation-graph-node automation-graph-node--idle" stroke-width="3"></rect>
-							<text x={ fmt.Sprintf("%.0f", node.PositionX+80) } y={ fmt.Sprintf("%.0f", node.PositionY+55) } text-anchor="middle" class="automation-graph-label automation-graph-label--primary text-[12px] font-semibold">{ automationNodeLabel(node.Name, 20) }</text>
+							<g transform={ fmt.Sprintf("translate(%.0f %.0f)", automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY)) }><rect data-replay-node={ node.ID } width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class="automation-graph-node automation-graph-node--idle" stroke-width="3"></rect><foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span>{ automationNodeTypeLabel(node.NodeType) }</span></div></foreignObject></g>
 						}
 					</svg>
 				</div>
@@ -562,7 +589,7 @@ templ automationNewContent(currentProjectID string, errorMessage string) {
 		<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
 			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Template</h3><p class="mt-1 text-sm text-base-content/60">Start from a maintained supported topology.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4 space-y-3"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="template"/><select name="template_key" class="select select-bordered w-full" aria-label="Automation template"><option value="native_sdlc">Native SDLC</option><option value="github_sdlc">GitHub SDLC</option><option value="vision_driver">Vision Driver</option></select><button class="btn btn-primary w-full" type="submit">Use template</button></form></section>
 			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Describe It</h3><p class="mt-1 text-sm text-base-content/60">Generate a draft through the shared safe schema. Nothing runs yet.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" hx-indicator="#automation-describe-loading" hx-disabled-elt="button" class="mt-4 space-y-3"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="describe"/><textarea name="description" class="textarea textarea-bordered h-32 w-full" maxlength="4000" required placeholder="Review project vision daily, request approval, then create implementation work."></textarea><button class="btn btn-primary w-full" type="submit">Generate draft</button><div id="automation-describe-loading" class="htmx-indicator text-center text-sm text-base-content/65" role="status" aria-live="polite">Generating and validating draft…</div></form></section>
-			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Blank</h3><p class="mt-1 text-sm text-base-content/60">Start with an unconfigured supported topology and fill its task prompts.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4 space-y-3"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="blank"/><select name="template_key" class="select select-bordered w-full" aria-label="Blank topology"><option value="vision_driver">Vision Driver</option><option value="native_sdlc">Native SDLC</option><option value="github_sdlc">GitHub SDLC</option></select><button class="btn btn-outline w-full" type="submit">Create blank draft</button></form></section>
+			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Blank</h3><p class="mt-1 text-sm text-base-content/60">Start with an empty canvas. Add supported nodes, connect transitions, and arrange the graph yourself.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="blank"/><button class="btn btn-outline w-full" type="submit">Open blank canvas</button></form></section>
 		</div>
 	</div>
 }
@@ -613,24 +640,60 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				}
 			</ul></div></div>
 		}
-		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Draft graph</h3><div class="mt-3 w-full overflow-auto" role="region" aria-label="Draft automation graph"><svg viewBox={ fmt.Sprintf("0 0 %d %d", automationDraftGraphWidth(page.Result.Candidate.Nodes), automationDraftGraphHeight(page.Result.Candidate.Nodes)) } class="min-h-[420px] min-w-[900px] w-full" role="img" aria-label={ page.Result.Candidate.Name + " draft graph" }>
-			@automationGraphThemeStyles()
-			for _, edge := range page.Result.Candidate.Edges {
-				if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
-					<line x1={ fmt.Sprintf("%.0f", source.Position.X+145) } y1={ fmt.Sprintf("%.0f", source.Position.Y+55) } x2={ fmt.Sprintf("%.0f", target.Position.X+15) } y2={ fmt.Sprintf("%.0f", target.Position.Y+55) } class="automation-graph-edge" stroke-width="2"></line>
-				}
-			}
-			for _, node := range page.Result.Candidate.Nodes {
-				if node.Position != nil {
-					<g class="automation-graph-focus" tabindex="0" role="button" aria-label={ node.Name + ", " + string(node.Type) }><rect x={ fmt.Sprintf("%.0f", node.Position.X+10) } y={ fmt.Sprintf("%.0f", node.Position.Y+20) } width="140" height="70" rx="10" class="automation-graph-node automation-graph-node--idle" stroke-width="2"></rect><text x={ fmt.Sprintf("%.0f", node.Position.X+80) } y={ fmt.Sprintf("%.0f", node.Position.Y+50) } text-anchor="middle" class="automation-graph-label automation-graph-label--primary text-[12px] font-semibold">{ automationNodeLabel(node.Name, 20) }</text><text x={ fmt.Sprintf("%.0f", node.Position.X+80) } y={ fmt.Sprintf("%.0f", node.Position.Y+70) } text-anchor="middle" class="automation-graph-label automation-graph-label--muted text-[10px]">{ string(node.Type) }</text></g>
-				}
-			}
-		</svg></div></div>
-		<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content" class="space-y-4">
+		<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-4" data-automation-draft-canvas>
+			<div class="flex flex-wrap items-start justify-between gap-3">
+				<div><h3 class="font-semibold">Draft canvas</h3><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them. Drag empty canvas space to pan; use the mouse wheel or controls to zoom.</p></div>
+				<div class="flex flex-wrap gap-2" aria-label="Canvas controls"><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button><button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button></div>
+			</div>
+			<div class="mt-4 grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+				<div class="automation-canvas-shell min-h-[30rem] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30" role="region" aria-label="Draft automation graph">
+					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class="h-[30rem] w-full touch-none select-none" role="img" aria-label={ page.Result.Candidate.Name + " draft graph" }>
+						@automationGraphThemeStyles()
+						<defs><marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker></defs>
+						for _, edge := range page.Result.Candidate.Edges {
+							if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
+								<line data-edge-key={ edge.Key } data-from={ edge.From } data-to={ edge.To } x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-graph-edge" stroke-width="2" marker-end="url(#automation-draft-arrow)"></line>
+							}
+						}
+						for _, node := range page.Result.Candidate.Nodes {
+							if node.Position != nil {
+								<g class="automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing" data-node-key={ node.Key } data-node-x={ fmt.Sprintf("%.0f", node.Position.X) } data-node-y={ fmt.Sprintf("%.0f", node.Position.Y) } data-default-x={ fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)) } data-default-y={ fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)) } transform={ fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y) } tabindex="0" role="button" aria-label={ node.Name + ", " + string(node.Type) }>
+									<rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class="automation-graph-node automation-graph-node--idle" stroke-width="2"></rect>
+									<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span>{ automationNodeTypeLabel(node.Type) }</span></div></foreignObject>
+								</g>
+							}
+						}
+					</svg>
+				</div>
+				<aside class="rounded-box border border-base-300 bg-base-200/30 p-3">
+					<h4 class="font-semibold">Add nodes</h4><p class="mt-1 text-xs text-base-content/60">Supported by this automation type. Add all required nodes before publishing.</p>
+					<div class="mt-3 space-y-2">
+						for _, node := range page.NodePalette {
+							if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
+								<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
+							}
+						}
+					</div>
+					<h4 class="mt-5 font-semibold">Add transitions</h4>
+					<div class="mt-3 space-y-2">
+						for _, edge := range page.EdgePalette {
+							if automationDraftHasNode(page.Result.Candidate.Nodes, edge.From) && automationDraftHasNode(page.Result.Candidate.Nodes, edge.To) && !automationDraftHasEdge(page.Result.Candidate.Edges, edge.Key) {
+								<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_edge"/><input type="hidden" name="edge_key" value={ edge.Key }/><button class="btn btn-ghost min-h-11 w-full justify-start text-left text-xs" type="submit">{ automationDraftNodeName(page.NodePalette, edge.From) } → { automationDraftNodeName(page.NodePalette, edge.To) }</button></form>
+							}
+						}
+					</div>
+				</aside>
+			</div>
+		</section>
+		<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content" class="space-y-4" data-automation-draft-form>
 			<input type="hidden" name="project_id" value={ currentProjectID }/>
+			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
+			<input type="hidden" name="builder_action" value="" data-builder-action/>
+			<input type="hidden" name="node_key" value="" data-builder-node-key/>
+			<input type="hidden" name="edge_key" value="" data-builder-edge-key/>
 			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
 				for _, node := range page.Result.Candidate.Nodes {
-					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><span class="badge badge-ghost badge-sm">{ string(node.Type) }</span></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
+					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Remove</button></div></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
 						if automationDraftHasConfig(node, "prompt") {
 							<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea></label><div class="mt-3 grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option><option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option></select></label><label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label></div>
 						}
@@ -646,11 +709,54 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			</div>
 			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
 				for _, edge := range page.Result.Candidate.Edges {
-					<label class="form-control"><span class="label-text">{ edge.From } → { edge.To }</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label>
+					<div class="rounded-box bg-base-200/40 p-3"><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.NodePalette, edge.From) } → { automationDraftNodeName(page.NodePalette, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Remove</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label></div>
 				}
 			</div></div>
 			<div class="flex flex-wrap gap-3"><button class="btn btn-primary" type="submit">Save draft</button><button class="btn btn-outline" type="submit" formaction={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) }>Preview publication</button></div>
 		</form>
+		<script>
+			(function() {
+				var root = document.querySelector('[data-automation-draft-canvas]');
+				var builder = document.getElementById('automation-builder');
+				var svg = root && root.querySelector('[data-automation-canvas]');
+				var source = builder && builder.querySelector('[data-candidate-json]');
+				if (!root || !builder || !svg || !source) return;
+				var candidate;
+				try { candidate = JSON.parse(source.value); } catch (_) { return; }
+				var initialViewBox = svg.getAttribute('viewBox').split(/\s+/).map(Number);
+				var viewBox = initialViewBox.slice();
+				function nodeCandidate(key) { return (candidate.nodes || []).find(function(node) { return node.key === key; }); }
+				function syncCandidate() {
+					(candidate.nodes || []).forEach(function(node) { var prefix='node_'+node.key+'_'; var name=builder.querySelector('[name="'+prefix+'name"]'); if (name) node.name=name.value; if (node.config && Object.prototype.hasOwnProperty.call(node.config,'prompt')) { var prompt=builder.querySelector('[name="'+prefix+'prompt"]'), category=builder.querySelector('[name="'+prefix+'category"]'), priority=builder.querySelector('[name="'+prefix+'priority"]'); if(prompt)node.config.prompt=prompt.value;if(category)node.config.category=category.value;if(priority)node.config.priority=Number(priority.value); } if (node.config && Object.prototype.hasOwnProperty.call(node.config,'run_at')) { var runAt=builder.querySelector('[name="'+prefix+'run_at"]'), repeat=builder.querySelector('[name="'+prefix+'repeat_type"]'), interval=builder.querySelector('[name="'+prefix+'repeat_interval"]'), enabled=builder.querySelector('[name="'+prefix+'enabled"]'); if(runAt)node.config.run_at=runAt.value;if(repeat)node.config.repeat_type=repeat.value;if(interval)node.config.repeat_interval=Number(interval.value);if(enabled)node.config.enabled=enabled.checked; } });
+					(candidate.edges || []).forEach(function(edge) { var label=builder.querySelector('[name="edge_'+edge.key+'_label"]'); if(label)edge.label=label.value; });
+					builder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });
+				}
+				function applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }
+				function graphPoint(event) { var point = svg.createSVGPoint(); point.x = event.clientX; point.y = event.clientY; return point.matrixTransform(svg.getScreenCTM().inverse()); }
+				function renderNode(group, x, y) { group.dataset.nodeX = String(x); group.dataset.nodeY = String(y); group.setAttribute('transform', 'translate(' + x + ' ' + y + ')'); var node = nodeCandidate(group.dataset.nodeKey); if (node) node.position = {x:x, y:y}; }
+				function renderEdges() { svg.querySelectorAll('[data-edge-key]').forEach(function(line) { var from = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.from) + '"]'); var to = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.to) + '"]'); if (!from || !to) return; var fx = Number(from.dataset.nodeX), fy = Number(from.dataset.nodeY), tx = Number(to.dataset.nodeX), ty = Number(to.dataset.nodeY); line.setAttribute('x1', fx + 170); line.setAttribute('y1', fy + 52); line.setAttribute('x2', tx); line.setAttribute('y2', ty + 52); }); }
+				svg.querySelectorAll('.automation-draft-node').forEach(function(group) {
+					group.addEventListener('pointerdown', function(event) {
+						if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); group.setPointerCapture(event.pointerId); var start = graphPoint(event); var originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);
+						function move(moveEvent) { var point = graphPoint(moveEvent); renderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges(); syncCandidate(); }
+						function done() { group.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done); }
+						group.addEventListener('pointermove', move); group.addEventListener('pointerup', done); group.addEventListener('pointercancel', done);
+					});
+					group.addEventListener('keydown', function(event) { var dx = 0, dy = 0; if (event.key === 'ArrowLeft') dx = -10; if (event.key === 'ArrowRight') dx = 10; if (event.key === 'ArrowUp') dy = -10; if (event.key === 'ArrowDown') dy = 10; if (!dx && !dy) return; event.preventDefault(); renderNode(group, Number(group.dataset.nodeX)+dx, Number(group.dataset.nodeY)+dy); renderEdges(); syncCandidate(); });
+				});
+				var pan = null;
+				svg.addEventListener('pointerdown', function(event) { if (event.target !== svg || event.button !== 0) return; var point = graphPoint(event); pan = {x:point.x, y:point.y, view:viewBox.slice()}; svg.setPointerCapture(event.pointerId); });
+				svg.addEventListener('pointermove', function(event) { if (!pan) return; var point = graphPoint(event); viewBox[0] = pan.view[0] + pan.x - point.x; viewBox[1] = pan.view[1] + pan.y - point.y; applyViewBox(); });
+				svg.addEventListener('pointerup', function() { pan = null; }); svg.addEventListener('pointercancel', function() { pan = null; });
+				function zoom(factor) { var cx = viewBox[0] + viewBox[2]/2, cy = viewBox[1] + viewBox[3]/2; viewBox[2] = Math.max(240, Math.min(3000, viewBox[2]*factor)); viewBox[3] = Math.max(160, Math.min(2000, viewBox[3]*factor)); viewBox[0] = cx-viewBox[2]/2; viewBox[1] = cy-viewBox[3]/2; applyViewBox(); }
+				svg.addEventListener('wheel', function(event) { event.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : 0.88); }, {passive:false});
+				root.querySelector('[data-automation-zoom-in]').addEventListener('click', function() { zoom(0.82); }); root.querySelector('[data-automation-zoom-out]').addEventListener('click', function() { zoom(1.22); });
+				root.querySelector('[data-automation-fit]').addEventListener('click', function() { var groups = Array.from(svg.querySelectorAll('.automation-draft-node')); if (!groups.length) { viewBox = initialViewBox.slice(); applyViewBox(); return; } var xs = groups.map(function(g){return Number(g.dataset.nodeX);}), ys = groups.map(function(g){return Number(g.dataset.nodeY);}); var minX = Math.min.apply(null,xs)-60, minY = Math.min.apply(null,ys)-60, maxX = Math.max.apply(null,xs)+250, maxY = Math.max.apply(null,ys)+164; viewBox = [minX,minY,Math.max(360,maxX-minX),Math.max(240,maxY-minY)]; applyViewBox(); });
+				root.querySelector('[data-automation-reset]').addEventListener('click', function() { svg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); }); renderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox(); });
+				builder.addEventListener('submit', syncCandidate);
+				syncCandidate();
+			})();
+		</script>
 		if page.Plan != nil {
 			<section class="mt-5 rounded-box border border-primary/30 bg-base-100 p-5"><h3 class="text-lg font-semibold">Publication preview</h3><p class="mt-1 text-sm text-base-content/65">Review every effect. No task or schedule has been created by this preview.</p><div class="mt-4 space-y-2">
 				for _, effect := range page.Plan.Effects {
@@ -667,13 +773,25 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 	</div>
 }
 
+const (
+	automationGraphNodeWidth  = 170.0
+	automationGraphNodeHeight = 104.0
+	automationGraphPadding    = 60.0
+)
+
+func automationDraftCandidateJSON(candidate models.AutomationDraftCandidate) string { value, _ := json.Marshal(candidate); return string(value) }
 func automationDraftHasConfig(node models.AutomationDraftNode, key string) bool { _, ok := node.Config[key]; return ok }
 func automationDraftStringConfig(node models.AutomationDraftNode, key string) string { value, _ := node.Config[key].(string); return value }
 func automationDraftIntConfig(node models.AutomationDraftNode, key string) int { switch value := node.Config[key].(type) { case int: return value; case float64: return int(value); case json.Number: parsed, _ := value.Int64(); return int(parsed) }; return 0 }
 func automationDraftBoolConfig(node models.AutomationDraftNode, key string) bool { value, _ := node.Config[key].(bool); return value }
-func automationDraftGraphWidth(nodes []models.AutomationDraftNode) int { max := 900.0; for _, node := range nodes { if node.Position != nil && node.Position.X+180 > max { max = node.Position.X+180 } }; return int(max) }
-func automationDraftGraphHeight(nodes []models.AutomationDraftNode) int { max := 420.0; for _, node := range nodes { if node.Position != nil && node.Position.Y+140 > max { max = node.Position.Y+140 } }; return int(max) }
+func automationDraftHasNode(nodes []models.AutomationDraftNode, key string) bool { for _, node := range nodes { if node.Key == key { return true } }; return false }
+func automationDraftHasEdge(edges []models.AutomationDraftEdge, key string) bool { for _, edge := range edges { if edge.Key == key { return true } }; return false }
+func automationDraftNodeName(nodes []models.AutomationDraftNode, key string) string { for _, node := range nodes { if node.Key == key { return node.Name } }; return key }
+func automationDraftDefaultX(nodes []models.AutomationDraftNode, key string) float64 { for _, node := range nodes { if node.Key == key && node.Position != nil { return node.Position.X } }; return 0 }
+func automationDraftDefaultY(nodes []models.AutomationDraftNode, key string) float64 { for _, node := range nodes { if node.Key == key && node.Position != nil { return node.Position.Y } }; return 0 }
+func automationDraftGraphViewBox(nodes []models.AutomationDraftNode) string { var first *models.AutomationDraftPoint; for _, node := range nodes { if node.Position != nil { first = node.Position; break } }; if first == nil { return "-60 -60 900 540" }; minX, minY, maxX, maxY := first.X, first.Y, first.X+automationGraphNodeWidth, first.Y+automationGraphNodeHeight; for _, node := range nodes { if node.Position == nil { continue }; if node.Position.X < minX { minX = node.Position.X }; if node.Position.Y < minY { minY = node.Position.Y }; if node.Position.X+automationGraphNodeWidth > maxX { maxX = node.Position.X+automationGraphNodeWidth }; if node.Position.Y+automationGraphNodeHeight > maxY { maxY = node.Position.Y+automationGraphNodeHeight } }; return fmt.Sprintf("%.0f %.0f %.0f %.0f", minX-automationGraphPadding, minY-automationGraphPadding, maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding) }
 func automationDraftEdgeNodes(nodes []models.AutomationDraftNode, edge models.AutomationDraftEdge) (models.AutomationDraftNode, models.AutomationDraftNode, bool) { var source, target models.AutomationDraftNode; var sourceOK, targetOK bool; for _, node := range nodes { if node.Key == edge.From { source, sourceOK = node, node.Position != nil }; if node.Key == edge.To { target, targetOK = node, node.Position != nil } }; return source, target, sourceOK && targetOK }
+func automationNodeTypeLabel(nodeType models.AutomationNodeType) string { return strings.Title(strings.ReplaceAll(string(nodeType), "_", " ")) }
 
 func automationMetricsJSON(metrics models.AutomationMetrics) string { value, _ := json.Marshal(metrics); return string(value) }
 func automationReplayJSON(frames []models.AutomationReplayFrame) string { value, _ := json.Marshal(frames); return string(value) }
@@ -687,8 +805,7 @@ func automationInvocationNodeClass(history models.AutomationInvocationHistory, n
 
 func automationCardSearchText(card models.AutomationCard) string { return strings.Join([]string{card.Automation.Name, card.Automation.Description, card.Version.AdapterKey, string(card.Automation.LifecycleState), string(card.Automation.HealthState)}, " ") }
 func automationTime(value *time.Time, empty string) string { if value == nil { return empty }; return value.Local().Format("Jan 2, 3:04 PM") }
-func automationGraphWidth(nodes []models.AutomationNode) int { max := 900.0; for _, n := range nodes { if n.PositionX+180 > max { max = n.PositionX+180 } }; return int(max) }
-func automationGraphHeight(nodes []models.AutomationNode) int { max := 420.0; for _, n := range nodes { if n.PositionY+130 > max { max = n.PositionY+130 } }; return int(max) }
+func automationGraphViewBox(nodes []models.AutomationNode) string { if len(nodes) == 0 { return "-60 -60 900 540" }; minX, minY := automationGraphLayoutX(nodes[0].PositionX), automationGraphLayoutY(nodes[0].PositionY); maxX, maxY := minX+automationGraphNodeWidth, minY+automationGraphNodeHeight; for _, node := range nodes { x, y := automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY); if x < minX { minX = x }; if y < minY { minY = y }; if x+automationGraphNodeWidth > maxX { maxX = x+automationGraphNodeWidth }; if y+automationGraphNodeHeight > maxY { maxY = y+automationGraphNodeHeight } }; return fmt.Sprintf("%.0f %.0f %.0f %.0f", minX-automationGraphPadding, minY-automationGraphPadding, maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding) }
 func automationEdgeNodes(nodes []models.AutomationNode, edge models.AutomationEdge) (models.AutomationNode, models.AutomationNode, bool) { var source, target models.AutomationNode; var foundSource, foundTarget bool; for _, n := range nodes { if n.ID == edge.SourceNodeID { source, foundSource = n, true }; if n.ID == edge.TargetNodeID { target, foundTarget = n, true } }; return source, target, foundSource && foundTarget }
 func automationNodeLabel(value string, limit int) string { r := []rune(value); if len(r) <= limit { return value }; return string(r[:limit-1]) + "…" }
 func resourcesForAutomationNode(resources []models.AutomationResourceSummary, nodeID string) []models.AutomationResourceSummary { var out []models.AutomationResourceSummary; for _, resource := range resources { if resource.NodeID == nodeID { out = append(out, resource) } }; return out }
@@ -708,6 +825,25 @@ templ automationGraphThemeStyles() {
 		.automation-graph-label--primary { fill: oklch(var(--bc)); }
 		.automation-graph-label--secondary { fill: oklch(var(--bc) / 0.7); }
 		.automation-graph-label--muted { fill: oklch(var(--bc) / 0.6); }
+		.automation-node-content { box-sizing: border-box; display: flex; height: 100%; width: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 10px 12px; color: oklch(var(--bc)); text-align: center; line-height: 1.15; overflow: hidden; }
+		.automation-node-content strong { display: -webkit-box; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 13px; }
+		.automation-node-content span { font-size: 10px; font-weight: 650; }
+		.automation-node-content small { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: oklch(var(--bc) / 0.65); font-size: 9px; }
+		.automation-state-dot { display: inline-block; width: 0.65rem; height: 0.65rem; border-radius: 9999px; border: 2px solid oklch(var(--bc) / 0.4); }
+		.automation-state-dot--failed { border-color: oklch(var(--er)); background: oklch(var(--er) / 0.35); }
+		.automation-state-dot--blocked { border-color: oklch(var(--wa)); background: oklch(var(--wa) / 0.35); }
+		.automation-state-dot--waiting { border-color: oklch(var(--in)); background: oklch(var(--in) / 0.35); }
+		.automation-state-dot--running { border-color: oklch(var(--p)); background: oklch(var(--p) / 0.35); }
+		.automation-state-dot--recently_completed { border-color: oklch(var(--su)); background: oklch(var(--su) / 0.35); }
+		.automation-node-state--failed { color: oklch(var(--er)); }
+		.automation-node-state--blocked { color: oklch(var(--wa)); }
+		.automation-node-state--waiting { color: oklch(var(--in)); }
+		.automation-node-state--running { color: oklch(var(--p)); }
+		.automation-node-state--recently_completed { color: oklch(var(--su)); }
+		.automation-canvas-shell svg { cursor: grab; }
+		.automation-canvas-shell svg:active { cursor: grabbing; }
+		.automation-canvas-shell .automation-draft-node { cursor: grab; }
+		.automation-canvas-shell .automation-draft-node:active { cursor: grabbing; }
 		.automation-graph-link:focus-visible .automation-graph-node,
 		.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }
 	</style>
