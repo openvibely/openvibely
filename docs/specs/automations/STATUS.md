@@ -316,6 +316,41 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 - Final generated-output/diff audit found synchronized `.templ` output, no stale click-to-connect/request-submit controller, ordinary-wheel pass-through on both editable and read-only graph canvases, bounded listener cleanup, and no material Definition of Done regression.
 - Remaining work: none; create the clean checkpoint and allow Goal Agent evaluation.
 
+## Post-Completion Architect Workspace Repair
+
+### Repair Checklist
+
+- [x] Replace the page-sized yellow incomplete-graph alert with a compact neutral disclosure that keeps setup details available without dominating the builder.
+- [x] Make the graph canvas the primary full-width workspace, with viewport-scale height and no permanent right-side node-creation rail.
+- [x] Reposition Add node into the canvas toolbar while retaining all six supported node types and template-only maintained suggestions.
+- [x] Make both left and right ports on every node valid drag origins and drop targets; preserve the chosen source and target sides in saved design metadata and across apply/edit cycles.
+- [x] Keep edge direction explicit from drag origin to drop target while retaining arbitrary repeated connections, reverse edges, and multi-node loops.
+- [x] Make graph connections directly selectable, expose draggable start/end handles for rewiring, and provide an on-canvas Delete connection control plus Delete/Backspace keyboard support.
+- [x] Provide an on-canvas Delete node control plus Delete/Backspace keyboard support; node deletion also removes every incident connection from the saved candidate.
+- [x] Replace visible `Edit as new draft`, draft badge, and Save draft terminology with Edit automation, Save changes, Review and apply, and Apply changes.
+- [x] Reopen and overwrite one existing working design for repeated edits instead of accumulating duplicate draft versions; keep immutable published versions and history internal.
+- [x] Preserve ordinary vertical wheel page scrolling, Ctrl/Meta pinch-style zoom, explicit zoom controls, and the unsupported-topology publication block.
+- [x] Add service, handler, generated-template, and real-Chrome regressions for layout, terminology, two-sided port persistence, loops, rewiring, edge deletion, node deletion, repeated Edit behavior, wheel pass-through, and pinch zoom.
+
+### Changed Files
+
+- Saved connector geometry and one-working-design edit behavior: `internal/models/automation_draft.go`, `internal/repository/automation_draft_repo.go`, `internal/service/automation_draft_service.go`, and `internal/service/automation_draft_service_test.go`.
+- Rendered builder contract regressions: `internal/handler/automation_handler_test.go`.
+- Full architect workspace, compact setup disclosure, toolbar node creator, bidirectional ports, direct deletion/rewiring, terminology, generated output, and production browser regression: `web/templates/pages/automations.templ`, `web/templates/pages/automations_templ.go`, and `web/templates/pages/automations_navigation_browser_test.go`.
+
+### Validation And Audit
+
+- Regression-first handler tests failed against the previous page-sized warning, permanent 18rem node rail, 30rem builder canvas, fixed output/input handles, missing canvas deletion/rewiring controls, and old Draft terminology.
+- Regression-first service coverage proved repeated Edit requests created multiple draft versions before the working-design reuse repair.
+- `templ generate`, `go build ./cmd/server`, focused draft service tests, focused builder handler tests, and `TestAutomationGraphThemeAndHistoryNavigationInChrome`: passed.
+- The real-Chrome fixture draws three consecutive edges using left-to-right and right-to-left port combinations, retains the chosen port sides, forms a cycle, rewires an existing endpoint, deletes a connection, deletes a node and its incident edges, preserves keyboard movement, passes ordinary wheel events through, and reserves Ctrl/Meta wheel for zoom.
+- Automation-focused validation passed: `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./web/templates/pages -run 'TestMigration11[345]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`.
+- The first final repository rerun found one stale handler assertion expecting the removed `Generating and validating draft` copy; updating that regression to the user-facing design terminology repaired the only failure, and the fresh full rerun passed every package.
+- Final repository validation passed: `templ generate`, `go build ./cmd/server`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`; every package passed and the desktop linker emitted only the documented non-failing newer-SDK warning.
+- Fresh audit found and repaired three material follow-ups: the painted edge stroke could intercept clicks before the transparent hit target; published design metadata was not reused when reopening an Automation, which would lose chosen connector sides; and repeated Edit requests created duplicate working versions instead of reopening the saved design.
+- Fresh safety audit confirmed custom loops and arbitrary topology remain inert saved designs with `unsupported_topology`; planning returns no effects, published versions remain immutable, and no generic runtime, task/worker/queue/Workflow/Alert/GitHub replacement, Register Existing, detection, inference, migration, confidence scoring, or graph backfill was introduced.
+- Remaining work for this repair: none; create the clean checkpoint and allow Goal Agent evaluation.
+
 ## Open Findings Or Blockers
 
 - No code, validation, or Definition of Done blockers remain.

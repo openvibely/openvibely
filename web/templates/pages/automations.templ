@@ -79,19 +79,19 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 		hx-trigger="every 20s [document.visibilityState === 'visible']" hx-target="this" hx-swap="outerHTML">
 		@layout.PageTitle(graph.Automation.Name)
 		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
-			<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
-				<div class="min-w-0"><h2 class="break-words text-2xl font-bold">{ graph.Automation.Name }</h2><p class="mt-1 max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p></div>
-				<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-outline btn-sm" type="submit">Edit as new draft</button></form>
-					if graph.Automation.LifecycleState == models.AutomationActive {
-						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-sm" type="submit">Pause</button></form>
-					}
-					if graph.Automation.LifecycleState == models.AutomationPaused {
-						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-sm" type="submit">Resume</button></form>
-					}
-					<button class="btn btn-ghost btn-sm text-error" type="button" onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button>
-				</div>
+		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+			<div class="min-w-0"><h2 class="break-words text-2xl font-bold">{ graph.Automation.Name }</h2><p class="mt-1 max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p></div>
+			<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-outline btn-sm" type="submit">Edit automation</button></form>
+				if graph.Automation.LifecycleState == models.AutomationActive {
+					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-sm" type="submit">Pause</button></form>
+				}
+				if graph.Automation.LifecycleState == models.AutomationPaused {
+					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-sm" type="submit">Resume</button></form>
+				}
+				<button class="btn btn-ghost btn-sm text-error" type="button" onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button>
 			</div>
-			@automationViewTabs(graph.Automation.ID, currentProjectID, "live")
+		</div>
+		@automationViewTabs(graph.Automation.ID, currentProjectID, "live")
 		<div class="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
 			<div class="stat rounded-box bg-base-200/60 p-3"><div class="stat-title text-xs">Active invocations</div><div class="stat-value text-xl">{ fmt.Sprintf("%d", graph.ActiveInvocations) }</div></div>
 			<div class="stat rounded-box bg-base-200/60 p-3"><div class="stat-title text-xs">Open work items</div><div class="stat-value text-xl">{ fmt.Sprintf("%d", graph.ActiveWorkItems) }</div></div>
@@ -600,14 +600,14 @@ templ automationNewContent(currentProjectID string, errorMessage string) {
 		}
 		<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
 			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Template</h3><p class="mt-1 text-sm text-base-content/60">Start from a maintained supported topology.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4 space-y-3"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="template"/><select name="template_key" class="select select-bordered w-full" aria-label="Automation template"><option value="native_sdlc">Native SDLC</option><option value="github_sdlc">GitHub SDLC</option><option value="vision_driver">Vision Driver</option></select><button class="btn btn-primary w-full" type="submit">Use template</button></form></section>
-			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Describe It</h3><p class="mt-1 text-sm text-base-content/60">Generate a draft through the shared safe schema. Nothing runs yet.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" hx-indicator="#automation-describe-loading" hx-disabled-elt="button" class="mt-4 space-y-3"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="describe"/><textarea name="description" class="textarea textarea-bordered h-32 w-full" maxlength="4000" required placeholder="Review project vision daily, request approval, then create implementation work."></textarea><button class="btn btn-primary w-full" type="submit">Generate draft</button><div id="automation-describe-loading" class="htmx-indicator text-center text-sm text-base-content/65" role="status" aria-live="polite">Generating and validating draft…</div></form></section>
+			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Describe It</h3><p class="mt-1 text-sm text-base-content/60">Generate a design through the shared safe schema. Nothing runs yet.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" hx-indicator="#automation-describe-loading" hx-disabled-elt="button" class="mt-4 space-y-3"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="describe"/><textarea name="description" class="textarea textarea-bordered h-32 w-full" maxlength="4000" required placeholder="Review project vision daily, request approval, then create implementation work."></textarea><button class="btn btn-primary w-full" type="submit">Generate design</button><div id="automation-describe-loading" class="htmx-indicator text-center text-sm text-base-content/65" role="status" aria-live="polite">Generating and validating design…</div></form></section>
 			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Blank</h3><p class="mt-1 text-sm text-base-content/60">Start with an empty canvas. Add supported nodes, connect transitions, and arrange the graph yourself.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="blank"/><button class="btn btn-outline w-full" type="submit">Open blank canvas</button></form></section>
 		</div>
 	</div>
 }
 
 templ AutomationBuilder(projects []models.Project, currentProjectID string, page models.AutomationBuilderPage) {
-	@layout.Base("Automation Draft", projects, currentProjectID) {
+	@layout.Base("Automation Builder", projects, currentProjectID) {
 		@AutomationBuilderContent(page, currentProjectID)
 	}
 }
@@ -616,7 +616,16 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 	<div id="automation-builder" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-draft>
 		@layout.PageTitle(page.Result.Candidate.Name)
 		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
-		<div class="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 class="break-words text-2xl font-bold">{ page.Result.Candidate.Name }</h2><p class="mt-1 text-sm text-base-content/65">Draft · { page.Result.Candidate.AdapterKey } · Nothing is active until publication completes.</p></div><span class="badge badge-warning badge-outline">draft</span></div>
+		<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+			<div><h2 class="break-words text-2xl font-bold">{ page.Result.Candidate.Name }</h2>
+				if page.Result.Definition.Automation.PublishedVersionID != nil {
+					<p class="mt-1 text-sm text-base-content/65">Editing this Automation. Save the design here, then apply executable changes when ready.</p>
+				} else {
+					<p class="mt-1 text-sm text-base-content/65">Build the design, save your work, then apply it when it is ready to run.</p>
+				}
+			</div>
+			<div class="flex flex-wrap gap-2"><button class="btn btn-primary btn-sm" type="submit" form="automation-design-form">Save changes</button></div>
+		</div>
 		if page.Error != "" {
 			<div class="alert alert-error mb-4" role="alert">{ page.Error }</div>
 		}
@@ -646,26 +655,58 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			</div>
 		}
 			if len(page.Result.ValidationErrors) > 0 {
-				<div class="alert alert-warning mb-4"><div><h3 class="font-semibold">Draft needs attention</h3><ul class="mt-1 list-disc pl-5 text-sm">
-					for _, message := range automationValidationMessages(page.Result.ValidationErrors, page.NodePalette) {
-						<li>{ message }</li>
-					}
-				</ul></div></div>
+				<details class="mb-3 rounded-box border border-base-300 bg-base-200/40 px-4 py-3" data-automation-validation-summary>
+					<summary class="cursor-pointer text-sm font-medium">{ fmt.Sprintf("%d setup items before this design can run", len(automationValidationMessages(page.Result.ValidationErrors, page.NodePalette))) }</summary>
+					<ul class="mt-2 list-disc pl-5 text-sm text-base-content/70">
+						for _, message := range automationValidationMessages(page.Result.ValidationErrors, page.NodePalette) {
+							<li>{ message }</li>
+						}
+					</ul>
+				</details>
 			}
-			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
+			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 				<div class="flex flex-wrap items-start justify-between gap-3">
-					<div><h3 class="font-semibold">Draft canvas</h3><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them. Drag empty canvas space to pan. Pinch on a trackpad or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect nodes:</span> drag from a node’s right output dot to another node’s left input dot.</p></div>
-				<div class="flex flex-wrap gap-2" aria-label="Canvas controls"><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button><button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button></div>
-			</div>
-			<div class="mt-4 grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
-				<div class="automation-canvas-shell min-h-[30rem] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30" role="region" aria-label="Draft automation graph">
-					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class="h-[30rem] w-full touch-none select-none" role="img" aria-label={ page.Result.Candidate.Name + " draft graph" }>
+					<div><h3 class="font-semibold">Canvas</h3><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect from either side:</span> drag either dot on one node to either dot on another. Click a connection to rewire or delete it.</p></div>
+					<div class="flex flex-wrap items-center gap-2" aria-label="Canvas controls">
+						<details class="dropdown dropdown-end" data-automation-node-tool>
+							<summary class="btn btn-primary btn-sm">Add node</summary>
+							<div class="dropdown-content z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-box border border-base-300 bg-base-100 p-4 shadow-xl">
+								<form class="space-y-3" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content">
+									<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
+									<label class="form-control"><span class="label-text">Name</span><input class="input input-bordered input-sm" name="node_name" maxlength="200" placeholder="Review result" required/></label>
+									<label class="form-control"><span class="label-text">Type</span><select class="select select-bordered select-sm" name="node_type"><option value="agent_task">Agent task</option><option value="trigger">Trigger</option><option value="human_gate">Human gate</option><option value="condition">Condition</option><option value="action">Action</option><option value="outcome">Outcome</option></select></label>
+									<button class="btn btn-primary btn-sm w-full" type="submit" data-automation-create-node>Add node</button>
+								</form>
+								if page.Result.Definition.Version.Source == "template" {
+									<details class="mt-4"><summary class="cursor-pointer text-sm font-semibold">Suggested nodes</summary><p class="mt-1 text-xs text-base-content/60">Quick-add nodes understood by this Automation’s runtime.</p>
+										<div class="mt-2 space-y-1">
+											for _, node := range page.NodePalette {
+												if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
+													<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
+												}
+											}
+										</div>
+									</details>
+								}
+							</div>
+						</details>
+						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button><button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button>
+					</div>
+				</div>
+				<div class="automation-canvas-shell mt-3 min-h-[calc(100dvh-15rem)] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30" role="region" aria-label="Automation graph builder">
+					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class="h-[calc(100dvh-15rem)] min-h-[42rem] w-full touch-none select-none" role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
 						@automationGraphThemeStyles()
 						<defs><marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker></defs>
 						<line data-automation-edge-preview x1="0" y1="0" x2="0" y2="0" class="automation-graph-edge automation-graph-edge--preview" stroke-width="2" marker-end="url(#automation-draft-arrow)" hidden></line>
 						for _, edge := range page.Result.Candidate.Edges {
 							if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
-								<line data-edge-key={ edge.Key } data-from={ edge.From } data-to={ edge.To } x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-graph-edge" stroke-width="2" marker-end="url(#automation-draft-arrow)"></line>
+								<g class="automation-draft-edge" data-edge-key={ edge.Key } data-from={ edge.From } data-to={ edge.To } tabindex="0" role="group" aria-label={ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) + " connection" }>
+									<line data-edge-hit x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-edge-hit"></line>
+									<line data-edge-line x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-graph-edge" stroke-width="2" marker-end="url(#automation-draft-arrow)"></line>
+									<circle data-reconnect-edge data-edge-endpoint="from" cx={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } r="7" class="automation-edge-endpoint" tabindex="0" role="button" aria-label="Reconnect connection start"></circle>
+									<circle data-reconnect-edge data-edge-endpoint="to" cx={ fmt.Sprintf("%.0f", target.Position.X) } cy={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } r="7" class="automation-edge-endpoint" tabindex="0" role="button" aria-label="Reconnect connection end"></circle>
+									<g data-delete-edge transform={ fmt.Sprintf("translate(%.0f %.0f)", (source.Position.X+automationGraphNodeWidth+target.Position.X)/2, (source.Position.Y+target.Position.Y)/2+automationGraphNodeHeight/2) } class="automation-edge-delete" tabindex="0" role="button" aria-label="Delete connection"><circle r="11"></circle><text text-anchor="middle" dominant-baseline="central">×</text></g>
+								</g>
 							}
 						}
 						for _, node := range page.Result.Candidate.Nodes {
@@ -673,41 +714,22 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								<g class="automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing" data-node-key={ node.Key } data-node-x={ fmt.Sprintf("%.0f", node.Position.X) } data-node-y={ fmt.Sprintf("%.0f", node.Position.Y) } data-default-x={ fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)) } data-default-y={ fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)) } transform={ fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y) } tabindex="0" role="group" aria-label={ node.Name + ", " + string(node.Type) + ", use arrow keys to move" }>
 									<rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class="automation-graph-node automation-graph-node--idle" stroke-width="2"></rect>
 									<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span>{ automationNodeTypeLabel(node.Type) }</span></div></foreignObject>
-									<circle cx="0" cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--target" data-connect-target={ node.Key } tabindex="0" role="button" aria-label={ "Connect into " + node.Name }></circle>
-									<circle cx={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--source" data-connect-source={ node.Key } tabindex="0" role="button" aria-label={ "Drag a connection from " + node.Name }></circle>
+									<circle cx="0" cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle" data-connect-port={ node.Key } data-port-side="left" tabindex="0" role="button" aria-label={ "Connect from or to the left side of " + node.Name }></circle>
+									<circle cx={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle" data-connect-port={ node.Key } data-port-side="right" tabindex="0" role="button" aria-label={ "Connect from or to the right side of " + node.Name }></circle>
+									<g data-delete-node transform={ fmt.Sprintf("translate(%.0f 16)", automationGraphNodeWidth-16) } class="automation-node-delete" tabindex="0" role="button" aria-label={ "Delete " + node.Name }><circle r="11"></circle><text text-anchor="middle" dominant-baseline="central">×</text></g>
 								</g>
 							}
 						}
 					</svg>
 				</div>
-				<aside class="rounded-box border border-base-300 bg-base-200/30 p-3">
-					<h4 class="font-semibold">Create node</h4><p class="mt-1 text-xs text-base-content/60">Add any supported graph node, then drag it into place and draw its connections.</p>
-					<form class="mt-3 space-y-3" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content">
-						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
-						<label class="form-control"><span class="label-text">Name</span><input class="input input-bordered input-sm" name="node_name" maxlength="200" placeholder="Review result" required/></label>
-						<label class="form-control"><span class="label-text">Type</span><select class="select select-bordered select-sm" name="node_type"><option value="agent_task">Agent task</option><option value="trigger">Trigger</option><option value="human_gate">Human gate</option><option value="condition">Condition</option><option value="action">Action</option><option value="outcome">Outcome</option></select></label>
-						<button class="btn btn-primary btn-sm w-full" type="submit" data-automation-create-node>Add node</button>
-					</form>
-					if page.Result.Definition.Version.Source == "template" {
-						<details class="mt-5"><summary class="cursor-pointer text-sm font-semibold">Suggested nodes</summary><p class="mt-1 text-xs text-base-content/60">Quick-add nodes understood by this automation’s registered runtime.</p>
-						<div class="mt-3 space-y-2">
-							for _, node := range page.NodePalette {
-								if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
-									<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
-								}
-							}
-						</div>
-						</details>
-					}
-				</aside>
-			</div>
-		</section>
-		<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content" class="space-y-4" data-automation-draft-form>
-			<input type="hidden" name="project_id" value={ currentProjectID }/>
+			</section>
+			<details class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
+				<summary class="cursor-pointer font-semibold">Node and connection settings</summary>
+				<form id="automation-design-form" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content" class="mt-4 space-y-4" data-automation-draft-form>			<input type="hidden" name="project_id" value={ currentProjectID }/>
 			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
 			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
 				for _, node := range page.Result.Candidate.Nodes {
-					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Remove</button></div></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
+					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Delete node</button></div></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
 						if automationDraftHasConfig(node, "prompt") {
 							<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea></label><div class="mt-3 grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option><option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option></select></label><label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label></div>
 						}
@@ -716,19 +738,20 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								for _, repeat := range []string{"once","minutes","hours","daily","weekly","monthly"} {
 									<option value={ repeat } selected?={ automationDraftStringConfig(node, "repeat_type") == repeat }>{ repeat }</option>
 								}
-							</select></label><label class="form-control"><span class="label-text">Interval</span><input type="number" min="1" max="365" class="input input-bordered" name={ "node_" + node.Key + "_repeat_interval" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "repeat_interval")) }/></label><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox" name={ "node_" + node.Key + "_enabled" } value="true" checked?={ automationDraftBoolConfig(node, "enabled") }/><span class="label-text">Enabled after publish</span></label></div>
+							</select></label><label class="form-control"><span class="label-text">Interval</span><input type="number" min="1" max="365" class="input input-bordered" name={ "node_" + node.Key + "_repeat_interval" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "repeat_interval")) }/></label><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox" name={ "node_" + node.Key + "_enabled" } value="true" checked?={ automationDraftBoolConfig(node, "enabled") }/><span class="label-text">Enabled when applied</span></label></div>
 						}
 					</section>
 				}
 			</div>
 			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
 				for _, edge := range page.Result.Candidate.Edges {
-					<div class="rounded-box bg-base-200/40 p-3"><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Remove</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label></div>
+					<div class="rounded-box bg-base-200/40 p-3"><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Delete connection</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label></div>
 				}
 			</div></div>
-			<div class="flex flex-wrap gap-3"><button class="btn btn-primary" type="submit">Save draft</button><button class="btn btn-outline" type="submit" formaction={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) }>Preview publication</button></div>
-		</form>
-		<script>
+				<div class="flex flex-wrap gap-3"><button class="btn btn-primary" type="submit">Save changes</button><button class="btn btn-outline" type="submit" formaction={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) }>Review and apply</button></div>
+				</form>
+			</details>
+			<script>
 			(function() {
 				var root = document.querySelector('[data-automation-draft-canvas]');
 				var builder = document.getElementById('automation-builder');
@@ -741,14 +764,17 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				try { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }
 				var connectStatus = root.querySelector('[data-automation-connect-status]');
 				var preview = svg.querySelector('[data-automation-edge-preview]');
-				var keyboardSourceKey = '';
-				var activeConnection = null;
-				var initialViewBox = svg.getAttribute('viewBox').split(/\s+/).map(Number);
-				var viewBox = initialViewBox.slice();
+					var keyboardSource = null;
+					var activeConnection = null;
+					var initialViewBox = svg.getAttribute('viewBox').split(/\s+/).map(Number);
+					var viewBox = initialViewBox.slice();
 
-				function nodeCandidate(key) { return (candidate.nodes || []).find(function(node) { return node.key === key; }); }
-				function nodeName(key) { var node = nodeCandidate(key); return node ? node.name : key; }
-				function syncCandidate() {
+					function nodeCandidate(key) { return (candidate.nodes || []).find(function(node) { return node.key === key; }); }
+					function edgeCandidate(key) { return (candidate.edges || []).find(function(edge) { return edge.key === key; }); }
+					function nodeName(key) { var node = nodeCandidate(key); return node ? node.name : key; }
+					function nodeGroup(key) { return svg.querySelector('[data-node-key="' + CSS.escape(key) + '"]'); }
+					function nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }
+					function syncCandidate() {
 					(candidate.nodes || []).forEach(function(node) {
 						var prefix = 'node_' + node.key + '_';
 						var name = builder.querySelector('[name="' + prefix + 'name"]');
@@ -792,120 +818,130 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					var node = nodeCandidate(group.dataset.nodeKey);
 					if (node) node.position = {x: x, y: y};
 				}
-				function renderEdges() {
-					svg.querySelectorAll('[data-edge-key]').forEach(function(line) {
-						var from = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.from) + '"]');
-						var to = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.to) + '"]');
-						if (!from || !to) return;
-						var fx = Number(from.dataset.nodeX), fy = Number(from.dataset.nodeY);
-						var tx = Number(to.dataset.nodeX), ty = Number(to.dataset.nodeY);
-						line.setAttribute('x1', fx + 170); line.setAttribute('y1', fy + 52);
-						line.setAttribute('x2', tx); line.setAttribute('y2', ty + 52);
-					});
-				}
-				function connectionExists(from, to) { return (candidate.edges || []).some(function(edge) { return edge.from === from && edge.to === to; }); }
-				function safeKey(value, fallback) {
+					function edgePoints(edge) {
+						var from = nodeGroup(edge.from), to = nodeGroup(edge.to); if (!from || !to) return null;
+						var fromCenter = Number(from.dataset.nodeX) + 85, toCenter = Number(to.dataset.nodeX) + 85;
+						var fromSide = edge.from_port || (toCenter >= fromCenter ? 'right' : 'left');
+						var toSide = edge.to_port || (toCenter >= fromCenter ? 'left' : 'right');
+						return {start: nodePortPoint(edge.from, fromSide), finish: nodePortPoint(edge.to, toSide)};
+					}
+					function setEdgeLine(line, points) { line.setAttribute('x1', points.start.x); line.setAttribute('y1', points.start.y); line.setAttribute('x2', points.finish.x); line.setAttribute('y2', points.finish.y); }
+					function renderEdge(group) {
+						var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!edge || !points) return;
+						group.dataset.from = edge.from; group.dataset.to = edge.to;
+						group.querySelectorAll('[data-edge-line], [data-edge-hit]').forEach(function(line) { setEdgeLine(line, points); });
+						var start = group.querySelector('[data-edge-endpoint="from"]'), finish = group.querySelector('[data-edge-endpoint="to"]');
+						start.setAttribute('cx', points.start.x); start.setAttribute('cy', points.start.y); finish.setAttribute('cx', points.finish.x); finish.setAttribute('cy', points.finish.y);
+						group.querySelector('[data-delete-edge]').setAttribute('transform', 'translate(' + ((points.start.x + points.finish.x) / 2) + ' ' + ((points.start.y + points.finish.y) / 2) + ')');
+					}
+					function renderEdges() { svg.querySelectorAll('.automation-draft-edge').forEach(renderEdge); }
+					function connectionExists(from, to, exceptKey) { return (candidate.edges || []).some(function(edge) { return edge.key !== exceptKey && edge.from === from && edge.to === to; }); }
+					function safeKey(value, fallback) {
 					var key = String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80).replace(/_+$/g, '');
 					return key || fallback;
 				}
-				function uniqueEdgeKey(base) {
-					var keys = new Set((candidate.edges || []).map(function(edge) { return edge.key; }));
-					if (!keys.has(base)) return base;
-					for (var suffix = 2; ; suffix++) if (!keys.has(base + '_' + suffix)) return base + '_' + suffix;
-				}
-				function appendEdgeLine(edge) {
-					var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-					line.dataset.edgeKey = edge.key; line.dataset.from = edge.from; line.dataset.to = edge.to;
-					line.setAttribute('class', 'automation-graph-edge'); line.setAttribute('stroke-width', '2');
-					line.setAttribute('marker-end', 'url(#automation-draft-arrow)');
-					svg.insertBefore(line, svg.querySelector('.automation-draft-node'));
-				}
-				function addConnection(from, to) {
-					if (!from || !to || from === to) { if (connectStatus) connectStatus.textContent = 'Connect two different nodes.'; return; }
-					if (connectionExists(from, to)) { if (connectStatus) connectStatus.textContent = 'Those nodes are already connected in that direction.'; return; }
-					candidate.edges = candidate.edges || [];
-					var canonical = edgePalette.find(function(edge) { return edge.from === from && edge.to === to; });
-					var useCanonical = canonical && !candidate.edges.some(function(edge) { return edge.key === canonical.key; });
-					var edge = useCanonical ? JSON.parse(JSON.stringify(canonical)) : {
-						key: uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target')),
-						from: from, to: to, label: '', condition: {}
-					};
-					candidate.edges.push(edge);
-					appendEdgeLine(edge); renderEdges(); syncCandidate();
-					if (connectStatus) connectStatus.textContent = 'Connected ' + nodeName(from) + ' to ' + nodeName(to) + '. Drag another connection or save the draft.';
-				}
-				function clearConnectionHandles() {
-					svg.querySelectorAll('[data-connect-source]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--selected'); });
-					svg.querySelectorAll('[data-connect-target]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--eligible'); });
-				}
-				function showConnectionTargets(from) {
-					clearConnectionHandles();
-					var sourceHandle = svg.querySelector('[data-connect-source="' + CSS.escape(from) + '"]');
-					if (sourceHandle) sourceHandle.classList.add('automation-connect-handle--selected');
-					svg.querySelectorAll('[data-connect-target]').forEach(function(handle) {
-						if (handle.dataset.connectTarget !== from) handle.classList.add('automation-connect-handle--eligible');
-					});
-				}
-				function removeConnectionListeners() {
+					function uniqueEdgeKey(base, exceptKey) {
+						var keys = new Set((candidate.edges || []).filter(function(edge) { return edge.key !== exceptKey; }).map(function(edge) { return edge.key; }));
+						if (!keys.has(base)) return base;
+						for (var suffix = 2; ; suffix++) if (!keys.has(base + '_' + suffix)) return base + '_' + suffix;
+					}
+					function svgElement(name, attributes) { var element = document.createElementNS('http://www.w3.org/2000/svg', name); Object.keys(attributes || {}).forEach(function(key) { element.setAttribute(key, attributes[key]); }); return element; }
+					function appendEdgeGroup(edge) {
+						var group = svgElement('g', {class: 'automation-draft-edge', tabindex: '0', role: 'group', 'aria-label': nodeName(edge.from) + ' to ' + nodeName(edge.to) + ' connection'}); group.dataset.edgeKey = edge.key; group.dataset.from = edge.from; group.dataset.to = edge.to;
+						group.appendChild(svgElement('line', {class: 'automation-edge-hit', 'data-edge-hit': ''})); group.appendChild(svgElement('line', {class: 'automation-graph-edge', 'stroke-width': '2', 'marker-end': 'url(#automation-draft-arrow)', 'data-edge-line': ''}));
+						['from', 'to'].forEach(function(endpoint) { group.appendChild(svgElement('circle', {r: '7', class: 'automation-edge-endpoint', tabindex: '0', role: 'button', 'data-reconnect-edge': '', 'data-edge-endpoint': endpoint, 'aria-label': 'Reconnect connection ' + (endpoint === 'from' ? 'start' : 'end')})); });
+						var remove = svgElement('g', {class: 'automation-edge-delete', tabindex: '0', role: 'button', 'data-delete-edge': '', 'aria-label': 'Delete connection'}); remove.appendChild(svgElement('circle', {r: '11'})); var x = svgElement('text', {'text-anchor': 'middle', 'dominant-baseline': 'central'}); x.textContent = '×'; remove.appendChild(x); group.appendChild(remove);
+						svg.insertBefore(group, svg.querySelector('.automation-draft-node')); bindEdgeGroup(group); renderEdge(group);
+					}
+					function canonicalEdge(from, to, exceptKey) { return edgePalette.find(function(edge) { return edge.from === from && edge.to === to && !(candidate.edges || []).some(function(current) { return current.key !== exceptKey && current.key === edge.key; }); }); }
+					function addConnection(from, to, fromSide, toSide) {
+						if (!from || !to || from === to) { if (connectStatus) connectStatus.textContent = 'Connect two different nodes.'; return; }
+						if (connectionExists(from, to, '')) { if (connectStatus) connectStatus.textContent = 'Those nodes are already connected in that direction.'; return; }
+						candidate.edges = candidate.edges || [];
+						var canonical = canonicalEdge(from, to, '');
+						var edge = canonical ? JSON.parse(JSON.stringify(canonical)) : {key: uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), ''), from: from, to: to, label: '', condition: {}};
+						edge.from_port = fromSide; edge.to_port = toSide; candidate.edges.push(edge);
+						appendEdgeGroup(edge); syncCandidate();
+						if (connectStatus) connectStatus.textContent = 'Connected ' + nodeName(from) + ' to ' + nodeName(to) + '. Select a line to rewire or delete it.';
+					}
+					function reconnectEdge(key, endpoint, nodeKey, side) {
+						var edge = edgeCandidate(key); if (!edge) return; var from = endpoint === 'from' ? nodeKey : edge.from; var to = endpoint === 'to' ? nodeKey : edge.to;
+						if (!from || !to || from === to || connectionExists(from, to, key)) { if (connectStatus) connectStatus.textContent = 'That reconnection would duplicate or loop back to the same node.'; return; }
+						var oldKey = edge.key, canonical = canonicalEdge(from, to, oldKey); edge.from = from; edge.to = to; if (endpoint === 'from') edge.from_port = side; else edge.to_port = side;
+						if (canonical) { edge.key = canonical.key; edge.label = canonical.label || ''; edge.condition = canonical.condition || {}; } else if (edgePalette.some(function(item) { return item.key === edge.key; })) { edge.key = uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), oldKey); edge.condition = {}; }
+						var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(oldKey) + '"]'); if (group) { group.dataset.edgeKey = edge.key; renderEdge(group); } syncCandidate(); if (connectStatus) connectStatus.textContent = 'Reconnected ' + nodeName(from) + ' to ' + nodeName(to) + '.';
+					}
+					function removeEdge(key) { candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.key !== key; }); var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(key) + '"]'); if (group) group.remove(); syncCandidate(); if (connectStatus) connectStatus.textContent = 'Connection deleted. Draw a new one from either side when ready.'; }
+					function removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }
+					function selectEdge(group) { svg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); }); }
+					function beginReconnect(group, handle, event) {
+						if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection(); var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!points) return;
+						var endpoint = handle.dataset.edgeEndpoint, start = endpoint === 'from' ? points.start : points.finish; activeConnection = {reconnectKey: edge.key, endpoint: endpoint, pointerId: event.pointerId}; preview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.hidden = false;
+						svg.querySelectorAll('[data-connect-port]').forEach(function(port) { port.classList.add('automation-connect-handle--eligible'); }); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);
+					}
+					function bindEdgeGroup(group) {
+						var hit = group.querySelector('[data-edge-hit]'); hit.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); hit.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); selectEdge(group); });
+						group.querySelectorAll('[data-reconnect-edge]').forEach(function(handle) { handle.addEventListener('pointerdown', function(event) { beginReconnect(group, handle, event); }); });
+						var remove = group.querySelector('[data-delete-edge]'); function deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeEdge(group.dataset.edgeKey); } remove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent); remove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });
+						group.addEventListener('keydown', function(event) { if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeEdge(group.dataset.edgeKey); } });
+					}
+					function clearConnectionHandles() {
+						svg.querySelectorAll('[data-connect-port]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--selected', 'automation-connect-handle--eligible'); });
+					}
+					function showConnectionTargets(from, side) {
+						clearConnectionHandles();
+						var sourceHandle = svg.querySelector('[data-connect-port="' + CSS.escape(from) + '"][data-port-side="' + side + '"]');
+						if (sourceHandle) sourceHandle.classList.add('automation-connect-handle--selected');
+						svg.querySelectorAll('[data-connect-port]').forEach(function(handle) { if (handle.dataset.connectPort !== from) handle.classList.add('automation-connect-handle--eligible'); });
+					}
+					function removeConnectionListeners() {
 					window.removeEventListener('pointermove', moveConnection);
 					window.removeEventListener('pointerup', finishConnection);
 					window.removeEventListener('pointercancel', cancelConnection);
 				}
 				function clearActiveConnection() {
-					activeConnection = null; keyboardSourceKey = ''; preview.hidden = true; clearConnectionHandles(); removeConnectionListeners();
+					activeConnection = null; keyboardSource = null; preview.hidden = true; clearConnectionHandles(); removeConnectionListeners();
 				}
 				function moveConnection(event) {
 					if (!activeConnection || event.pointerId !== activeConnection.pointerId) return;
 					var point = graphPoint(event); preview.setAttribute('x2', point.x); preview.setAttribute('y2', point.y);
 				}
-				function finishConnection(event) {
-					if (!activeConnection || event.pointerId !== activeConnection.pointerId) return;
-					var target = event.target instanceof Element ? event.target.closest('[data-connect-target]') : null;
-					if (!target && document.elementFromPoint) {
-						var underPointer = document.elementFromPoint(event.clientX, event.clientY);
-						target = underPointer && underPointer.closest('[data-connect-target]');
+					function finishConnection(event) {
+						if (!activeConnection || event.pointerId !== activeConnection.pointerId) return;
+						var target = event.target instanceof Element ? event.target.closest('[data-connect-port]') : null;
+						if (!target && document.elementFromPoint) { var underPointer = document.elementFromPoint(event.clientX, event.clientY); target = underPointer && underPointer.closest('[data-connect-port]'); }
+						var connection = activeConnection; clearActiveConnection();
+						if (target) {
+							if (connection.reconnectKey) reconnectEdge(connection.reconnectKey, connection.endpoint, target.dataset.connectPort, target.dataset.portSide);
+							else addConnection(connection.from, target.dataset.connectPort, connection.fromSide, target.dataset.portSide);
+						} else if (connectStatus) connectStatus.textContent = 'Connection cancelled. Drop on either dot of another node.';
 					}
-					var from = activeConnection.from, to = target && target.dataset.connectTarget;
-					clearActiveConnection();
-					if (to) addConnection(from, to);
-					else if (connectStatus) connectStatus.textContent = 'Connection cancelled. Drag an output dot onto another node’s input dot.';
-				}
-				function cancelConnection(event) { if (activeConnection && event.pointerId === activeConnection.pointerId) clearActiveConnection(); }
-				function beginConnection(handle, event) {
-					if (event.button !== 0) return;
-					event.preventDefault(); event.stopPropagation(); clearActiveConnection();
-					var group = handle.closest('[data-node-key]');
-					var x = Number(group.dataset.nodeX) + 170, y = Number(group.dataset.nodeY) + 52;
-					activeConnection = {from: handle.dataset.connectSource, pointerId: event.pointerId};
-					preview.setAttribute('x1', x); preview.setAttribute('y1', y); preview.setAttribute('x2', x); preview.setAttribute('y2', y); preview.hidden = false;
-					showConnectionTargets(activeConnection.from);
-					window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);
-				}
-				function chooseKeyboardSource(key) {
-					keyboardSourceKey = key; showConnectionTargets(key);
-					if (connectStatus) connectStatus.textContent = 'Connection start: ' + nodeName(key) + '. Focus another node’s input dot and press Enter.';
-				}
-				svg.querySelectorAll('[data-connect-source]').forEach(function(handle) {
-					handle.addEventListener('pointerdown', function(event) { beginConnection(handle, event); });
-					handle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });
-					handle.addEventListener('keydown', function(event) {
-						event.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return;
-						event.preventDefault(); chooseKeyboardSource(handle.dataset.connectSource);
+					function cancelConnection(event) { if (activeConnection && event.pointerId === activeConnection.pointerId) clearActiveConnection(); }
+					function beginConnection(handle, event) {
+						if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection();
+						var start = nodePortPoint(handle.dataset.connectPort, handle.dataset.portSide); if (!start) return;
+						activeConnection = {from: handle.dataset.connectPort, fromSide: handle.dataset.portSide, pointerId: event.pointerId};
+						preview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.hidden = false;
+						showConnectionTargets(activeConnection.from, activeConnection.fromSide); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);
+					}
+					svg.querySelectorAll('.automation-draft-edge').forEach(bindEdgeGroup);
+					svg.querySelectorAll('[data-connect-port]').forEach(function(handle) {
+						handle.addEventListener('pointerdown', function(event) { beginConnection(handle, event); });
+						handle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });
+						handle.addEventListener('keydown', function(event) {
+							event.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault();
+							if (!keyboardSource) { keyboardSource = {key: handle.dataset.connectPort, side: handle.dataset.portSide}; showConnectionTargets(keyboardSource.key, keyboardSource.side); if (connectStatus) connectStatus.textContent = 'Connection start selected. Focus either side of another node and press Enter.'; return; }
+							var start = keyboardSource; keyboardSource = null; clearConnectionHandles(); addConnection(start.key, handle.dataset.connectPort, start.side, handle.dataset.portSide);
+						});
 					});
-				});
-				svg.querySelectorAll('[data-connect-target]').forEach(function(handle) {
-					handle.addEventListener('pointerdown', function(event) { event.stopPropagation(); });
-					handle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });
-					handle.addEventListener('keydown', function(event) {
-						event.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault();
-						if (!keyboardSourceKey) { if (connectStatus) connectStatus.textContent = 'Focus a node’s output dot and press Enter first.'; return; }
-						var from = keyboardSourceKey; keyboardSourceKey = ''; clearConnectionHandles(); addConnection(from, handle.dataset.connectTarget);
-					});
-				});
-				svg.querySelectorAll('.automation-draft-node').forEach(function(group) {
-					group.addEventListener('pointerdown', function(event) {
-						if (event.button !== 0) return;
-						event.preventDefault(); event.stopPropagation(); group.setPointerCapture(event.pointerId);
+					svg.querySelectorAll('.automation-draft-node').forEach(function(group) {
+						var remove = group.querySelector('[data-delete-node]');
+						function deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeNode(group.dataset.nodeKey); }
+						remove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent);
+						remove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });
+						group.addEventListener('pointerdown', function(event) {
+							if (event.button !== 0 || event.target.closest('[data-connect-port], [data-delete-node]')) return;
+							event.preventDefault(); event.stopPropagation(); group.setPointerCapture(event.pointerId);
 						var start = graphPoint(event), originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);
 						function move(moveEvent) {
 							var point = graphPoint(moveEvent);
@@ -914,9 +950,10 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						function done() { group.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done); }
 						group.addEventListener('pointermove', move); group.addEventListener('pointerup', done); group.addEventListener('pointercancel', done);
 					});
-					group.addEventListener('keydown', function(event) {
-						var dx = 0, dy = 0;
-						if (event.key === 'ArrowLeft') dx = -10; if (event.key === 'ArrowRight') dx = 10;
+						group.addEventListener('keydown', function(event) {
+							if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeNode(group.dataset.nodeKey); return; }
+							var dx = 0, dy = 0;
+							if (event.key === 'ArrowLeft') dx = -10; if (event.key === 'ArrowRight') dx = 10;
 						if (event.key === 'ArrowUp') dy = -10; if (event.key === 'ArrowDown') dy = 10;
 						if (!dx && !dy) return;
 						event.preventDefault(); renderNode(group, Number(group.dataset.nodeX) + dx, Number(group.dataset.nodeY) + dy); renderEdges(); syncCandidate();
@@ -960,20 +997,20 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				builder.addEventListener('htmx:beforeCleanupElement', function(event) {
 					if (event.target === builder) clearActiveConnection();
 				});
-				builder.addEventListener('submit', syncCandidate);
-				syncCandidate();
-			})();
+					builder.addEventListener('submit', syncCandidate);
+					renderEdges(); syncCandidate();
+				})();
 		</script>
 		if page.Plan != nil {
-			<section class="mt-5 rounded-box border border-primary/30 bg-base-100 p-5"><h3 class="text-lg font-semibold">Publication preview</h3><p class="mt-1 text-sm text-base-content/65">Review every effect. No task or schedule has been created by this preview.</p><div class="mt-4 space-y-2">
+			<section class="mt-5 rounded-box border border-primary/30 bg-base-100 p-5"><h3 class="text-lg font-semibold">Review changes</h3><p class="mt-1 text-sm text-base-content/65">Review every effect before applying this design. Nothing has changed in the runtime yet.</p><div class="mt-4 space-y-2">
 				for _, effect := range page.Plan.Effects {
 					<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-base-200/60 px-3 py-2"><span class="text-sm">{ effect.Name }</span><span class="badge badge-outline">{ effect.Operation } { effect.ResourceType }</span></div>
 				}
 			</div>
 				if len(page.Plan.Validation) > 0 {
-					<div class="alert alert-warning mt-4">Fix validation errors before publishing.</div>
+					<div class="mt-4 rounded-box border border-base-300 bg-base-200/40 px-3 py-2 text-sm">Resolve the setup items above before applying changes.</div>
 				} else {
-					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s/publish?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s/publish?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } class="mt-4"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="plan_revision" value={ page.Plan.PlanRevision }/><input type="hidden" name="confirmation_token" value={ page.ConfirmationToken }/><button class="btn btn-primary" type="submit">Publish automation</button></form>
+					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s/publish?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s/publish?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } class="mt-4"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="plan_revision" value={ page.Plan.PlanRevision }/><input type="hidden" name="confirmation_token" value={ page.ConfirmationToken }/><button class="btn btn-primary" type="submit">Apply changes</button></form>
 				}
 			</section>
 		}
@@ -1040,7 +1077,8 @@ templ automationGraphThemeStyles() {
 	<style>
 		.automation-graph-edge { fill: none; stroke: oklch(var(--bc) / 0.35); vector-effect: non-scaling-stroke; }
 			.automation-graph-edge--highlighted { stroke: oklch(var(--p)); }
-			.automation-graph-edge--preview { stroke: oklch(var(--p)); stroke-dasharray: 6 4; }		.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }
+			.automation-graph-edge--preview { stroke: oklch(var(--p)); stroke-dasharray: 6 4; }
+		.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }
 		.automation-graph-node { fill: oklch(var(--b2)); stroke: oklch(var(--bc) / 0.3); vector-effect: non-scaling-stroke; }
 		.automation-graph-node--failed { fill: oklch(var(--er) / 0.15); stroke: oklch(var(--er)); }
 		.automation-graph-node--blocked { fill: oklch(var(--wa) / 0.15); stroke: oklch(var(--wa)); }
@@ -1070,12 +1108,21 @@ templ automationGraphThemeStyles() {
 		.automation-canvas-shell svg:active { cursor: grabbing; }
 		.automation-canvas-shell .automation-draft-node { cursor: grab; }
 			.automation-canvas-shell .automation-draft-node:active { cursor: grabbing; }
-			.automation-connect-handle { fill: oklch(var(--b1)); stroke: oklch(var(--bc) / 0.55); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }
-			.automation-connect-handle--source { fill: oklch(var(--p) / 0.7); stroke: oklch(var(--p)); }
-			.automation-connect-handle--target { opacity: 0.5; }
+			.automation-connect-handle { fill: oklch(var(--p) / 0.7); stroke: oklch(var(--p)); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }
 			.automation-connect-handle--selected { fill: oklch(var(--p)); stroke-width: 4; }
 			.automation-connect-handle--eligible { fill: oklch(var(--su)); stroke: oklch(var(--su)); opacity: 1; stroke-width: 4; }
 			.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--p)); stroke-width: 5; }
+			.automation-edge-hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; }
+			.automation-draft-edge [data-edge-line] { pointer-events: none; }
+			.automation-edge-endpoint, .automation-edge-delete { opacity: 0; pointer-events: none; }
+			.automation-draft-edge--selected .automation-graph-edge { stroke: oklch(var(--p)); stroke-width: 3; }
+			.automation-draft-edge--selected .automation-edge-endpoint, .automation-draft-edge--selected .automation-edge-delete, .automation-draft-edge:focus-within .automation-edge-endpoint, .automation-draft-edge:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }
+			.automation-edge-endpoint { fill: oklch(var(--p)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }
+			.automation-edge-delete circle, .automation-node-delete circle { fill: oklch(var(--er)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; }
+			.automation-edge-delete text, .automation-node-delete text { fill: oklch(var(--b1)); font-size: 15px; font-weight: 700; pointer-events: none; }
+			.automation-edge-delete, .automation-node-delete { cursor: pointer; }
+			.automation-edge-delete:focus-visible, .automation-node-delete:focus-visible { outline: none; }
+			.automation-edge-delete:focus-visible circle, .automation-node-delete:focus-visible circle { stroke: oklch(var(--bc)); stroke-width: 4; }
 			.automation-graph-link:focus-visible .automation-graph-node,
 		.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }
 	</style>

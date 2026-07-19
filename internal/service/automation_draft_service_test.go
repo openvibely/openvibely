@@ -69,9 +69,9 @@ func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *
 		{Key: "gamma", Name: "Gamma", Type: models.AutomationNodeAction, Role: "custom_action", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
 	}
 	candidate.Edges = []models.AutomationDraftEdge{
-		{Key: "edge_alpha_beta", From: "alpha", To: "beta", Condition: map[string]any{}},
-		{Key: "edge_beta_gamma", From: "beta", To: "gamma", Condition: map[string]any{}},
-		{Key: "edge_gamma_alpha", From: "gamma", To: "alpha", Condition: map[string]any{}},
+		{Key: "edge_alpha_beta", From: "alpha", To: "beta", FromPort: "left", ToPort: "right", Condition: map[string]any{}},
+		{Key: "edge_beta_gamma", From: "beta", To: "gamma", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "edge_gamma_alpha", From: "gamma", To: "alpha", FromPort: "left", ToPort: "right", Condition: map[string]any{}},
 	}
 
 	issues := svc.ValidateCandidate(candidate)
@@ -81,6 +81,8 @@ func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *
 	require.NoError(t, err)
 	require.Len(t, created.Candidate.Nodes, 3)
 	require.Len(t, created.Candidate.Edges, 3)
+	require.Equal(t, "left", created.Candidate.Edges[0].FromPort, "chosen connector side must survive draft persistence")
+	require.Equal(t, "right", created.Candidate.Edges[0].ToPort, "chosen connector side must survive draft persistence")
 	require.Contains(t, issueCodes(created.ValidationErrors), "unsupported_topology")
 
 	planner := NewAutomationPublicationPlanner(repo, nil, nil, svc.registry, svc)
@@ -106,6 +108,11 @@ func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t 
 	issues = svc.ValidateCandidate(candidate)
 	require.NotEmpty(t, issues)
 	require.Contains(t, issueCodes(issues), "unsupported_topology")
+
+	candidate, err = svc.TemplateCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	candidate.Edges[0].FromPort = "top"
+	require.Contains(t, issueCodes(svc.ValidateCandidate(candidate)), "invalid_edge", "unknown visual connector sides must not persist")
 
 	_, err = DecodeAutomationDraftCandidate([]byte(`{"schema_version":1,"name":"x","description":"","automation_type":"vision_driver","adapter_key":"vision_driver","nodes":[],"edges":[],"database_id":"forbidden"}`))
 	require.Error(t, err)
@@ -170,6 +177,8 @@ func TestAutomationDraftClonePreservesPublishedVersion(t *testing.T) {
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
+	candidate.Edges[0].FromPort = "left"
+	candidate.Edges[0].ToPort = "right"
 	created, err := drafts.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
 	require.NoError(t, err)
 	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
@@ -185,6 +194,8 @@ func TestAutomationDraftClonePreservesPublishedVersion(t *testing.T) {
 	require.Equal(t, 2, cloned.Definition.Version.Version)
 	require.Equal(t, models.AutomationVersionDraft, cloned.Definition.Version.State)
 	require.NotEqual(t, published.Definition.Version.ID, cloned.Definition.Version.ID)
+	require.Equal(t, "left", cloned.Candidate.Edges[0].FromPort, "editing after apply must preserve the chosen source side")
+	require.Equal(t, "right", cloned.Candidate.Edges[0].ToPort, "editing after apply must preserve the chosen target side")
 	current, err := automationRepo.GetDefinition(context.Background(), project.ID, published.Definition.Automation.ID)
 	require.NoError(t, err)
 	require.Equal(t, published.Definition.Version.ID, current.Version.ID, "cloning must not replace the active topology")
@@ -192,6 +203,13 @@ func TestAutomationDraftClonePreservesPublishedVersion(t *testing.T) {
 	cloned.Candidate.Nodes[0].Name = "Draft-only name"
 	_, err = drafts.UpdateDraft(context.Background(), cloned.Definition.Automation.ID, cloned.Definition.Version.ID, project.ID, cloned.Candidate)
 	require.NoError(t, err)
+	reopened, err := drafts.ClonePublishedVersion(context.Background(), project.ID, published.Definition.Automation.ID)
+	require.NoError(t, err)
+	require.Equal(t, cloned.Definition.Version.ID, reopened.Definition.Version.ID, "Edit must reopen the current working design instead of creating another draft")
+	require.Equal(t, "Draft-only name", reopened.Candidate.Nodes[0].Name, "saved edits must be reopened on the same Automation")
+	var editableCount int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, published.Definition.Automation.ID).Scan(&editableCount))
+	require.Equal(t, 1, editableCount)
 	original, err := automationRepo.GetDefinitionVersion(context.Background(), project.ID, published.Definition.Automation.ID, published.Definition.Version.ID)
 	require.NoError(t, err)
 	require.NotEqual(t, "Draft-only name", original.Nodes[0].Name)

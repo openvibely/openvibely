@@ -286,6 +286,10 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			continue
 		}
 		seenEdgeKeys[edge.Key] = true
+		if !validAutomationDraftPort(edge.FromPort) || !validAutomationDraftPort(edge.ToPort) {
+			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Graph connection ports must be left or right."})
+			continue
+		}
 		if !seenNodes[edge.From] || !seenNodes[edge.To] || edge.From == edge.To {
 			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Graph edge references an invalid node."})
 			continue
@@ -324,6 +328,10 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		return issues[i].Message < issues[j].Message
 	})
 	return issues
+}
+
+func validAutomationDraftPort(port string) bool {
+	return port == "" || port == "left" || port == "right"
 }
 
 func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []models.AutomationValidationIssue {
@@ -601,6 +609,27 @@ func (s *AutomationDraftService) ClonePublishedVersion(ctx context.Context, proj
 	if s == nil || s.repo == nil {
 		return nil, errors.New("automation repository is unavailable")
 	}
+	existing, err := s.repo.GetLatestAutomationDraftMetadata(ctx, projectID, automationID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		candidate, err := existing.Candidate()
+		if err != nil {
+			return nil, err
+		}
+		definition, err := s.repo.GetDefinitionVersion(ctx, projectID, automationID, existing.VersionID)
+		if err != nil {
+			return nil, err
+		}
+		if definition == nil {
+			return nil, errors.New("automation draft not found")
+		}
+		result := draftPreviewResult(candidate, definition)
+		result.ValidationErrors = existing.ValidationErrors
+		result.URL = fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, existing.VersionID, projectID)
+		return result, nil
+	}
 	published, err := s.repo.GetDefinition(ctx, projectID, automationID)
 	if err != nil {
 		return nil, err
@@ -608,30 +637,42 @@ func (s *AutomationDraftService) ClonePublishedVersion(ctx context.Context, proj
 	if published == nil || published.Version.State != models.AutomationVersionPublished {
 		return nil, errors.New("published automation not found")
 	}
-	candidate := models.AutomationDraftCandidate{SchemaVersion: automationDraftSchemaVersion,
-		Name: published.Automation.Name, Description: published.Automation.Description,
-		AutomationType: published.Automation.AutomationType, AdapterKey: published.Version.AdapterKey}
-	nodeKeys := make(map[string]string, len(published.Nodes))
-	for _, node := range published.Nodes {
-		var config map[string]any
-		if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
-			return nil, err
-		}
-		if config == nil {
-			config = map[string]any{}
-		}
-		nodeKeys[node.ID] = node.NodeKey
-		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: node.NodeKey, Name: node.Name,
-			Type: node.NodeType, Role: node.Role, Config: config,
-			Position: &models.AutomationDraftPoint{X: node.PositionX, Y: node.PositionY}})
+	var candidate models.AutomationDraftCandidate
+	publishedMetadata, err := s.repo.GetAutomationDraftMetadata(ctx, projectID, automationID, published.Version.ID)
+	if err != nil {
+		return nil, err
 	}
-	for _, edge := range published.Edges {
-		var condition map[string]any
-		if err := json.Unmarshal([]byte(edge.ConditionJSON), &condition); err != nil {
+	if publishedMetadata != nil {
+		candidate, err = publishedMetadata.Candidate()
+		if err != nil {
 			return nil, err
 		}
-		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: edge.EdgeKey,
-			From: nodeKeys[edge.SourceNodeID], To: nodeKeys[edge.TargetNodeID], Label: edge.Label, Condition: condition})
+	} else {
+		candidate = models.AutomationDraftCandidate{SchemaVersion: automationDraftSchemaVersion,
+			Name: published.Automation.Name, Description: published.Automation.Description,
+			AutomationType: published.Automation.AutomationType, AdapterKey: published.Version.AdapterKey}
+		nodeKeys := make(map[string]string, len(published.Nodes))
+		for _, node := range published.Nodes {
+			var config map[string]any
+			if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
+				return nil, err
+			}
+			if config == nil {
+				config = map[string]any{}
+			}
+			nodeKeys[node.ID] = node.NodeKey
+			candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: node.NodeKey, Name: node.Name,
+				Type: node.NodeType, Role: node.Role, Config: config,
+				Position: &models.AutomationDraftPoint{X: node.PositionX, Y: node.PositionY}})
+		}
+		for _, edge := range published.Edges {
+			var condition map[string]any
+			if err := json.Unmarshal([]byte(edge.ConditionJSON), &condition); err != nil {
+				return nil, err
+			}
+			candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: edge.EdgeKey,
+				From: nodeKeys[edge.SourceNodeID], To: nodeKeys[edge.TargetNodeID], Label: edge.Label, Condition: condition})
+		}
 	}
 	candidate, err = s.NormalizeCandidate(candidate)
 	if err != nil {

@@ -247,6 +247,35 @@ func replaceAutomationDraftGraph(ctx context.Context, conn *sql.Conn, in Automat
 	return err
 }
 
+func (r *AutomationRepo) GetLatestAutomationDraftMetadata(ctx context.Context, projectID, automationID string) (*models.AutomationDraftMetadata, error) {
+	var metadata models.AutomationDraftMetadata
+	var assumptionsJSON, warningsJSON, validationJSON string
+	err := r.db.QueryRowContext(ctx, `SELECT m.project_id, m.automation_id, m.version_id, m.candidate_json,
+		m.assumptions_json, m.warnings_json, m.validation_json, m.updated_at
+		FROM automation_draft_metadata m
+		JOIN automation_versions v ON v.id = m.version_id AND v.project_id = m.project_id AND v.automation_id = m.automation_id
+		WHERE m.project_id = ? AND m.automation_id = ? AND v.state = 'draft'
+		ORDER BY v.version DESC LIMIT 1`, projectID, automationID).
+		Scan(&metadata.ProjectID, &metadata.AutomationID, &metadata.VersionID, &metadata.CandidateJSON,
+			&assumptionsJSON, &warningsJSON, &validationJSON, &metadata.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(assumptionsJSON), &metadata.Assumptions); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(warningsJSON), &metadata.Warnings); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(validationJSON), &metadata.ValidationErrors); err != nil {
+		return nil, err
+	}
+	return &metadata, nil
+}
+
 func (r *AutomationRepo) GetAutomationDraftMetadata(ctx context.Context, projectID, automationID, versionID string) (*models.AutomationDraftMetadata, error) {
 	var metadata models.AutomationDraftMetadata
 	var assumptionsJSON, warningsJSON, validationJSON string

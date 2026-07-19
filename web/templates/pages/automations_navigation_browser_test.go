@@ -192,28 +192,43 @@ window.addEventListener('DOMContentLoaded', function() {
 	      event.preventDefault();
 	      event.stopImmediatePropagation();
 	    });
-	    function dragConnection(from, to, pointerId) {
-	      var sourceHandle = document.querySelector('[data-connect-source="' + from + '"]');
-	      var targetHandle = document.querySelector('[data-connect-target="' + to + '"]');
-	      if (!sourceHandle || !targetHandle) fail('missing drag connector for ' + from + ' to ' + to);
-	      var sourceRect = sourceHandle.getBoundingClientRect();
-	      var targetRect = targetHandle.getBoundingClientRect();
-	      sourceHandle.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:sourceRect.left+sourceRect.width/2, clientY:sourceRect.top+sourceRect.height/2}));
-	      targetHandle.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
-	      targetHandle.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
-	    }
-	    dragConnection('vision_trigger', 'vision_driver', 11);
-	    dragConnection('vision_driver', 'result', 12);
-	    dragConnection('result', 'vision_trigger', 13);
-	    var candidateInput = document.querySelector('[data-automation-draft-form] [data-candidate-json]');
+		    function port(node, side) { return document.querySelector('[data-connect-port="' + node + '"][data-port-side="' + side + '"]'); }
+		    function dragConnection(from, fromSide, to, toSide, pointerId) {
+		      var sourceHandle = port(from, fromSide);
+		      var targetHandle = port(to, toSide);
+		      if (!sourceHandle || !targetHandle) fail('missing two-sided drag connector for ' + from + ' to ' + to);
+		      var sourceRect = sourceHandle.getBoundingClientRect();
+		      var targetRect = targetHandle.getBoundingClientRect();
+		      sourceHandle.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:sourceRect.left+sourceRect.width/2, clientY:sourceRect.top+sourceRect.height/2}));
+		      targetHandle.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
+		      targetHandle.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
+		    }
+		    dragConnection('vision_trigger', 'left', 'vision_driver', 'right', 11);
+		    dragConnection('vision_driver', 'right', 'result', 'left', 12);
+		    dragConnection('result', 'left', 'vision_trigger', 'right', 13);	    var candidateInput = document.querySelector('[data-automation-draft-form] [data-candidate-json]');
 	    var connectedCandidate = JSON.parse(candidateInput.value);
 	    if (connectionSubmissions !== 0) fail('drag connections submitted and replaced the builder fragment');
 	    if (connectedCandidate.edges.length !== 3) fail('three consecutive drag connections were not retained');
 	    var pairs = connectedCandidate.edges.map(function(edge) { return edge.from + '>' + edge.to; });
-	    ['vision_trigger>vision_driver', 'vision_driver>result', 'result>vision_trigger'].forEach(function(pair) { if (!pairs.includes(pair)) fail('missing cyclic connection ' + pair); });
-	    var draftNode = document.querySelector('[data-node-key="vision_trigger"]');
-	    var beforeX = JSON.parse(candidateInput.value).nodes[0].position.x;
-	    draftNode.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
+		    ['vision_trigger>vision_driver', 'vision_driver>result', 'result>vision_trigger'].forEach(function(pair) { if (!pairs.includes(pair)) fail('missing cyclic connection ' + pair); });
+		    var twoSidedEdge = connectedCandidate.edges.find(function(edge) { return edge.from === 'vision_trigger' && edge.to === 'vision_driver'; });
+		    if (!twoSidedEdge || twoSidedEdge.from_port !== 'left' || twoSidedEdge.to_port !== 'right') fail('chosen left/right connection sides were not retained');
+		    click('[data-edge-key][data-from="result"][data-to="vision_trigger"] [data-edge-hit]', 'selectable connection');
+		    var reconnectHandle = document.querySelector('[data-edge-key][data-from="result"][data-to="vision_trigger"] [data-reconnect-edge][data-edge-endpoint="to"]');
+		    var reconnectTarget = port('vision_driver', 'left');
+		    if (!reconnectHandle || !reconnectTarget) fail('selected connection did not expose a draggable endpoint');
+		    var reconnectRect = reconnectHandle.getBoundingClientRect();
+		    var reconnectTargetRect = reconnectTarget.getBoundingClientRect();
+		    reconnectHandle.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:14, clientX:reconnectRect.left+reconnectRect.width/2, clientY:reconnectRect.top+reconnectRect.height/2}));
+		    reconnectTarget.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:14, clientX:reconnectTargetRect.left+reconnectTargetRect.width/2, clientY:reconnectTargetRect.top+reconnectTargetRect.height/2}));
+		    connectedCandidate = JSON.parse(candidateInput.value);
+		    if (!connectedCandidate.edges.some(function(edge) { return edge.from === 'result' && edge.to === 'vision_driver'; })) fail('dragging an existing endpoint did not reconnect the edge');
+		    click('[data-edge-key][data-from="vision_trigger"][data-to="vision_driver"] [data-delete-edge]', 'connection delete control');
+		    connectedCandidate = JSON.parse(candidateInput.value);
+		    if (connectedCandidate.edges.some(function(edge) { return edge.from === 'vision_trigger' && edge.to === 'vision_driver'; })) fail('connection delete control did not update the design');
+		    var draftNode = document.querySelector('[data-node-key="vision_trigger"]');
+		    var beforeX = JSON.parse(candidateInput.value).nodes[0].position.x;
+		    draftNode.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
 	    var afterX = JSON.parse(candidateInput.value).nodes[0].position.x;
 	    if (afterX !== beforeX + 10) fail('keyboard node movement did not persist into candidate JSON');
 	    var draftSVG = document.querySelector('[data-automation-draft-canvas] [data-automation-canvas]');
@@ -231,6 +246,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (draftSVG.getAttribute('viewBox') === afterPinchZoom) fail('builder zoom control did not change viewBox');
 	    click('[data-automation-draft-canvas] [data-automation-reset]', 'builder reset layout');
 	    if (JSON.parse(candidateInput.value).nodes[0].position.x !== beforeX) fail('builder reset did not restore canonical position');
+	    click('[data-node-key="result"] [data-delete-node]', 'node delete control');
+	    var afterNodeDelete = JSON.parse(candidateInput.value);
+	    if (afterNodeDelete.nodes.some(function(node) { return node.key === 'result'; })) fail('node delete control did not remove the node');
+	    if (afterNodeDelete.edges.some(function(edge) { return edge.from === 'result' || edge.to === 'result'; })) fail('node deletion left connected edges behind');
 	    await report('pass', '');  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`

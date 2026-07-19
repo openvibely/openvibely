@@ -35,6 +35,8 @@ type AutomationDraftEdge struct {
 	Key       string         `json:"key"`
 	From      string         `json:"from"`
 	To        string         `json:"to"`
+	FromPort  string         `json:"from_port,omitempty"`
+	ToPort    string         `json:"to_port,omitempty"`
 	Label     string         `json:"label,omitempty"`
 	Condition map[string]any `json:"condition,omitempty"`
 }
