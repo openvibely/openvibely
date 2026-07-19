@@ -198,6 +198,26 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		return err
 	}
 	switch action {
+	case "create_node":
+		name := strings.TrimSpace(c.FormValue("node_name"))
+		nodeType := models.AutomationNodeType(strings.TrimSpace(c.FormValue("node_type")))
+		if name == "" || len(name) > 200 || !automationDraftEditableNodeType(nodeType) {
+			return echo.NewHTTPError(http.StatusBadRequest, "node name and type are required")
+		}
+		key := automationDraftUniqueKey(candidate, automationDraftKey(name, "node"), false)
+		config := map[string]any{}
+		switch nodeType {
+		case models.AutomationNodeAgentTask:
+			config = map[string]any{"prompt": "Describe the work this node should perform.", "category": string(models.CategoryBacklog), "priority": 2}
+		case models.AutomationNodeTrigger:
+			config = map[string]any{"run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1, "enabled": true}
+		}
+		index := len(candidate.Nodes)
+		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{
+			Key: key, Name: name, Type: nodeType, Role: "custom_" + string(nodeType), Config: config,
+			Position: &models.AutomationDraftPoint{X: float64((index % 4) * 260), Y: float64((index / 4) * 180)},
+		})
+		return nil
 	case "add_node":
 		key := strings.TrimSpace(c.FormValue("node_key"))
 		for _, node := range candidate.Nodes {
@@ -235,22 +255,25 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 	case "connect_nodes":
 		fromKey := strings.TrimSpace(c.FormValue("from_key"))
 		toKey := strings.TrimSpace(c.FormValue("to_key"))
-		if !automationDraftContainsNode(candidate.Nodes, fromKey) || !automationDraftContainsNode(candidate.Nodes, toKey) {
-			return echo.NewHTTPError(http.StatusBadRequest, "transition endpoints must be on the canvas")
+		if fromKey == toKey || !automationDraftContainsNode(candidate.Nodes, fromKey) || !automationDraftContainsNode(candidate.Nodes, toKey) {
+			return echo.NewHTTPError(http.StatusBadRequest, "transition endpoints must be different nodes on the canvas")
+		}
+		for _, existing := range candidate.Edges {
+			if existing.From == fromKey && existing.To == toKey {
+				return nil
+			}
 		}
 		for _, edge := range palette.Edges {
-			if edge.From != fromKey || edge.To != toKey {
-				continue
+			if edge.From == fromKey && edge.To == toKey {
+				candidate.Edges = append(candidate.Edges, edge)
+				return nil
 			}
-			for _, existing := range candidate.Edges {
-				if existing.Key == edge.Key {
-					return nil
-				}
-			}
-			candidate.Edges = append(candidate.Edges, edge)
-			return nil
 		}
-		return echo.NewHTTPError(http.StatusBadRequest, "these nodes do not have a supported transition")
+		baseKey := "edge_" + automationDraftKey(fromKey, "source") + "_" + automationDraftKey(toKey, "target")
+		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{
+			Key: automationDraftUniqueKey(candidate, baseKey, true), From: fromKey, To: toKey, Condition: map[string]any{},
+		})
+		return nil
 	case "add_edge":
 		key := strings.TrimSpace(c.FormValue("edge_key"))
 		for _, edge := range candidate.Edges {
@@ -280,6 +303,63 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		return nil
 	default:
 		return echo.NewHTTPError(http.StatusBadRequest, "unsupported builder action")
+	}
+}
+
+func automationDraftEditableNodeType(nodeType models.AutomationNodeType) bool {
+	switch nodeType {
+	case models.AutomationNodeTrigger, models.AutomationNodeAgentTask, models.AutomationNodeHumanGate,
+		models.AutomationNodeAction, models.AutomationNodeCondition, models.AutomationNodeOutcome:
+		return true
+	default:
+		return false
+	}
+}
+
+func automationDraftKey(value, fallback string) string {
+	var key strings.Builder
+	lastUnderscore := false
+	for _, character := range strings.ToLower(strings.TrimSpace(value)) {
+		if (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') {
+			key.WriteRune(character)
+			lastUnderscore = false
+			continue
+		}
+		if key.Len() > 0 && !lastUnderscore {
+			key.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	result := strings.Trim(key.String(), "_")
+	if result == "" {
+		return fallback
+	}
+	if len(result) > 80 {
+		result = strings.TrimRight(result[:80], "_")
+	}
+	return result
+}
+
+func automationDraftUniqueKey(candidate *models.AutomationDraftCandidate, base string, edge bool) string {
+	exists := func(key string) bool {
+		if edge {
+			for _, item := range candidate.Edges {
+				if item.Key == key {
+					return true
+				}
+			}
+			return false
+		}
+		return automationDraftContainsNode(candidate.Nodes, key)
+	}
+	if !exists(base) {
+		return base
+	}
+	for suffix := 2; ; suffix++ {
+		key := base + "_" + strconv.Itoa(suffix)
+		if !exists(key) {
+			return key
+		}
 	}
 }
 

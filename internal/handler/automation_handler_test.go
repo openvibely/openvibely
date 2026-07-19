@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
@@ -205,12 +206,14 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	}).Execute()
 	require.Equal(t, 200, created.Code)
 	require.Contains(t, created.Body.String(), `data-automation-draft-canvas`)
-	require.Contains(t, created.Body.String(), `data-automation-add-node`)
+	require.Contains(t, created.Body.String(), `data-automation-create-node`)
 	require.Contains(t, created.Body.String(), `data-automation-fit`)
 	require.Contains(t, created.Body.String(), `data-automation-reset`)
 	require.Contains(t, created.Body.String(), `name="candidate_json"`)
-	require.Contains(t, created.Body.String(), "Add nodes")
+	require.Contains(t, created.Body.String(), "Create node")
 	require.Contains(t, created.Body.String(), "Connect nodes")
+	require.NotContains(t, created.Body.String(), "Suggested nodes", "blank drafts must not show a template-derived node list")
+	require.NotContains(t, created.Body.String(), `data-automation-add-node`, "blank drafts create nodes directly instead of exposing template nodes")
 	require.Contains(t, created.Body.String(), "6 required nodes remain")
 	require.Contains(t, created.Body.String(), "5 required connections remain")
 	require.Equal(t, 1, strings.Count(created.Body.String(), "required nodes remain"))
@@ -286,6 +289,64 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	candidate, err = metadata.Candidate()
 	require.NoError(t, err)
 	require.Equal(t, "Keep this transition label", candidate.Edges[0].Label, "palette actions must preserve fields absent from their submitted form")
+}
+
+func TestAutomationBuilderCreatesCustomNodesAndCyclicDraftConnections(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Freeform Builder Project").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	drafts := service.NewAutomationDraftService(automationRepo, service.NewAutomationAdapterRegistry())
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, nil)
+
+	created := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"blank"},
+	}).Execute()
+	require.Equal(t, 200, created.Code)
+	var automationID, versionID string
+	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
+
+	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+	require.NoError(t, err)
+	candidate, err := metadata.Candidate()
+	require.NoError(t, err)
+	post := func(values url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, marshalErr := json.Marshal(candidate)
+		require.NoError(t, marshalErr)
+		values.Set("project_id", project.ID)
+		values.Set("candidate_json", string(raw))
+		response := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(values).Execute()
+		if response.Code == 200 {
+			metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+			require.NoError(t, err)
+			candidate, err = metadata.Candidate()
+			require.NoError(t, err)
+		}
+		return response
+	}
+
+	for _, node := range []struct{ name, nodeType string }{{"Alpha", "agent_task"}, {"Beta", "condition"}, {"Gamma", "action"}} {
+		response := post(url.Values{"builder_action": {"create_node"}, "node_name": {node.name}, "node_type": {node.nodeType}})
+		require.Equal(t, 200, response.Code)
+	}
+	require.Len(t, candidate.Nodes, 3)
+	keys := []string{candidate.Nodes[0].Key, candidate.Nodes[1].Key, candidate.Nodes[2].Key}
+	for _, endpoints := range [][2]string{{keys[0], keys[1]}, {keys[1], keys[2]}, {keys[2], keys[0]}} {
+		response := post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {endpoints[0]}, "to_key": {endpoints[1]}})
+		require.Equal(t, 200, response.Code)
+	}
+	require.Len(t, candidate.Edges, 3)
+	require.Contains(t, issueCodesHandler(candidate, drafts), "unsupported_topology", "freeform graph must be saved but remain unpublished")
+}
+
+func issueCodesHandler(candidate models.AutomationDraftCandidate, drafts *service.AutomationDraftService) []string {
+	issues := drafts.ValidateCandidate(candidate)
+	codes := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		codes = append(codes, issue.Code)
+	}
+	return codes
 }
 
 func TestAutomationBuilderWebFlowIsExplicitDraftOnlyAndProjectScoped(t *testing.T) {

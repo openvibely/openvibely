@@ -56,6 +56,40 @@ func TestAutomationBlankDraftStartsEmptyAndPersistsUserLayout(t *testing.T) {
 	require.Equal(t, &models.AutomationDraftPoint{X: 37, Y: 83}, updated.Candidate.Nodes[0].Position, "normalization must preserve user-positioned nodes")
 }
 
+func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Freeform draft")
+	repo := repository.NewAutomationRepo(db)
+	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
+	candidate, err := svc.BlankCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "alpha", Name: "Alpha", Type: models.AutomationNodeAgentTask, Role: "custom_agent_task", Config: map[string]any{"prompt": "Do alpha work", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
+		{Key: "beta", Name: "Beta", Type: models.AutomationNodeCondition, Role: "custom_condition", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 260, Y: 0}},
+		{Key: "gamma", Name: "Gamma", Type: models.AutomationNodeAction, Role: "custom_action", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{
+		{Key: "edge_alpha_beta", From: "alpha", To: "beta", Condition: map[string]any{}},
+		{Key: "edge_beta_gamma", From: "beta", To: "gamma", Condition: map[string]any{}},
+		{Key: "edge_gamma_alpha", From: "gamma", To: "alpha", Condition: map[string]any{}},
+	}
+
+	issues := svc.ValidateCandidate(candidate)
+	require.Contains(t, issueCodes(issues), "unsupported_topology", "freeform topology must remain visibly unpublished")
+	require.NotContains(t, issueCodes(issues), "invalid_edge", "a multi-node cycle is valid draft geometry")
+	created, err := svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.Len(t, created.Candidate.Nodes, 3)
+	require.Len(t, created.Candidate.Edges, 3)
+	require.Contains(t, issueCodes(created.ValidationErrors), "unsupported_topology")
+
+	planner := NewAutomationPublicationPlanner(repo, nil, nil, svc.registry, svc)
+	plan, err := planner.Plan(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Contains(t, issueCodes(plan.Validation), "unsupported_topology", "the publication planner must reject freeform topology")
+	require.Empty(t, plan.Effects, "unsupported topology must not produce runtime resource mutations")
+}
+
 func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t *testing.T) {
 	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)

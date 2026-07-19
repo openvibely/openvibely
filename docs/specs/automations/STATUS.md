@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Complete: Phases 1-4 and final Definition of Done audit.
+Post-completion Phase 4 free-form graph-editor repair is implemented and in final validation. Phases 1-4 and the Definition of Done audit remain complete.
 
 ## Status
 
-Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phase 4 implementation, phase validation, repository-wide validation, and the concrete Definition of Done audit completed on 2026-07-18. Subsequent visual-builder, graph-theme/history, persistent-view-navigation, direct-connection, and confirmed-delete repairs are complete with focused Chrome coverage and a passing full repository suite.
+Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phase 4 implementation, phase validation, repository-wide validation, and the concrete Definition of Done audit completed on 2026-07-18. Subsequent visual-builder, graph-theme/history, persistent-view-navigation, direct-connection, and confirmed-delete repairs are complete with focused Chrome coverage and a passing full repository suite. A reopened Phase 4 editor repair now replaces the constrained click-to-connect interaction with direct free-form draft manipulation while retaining registered-adapter publication boundaries.
 
 ## Phase 4 Checklist
 
@@ -281,6 +281,40 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 - The fresh full rerun `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passed every package; the desktop linker emitted only the documented non-failing newer-SDK warning.
 - Fresh route/UI search found no Automation archive route/control and no new identity inference/backfill path. Transactional deletion tests prove project isolation, Automation-history cascade, preserved tasks/schedules, disabled owned triggers, and released ownership.
 - Remaining work for this repair: none; create the clean checkpoint and allow Goal Agent evaluation.
+
+## Post-Completion Free-Form Graph Editor Repair
+
+### Repair Checklist
+
+- [x] Replace the source-click/target-click submission dance with one continuous output-to-input pointer drag and a visible in-canvas preview edge.
+- [x] Keep the builder mounted while drawing connections so users can create any number of consecutive directed edges without an HTMX fragment replacement.
+- [x] Allow connections between any two distinct draft nodes, including reverse edges and multi-node cycles, while rejecting duplicate directed pairs and self-edges.
+- [x] Add direct creation for trigger, agent-task, human-gate, condition, action, and outcome nodes; retain drag positioning, keyboard movement, removal, and explicit draft saving.
+- [x] Remove adapter/template node suggestions from Blank drafts; template-created drafts alone retain collapsed runtime-node recovery suggestions.
+- [x] Persist structurally safe custom nodes and cyclic edges as inert drafts with an explicit `unsupported_topology` publication blocker; do not add arbitrary edge execution or a generic runtime engine.
+- [x] Preserve canonical adapter edge identity when a drawn pair exactly matches a registered adapter so supported Template/Describe/Blank drafts retain their existing publication path.
+- [x] Let ordinary unmodified wheel events pass through the graph without changing its view box; retain Ctrl/Meta pinch-style wheel zoom and explicit zoom controls.
+- [x] Retain keyboard-accessible source/target handles and clean in-progress pointer listeners when HTMX removes the builder.
+- [x] Add service, handler, rendered-page, and real-Chrome regressions covering custom node creation, three-edge cycles, no connection submits/rerenders, Blank template-list exclusion, ordinary wheel pass-through, and pinch zoom.
+- [x] Run the Automation-focused validation, full repository validation chain, fresh contract/security audit, and repair all material findings before checkpointing.
+
+### Changed Files
+
+- Draft validation and inert custom-topology persistence: `internal/service/automation_draft_service.go` and `internal/service/automation_draft_service_test.go`.
+- Node/edge builder actions and rendered Blank regressions: `internal/handler/automation_builder_handler.go` and `internal/handler/automation_handler_test.go`.
+- Direct-manipulation canvas, wheel behavior, generated output, and production Chrome regression: `web/templates/pages/automations.templ`, `web/templates/pages/automations_templ.go`, and `web/templates/pages/automations_navigation_browser_test.go`.
+
+### Validation And Audit
+
+- Regression-first Chrome validation failed before the production repair because a connector for the second edge did not exist, reproducing the reported inability to connect a third node.
+- `templ generate`, `go build ./cmd/server`, focused service/handler regressions, and `TestAutomationGraphThemeAndHistoryNavigationInChrome`: passed after implementation.
+- Focused Chrome evidence draws `vision_trigger -> vision_driver -> result -> vision_trigger` without submitting the draft form, then proves an ordinary wheel event is not prevented and does not zoom while a Ctrl-modified event is prevented and does zoom.
+- Fresh audit confirmed custom topology remains draft-only through `unsupported_topology`; the real publication planner returns validation with no resource effects, canonical edges retain adapter keys, and self-edges, dangling endpoints, duplicate keys, unsafe/unknown configuration, and oversized payloads remain rejected.
+- Fresh audit confirmed no new task, worker, queue, Workflow, Alert, GitHub, or generic graph execution path and no Register Existing, detection, inference, migration, confidence scoring, or graph backfill path.
+- Automation-focused validation passed: `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./web/templates/pages -run 'TestMigration11[345]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`.
+- Final repository validation passed: `templ generate`, `go build ./cmd/server`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`; every package passed and the desktop linker emitted only the documented non-failing newer-SDK warning.
+- Final generated-output/diff audit found synchronized `.templ` output, no stale click-to-connect/request-submit controller, ordinary-wheel pass-through on both editable and read-only graph canvases, bounded listener cleanup, and no material Definition of Done regression.
+- Remaining work: none; create the clean checkpoint and allow Goal Agent evaluation.
 
 ## Open Findings Or Blockers
 

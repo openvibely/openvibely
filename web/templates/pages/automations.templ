@@ -181,7 +181,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					function apply() { svg.setAttribute('viewBox', box.join(' ')); }
 					function point(event) { var value = svg.createSVGPoint(); value.x = event.clientX; value.y = event.clientY; return value.matrixTransform(svg.getScreenCTM().inverse()); }
 					function zoom(factor) { var cx=box[0]+box[2]/2, cy=box[1]+box[3]/2; box[2]=Math.max(300,Math.min(4000,box[2]*factor)); box[3]=Math.max(200,Math.min(2500,box[3]*factor)); box[0]=cx-box[2]/2; box[1]=cy-box[3]/2; apply(); }
-					svg.addEventListener('wheel', function(event) { event.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : .88); }, {passive:false});
+					svg.addEventListener('wheel', function(event) { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : .88); }, {passive:false});
 					svg.addEventListener('pointerdown', function(event) { if (event.target !== svg || event.button !== 0) return; var p=point(event); pan={x:p.x,y:p.y,box:box.slice()}; svg.setPointerCapture(event.pointerId); });
 					svg.addEventListener('pointermove', function(event) { if (!pan) return; var p=point(event); box[0]=pan.box[0]+pan.x-p.x; box[1]=pan.box[1]+pan.y-p.y; apply(); });
 					svg.addEventListener('pointerup', function(){pan=null;});
@@ -654,7 +654,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			}
 			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 				<div class="flex flex-wrap items-start justify-between gap-3">
-					<div><h3 class="font-semibold">Draft canvas</h3><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them. Drag empty canvas space to pan; use the mouse wheel or controls to zoom.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect nodes:</span> select the right connector on a source node, then the left connector on a highlighted target.</p></div>
+					<div><h3 class="font-semibold">Draft canvas</h3><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them. Drag empty canvas space to pan. Pinch on a trackpad or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect nodes:</span> drag from a node’s right output dot to another node’s left input dot.</p></div>
 				<div class="flex flex-wrap gap-2" aria-label="Canvas controls"><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button><button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button></div>
 			</div>
 			<div class="mt-4 grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
@@ -662,6 +662,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class="h-[30rem] w-full touch-none select-none" role="img" aria-label={ page.Result.Candidate.Name + " draft graph" }>
 						@automationGraphThemeStyles()
 						<defs><marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker></defs>
+						<line data-automation-edge-preview x1="0" y1="0" x2="0" y2="0" class="automation-graph-edge automation-graph-edge--preview" stroke-width="2" marker-end="url(#automation-draft-arrow)" hidden></line>
 						for _, edge := range page.Result.Candidate.Edges {
 							if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
 								<line data-edge-key={ edge.Key } data-from={ edge.From } data-to={ edge.To } x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-graph-edge" stroke-width="2" marker-end="url(#automation-draft-arrow)"></line>
@@ -672,41 +673,38 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								<g class="automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing" data-node-key={ node.Key } data-node-x={ fmt.Sprintf("%.0f", node.Position.X) } data-node-y={ fmt.Sprintf("%.0f", node.Position.Y) } data-default-x={ fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)) } data-default-y={ fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)) } transform={ fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y) } tabindex="0" role="group" aria-label={ node.Name + ", " + string(node.Type) + ", use arrow keys to move" }>
 									<rect width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } rx="12" class="automation-graph-node automation-graph-node--idle" stroke-width="2"></rect>
 									<foreignObject x="0" y="0" width={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } height={ fmt.Sprintf("%.0f", automationGraphNodeHeight) } class="pointer-events-none"><div xmlns="http://www.w3.org/1999/xhtml" class="automation-node-content"><strong>{ node.Name }</strong><span>{ automationNodeTypeLabel(node.Type) }</span></div></foreignObject>
-									if automationDraftCanConnectTo(page.EdgePalette, page.Result.Candidate.Edges, page.Result.Candidate.Nodes, node.Key) {
-										<circle cx="0" cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--target" data-connect-target={ node.Key } tabindex="0" role="button" aria-label={ "Connect into " + node.Name }></circle>
-									}
-									if automationDraftCanConnectFrom(page.EdgePalette, page.Result.Candidate.Edges, page.Result.Candidate.Nodes, node.Key) {
-										<circle cx={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--source" data-connect-source={ node.Key } tabindex="0" role="button" aria-label={ "Connect from " + node.Name }></circle>
-									}
+									<circle cx="0" cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--target" data-connect-target={ node.Key } tabindex="0" role="button" aria-label={ "Connect into " + node.Name }></circle>
+									<circle cx={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle automation-connect-handle--source" data-connect-source={ node.Key } tabindex="0" role="button" aria-label={ "Drag a connection from " + node.Name }></circle>
 								</g>
 							}
 						}
 					</svg>
 				</div>
 				<aside class="rounded-box border border-base-300 bg-base-200/30 p-3">
-					<h4 class="font-semibold">Add nodes</h4><p class="mt-1 text-xs text-base-content/60">Supported by this automation type. Add all required nodes before publishing.</p>
-					<div class="mt-3 space-y-2">
-						for _, node := range page.NodePalette {
-							if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
-								<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
+					<h4 class="font-semibold">Create node</h4><p class="mt-1 text-xs text-base-content/60">Add any supported graph node, then drag it into place and draw its connections.</p>
+					<form class="mt-3 space-y-3" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content">
+						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
+						<label class="form-control"><span class="label-text">Name</span><input class="input input-bordered input-sm" name="node_name" maxlength="200" placeholder="Review result" required/></label>
+						<label class="form-control"><span class="label-text">Type</span><select class="select select-bordered select-sm" name="node_type"><option value="agent_task">Agent task</option><option value="trigger">Trigger</option><option value="human_gate">Human gate</option><option value="condition">Condition</option><option value="action">Action</option><option value="outcome">Outcome</option></select></label>
+						<button class="btn btn-primary btn-sm w-full" type="submit" data-automation-create-node>Add node</button>
+					</form>
+					if page.Result.Definition.Version.Source == "template" {
+						<details class="mt-5"><summary class="cursor-pointer text-sm font-semibold">Suggested nodes</summary><p class="mt-1 text-xs text-base-content/60">Quick-add nodes understood by this automation’s registered runtime.</p>
+						<div class="mt-3 space-y-2">
+							for _, node := range page.NodePalette {
+								if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
+									<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
+								}
 							}
-						}
-					</div>
-						<div class="mt-5 rounded-lg border border-primary/25 bg-primary/5 p-3">
-							<h4 class="font-semibold">Connect nodes</h4>
-							<ol class="mt-2 list-decimal space-y-1 pl-4 text-xs text-base-content/70"><li>Select the right dot on the source node.</li><li>Select the highlighted left dot on the target node.</li><li>The supported transition is saved immediately.</li></ol>
 						</div>
+						</details>
+					}
 				</aside>
 			</div>
 		</section>
 		<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content" class="space-y-4" data-automation-draft-form>
 			<input type="hidden" name="project_id" value={ currentProjectID }/>
 			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
-			<input type="hidden" name="builder_action" value="" data-builder-action/>
-			<input type="hidden" name="node_key" value="" data-builder-node-key/>
-				<input type="hidden" name="edge_key" value="" data-builder-edge-key/>
-				<input type="hidden" name="from_key" value="" data-builder-from-key/>
-				<input type="hidden" name="to_key" value="" data-builder-to-key/>
 			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
 				for _, node := range page.Result.Candidate.Nodes {
 					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Remove</button></div></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
@@ -725,7 +723,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			</div>
 			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
 				for _, edge := range page.Result.Candidate.Edges {
-					<div class="rounded-box bg-base-200/40 p-3"><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.NodePalette, edge.From) } → { automationDraftNodeName(page.NodePalette, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Remove</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label></div>
+					<div class="rounded-box bg-base-200/40 p-3"><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Remove</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label></div>
 				}
 			</div></div>
 			<div class="flex flex-wrap gap-3"><button class="btn btn-primary" type="submit">Save draft</button><button class="btn btn-outline" type="submit" formaction={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) }>Preview publication</button></div>
@@ -737,74 +735,231 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				var svg = root && root.querySelector('[data-automation-canvas]');
 				var source = builder && builder.querySelector('[data-candidate-json]');
 				if (!root || !builder || !svg || !source) return;
-					var candidate;
-					try { candidate = JSON.parse(source.value); } catch (_) { return; }
-					var edgePalette = [];
-					try { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }
-					var draftForm = builder.querySelector('[data-automation-draft-form]');
-					var connectStatus = root.querySelector('[data-automation-connect-status]');
-					var selectedSourceKey = '';
-					var initialViewBox = svg.getAttribute('viewBox').split(/\s+/).map(Number);
+				var candidate;
+				try { candidate = JSON.parse(source.value); } catch (_) { return; }
+				var edgePalette = [];
+				try { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }
+				var connectStatus = root.querySelector('[data-automation-connect-status]');
+				var preview = svg.querySelector('[data-automation-edge-preview]');
+				var keyboardSourceKey = '';
+				var activeConnection = null;
+				var initialViewBox = svg.getAttribute('viewBox').split(/\s+/).map(Number);
 				var viewBox = initialViewBox.slice();
+
 				function nodeCandidate(key) { return (candidate.nodes || []).find(function(node) { return node.key === key; }); }
+				function nodeName(key) { var node = nodeCandidate(key); return node ? node.name : key; }
 				function syncCandidate() {
-					(candidate.nodes || []).forEach(function(node) { var prefix='node_'+node.key+'_'; var name=builder.querySelector('[name="'+prefix+'name"]'); if (name) node.name=name.value; if (node.config && Object.prototype.hasOwnProperty.call(node.config,'prompt')) { var prompt=builder.querySelector('[name="'+prefix+'prompt"]'), category=builder.querySelector('[name="'+prefix+'category"]'), priority=builder.querySelector('[name="'+prefix+'priority"]'); if(prompt)node.config.prompt=prompt.value;if(category)node.config.category=category.value;if(priority)node.config.priority=Number(priority.value); } if (node.config && Object.prototype.hasOwnProperty.call(node.config,'run_at')) { var runAt=builder.querySelector('[name="'+prefix+'run_at"]'), repeat=builder.querySelector('[name="'+prefix+'repeat_type"]'), interval=builder.querySelector('[name="'+prefix+'repeat_interval"]'), enabled=builder.querySelector('[name="'+prefix+'enabled"]'); if(runAt)node.config.run_at=runAt.value;if(repeat)node.config.repeat_type=repeat.value;if(interval)node.config.repeat_interval=Number(interval.value);if(enabled)node.config.enabled=enabled.checked; } });
-					(candidate.edges || []).forEach(function(edge) { var label=builder.querySelector('[name="edge_'+edge.key+'_label"]'); if(label)edge.label=label.value; });
+					(candidate.nodes || []).forEach(function(node) {
+						var prefix = 'node_' + node.key + '_';
+						var name = builder.querySelector('[name="' + prefix + 'name"]');
+						if (name) node.name = name.value;
+						if (node.config && Object.prototype.hasOwnProperty.call(node.config, 'prompt')) {
+							var prompt = builder.querySelector('[name="' + prefix + 'prompt"]');
+							var category = builder.querySelector('[name="' + prefix + 'category"]');
+							var priority = builder.querySelector('[name="' + prefix + 'priority"]');
+							if (prompt) node.config.prompt = prompt.value;
+							if (category) node.config.category = category.value;
+							if (priority) node.config.priority = Number(priority.value);
+						}
+						if (node.config && Object.prototype.hasOwnProperty.call(node.config, 'run_at')) {
+							var runAt = builder.querySelector('[name="' + prefix + 'run_at"]');
+							var repeat = builder.querySelector('[name="' + prefix + 'repeat_type"]');
+							var interval = builder.querySelector('[name="' + prefix + 'repeat_interval"]');
+							var enabled = builder.querySelector('[name="' + prefix + 'enabled"]');
+							if (runAt) node.config.run_at = runAt.value;
+							if (repeat) node.config.repeat_type = repeat.value;
+							if (interval) node.config.repeat_interval = Number(interval.value);
+							if (enabled) node.config.enabled = enabled.checked;
+						}
+					});
+					(candidate.edges || []).forEach(function(edge) {
+						var label = builder.querySelector('[name="edge_' + edge.key + '_label"]');
+						if (label) edge.label = label.value;
+					});
 					builder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });
 				}
 				function applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }
-				function graphPoint(event) { var point = svg.createSVGPoint(); point.x = event.clientX; point.y = event.clientY; return point.matrixTransform(svg.getScreenCTM().inverse()); }
-				function renderNode(group, x, y) { group.dataset.nodeX = String(x); group.dataset.nodeY = String(y); group.setAttribute('transform', 'translate(' + x + ' ' + y + ')'); var node = nodeCandidate(group.dataset.nodeKey); if (node) node.position = {x:x, y:y}; }
-					function renderEdges() { svg.querySelectorAll('[data-edge-key]').forEach(function(line) { var from = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.from) + '"]'); var to = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.to) + '"]'); if (!from || !to) return; var fx = Number(from.dataset.nodeX), fy = Number(from.dataset.nodeY), tx = Number(to.dataset.nodeX), ty = Number(to.dataset.nodeY); line.setAttribute('x1', fx + 170); line.setAttribute('y1', fy + 52); line.setAttribute('x2', tx); line.setAttribute('y2', ty + 52); }); }
-					function edgeExists(key) { return (candidate.edges || []).some(function(edge) { return edge.key === key; }); }
-					function availableConnection(from, to) { return edgePalette.find(function(edge) { return edge.from === from && edge.to === to && !edgeExists(edge.key); }); }
-					function clearConnectionSelection() {
-						selectedSourceKey = '';
-						svg.querySelectorAll('[data-connect-source]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--selected'); });
-						svg.querySelectorAll('[data-connect-target]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--eligible'); handle.setAttribute('aria-disabled', 'true'); });
-					}
-					function selectConnectionSource(key) {
-						clearConnectionSelection(); selectedSourceKey = key;
-						var sourceHandle = svg.querySelector('[data-connect-source="' + CSS.escape(key) + '"]'); if (sourceHandle) sourceHandle.classList.add('automation-connect-handle--selected');
-						var targets = 0;
-						edgePalette.forEach(function(edge) { if (edge.from !== key || edgeExists(edge.key)) return; var target = svg.querySelector('[data-connect-target="' + CSS.escape(edge.to) + '"]'); if (!target) return; target.classList.add('automation-connect-handle--eligible'); target.setAttribute('aria-disabled', 'false'); targets++; });
-						if (connectStatus) connectStatus.textContent = targets ? 'Now select a highlighted left connector.' : 'This node has no unconnected supported targets.';
-					}
-					function connectToTarget(key) {
-						if (!selectedSourceKey) { if (connectStatus) connectStatus.textContent = 'Select a source node’s right connector first.'; return; }
-						var edge = availableConnection(selectedSourceKey, key);
-						if (!edge) { if (connectStatus) connectStatus.textContent = 'That connection is not supported by this automation type.'; return; }
-						syncCandidate();
-						draftForm.querySelector('[data-builder-action]').value = 'connect_nodes';
-						draftForm.querySelector('[data-builder-from-key]').value = selectedSourceKey;
-						draftForm.querySelector('[data-builder-to-key]').value = key;
-						if (connectStatus) connectStatus.textContent = 'Connecting nodes…';
-						draftForm.requestSubmit();
-					}
-					svg.querySelectorAll('[data-connect-source], [data-connect-target]').forEach(function(handle) {
-						handle.addEventListener('pointerdown', function(event) { event.preventDefault(); event.stopPropagation(); });
-						handle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); if (handle.dataset.connectSource) selectConnectionSource(handle.dataset.connectSource); else connectToTarget(handle.dataset.connectTarget); });
-						handle.addEventListener('keydown', function(event) { event.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault(); handle.click(); });
+				function graphPoint(event) {
+					var point = svg.createSVGPoint();
+					point.x = event.clientX;
+					point.y = event.clientY;
+					return point.matrixTransform(svg.getScreenCTM().inverse());
+				}
+				function renderNode(group, x, y) {
+					group.dataset.nodeX = String(x);
+					group.dataset.nodeY = String(y);
+					group.setAttribute('transform', 'translate(' + x + ' ' + y + ')');
+					var node = nodeCandidate(group.dataset.nodeKey);
+					if (node) node.position = {x: x, y: y};
+				}
+				function renderEdges() {
+					svg.querySelectorAll('[data-edge-key]').forEach(function(line) {
+						var from = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.from) + '"]');
+						var to = svg.querySelector('[data-node-key="' + CSS.escape(line.dataset.to) + '"]');
+						if (!from || !to) return;
+						var fx = Number(from.dataset.nodeX), fy = Number(from.dataset.nodeY);
+						var tx = Number(to.dataset.nodeX), ty = Number(to.dataset.nodeY);
+						line.setAttribute('x1', fx + 170); line.setAttribute('y1', fy + 52);
+						line.setAttribute('x2', tx); line.setAttribute('y2', ty + 52);
 					});
-					clearConnectionSelection();
-					svg.querySelectorAll('.automation-draft-node').forEach(function(group) {
+				}
+				function connectionExists(from, to) { return (candidate.edges || []).some(function(edge) { return edge.from === from && edge.to === to; }); }
+				function safeKey(value, fallback) {
+					var key = String(value || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80).replace(/_+$/g, '');
+					return key || fallback;
+				}
+				function uniqueEdgeKey(base) {
+					var keys = new Set((candidate.edges || []).map(function(edge) { return edge.key; }));
+					if (!keys.has(base)) return base;
+					for (var suffix = 2; ; suffix++) if (!keys.has(base + '_' + suffix)) return base + '_' + suffix;
+				}
+				function appendEdgeLine(edge) {
+					var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+					line.dataset.edgeKey = edge.key; line.dataset.from = edge.from; line.dataset.to = edge.to;
+					line.setAttribute('class', 'automation-graph-edge'); line.setAttribute('stroke-width', '2');
+					line.setAttribute('marker-end', 'url(#automation-draft-arrow)');
+					svg.insertBefore(line, svg.querySelector('.automation-draft-node'));
+				}
+				function addConnection(from, to) {
+					if (!from || !to || from === to) { if (connectStatus) connectStatus.textContent = 'Connect two different nodes.'; return; }
+					if (connectionExists(from, to)) { if (connectStatus) connectStatus.textContent = 'Those nodes are already connected in that direction.'; return; }
+					candidate.edges = candidate.edges || [];
+					var canonical = edgePalette.find(function(edge) { return edge.from === from && edge.to === to; });
+					var useCanonical = canonical && !candidate.edges.some(function(edge) { return edge.key === canonical.key; });
+					var edge = useCanonical ? JSON.parse(JSON.stringify(canonical)) : {
+						key: uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target')),
+						from: from, to: to, label: '', condition: {}
+					};
+					candidate.edges.push(edge);
+					appendEdgeLine(edge); renderEdges(); syncCandidate();
+					if (connectStatus) connectStatus.textContent = 'Connected ' + nodeName(from) + ' to ' + nodeName(to) + '. Drag another connection or save the draft.';
+				}
+				function clearConnectionHandles() {
+					svg.querySelectorAll('[data-connect-source]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--selected'); });
+					svg.querySelectorAll('[data-connect-target]').forEach(function(handle) { handle.classList.remove('automation-connect-handle--eligible'); });
+				}
+				function showConnectionTargets(from) {
+					clearConnectionHandles();
+					var sourceHandle = svg.querySelector('[data-connect-source="' + CSS.escape(from) + '"]');
+					if (sourceHandle) sourceHandle.classList.add('automation-connect-handle--selected');
+					svg.querySelectorAll('[data-connect-target]').forEach(function(handle) {
+						if (handle.dataset.connectTarget !== from) handle.classList.add('automation-connect-handle--eligible');
+					});
+				}
+				function removeConnectionListeners() {
+					window.removeEventListener('pointermove', moveConnection);
+					window.removeEventListener('pointerup', finishConnection);
+					window.removeEventListener('pointercancel', cancelConnection);
+				}
+				function clearActiveConnection() {
+					activeConnection = null; keyboardSourceKey = ''; preview.hidden = true; clearConnectionHandles(); removeConnectionListeners();
+				}
+				function moveConnection(event) {
+					if (!activeConnection || event.pointerId !== activeConnection.pointerId) return;
+					var point = graphPoint(event); preview.setAttribute('x2', point.x); preview.setAttribute('y2', point.y);
+				}
+				function finishConnection(event) {
+					if (!activeConnection || event.pointerId !== activeConnection.pointerId) return;
+					var target = event.target instanceof Element ? event.target.closest('[data-connect-target]') : null;
+					if (!target && document.elementFromPoint) {
+						var underPointer = document.elementFromPoint(event.clientX, event.clientY);
+						target = underPointer && underPointer.closest('[data-connect-target]');
+					}
+					var from = activeConnection.from, to = target && target.dataset.connectTarget;
+					clearActiveConnection();
+					if (to) addConnection(from, to);
+					else if (connectStatus) connectStatus.textContent = 'Connection cancelled. Drag an output dot onto another node’s input dot.';
+				}
+				function cancelConnection(event) { if (activeConnection && event.pointerId === activeConnection.pointerId) clearActiveConnection(); }
+				function beginConnection(handle, event) {
+					if (event.button !== 0) return;
+					event.preventDefault(); event.stopPropagation(); clearActiveConnection();
+					var group = handle.closest('[data-node-key]');
+					var x = Number(group.dataset.nodeX) + 170, y = Number(group.dataset.nodeY) + 52;
+					activeConnection = {from: handle.dataset.connectSource, pointerId: event.pointerId};
+					preview.setAttribute('x1', x); preview.setAttribute('y1', y); preview.setAttribute('x2', x); preview.setAttribute('y2', y); preview.hidden = false;
+					showConnectionTargets(activeConnection.from);
+					window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);
+				}
+				function chooseKeyboardSource(key) {
+					keyboardSourceKey = key; showConnectionTargets(key);
+					if (connectStatus) connectStatus.textContent = 'Connection start: ' + nodeName(key) + '. Focus another node’s input dot and press Enter.';
+				}
+				svg.querySelectorAll('[data-connect-source]').forEach(function(handle) {
+					handle.addEventListener('pointerdown', function(event) { beginConnection(handle, event); });
+					handle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });
+					handle.addEventListener('keydown', function(event) {
+						event.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return;
+						event.preventDefault(); chooseKeyboardSource(handle.dataset.connectSource);
+					});
+				});
+				svg.querySelectorAll('[data-connect-target]').forEach(function(handle) {
+					handle.addEventListener('pointerdown', function(event) { event.stopPropagation(); });
+					handle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });
+					handle.addEventListener('keydown', function(event) {
+						event.stopPropagation(); if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault();
+						if (!keyboardSourceKey) { if (connectStatus) connectStatus.textContent = 'Focus a node’s output dot and press Enter first.'; return; }
+						var from = keyboardSourceKey; keyboardSourceKey = ''; clearConnectionHandles(); addConnection(from, handle.dataset.connectTarget);
+					});
+				});
+				svg.querySelectorAll('.automation-draft-node').forEach(function(group) {
 					group.addEventListener('pointerdown', function(event) {
-						if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); group.setPointerCapture(event.pointerId); var start = graphPoint(event); var originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);
-						function move(moveEvent) { var point = graphPoint(moveEvent); renderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges(); syncCandidate(); }
+						if (event.button !== 0) return;
+						event.preventDefault(); event.stopPropagation(); group.setPointerCapture(event.pointerId);
+						var start = graphPoint(event), originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);
+						function move(moveEvent) {
+							var point = graphPoint(moveEvent);
+							renderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges(); syncCandidate();
+						}
 						function done() { group.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done); }
 						group.addEventListener('pointermove', move); group.addEventListener('pointerup', done); group.addEventListener('pointercancel', done);
 					});
-					group.addEventListener('keydown', function(event) { var dx = 0, dy = 0; if (event.key === 'ArrowLeft') dx = -10; if (event.key === 'ArrowRight') dx = 10; if (event.key === 'ArrowUp') dy = -10; if (event.key === 'ArrowDown') dy = 10; if (!dx && !dy) return; event.preventDefault(); renderNode(group, Number(group.dataset.nodeX)+dx, Number(group.dataset.nodeY)+dy); renderEdges(); syncCandidate(); });
+					group.addEventListener('keydown', function(event) {
+						var dx = 0, dy = 0;
+						if (event.key === 'ArrowLeft') dx = -10; if (event.key === 'ArrowRight') dx = 10;
+						if (event.key === 'ArrowUp') dy = -10; if (event.key === 'ArrowDown') dy = 10;
+						if (!dx && !dy) return;
+						event.preventDefault(); renderNode(group, Number(group.dataset.nodeX) + dx, Number(group.dataset.nodeY) + dy); renderEdges(); syncCandidate();
+					});
 				});
 				var pan = null;
-				svg.addEventListener('pointerdown', function(event) { if (event.target !== svg || event.button !== 0) return; var point = graphPoint(event); pan = {x:point.x, y:point.y, view:viewBox.slice()}; svg.setPointerCapture(event.pointerId); });
-				svg.addEventListener('pointermove', function(event) { if (!pan) return; var point = graphPoint(event); viewBox[0] = pan.view[0] + pan.x - point.x; viewBox[1] = pan.view[1] + pan.y - point.y; applyViewBox(); });
-				svg.addEventListener('pointerup', function() { pan = null; }); svg.addEventListener('pointercancel', function() { pan = null; });
-				function zoom(factor) { var cx = viewBox[0] + viewBox[2]/2, cy = viewBox[1] + viewBox[3]/2; viewBox[2] = Math.max(240, Math.min(3000, viewBox[2]*factor)); viewBox[3] = Math.max(160, Math.min(2000, viewBox[3]*factor)); viewBox[0] = cx-viewBox[2]/2; viewBox[1] = cy-viewBox[3]/2; applyViewBox(); }
-				svg.addEventListener('wheel', function(event) { event.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : 0.88); }, {passive:false});
-				root.querySelector('[data-automation-zoom-in]').addEventListener('click', function() { zoom(0.82); }); root.querySelector('[data-automation-zoom-out]').addEventListener('click', function() { zoom(1.22); });
-				root.querySelector('[data-automation-fit]').addEventListener('click', function() { var groups = Array.from(svg.querySelectorAll('.automation-draft-node')); if (!groups.length) { viewBox = initialViewBox.slice(); applyViewBox(); return; } var xs = groups.map(function(g){return Number(g.dataset.nodeX);}), ys = groups.map(function(g){return Number(g.dataset.nodeY);}); var minX = Math.min.apply(null,xs)-60, minY = Math.min.apply(null,ys)-60, maxX = Math.max.apply(null,xs)+250, maxY = Math.max.apply(null,ys)+164; viewBox = [minX,minY,Math.max(360,maxX-minX),Math.max(240,maxY-minY)]; applyViewBox(); });
-				root.querySelector('[data-automation-reset]').addEventListener('click', function() { svg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); }); renderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox(); });
+				svg.addEventListener('pointerdown', function(event) {
+					if (event.target !== svg || event.button !== 0) return;
+					var point = graphPoint(event); pan = {x: point.x, y: point.y, view: viewBox.slice()}; svg.setPointerCapture(event.pointerId);
+				});
+				svg.addEventListener('pointermove', function(event) {
+					if (!pan) return;
+					var point = graphPoint(event); viewBox[0] = pan.view[0] + pan.x - point.x; viewBox[1] = pan.view[1] + pan.y - point.y; applyViewBox();
+				});
+				svg.addEventListener('pointerup', function() { pan = null; });
+				svg.addEventListener('pointercancel', function() { pan = null; });
+				function zoom(factor) {
+					var cx = viewBox[0] + viewBox[2] / 2, cy = viewBox[1] + viewBox[3] / 2;
+					viewBox[2] = Math.max(240, Math.min(3000, viewBox[2] * factor)); viewBox[3] = Math.max(160, Math.min(2000, viewBox[3] * factor));
+					viewBox[0] = cx - viewBox[2] / 2; viewBox[1] = cy - viewBox[3] / 2; applyViewBox();
+				}
+				svg.addEventListener('wheel', function(event) {
+					if (!event.ctrlKey && !event.metaKey) return;
+					event.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : 0.88);
+				}, {passive: false});
+				root.querySelector('[data-automation-zoom-in]').addEventListener('click', function() { zoom(0.82); });
+				root.querySelector('[data-automation-zoom-out]').addEventListener('click', function() { zoom(1.22); });
+				root.querySelector('[data-automation-fit]').addEventListener('click', function() {
+					var groups = Array.from(svg.querySelectorAll('.automation-draft-node'));
+					if (!groups.length) { viewBox = initialViewBox.slice(); applyViewBox(); return; }
+					var xs = groups.map(function(group) { return Number(group.dataset.nodeX); });
+					var ys = groups.map(function(group) { return Number(group.dataset.nodeY); });
+					var minX = Math.min.apply(null, xs) - 60, minY = Math.min.apply(null, ys) - 60;
+					var maxX = Math.max.apply(null, xs) + 250, maxY = Math.max.apply(null, ys) + 164;
+					viewBox = [minX, minY, Math.max(360, maxX - minX), Math.max(240, maxY - minY)]; applyViewBox();
+				});
+				root.querySelector('[data-automation-reset]').addEventListener('click', function() {
+					svg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); });
+					renderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox();
+				});
+				builder.addEventListener('htmx:beforeCleanupElement', function(event) {
+					if (event.target === builder) clearActiveConnection();
+				});
 				builder.addEventListener('submit', syncCandidate);
 				syncCandidate();
 			})();
@@ -857,9 +1012,6 @@ func automationDraftStringConfig(node models.AutomationDraftNode, key string) st
 func automationDraftIntConfig(node models.AutomationDraftNode, key string) int { switch value := node.Config[key].(type) { case int: return value; case float64: return int(value); case json.Number: parsed, _ := value.Int64(); return int(parsed) }; return 0 }
 func automationDraftBoolConfig(node models.AutomationDraftNode, key string) bool { value, _ := node.Config[key].(bool); return value }
 func automationDraftHasNode(nodes []models.AutomationDraftNode, key string) bool { for _, node := range nodes { if node.Key == key { return true } }; return false }
-func automationDraftHasEdge(edges []models.AutomationDraftEdge, key string) bool { for _, edge := range edges { if edge.Key == key { return true } }; return false }
-func automationDraftCanConnectFrom(palette []models.AutomationDraftEdge, existing []models.AutomationDraftEdge, nodes []models.AutomationDraftNode, key string) bool { for _, edge := range palette { if edge.From == key && automationDraftHasNode(nodes, edge.To) && !automationDraftHasEdge(existing, edge.Key) { return true } }; return false }
-func automationDraftCanConnectTo(palette []models.AutomationDraftEdge, existing []models.AutomationDraftEdge, nodes []models.AutomationDraftNode, key string) bool { for _, edge := range palette { if edge.To == key && automationDraftHasNode(nodes, edge.From) && !automationDraftHasEdge(existing, edge.Key) { return true } }; return false }
 func automationDraftNodeName(nodes []models.AutomationDraftNode, key string) string { for _, node := range nodes { if node.Key == key { return node.Name } }; return key }
 func automationDraftDefaultX(nodes []models.AutomationDraftNode, key string) float64 { for _, node := range nodes { if node.Key == key && node.Position != nil { return node.Position.X } }; return 0 }
 func automationDraftDefaultY(nodes []models.AutomationDraftNode, key string) float64 { for _, node := range nodes { if node.Key == key && node.Position != nil { return node.Position.Y } }; return 0 }
@@ -887,8 +1039,8 @@ func resourcesForAutomationNode(resources []models.AutomationResourceSummary, no
 templ automationGraphThemeStyles() {
 	<style>
 		.automation-graph-edge { fill: none; stroke: oklch(var(--bc) / 0.35); vector-effect: non-scaling-stroke; }
-		.automation-graph-edge--highlighted { stroke: oklch(var(--p)); }
-		.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }
+			.automation-graph-edge--highlighted { stroke: oklch(var(--p)); }
+			.automation-graph-edge--preview { stroke: oklch(var(--p)); stroke-dasharray: 6 4; }		.automation-graph-arrow { fill: oklch(var(--bc) / 0.45); }
 		.automation-graph-node { fill: oklch(var(--b2)); stroke: oklch(var(--bc) / 0.3); vector-effect: non-scaling-stroke; }
 		.automation-graph-node--failed { fill: oklch(var(--er) / 0.15); stroke: oklch(var(--er)); }
 		.automation-graph-node--blocked { fill: oklch(var(--wa) / 0.15); stroke: oklch(var(--wa)); }

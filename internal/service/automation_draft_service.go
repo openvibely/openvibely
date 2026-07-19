@@ -239,15 +239,29 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		canonicalNodes[node.Key] = node
 	}
 	seenNodes := map[string]bool{}
+	validNodeTypes := map[models.AutomationNodeType]bool{
+		models.AutomationNodeTrigger: true, models.AutomationNodeAgentTask: true,
+		models.AutomationNodeHumanGate: true, models.AutomationNodeAction: true,
+		models.AutomationNodeCondition: true, models.AutomationNodeOutcome: true,
+	}
 	for _, node := range candidate.Nodes {
-		canonical, exists := canonicalNodes[node.Key]
-		if !exists || seenNodes[node.Key] {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Graph nodes must match the selected registered template."})
+		if node.Key == "" || seenNodes[node.Key] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "invalid_node", Message: "Every graph node requires a unique key."})
 			continue
 		}
 		seenNodes[node.Key] = true
 		if node.Name == "" || len(node.Name) > 200 {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "node_name", Message: "Node name must be between 1 and 200 characters."})
+		}
+		canonical, exists := canonicalNodes[node.Key]
+		if !exists {
+			if !validNodeTypes[node.Type] {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "invalid_node", Message: "Node type is not supported by the graph editor."})
+				continue
+			}
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Custom graph nodes can be saved, but publication requires a registered runtime adapter."})
+			issues = append(issues, validateCustomAutomationNodeConfig(node)...)
+			continue
 		}
 		if node.Type != models.AutomationNodeType(canonical.Type) || node.Role != canonical.Role {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Node type and role are fixed by the registered adapter."})
@@ -264,17 +278,27 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 	for _, edge := range adapter.Edges {
 		canonicalEdges[edge.Key] = edge
 	}
-	seenEdges := map[string]bool{}
+	seenEdgeKeys := map[string]bool{}
+	seenCanonicalEdges := map[string]bool{}
 	for _, edge := range candidate.Edges {
-		canonical, exists := canonicalEdges[edge.Key]
-		if !exists || seenEdges[edge.Key] || edge.From != canonical.From || edge.To != canonical.To {
-			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_topology", Message: "Graph edges must match the selected registered template."})
+		if edge.Key == "" || seenEdgeKeys[edge.Key] {
+			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Every graph connection requires a unique key."})
 			continue
 		}
-		seenEdges[edge.Key] = true
+		seenEdgeKeys[edge.Key] = true
 		if !seenNodes[edge.From] || !seenNodes[edge.To] || edge.From == edge.To {
 			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Graph edge references an invalid node."})
+			continue
 		}
+		canonical, isCanonical := canonicalEdges[edge.Key]
+		if !isCanonical || edge.From != canonical.From || edge.To != canonical.To {
+			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_topology", Message: "Custom graph connections can be saved, but publication requires a registered runtime adapter."})
+			if len(edge.Condition) != 0 {
+				issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Custom edge conditions are not executable by the registered adapter."})
+			}
+			continue
+		}
+		seenCanonicalEdges[edge.Key] = true
 		expectedCondition := map[string]any{}
 		if strings.TrimSpace(canonical.Condition) != "" {
 			_ = json.Unmarshal([]byte(canonical.Condition), &expectedCondition)
@@ -286,7 +310,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		}
 	}
 	for key := range canonicalEdges {
-		if !seenEdges[key] {
+		if !seenCanonicalEdges[key] {
 			issues = append(issues, models.AutomationValidationIssue{Code: "missing_edge", Message: "Add every required transition before publication."})
 		}
 	}
@@ -299,6 +323,60 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		}
 		return issues[i].Message < issues[j].Message
 	})
+	return issues
+}
+
+func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []models.AutomationValidationIssue {
+	allowed := map[string]bool{}
+	switch node.Type {
+	case models.AutomationNodeAgentTask:
+		allowed = map[string]bool{"prompt": true, "category": true, "priority": true}
+	case models.AutomationNodeTrigger:
+		allowed = map[string]bool{"run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
+	}
+	var issues []models.AutomationValidationIssue
+	for key, value := range node.Config {
+		if !allowed[key] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unknown_config", Message: fmt.Sprintf("Configuration field %q is not supported for this node.", key)})
+			continue
+		}
+		if unsafeAutomationConfigValue(key, value) {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsafe_config", Message: fmt.Sprintf("Configuration field %q contains an unsupported value.", key)})
+		}
+	}
+	if node.Type == models.AutomationNodeAgentTask {
+		prompt, promptOK := node.Config["prompt"].(string)
+		if !promptOK || strings.TrimSpace(prompt) == "" {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Task nodes require a prompt before publication."})
+		}
+		category, categoryOK := node.Config["category"].(string)
+		if !categoryOK || (category != string(models.CategoryBacklog) && category != string(models.CategoryScheduled)) {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "Automation task category must be backlog or scheduled."})
+		}
+		priority, priorityOK := draftInt(node.Config["priority"])
+		if !priorityOK || priority < 1 || priority > 4 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "priority", Message: "Task priority must be between 1 and 4."})
+		}
+	}
+	if node.Type == models.AutomationNodeTrigger {
+		runAt, runAtOK := node.Config["run_at"].(string)
+		if !runAtOK {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
+		} else if _, err := time.Parse("15:04", runAt); err != nil {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
+		}
+		repeat, repeatOK := node.Config["repeat_type"].(string)
+		if !repeatOK || !map[string]bool{"once": true, "minutes": true, "hours": true, "daily": true, "weekly": true, "monthly": true}[repeat] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_type", Message: "Unsupported schedule repeat type."})
+		}
+		interval, intervalOK := draftInt(node.Config["repeat_interval"])
+		if !intervalOK || interval < 1 || interval > 365 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
+		}
+		if _, enabledOK := node.Config["enabled"].(bool); !enabledOK {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Trigger enabled state must be true or false."})
+		}
+	}
 	return issues
 }
 
@@ -512,7 +590,7 @@ func (s *AutomationDraftService) UpdateDraft(ctx context.Context, automationID, 
 
 func automationDraftIssuePreventsPersistence(code string) bool {
 	switch code {
-	case "unsupported_adapter", "schema_version", "graph_size", "invalid_json", "unsupported_topology", "invalid_edge", "unsupported_condition", "unknown_config", "unsafe_config":
+	case "unsupported_adapter", "schema_version", "graph_size", "invalid_json", "invalid_node", "invalid_edge", "unsupported_condition", "unknown_config", "unsafe_config":
 		return true
 	default:
 		return false

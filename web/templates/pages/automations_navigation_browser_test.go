@@ -89,9 +89,10 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 
 	renderBuilder := func() string {
 		trigger := models.AutomationDraftNode{Key: "vision_trigger", Name: "Vision Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"target_node_key": "vision_driver", "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}}
-		driver := models.AutomationDraftNode{Key: "vision_driver", Name: "Vision Driver", Type: models.AutomationNodeAgentTask, Role: "vision_driver", Config: map[string]any{"prompt": "Review vision", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 180, Y: 0}}
+		driver := models.AutomationDraftNode{Key: "vision_driver", Name: "Vision Driver", Type: models.AutomationNodeAgentTask, Role: "vision_driver", Config: map[string]any{"prompt": "Review vision", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 240, Y: 0}}
+		result := models.AutomationDraftNode{Key: "result", Name: "Result", Type: models.AutomationNodeOutcome, Role: "custom_outcome", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 480, Y: 160}}
 		edge := models.AutomationDraftEdge{Key: "trigger_to_driver", From: "vision_trigger", To: "vision_driver"}
-		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Visual Draft", AutomationType: "vision_driver", AdapterKey: "vision_driver", Nodes: []models.AutomationDraftNode{trigger, driver}}
+		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Visual Draft", AutomationType: "vision_driver", AdapterKey: "vision_driver", Nodes: []models.AutomationDraftNode{trigger, driver, result}}
 		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate, Definition: &models.AutomationDefinition{Automation: models.Automation{ID: "automation-draft", Name: "Visual Draft"}, Version: models.AutomationVersion{ID: "version-draft", AdapterKey: "vision_driver"}}}, NodePalette: []models.AutomationDraftNode{trigger, driver}, EdgePalette: []models.AutomationDraftEdge{edge}}
 		var out bytes.Buffer
 		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
@@ -184,32 +185,50 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	    await window.openVibelyNavigate('/automations/automation-draft/drafts/version-draft?project_id=project-browser');
 	    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder');
-	    var connectionSubmission = null;
 	    var draftForm = document.querySelector('[data-automation-draft-form]');
+	    var connectionSubmissions = 0;
 	    draftForm.addEventListener('submit', function(event) {
-	      connectionSubmission = {
-	        action: draftForm.querySelector('[data-builder-action]').value,
-	        from: draftForm.querySelector('[data-builder-from-key]').value,
-	        to: draftForm.querySelector('[data-builder-to-key]').value
-	      };
+	      connectionSubmissions++;
 	      event.preventDefault();
 	      event.stopImmediatePropagation();
-	    }, {once:true});
-	    click('[data-connect-source="vision_trigger"]', 'source connector');
-	    var targetConnector = document.querySelector('[data-connect-target="vision_driver"]');
-	    if (!targetConnector || !targetConnector.classList.contains('automation-connect-handle--eligible')) fail('valid target connector was not highlighted');
-	    click('[data-connect-target="vision_driver"]', 'target connector');
-	    if (!connectionSubmission || connectionSubmission.action !== 'connect_nodes' || connectionSubmission.from !== 'vision_trigger' || connectionSubmission.to !== 'vision_driver') fail('connector interaction did not submit canonical endpoints');
-	    var draftNode = document.querySelector('[data-node-key="vision_trigger"]');
+	    });
+	    function dragConnection(from, to, pointerId) {
+	      var sourceHandle = document.querySelector('[data-connect-source="' + from + '"]');
+	      var targetHandle = document.querySelector('[data-connect-target="' + to + '"]');
+	      if (!sourceHandle || !targetHandle) fail('missing drag connector for ' + from + ' to ' + to);
+	      var sourceRect = sourceHandle.getBoundingClientRect();
+	      var targetRect = targetHandle.getBoundingClientRect();
+	      sourceHandle.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:sourceRect.left+sourceRect.width/2, clientY:sourceRect.top+sourceRect.height/2}));
+	      targetHandle.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
+	      targetHandle.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
+	    }
+	    dragConnection('vision_trigger', 'vision_driver', 11);
+	    dragConnection('vision_driver', 'result', 12);
+	    dragConnection('result', 'vision_trigger', 13);
 	    var candidateInput = document.querySelector('[data-automation-draft-form] [data-candidate-json]');
+	    var connectedCandidate = JSON.parse(candidateInput.value);
+	    if (connectionSubmissions !== 0) fail('drag connections submitted and replaced the builder fragment');
+	    if (connectedCandidate.edges.length !== 3) fail('three consecutive drag connections were not retained');
+	    var pairs = connectedCandidate.edges.map(function(edge) { return edge.from + '>' + edge.to; });
+	    ['vision_trigger>vision_driver', 'vision_driver>result', 'result>vision_trigger'].forEach(function(pair) { if (!pairs.includes(pair)) fail('missing cyclic connection ' + pair); });
+	    var draftNode = document.querySelector('[data-node-key="vision_trigger"]');
 	    var beforeX = JSON.parse(candidateInput.value).nodes[0].position.x;
 	    draftNode.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));
 	    var afterX = JSON.parse(candidateInput.value).nodes[0].position.x;
 	    if (afterX !== beforeX + 10) fail('keyboard node movement did not persist into candidate JSON');
 	    var draftSVG = document.querySelector('[data-automation-draft-canvas] [data-automation-canvas]');
 	    var beforeZoom = draftSVG.getAttribute('viewBox');
+	    var ordinaryWheel = new WheelEvent('wheel', {bubbles:true, cancelable:true, deltaY:100});
+	    draftSVG.dispatchEvent(ordinaryWheel);
+	    if (ordinaryWheel.defaultPrevented) fail('ordinary vertical wheel scrolling was consumed by the graph');
+	    if (draftSVG.getAttribute('viewBox') !== beforeZoom) fail('ordinary vertical wheel scrolling changed graph zoom');
+	    var pinchWheel = new WheelEvent('wheel', {bubbles:true, cancelable:true, deltaY:-100, ctrlKey:true});
+	    draftSVG.dispatchEvent(pinchWheel);
+	    if (!pinchWheel.defaultPrevented) fail('pinch-style wheel zoom was not consumed by the graph');
+	    if (draftSVG.getAttribute('viewBox') === beforeZoom) fail('pinch-style wheel zoom did not change viewBox');
+	    var afterPinchZoom = draftSVG.getAttribute('viewBox');
 	    click('[data-automation-draft-canvas] [data-automation-zoom-in]', 'builder zoom in');
-	    if (draftSVG.getAttribute('viewBox') === beforeZoom) fail('builder zoom control did not change viewBox');
+	    if (draftSVG.getAttribute('viewBox') === afterPinchZoom) fail('builder zoom control did not change viewBox');
 	    click('[data-automation-draft-canvas] [data-automation-reset]', 'builder reset layout');
 	    if (JSON.parse(candidateInput.value).nodes[0].position.x !== beforeX) fail('builder reset did not restore canonical position');
 	    await report('pass', '');  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
