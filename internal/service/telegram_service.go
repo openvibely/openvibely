@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1305,15 +1304,11 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 			return s.setTelegramActiveProject(ctx, userID, project.ID)
 		},
 	}))
-	handlers["get_current_project"] = func(ctx context.Context, _ json.RawMessage) (string, error) {
-		return channelCurrentProjectResult(ctx, s.projectRepo, projectID), nil
-	}
-	handlers["get_chat_mode"] = func(_ context.Context, _ json.RawMessage) (string, error) {
-		return "Current chat mode: orchestrate", nil
-	}
-	handlers["set_chat_mode"] = func(_ context.Context, _ json.RawMessage) (string, error) {
-		return "Chat mode changes are not supported on Telegram. Telegram always uses orchestrate mode.", nil
-	}
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelContextModeActionHandlers(channelContextModeActionHandlerOptions{
+		ChannelDisplayName: "Telegram",
+		ProjectID:          projectID,
+		ProjectRepo:        s.projectRepo,
+	}))
 	return handlers
 }
 

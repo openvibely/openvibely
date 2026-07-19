@@ -1119,15 +1119,11 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 			return s.setActiveProject(ctx, actionCtx.TeamID, actionCtx.UserID, project.ID)
 		},
 	}))
-	handlers["get_current_project"] = func(ctx context.Context, _ json.RawMessage) (string, error) {
-		return channelCurrentProjectResult(ctx, s.projectRepo, projectID), nil
-	}
-	handlers["get_chat_mode"] = func(_ context.Context, _ json.RawMessage) (string, error) {
-		return "Current chat mode: orchestrate", nil
-	}
-	handlers["set_chat_mode"] = func(_ context.Context, _ json.RawMessage) (string, error) {
-		return "Chat mode changes are not supported on Slack. Slack always uses orchestrate mode.", nil
-	}
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelContextModeActionHandlers(channelContextModeActionHandlerOptions{
+		ChannelDisplayName: "Slack",
+		ProjectID:          projectID,
+		ProjectRepo:        s.projectRepo,
+	}))
 	return handlers
 }
 

@@ -6,12 +6,126 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func TestChannelContextModeActionHandlers(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Channel Runtime Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	for _, channelName := range []string{"Slack", "Telegram", "Discord", "Email"} {
+		t.Run(channelName, func(t *testing.T) {
+			handlers := buildChannelContextModeActionHandlers(channelContextModeActionHandlerOptions{
+				ChannelDisplayName: channelName,
+				ProjectID:          project.ID,
+				ProjectRepo:        projectRepo,
+			})
+
+			currentProject, err := handlers["get_current_project"](ctx, nil)
+			require.NoError(t, err)
+			require.Equal(t, "Current project: Channel Runtime Project (id: "+project.ID+")", currentProject)
+
+			chatMode, err := handlers["get_chat_mode"](ctx, nil)
+			require.NoError(t, err)
+			require.Equal(t, "Current chat mode: orchestrate", chatMode)
+
+			setMode, err := handlers["set_chat_mode"](ctx, json.RawMessage(`{"mode":"plan"}`))
+			require.NoError(t, err)
+			require.Equal(t, "Chat mode changes are not supported on "+channelName+". "+channelName+" always uses orchestrate mode.", setMode)
+		})
+	}
+}
+
+func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Channel Handler Coverage"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	tests := []struct {
+		name     string
+		surface  chatcontrol.Surface
+		handlers func() map[string]chatcontrol.RuntimeActionHandler
+		runtime  func() *llmcontracts.RuntimeTools
+	}{
+		{
+			name:    "Slack",
+			surface: chatcontrol.SurfaceSlack,
+			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
+				return (&SlackService{projectRepo: projectRepo}).slackActionHandlers(project.ID, slackActionContext{}, nil)
+			},
+			runtime: func() *llmcontracts.RuntimeTools {
+				return (&SlackService{projectRepo: projectRepo}).buildSlackActionToolRuntime(project.ID, slackActionContext{}, nil)
+			},
+		},
+		{
+			name:    "Telegram",
+			surface: chatcontrol.SurfaceTelegram,
+			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
+				return (&TelegramService{projectRepo: projectRepo}).telegramActionHandlers(project.ID, 1, 1, nil)
+			},
+			runtime: func() *llmcontracts.RuntimeTools {
+				return (&TelegramService{projectRepo: projectRepo}).buildTelegramActionToolRuntime(project.ID, 1, 1, nil)
+			},
+		},
+		{
+			name:    "Discord",
+			surface: chatcontrol.SurfaceDiscord,
+			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
+				return (&DiscordService{projectRepo: projectRepo}).discordActionHandlers(project.ID, discordActionContext{}, nil)
+			},
+			runtime: func() *llmcontracts.RuntimeTools {
+				return (&DiscordService{projectRepo: projectRepo}).buildDiscordActionToolRuntime(project.ID, discordActionContext{}, nil)
+			},
+		},
+		{
+			name:    "Email",
+			surface: chatcontrol.SurfaceEmail,
+			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
+				return (&EmailService{projectRepo: projectRepo}).emailActionHandlers(project.ID, "user@example.com")
+			},
+			runtime: func() *llmcontracts.RuntimeTools {
+				return (&EmailService{projectRepo: projectRepo}).buildEmailActionToolRuntime(project.ID, "user@example.com")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handlers := tt.handlers()
+			runtime := tt.runtime()
+			require.NotNil(t, runtime)
+			if tt.surface == chatcontrol.SurfaceEmail {
+				for _, def := range runtime.Definitions {
+					require.Contains(t, handlers, def.Name, "advertised runtime tool must have a handler")
+				}
+			} else {
+				require.NoError(t, chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, tt.surface, true, handlers))
+			}
+
+			currentProject, err := handlers["get_current_project"](ctx, nil)
+			require.NoError(t, err)
+			require.Equal(t, "Current project: Channel Handler Coverage (id: "+project.ID+")", currentProject)
+
+			chatMode, err := handlers["get_chat_mode"](ctx, nil)
+			require.NoError(t, err)
+			require.Equal(t, "Current chat mode: orchestrate", chatMode)
+
+			setMode, err := handlers["set_chat_mode"](ctx, json.RawMessage(`{"mode":"plan"}`))
+			require.NoError(t, err)
+			require.Equal(t, "Chat mode changes are not supported on "+tt.name+". "+tt.name+" always uses orchestrate mode.", setMode)
+		})
+	}
+}
 
 func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	db := testutil.NewTestDB(t)

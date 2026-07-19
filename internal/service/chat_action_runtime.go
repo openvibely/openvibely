@@ -108,6 +108,12 @@ type channelThreadActionHandlerOptions struct {
 	ConfigureSendOptions     func(*channelTaskThreadSendOptions)
 }
 
+type channelContextModeActionHandlerOptions struct {
+	ChannelDisplayName string
+	ProjectID          string
+	ProjectRepo        *repository.ProjectRepo
+}
+
 type channelProjectActionHandlerOptions struct {
 	ProjectID   string
 	ProjectRepo *repository.ProjectRepo
@@ -419,6 +425,20 @@ func runChannelSendToTaskAction(ctx context.Context, opts channelThreadActionHan
 		opts.ConfigureSendOptions(&sendOpts)
 	}
 	return runChannelTaskThreadSend(ctx, task, sendOpts)
+}
+
+func buildChannelContextModeActionHandlers(opts channelContextModeActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
+	return map[string]chatcontrol.RuntimeActionHandler{
+		"get_current_project": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return channelCurrentProjectResult(ctx, opts.ProjectRepo, opts.ProjectID), nil
+		},
+		"get_chat_mode": func(_ context.Context, _ json.RawMessage) (string, error) {
+			return "Current chat mode: orchestrate", nil
+		},
+		"set_chat_mode": func(_ context.Context, _ json.RawMessage) (string, error) {
+			return fmt.Sprintf("Chat mode changes are not supported on %s. %s always uses orchestrate mode.", opts.ChannelDisplayName, opts.ChannelDisplayName), nil
+		},
+	}
 }
 
 func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
