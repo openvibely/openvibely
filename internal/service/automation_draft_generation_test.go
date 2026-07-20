@@ -40,6 +40,57 @@ func TestAutomationCapabilitySnapshotIsBoundedDeterministicAndSecretFree(t *test
 	require.NotContains(t, string(encoded), "ghp_do_not_expose")
 	require.LessOrEqual(t, len(first.Agents), 50)
 	require.LessOrEqual(t, len(first.ReusableResources), 50)
+	for _, role := range []string{"task", "create_notification", "native_approval", "create_github_issue", "github_assignment", "github_inbox", "implementation", "open_pull_request", "pull_request_review", "completed"} {
+		require.Contains(t, first.SupportedRoles, role, "Describe It must see every surfaced custom capability role")
+	}
+}
+
+func TestAutomationDescriptionGenerationSupportsExpandedCustomBuilderContract(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := svc.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Review proposed changes"
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "morning", Name: "Morning", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "review", Name: "Review changes", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review one focused change.", "category": "scheduled", "priority": 2}},
+		{Key: "notify", Name: "Request approval", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "change_proposal", "instructions": "Summarize the proposed change."}},
+		{Key: "approve", Name: "Human approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{"approval_method": "native_alert"}},
+		{Key: "accepted", Name: "Accepted", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+		{Key: "rejected", Name: "Rejected", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{
+		{Key: "morning_review", From: "morning", To: "review", Condition: map[string]any{}},
+		{Key: "review_notify", From: "review", To: "notify", Condition: map[string]any{}},
+		{Key: "notify_approve", From: "notify", To: "approve", Condition: map[string]any{}},
+		{Key: "approve_accepted", From: "approve", To: "accepted", Condition: map[string]any{"state": "approved"}},
+		{Key: "approve_rejected", From: "approve", To: "rejected", Condition: map[string]any{"state": "rejected"}},
+	}
+	candidateJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+
+	preview, err := svc.PreviewDescription(context.Background(), "Every morning review a change and ask me to approve or reject it", models.AutomationCapabilitySnapshot{}, func(_ context.Context, prompt string) (string, error) {
+		require.Contains(t, prompt, "adapter_key custom")
+		require.Contains(t, prompt, "Schedule -> Agent task")
+		require.Contains(t, prompt, "create_notification")
+		require.Contains(t, prompt, "native_approval")
+		require.Contains(t, prompt, "create_github_issue")
+		require.Contains(t, prompt, "github_assignment")
+		require.Contains(t, prompt, "github_inbox")
+		require.Contains(t, prompt, "implementation")
+		require.Contains(t, prompt, "open_pull_request")
+		require.Contains(t, prompt, "pull_request_review")
+		require.NotContains(t, prompt, "existing_workflow")
+		return string(candidateJSON), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, AutomationAdapterCustom, preview.Candidate.AdapterKey)
+	require.Empty(t, preview.ValidationErrors)
+	expected, err := DecodeAutomationDraftCandidate(candidateJSON)
+	require.NoError(t, err)
+	expected, err = svc.NormalizeCandidate(expected)
+	require.NoError(t, err)
+	require.Equal(t, expected.Nodes, preview.Candidate.Nodes)
+	require.Equal(t, expected.Edges, preview.Candidate.Edges)
 }
 
 func TestAutomationDescriptionGenerationRepairsUnsupportedSchemaVersion(t *testing.T) {

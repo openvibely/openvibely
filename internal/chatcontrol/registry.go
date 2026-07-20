@@ -733,7 +733,7 @@ var registry = []ActionDef{
 	// --- Automations domain (project-scoped definition control) ---
 	{
 		Name:         "preview_automation_description",
-		Description:  "Generate and validate an ephemeral Automation graph candidate from a description. This does not persist a draft or create runtime resources.",
+		Description:  "Generate and validate an ephemeral custom or maintained-template Automation graph from a description using the same surfaced capabilities as the visual builder. This does not persist a draft or create runtime resources.",
 		Domain:       DomainAutomations,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -743,7 +743,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "create_automation_draft",
-		Description:  "Persist an unpublished Automation draft from a registered template, a description, or Blank. This creates no runtime resources.",
+		Description:  "Persist an unpublished custom or maintained-template Automation draft from a description, template, or Blank. Describe uses the same surfaced capability contract as the visual builder. This creates no runtime resources.",
 		Domain:       DomainAutomations,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,

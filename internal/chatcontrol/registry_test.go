@@ -123,6 +123,11 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 	if strings.Contains(string(create.Parameters), `"candidate"`) || strings.Contains(create.Description, "structured candidate") {
 		t.Fatal("public create Automation action must not expose a candidate creation identity")
 	}
+	preview := Get("preview_automation_description")
+	if preview == nil || !strings.Contains(preview.Description, "custom") || !strings.Contains(preview.Description, "visual builder") ||
+		!strings.Contains(create.Description, "custom") || !strings.Contains(create.Description, "visual builder") {
+		t.Fatal("Describe It and Chat action descriptions must advertise the shared custom builder contract")
+	}
 }
 
 func TestRegistry_AllActionsHaveDomain(t *testing.T) {

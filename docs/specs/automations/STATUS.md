@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 5 is active after direct product feedback showed the completed first-release Blank flow was still a preset-topology assembler rather than a custom Automation builder. Blank now uses the registered `custom` capability adapter. User-defined Schedule, Agent task, Native Alert, GitHub issue/assignment/inbox/implementation/PR/review, and Outcome nodes can be freely added, positioned, connected, and configured; supported task, approval, and GitHub lifecycle graphs publish real visible resources through existing services and project exact runtime state onto the user-owned topology.
+Phase 5 is active after direct product feedback showed the completed first-release Blank flow was still a preset-topology assembler rather than a custom Automation builder. Blank now uses the registered `custom` capability adapter. User-defined Schedule, Agent task, Native Alert, GitHub issue/assignment/inbox/implementation/PR/review, and Outcome nodes can be freely added, positioned, connected, and configured; supported task, approval, and GitHub lifecycle graphs publish real visible resources through existing services and project exact runtime state onto the user-owned topology. Describe It and Chat now generate and publish the same surfaced custom contract instead of forcing a maintained preset.
 
 ## Status
 
-Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 now has a validated custom foundation, deterministic multi-task execution, Native human approval, and configurable GitHub lifecycle capabilities. Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are inserted, unsupported capability handoffs remain fail-closed draft errors, and publication derives only real task/schedule effects plus explicit Alert/GitHub/human-gate configuration from user-owned nodes and edges. Runtime Alert and GitHub activity uses existing services and exact immutable Automation-version provenance. Remaining Phase 5 work is existing Workflow capability execution/linkage, Describe It/Chat parity, managed-memory reconciliation, and final validation/audit/checkpoint completion.
+Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 now has a validated custom foundation, deterministic multi-task execution, Native human approval, configurable GitHub lifecycle capabilities, and Describe It/Chat parity for the surfaced custom schema. Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are inserted, unsupported capability handoffs remain fail-closed draft errors, and publication derives only real task/schedule effects plus explicit Alert/GitHub/human-gate configuration from user-owned nodes and edges. Runtime Alert and GitHub activity uses existing services and exact immutable Automation-version provenance. Per the user's correction, the old JSON-only hidden Workflow subsystem is not an Automation builder capability and will be removed separately rather than exposed here. Remaining Phase 5 work is managed-memory reconciliation, a clean checkpoint, and the fresh edit-free full-objective audit.
 
 ## Phase 5 Custom Builder Checklist
 
@@ -27,10 +27,38 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
   - [x] Add regression-first validation, publication, runtime projection, idempotency, and analogous unsupported-topology coverage; run the slice validation and fresh audit.
 - [x] Add native approval/notification capability nodes through the existing Alert service.
 - [x] Add GitHub issue/assignment/PR/review capability nodes through the existing GitHub services and human boundaries.
-- [ ] Add existing Workflow capability selection/execution without copying Workflow steps or creating a second engine.
-- [ ] Extend Describe It and Chat schemas/capability snapshots to generate the same custom graph contract.
-- [ ] Add focused and real-browser coverage for every custom capability and supported/unsupported analogous handoff class.
+- [x] Exclude the old JSON-only hidden Workflow subsystem from Automation capabilities per direct user correction; it is being removed separately rather than presented as a surfaced feature.
+- [x] Extend Describe It and Chat schemas/capability snapshots to generate the same surfaced custom graph contract.
+- [x] Add focused and real-browser coverage for every custom capability and supported/unsupported analogous handoff class.
 - [ ] Run generation, build, focused Automation, internal, and full validation; update managed memory; create a clean checkpoint; perform a fresh edit-free Phase 5/full-objective audit.
+
+## Phase 5 Describe It And Chat Parity Checkpoint
+
+### Completed Requirements
+
+- Describe It now treats `custom` as a first-class generated adapter instead of forcing every request into Native SDLC, GitHub SDLC, or Vision Driver. Its model-facing schema enumerates the same surfaced Schedule, Agent task, Native Alert approval, GitHub lifecycle, and Outcome node configuration available in Blank.
+- The generation contract documents only deterministic supported custom handoffs: linear task chains, Native approved/rejected branches, and the existing human-gated GitHub lifecycle. It rejects task branching, multiple parents, cycles, unsupported conditions, human-gate bypasses, automatic issue assignment, hidden/internal capabilities, and merge/release/deployment authority.
+- The bounded project capability snapshot now advertises the custom `task` role alongside all surfaced Alert/GitHub roles. Agent, skill, source-file, GitHub readiness, secret exclusion, deterministic ordering, and collection bounds remain unchanged.
+- The one bounded repair prompt preserves valid custom intent and no longer replaces a requested custom graph with an unrelated preset.
+- The Automations page and canonical Chat actions use the same capability snapshot, no-tools model generation, decode, normalization, validation, persistence, planning, confirmation, and compiler path. A fixed custom approval candidate now proves identical web/Chat persistence and confirmed Chat publication into the expected visible task and schedule.
+- The canonical Chat registry explicitly describes custom/maintained-template parity while retaining only Template, Describe It, and Blank creation identities. It still exposes no arbitrary candidate payload and creates no runtime resource before explicit review and later confirmation.
+- The old JSON-only hidden Workflow subsystem is intentionally absent from the generated custom contract per direct user correction and is being removed separately.
+
+### Regression And Validation Evidence
+
+- `TestAutomationDescriptionGenerationSupportsExpandedCustomBuilderContract` failed first because the generator required a maintained preset and then passed with exact surfaced custom roles, handoffs, safety boundaries, and no hidden Workflow role.
+- `TestAutomationCapabilitySnapshotIsBoundedDeterministicAndSecretFree` failed first because `task` was absent and now covers every surfaced custom role without exposing prompts, skill bodies, task prompts, or GitHub credentials.
+- `TestAutomationChatActionsUseCanonicalPipelineAndDeferConfirmationReceipt` now enters both the public web Describe It route and Chat with the same fixed custom approval candidate, proves identical normalized persistence, no draft-time task/schedule mutation, and deferred confirmation receipt creation.
+- `TestAutomationCanonicalChatRuntimeExecutesPreviewDraftPlanAndConfirmedPublish` now runs the complete canonical Chat action sequence for a custom approval graph and proves explicit confirmation before one real task and schedule are published.
+- Focused service, handler, and Chat registry regressions pass.
+- `templ generate` completed with zero generated updates; `gofmt`, `git diff --check`, and `go build ./...` pass with only the documented non-failing macOS SDK linker warnings.
+- The Automation-wide database/repository/service/handler/Chat/observability/page suite passes.
+- `go test ./internal/... -count=1 -timeout 120s` passes every internal package.
+- `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passes every package, including the production real-Chrome Automation graph coverage.
+
+### Remaining Work
+
+- Reconcile managed memory through an authorized direct writer if one becomes available, checkpoint the clean candidate, and perform the fresh edit-free full-objective audit.
 
 ## Phase 5 Custom GitHub Checkpoint
 
@@ -57,8 +85,8 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ### Remaining Work
 
-- Add existing Workflow selection/execution linkage without copying Workflow steps or adding another engine, then extend Describe It/Chat parity for the complete custom contract.
-- Reconcile the authoritative `automation_graphs.md` managed topic when a scoped mutation path is available, then perform the fresh full-objective audit after all remaining custom capabilities are implemented.
+- Describe It/Chat parity is completed by the later Phase 5 checkpoint above. The old hidden Workflow subsystem is intentionally excluded per direct user correction.
+- Reconcile the authoritative `automation_graphs.md` managed topic when a scoped mutation path is available, then perform the fresh full-objective audit after final validation.
 
 ## Phase 5 Native Alert Approval Checkpoint
 
@@ -84,8 +112,8 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ### Remaining Work
 
-- GitHub lifecycle capability nodes are completed by the later Phase 5 checkpoint above. Add existing Workflow selection/execution linkage and Describe It/Chat parity.
-- Reconcile the authoritative `automation_graphs.md` managed topic when a scoped mutation path is available, then perform the fresh full-objective audit after all remaining custom capabilities are implemented.
+- GitHub lifecycle capability nodes and Describe It/Chat parity are completed by the later Phase 5 checkpoints above. The hidden Workflow subsystem is excluded per direct user correction.
+- Reconcile the authoritative `automation_graphs.md` managed topic when a scoped mutation path is available, then perform the fresh full-objective audit after final validation.
 
 ## Phase 5 Agent-Task Handoff Checkpoint
 
@@ -116,7 +144,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ### Remaining Work
 
-- Native approval and configurable GitHub lifecycle nodes are completed by the later Phase 5 checkpoints above. Remaining follow-on work is existing Workflow nodes, described/Chat parity, managed-memory reconciliation, and the final full-objective audit.
+- Native approval, configurable GitHub lifecycle nodes, and described/Chat parity are completed by the later Phase 5 checkpoints above. The hidden Workflow subsystem is excluded per direct user correction. Remaining work is managed-memory reconciliation, final validation, and the fresh full-objective audit.
 - The authoritative `automation_graphs.md` managed view records checkpoint `2010127` and correctly includes the Native approval slice, but it still names configurable GitHub capabilities as remaining work. This runtime exposes `memory_view` but no scoped memory mutation action. Per the managed-memory runbook and explicit user direction, do not delegate or edit an untracked copy; reconcile the authoritative topic once a scoped writer is available and before the qualifying final audit.
 
 ## Phase 4 Checklist
@@ -761,11 +789,11 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ## Remaining Phases
 
-- Complete the unchecked Phase 5 custom capability and handoff classes, reconcile Describe It/Chat/Live behavior, run the full validation chain, update managed memory, create clean checkpoints, and perform a new edit-free full-objective audit.
+- Reconcile managed memory, create a clean checkpoint, and perform a new edit-free full-objective audit. The old hidden Workflow subsystem is not an Automation capability and is being removed separately per direct user correction.
 
 ## Exact Next Action
 
-Add regression-first existing Workflow capability nodes that select a real same-project Workflow and invoke it through the existing Workflow engine with immutable Automation execution linkage; do not copy Workflow steps or add another executor. Then extend Describe It/Chat parity for the complete custom schema.
+Checkpoint the validated surfaced custom builder candidate, then reconcile the authoritative managed topic through an authorized direct writer and perform the fresh edit-free audit against the revised full objective.
 
 ## Update Contract
 

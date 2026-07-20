@@ -906,6 +906,32 @@ func tableCountHandler(t *testing.T, tc *TestContext, table string) int {
 	return count
 }
 
+func automationChatCustomApprovalCandidate(t *testing.T, drafts *service.AutomationDraftService) models.AutomationDraftCandidate {
+	t.Helper()
+	candidate, err := drafts.BlankCandidate(service.AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Custom approval review"
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "morning", Name: "Morning", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "review", Name: "Review changes", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review one focused change.", "category": "scheduled", "priority": 2}},
+		{Key: "notify", Name: "Request approval", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "change_proposal", "instructions": "Summarize the proposed change."}},
+		{Key: "approval", Name: "Human approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{"approval_method": "native_alert"}},
+		{Key: "accepted", Name: "Accepted", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+		{Key: "rejected", Name: "Rejected", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{
+		{Key: "morning_review", From: "morning", To: "review", Condition: map[string]any{}},
+		{Key: "review_notify", From: "review", To: "notify", Condition: map[string]any{}},
+		{Key: "notify_approval", From: "notify", To: "approval", Condition: map[string]any{}},
+		{Key: "approval_accepted", From: "approval", To: "accepted", Condition: map[string]any{"state": "approved"}},
+		{Key: "approval_rejected", From: "approval", To: "rejected", Condition: map[string]any{"state": "rejected"}},
+	}
+	normalized, err := drafts.NormalizeCandidate(candidate)
+	require.NoError(t, err)
+	require.Empty(t, drafts.ValidateCandidate(normalized))
+	return normalized
+}
+
 func TestAutomationChatDraftCreationRejectsCandidateIdentity(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Automation Chat Identity").Build()
@@ -937,8 +963,7 @@ func TestAutomationChatActionsUseCanonicalPipelineAndDeferConfirmationReceipt(t 
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, capabilities, planner, compiler, confirmation, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
-	candidate, err := drafts.TemplateCandidate(service.AutomationAdapterVisionDriver)
-	require.NoError(t, err)
+	candidate := automationChatCustomApprovalCandidate(t, drafts)
 	candidateJSON, err := json.Marshal(candidate)
 	require.NoError(t, err)
 	model := models.LLMConfig{Name: "Automation parity generator", Provider: models.ProviderTest, Model: "test", IsDefault: true}
@@ -946,6 +971,14 @@ func TestAutomationChatActionsUseCanonicalPipelineAndDeferConfirmationReceipt(t 
 	mock := testutil.NewMockLLMCaller()
 	mock.Response = string(candidateJSON)
 	tc.handler.llmSvc.SetLLMCaller(mock)
+	webCreated := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"describe"}, "description": {"Review a proposed change and ask for approval"},
+	}).Execute()
+	require.Equal(t, 200, webCreated.Code, webCreated.Body.String())
+	var webCandidateJSON string
+	require.NoError(t, tc.db.QueryRow(`SELECT metadata.candidate_json FROM automation_draft_metadata metadata
+		JOIN automations automation ON automation.id = metadata.automation_id
+		WHERE metadata.project_id = ? AND automation.created_via = 'web' ORDER BY automation.created_at DESC LIMIT 1`, project.ID).Scan(&webCandidateJSON))
 	createdJSON, err := tc.handler.executeAutomationCreateDraftAction(ctx, streamingResponseParams{ProjectID: project.ID}, json.RawMessage(`{"source":"describe","description":"Review vision daily"}`))
 	require.NoError(t, err)
 	var created struct {
@@ -957,7 +990,10 @@ func TestAutomationChatActionsUseCanonicalPipelineAndDeferConfirmationReceipt(t 
 	require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
 	actualCandidateJSON, err := json.Marshal(created.Candidate)
 	require.NoError(t, err)
-	require.JSONEq(t, string(candidateJSON), string(actualCandidateJSON), "page and Chat fixed candidates must normalize identically")
+	require.JSONEq(t, string(candidateJSON), string(actualCandidateJSON), "page and Chat fixed custom candidates must normalize identically")
+	require.JSONEq(t, string(candidateJSON), webCandidateJSON, "Describe It on the page and Chat must use the same expanded custom contract")
+	require.Equal(t, service.AutomationAdapterCustom, created.Candidate.AdapterKey)
+	require.Equal(t, 2, mock.CallCount())
 	require.False(t, created.Active)
 	require.Zero(t, tableCountHandler(t, tc, "tasks"))
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
@@ -1001,8 +1037,7 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewDraftPlanAndConfirmedPubli
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, capabilities, planner, compiler, confirmation, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
-	candidate, err := drafts.TemplateCandidate(service.AutomationAdapterVisionDriver)
-	require.NoError(t, err)
+	candidate := automationChatCustomApprovalCandidate(t, drafts)
 	candidateJSON, err := json.Marshal(candidate)
 	require.NoError(t, err)
 	model := models.LLMConfig{Name: "Automation generator", Provider: models.ProviderTest, Model: "test", IsDefault: true}

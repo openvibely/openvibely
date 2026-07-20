@@ -110,7 +110,7 @@ func capabilityRefLess(a, b models.AutomationCapabilityRef) bool {
 }
 
 func supportedAutomationRoles() []string {
-	roles := []string{"completed", "create_github_issue", "create_notification", "fixed_schedule", "github_assignment", "github_inbox", "implementation", "loop_auditor", "native_approval", "native_inbox", "offering_manager", "open_pull_request", "pull_request_review", "rejected", "suggestion_producer", "vision_driver"}
+	roles := []string{"completed", "create_github_issue", "create_notification", "fixed_schedule", "github_assignment", "github_inbox", "implementation", "loop_auditor", "native_approval", "native_inbox", "offering_manager", "open_pull_request", "pull_request_review", "rejected", "suggestion_producer", "task", "vision_driver"}
 	sort.Strings(roles)
 	return roles
 }
