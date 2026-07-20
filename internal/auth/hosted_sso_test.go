@@ -595,6 +595,34 @@ func TestHostedExchangeRetryAttemptAndTotalBudgets(t *testing.T) {
 	})
 }
 
+func TestHostedExchangeHonorsShorterParentDeadlineBeforeRetry(t *testing.T) {
+	code := canonicalAuthTestValue("c")
+	verifier := canonicalAuthTestValue("v")
+	var attempts atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = io.WriteString(w, `{"error":"slow_down"}`)
+	}))
+	defer provider.Close()
+
+	parent, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	client := NewHostedSSOClient(provider.URL, "instance-1", "https://alice.openvibely.ai/auth/sso/callback")
+	client.Sleep = func(context.Context, time.Duration) error {
+		t.Fatal("retry sleeper called when delay exceeds the effective parent deadline")
+		return nil
+	}
+	if _, err := client.Exchange(parent, code, verifier); err == nil {
+		t.Fatal("slow_down unexpectedly succeeded")
+	}
+	if attempts.Load() != 1 {
+		t.Fatalf("attempts=%d", attempts.Load())
+	}
+}
+
 func TestRetryDelayPolicy(t *testing.T) {
 	for value, want := range map[string]time.Duration{
 		"1": time.Second, "2": 2 * time.Second, "3": 3 * time.Second, "4": 3 * time.Second,

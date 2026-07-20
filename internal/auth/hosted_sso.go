@@ -416,6 +416,11 @@ type PendingStore struct {
 }
 
 func NewPendingStore(parent context.Context, now func() time.Time) *PendingStore {
+	ticker := time.NewTicker(time.Minute)
+	return newPendingStore(parent, now, ticker.C, ticker.Stop)
+}
+
+func newPendingStore(parent context.Context, now func() time.Time, cleanupTicks <-chan time.Time, stopCleanup func()) *PendingStore {
 	if parent == nil {
 		parent = context.Background()
 	}
@@ -430,7 +435,7 @@ func NewPendingStore(parent context.Context, now func() time.Time) *PendingStore
 		cancel:        cancel,
 		done:          make(chan struct{}),
 	}
-	go s.cleanup(ctx)
+	go s.cleanup(ctx, cleanupTicks, stopCleanup)
 	return s
 }
 
@@ -565,10 +570,11 @@ func (s *PendingStore) Close() {
 	})
 }
 
-func (s *PendingStore) cleanup(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
+func (s *PendingStore) cleanup(ctx context.Context, ticks <-chan time.Time, stop func()) {
 	defer func() {
-		ticker.Stop()
+		if stop != nil {
+			stop()
+		}
 		s.mu.Lock()
 		s.closed = true
 		for state := range s.entries {
@@ -581,7 +587,7 @@ func (s *PendingStore) cleanup(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
 			s.Prune()
 		}
 	}
@@ -686,7 +692,13 @@ func (c *HostedSSOClient) Exchange(parent context.Context, code, verifier string
 			return nil, &ExchangeError{Status: resp.StatusCode, Category: category}
 		}
 		delay := retryDelay(resp.Header.Get("Retry-After"))
-		if delay >= exchangeDeadline.Sub(now()) {
+		remaining := exchangeDeadline.Sub(now())
+		if contextDeadline, ok := ctx.Deadline(); ok {
+			if contextRemaining := time.Until(contextDeadline); contextRemaining < remaining {
+				remaining = contextRemaining
+			}
+		}
+		if delay >= remaining {
 			return nil, &ExchangeError{Status: resp.StatusCode, Category: category}
 		}
 		if err := sleeper(ctx, delay); err != nil || ctx.Err() != nil {
@@ -896,7 +908,11 @@ func validateJSONContentType(header http.Header) error {
 	if len(values) != 1 || strings.TrimSpace(values[0]) == "" {
 		return errors.New("exactly one Content-Type is required")
 	}
-	mediaType, params, err := mime.ParseMediaType(values[0])
+	value := values[0]
+	if strings.TrimSpace(value) == "" || strings.Count(value, ";") > 1 || strings.HasSuffix(strings.TrimSpace(value), ";") {
+		return errors.New("invalid Content-Type shape")
+	}
+	mediaType, params, err := mime.ParseMediaType(value)
 	if err != nil || !strings.EqualFold(mediaType, "application/json") {
 		return errors.New("Content-Type must be application/json")
 	}

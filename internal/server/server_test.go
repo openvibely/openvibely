@@ -5,12 +5,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -92,6 +94,19 @@ func TestMethodOverrideSkipsExactAuthenticationProtocolPaths(t *testing.T) {
 }
 
 func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
+	var providerConnections atomic.Int32
+	provider := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	provider.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			providerConnections.Add(1)
+		}
+	}
+	provider.StartTLS()
+	defer provider.Close()
+
 	tmpDir := t.TempDir()
 	cfg := &config.Config{
 		Mode:                     config.ModeServer,
@@ -103,7 +118,7 @@ func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
 		EnvironmentExplicitlySet: true,
 		AuthMode:                 auth.AuthModeHostedSSO,
 		HostedSSOEnabled:         true,
-		HostedSSOControlURL:      "https://openvibely.ai",
+		HostedSSOControlURL:      provider.URL,
 		HostedSSOInstanceID:      "instance-1",
 		AppBaseURL:               "https://alice.openvibely.ai",
 		AuthSessionSecret:        base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
@@ -118,6 +133,40 @@ func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
 	client := &http.Client{
 		Timeout:       5 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	type authProtocolResponse struct {
+		status    int
+		allow     string
+		location  string
+		setCookie []string
+	}
+	requestAuthProtocol := func(path, override string) authProtocolResponse {
+		t.Helper()
+		req, requestErr := http.NewRequest(http.MethodPost, instance.BaseURL+path, nil)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		if override != "" {
+			req.Header.Set("X-HTTP-Method-Override", override)
+		}
+		response, requestErr := client.Do(req)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		response.Body.Close()
+		return authProtocolResponse{
+			status: response.StatusCode, allow: response.Header.Get("Allow"), location: response.Header.Get("Location"),
+			setCookie: response.Header.Values("Set-Cookie"),
+		}
+	}
+	for _, path := range []string{"/login", "/logout", "/auth/me", "/auth/sso/start", "/auth/sso/callback", "/logged-out"} {
+		baseline := requestAuthProtocol(path, "")
+		for _, override := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, "ARBITRARY"} {
+			got := requestAuthProtocol(path, override)
+			if got.status != baseline.status || got.allow != baseline.allow || got.location != baseline.location || strings.Join(got.setCookie, "\n") != strings.Join(baseline.setCookie, "\n") {
+				t.Fatalf("path=%s override=%s got=%#v baseline=%#v", path, override, got, baseline)
+			}
+		}
 	}
 	response, err := client.Get(instance.BaseURL + "/projects?tab=active")
 	if err != nil {
@@ -136,8 +185,40 @@ func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if startResponse.StatusCode != http.StatusFound || location.Scheme != "https" || location.Host != "openvibely.ai" || location.Path != "/sso/authorize" || location.Query().Get("redirect_uri") != "https://alice.openvibely.ai/auth/sso/callback" {
+	providerOrigin, err := url.Parse(provider.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startResponse.StatusCode != http.StatusFound || location.Scheme != "https" || location.Host != providerOrigin.Host || location.Path != "/sso/authorize" || location.Query().Get("redirect_uri") != "https://alice.openvibely.ai/auth/sso/callback" {
 		t.Fatalf("start status=%d location=%q", startResponse.StatusCode, location.String())
+	}
+	var binding *http.Cookie
+	for _, cookie := range startResponse.Cookies() {
+		if cookie.Name == "ov_sso_browser" {
+			binding = cookie
+		}
+	}
+	if binding == nil {
+		t.Fatal("hosted start did not set browser binding")
+	}
+	code := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("c", 32)))
+	callbackURL := instance.BaseURL + "/auth/sso/callback?code=" + code + "&state=" + location.Query().Get("state")
+	callbackRequest, err := http.NewRequest(http.MethodPost, callbackURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackRequest.Header.Set("X-HTTP-Method-Override", http.MethodGet)
+	callbackRequest.AddCookie(binding)
+	callbackResponse, err := client.Do(callbackRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackResponse.Body.Close()
+	if callbackResponse.StatusCode != http.StatusMethodNotAllowed || len(callbackResponse.Cookies()) != 0 || callbackResponse.Header.Get("Location") != "" {
+		t.Fatalf("overridden callback status=%d cookies=%#v location=%q", callbackResponse.StatusCode, callbackResponse.Cookies(), callbackResponse.Header.Get("Location"))
+	}
+	if providerConnections.Load() != 0 {
+		t.Fatalf("method-overridden callback contacted provider %d times", providerConnections.Load())
 	}
 }
 

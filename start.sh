@@ -29,7 +29,8 @@ LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/openvibely.log"
 TEMPL_MODULE="github.com/a-h/templ/cmd/templ"
 TEMPL_VERSION="${TEMPL_VERSION:-}"
-if [ "${ENVIRONMENT+x}" != "x" ]; then
+ENVIRONMENT_WAS_SET="${ENVIRONMENT+x}"
+if [ "$ENVIRONMENT_WAS_SET" != "x" ]; then
     ENVIRONMENT=development
 fi
 OPENVIBELY_ENABLE_LOCAL_REPO_PATH=true
@@ -154,7 +155,7 @@ if lsof -ti:"$PORT" &>/dev/null; then
 fi
 
 export PORT OPENVIBELY_ENABLE_LOCAL_REPO_PATH OPENVIBELY_LOG_LEVEL AUTH_ENABLED AUTH_USERNAME AUTH_PASSWORD AUTH_SESSION_SECRET
-if [ "${ENVIRONMENT+x}" = "x" ] && [ -n "${ENVIRONMENT:-}" ]; then export ENVIRONMENT; fi
+if [ "$ENVIRONMENT_WAS_SET" = "x" ]; then export ENVIRONMENT; fi
 if [ "${OPENVIBELY_HOSTED_SSO_ENABLED+x}" = "x" ]; then export OPENVIBELY_HOSTED_SSO_ENABLED; fi
 if [ "${OPENVIBELY_HOSTED_CONTROL_URL+x}" = "x" ]; then export OPENVIBELY_HOSTED_CONTROL_URL; fi
 if [ "${OPENVIBELY_HOSTED_INSTANCE_ID+x}" = "x" ]; then export OPENVIBELY_HOSTED_INSTANCE_ID; fi

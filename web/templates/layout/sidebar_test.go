@@ -322,6 +322,43 @@ func TestSidebar_UserAreaAndThemeToggleCoexist(t *testing.T) {
 	}
 }
 
+func TestSidebar_HostedIdentityUsesOnlyInertTextSinks(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "fetch('/auth/me'")
+	if start < 0 {
+		t.Fatal("hosted identity browser update block not found")
+	}
+	end := strings.Index(html[start:], ".catch(function() {})")
+	if end < 0 {
+		t.Fatal("hosted identity browser update block terminator not found")
+	}
+	block := html[start : start+end]
+	for _, required := range []string{
+		"name.textContent = data.display || data.username",
+		"avatar.textContent = initial",
+		"avatarCollapsed.textContent = initial",
+		"logoutLabel.textContent = 'Log out of this workspace'",
+	} {
+		if !strings.Contains(block, required) {
+			t.Fatalf("missing inert identity sink %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
+		"setAttribute('href'", "setAttribute(\"href\"", "setAttribute('src'", "setAttribute(\"src\"",
+		"style.cssText", "eval(", "new Function",
+	} {
+		if strings.Contains(block, forbidden) {
+			t.Fatalf("identity update block contains active sink %q", forbidden)
+		}
+	}
+}
+
 func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 

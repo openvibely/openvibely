@@ -3,6 +3,8 @@ package config
 import (
 	"encoding/base64"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -220,6 +222,138 @@ func TestHostedSSOExplicitEmptyEnvironmentDoesNotPermitHTTP(t *testing.T) {
 	t.Setenv("ENVIRONMENT", "")
 	if err := LoadWithMode(ModeServer).Validate(); err == nil {
 		t.Fatal("explicit empty ENVIRONMENT permitted hosted HTTP")
+	}
+}
+
+func TestHostedSSODesktopSwitchMatrix(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		set       bool
+		value     string
+		wantError bool
+	}{
+		{name: "unset"},
+		{name: "explicit false", set: true, value: " FaLsE "},
+		{name: "explicit true", set: true, value: "true", wantError: true},
+		{name: "invalid", set: true, value: "yes", wantError: true},
+		{name: "present empty", set: true, value: "", wantError: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			clearHostedEnv(t)
+			if tt.set {
+				t.Setenv("OPENVIBELY_HOSTED_SSO_ENABLED", tt.value)
+			}
+			cfg := LoadWithMode(ModeDesktop)
+			err := cfg.Validate()
+			if (err != nil) != tt.wantError {
+				t.Fatalf("Validate error=%v wantError=%v", err, tt.wantError)
+			}
+			if !tt.wantError && cfg.AuthMode == auth.AuthModeHostedSSO {
+				t.Fatal("desktop selected hosted SSO")
+			}
+		})
+	}
+}
+
+func TestHostedSSORequiredValuesAndByteBoundaries(t *testing.T) {
+	valid := Config{
+		Mode: ModeServer, AuthMode: auth.AuthModeHostedSSO, HostedSSOEnabled: true,
+		HostedSSOControlURL: "https://openvibely.ai", HostedSSOInstanceID: "instance-1",
+		AppBaseURL: "https://alice.openvibely.ai", AuthSessionSecret: hostedSecretFixture(),
+		Environment: "production", EnvironmentExplicitlySet: true,
+	}
+	for name, mutate := range map[string]func(*Config){
+		"control URL":     func(c *Config) { c.HostedSSOControlURL = "" },
+		"instance ID":     func(c *Config) { c.HostedSSOInstanceID = "" },
+		"application URL": func(c *Config) { c.AppBaseURL = "" },
+		"session secret":  func(c *Config) { c.AuthSessionSecret = "" },
+	} {
+		t.Run("missing "+name, func(t *testing.T) {
+			cfg := valid
+			mutate(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("missing required hosted value accepted")
+			}
+		})
+	}
+
+	for _, instanceID := range []string{strings.Repeat("i", 128), strings.Repeat("é", 64)} {
+		cfg := valid
+		cfg.HostedSSOInstanceID = instanceID
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("128-byte instance ID rejected: %v", err)
+		}
+	}
+	for name, instanceID := range map[string]string{
+		"invalid UTF-8":       string([]byte{0xff}),
+		"ASCII control":       "instance\n1",
+		"leading space":       " instance-1",
+		"trailing space":      "instance-1 ",
+		"129 ASCII bytes":     strings.Repeat("i", 129),
+		"130 multibyte bytes": strings.Repeat("é", 65),
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := valid
+			cfg.HostedSSOInstanceID = instanceID
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("invalid instance ID accepted")
+			}
+		})
+	}
+}
+
+func TestHostedSSOSecretCanonicalMatrixInEveryEnvironment(t *testing.T) {
+	canonical := hostedSecretFixture()
+	noncanonical := canonical[:len(canonical)-1] + "B"
+	for _, environment := range []string{"development", "production"} {
+		t.Run(environment, func(t *testing.T) {
+			base := Config{
+				Mode: ModeServer, AuthMode: auth.AuthModeHostedSSO, HostedSSOEnabled: true,
+				HostedSSOControlURL: "https://openvibely.ai", HostedSSOInstanceID: "instance-1",
+				AppBaseURL: "https://alice.openvibely.ai", AuthSessionSecret: canonical,
+				Environment: environment, EnvironmentExplicitlySet: true,
+			}
+			if err := base.Validate(); err != nil {
+				t.Fatalf("canonical secret rejected: %v", err)
+			}
+			for name, secret := range map[string]string{
+				"empty":                      "",
+				"padded":                     canonical + "=",
+				"malformed":                  strings.Repeat("!", 43),
+				"noncanonical trailing bits": noncanonical,
+				"shorter decoded key":        base64.RawURLEncoding.EncodeToString(make([]byte, 31)),
+				"longer decoded key":         base64.RawURLEncoding.EncodeToString(make([]byte, 33)),
+			} {
+				t.Run(name, func(t *testing.T) {
+					cfg := base
+					cfg.AuthSessionSecret = secret
+					if err := cfg.Validate(); err == nil {
+						t.Fatalf("invalid secret accepted: %q", secret)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestSourceRunnerPreservesEnvironmentPresence(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve test file")
+	}
+	contents, err := os.ReadFile(filepath.Join(filepath.Dir(currentFile), "..", "..", "start.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(contents)
+	if !strings.Contains(script, `ENVIRONMENT_WAS_SET="${ENVIRONMENT+x}"`) {
+		t.Fatal("start.sh must capture ENVIRONMENT presence before applying its local default")
+	}
+	if !strings.Contains(script, `if [ "$ENVIRONMENT_WAS_SET" = "x" ]; then export ENVIRONMENT; fi`) {
+		t.Fatal("start.sh must export ENVIRONMENT only when it was explicitly present")
+	}
+	if strings.Contains(script, `if [ "${ENVIRONMENT+x}" = "x" ] && [ -n "${ENVIRONMENT:-}" ]; then export ENVIRONMENT; fi`) {
+		t.Fatal("start.sh re-checks presence after assigning its default")
 	}
 }
 
