@@ -211,6 +211,178 @@ func TestHostedErrorCallbackConsumesOnlyMatchingTransaction(t *testing.T) {
 	}
 }
 
+func TestHostedCallbackEncodedErrorBoundaryPrecedesStateLookup(t *testing.T) {
+	_, e, store := hostedAuthTestHandler(t, nil)
+	start := func(binding *http.Cookie, destination string) (*http.Cookie, string) {
+		req := httptest.NewRequest(http.MethodGet, auth.HostedSSOStartURL(destination), nil)
+		if binding != nil {
+			req.AddCookie(binding)
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		location, err := url.Parse(rec.Header().Get("Location"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, cookie := range rec.Result().Cookies() {
+			if cookie.Name == "ov_sso_browser" {
+				return cookie, location.Query().Get("state")
+			}
+		}
+		t.Fatal("start response omitted browser binding")
+		return nil, ""
+	}
+	binding, exactState := start(nil, "/exact")
+	binding, overState := start(binding, "/over")
+
+	exactEncodedError := strings.Repeat("%61", 64)
+	exactReq := httptest.NewRequest(http.MethodGet, "/auth/sso/callback?error="+exactEncodedError+"&state="+exactState, nil)
+	exactReq.AddCookie(binding)
+	exactRec := httptest.NewRecorder()
+	e.ServeHTTP(exactRec, exactReq)
+	if exactRec.Code != http.StatusBadRequest || store.Count() != 1 {
+		t.Fatalf("exact boundary status=%d pending=%d", exactRec.Code, store.Count())
+	}
+
+	overReq := httptest.NewRequest(http.MethodGet, "/auth/sso/callback?error="+exactEncodedError+"a&state="+overState, nil)
+	overReq.AddCookie(binding)
+	overRec := httptest.NewRecorder()
+	e.ServeHTTP(overRec, overReq)
+	if overRec.Code != http.StatusBadRequest || store.Count() != 1 {
+		t.Fatalf("over-limit error reached state lookup: status=%d pending=%d", overRec.Code, store.Count())
+	}
+
+	validReq := httptest.NewRequest(http.MethodGet, "/auth/sso/callback?error=access_denied&state="+overState, nil)
+	validReq.AddCookie(binding)
+	validRec := httptest.NewRecorder()
+	e.ServeHTTP(validRec, validReq)
+	if validRec.Code != http.StatusBadRequest || store.Count() != 0 {
+		t.Fatalf("over-limit callback consumed matching state: status=%d pending=%d", validRec.Code, store.Count())
+	}
+}
+
+func TestHostedBrowserBindingRefreshPreservesNewestTransactionLifetime(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := auth.NewPendingStore(ctx, func() time.Time { return now })
+	defer store.Close()
+
+	var providerCalls int
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"sub":"subject","email":"user@example.com","email_verified":true,"instance_id":"instance-1","instance_slug":"alice","instance_host":"alice.openvibely.ai"}`)
+	}))
+	defer provider.Close()
+
+	h, _, _ := setupTestHandler(t)
+	client := auth.NewHostedSSOClient(provider.URL, "instance-1", "https://alice.openvibely.ai/auth/sso/callback")
+	h.SetHostedSSO(client, store, hostedHandlerKey, "instance-1", "https://alice.openvibely.ai")
+	e := echo.New()
+	e.Use(h.AuthMiddleware())
+	h.RegisterRoutes(e)
+
+	nonce := canonicalHostedValue("b")
+	bindingValue, err := auth.SignBrowserBinding(nonce, hostedHandlerKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priorExpiry := time.Now().Add(time.Second)
+	startReq := httptest.NewRequest(http.MethodGet, auth.HostedSSOStartURL("/newest"), nil)
+	startReq.AddCookie(&http.Cookie{Name: "ov_sso_browser", Value: bindingValue, Expires: priorExpiry, MaxAge: 1})
+	startRec := httptest.NewRecorder()
+	e.ServeHTTP(startRec, startReq)
+	if startRec.Code != http.StatusFound {
+		t.Fatalf("start status=%d body=%s", startRec.Code, startRec.Body.String())
+	}
+	location, err := url.Parse(startRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refreshed *http.Cookie
+	for _, cookie := range startRec.Result().Cookies() {
+		if cookie.Name == "ov_sso_browser" {
+			refreshed = cookie
+		}
+	}
+	if refreshed == nil || refreshed.Value != bindingValue || refreshed.MaxAge != 600 || !refreshed.Expires.After(priorExpiry.Add(9*time.Minute)) {
+		t.Fatalf("browser binding was not refreshed for ten minutes: %#v priorExpiry=%s", refreshed, priorExpiry)
+	}
+
+	now = now.Add(10*time.Minute - time.Second)
+	callbackReq := httptest.NewRequest(http.MethodGet, "/auth/sso/callback?code="+canonicalHostedValue("c")+"&state="+location.Query().Get("state"), nil)
+	callbackReq.AddCookie(refreshed)
+	callbackRec := httptest.NewRecorder()
+	e.ServeHTTP(callbackRec, callbackReq)
+	if callbackRec.Code != http.StatusFound || callbackRec.Header().Get("Location") != "/newest" || providerCalls != 1 || store.Count() != 0 {
+		t.Fatalf("callback status=%d location=%q providerCalls=%d pending=%d body=%s", callbackRec.Code, callbackRec.Header().Get("Location"), providerCalls, store.Count(), callbackRec.Body.String())
+	}
+	foundSession := false
+	for _, cookie := range callbackRec.Result().Cookies() {
+		if cookie.Name == auth.DefaultCookieName && cookie.Value != "" {
+			foundSession = true
+		}
+	}
+	if !foundSession {
+		t.Fatal("newest transaction did not create a hosted session near its full lifetime")
+	}
+}
+
+func TestHostedAuthTransitionCacheHeaders(t *testing.T) {
+	_, e, _ := hostedAuthTestHandler(t, nil)
+	assertHeaders := func(method, target string, configure func(*http.Request), wantStatus int, callback bool) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, target, nil)
+		if configure != nil {
+			configure(req)
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != wantStatus || rec.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s %s status=%d cache=%q body=%q", method, target, rec.Code, rec.Header().Get("Cache-Control"), rec.Body.String())
+		}
+		if callback && rec.Header().Get("Pragma") != "no-cache" {
+			t.Fatalf("%s %s pragma=%q", method, target, rec.Header().Get("Pragma"))
+		}
+		return rec
+	}
+
+	assertHeaders(http.MethodGet, "/login", nil, http.StatusFound, false)
+	assertHeaders(http.MethodPost, "/login", nil, http.StatusMethodNotAllowed, false)
+	assertHeaders(http.MethodGet, auth.HostedSSOStartURL("/start"), nil, http.StatusFound, false)
+	assertHeaders(http.MethodPost, "/logout", nil, http.StatusForbidden, false)
+	assertHeaders(http.MethodPost, "/logout", func(req *http.Request) {
+		req.Header.Set("Origin", "https://alice.openvibely.ai")
+	}, http.StatusFound, false)
+	assertHeaders(http.MethodGet, "/auth/me", nil, http.StatusUnauthorized, false)
+	assertHeaders(http.MethodGet, "/logged-out", nil, http.StatusOK, false)
+	assertHeaders(http.MethodGet, "/auth/sso/callback?bad=input", nil, http.StatusBadRequest, true)
+
+	start := func(destination string) (string, *http.Cookie) {
+		rec := assertHeaders(http.MethodGet, auth.HostedSSOStartURL(destination), nil, http.StatusFound, false)
+		location, err := url.Parse(rec.Header().Get("Location"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, cookie := range rec.Result().Cookies() {
+			if cookie.Name == "ov_sso_browser" {
+				return location.Query().Get("state"), cookie
+			}
+		}
+		t.Fatal("start response omitted browser binding")
+		return "", nil
+	}
+	errorState, errorBinding := start("/error")
+	assertHeaders(http.MethodGet, "/auth/sso/callback?error=access_denied&state="+errorState, func(req *http.Request) {
+		req.AddCookie(errorBinding)
+	}, http.StatusBadRequest, true)
+	successState, successBinding := start("/success")
+	assertHeaders(http.MethodGet, "/auth/sso/callback?code="+canonicalHostedValue("c")+"&state="+successState, func(req *http.Request) {
+		req.AddCookie(successBinding)
+	}, http.StatusFound, true)
+}
+
 func TestHostedCookiesUseConfiguredExternalScheme(t *testing.T) {
 	h, _, _ := hostedAuthTestHandler(t, nil)
 	h.SetAppBaseURL("http://127.0.0.1:3001")

@@ -15,7 +15,6 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -927,21 +926,26 @@ func validateJSONContentType(header http.Header) error {
 }
 
 func retryDelay(value string) time.Duration {
-	validDigits := value != ""
+	if value == "" {
+		return time.Second
+	}
+
+	firstNonzero := -1
 	for i := 0; i < len(value); i++ {
 		if value[i] < '0' || value[i] > '9' {
-			validDigits = false
-			break
+			return time.Second
+		}
+		if firstNonzero == -1 && value[i] != '0' {
+			firstNonzero = i
 		}
 	}
-	seconds, err := strconv.Atoi(value)
-	if !validDigits || err != nil || seconds <= 0 {
-		seconds = 1
+	if firstNonzero == -1 {
+		return time.Second
 	}
-	if seconds > 3 {
-		seconds = 3
+	if len(value)-firstNonzero > 1 || value[firstNonzero] > '3' {
+		return 3 * time.Second
 	}
-	return time.Duration(seconds) * time.Second
+	return time.Duration(value[firstNonzero]-'0') * time.Second
 }
 
 func sleepContext(ctx context.Context, duration time.Duration) error {

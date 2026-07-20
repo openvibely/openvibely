@@ -117,6 +117,26 @@ func TestHostedIdentityExactBodyAndFieldBoundaries(t *testing.T) {
 	}
 }
 
+func TestHostedCallbackEncodedErrorBoundaries(t *testing.T) {
+	state := canonicalAuthTestValue("s")
+	exactEncodedError := strings.Repeat("%61", 64)
+	if len(exactEncodedError) != 192 {
+		t.Fatalf("exact encoded error length=%d", len(exactEncodedError))
+	}
+	callback, err := ParseHostedCallback("error="+exactEncodedError+"&state="+state, 300)
+	if err != nil || callback.Error != strings.Repeat("a", 64) || !callback.IsError {
+		t.Fatalf("exact encoded error callback=%#v err=%v", callback, err)
+	}
+
+	overEncodedError := exactEncodedError + "a"
+	if len(overEncodedError) != 193 {
+		t.Fatalf("over-limit encoded error length=%d", len(overEncodedError))
+	}
+	if _, err := ParseHostedCallback("error="+overEncodedError+"&state="+state, 301); err == nil {
+		t.Fatal("193-byte encoded callback error accepted")
+	}
+}
+
 func TestHostedIdentityRejectsMalformedRequiredValues(t *testing.T) {
 	valid := `{"sub":"s","email":"e","email_verified":true,"instance_id":"instance-1","instance_slug":"g","instance_host":"h"}`
 	cases := map[string][]byte{

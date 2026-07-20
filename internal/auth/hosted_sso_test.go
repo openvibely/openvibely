@@ -626,7 +626,8 @@ func TestHostedExchangeHonorsShorterParentDeadlineBeforeRetry(t *testing.T) {
 func TestRetryDelayPolicy(t *testing.T) {
 	for value, want := range map[string]time.Duration{
 		"1": time.Second, "2": 2 * time.Second, "3": 3 * time.Second, "4": 3 * time.Second,
-		"999999": 3 * time.Second, "": time.Second, "0": time.Second, "-1": time.Second,
+		"999999": 3 * time.Second, strings.Repeat("9", 128): 3 * time.Second,
+		"": time.Second, "0": time.Second, "-1": time.Second,
 		"+2": time.Second, "1.5": time.Second, " 2 ": time.Second, "Wed, 21 Oct 2015 07:28:00 GMT": time.Second,
 	} {
 		if got := retryDelay(value); got != want {
@@ -659,6 +660,8 @@ func TestHostedTokenExchangeRejectsMalformedIdentity(t *testing.T) {
 		`{"sub":"s","email":"e","email_verified":true,"instance_id":"wrong"}`,
 		`{"sub":"s","email":"e","email_verified":true,"instance_id":"instance-1","unknown":1}`,
 		`{"sub":"s","sub":"other","email":"e","email_verified":true,"instance_id":"instance-1"}`,
+		`{"sub":"s","email":"e","email_verified":true,"instance_id":"instance-1","instance_id":"instance-1"}`,
+		`{"sub":"s","email":"e","email_verified":true,"email_verified":true,"instance_id":"instance-1"}`,
 		`{"sub":"s","email":"e","email_verified":true,"instance_id":"instance-1"} {}`,
 	}
 	for _, body := range tests {

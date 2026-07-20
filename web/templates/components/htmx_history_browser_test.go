@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"html"
 	"net/http"
@@ -149,6 +150,152 @@ func TestHTMXHistoryNavigationAndTitlesInChrome(t *testing.T) {
 	}
 	if got := historyMissRequests.Load(); got != 1 {
 		t.Fatalf("HTMX history cache-miss requests = %d, want 1", got)
+	}
+}
+
+func TestSidebarHostedIdentityPayloadIsInertInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+
+	var renderedSidebar bytes.Buffer
+	if err := layout.Sidebar(nil, "").Render(context.Background(), &renderedSidebar); err != nil {
+		t.Fatalf("render sidebar: %v", err)
+	}
+	rendered := renderedSidebar.String()
+	marker := strings.Index(rendered, "fetch('/auth/me'")
+	if marker < 0 {
+		t.Fatal("rendered sidebar is missing hosted identity update script")
+	}
+	scriptStart := strings.LastIndex(rendered[:marker], "<script>")
+	scriptEndOffset := strings.Index(rendered[marker:], "</script>")
+	if scriptStart < 0 || scriptEndOffset < 0 {
+		t.Fatal("could not isolate hosted identity update script")
+	}
+	productionScript := rendered[scriptStart+len("<script>") : marker+scriptEndOffset]
+
+	payload := `</script><img src=x onerror="window.__identityPayloadExecuted=true"><script>window.__identityPayloadExecuted=true</script>javascript:alert(1);background:url(https://attacker.example/x)`
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityBody, err := json.Marshal(map[string]any{
+		"authenticated": true,
+		"auth_source":   "hosted_sso",
+		"subject":       payload,
+		"email":         payload,
+		"username":      payload,
+		"display":       payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fixture := `<!doctype html><html><body data-test-result="pending">
+<div id="sidebar-auth-user" class="hidden"><span id="sidebar-auth-name">User</span><span id="sidebar-auth-avatar">U</span><button id="sidebar-logout-label">Logout</button></div>
+<div id="sidebar-auth-user-collapsed" class="hidden"><span id="sidebar-auth-avatar-collapsed">U</span></div>
+<script>window.__identityPayloadExecuted = false;</script>
+<script>` + productionScript + `</script>
+<script>
+(function pollForIdentity() {
+  var started = performance.now();
+  function fail(message) {
+    document.body.setAttribute('data-test-result', 'fail');
+    document.body.setAttribute('data-test-error', message);
+  }
+  function poll() {
+    var expected = ` + string(payloadJSON) + `;
+    var name = document.getElementById('sidebar-auth-name');
+    var avatar = document.getElementById('sidebar-auth-avatar');
+    var collapsed = document.getElementById('sidebar-auth-avatar-collapsed');
+    var logout = document.getElementById('sidebar-logout-label');
+    if (name && name.textContent === expected && logout && logout.textContent === 'Log out of this workspace') {
+      if (window.__identityPayloadExecuted) return fail('payload executed');
+      if (name.children.length !== 0 || document.querySelector('img') || document.querySelector('script[src]')) return fail('payload created active DOM');
+      for (var element of [name, avatar, collapsed, logout]) {
+        for (var attribute of ['href', 'src', 'style', 'onclick', 'onerror']) {
+          if (element.hasAttribute(attribute)) return fail('identity reached ' + attribute + ' sink');
+        }
+      }
+      if (avatar.textContent !== '<' || collapsed.textContent !== '<') return fail('avatar text was not derived inertly');
+      document.body.setAttribute('data-test-result', 'pass');
+      return;
+    }
+    if (performance.now() - started > 2500) return fail('timed out waiting for identity update');
+    setTimeout(poll, 10);
+  }
+  poll();
+})();
+</script></body></html>`
+
+	fixtureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(fixture))
+		case "/auth/me":
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_, _ = w.Write(identityBody)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fixtureServer.Close()
+
+	stdoutPath := filepath.Join(t.TempDir(), "hosted-identity-chrome-stdout.html")
+	stderrPath := filepath.Join(t.TempDir(), "hosted-identity-chrome-stderr.log")
+	stdoutFile, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+
+	cmd := exec.Command(chrome,
+		"--headless=new",
+		"--no-sandbox",
+		"--disable-gpu",
+		"--disable-software-rasterizer",
+		"--disable-dev-shm-usage",
+		"--disable-background-networking",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "hosted-identity-chrome-profile"),
+		"--virtual-time-budget=5000",
+		"--dump-dom",
+		fixtureServer.URL+"/",
+	)
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+	configureTestBrowserProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start Chrome hosted identity fixture: %v", err)
+	}
+
+	deadline := time.Now().Add(20 * time.Second)
+	var result string
+	for time.Now().Before(deadline) {
+		if output, readErr := os.ReadFile(stdoutPath); readErr == nil {
+			result = string(output)
+			if strings.Contains(result, `data-test-result="pass"`) || strings.Contains(result, `data-test-result="fail"`) {
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	stopTestBrowserProcess(cmd)
+
+	if !strings.Contains(result, `data-test-result="pass"`) {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(result) > 5000 {
+			result = result[len(result)-5000:]
+		}
+		if len(stderr) > 5000 {
+			stderr = stderr[len(stderr)-5000:]
+		}
+		t.Fatalf("real hosted identity browser fixture failed:\nDOM tail:\n%s\nChrome stderr tail:\n%s", result, stderr)
 	}
 }
 
