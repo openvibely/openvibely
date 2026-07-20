@@ -1134,15 +1134,19 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 		SELECT to_node_id, 'recent', 'work:' || work_item_id
 		FROM automation_transitions
 		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state = 'completed' AND occurred_at >= ?
-	)
-	SELECT node_id,
-		SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'waiting' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'recent' THEN 1 ELSE 0 END)
-	FROM operational_state GROUP BY node_id`,
-		projectID, automationID, versionID,
+		), identity_state AS (
+			SELECT node_id, state_key, MAX(CASE state
+				WHEN 'failed' THEN 5 WHEN 'blocked' THEN 4 WHEN 'waiting' THEN 3
+				WHEN 'running' THEN 2 WHEN 'recent' THEN 1 ELSE 0 END) AS state_priority
+			FROM operational_state GROUP BY node_id, state_key
+		)
+		SELECT node_id,
+			SUM(CASE WHEN state_priority = 2 THEN 1 ELSE 0 END),
+			SUM(CASE WHEN state_priority = 3 THEN 1 ELSE 0 END),
+			SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
+			SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
+			SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
+		FROM identity_state GROUP BY node_id`, projectID, automationID, versionID,
 		projectID, automationID, versionID,
 		projectID, automationID, versionID,
 		projectID, automationID, versionID, recentCutoff.UTC(),
@@ -1207,14 +1211,19 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 		SELECT automation_id, 'recent', 'work:' || work_item_id
 		FROM automation_transitions
 		WHERE project_id = ? AND state = 'completed' AND occurred_at >= ?
-	)
-	SELECT automation_id,
-		SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'waiting' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'recent' THEN 1 ELSE 0 END)
-	FROM operational_state GROUP BY automation_id`, projectID, projectID, projectID, projectID, recentCutoff.UTC(), projectID, projectID, recentCutoff.UTC())
+		), identity_state AS (
+			SELECT automation_id, state_key, MAX(CASE state
+				WHEN 'failed' THEN 5 WHEN 'blocked' THEN 4 WHEN 'waiting' THEN 3
+				WHEN 'running' THEN 2 WHEN 'recent' THEN 1 ELSE 0 END) AS state_priority
+			FROM operational_state GROUP BY automation_id, state_key
+		)
+		SELECT automation_id,
+			SUM(CASE WHEN state_priority = 2 THEN 1 ELSE 0 END),
+			SUM(CASE WHEN state_priority = 3 THEN 1 ELSE 0 END),
+			SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
+			SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
+			SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
+		FROM identity_state GROUP BY automation_id`, projectID, projectID, projectID, projectID, recentCutoff.UTC(), projectID, projectID, recentCutoff.UTC())
 	if err != nil {
 		return nil, err
 	}

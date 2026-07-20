@@ -1041,7 +1041,7 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 	}{
 		{key: "running", transition: models.AutomationTransitionEntered, activity: models.AutomationActivityRunning},
 		{key: "position-only-running", transition: models.AutomationTransitionEntered, activity: models.AutomationActivityCompleted},
-		{key: "waiting", transition: models.AutomationTransitionWaiting, activity: models.AutomationActivityWaiting},
+		{key: "waiting", transition: models.AutomationTransitionWaiting, activity: models.AutomationActivityRunning},
 		{key: "blocked", transition: models.AutomationTransitionBlocked, activity: models.AutomationActivityCompleted},
 		{key: "failed", transition: models.AutomationTransitionFailed, activity: models.AutomationActivityFailed},
 		{key: "completed", transition: models.AutomationTransitionCompleted, activity: models.AutomationActivityCompleted},
@@ -1069,11 +1069,11 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 		if node.ID != approval.ID {
 			continue
 		}
-		require.Equal(t, 2, node.Counts.Running, "running work must include active positions and deduplicate matching activities")
-		require.Equal(t, 1, node.Counts.Waiting, "one waiting work item must not count once as an activity and again as a position")
+		require.Equal(t, 2, node.Counts.Running, "a waiting work item must not also remain counted as running activity")
+		require.Equal(t, 1, node.Counts.Waiting, "one waiting work item must have exactly one precedence-selected state")
 		require.Equal(t, 1, node.Counts.Blocked)
 		require.Equal(t, 2, node.Counts.Failed, "one failed work item must count once while an invocation-only failure remains visible")
-		require.Equal(t, 3, node.Counts.CompletedRecently, "one completed work item must not count once as an activity and again as a transition")
+		require.Equal(t, 1, node.Counts.CompletedRecently, "active, waiting, blocked, or failed work must not also appear recently completed")
 		require.Equal(t, "failed", node.DisplayState)
 	}
 	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
@@ -1083,7 +1083,7 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 	require.Equal(t, 1, cards[0].Counts.Waiting)
 	require.Equal(t, 1, cards[0].Counts.Blocked)
 	require.Equal(t, 2, cards[0].Counts.Failed, "portfolio failures must retain Live provenance deduplication")
-	require.Equal(t, 3, cards[0].Counts.CompletedRecently, "portfolio completion must use the same work-item identity as Live")
+	require.Equal(t, 1, cards[0].Counts.CompletedRecently, "portfolio counters must choose one state per work-item identity")
 }
 
 type fakeAutomationPullRequestProvider struct {
