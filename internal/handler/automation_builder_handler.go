@@ -126,7 +126,8 @@ func (h *Handler) CloneAutomationDraftWeb(c echo.Context) error {
 	if !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
-	if baseVersionID := strings.TrimSpace(c.FormValue("base_version_id")); baseVersionID != "" && baseVersionID != published.Definition.Version.ID {
+	baseVersionID := strings.TrimSpace(c.FormValue("base_version_id"))
+	if baseVersionID == "" || baseVersionID != published.Definition.Version.ID {
 		page.Error = "This Automation changed after you opened it. Reopen the editor before saving."
 		return h.renderAutomationBuilder(c, page)
 	}
