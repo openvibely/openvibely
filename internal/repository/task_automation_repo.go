@@ -5,11 +5,120 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+var ErrAutomationChainChildBusy = errors.New("automation chained task is already running")
+
+// ActivateAutomationChainedTask reuses the existing Task state transition and
+// records the connected Automation handoff in the same local transaction.
+func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent models.Task, child *models.Task, event AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, bool, error) {
+	if r == nil || child == nil || parent.ID == "" || child.ID == "" || event.Context.ProjectID == "" || event.EventKey == "" {
+		return nil, nil, false, errors.New("complete automation task handoff is required")
+	}
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, nil, false, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	var parentProject, parentCreatedVia string
+	if err := conn.QueryRowContext(ctx, `SELECT project_id, created_via FROM tasks WHERE id = ?`, parent.ID).Scan(&parentProject, &parentCreatedVia); err != nil {
+		return nil, nil, false, fmt.Errorf("loading automation chain parent: %w", err)
+	}
+	var childProject, childCreatedVia, childParentID string
+	var previousStatus models.TaskStatus
+	var previousCategory models.TaskCategory
+	if err := conn.QueryRowContext(ctx, `SELECT project_id, status, category, COALESCE(parent_task_id, ''), created_via FROM tasks WHERE id = ?`, child.ID).
+		Scan(&childProject, &previousStatus, &previousCategory, &childParentID, &childCreatedVia); err != nil {
+		return nil, nil, false, fmt.Errorf("loading automation chain child: %w", err)
+	}
+	var targetNodeKey string
+	if err := conn.QueryRowContext(ctx, `SELECT node_key FROM automation_nodes WHERE id = ? AND project_id = ? AND automation_id = ? AND version_id = ?`,
+		event.Binding.NodeID, event.Context.ProjectID, event.Binding.AutomationID, event.Binding.VersionID).Scan(&targetNodeKey); err != nil {
+		return nil, nil, false, fmt.Errorf("loading automation chain target node: %w", err)
+	}
+	expectedChildCreatedVia := AutomationCompilerTaskCreatedVia(event.Binding.AutomationID, targetNodeKey)
+	if parentProject != event.Context.ProjectID || childProject != event.Context.ProjectID || childParentID != parent.ID ||
+		!strings.HasPrefix(parentCreatedVia, "automation:"+event.Binding.AutomationID+":") || childCreatedVia != expectedChildCreatedVia {
+		return nil, nil, false, errors.New("automation task handoff does not match the published topology")
+	}
+	var publishedHandoff int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_edges edge
+		JOIN automation_nodes source ON source.id = edge.source_node_id AND source.node_type = 'agent_task'
+		JOIN automation_nodes target ON target.id = edge.target_node_id AND target.node_type = 'agent_task'
+		JOIN automation_definition_resources source_resource ON source_resource.version_id = edge.version_id
+			AND source_resource.node_id = source.id AND source_resource.resource_type = 'task' AND source_resource.resource_id = ?
+		JOIN automation_definition_resources target_resource ON target_resource.version_id = edge.version_id
+			AND target_resource.node_id = target.id AND target_resource.resource_type = 'task' AND target_resource.resource_id = ?
+		WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ?
+		AND edge.source_node_id = ? AND edge.target_node_id = ?`, parent.ID, child.ID, event.Context.ProjectID,
+		event.Binding.AutomationID, event.Binding.VersionID, event.FromNodeID, event.Binding.NodeID).Scan(&publishedHandoff); err != nil {
+		return nil, nil, false, err
+	}
+	if publishedHandoff != 1 {
+		return nil, nil, false, errors.New("automation task handoff is not connected in the published topology")
+	}
+	var existingEvent int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions
+		WHERE automation_id = ? AND version_id = ? AND event_key = ?`, event.Binding.AutomationID, event.Binding.VersionID, event.EventKey).Scan(&existingEvent); err != nil {
+		return nil, nil, false, err
+	}
+	if existingEvent > 0 {
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, nil, false, err
+		}
+		committed = true
+		child.Status = previousStatus
+		child.Category = previousCategory
+		return nil, nil, previousStatus == models.StatusPending && previousCategory == models.CategoryActive, nil
+	}
+	if previousStatus == models.StatusRunning || previousStatus == models.StatusQueued {
+		return nil, nil, false, ErrAutomationChainChildBusy
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE tasks SET prompt = ?, category = ?, status = 'pending', base_branch = ?, base_commit_sha = ?,
+		lineage_depth = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ? AND parent_task_id = ?`,
+		child.Prompt, child.Category, child.BaseBranch, child.BaseCommitSHA, child.LineageDepth, child.ID, child.ProjectID, parent.ID)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("activating automation chain child: %w", err)
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, nil, false, errors.New("automation chain child is unavailable")
+	}
+	workItem, activity, err := recordProjectionEventWithExecutor(ctx, conn, event)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, nil, false, err
+	}
+	committed = true
+	child.Status = models.StatusPending
+	if r.broadcaster != nil {
+		if previousStatus != models.StatusPending {
+			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, ProjectID: child.ProjectID, TaskID: child.ID,
+				TaskName: child.Title, Status: string(models.StatusPending), OldStatus: string(previousStatus), Category: string(child.Category)})
+		}
+		if previousCategory != child.Category {
+			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskCategoryChanged, ProjectID: child.ProjectID, TaskID: child.ID,
+				TaskName: child.Title, Status: string(models.StatusPending), Category: string(child.Category), OldCategory: string(previousCategory)})
+		}
+	}
+	return workItem, activity, true, nil
+}
 
 // ClaimAutomationDispatch consumes a leased Automation reservation, applies the
 // existing pending-to-running task transition, and creates or resolves exactly

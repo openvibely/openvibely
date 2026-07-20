@@ -182,7 +182,7 @@ func (c *AutomationCompiler) compileEffect(ctx context.Context, attemptID string
 	}
 	switch effect.ResourceType {
 	case "task":
-		return c.compileTask(ctx, request, definition, node, effect)
+		return c.compileTask(ctx, request, definition, candidate, node, effect)
 	case "schedule":
 		return c.compileSchedule(ctx, attemptID, request, node, effect, resources)
 	default:
@@ -190,7 +190,7 @@ func (c *AutomationCompiler) compileEffect(ctx context.Context, attemptID string
 	}
 }
 
-func (c *AutomationCompiler) compileTask(ctx context.Context, request AutomationPublishRequest, definition *models.AutomationDefinition, node models.AutomationDraftNode, effect models.AutomationPublicationEffect) (string, error) {
+func (c *AutomationCompiler) compileTask(ctx context.Context, request AutomationPublishRequest, definition *models.AutomationDefinition, candidate models.AutomationDraftCandidate, node models.AutomationDraftNode, effect models.AutomationPublicationEffect) (string, error) {
 	task := (*models.Task)(nil)
 	var err error
 	if effect.ResourceID != "" {
@@ -217,8 +217,16 @@ func (c *AutomationCompiler) compileTask(ctx context.Context, request Automation
 		agentDefinitionID = &agent.ID
 	}
 	if task == nil {
+		createCategory := models.TaskCategory(category)
+		createStatus := models.StatusPending
+		if candidate.AdapterKey == AutomationAdapterCustom {
+			if parentKey, _ := customAutomationTaskNeighbors(candidate, node.Key); parentKey != "" {
+				createCategory = models.CategoryBacklog
+				createStatus = models.StatusBlocked
+			}
+		}
 		task = &models.Task{ProjectID: request.ProjectID, Title: automationTaskTitle(definition.Automation, node), Prompt: prompt,
-			Category: models.TaskCategory(category), Priority: priority, Status: models.StatusPending, AgentDefinitionID: agentDefinitionID,
+			Category: createCategory, Priority: priority, Status: createStatus, AgentDefinitionID: agentDefinitionID,
 			CreatedVia: repository.AutomationCompilerTaskCreatedVia(request.AutomationID, node.Key)}
 		if err := c.taskSvc.Create(ctx, task); err != nil {
 			if errors.Is(err, ErrDuplicateTask) {
@@ -261,7 +269,7 @@ func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definit
 	for _, node := range candidate.Nodes {
 		stepKey := "task:" + node.Key
 		effect, ok := effects[stepKey]
-		if !ok || effect.ResourceType != "task" || effect.Operation != "update" {
+		if !ok || effect.ResourceType != "task" || candidate.AdapterKey != AutomationAdapterCustom && effect.Operation != "update" {
 			continue
 		}
 		taskID := resources[stepKey]
@@ -279,10 +287,36 @@ func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definit
 		if agent != nil {
 			agentDefinitionID = &agent.ID
 		}
-		updates = append(updates, repository.AutomationPublicationTaskUpdate{
+		update := repository.AutomationPublicationTaskUpdate{
 			StepKey: stepKey, TaskID: taskID, Title: automationTaskTitle(definition.Automation, node),
 			Prompt: prompt, Category: models.TaskCategory(category), Priority: priority, AgentDefinitionID: agentDefinitionID,
-		})
+		}
+		if candidate.AdapterKey == AutomationAdapterCustom {
+			update.ApplyTopology = true
+			update.Status = models.StatusPending
+			parentKey, childNode := customAutomationTaskNeighbors(candidate, node.Key)
+			if parentKey != "" {
+				parentID := resources["task:"+parentKey]
+				if parentID == "" {
+					return nil, fmt.Errorf("custom task node %q has no compiled parent task", node.Key)
+				}
+				update.ParentTaskID = &parentID
+				update.Status = models.StatusBlocked
+			}
+			if childNode != nil {
+				childID := resources["task:"+childNode.Key]
+				if childID == "" {
+					return nil, fmt.Errorf("custom task node %q has no compiled child task", node.Key)
+				}
+				update.ChainConfig, err = customAutomationTaskChainConfig(definition.Automation, *childNode, childID)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				update.ChainConfig = "{}"
+			}
+		}
+		updates = append(updates, update)
 	}
 	return updates, nil
 }

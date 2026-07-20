@@ -839,8 +839,14 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 									}
 								</select></label>
 							</div>
-							<div class="mt-3 grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option><option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option></select></label><label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label></div>
-						}
+								<div class="mt-3 grid grid-cols-2 gap-3">
+									<label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option><option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option>
+										if page.Result.Candidate.AdapterKey == "custom" {
+											<option value="active" selected?={ automationDraftStringConfig(node, "category") == "active" }>Active follow-up</option>
+										}
+									</select></label>
+									<label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label>
+								</div>						}
 						if automationDraftHasConfig(node, "run_at") {
 							<div class="grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Time</span><input type="time" class="input input-bordered" name={ "node_" + node.Key + "_run_at" } value={ automationDraftStringConfig(node, "run_at") }/></label><label class="form-control"><span class="label-text">Repeat</span><select class="select select-bordered" name={ "node_" + node.Key + "_repeat_type" }>
 								for _, repeat := range []string{"once","minutes","hours","daily","weekly","monthly"} {

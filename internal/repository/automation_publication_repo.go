@@ -27,10 +27,21 @@ type AutomationPublicationTaskUpdate struct {
 	Category          models.TaskCategory
 	Priority          int
 	AgentDefinitionID *string
+	ParentTaskID      *string
+	ChainConfig       string
+	Status            models.TaskStatus
+	ApplyTopology     bool
 }
 
 var ErrAutomationPublicationInProgress = errors.New("automation publication is already in progress")
 var ErrAutomationDispatchInFlight = errors.New("automation has in-flight dispatch work")
+
+func normalizedTaskChainConfig(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "{}"
+	}
+	return value
+}
 
 func (r *AutomationRepo) AcquirePublicationAttempt(ctx context.Context, attemptID, owner string, now time.Time, lease time.Duration) error {
 	if attemptID == "" || owner == "" || lease <= 0 {
@@ -287,11 +298,25 @@ func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID stri
 	appliedTaskUpdates := make(map[string]bool, len(taskUpdates))
 	for _, update := range taskUpdates {
 		step, ok := stepsByKey[update.StepKey]
-		if !ok || step.Operation != "update" || step.ResourceType != "task" || step.Status != "running" || step.ResourceID == "" || step.ResourceID != update.TaskID {
-			return nil, fmt.Errorf("publication task update %q does not match a staged update step", update.StepKey)
+		stagedUpdate := ok && step.Operation == "update" && step.Status == "running"
+		if !ok || step.ResourceType != "task" || step.ResourceID == "" || step.ResourceID != update.TaskID || (!update.ApplyTopology && !stagedUpdate) || (update.ApplyTopology && step.Status != "completed" && !stagedUpdate) {
+			return nil, fmt.Errorf("publication task update %q does not match its task step", update.StepKey)
 		}
-		result, updateErr := conn.ExecContext(ctx, `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND project_id = ?`, update.Title, update.Prompt, update.Category, update.Priority, update.AgentDefinitionID, update.TaskID, snapshot.Attempt.ProjectID)
+		var result sql.Result
+		var updateErr error
+		if update.ApplyTopology {
+			if update.Status == "" {
+				return nil, fmt.Errorf("publication task topology %q has no status", update.StepKey)
+			}
+			result, updateErr = conn.ExecContext(ctx, `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_definition_id = ?,
+				parent_task_id = ?, chain_config = ?, status = CASE WHEN status IN ('running','queued') THEN status ELSE ? END,
+				updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`, update.Title, update.Prompt, update.Category,
+				update.Priority, update.AgentDefinitionID, update.ParentTaskID, normalizedTaskChainConfig(update.ChainConfig), update.Status,
+				update.TaskID, snapshot.Attempt.ProjectID)
+		} else {
+			result, updateErr = conn.ExecContext(ctx, `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP
+				WHERE id = ? AND project_id = ?`, update.Title, update.Prompt, update.Category, update.Priority, update.AgentDefinitionID, update.TaskID, snapshot.Attempt.ProjectID)
+		}
 		if updateErr != nil {
 			if strings.Contains(updateErr.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
 				return nil, ErrDuplicateTask
@@ -303,10 +328,12 @@ func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID stri
 		} else if affected != 1 {
 			return nil, errors.New("publication task update target is unavailable")
 		}
-		if _, updateErr := conn.ExecContext(ctx, `UPDATE automation_publication_steps
-			SET status = 'completed', error_message = '', updated_at = CURRENT_TIMESTAMP
-			WHERE attempt_id = ? AND step_key = ? AND status = 'running'`, attemptID, update.StepKey); updateErr != nil {
-			return nil, updateErr
+		if stagedUpdate {
+			if _, updateErr := conn.ExecContext(ctx, `UPDATE automation_publication_steps
+				SET status = 'completed', error_message = '', updated_at = CURRENT_TIMESTAMP
+				WHERE attempt_id = ? AND step_key = ? AND status = 'running'`, attemptID, update.StepKey); updateErr != nil {
+				return nil, updateErr
+			}
 		}
 		appliedTaskUpdates[update.StepKey] = true
 	}

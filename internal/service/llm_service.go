@@ -683,6 +683,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	}
 	preparedExecution := preparedAutomationExecutionID(ctx) != ""
 	ctx = withAutomationExecution(ctx, task.ID, exec.ID)
+	finalizeCtx = context.WithoutCancel(ctx)
 	if s.automationRepo != nil && !preparedExecution {
 		if automationContext, ok := AutomationContextFromContext(ctx); ok && automationContext.ProjectID == task.ProjectID {
 			for _, binding := range automationContext.Bindings {

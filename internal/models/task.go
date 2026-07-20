@@ -228,14 +228,16 @@ func IsTerminalStatus(s TaskStatus) bool {
 
 // ChainConfiguration defines the chaining behavior for tasks
 type ChainConfiguration struct {
-	Enabled           bool                `json:"enabled"`                       // Whether chaining is enabled
-	Trigger           string              `json:"trigger"`                       // Trigger condition: "on_completion", "on_planning_complete"
-	ChildAgentID      string              `json:"child_agent_id"`                // Agent ID to use for child task (empty = use default)
-	ChildModel        string              `json:"child_model"`                   // Model to use for child task (e.g., "sonnet", "opus")
-	ChildCategory     string              `json:"child_category"`                // Category for child task (empty = use same as parent)
-	ChildTitle        string              `json:"child_title,omitempty"`         // Explicit title for child task (empty = "{parent.Title} (Implementation)")
-	ChildPromptPrefix string              `json:"child_prompt_prefix,omitempty"` // Prefix prepended to parent output for child prompt
-	ChildChainConfig  *ChainConfiguration `json:"child_chain_config,omitempty"`  // Chain config for the child task (enables multi-level chaining)
+	Enabled                bool                `json:"enabled"`                             // Whether chaining is enabled
+	Trigger                string              `json:"trigger"`                             // Trigger condition: "on_completion", "on_planning_complete"
+	ChildAgentID           string              `json:"child_agent_id"`                      // Agent ID to use for child task (empty = use default)
+	ChildModel             string              `json:"child_model"`                         // Model to use for child task (e.g., "sonnet", "opus")
+	ChildCategory          string              `json:"child_category"`                      // Category for child task (empty = use same as parent)
+	ChildTitle             string              `json:"child_title,omitempty"`               // Explicit title for child task (empty = "{parent.Title} (Implementation)")
+	ChildPromptPrefix      string              `json:"child_prompt_prefix,omitempty"`       // Prefix prepended to parent output for child prompt
+	ChildTaskID            string              `json:"child_task_id,omitempty"`             // Server-owned existing child task for compiled Automation handoffs
+	ChildAutomationNodeKey string              `json:"child_automation_node_key,omitempty"` // Server-owned target node for compiled Automation handoffs
+	ChildChainConfig       *ChainConfiguration `json:"child_chain_config,omitempty"`        // Chain config for the child task (enables multi-level chaining)
 }
 
 // ParseChainConfig parses the ChainConfig JSON string from a Task

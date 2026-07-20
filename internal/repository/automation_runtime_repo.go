@@ -628,15 +628,29 @@ func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projec
 	}
 	var changed []models.AutomationBinding
 	for _, value := range targets {
+		createdTerminalItem := false
 		if value.binding.WorkItemID == "" {
-			continue
+			if value.adapterKey != "custom" {
+				continue
+			}
+			seed := AutomationProjectionEvent{
+				Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{value.binding}},
+				Binding: value.binding, WorkItemKey: "execution:" + executionID + ":custom-work", WorkItemKind: "task_execution",
+			}
+			item, binding, seedErr := upsertAutomationWorkItem(ctx, conn, seed, value.binding)
+			if seedErr != nil {
+				return seedErr
+			}
+			value.binding = binding
+			value.binding.WorkItemID = item.ID
+			createdTerminalItem = true
 		}
 		var positioned int
 		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_item_positions
 			WHERE work_item_id = ? AND node_id = ?`, value.binding.WorkItemID, value.binding.NodeID).Scan(&positioned); err != nil {
 			return err
 		}
-		if positioned == 0 {
+		if positioned == 0 && !createdTerminalItem {
 			continue
 		}
 		event := AutomationProjectionEvent{
@@ -652,13 +666,27 @@ func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projec
 		case models.ExecCancelled:
 			event.Transition = models.AutomationTransitionCancelled
 		case models.ExecCompleted:
-			if value.adapterKey != "native_sdlc" || value.nodeKey != "implementation" {
+			switch {
+			case value.adapterKey == "native_sdlc" && value.nodeKey == "implementation":
+				if err := conn.QueryRowContext(ctx, `SELECT id FROM automation_nodes
+					WHERE project_id = ? AND automation_id = ? AND version_id = ? AND node_key = 'completed'`,
+					projectID, value.binding.AutomationID, value.binding.VersionID).Scan(&event.ToNodeID); err != nil {
+					return err
+				}
+			case value.adapterKey == "custom":
+				err := conn.QueryRowContext(ctx, `SELECT target.id FROM automation_edges edge
+					JOIN automation_nodes target ON target.id = edge.target_node_id AND target.version_id = edge.version_id
+					WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ?
+					AND edge.source_node_id = ? AND target.node_type = 'outcome'
+					ORDER BY edge.display_order, edge.id LIMIT 1`, projectID, value.binding.AutomationID,
+					value.binding.VersionID, value.binding.NodeID).Scan(&event.ToNodeID)
+				if errors.Is(err, sql.ErrNoRows) {
+					event.ToNodeID = value.binding.NodeID
+				} else if err != nil {
+					return err
+				}
+			default:
 				continue
-			}
-			if err := conn.QueryRowContext(ctx, `SELECT id FROM automation_nodes
-				WHERE project_id = ? AND automation_id = ? AND version_id = ? AND node_key = 'completed'`,
-				projectID, value.binding.AutomationID, value.binding.VersionID).Scan(&event.ToNodeID); err != nil {
-				return err
 			}
 			event.Transition = models.AutomationTransitionCompleted
 		default:
@@ -1063,9 +1091,9 @@ func appendAutomationTransition(ctx context.Context, exec SQLExecutor, in Automa
 
 		var pendingActivities, waitingActivities, claimedAlerts, queuedInputs int
 		if err := exec.QueryRowContext(ctx, `SELECT
-			SUM(CASE WHEN status IN ('pending','running','waiting') THEN 1 ELSE 0 END),
-			SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END)
-			FROM automation_activities WHERE work_item_id = ?`, item.ID).Scan(&pendingActivities, &waitingActivities); err != nil {
+				COALESCE(SUM(CASE WHEN status IN ('pending','running','waiting') THEN 1 ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END), 0)
+				FROM automation_activities WHERE work_item_id = ?`, item.ID).Scan(&pendingActivities, &waitingActivities); err != nil {
 			return err
 		}
 		if err := exec.QueryRowContext(ctx, `SELECT COUNT(DISTINCT al.id)
@@ -1331,6 +1359,43 @@ func (r *AutomationRepo) GetNodeByKey(ctx context.Context, projectID, automation
 		return nil, nil
 	}
 	return &node, err
+}
+
+func (r *AutomationRepo) GetCustomTaskHandoff(ctx context.Context, projectID, automationID, versionID, sourceNodeID string) (bool, *models.AutomationNode, string, error) {
+	var adapterKey string
+	err := r.db.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
+		WHERE project_id = ? AND automation_id = ? AND id = ? AND state IN ('published','superseded')`,
+		projectID, automationID, versionID).Scan(&adapterKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil, "", nil
+	}
+	if err != nil {
+		return false, nil, "", err
+	}
+	if adapterKey != "custom" {
+		return false, nil, "", nil
+	}
+	var node models.AutomationNode
+	var taskID string
+	err = r.db.QueryRowContext(ctx, `SELECT target.id, target.project_id, target.automation_id, target.version_id,
+		target.node_key, target.name, target.node_type, target.role, target.config_json, target.position_x, target.position_y,
+		target.created_at, target.updated_at, resource.resource_id
+		FROM automation_edges edge
+		JOIN automation_nodes source ON source.id = edge.source_node_id AND source.version_id = edge.version_id AND source.node_type = 'agent_task'
+		JOIN automation_nodes target ON target.id = edge.target_node_id AND target.version_id = edge.version_id AND target.node_type = 'agent_task'
+		JOIN automation_definition_resources resource ON resource.version_id = edge.version_id AND resource.node_id = target.id
+			AND resource.resource_type = 'task'
+		WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ? AND edge.source_node_id = ?
+		ORDER BY edge.display_order, edge.id LIMIT 1`, projectID, automationID, versionID, sourceNodeID).
+		Scan(&node.ID, &node.ProjectID, &node.AutomationID, &node.VersionID, &node.NodeKey, &node.Name, &node.NodeType,
+			&node.Role, &node.ConfigJSON, &node.PositionX, &node.PositionY, &node.CreatedAt, &node.UpdatedAt, &taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil, "", nil
+	}
+	if err != nil {
+		return true, nil, "", err
+	}
+	return true, &node, taskID, nil
 }
 
 func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID string, binding models.AutomationBinding, activityKey, activityType, resourceType string) (string, error) {

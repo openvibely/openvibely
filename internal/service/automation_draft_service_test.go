@@ -56,6 +56,53 @@ func TestAutomationBlankDraftStartsEmptyAndPersistsUserLayout(t *testing.T) {
 	require.Equal(t, &models.AutomationDraftPoint{X: 37, Y: 83}, updated.Candidate.Nodes[0].Position, "normalization must preserve user-positioned nodes")
 }
 
+func TestCustomAutomationValidatesLinearTaskHandoffsAndRejectsAnalogousUnsupportedTopologies(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := svc.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "schedule", Name: "Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "research", Name: "Research", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Research the request.", "category": "scheduled", "priority": 2}},
+		{Key: "implement", Name: "Implement", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the researched request.", "category": "active", "priority": 2}},
+		{Key: "done", Name: "Done", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{
+		{Key: "schedule_research", From: "schedule", To: "research", Condition: map[string]any{}},
+		{Key: "research_implement", From: "research", To: "implement", Condition: map[string]any{}},
+		{Key: "implement_done", From: "implement", To: "done", Condition: map[string]any{}},
+	}
+
+	require.Empty(t, svc.ValidateCandidate(candidate), "a linear Schedule → Agent task → Agent task → Outcome path must publish")
+
+	branch := candidate
+	branch.Nodes = append(append([]models.AutomationDraftNode(nil), candidate.Nodes...), models.AutomationDraftNode{
+		Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task",
+		Config: map[string]any{"prompt": "Review the implementation.", "category": "backlog", "priority": 2},
+	})
+	branch.Edges = append(append([]models.AutomationDraftEdge(nil), candidate.Edges...), models.AutomationDraftEdge{
+		Key: "research_review", From: "research", To: "review", Condition: map[string]any{},
+	})
+	require.Contains(t, issueCodes(svc.ValidateCandidate(branch)), "task_branching")
+
+	cycle := candidate
+	cycle.Edges = []models.AutomationDraftEdge{
+		{Key: "schedule_research", From: "schedule", To: "research", Condition: map[string]any{}},
+		{Key: "research_implement", From: "research", To: "implement", Condition: map[string]any{}},
+		{Key: "implement_research", From: "implement", To: "research", Condition: map[string]any{}},
+	}
+	require.Contains(t, issueCodes(svc.ValidateCandidate(cycle)), "unsupported_cycle")
+
+	multipleParents := candidate
+	multipleParents.Nodes = append(append([]models.AutomationDraftNode(nil), candidate.Nodes...), models.AutomationDraftNode{
+		Key: "second_schedule", Name: "Second schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule",
+		Config: map[string]any{"run_at": "10:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true},
+	})
+	multipleParents.Edges = append(append([]models.AutomationDraftEdge(nil), candidate.Edges...), models.AutomationDraftEdge{
+		Key: "second_implement", From: "second_schedule", To: "implement", Condition: map[string]any{},
+	})
+	require.Contains(t, issueCodes(svc.ValidateCandidate(multipleParents)), "task_parents")
+}
+
 func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Freeform draft")

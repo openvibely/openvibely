@@ -6,7 +6,7 @@ Phase 5 is active after direct product feedback showed the completed first-relea
 
 ## Status
 
-Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 currently has a validated custom foundation: Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are required, unsupported capability handoffs remain fail-closed draft errors, and custom publication derives task/schedule effects from user-owned nodes and edges. Remaining Phase 5 work is to add deterministic multi-task, approval, GitHub, and existing-Workflow capability handoffs with exact provenance and Live projection, then rerun the full validation/audit/checkpoint sequence.
+Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 currently has a validated custom foundation plus deterministic multi-task execution: Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are required, unsupported capability handoffs remain fail-closed draft errors, and custom publication derives real task/schedule effects and linear task-chain handoffs from user-owned nodes and edges. Remaining Phase 5 work is to add deterministic approval, GitHub, and existing-Workflow capability handoffs with exact provenance and Live projection, then rerun the full validation/audit/checkpoint sequence.
 
 ## Phase 5 Custom Builder Checklist
 
@@ -18,13 +18,51 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 - [x] Validate the initial Schedule → Agent task → Outcome capability handoff and fail closed for unsupported capabilities, handoffs, conditions, and invalid targets.
 - [x] Plan and compile a user-named, user-configured custom Agent task and Schedule into real existing-domain resources.
 - [x] Preserve draft-only geometry, project isolation, explicit Automation identity, confirmation, idempotency, trigger ownership, lifecycle, and no-inference boundaries.
-- [ ] Compile Agent task → Agent task handoffs through existing task/Workflow machinery with exact Automation provenance and Live projection.
+- [x] Compile Agent task → Agent task handoffs through existing task/Workflow machinery with exact Automation provenance and Live projection.
+  - [x] Accept only deterministic linear task-chain handoffs rooted at a Schedule; reject task branching, multiple parents, cycles, and unscheduled roots.
+  - [x] Publish every configured Agent task as a visible OpenVibely task and atomically configure existing task chaining only after the version is ready.
+  - [x] Reuse a connected child task across scheduled invocations while preserving task status, category, Agent definition, prompt handoff, and project ownership.
+  - [x] Persist one idempotent work item/activity/transition for each task handoff and project the child execution on the exact connected node.
+  - [x] Transition a completed terminal custom task to its connected Outcome using persisted Automation provenance.
+  - [x] Add regression-first validation, publication, runtime projection, idempotency, and analogous unsupported-topology coverage; run the slice validation and fresh audit.
 - [ ] Add native approval/notification capability nodes through the existing Alert service.
 - [ ] Add GitHub issue/assignment/PR/review capability nodes through the existing GitHub services and human boundaries.
 - [ ] Add existing Workflow capability selection/execution without copying Workflow steps or creating a second engine.
 - [ ] Extend Describe It and Chat schemas/capability snapshots to generate the same custom graph contract.
 - [ ] Add focused and real-browser coverage for every custom capability and supported/unsupported analogous handoff class.
 - [ ] Run generation, build, focused Automation, internal, and full validation; update managed memory; create a clean checkpoint; perform a fresh edit-free Phase 5/full-objective audit.
+
+## Phase 5 Agent-Task Handoff Checkpoint
+
+### Completed Requirements
+
+- Custom graphs now accept deterministic linear `Schedule → Agent task → Agent task… → Outcome` paths. Graph normalization derives Scheduled root-task and Active follow-up behavior from the connected parent capability; branching, multiple parents, cycles, unsupported capability edges, and cross-project/version/resource targets fail closed.
+- Confirmed publication creates every configured node as a visible normal OpenVibely task. Downstream tasks remain blocked during compilation, and the existing publication transaction atomically installs parent IDs, chain configuration, Agent definitions, prompts, categories, priorities, and statuses with the immutable version switch.
+- Runtime handoff uses the existing task-chain and Worker paths. It reactivates the published child task, carries parent output into the configured child prompt, preserves lineage, reloads Automation context through the child task activity, and creates one work item/activity/edge transition at the exact connected node.
+- Causal runtime behavior resolves the source version's persisted custom edge and task membership rather than trusting the task's latest mutable chain JSON. Old invocations therefore retain their immutable graph-version semantics after later task configuration changes.
+- Handoff retry is idempotent. A crash after the local handoff commit can resubmit the still-pending Active child through the existing deduplicating Worker queue and Scheduler recovery; a busy child records a visible blocked work item/transition rather than silently dropping work.
+- A terminal custom task projects completion either to its connected Outcome or, when Outcome is omitted, to the task node itself. Invocation-only terminal activity safely creates the required work item, and empty terminal aggregates use zero rather than SQLite `NULL`.
+
+### Changed Files
+
+- Task-chain identity and completion context: `internal/models/task.go`, `internal/service/llm_service.go`, `internal/service/llm_workflow_chain.go`.
+- Custom topology normalization/validation, deterministic planning, compilation, and atomic publication: `internal/service/automation_draft_service.go`, `internal/service/automation_publication_planner.go`, `internal/service/automation_compiler.go`, `internal/repository/automation_publication_repo.go`.
+- Atomic task activation and runtime projection: `internal/repository/task_automation_repo.go`, `internal/repository/automation_runtime_repo.go`.
+- Builder category presentation and generated output: `web/templates/pages/automations.templ`, `web/templates/pages/automations_templ.go`.
+- Regression coverage: `internal/service/automation_draft_service_test.go`, `internal/service/automation_publication_service_test.go`.
+
+### Validation And Audit
+
+- Regression-first focused tests initially failed because chain configuration had no server-owned target task/node identity. The implemented regressions cover valid linear handoffs, branching, multiple parents, cycles, visible task creation, blocked-before-publication safety, atomic chain setup, publication retry, mutable-chain tampering, exact target-node context, idempotent retry/resubmission, busy-child blocking, connected Outcome completion, and the original single-task custom path.
+- `templ generate`, `gofmt`, `git diff --check`, and `go build ./...` pass; desktop emits only the documented non-failing newer-SDK linker warnings.
+- `go test ./internal/... -count=1 -timeout 120s` passes.
+- `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passes every package, including production Chrome Automation graph coverage.
+- The fresh slice audit found and repaired commit-before-submit recovery, single-task terminal projection/empty aggregate handling, busy-child provenance, published edge/resource verification, and immutable-version handoff resolution. No task/worker/queue/Workflow/Alert/GitHub parallel runtime, generic edge interpreter, implicit Automation identity, legacy inference, Register Existing, migration/backfill, confidence scoring, or changed human merge/release/deploy authority was introduced.
+
+### Remaining Work
+
+- Add native approval/notification capability nodes through the existing Alert service, then GitHub action/gate nodes, existing Workflow nodes, described/Chat parity, managed-memory reconciliation, and the final full-objective audit.
+- The authoritative `automation_graphs.md` managed view still describes multi-task handoffs as the next gap at `2573e47`. This runtime exposes `memory_view` but no scoped memory mutation action, and the previously verified curator fallback has the same read-only limitation. Per the managed-memory runbook, do not delegate or edit an untracked copy; reconcile the authoritative topic once a scoped writer is available and before the qualifying final audit.
 
 ## Phase 4 Checklist
 
@@ -672,7 +710,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ## Exact Next Action
 
-Add regression-first Agent task → Agent task handoff compilation using existing task/Workflow machinery, including exact Automation/node provenance for dynamically created work and Live graph projection; then continue through approval, GitHub, and existing-Workflow capability nodes.
+Add regression-first native approval/notification capability nodes through the existing Alert service, including supported task-to-notification-to-human-gate handoffs, approved/rejected outcomes, exact Alert/work-item provenance, and unchanged human decision authority; then continue through GitHub and existing-Workflow capability nodes.
 
 ## Update Contract
 

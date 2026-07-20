@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	automationAdapterContractVersion  = 1
-	automationCompilerContractVersion = 1
+	automationAdapterContractVersion  = 2
+	automationCompilerContractVersion = 2
 )
 
 type automationGitHubConnectionProvider interface {
@@ -190,7 +190,7 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 	for _, node := range resourceNodes {
 		candidateNode := candidateNodes[node.Key]
 		if node.AllowedResources["task"] {
-			effect, dependency, effectErr := p.planTask(ctx, definition, candidateNode, publishedResources[node.Key+"\x00task"])
+			effect, dependency, effectErr := p.planTask(ctx, definition, candidate, candidateNode, publishedResources)
 			if effectErr != nil {
 				return nil, effectErr
 			}
@@ -428,7 +428,8 @@ func canonicalAutomationPlanCandidate(candidate models.AutomationDraftCandidate)
 	return out
 }
 
-func (p *AutomationPublicationPlanner) planTask(ctx context.Context, definition *models.AutomationDefinition, node models.AutomationDraftNode, existing models.AutomationDefinitionResource) (models.AutomationPublicationEffect, automationPlanDependency, error) {
+func (p *AutomationPublicationPlanner) planTask(ctx context.Context, definition *models.AutomationDefinition, candidate models.AutomationDraftCandidate, node models.AutomationDraftNode, publishedResources map[string]models.AutomationDefinitionResource) (models.AutomationPublicationEffect, automationPlanDependency, error) {
+	existing := publishedResources[node.Key+"\x00task"]
 	effect := models.AutomationPublicationEffect{StepKey: "task:" + node.Key, Operation: "create", TargetKey: "task:" + node.Key, ResourceType: "task", Name: automationTaskTitle(definition.Automation, node)}
 	var dependency automationPlanDependency
 	if existing.ResourceID == "" {
@@ -444,7 +445,7 @@ func (p *AutomationPublicationPlanner) planTask(ctx context.Context, definition 
 	if task == nil || task.ProjectID != definition.Automation.ProjectID {
 		return effect, dependency, fmt.Errorf("published task resource %q is unavailable", existing.ResourceID)
 	}
-	configured := map[string]any{"title": task.Title, "prompt": task.Prompt, "category": task.Category, "priority": task.Priority, "agent_id": nilString(task.AgentID), "agent_definition_id": nilString(task.AgentDefinitionID)}
+	configured := map[string]any{"title": task.Title, "prompt": task.Prompt, "category": task.Category, "priority": task.Priority, "agent_id": nilString(task.AgentID), "agent_definition_id": nilString(task.AgentDefinitionID), "parent_task_id": nilString(task.ParentTaskID), "chain_config": task.ChainConfig}
 	dependency = automationPlanDependency{Type: "task", ID: task.ID, ProjectID: task.ProjectID, NodeKey: node.Key, Configured: configured}
 	effect.ResourceID = task.ID
 	desiredPriority, _ := draftInt(node.Config["priority"])
@@ -458,7 +459,31 @@ func (p *AutomationPublicationPlanner) planTask(ctx context.Context, definition 
 	if desiredAgent != nil {
 		desiredAgentID = &desiredAgent.ID
 	}
-	if task.Title == effect.Name && task.Prompt == desiredPrompt && string(task.Category) == desiredCategory && task.Priority == desiredPriority && equalOptionalString(task.AgentDefinitionID, desiredAgentID) {
+	desiredParentID := (*string)(nil)
+	desiredChainConfig := "{}"
+	topologyComplete := true
+	if candidate.AdapterKey == AutomationAdapterCustom {
+		parentKey, childNode := customAutomationTaskNeighbors(candidate, node.Key)
+		if parentKey != "" {
+			parentResource := publishedResources[parentKey+"\x00task"]
+			if parentResource.ResourceID == "" {
+				topologyComplete = false
+			} else {
+				desiredParentID = &parentResource.ResourceID
+			}
+		}
+		if childNode != nil {
+			childResource := publishedResources[childNode.Key+"\x00task"]
+			if childResource.ResourceID == "" {
+				topologyComplete = false
+			}
+			desiredChainConfig, err = customAutomationTaskChainConfig(definition.Automation, *childNode, childResource.ResourceID)
+			if err != nil {
+				return effect, dependency, err
+			}
+		}
+	}
+	if topologyComplete && task.Title == effect.Name && task.Prompt == desiredPrompt && string(task.Category) == desiredCategory && task.Priority == desiredPriority && equalOptionalString(task.AgentDefinitionID, desiredAgentID) && equalOptionalString(task.ParentTaskID, desiredParentID) && normalizedChainConfig(task.ChainConfig) == normalizedChainConfig(desiredChainConfig) {
 		effect.Operation = "unchanged"
 	} else {
 		effect.Operation = "update"
@@ -486,6 +511,46 @@ func equalOptionalString(left, right *string) bool {
 		return left == nil && right == nil
 	}
 	return *left == *right
+}
+
+func normalizedChainConfig(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "{}"
+	}
+	return value
+}
+
+func customAutomationTaskNeighbors(candidate models.AutomationDraftCandidate, nodeKey string) (string, *models.AutomationDraftNode) {
+	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		nodes[node.Key] = node
+	}
+	parentKey := ""
+	var child *models.AutomationDraftNode
+	for _, edge := range candidate.Edges {
+		if edge.To == nodeKey && nodes[edge.From].Type == models.AutomationNodeAgentTask {
+			parentKey = edge.From
+		}
+		if edge.From == nodeKey && nodes[edge.To].Type == models.AutomationNodeAgentTask {
+			value := nodes[edge.To]
+			child = &value
+		}
+	}
+	return parentKey, child
+}
+
+func customAutomationTaskChainConfig(automation models.Automation, child models.AutomationDraftNode, childTaskID string) (string, error) {
+	config := models.ChainConfiguration{
+		Enabled: true, Trigger: "on_completion", ChildTaskID: childTaskID, ChildAutomationNodeKey: child.Key,
+		ChildTitle: automationTaskTitle(automation, child), ChildPromptPrefix: automationCompiledTaskPrompt(child),
+	}
+	category, _ := child.Config["category"].(string)
+	config.ChildCategory = category
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func automationCompiledTaskPrompt(node models.AutomationDraftNode) string {

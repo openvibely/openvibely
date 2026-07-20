@@ -203,10 +203,22 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 	}
 	if adapter.DynamicTopology {
 		nodeTypes := make(map[string]models.AutomationNodeType, len(candidate.Nodes))
+		incoming := make(map[string][]string, len(candidate.Nodes))
 		for _, node := range candidate.Nodes {
 			nodeTypes[node.Key] = node.Type
 		}
+		for _, edge := range candidate.Edges {
+			incoming[edge.To] = append(incoming[edge.To], edge.From)
+		}
 		for i := range candidate.Nodes {
+			if candidate.Nodes[i].Type == models.AutomationNodeAgentTask && len(incoming[candidate.Nodes[i].Key]) == 1 {
+				switch nodeTypes[incoming[candidate.Nodes[i].Key][0]] {
+				case models.AutomationNodeTrigger:
+					candidate.Nodes[i].Config["category"] = string(models.CategoryScheduled)
+				case models.AutomationNodeAgentTask:
+					candidate.Nodes[i].Config["category"] = string(models.CategoryActive)
+				}
+			}
 			if candidate.Nodes[i].Type != models.AutomationNodeTrigger {
 				continue
 			}
@@ -444,9 +456,9 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 		outgoing[edge.From] = append(outgoing[edge.From], edge)
 		incoming[edge.To] = append(incoming[edge.To], edge)
 		valid := from.Type == models.AutomationNodeTrigger && to.Type == models.AutomationNodeAgentTask ||
-			from.Type == models.AutomationNodeAgentTask && to.Type == models.AutomationNodeOutcome
+			from.Type == models.AutomationNodeAgentTask && (to.Type == models.AutomationNodeAgentTask || to.Type == models.AutomationNodeOutcome)
 		if !valid {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: from.Key, Code: "unsupported_handoff", Message: "Custom automations currently support Schedule → Agent task → Outcome handoffs."})
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: from.Key, Code: "unsupported_handoff", Message: "Connect Schedules to Agent tasks, Agent tasks to one next Agent task, or Agent tasks to an Outcome."})
 		}
 	}
 	if triggerCount == 0 {
@@ -458,28 +470,62 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 	for _, node := range candidate.Nodes {
 		switch node.Type {
 		case models.AutomationNodeTrigger:
+			if len(incoming[node.Key]) != 0 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "schedule_parents", Message: "A Schedule starts a path and cannot have an incoming connection."})
+			}
 			if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Type != models.AutomationNodeAgentTask {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "schedule_target", Message: "Connect this Schedule to exactly one Agent task."})
 			}
 		case models.AutomationNodeAgentTask:
-			hasTrigger := false
-			for _, edge := range incoming[node.Key] {
-				if nodes[edge.From].Type == models.AutomationNodeTrigger {
-					hasTrigger = true
-					break
+			if len(incoming[node.Key]) != 1 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_parents", Message: "Connect this Agent task to exactly one Schedule or previous Agent task."})
+			} else {
+				parent := nodes[incoming[node.Key][0].From]
+				category, _ := node.Config["category"].(string)
+				if parent.Type == models.AutomationNodeTrigger && category != string(models.CategoryScheduled) {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_category", Message: "An Agent task started by a Schedule must use the Scheduled category."})
+				}
+				if parent.Type == models.AutomationNodeAgentTask && category != string(models.CategoryActive) {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_category", Message: "A connected follow-up Agent task must use the Active category so the existing task chain runs it."})
 				}
 			}
-			if !hasTrigger {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_trigger", Message: "Connect a Schedule to this Agent task so it can run."})
-			}
 			if len(outgoing[node.Key]) > 1 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_outcome", Message: "An Agent task can connect to at most one Outcome."})
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_branching", Message: "An Agent task can connect to only one next Agent task or Outcome."})
 			}
 		case models.AutomationNodeOutcome:
+			if len(incoming[node.Key]) == 0 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "outcome_parent", Message: "Connect an Agent task to this Outcome."})
+			}
 			if len(outgoing[node.Key]) != 0 {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "outcome_terminal", Message: "An Outcome must be the end of a path."})
 			}
 		}
+	}
+
+	indegree := make(map[string]int, len(nodes))
+	for key := range nodes {
+		indegree[key] = len(incoming[key])
+	}
+	queue := make([]string, 0, len(nodes))
+	for key, degree := range indegree {
+		if degree == 0 {
+			queue = append(queue, key)
+		}
+	}
+	visited := 0
+	for len(queue) > 0 {
+		key := queue[0]
+		queue = queue[1:]
+		visited++
+		for _, edge := range outgoing[key] {
+			indegree[edge.To]--
+			if indegree[edge.To] == 0 {
+				queue = append(queue, edge.To)
+			}
+		}
+	}
+	if visited != len(nodes) {
+		issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_cycle", Message: "Custom Automation task handoffs must not contain a cycle."})
 	}
 	return issues
 }
@@ -512,8 +558,8 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Task nodes require a prompt before publication."})
 		}
 		category, categoryOK := node.Config["category"].(string)
-		if !categoryOK || (category != string(models.CategoryBacklog) && category != string(models.CategoryScheduled)) {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "Automation task category must be backlog or scheduled."})
+		if !categoryOK || (category != string(models.CategoryBacklog) && category != string(models.CategoryScheduled) && category != string(models.CategoryActive)) {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "Custom Automation task category must be scheduled, active, or backlog."})
 		}
 		priority, priorityOK := draftInt(node.Config["priority"])
 		if !priorityOK || priority < 1 || priority > 4 {

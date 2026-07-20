@@ -118,6 +118,182 @@ func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *test
 	require.Equal(t, task.ID, schedule.TaskID)
 	require.Equal(t, models.RepeatDaily, schedule.RepeatType)
 	require.True(t, schedule.Enabled)
+
+	var triggerNodeID, taskNodeID, outcomeNodeID string
+	for _, node := range published.Definition.Nodes {
+		if node.NodeKey == "weekday_schedule" {
+			triggerNodeID = node.ID
+		}
+		if node.NodeKey == "review_support" {
+			taskNodeID = node.ID
+		}
+		if node.NodeKey == "reviewed" {
+			outcomeNodeID = node.ID
+		}
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	invocationID := repository.NewID()
+	_, err = db.Exec(`INSERT INTO automation_invocations
+		(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status)
+		VALUES (?, ?, ?, ?, ?, 'schedule', ?, ?, 'running')`, invocationID, project.ID, published.Definition.Automation.ID,
+		published.Definition.Version.ID, triggerNodeID, schedule.ID, "test:"+repository.NewID())
+	require.NoError(t, err)
+	execution := models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: task.Prompt}
+	require.NoError(t, execRepo.Create(context.Background(), &execution))
+	binding := models.AutomationBinding{AutomationID: published.Definition.Automation.ID, VersionID: published.Definition.Version.ID, InvocationID: invocationID, NodeID: taskNodeID}
+	_, _, err = automationRepo.RecordProjectionEvent(context.Background(), repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		ActivityKey: "execution:" + execution.ID + ":run", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}, {ResourceType: "execution", ResourceID: execution.ID}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, automationRepo.FinalizeExecutionProjection(context.Background(), project.ID, execution.ID, models.ExecCompleted))
+	var completed int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ? AND from_node_id = ? AND to_node_id = ? AND state = 'completed'`,
+		published.Definition.Automation.ID, taskNodeID, outcomeNodeID).Scan(&completed))
+	require.Equal(t, 1, completed, "a single terminal custom task must project its real completion onto the connected Outcome")
+}
+
+func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskChain(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Custom task handoff")
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	candidate, err := drafts.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Research then implement"
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "schedule", Name: "Daily", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "08:30", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "research", Name: "Research", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Research the requested change.", "category": "scheduled", "priority": 2}},
+		{Key: "implement", Name: "Implement", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the researched change.", "category": "active", "priority": 3}},
+		{Key: "done", Name: "Done", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{
+		{Key: "schedule_research", From: "schedule", To: "research", Condition: map[string]any{}},
+		{Key: "research_implement", From: "research", To: "implement", Condition: map[string]any{}},
+		{Key: "implement_done", From: "implement", To: "done", Condition: map[string]any{}},
+	}
+	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.Empty(t, created.ValidationErrors)
+
+	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Empty(t, plan.Validation)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
+	published, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+	require.NoError(t, err)
+
+	resources := map[string]string{}
+	for _, resource := range published.Definition.Resources {
+		resources[resource.NodeKey+":"+resource.ResourceType] = resource.ResourceID
+	}
+	research, err := taskRepo.GetByID(ctx, resources["research:task"])
+	require.NoError(t, err)
+	implement, err := taskRepo.GetByID(ctx, resources["implement:task"])
+	require.NoError(t, err)
+	require.NotNil(t, research)
+	require.NotNil(t, implement)
+	require.Equal(t, models.StatusPending, research.Status)
+	require.Equal(t, models.StatusBlocked, implement.Status)
+	require.NotNil(t, implement.ParentTaskID)
+	require.Equal(t, research.ID, *implement.ParentTaskID)
+	chain, err := research.ParseChainConfig()
+	require.NoError(t, err)
+	require.True(t, chain.Enabled)
+	require.Equal(t, "on_completion", chain.Trigger)
+	require.Equal(t, implement.ID, chain.ChildTaskID)
+	require.Equal(t, "implement", chain.ChildAutomationNodeKey)
+	require.Equal(t, string(models.CategoryActive), chain.ChildCategory)
+	require.Equal(t, "Implement the researched change.", chain.ChildPromptPrefix)
+
+	chain.ChildTaskID = repository.NewID()
+	chain.ChildAutomationNodeKey = "newer_version_target"
+	require.NoError(t, research.SetChainConfig(chain))
+	require.NoError(t, taskRepo.Update(ctx, research))
+	research, err = taskRepo.GetByID(ctx, research.ID)
+	require.NoError(t, err)
+
+	before := tableCount(t, db, "tasks")
+	_, err = compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+	require.NoError(t, err)
+	require.Equal(t, before, tableCount(t, db, "tasks"), "publication retry must reuse the same chained tasks")
+
+	var researchNodeID, implementNodeID, outcomeNodeID string
+	for _, node := range published.Definition.Nodes {
+		switch node.NodeKey {
+		case "research":
+			researchNodeID = node.ID
+		case "implement":
+			implementNodeID = node.ID
+		case "done":
+			outcomeNodeID = node.ID
+		}
+	}
+	require.NotEmpty(t, researchNodeID)
+	require.NotEmpty(t, implementNodeID)
+	require.NotEmpty(t, outcomeNodeID)
+	execRepo := repository.NewExecutionRepo(db)
+	parentExecution := models.Execution{TaskID: research.ID, Status: models.ExecCompleted, PromptSent: research.Prompt}
+	require.NoError(t, execRepo.Create(ctx, &parentExecution))
+	binding := models.AutomationBinding{AutomationID: published.Definition.Automation.ID, VersionID: published.Definition.Version.ID, NodeID: researchNodeID}
+	runtimeContext := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}})
+	runtimeContext = withAutomationExecution(runtimeContext, research.ID, parentExecution.ID)
+	workerSvc := NewWorkerService(nil, 0, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	llmSvc := NewLLMService(repository.NewLLMConfigRepo(db), execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, repository.NewAttachmentRepo(db))
+	llmSvc.SetTaskService(taskSvc)
+	llmSvc.SetAutomationRepo(automationRepo)
+	require.NoError(t, llmSvc.triggerTaskChain(runtimeContext, *research, "Research findings"))
+	activated, err := taskRepo.GetByID(ctx, implement.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, activated.Status)
+	require.Equal(t, models.CategoryActive, activated.Category)
+	require.Equal(t, "Implement the researched change.\n\nResearch findings", activated.Prompt)
+	childContext, err := automationRepo.ContextForTask(ctx, project.ID, activated.ID)
+	require.NoError(t, err)
+	require.Len(t, childContext.Bindings, 1)
+	require.Equal(t, implementNodeID, childContext.Bindings[0].NodeID)
+	require.NotEmpty(t, childContext.Bindings[0].WorkItemID)
+	var handoffs int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ? AND from_node_id = ? AND to_node_id = ?`,
+		published.Definition.Automation.ID, researchNodeID, implementNodeID).Scan(&handoffs))
+	require.Equal(t, 1, handoffs)
+	require.NoError(t, llmSvc.triggerTaskChain(runtimeContext, *research, "Research findings"), "retry must resolve the persisted handoff")
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ? AND from_node_id = ? AND to_node_id = ?`,
+		published.Definition.Automation.ID, researchNodeID, implementNodeID).Scan(&handoffs))
+	require.Equal(t, 1, handoffs)
+
+	require.NoError(t, taskRepo.UpdateStatus(ctx, activated.ID, models.StatusRunning))
+	secondParentExecution := models.Execution{TaskID: research.ID, Status: models.ExecCompleted, PromptSent: research.Prompt}
+	require.NoError(t, execRepo.Create(ctx, &secondParentExecution))
+	secondRuntimeContext := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}})
+	secondRuntimeContext = withAutomationExecution(secondRuntimeContext, research.ID, secondParentExecution.ID)
+	require.ErrorIs(t, llmSvc.triggerTaskChain(secondRuntimeContext, *research, "New research findings"), repository.ErrAutomationChainChildBusy)
+	var blocked int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ? AND from_node_id = ? AND to_node_id = ? AND state = 'blocked'`,
+		published.Definition.Automation.ID, researchNodeID, implementNodeID).Scan(&blocked))
+	require.Equal(t, 1, blocked, "a busy fixed child must leave visible blocked provenance instead of losing the handoff")
+
+	childExecution := models.Execution{TaskID: activated.ID, Status: models.ExecRunning, PromptSent: activated.Prompt}
+	require.NoError(t, execRepo.Create(ctx, &childExecution))
+	childBinding := childContext.Bindings[0]
+	_, _, err = automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: childContext, Binding: childBinding,
+		ActivityKey: "execution:" + childExecution.ID + ":run", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: activated.ID}, {ResourceType: "execution", ResourceID: childExecution.ID}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, automationRepo.FinalizeExecutionProjection(ctx, project.ID, childExecution.ID, models.ExecCompleted))
+	var terminalState string
+	require.NoError(t, db.QueryRow(`SELECT state FROM automation_transitions WHERE automation_id = ? AND from_node_id = ? AND to_node_id = ?`,
+		published.Definition.Automation.ID, implementNodeID, outcomeNodeID).Scan(&terminalState))
+	require.Equal(t, string(models.AutomationTransitionCompleted), terminalState)
 }
 
 func TestAutomationPublicationRejectsStalePlanAndLifecycleTouchesOwnedTriggersOnly(t *testing.T) {
@@ -262,7 +438,7 @@ func TestAutomationPublicationPlanGoldenRevisionExcludesLayoutAndMessages(t *tes
 	planner := NewAutomationPublicationPlanner(automationRepo, repository.NewTaskRepo(db, nil), repository.NewScheduleRepo(db), registry, drafts)
 	first, err := planner.Plan(context.Background(), project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "4d5335b5db47d2e2a0f1bfeedec71dab1b10ac1d270dea0dbba085446961d713", first.PlanRevision)
+	require.Equal(t, "d37630fd08fecacb8ddc50994d3891aae61dd32d6e28818b8fb73d7b61611618", first.PlanRevision)
 
 	candidate.Assumptions = []string{"Layout-only author note"}
 	candidate.Warnings = []string{"Operational observation"}
@@ -301,7 +477,7 @@ func TestAutomationPublicationPlanGoldenGitHubDependenciesAndConfigurationChange
 	planner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	first, err := planner.Plan(ctx, project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "6189fde192627f42457bf42e532304594cba7a623bb367eba3378679ae368e80", first.PlanRevision)
+	require.Equal(t, "74c7f9e93771fc9a5b757f77c330f4a64ec7082dc525ac222f9cf116cd8b7e86", first.PlanRevision)
 
 	inbox.Enabled = false
 	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
