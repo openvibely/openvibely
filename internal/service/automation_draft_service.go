@@ -211,12 +211,14 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 			incoming[edge.To] = append(incoming[edge.To], edge.From)
 		}
 		for i := range candidate.Nodes {
-			if candidate.Nodes[i].Type == models.AutomationNodeAgentTask && len(incoming[candidate.Nodes[i].Key]) == 1 {
-				switch nodeTypes[incoming[candidate.Nodes[i].Key][0]] {
-				case models.AutomationNodeTrigger:
-					candidate.Nodes[i].Config["category"] = string(models.CategoryScheduled)
-				case models.AutomationNodeAgentTask:
-					candidate.Nodes[i].Config["category"] = string(models.CategoryActive)
+			if candidate.Nodes[i].Type == models.AutomationNodeAgentTask {
+				for _, parentKey := range incoming[candidate.Nodes[i].Key] {
+					switch nodeTypes[parentKey] {
+					case models.AutomationNodeTrigger:
+						candidate.Nodes[i].Config["category"] = string(models.CategoryBacklog)
+					case models.AutomationNodeAgentTask:
+						candidate.Nodes[i].Config["category"] = string(models.CategoryActive)
+					}
 				}
 			}
 			if candidate.Nodes[i].Type != models.AutomationNodeTrigger {
@@ -532,8 +534,8 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 				} else {
 					parent := nodes[incoming[node.Key][0].From]
 					category, _ := node.Config["category"].(string)
-					if parent.Type == models.AutomationNodeTrigger && category != string(models.CategoryScheduled) {
-						issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_category", Message: "An Agent task started by a Schedule must use the Scheduled category."})
+					if parent.Type == models.AutomationNodeTrigger && category != string(models.CategoryBacklog) {
+						issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_category", Message: "An Agent task started by a Schedule must remain an ordinary Backlog task; the Schedule node owns the scheduled task."})
 					}
 					if parent.Type == models.AutomationNodeAgentTask && category != string(models.CategoryActive) {
 						issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_category", Message: "A connected follow-up Agent task must use the Active category so the existing task chain runs it."})

@@ -844,9 +844,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								</select></label>
 							</div>
 								<div class="mt-3 grid grid-cols-2 gap-3">
-									<label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option><option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option>
+									<label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option>
 										if page.Result.Candidate.AdapterKey == "custom" {
 											<option value="active" selected?={ automationDraftStringConfig(node, "category") == "active" }>Active follow-up</option>
+										} else {
+											<option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option>
 										}
 									</select></label>
 									<label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label>

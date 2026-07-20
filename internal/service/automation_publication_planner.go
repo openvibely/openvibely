@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	automationAdapterContractVersion  = 4
-	automationCompilerContractVersion = 4
+	automationAdapterContractVersion  = 5
+	automationCompilerContractVersion = 5
 )
 
 type automationGitHubConnectionProvider interface {
@@ -184,6 +184,7 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 					resource.AllowedResources["task"] = true
 				}
 			case models.AutomationNodeTrigger:
+				resource.AllowedResources["task"] = true
 				resource.AllowedResources["schedule"] = true
 			}
 			resourceNodes = append(resourceNodes, resource)
@@ -231,7 +232,8 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 			continue
 		}
 		candidateNode := candidateNodes[node.Key]
-		effect, dependency, changed, effectErr := p.planSchedule(ctx, definition, candidateNode, publishedResources[node.Key+"\x00schedule"])
+		effect, dependency, changed, effectErr := p.planSchedule(ctx, definition, candidateNode,
+			publishedResources[node.Key+"\x00schedule"], publishedResources[node.Key+"\x00task"])
 		if effectErr != nil {
 			return nil, effectErr
 		}
@@ -487,9 +489,7 @@ func (p *AutomationPublicationPlanner) planTask(ctx context.Context, definition 
 	configured := map[string]any{"title": task.Title, "prompt": task.Prompt, "category": task.Category, "priority": task.Priority, "agent_id": nilString(task.AgentID), "agent_definition_id": nilString(task.AgentDefinitionID), "parent_task_id": nilString(task.ParentTaskID), "chain_config": task.ChainConfig}
 	dependency = automationPlanDependency{Type: "task", ID: task.ID, ProjectID: task.ProjectID, NodeKey: node.Key, Configured: configured}
 	effect.ResourceID = task.ID
-	desiredPriority, _ := draftInt(node.Config["priority"])
-	desiredCategory, _ := node.Config["category"].(string)
-	desiredPrompt := automationCompiledTaskPrompt(candidate, node)
+	desiredPrompt, desiredCategory, desiredPriority := automationNodeTaskConfiguration(candidate, node)
 	desiredAgent, err := p.resolveNodeAgent(ctx, definition.Automation.ProjectID, node)
 	if err != nil {
 		return effect, dependency, err
@@ -522,7 +522,7 @@ func (p *AutomationPublicationPlanner) planTask(ctx context.Context, definition 
 			}
 		}
 	}
-	if topologyComplete && task.Title == effect.Name && task.Prompt == desiredPrompt && string(task.Category) == desiredCategory && task.Priority == desiredPriority && equalOptionalString(task.AgentDefinitionID, desiredAgentID) && equalOptionalString(task.ParentTaskID, desiredParentID) && normalizedChainConfig(task.ChainConfig) == normalizedChainConfig(desiredChainConfig) {
+	if topologyComplete && task.Title == effect.Name && task.Prompt == desiredPrompt && task.Category == desiredCategory && task.Priority == desiredPriority && equalOptionalString(task.AgentDefinitionID, desiredAgentID) && equalOptionalString(task.ParentTaskID, desiredParentID) && normalizedChainConfig(task.ChainConfig) == normalizedChainConfig(desiredChainConfig) {
 		effect.Operation = "unchanged"
 	} else {
 		effect.Operation = "update"
@@ -592,6 +592,16 @@ func customAutomationTaskChainConfig(automation models.Automation, candidate mod
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+func automationNodeTaskConfiguration(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) (string, models.TaskCategory, int) {
+	if node.Type == models.AutomationNodeTrigger {
+		return "Automation Scheduler trigger. Runtime work is dispatched through the published graph connection.", models.CategoryScheduled, 2
+	}
+	prompt := automationCompiledTaskPrompt(candidate, node)
+	category, _ := node.Config["category"].(string)
+	priority, _ := draftInt(node.Config["priority"])
+	return prompt, models.TaskCategory(category), priority
 }
 
 func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) string {
@@ -691,7 +701,7 @@ func automationSkillNames(refs []string) []string {
 	return names
 }
 
-func (p *AutomationPublicationPlanner) planSchedule(ctx context.Context, definition *models.AutomationDefinition, node models.AutomationDraftNode, existing models.AutomationDefinitionResource) (models.AutomationPublicationEffect, automationPlanDependency, bool, error) {
+func (p *AutomationPublicationPlanner) planSchedule(ctx context.Context, definition *models.AutomationDefinition, node models.AutomationDraftNode, existing, scheduledTask models.AutomationDefinitionResource) (models.AutomationPublicationEffect, automationPlanDependency, bool, error) {
 	effect := models.AutomationPublicationEffect{StepKey: "schedule:" + node.Key, Operation: "create", TargetKey: "schedule:" + node.Key, ResourceType: "schedule", Name: node.Name}
 	var dependency automationPlanDependency
 	if existing.ResourceID == "" {
@@ -713,7 +723,11 @@ func (p *AutomationPublicationPlanner) planSchedule(ctx context.Context, definit
 	desiredRepeat, _ := node.Config["repeat_type"].(string)
 	desiredInterval, _ := draftInt(node.Config["repeat_interval"])
 	desiredEnabled, _ := node.Config["enabled"].(bool)
-	if schedule.RunAt.Format("15:04") == desiredRunAt && string(schedule.RepeatType) == desiredRepeat && schedule.RepeatInterval == desiredInterval && schedule.Enabled == desiredEnabled {
+	correctTask := true
+	if definition.Version.AdapterKey == AutomationAdapterCustom {
+		correctTask = scheduledTask.ResourceID != "" && schedule.TaskID == scheduledTask.ResourceID
+	}
+	if correctTask && schedule.RunAt.Format("15:04") == desiredRunAt && string(schedule.RepeatType) == desiredRepeat && schedule.RepeatInterval == desiredInterval && schedule.Enabled == desiredEnabled {
 		effect.Operation = "reuse"
 		effect.ResourceID = schedule.ID
 		return effect, dependency, false, nil

@@ -6,7 +6,7 @@ Phase 5 is active after direct product feedback showed the completed first-relea
 
 ## Status
 
-Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 now has a validated custom foundation, deterministic multi-task execution, Native human approval, configurable GitHub lifecycle capabilities, Describe It/Chat parity for the surfaced custom schema, and repaired Blank connector and schedule projections. Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are inserted, and its empty supported-edge palette is serialized as `[]` rather than `null`, so direct node-to-node drags cannot fail in the browser before creating an edge. Visible lines and arrows render fully opaque in a final pointer-transparent foreground above nodes and connector circles, while selection hit areas remain behind nodes and captured pointer releases resolve the real connector under the release coordinates. Applying a custom Schedule → Agent task graph creates the normal Scheduler row and task, and the Schedules calendar projects the exact immutable Automation schedule-node name instead of presenting the attached agent task as the schedule identity. Unsupported capability handoffs remain fail-closed draft errors, and publication derives only real task/schedule effects plus explicit Alert/GitHub/human-gate configuration from user-owned nodes and edges. Runtime Alert and GitHub activity uses existing services and exact immutable Automation-version provenance. Per the user's correction, the old JSON-only hidden Workflow subsystem is not an Automation builder capability and will be removed separately rather than exposed here. Remaining Phase 5 work is managed-memory reconciliation, a clean checkpoint, and the fresh edit-free full-objective audit.
+Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 now has a validated custom foundation, deterministic multi-task execution, Native human approval, configurable GitHub lifecycle capabilities, Describe It/Chat parity for the surfaced custom schema, and repaired Blank connector and schedule resource ownership. Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are inserted, and its empty supported-edge palette is serialized as `[]` rather than `null`, so direct node-to-node drags cannot fail in the browser before creating an edge. Visible lines and arrows render fully opaque in a final pointer-transparent foreground above nodes and connector circles, while selection hit areas remain behind nodes and captured pointer releases resolve the real connector under the release coordinates. Applying a custom Schedule → Agent task graph creates a dedicated scheduled task and Scheduler row for the Schedule node plus a separate ordinary Backlog Agent Task. A due occurrence follows the exact immutable Schedule-to-Agent edge and activates the Agent Task without repointing the Scheduler row or changing the schedule task's ownership. The Schedules calendar therefore shows every applied Schedule node as its own scheduled task using the immutable schedule-node name. Unsupported capability handoffs remain fail-closed draft errors, and publication derives only real task/schedule effects plus explicit Alert/GitHub/human-gate configuration from user-owned nodes and edges. Runtime Alert and GitHub activity uses existing services and exact immutable Automation-version provenance. Per the user's correction, the old JSON-only hidden Workflow subsystem is not an Automation builder capability and will be removed separately rather than exposed here. Remaining Phase 5 work is managed-memory reconciliation, a clean checkpoint, and the fresh edit-free full-objective audit.
 
 ## Phase 5 Blank Connector Regression Checkpoint
 
@@ -31,8 +31,9 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 ### Completed Requirements
 
 - The custom builder’s persisted edge line and marker arrow are now fully opaque as well as DOM-foregrounded. They paint visibly over connector circles while retaining `pointer-events: none`; the transparent selectable hit surface remains behind nodes.
-- Applying a real Blank `Schedule → Agent task` graph still creates the existing normal task and Scheduler row. The Schedules query follows the schedule’s project-scoped `automation_trigger_owners` identity to the exact immutable Automation version/node and exposes that schedule-node name to the calendar.
-- Automation-owned calendar cards use the configured schedule node’s name as their visible identity rather than masquerading as the target Agent task. Ordinary non-Automation schedules continue using their existing task title and behavior.
+- Applying a real Blank `Schedule → Agent task` graph creates two distinct tasks: the Schedule node's task remains `scheduled` and owns the Scheduler row, while the Agent Task node remains an ordinary `backlog` task until a due occurrence activates it.
+- The Schedules query follows the schedule’s project-scoped `automation_trigger_owners` identity to the exact immutable Automation version/node and exposes that schedule-node name to the calendar.
+- Automation-owned calendar cards use the configured Schedule node's name and real scheduled task. The connected Agent Task is never substituted as the Scheduler row's task; ordinary non-Automation schedules continue using their existing task title and behavior.
 
 ### Regression And Validation Evidence
 
@@ -42,6 +43,26 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 - `go test ./web/templates/pages -count=1 -timeout 120s` passes, including the production Chrome graph fixture.
 - `go test ./internal/... -count=1 -timeout 120s` passes every internal package.
 - `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passes every package.
+
+## Phase 5 Schedule Resource Ownership Correction
+
+### Completed Requirements
+
+- Every applied custom Schedule node now compiles to its own visible `scheduled` task and one real Scheduler row linked to that task. A Schedule no longer borrows the connected Agent Task as its backing task.
+- Agent Task and GitHub inbox nodes rooted at a Schedule normalize to ordinary `backlog` tasks. The custom builder no longer offers `Scheduled` as an Agent Task category, and Describe It/Chat use the same corrected contract.
+- When a custom schedule becomes due, the existing Automation occurrence/dispatch machinery resolves exactly one downstream task through the persisted project, Automation, immutable version, trigger node, edge, and target task membership. It activates and dispatches that task while leaving the Schedule node's task scheduled.
+- Runtime fails closed with no invocation or dispatch if the Scheduler row is repointed to the Agent Task, the Schedule node's exact task membership is absent, or the immutable trigger edge resolves anything other than one task.
+- Maintained adapters retain their existing schedule-to-task behavior. Review/apply plans and compiler revisions include the additional custom Schedule task effect, and changed legacy-shaped custom schedules are replaced rather than silently reused.
+
+### Regression And Validation Evidence
+
+- `TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule` failed first because planning produced only one task effect. It now proves distinct scheduled/Agent tasks, exact Scheduler linkage, ordinary Agent category, immutable-edge dispatch, no schedule-task execution, and fail-closed tamper handling with zero runtime state.
+- `TestAutomationBlankAppliedScheduleUsesScheduleNodeNameOnSchedulePage` now proves the full visible Blank create/connect/review/apply path persists distinct tasks, links the Scheduler row to the Schedule task, leaves the Agent Task in Backlog, and renders the Schedule node on `/schedule`.
+- Custom validation, Alert, GitHub, Describe It, canonical Chat, maintained Automation, handler, and production-browser focused suites pass with the corrected resource counts and categories.
+- `templ generate` completes with zero pending generated updates; `gofmt`, `git diff --check`, and `go build ./...` pass. Desktop build/test emits only the documented non-failing newer-SDK linker warnings.
+- `go test ./internal/... -count=1 -timeout 120s` passes every internal package.
+- `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passes every package, including production real-Chrome Automation graph coverage.
+- Direct managed-memory mutation remains unavailable in this task runtime. The authoritative `automation_graphs.md` topic still describes the Schedule page in terms of an attached Agent Task and must be reconciled through an authorized writer before the final qualifying audit.
 
 ## Phase 5 Custom Builder Checklist
 

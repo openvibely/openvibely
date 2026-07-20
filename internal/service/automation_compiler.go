@@ -184,7 +184,7 @@ func (c *AutomationCompiler) compileEffect(ctx context.Context, attemptID string
 	case "task":
 		return c.compileTask(ctx, request, definition, candidate, node, effect)
 	case "schedule":
-		return c.compileSchedule(ctx, attemptID, request, node, effect, resources)
+		return c.compileSchedule(ctx, attemptID, request, definition, node, effect, resources)
 	default:
 		return effect.ResourceID, nil
 	}
@@ -205,9 +205,7 @@ func (c *AutomationCompiler) compileTask(ctx context.Context, request Automation
 			return "", err
 		}
 	}
-	prompt := automationCompiledTaskPrompt(candidate, node)
-	category, _ := node.Config["category"].(string)
-	priority, _ := draftInt(node.Config["priority"])
+	prompt, category, priority := automationNodeTaskConfiguration(candidate, node)
 	agent, err := c.resolveNodeAgent(ctx, request.ProjectID, node)
 	if err != nil {
 		return "", err
@@ -217,7 +215,7 @@ func (c *AutomationCompiler) compileTask(ctx context.Context, request Automation
 		agentDefinitionID = &agent.ID
 	}
 	if task == nil {
-		createCategory := models.TaskCategory(category)
+		createCategory := category
 		createStatus := models.StatusPending
 		if candidate.AdapterKey == AutomationAdapterCustom {
 			if parentKey, _ := customAutomationTaskNeighbors(candidate, node.Key); parentKey != "" {
@@ -276,9 +274,7 @@ func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definit
 		if taskID == "" {
 			return nil, fmt.Errorf("publication task update %q has no reconciled resource", stepKey)
 		}
-		prompt := automationCompiledTaskPrompt(candidate, node)
-		category, _ := node.Config["category"].(string)
-		priority, _ := draftInt(node.Config["priority"])
+		prompt, category, priority := automationNodeTaskConfiguration(candidate, node)
 		agent, err := c.resolveNodeAgent(ctx, definition.Automation.ProjectID, node)
 		if err != nil {
 			return nil, err
@@ -289,7 +285,7 @@ func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definit
 		}
 		update := repository.AutomationPublicationTaskUpdate{
 			StepKey: stepKey, TaskID: taskID, Title: automationTaskTitle(definition.Automation, node),
-			Prompt: prompt, Category: models.TaskCategory(category), Priority: priority, AgentDefinitionID: agentDefinitionID,
+			Prompt: prompt, Category: category, Priority: priority, AgentDefinitionID: agentDefinitionID,
 		}
 		if candidate.AdapterKey == AutomationAdapterCustom {
 			update.ApplyTopology = true
@@ -321,12 +317,15 @@ func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definit
 	return updates, nil
 }
 
-func (c *AutomationCompiler) compileSchedule(ctx context.Context, attemptID string, request AutomationPublishRequest, node models.AutomationDraftNode, effect models.AutomationPublicationEffect, resources map[string]string) (string, error) {
+func (c *AutomationCompiler) compileSchedule(ctx context.Context, attemptID string, request AutomationPublishRequest, definition *models.AutomationDefinition, node models.AutomationDraftNode, effect models.AutomationPublicationEffect, resources map[string]string) (string, error) {
 	if effect.Operation == "reuse" && effect.ResourceID != "" {
 		return effect.ResourceID, nil
 	}
-	targetKey, _ := node.Config["target_node_key"].(string)
-	taskID := resources["task:"+targetKey]
+	taskKey := node.Key
+	if definition.Version.AdapterKey != AutomationAdapterCustom {
+		taskKey, _ = node.Config["target_node_key"].(string)
+	}
+	taskID := resources["task:"+taskKey]
 	if taskID == "" {
 		return "", fmt.Errorf("trigger node %q has no compiled task target", node.Key)
 	}

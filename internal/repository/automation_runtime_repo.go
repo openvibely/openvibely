@@ -135,12 +135,14 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 
 	var owner models.AutomationTriggerOwner
 	var lifecycle models.AutomationLifecycleState
+	var adapterKey string
 	err = conn.QueryRowContext(ctx, `SELECT o.schedule_id, o.project_id, o.automation_id, o.version_id, o.node_id,
-		o.ownership_state, o.created_at, o.updated_at, a.lifecycle_state
+		o.ownership_state, o.created_at, o.updated_at, a.lifecycle_state, v.adapter_key
 		FROM automation_trigger_owners o JOIN automations a ON a.id = o.automation_id AND a.project_id = o.project_id
+		JOIN automation_versions v ON v.id = o.version_id AND v.automation_id = o.automation_id AND v.project_id = o.project_id
 		WHERE o.schedule_id = ? AND o.ownership_state = 'active' AND a.lifecycle_state = 'active'`, schedule.ID).
 		Scan(&owner.ScheduleID, &owner.ProjectID, &owner.AutomationID, &owner.VersionID, &owner.NodeID,
-			&owner.OwnershipState, &owner.CreatedAt, &owner.UpdatedAt, &lifecycle)
+			&owner.OwnershipState, &owner.CreatedAt, &owner.UpdatedAt, &lifecycle, &adapterKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, ErrAutomationScheduleChanged
 	}
@@ -149,19 +151,70 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	}
 	var enabled bool
 	var currentDue time.Time
-	var taskID, taskProject, taskTitle string
-	var taskStatus models.TaskStatus
-	var taskCategory models.TaskCategory
-	if err := conn.QueryRowContext(ctx, `SELECT s.enabled, s.next_run, s.task_id, t.project_id, t.title, t.status, t.category
+	var scheduledTaskID, scheduledTaskProject string
+	if err := conn.QueryRowContext(ctx, `SELECT s.enabled, s.next_run, s.task_id, t.project_id
 		FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ?`, schedule.ID).
-		Scan(&enabled, &currentDue, &taskID, &taskProject, &taskTitle, &taskStatus, &taskCategory); err != nil {
+		Scan(&enabled, &currentDue, &scheduledTaskID, &scheduledTaskProject); err != nil {
 		return nil, nil, fmt.Errorf("loading due automation schedule: %w", err)
 	}
-	if !enabled || !currentDue.UTC().Equal(due) || currentDue.After(now) || taskProject != owner.ProjectID {
+	if !enabled || !currentDue.UTC().Equal(due) || currentDue.After(now) || scheduledTaskProject != owner.ProjectID {
+		return nil, nil, ErrAutomationScheduleChanged
+	}
+
+	taskID := scheduledTaskID
+	if adapterKey == "custom" {
+		var triggerTaskMemberships int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_definition_resources
+			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND node_id = ?
+			AND resource_type = 'task' AND resource_id = ?`, owner.ProjectID, owner.AutomationID, owner.VersionID,
+			owner.NodeID, scheduledTaskID).Scan(&triggerTaskMemberships); err != nil {
+			return nil, nil, err
+		}
+		if triggerTaskMemberships != 1 {
+			return nil, nil, ErrAutomationScheduleChanged
+		}
+		rows, queryErr := conn.QueryContext(ctx, `SELECT dr.resource_id
+			FROM automation_edges e
+			JOIN automation_definition_resources dr ON dr.project_id = e.project_id
+				AND dr.automation_id = e.automation_id AND dr.version_id = e.version_id
+				AND dr.node_id = e.target_node_id AND dr.resource_type = 'task'
+			WHERE e.project_id = ? AND e.automation_id = ? AND e.version_id = ? AND e.source_node_id = ?
+			ORDER BY e.display_order, e.id, dr.id`, owner.ProjectID, owner.AutomationID, owner.VersionID, owner.NodeID)
+		if queryErr != nil {
+			return nil, nil, queryErr
+		}
+		var targets []string
+		for rows.Next() {
+			var target string
+			if err := rows.Scan(&target); err != nil {
+				rows.Close()
+				return nil, nil, err
+			}
+			targets = append(targets, target)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, nil, err
+		}
+		if len(targets) != 1 {
+			return nil, nil, ErrAutomationScheduleChanged
+		}
+		taskID = targets[0]
+	}
+
+	var taskProject, taskTitle string
+	var taskStatus models.TaskStatus
+	var taskCategory models.TaskCategory
+	if err := conn.QueryRowContext(ctx, `SELECT project_id, title, status, category FROM tasks WHERE id = ?`, taskID).
+		Scan(&taskProject, &taskTitle, &taskStatus, &taskCategory); err != nil {
+		return nil, nil, fmt.Errorf("loading automation dispatch task: %w", err)
+	}
+	if taskProject != owner.ProjectID {
 		return nil, nil, ErrAutomationScheduleChanged
 	}
 	preparedCategory := taskCategory
-	if preparedCategory != models.CategoryActive && preparedCategory != models.CategoryScheduled {
+	if adapterKey == "custom" {
+		preparedCategory = models.CategoryActive
+	} else if preparedCategory != models.CategoryActive && preparedCategory != models.CategoryScheduled {
 		preparedCategory = models.CategoryScheduled
 	}
 
@@ -222,9 +275,8 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 			VALUES (?, ?, ?)`, taskID, dispatch.ID, owner.ProjectID); err != nil {
 			return nil, nil, fmt.Errorf("reserving automation task: %w", err)
 		}
-		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending',
-			category = CASE WHEN category IN ('active','scheduled') THEN category ELSE 'scheduled' END,
-			updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`, taskID, owner.ProjectID); err != nil {
+		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = ?,
+			updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`, preparedCategory, taskID, owner.ProjectID); err != nil {
 			return nil, nil, fmt.Errorf("preparing automation task: %w", err)
 		}
 	}

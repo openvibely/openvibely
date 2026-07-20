@@ -302,7 +302,7 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 			config = map[string]any{"run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1, "enabled": true}
 		case "agent_task":
 			nodeType, role = models.AutomationNodeAgentTask, "task"
-			config = map[string]any{"prompt": "Describe the work this node should perform.", "category": string(models.CategoryScheduled), "priority": 2}
+			config = map[string]any{"prompt": "Describe the work this node should perform.", "category": string(models.CategoryBacklog), "priority": 2}
 		case "create_notification":
 			nodeType, role = models.AutomationNodeAction, "create_notification"
 			config = map[string]any{"notification_type": "approval_request", "instructions": "Summarize the proposal that needs a human decision."}
@@ -317,7 +317,7 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 			config = map[string]any{"approval_method": "github_assignment"}
 		case "github_inbox":
 			nodeType, role = models.AutomationNodeAgentTask, "github_inbox"
-			config = map[string]any{"prompt": "Process newly assigned GitHub issues.", "category": string(models.CategoryScheduled), "priority": 2}
+			config = map[string]any{"prompt": "Process newly assigned GitHub issues.", "category": string(models.CategoryBacklog), "priority": 2}
 		case "implementation":
 			nodeType, role = models.AutomationNodeAgentTask, "implementation"
 			config = map[string]any{"prompt": "Implement the accepted GitHub issue and run relevant validation.", "category": string(models.CategoryActive), "priority": 2}

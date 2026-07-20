@@ -62,7 +62,7 @@ func TestCustomAutomationValidatesLinearTaskHandoffsAndRejectsAnalogousUnsupport
 	require.NoError(t, err)
 	candidate.Nodes = []models.AutomationDraftNode{
 		{Key: "schedule", Name: "Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
-		{Key: "research", Name: "Research", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Research the request.", "category": "scheduled", "priority": 2}},
+		{Key: "research", Name: "Research", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Research the request.", "category": "backlog", "priority": 2}},
 		{Key: "implement", Name: "Implement", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the researched request.", "category": "active", "priority": 2}},
 		{Key: "done", Name: "Done", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
 	}
@@ -109,7 +109,7 @@ func TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogous
 	require.NoError(t, err)
 	candidate.Nodes = []models.AutomationDraftNode{
 		{Key: "schedule", Name: "Daily review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
-		{Key: "review", Name: "Review changes", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review likely changes.", "category": "scheduled", "priority": 2}},
+		{Key: "review", Name: "Review changes", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review likely changes.", "category": "backlog", "priority": 2}},
 		{Key: "request", Name: "Request approval", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "change_proposal", "instructions": "Summarize the proposed change for a human reviewer."}},
 		{Key: "human", Name: "Human approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{"approval_method": "native_alert"}},
 		{Key: "accepted", Name: "Accepted", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
@@ -129,7 +129,7 @@ func TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogous
 	multiTask.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
 	multiTask.Nodes = append(multiTask.Nodes, models.AutomationDraftNode{
 		Key: "research", Name: "Research first", Type: models.AutomationNodeAgentTask, Role: "task",
-		Config: map[string]any{"prompt": "Research likely changes.", "category": "scheduled", "priority": 2},
+		Config: map[string]any{"prompt": "Research likely changes.", "category": "backlog", "priority": 2},
 	})
 	for i := range multiTask.Nodes {
 		if multiTask.Nodes[i].Key == "review" {
@@ -167,11 +167,11 @@ func TestCustomAutomationValidatesGitHubHandoffsAndRejectsHumanBoundaryBypasses(
 	require.NoError(t, err)
 	candidate.Nodes = []models.AutomationDraftNode{
 		{Key: "producer_schedule", Name: "Daily suggestions", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
-		{Key: "producer", Name: "Find improvements", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Find one focused improvement.", "category": "scheduled", "priority": 2}},
+		{Key: "producer", Name: "Find improvements", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Find one focused improvement.", "category": "backlog", "priority": 2}},
 		{Key: "issue", Name: "Create issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Open one reviewable suggestion issue.", "labels": []any{"suggestion"}}},
 		{Key: "assignment", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
 		{Key: "inbox_schedule", Name: "Hourly inbox", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:15", "repeat_type": "hours", "repeat_interval": 1, "enabled": true}},
-		{Key: "inbox", Name: "Process assigned issues", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process newly assigned issues.", "category": "scheduled", "priority": 3}},
+		{Key: "inbox", Name: "Process assigned issues", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process newly assigned issues.", "category": "backlog", "priority": 3}},
 		{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "implementation", Config: map[string]any{"prompt": "Implement the accepted issue and run relevant validation.", "category": "active", "priority": 3}},
 		{Key: "open_pr", Name: "Open pull request", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "main", "draft": false}},
 		{Key: "review", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},

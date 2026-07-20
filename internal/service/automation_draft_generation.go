@@ -22,12 +22,12 @@ Choose the registered adapter that represents the user's request:
 
 Supported custom nodes and configuration:
 - Schedule: type trigger, role fixed_schedule; config target_node_key, run_at in HH:MM, repeat_type, repeat_interval, enabled.
-- Agent task: type agent_task, role task; config prompt, category, priority, and optional agent_ref, skills, source_files selected only from the project capability snapshot. A Schedule-root task uses category scheduled; a task started by another task uses active.
+- Agent task: type agent_task, role task; config prompt, category, priority, and optional agent_ref, skills, source_files selected only from the project capability snapshot. A task started by a Schedule remains an ordinary backlog task; a task started by another task uses active. The Schedule node owns its separate scheduled task.
 - Create notification: type action, role create_notification; config notification_type and instructions.
 - Human approval: type human_gate, role native_approval; config approval_method native_alert.
 - Create GitHub issue: type action, role create_github_issue; config instructions and labels. Never configure assignees.
 - Human assignment: type human_gate, role github_assignment; config approval_method github_assignment.
-- GitHub inbox: type agent_task, role github_inbox; task config with category scheduled.
+- GitHub inbox: type agent_task, role github_inbox; ordinary task config with category backlog. Its connected Schedule owns the scheduled task.
 - Implementation task template: type agent_task, role implementation; task config with category active.
 - Open pull request: type action, role open_pull_request; config instructions, base, draft.
 - Human review: type human_gate, role pull_request_review; config approval_method pull_request_review.

@@ -653,8 +653,12 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	plan, err := planner.Plan(context.Background(), project.ID, automationID, versionID)
 	require.NoError(t, err)
 	require.Empty(t, plan.Validation)
-	require.Len(t, plan.Effects, 2)
-	require.ElementsMatch(t, []string{"task", "schedule"}, []string{plan.Effects[0].ResourceType, plan.Effects[1].ResourceType})
+	require.Len(t, plan.Effects, 3)
+	var effectTypes []string
+	for _, effect := range plan.Effects {
+		effectTypes = append(effectTypes, effect.ResourceType)
+	}
+	require.ElementsMatch(t, []string{"task", "task", "schedule"}, effectTypes)
 
 	notificationHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"create_notification"}, "node_name": {"Request approval"}})
 	require.Contains(t, notificationHTML, `name="node_request_approval_notification_type"`)
@@ -748,6 +752,27 @@ func TestAutomationBlankAppliedScheduleUsesScheduleNodeNameOnSchedulePage(t *tes
 		"project_id": {project.ID}, "plan_revision": {revisionMatch[1]}, "confirmation_token": {tokenMatch[1]},
 	}).Execute()
 	require.Equal(t, 204, published.Code, published.Body.String())
+
+	var scheduleTaskID, agentTaskID string
+	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources r
+		JOIN automation_nodes n ON n.id = r.node_id AND n.version_id = r.version_id
+		WHERE r.automation_id = ? AND r.version_id = ? AND n.node_key = ? AND r.resource_type = 'task'`,
+		automationID, versionID, candidate.Nodes[0].Key).Scan(&scheduleTaskID))
+	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources r
+		JOIN automation_nodes n ON n.id = r.node_id AND n.version_id = r.version_id
+		WHERE r.automation_id = ? AND r.version_id = ? AND n.node_key = ? AND r.resource_type = 'task'`,
+		automationID, versionID, candidate.Nodes[1].Key).Scan(&agentTaskID))
+	require.NotEqual(t, scheduleTaskID, agentTaskID, "Schedule and Agent Task nodes must compile to distinct tasks")
+	var linkedTaskID string
+	require.NoError(t, tc.db.QueryRow(`SELECT task_id FROM schedules WHERE id IN
+		(SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?)`, automationID).Scan(&linkedTaskID))
+	require.Equal(t, scheduleTaskID, linkedTaskID, "the Schedules page entry must be backed by the Schedule node's task")
+	scheduleTask, err := tc.taskRepo.GetByID(context.Background(), scheduleTaskID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, scheduleTask.Category)
+	agentTask, err := tc.taskRepo.GetByID(context.Background(), agentTaskID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, agentTask.Category, "the connected Agent Task must remain an ordinary task")
 
 	schedulePage := tc.HTTP().Get("/schedule?project_id=" + project.ID).Execute()
 	require.Equal(t, 200, schedulePage.Code, schedulePage.Body.String())
@@ -970,7 +995,7 @@ func automationChatCustomApprovalCandidate(t *testing.T, drafts *service.Automat
 	candidate.Name = "Custom approval review"
 	candidate.Nodes = []models.AutomationDraftNode{
 		{Key: "morning", Name: "Morning", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
-		{Key: "review", Name: "Review changes", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review one focused change.", "category": "scheduled", "priority": 2}},
+		{Key: "review", Name: "Review changes", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review one focused change.", "category": "backlog", "priority": 2}},
 		{Key: "notify", Name: "Request approval", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "change_proposal", "instructions": "Summarize the proposed change."}},
 		{Key: "approval", Name: "Human approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{"approval_method": "native_alert"}},
 		{Key: "accepted", Name: "Accepted", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
@@ -1161,7 +1186,7 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewDraftPlanAndConfirmedPubli
 	publishedOutput := execute("publish_automation_draft", json.RawMessage(fmt.Sprintf(`{"automation_id":%q,"version_id":%q,"plan_revision":%q,"confirmation_token":%q,"confirming_user_input_id":%q}`,
 		prepared.AutomationID, prepared.VersionID, prepared.PlanRevision, prepared.Token, prepared.ConfirmingUserInputID)))
 	require.Contains(t, publishedOutput, `"active":true`)
-	require.Equal(t, 2, tableCountHandler(t, tc, "tasks"), "publication adds one visible Automation task beside the Chat thread")
+	require.Equal(t, 3, tableCountHandler(t, tc, "tasks"), "publication adds the Schedule node's task and the ordinary Agent Task beside the Chat thread")
 	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
 }
 
