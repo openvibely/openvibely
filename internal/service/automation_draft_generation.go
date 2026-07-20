@@ -15,6 +15,9 @@ type AutomationDescriptionGenerator func(context.Context, string) (string, error
 const automationDescriptionPrompt = `Return strict JSON only for one supported Automation draft candidate.
 
 The JSON must use schema_version 1 and exactly these top-level fields: schema_version, name, description, automation_type, adapter_key, nodes, edges, assumptions, warnings.
+Nodes use exactly these fields: key, name, type, role, config, position. Position uses exactly x and y.
+Edges use exactly these fields: key, from, to, from_port, to_port, label, condition. The from and to values are node keys. Never use source or target as edge field names.
+Condition uses only state when the supported handoff below requires it. Omit optional fields rather than inventing additional fields.
 
 Choose the registered adapter that represents the user's request:
 - Use a maintained adapter, native_sdlc, github_sdlc, or vision_driver, only when its canonical topology exactly matches. Its node keys, types, roles, and edges must remain canonical.
@@ -49,6 +52,9 @@ User description:
 %s`
 
 const automationDescriptionRepairPrompt = `Repair the previous Automation candidate. Return strict JSON only, with no Markdown fence or explanation. Preserve the user's intent, using either one canonical maintained adapter topology or the supported custom capability graph contract from the original request. Use only supported configuration fields and do not replace a requested custom graph with an unrelated preset.
+
+Original request, exact schema, supported capabilities, and project snapshot:
+%s
 
 Validation failure: %s
 
@@ -96,7 +102,7 @@ func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context
 	} else if len(issues) > 0 {
 		repairReason = issues[0].Code + ": " + issues[0].Message
 	}
-	repairPrompt := fmt.Sprintf(automationDescriptionRepairPrompt, repairReason, boundedAutomationGenerationOutput(output))
+	repairPrompt := fmt.Sprintf(automationDescriptionRepairPrompt, boundedAutomationGenerationOutput(prompt), repairReason, boundedAutomationGenerationOutput(output))
 	repaired, err := generate(ctx, repairPrompt)
 	if err != nil {
 		return nil, err

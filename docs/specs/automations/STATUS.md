@@ -974,6 +974,25 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 Checkpoint the validated surfaced custom builder candidate, then reconcile the authoritative managed topic through an authorized direct writer and perform the fresh edit-free audit against the revised full objective.
 
+## Describe It Exact Schema Repair
+
+### Contract And Regression
+
+- [x] Reproduce the reported bounded-repair failure where the model emits common graph edge fields `source` and `target`, strict decoding rejects `source`, and the independent repair call lacks the original schema context needed to correct it.
+- [x] State the exact top-level, node, position, edge, and condition field contract in the first generation prompt, including the required `from` and `to` edge fields and the explicit exclusion of `source` and `target`.
+- [x] Include the original exact schema, supported-capability contract, project snapshot, and user description in the one independent repair call while retaining strict unknown-field rejection and the one-repair limit.
+- [x] Preserve browser-local generation, zero generation-time resource effects, shared page/Chat normalization, project isolation, supported handoffs, and all human boundaries.
+
+### Validation Evidence
+
+- Regression-first `TestAutomationDescriptionGenerationRepairReceivesExactNestedSchema` failed against `ec77ef9` because the repair prompt contained only the unknown-field error and previous output, then passed after the repair prompt received the full original context.
+- `templ generate`, `git diff --check`, `go build ./...`, focused generation/handler tests, `TMPDIR=/private/tmp go test ./internal/... -count=1 -timeout 180s`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 180s` pass. The desktop build emitted only the documented non-failing newer-SDK linker warnings.
+- The strict decoder still uses `DisallowUnknownFields`; the change does not accept aliases, expand graph semantics, create resources during generation, or alter publication/runtime behavior.
+
+### Remaining Qualification
+
+- After this validated repair is checkpointed, reconcile the authoritative `automation_graphs.md` managed topic through an authorized memory writer and perform a fresh separate strictly read-only full-objective audit from that checkpoint.
+
 ## Update Contract
 
 After every implementation phase, record:

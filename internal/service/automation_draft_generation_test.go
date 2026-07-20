@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -119,6 +120,31 @@ func TestAutomationDescriptionGenerationRepairsUnsupportedSchemaVersion(t *testi
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
 	require.Equal(t, 1, preview.Candidate.SchemaVersion)
+}
+
+func TestAutomationDescriptionGenerationRepairReceivesExactNestedSchema(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	validJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	invalidJSON := strings.NewReplacer(`"from":`, `"source":`, `"to":`, `"target":`).Replace(string(validJSON))
+	calls := 0
+
+	preview, err := svc.PreviewDescription(context.Background(), "Review vision daily", models.AutomationCapabilitySnapshot{}, func(_ context.Context, prompt string) (string, error) {
+		calls++
+		if calls == 1 {
+			return invalidJSON, nil
+		}
+		require.Contains(t, prompt, "Edges use exactly these fields: key, from, to, from_port, to_port, label, condition.")
+		require.Contains(t, prompt, "Never use source or target as edge field names.")
+		require.Contains(t, prompt, "Review vision daily", "the independent repair call must receive the original request context")
+		return string(validJSON), nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+	require.Equal(t, candidate.Edges, preview.Candidate.Edges)
 }
 
 type automationCapabilityGitHubStatusStub struct {
