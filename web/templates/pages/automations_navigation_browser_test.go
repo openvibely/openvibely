@@ -55,6 +55,13 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 		}
 		return out.String()
 	}
+	renderDescribeFailure := func(description string) string {
+		var out bytes.Buffer
+		if err := AutomationNewFailureContent(projectID, description, "Could not generate a supported Automation: unsupported price-result branch").Render(context.Background(), &out); err != nil {
+			t.Fatalf("render Describe It failure: %v", err)
+		}
+		return out.String()
+	}
 	renderLive := func(id, name string) string {
 		node := models.AutomationNode{ID: id + "-node", Name: "A very long automation node name that must wrap safely", NodeType: models.AutomationNodeAgentTask, PositionX: 20, PositionY: -90}
 		graph := models.AutomationLiveGraph{
@@ -222,6 +229,19 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	    await window.openVibelyNavigate('/automations/new?project_id=project-browser');
 	    await waitFor(function() { return !!document.querySelector('input[name="source"][value="blank"]'); }, 'new Automation choices');
+	    var stockDescription = 'Monitor a stock for price increases or decreases so I can buy or sell depending on the result';
+	    var describeStart = document.querySelector('input[name="source"][value="describe"]');
+	    var describeForm = describeStart && describeStart.closest('form');
+	    if (!describeForm) fail('Describe It form is missing');
+	    describeForm.querySelector('textarea[name="description"]').value = stockDescription;
+	    htmx.process(describeForm);
+	    describeForm.requestSubmit(describeForm.querySelector('button[type="submit"]'));
+	    await waitFor(function() { return !!document.querySelector('#automation-new [role="alert"]'); }, 'visible Describe It failure');
+	    var describeError = document.querySelector('#automation-new [role="alert"]');
+	    if (!describeError.textContent.includes('Could not generate a supported Automation')) fail('Describe It failure did not explain that generation failed');
+	    var retainedDescription = document.querySelector('#automation-new textarea[name="description"]');
+	    if (!retainedDescription || retainedDescription.value !== stockDescription) fail('Describe It failure discarded the submitted description');
+	    await report('progress', 'describe-failure-visible');
 	    var blankStart = document.querySelector('input[name="source"][value="blank"]');
 	    var blankStartForm = blankStart && blankStart.closest('form');
 	    if (!blankStartForm) fail('Blank creation form is missing');
@@ -423,6 +443,10 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = w.Write([]byte(renderNew()))
 		case "/automations/drafts":
 			_ = r.ParseForm()
+			if r.FormValue("source") == "describe" {
+				_, _ = w.Write([]byte(renderDescribeFailure(r.FormValue("description"))))
+				return
+			}
 			_, _ = w.Write([]byte(renderBlankBuilder(r.FormValue("builder_action") == "create_node")))
 		case "/automations/automation-visual":
 			_, _ = w.Write([]byte(renderLive("automation-visual", "Visual Automation")))

@@ -1166,6 +1166,37 @@ func TestAutomationChatDraftCreationRejectsCandidateIdentity(t *testing.T) {
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 }
 
+func TestAutomationDescribeFailureIsVisibleAndPreservesInput(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Unsupported stock monitor").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	tc.handler.SetAutomationBuilderServices(drafts, capabilities, nil, nil, nil, nil)
+	model := models.LLMConfig{Name: "Automation generator", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, tc.llmConfigRepo.Create(ctx, &model))
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = `{"schema_version":1,"name":"Stock monitor","description":"Monitor a stock and buy or sell","automation_type":"custom","adapter_key":"custom","nodes":[],"edges":[{"key":"price_change","from":"price","to":"buy","condition":{"state":"price_increased"}}],"assumptions":[],"warnings":[]}`
+	tc.handler.llmSvc.SetLLMCaller(mock)
+	description := "Monitor a stock for price increases or decreases so I can buy or sell depending on the result"
+
+	response := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"describe"}, "description": {description},
+	}).Execute()
+
+	require.Equal(t, http.StatusOK, response.Code, "HTMX only swaps successful responses by default")
+	require.Contains(t, response.Body.String(), `id="automation-new"`)
+	require.Contains(t, response.Body.String(), `role="alert"`)
+	require.Contains(t, response.Body.String(), "Could not generate a supported Automation")
+	require.Contains(t, response.Body.String(), html.EscapeString(description))
+	require.Equal(t, 2, mock.CallCount(), "invalid generation receives one bounded repair attempt")
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Zero(t, tableCountHandler(t, tc, "tasks"))
+	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+}
+
 func TestAutomationChatActionsUseCanonicalPipelineAndDeferConfirmationReceipt(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
@@ -1192,6 +1223,8 @@ func TestAutomationChatActionsUseCanonicalPipelineAndDeferConfirmationReceipt(t 
 		"project_id": {project.ID}, "source": {"describe"}, "description": {"Review a proposed change and ask for approval"},
 	}).Execute()
 	require.Equal(t, 200, webCreated.Code, webCreated.Body.String())
+	require.Contains(t, webCreated.Body.String(), "This generated design is browser-local")
+	require.Contains(t, webCreated.Body.String(), "Save changes")
 	webCandidate := automationCandidateFromResponse(t, webCreated)
 	webCandidateJSON, err := json.Marshal(webCandidate)
 	require.NoError(t, err)
@@ -1290,9 +1323,11 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewDraftPlanAndConfirmedPubli
 	failedDescribe := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"describe"}, "description": {"Describe an unsupported draft"},
 	}).Execute()
-	require.Equal(t, 422, failedDescribe.Code)
+	require.Equal(t, http.StatusOK, failedDescribe.Code)
 	require.Contains(t, failedDescribe.Body.String(), `id="automation-new"`)
+	require.Contains(t, failedDescribe.Body.String(), "Could not generate a supported Automation")
 	require.Contains(t, failedDescribe.Body.String(), "automation generation repair failed")
+	require.Contains(t, failedDescribe.Body.String(), "Describe an unsupported draft")
 	require.Contains(t, failedDescribe.Body.String(), "Generating and validating design")
 	mock.Response = string(candidateJSON)
 

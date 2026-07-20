@@ -61,11 +61,15 @@ func (h *Handler) CreateAutomationDraftWeb(c echo.Context) error {
 	}
 	if err != nil {
 		if source == "describe" {
+			message := "Could not generate a supported Automation: " + err.Error()
+			description := c.FormValue("description")
 			if isHTMX(c) {
-				return render(c, http.StatusUnprocessableEntity, pages.AutomationNewFailureContent(projectID, err.Error()))
+				// HTMX does not swap 4xx responses by default, so render the validation
+				// result as a successful fragment while preserving the submitted input.
+				return render(c, http.StatusOK, pages.AutomationNewFailureContent(projectID, description, message))
 			}
 			projects, _ := h.projectSvc.List(ctx)
-			return render(c, http.StatusUnprocessableEntity, pages.AutomationNewFailure(projects, projectID, err.Error()))
+			return render(c, http.StatusUnprocessableEntity, pages.AutomationNewFailure(projects, projectID, description, message))
 		}
 		return err
 	}
