@@ -199,7 +199,19 @@ window.addEventListener('DOMContentLoaded', function() {
     await wait(100);
     click('a[href^="/automations/automation-a?"]', 'Automation A card after in-page back');
     await report('progress', 'automation-a-reclicked');
-	    await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A after in-page back');
+    await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A after in-page back');
+    await report('progress', 'automation-a-ready-before-edit');
+
+    click('#automation-live form[hx-post*="/drafts"] button[type="submit"]', 'Edit automation');
+    await waitFor(function() { return !!document.getElementById('automation-builder'); }, 'builder after Edit automation');
+    if (document.getElementById('automation-live')) fail('live Automation root remained mounted behind the editor');
+    var editedCanvas = document.querySelector('#automation-builder [data-automation-draft-canvas]');
+    if (!editedCanvas) fail('Edit automation did not render the custom canvas');
+    click('#automation-builder [data-automation-add-node-open]', 'Add node after Edit automation');
+    var editedNodeDialog = document.querySelector('#automation-builder [data-automation-node-dialog]');
+    if (!editedNodeDialog || !editedNodeDialog.open) fail('Add node is inoperable after the Edit automation HTMX transition');
+    editedNodeDialog.close();
+    await report('progress', 'edit-automation-builder-operable');
 
 	    await window.openVibelyNavigate('/automations/automation-blank/drafts/version-blank?project_id=project-browser');
 	    await waitFor(function() { return !!document.querySelector('[data-automation-add-first-node]'); }, 'empty Blank Automation canvas');
@@ -377,6 +389,8 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>%s</script>%s%s</head><body><main id="main-content" hx-history-elt>%s</main></body></html>`, navigationScript, style, runner, fragment)
 		case "/automations/automation-a":
 			_, _ = w.Write([]byte(renderLive("automation-a", "Automation A")))
+		case "/automations/automation-a/drafts":
+			_, _ = w.Write([]byte(renderBlankBuilder(true)))
 		case "/automations/automation-a/history":
 			_, _ = w.Write([]byte(renderHistory("automation-a", "Automation A")))
 		case "/automations/automation-a/definition":
