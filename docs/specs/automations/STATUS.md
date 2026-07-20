@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-The strict-audit repair is implemented and fully validated at checkpoint `d023f0e`, with status reconciliation at `8dad69b`. The authoritative managed memory is semantically current. A follow-up graph interaction repair now makes the SVG drag preview actually render in Chrome and removes the selected-edge bounding outline while preserving deletion and reconnection; it is fully validated and awaiting its clean checkpoint before the separate qualifying read-only full-objective audit.
+The qualifying strict read-only audit of checkpoint `f3d0524` failed on four material contracts: work-item counter deduplication, cached/rate-limited GitHub reconciliation and freshness, complete native node-resource destinations, and pause/resume/archive/delete observability. Regression-first repairs for all four are implemented and fully validated; the repair checkpoint and a separate fresh edit-free full-objective audit remain.
 
 ## Status
 
-Phases 1-4, graph-editor UX repairs, Definition of Done safety repairs, connector preview, Blank publication semantics, public Chat identity, node-resource pagination, and Automation observability are checkpointed through `8dad69b`. Checkpoint `d023f0e` preserves strict draft schema identity, adds project-scoped Agent/skill/source-file task configuration through validation/builder/planning/compilation, adds set-based portfolio operational summaries and health reasons, makes described-draft GitHub readiness connection-accurate, and adds reduced-motion-safe running-node animation. The follow-up connector visibility and selected-edge presentation repair passes focused Chrome, Automation-wide, build, and full repository validation; its checkpoint and the separate strict audit remain.
+Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `f3d0524`. The current repair deduplicates Live and portfolio counters by work-item identity, adds explicit persisted GitHub PR refresh/freshness without provider calls from graph reads, resolves every supported resource to its real native/GitHub detail destination, and records successful lifecycle mutations through safe Automation observability. Confirmed publication continues to compile registered adapter task nodes and trigger schedules into ordinary visible OpenVibely tasks/schedules; runtime notifications, implementation tasks, issues, PRs, reviews, goals, executions, and Workflow executions remain authoritative existing-domain resources projected onto the graph through explicit provenance.
 
 ## Phase 4 Checklist
 
@@ -478,12 +478,12 @@ Phases 1-4, graph-editor UX repairs, Definition of Done safety repairs, connecto
 - Full repository validation passed: `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`; every package passed and desktop emitted only the documented non-failing newer-SDK linker warning.
 - Fresh diff audit confirmed the preview is painted after durable edge groups and before node groups, carries `pointer-events: none`, uses a non-scaling 4px primary stroke and primary arrowhead, and is cleared through the existing drop/cancel/HTMX cleanup path.
 - The change is presentation and browser coverage only. It adds no persistence/runtime behavior, generic graph executor, parallel task/worker/queue/Workflow/Alert/GitHub system, Register Existing, legacy detection, heuristic inference, migration of old resources, confidence scoring, or graph backfill.
-- Remaining work: create the clean connector-preview checkpoint, then perform the required separate read-only full-objective audit.
+- Checkpoint `f3d0524` completed the connector-preview repair; its subsequent qualifying full-objective audit produced the four findings tracked in the current repair section.
 
 ## Open Findings Or Blockers
 
-- No known code, test, build, identity, or exclusion blocker remains after the strict-audit repair.
-- The qualifying read-only audit is blocked only by stale authoritative `automation_graphs.md` managed memory and the absence of an authorized memory mutation tool in this turn. A tracked counterpart does not exist.
+- No known code, test, build, managed-memory semantic, identity, or exclusion blocker remains after the current strict-audit repair.
+- The required separate edit-free full-objective audit remains and must run from the clean repair checkpoint before completion is claimed.
 
 ## Reopened Full-Objective Audit Repair
 
@@ -580,15 +580,43 @@ Phases 1-4, graph-editor UX repairs, Definition of Done safety repairs, connecto
 
 ### Remaining Work
 
-- Create the clean connector-rendering checkpoint, then perform the separate qualifying strict read-only audit from that immutable state.
+- Checkpoint `f3d0524` completed this connector-rendering repair. The later qualifying audit failed on the four separate contracts documented below.
+
+## Reopened `f3d0524` Full-Objective Audit Repair
+
+### Contract Checklist
+
+- [x] Deduplicate Live and portfolio running, waiting-human, blocked, failed, and recently-completed counters by work-item identity across activities, positions, and transitions while retaining invocation-only activity identity.
+- [x] Add an explicit bounded GitHub PR refresh service with a persisted one-minute cache, 20-resource limit, no retry on provider/rate-limit errors, local freshness/staleness, merged and closed projection reconciliation, and no GitHub calls from ordinary graph reads.
+- [x] Resolve task, execution, Alert, goal, Workflow execution, GitHub issue, PR, and review resources to actual native detail destinations with project-scoped Alert and goal navigation.
+- [x] Emit safe exact-once process-local Automation lifecycle events/counters after successful pause, resume, archive, and delete commits, with no success event on failed mutation.
+- [x] Refresh tracked external state through the explicit cached POST endpoint when a hidden Live tab becomes visible; retain the local GET fallback for graphs without tracked external resources.
+- [x] Run generation, formatting, focused regressions, build, internal tests, and the uncached full repository suite.
+- [ ] Create the clean repair checkpoint, then perform the required separate edit-free audit against all four phases, all 17 Definition of Done items, identity boundaries, and exclusions.
+
+### Resource And Execution Semantics
+
+- Draft creation, editing, and validation remain inert. Confirmed publication plans and compiles only registered adapter effects through existing services.
+- Publication creates or reuses the adapter's fixed visible OpenVibely task nodes and trigger schedules. `TestAutomationPublicationPlanIsDeterministicAndCompilerIsIdempotent` proves real task/schedule creation and retry idempotency; stale-plan coverage proves no resources are created before valid confirmation.
+- Dynamic Implementation nodes represent ordinary implementation tasks created by the existing Alert/GitHub runtime tools after approval or assignment. They are not a hidden graph task type. Existing Native/GitHub runtime tests prove those tasks, executions, issues, PRs, and transitions retain authoritative domain state and explicit Automation provenance.
+- Automation edges remain adapter-owned topology and projection only; no generic edge interpreter, worker pool, task queue, Workflow engine, Alert system, or GitHub subsystem was added.
+
+### Validation Evidence
+
+- Regression-first destination and visible-tab tests failed against the pre-repair implementation on missing project/goal destinations and missing explicit visibility reconciliation, then passed after the focused repairs.
+- Focused service and handler regressions pass for exact operational counts, explicit cached/rate-limit refresh, merged-state parsing and projection, every supported resource destination, visible-tab refresh, and exact lifecycle observability.
+- `templ generate`, `gofmt`, `git diff --check`, and `go build ./...` pass. Desktop build emits only the known non-failing newer-macOS-SDK linker warnings.
+- `go test ./internal/... -count=1 -timeout 120s` passes.
+- `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passes every package, including the production Chrome graph regression.
+- The authoritative `automation_graphs.md` managed view records the four repaired audit contracts, explicit persisted Automation identity, exclusions, and the separate audit as the only remaining action. No tracked `.openvibely/memories/automation_graphs.md` counterpart exists.
 
 ## Remaining Phases
 
-- Create the clean connector-rendering checkpoint, then perform the separate qualifying strict read-only full-objective audit against the immutable checkpoint.
+- Create the clean `f3d0524` strict-audit repair checkpoint, then perform the separate qualifying strict read-only full-objective audit against that immutable checkpoint.
 
 ## Exact Next Action
 
-Create the clean connector-rendering checkpoint, then begin a separate edit-free audit of all four phases, all 17 Definition of Done items, explicit Automation identity, and every exclusion.
+Create the clean `f3d0524` strict-audit repair checkpoint, then begin a separate edit-free audit of all four phases, all 17 Definition of Done items, explicit Automation identity, and every exclusion.
 
 ## Update Contract
 

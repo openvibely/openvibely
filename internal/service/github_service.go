@@ -71,6 +71,7 @@ type GitHubPullRequest struct {
 	Number           int
 	URL              string
 	State            string
+	Merged           bool
 	HeadRef          string
 	HeadRepoFullName string
 }
@@ -1213,6 +1214,7 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 		Number int    `json:"number"`
 		URL    string `json:"html_url"`
 		State  string `json:"state"`
+		Merged bool   `json:"merged"`
 		Head   struct {
 			Ref  string `json:"ref"`
 			Repo struct {
@@ -1223,7 +1225,7 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 	if err := s.doGitHubJSON(req, &pr); err != nil {
 		return nil, err
 	}
-	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, State: pr.State, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName}, nil
+	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, State: pr.State, Merged: pr.Merged, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName}, nil
 }
 
 func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {

@@ -62,6 +62,7 @@ func TestAutomationPublicationPlanIsDeterministicAndCompilerIsIdempotent(t *test
 }
 
 func TestAutomationPublicationRejectsStalePlanAndLifecycleTouchesOwnedTriggersOnly(t *testing.T) {
+	automationobs.ResetForTest()
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)
 	project := automationTestProject(t, projectRepo, "Lifecycle")
@@ -115,9 +116,14 @@ func TestAutomationPublicationRejectsStalePlanAndLifecycleTouchesOwnedTriggersOn
 	require.NoError(t, err)
 	require.Nil(t, owner, "archive must release exclusive trigger ownership after disabling it")
 	require.ErrorContains(t, lifecycle.Resume(context.Background(), project.ID, created.Definition.Automation.ID), "archived")
+	metrics := automationobs.Snapshot()
+	require.Equal(t, uint64(1), metrics["automation.lifecycle.paused"].Count)
+	require.Equal(t, uint64(1), metrics["automation.lifecycle.resumed"].Count)
+	require.Equal(t, uint64(1), metrics["automation.lifecycle.archived"].Count)
 }
 
 func TestAutomationDeleteDisablesOwnedTriggersAndRemovesOnlyAutomationRecords(t *testing.T) {
+	automationobs.ResetForTest()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(db)
@@ -170,6 +176,8 @@ func TestAutomationDeleteDisablesOwnedTriggersAndRemovesOnlyAutomationRecords(t 
 	owner, err := automationRepo.GetTriggerOwner(ctx, schedule.ID)
 	require.NoError(t, err)
 	require.Nil(t, owner)
+	metrics := automationobs.Snapshot()
+	require.Equal(t, uint64(1), metrics["automation.lifecycle.deleted"].Count)
 }
 
 func tableCountWhere(t *testing.T, db *sql.DB, table, column, value string) int {

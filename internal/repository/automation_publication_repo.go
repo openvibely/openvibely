@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -528,6 +529,15 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 		return err
 	}
 	committed = true
+	eventName := "automation.lifecycle.resumed"
+	if state == models.AutomationPaused {
+		eventName = "automation.lifecycle.paused"
+	} else if state == models.AutomationArchived {
+		eventName = "automation.lifecycle.archived"
+	}
+	automationobs.Event(eventName,
+		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+		automationobs.String("version_id", published.String), automationobs.String("state", string(state)))
 	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: published.String})
 	return nil
 }
@@ -588,6 +598,9 @@ func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automa
 		return err
 	}
 	committed = true
+	automationobs.Event("automation.lifecycle.deleted",
+		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+		automationobs.String("version_id", versionID.String), automationobs.String("state", "deleted"))
 	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: versionID.String})
 	return nil
 }

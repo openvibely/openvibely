@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
@@ -76,6 +78,9 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.NotContains(t, detail.Body.String(), "fill-base-content")
 	require.NotContains(t, detail.Body.String(), "fill-base-200")
 	require.Contains(t, detail.Body.String(), "sse-automation-event")
+	require.Contains(t, detail.Body.String(), `document.addEventListener('visibilitychange'`)
+	require.Contains(t, detail.Body.String(), `htmx.trigger(root, 'automation-visible')`, "returning to a visible tab must immediately refetch the local projection")
+	require.Contains(t, detail.Body.String(), `htmx.ajax('POST', root.dataset.externalRefreshUrl`, "visible-tab reconciliation must use the explicit cached external refresh endpoint")
 	require.Contains(t, detail.Body.String(), `aria-label="Automation views"`)
 	require.Contains(t, detail.Body.String(), `data-automation-view="live"`)
 	require.Contains(t, detail.Body.String(), `aria-selected="true"`)
@@ -198,6 +203,110 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 
 	foreign := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, other.ID)).Execute()
 	require.Equal(t, 404, foreign.Code)
+}
+
+func TestAutomationNodeResourcesResolveEverySupportedDetailDestination(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Node Resource Destinations").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
+
+	task := models.Task{ProjectID: project.ID, Title: "Resource task", Category: models.CategoryScheduled, Priority: 2, Status: models.StatusPending, Prompt: "private"}
+	require.NoError(t, tc.taskRepo.Create(ctx, &task))
+	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, tc.scheduleRepo.Create(ctx, &schedule))
+	definition, _, err := registration.Register(ctx, service.AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: service.AutomationAdapterNativeSDLC, StableKey: "native/destinations", Resources: []models.AutomationResourceBinding{
+		{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: schedule.ID},
+		{NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: task.ID},
+	}})
+	require.NoError(t, err)
+	var producer models.AutomationNode
+	for _, node := range definition.Nodes {
+		if node.NodeKey == "suggestion_producer" {
+			producer = node
+			break
+		}
+	}
+	require.NotEmpty(t, producer.ID)
+
+	execution := models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "private"}
+	require.NoError(t, tc.execRepo.Create(ctx, &execution))
+	alert := models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "Exact alert", Source: "test"}
+	require.NoError(t, tc.alertRepo.Create(ctx, &alert))
+	_, err = tc.db.ExecContext(ctx, `INSERT INTO task_goals (task_id, goal_id, objective, status) VALUES (?, 'goal-destination', 'private', 'active')`, task.ID)
+	require.NoError(t, err)
+	var workflowID, workflowExecutionID string
+	require.NoError(t, tc.db.QueryRowContext(ctx, `INSERT INTO workflows (project_id, name) VALUES (?, 'Destination workflow') RETURNING id`, project.ID).Scan(&workflowID))
+	require.NoError(t, tc.db.QueryRowContext(ctx, `INSERT INTO workflow_executions (workflow_id, task_id) VALUES (?, ?) RETURNING id`, workflowID, task.ID).Scan(&workflowExecutionID))
+
+	binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: producer.ID}
+	_, _, err = automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "resource-destinations:item", ActivityKey: "resource-destinations", ActivityType: "test", ActivityStatus: models.AutomationActivityRunning,
+		Resources: []models.AutomationActivityResource{
+			{ResourceType: "task", ResourceID: task.ID},
+			{ResourceType: "execution", ResourceID: execution.ID},
+			{ResourceType: "alert", ResourceID: alert.ID},
+			{ResourceType: "goal", ResourceID: task.ID},
+			{ResourceType: "workflow_execution", ResourceID: workflowExecutionID},
+			{ResourceType: "github_issue", ResourceID: "github:example/runtime:issue:6"},
+			{ResourceType: "pull_request", ResourceID: "github:example/runtime:pull:7"},
+			{ResourceType: "review", ResourceID: "github:example/runtime:review:7:99"},
+		},
+	})
+	require.NoError(t, err)
+	project.RepoURL = "https://github.com/example/runtime"
+	require.NoError(t, tc.projectRepo.Update(ctx, project))
+	pullRequests := repository.NewTaskPullRequestRepo(tc.db)
+	pull := models.TaskPullRequest{TaskID: task.ID, PRNumber: 7, PRURL: "https://github.com/example/runtime/pull/7", PRState: "open"}
+	require.NoError(t, pullRequests.Upsert(ctx, &pull))
+	staleAt := time.Now().UTC().Add(-time.Hour).Format("2006-01-02 15:04:05")
+	_, err = tc.db.ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = datetime(?) WHERE id = ?`, staleAt, pull.ID)
+	require.NoError(t, err)
+	refreshCalls := 0
+	github := &fakeGitHubService{
+		resolveRepoFn: func(context.Context, string, string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			refreshCalls++
+			return &service.GitHubPullRequest{Number: 7, URL: pull.PRURL, State: "open"}, nil
+		},
+	}
+	tc.handler.SetAutomationExternalStateService(service.NewAutomationExternalStateService(automationRepo, pullRequests, tc.projectRepo, github))
+
+	response := tc.HTMX().Get(fmt.Sprintf("/automations/%s/nodes/%s/resources?project_id=%s", definition.Automation.ID, producer.ID, project.ID)).Execute()
+	require.Equal(t, http.StatusOK, response.Code)
+	body := html.UnescapeString(response.Body.String())
+	for _, destination := range []string{
+		"/tasks/" + task.ID,
+		"/executions/" + execution.ID,
+		"/alerts?project_id=" + url.QueryEscape(project.ID) + "&alert_id=" + url.QueryEscape(alert.ID),
+		"/tasks/" + task.ID + "?project_id=" + url.QueryEscape(project.ID) + "#task-goal-panel",
+		"/workflows/executions/" + workflowExecutionID,
+		"https://github.com/example/runtime/issues/6",
+		"https://github.com/example/runtime/pull/7",
+		"https://github.com/example/runtime/pull/7#pullrequestreview-99",
+	} {
+		require.Contains(t, body, destination)
+	}
+	alertDetail := tc.HTTP().Get("/alerts?project_id=" + project.ID + "&alert_id=" + alert.ID).Execute()
+	require.Equal(t, http.StatusOK, alertDetail.Code)
+	require.Contains(t, alertDetail.Body.String(), "Exact alert")
+	require.Equal(t, 1, strings.Count(alertDetail.Body.String(), `data-alert-id="`), "alert detail destination must resolve one exact project-scoped notification")
+
+	live := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, project.ID)).Execute()
+	require.Equal(t, http.StatusOK, live.Code)
+	require.Contains(t, live.Body.String(), `data-automation-external-state`)
+	require.Contains(t, live.Body.String(), `data-external-refresh-url="/automations/`+definition.Automation.ID+`/refresh-external?project_id=`+project.ID+`"`)
+	require.Contains(t, live.Body.String(), ">Stale<")
+	require.Contains(t, live.Body.String(), "Refresh GitHub state")
+	refreshed := tc.HTMX().Post(fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", definition.Automation.ID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	require.Equal(t, http.StatusOK, refreshed.Code)
+	require.Equal(t, 1, refreshCalls)
+	require.Contains(t, refreshed.Body.String(), ">Fresh<")
 }
 
 func TestAutomationNodeResourcesUseStableBoundedPagination(t *testing.T) {

@@ -946,7 +946,11 @@ func validateAutomationActivityResource(ctx context.Context, exec SQLExecutor, p
 
 func validateCanonicalGitHubResourceID(resourceType, resourceID string) error {
 	parts := strings.Split(resourceID, ":")
-	if len(parts) != 4 || parts[0] != "github" || !strings.Contains(parts[1], "/") {
+	expectedParts := 4
+	if resourceType == "review" {
+		expectedParts = 5
+	}
+	if len(parts) != expectedParts || parts[0] != "github" || !strings.Contains(parts[1], "/") {
 		return fmt.Errorf("%s resource identity must be canonical and repository-qualified", resourceType)
 	}
 	expectedKind := "issue"
@@ -961,6 +965,12 @@ func validateCanonicalGitHubResourceID(resourceType, resourceID string) error {
 	number, err := strconv.Atoi(parts[3])
 	if err != nil || number < 1 {
 		return fmt.Errorf("%s resource identity has invalid number", resourceType)
+	}
+	if resourceType == "review" {
+		reviewID, reviewErr := strconv.Atoi(parts[4])
+		if reviewErr != nil || reviewID < 1 {
+			return fmt.Errorf("review resource identity has invalid review id")
+		}
 	}
 	repoParts := strings.Split(parts[1], "/")
 	if len(repoParts) != 2 || !githubResourceNamePattern.MatchString(repoParts[0]) ||
@@ -1094,96 +1104,64 @@ func appendAutomationTransition(ctx context.Context, exec SQLExecutor, in Automa
 }
 
 func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automationID, versionID string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, int, int, error) {
-	counts := make(map[string]models.AutomationNodeCounts)
-	rows, err := r.db.QueryContext(ctx, `SELECT node_id,
-		SUM(CASE WHEN status IN ('pending','running') THEN 1 ELSE 0 END),
-		SUM(CASE WHEN status = 'waiting' THEN 1 ELSE 0 END),
-		0,
-		SUM(CASE WHEN status = 'completed' AND completed_at >= ? THEN 1 ELSE 0 END)
-		FROM automation_activities WHERE project_id = ? AND automation_id = ? AND version_id = ?
-		GROUP BY node_id`, recentCutoff.UTC(), projectID, automationID, versionID)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	for rows.Next() {
-		var nodeID string
-		var value models.AutomationNodeCounts
-		if err := rows.Scan(&nodeID, &value.Running, &value.Waiting, &value.Failed, &value.CompletedRecently); err != nil {
-			_ = rows.Close()
-			return nil, 0, 0, err
-		}
-		counts[nodeID] = value
-	}
-	if err := rows.Close(); err != nil {
-		return nil, 0, 0, err
-	}
-	positionRows, err := r.db.QueryContext(ctx, `SELECT node_id,
-		SUM(CASE WHEN state = 'waiting' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END)
-		FROM automation_work_item_positions WHERE project_id = ? AND automation_id = ? AND version_id = ?
-		GROUP BY node_id`, projectID, automationID, versionID)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	for positionRows.Next() {
-		var nodeID string
-		var waiting, blocked int
-		if err := positionRows.Scan(&nodeID, &waiting, &blocked); err != nil {
-			_ = positionRows.Close()
-			return nil, 0, 0, err
-		}
-		value := counts[nodeID]
-		value.Waiting += waiting
-		value.Blocked += blocked
-		counts[nodeID] = value
-	}
-	if err := positionRows.Close(); err != nil {
-		return nil, 0, 0, err
-	}
-	failedRows, err := r.db.QueryContext(ctx, `SELECT node_id, COUNT(*) FROM (
-		SELECT node_id, CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END AS failure_key
+	rows, err := r.db.QueryContext(ctx, `WITH operational_state AS (
+		SELECT node_id, 'running' AS state,
+			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END AS state_key
+		FROM automation_activities
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND status IN ('pending','running')
+		UNION
+		SELECT node_id, 'waiting',
+			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
+		FROM automation_activities
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND status = 'waiting'
+		UNION
+		SELECT node_id, 'failed',
+			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
 		FROM automation_activities
 		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND status = 'failed'
 		UNION
-		SELECT node_id, 'work:' || work_item_id AS failure_key
+		SELECT node_id, 'recent',
+			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
+		FROM automation_activities
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND status = 'completed' AND completed_at >= ?
+		UNION
+		SELECT node_id,
+			CASE state WHEN 'active' THEN 'running' WHEN 'waiting' THEN 'waiting' WHEN 'blocked' THEN 'blocked' WHEN 'failed' THEN 'failed' END,
+			'work:' || work_item_id
 		FROM automation_work_item_positions
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state = 'failed'
-	) GROUP BY node_id`, projectID, automationID, versionID, projectID, automationID, versionID)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	for failedRows.Next() {
-		var nodeID string
-		var failed int
-		if err := failedRows.Scan(&nodeID, &failed); err != nil {
-			_ = failedRows.Close()
-			return nil, 0, 0, err
-		}
-		value := counts[nodeID]
-		value.Failed = failed
-		counts[nodeID] = value
-	}
-	if err := failedRows.Close(); err != nil {
-		return nil, 0, 0, err
-	}
-	transitionRows, err := r.db.QueryContext(ctx, `SELECT to_node_id, COUNT(*) FROM automation_transitions
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state IN ('active','waiting','blocked','failed')
+		UNION
+		SELECT to_node_id, 'recent', 'work:' || work_item_id
+		FROM automation_transitions
 		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state = 'completed' AND occurred_at >= ?
-		GROUP BY to_node_id`, projectID, automationID, versionID, recentCutoff.UTC())
+	)
+	SELECT node_id,
+		SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN state = 'waiting' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN state = 'recent' THEN 1 ELSE 0 END)
+	FROM operational_state GROUP BY node_id`,
+		projectID, automationID, versionID,
+		projectID, automationID, versionID,
+		projectID, automationID, versionID,
+		projectID, automationID, versionID, recentCutoff.UTC(),
+		projectID, automationID, versionID,
+		projectID, automationID, versionID, recentCutoff.UTC())
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	for transitionRows.Next() {
+	defer rows.Close()
+	counts := make(map[string]models.AutomationNodeCounts)
+	for rows.Next() {
 		var nodeID string
-		var completed int
-		if err := transitionRows.Scan(&nodeID, &completed); err != nil {
-			_ = transitionRows.Close()
+		var value models.AutomationNodeCounts
+		if err := rows.Scan(&nodeID, &value.Running, &value.Waiting, &value.Blocked, &value.Failed, &value.CompletedRecently); err != nil {
 			return nil, 0, 0, err
 		}
-		value := counts[nodeID]
-		value.CompletedRecently += completed
 		counts[nodeID] = value
 	}
-	if err := transitionRows.Close(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, 0, 0, err
 	}
 	var activeInvocations, activeWorkItems int
@@ -1215,7 +1193,8 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 		FROM automation_activities
 		WHERE project_id = ? AND status = 'failed'
 		UNION
-		SELECT automation_id, 'recent', 'activity:' || id
+		SELECT automation_id, 'recent',
+			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
 		FROM automation_activities
 		WHERE project_id = ? AND status = 'completed' AND completed_at >= ?
 		UNION
@@ -1225,7 +1204,7 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 		FROM automation_work_item_positions
 		WHERE project_id = ? AND state IN ('active','waiting','blocked','failed')
 		UNION
-		SELECT automation_id, 'recent', 'transition:' || id
+		SELECT automation_id, 'recent', 'work:' || work_item_id
 		FROM automation_transitions
 		WHERE project_id = ? AND state = 'completed' AND occurred_at >= ?
 	)
@@ -1400,6 +1379,91 @@ func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID 
 		return "", ErrAutomationExternalReconciliation
 	}
 	return "", nil
+}
+
+func (r *AutomationRepo) ListAutomationPullRequests(ctx context.Context, projectID, automationID string, limit int) ([]models.TaskPullRequest, error) {
+	if limit <= 0 || limit > 20 {
+		limit = 20
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT pr.id, pr.task_id, pr.pr_number, pr.pr_url, pr.pr_state,
+		pr.issue_number, pr.issue_url, pr.created_at, pr.updated_at
+		FROM task_pull_requests pr
+		JOIN tasks t ON t.id = pr.task_id
+		WHERE t.project_id = ? AND EXISTS (
+			SELECT 1 FROM automation_activities a
+			JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
+				AND task_resource.resource_type = 'task' AND task_resource.resource_id = pr.task_id
+			JOIN automation_activity_resources pull_resource ON pull_resource.activity_id = a.id
+				AND pull_resource.resource_type = 'pull_request'
+			WHERE a.project_id = ? AND a.automation_id = ?
+		)
+		ORDER BY pr.updated_at, pr.id LIMIT ?`, projectID, projectID, automationID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []models.TaskPullRequest
+	for rows.Next() {
+		var pull models.TaskPullRequest
+		if err := rows.Scan(&pull.ID, &pull.TaskID, &pull.PRNumber, &pull.PRURL, &pull.PRState,
+			&pull.IssueNumber, &pull.IssueURL, &pull.CreatedAt, &pull.UpdatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, pull)
+	}
+	return result, rows.Err()
+}
+
+func (r *AutomationRepo) AutomationExternalState(ctx context.Context, projectID, automationID string, staleBefore time.Time) (models.AutomationExternalState, error) {
+	var count int
+	var oldest sql.NullString
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*), datetime(MIN(pr.updated_at))
+		FROM task_pull_requests pr
+		JOIN tasks t ON t.id = pr.task_id
+		WHERE t.project_id = ? AND EXISTS (
+			SELECT 1 FROM automation_activities a
+			JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
+				AND task_resource.resource_type = 'task' AND task_resource.resource_id = pr.task_id
+			JOIN automation_activity_resources pull_resource ON pull_resource.activity_id = a.id
+				AND pull_resource.resource_type = 'pull_request'
+			WHERE a.project_id = ? AND a.automation_id = ?
+		)`, projectID, projectID, automationID).Scan(&count, &oldest)
+	if err != nil {
+		return models.AutomationExternalState{}, err
+	}
+	state := models.AutomationExternalState{TrackedResources: count}
+	if oldest.Valid {
+		updated := parseSQLiteTime(oldest.String)
+		if updated.IsZero() {
+			return models.AutomationExternalState{}, fmt.Errorf("invalid Automation external update time")
+		}
+		state.LastUpdatedAt = &updated
+		state.Stale = updated.Before(staleBefore.UTC())
+	}
+	return state, nil
+}
+
+func (r *AutomationRepo) BindingsForActivityResource(ctx context.Context, projectID, automationID, resourceType, resourceID string) (models.AutomationContext, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT a.automation_id, a.version_id, COALESCE(a.invocation_id, ''),
+		a.node_id, COALESCE(a.work_item_id, '')
+		FROM automation_activities a
+		JOIN automation_activity_resources ar ON ar.activity_id = a.id
+		WHERE a.project_id = ? AND a.automation_id = ? AND ar.resource_type = ? AND ar.resource_id = ?
+			AND a.work_item_id IS NOT NULL
+		ORDER BY a.version_id, a.node_id, a.work_item_id`, projectID, automationID, resourceType, resourceID)
+	if err != nil {
+		return models.AutomationContext{}, err
+	}
+	defer rows.Close()
+	result := models.AutomationContext{ProjectID: projectID}
+	for rows.Next() {
+		var binding models.AutomationBinding
+		if err := rows.Scan(&binding.AutomationID, &binding.VersionID, &binding.InvocationID, &binding.NodeID, &binding.WorkItemID); err != nil {
+			return models.AutomationContext{}, err
+		}
+		result.Bindings = append(result.Bindings, binding)
+	}
+	return result, rows.Err()
 }
 
 func (r *AutomationRepo) FindActivityResource(ctx context.Context, projectID string, binding models.AutomationBinding, activityKey, resourceType string) (string, error) {
@@ -1616,7 +1680,7 @@ func (r *AutomationRepo) ListNodeRuntimeResources(ctx context.Context, projectID
 			&value.Relation, &value.Name, &value.Status, &value.UpdatedAt, &linkID); err != nil {
 			return models.AutomationNodeResourcePage{}, err
 		}
-		value.URL = automationRuntimeResourceURL(value.ResourceType, value.ResourceID)
+		value.URL = automationRuntimeResourceURL(projectID, value.ResourceType, value.ResourceID)
 		page.Items = append(page.Items, value)
 		linkIDs = append(linkIDs, linkID)
 	}
@@ -1630,26 +1694,36 @@ func (r *AutomationRepo) ListNodeRuntimeResources(ctx context.Context, projectID
 	return page, nil
 }
 
-func automationRuntimeResourceURL(resourceType, resourceID string) string {
+func automationRuntimeResourceURL(projectID, resourceType, resourceID string) string {
 	switch resourceType {
 	case "task":
-		return "/tasks/" + resourceID
+		return "/tasks/" + url.PathEscape(resourceID)
 	case "execution":
-		return "/tasks?execution_id=" + resourceID
+		return "/executions/" + url.PathEscape(resourceID)
 	case "alert":
-		return "/alerts"
-	case "github_issue", "pull_request":
+		return "/alerts?project_id=" + url.QueryEscape(projectID) + "&alert_id=" + url.QueryEscape(resourceID)
+	case "goal":
+		return "/tasks/" + url.PathEscape(resourceID) + "?project_id=" + url.QueryEscape(projectID) + "#task-goal-panel"
+	case "workflow_execution":
+		return "/workflows/executions/" + url.PathEscape(resourceID)
+	case "github_issue", "pull_request", "review":
 		parts := strings.Split(resourceID, ":")
 		repositoryParts := []string(nil)
-		if len(parts) == 4 && parts[0] == "github" {
+		if len(parts) >= 4 && parts[0] == "github" {
 			repositoryParts = strings.Split(parts[1], "/")
 		}
 		if len(repositoryParts) == 2 {
-			segment := "issues"
-			if resourceType == "pull_request" || parts[2] == "pull" {
-				segment = "pull"
+			base := "https://github.com/" + url.PathEscape(repositoryParts[0]) + "/" + url.PathEscape(repositoryParts[1])
+			switch resourceType {
+			case "github_issue":
+				return base + "/issues/" + url.PathEscape(parts[3])
+			case "pull_request":
+				return base + "/pull/" + url.PathEscape(parts[3])
+			case "review":
+				if len(parts) == 5 {
+					return base + "/pull/" + url.PathEscape(parts[3]) + "#pullrequestreview-" + url.PathEscape(parts[4])
+				}
 			}
-			return "https://github.com/" + url.PathEscape(repositoryParts[0]) + "/" + url.PathEscape(repositoryParts[1]) + "/" + segment + "/" + url.PathEscape(parts[3])
 		}
 	}
 	return ""

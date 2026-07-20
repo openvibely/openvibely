@@ -43,6 +43,7 @@ type Handler struct {
 	automationCompiler         *service.AutomationCompiler
 	automationConfirmationSvc  *service.AutomationConfirmationService
 	automationLifecycleSvc     *service.AutomationLifecycleService
+	automationExternalStateSvc *service.AutomationExternalStateService
 	llmConfigRepo              *repository.LLMConfigRepo
 	taskRepo                   *repository.TaskRepo
 	scheduleRepo               *repository.ScheduleRepo
@@ -115,6 +116,7 @@ type GitHubServiceProvider interface {
 	DefaultBranch(ctx context.Context, repo *service.GitHubRepoRef) (string, error)
 	PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error
 	FindPullRequestByBranch(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
+	GetPullRequest(ctx context.Context, repo *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
 	CreateIssue(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error)
@@ -567,6 +569,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/automations/:automationId/drafts/:versionId/publish", h.PublishAutomationDraftWeb)
 	e.POST("/automations/:automationId/pause", h.PauseAutomation)
 	e.POST("/automations/:automationId/resume", h.ResumeAutomation)
+	e.POST("/automations/:automationId/refresh-external", h.RefreshAutomationExternalState)
 	e.POST("/automations/:automationId/delete", h.DeleteAutomation)
 	e.GET("/automations/:automationId", h.GetAutomationLive)
 	e.GET("/automations/:automationId/history", h.GetAutomationHistory)

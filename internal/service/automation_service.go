@@ -132,6 +132,11 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 	return definition, created, returnErr
 }
 
+const (
+	automationExternalRefreshCache = time.Minute
+	automationExternalStaleAfter   = 15 * time.Minute
+)
+
 type AutomationGraphService struct{ repo *repository.AutomationRepo }
 
 func NewAutomationGraphService(repo *repository.AutomationRepo) *AutomationGraphService {
@@ -222,9 +227,13 @@ func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automat
 	if err != nil {
 		return nil, err
 	}
+	externalState, err := s.repo.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-automationExternalStaleAfter))
+	if err != nil {
+		return nil, err
+	}
 	graph := &models.AutomationLiveGraph{Automation: definition.Automation, Version: definition.Version,
 		Resources: resources, ActiveInvocations: activeInvocations,
-		ActiveWorkItems: activeWorkItems, RecentCutoff: cutoff, LegacyWork: legacyWork}
+		ActiveWorkItems: activeWorkItems, RecentCutoff: cutoff, ExternalState: externalState, LegacyWork: legacyWork}
 	for _, edge := range definition.Edges {
 		values := edgeCounts[edge.ID]
 		graph.Edges = append(graph.Edges, models.AutomationLiveEdge{AutomationEdge: edge,

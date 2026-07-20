@@ -605,6 +605,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.GitHubAppPrivateKey,
 		cfg.ProjectRepoRoot,
 	)
+	automationExternalStateSvc := service.NewAutomationExternalStateService(automationRepo, taskPullRequestRepo, projectRepo, githubSvc)
 	automationPlanner.SetGitHubConnectionProvider(githubSvc)
 	automationCapabilitySvc.SetGitHubConnectionProvider(githubSvc)
 	llmSvc.SetGitHubIssueRuntimeProvider(githubSvc)
@@ -916,6 +917,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetExecutionStreamHub(executionStreamHub)
 	h.SetTaskGoalService(taskGoalSvc)
 	h.SetAutomationServices(automationGraphSvc, automationRegistrationSvc)
+	h.SetAutomationExternalStateService(automationExternalStateSvc)
 	h.SetAutomationBuilderServices(automationDraftSvc, automationCapabilitySvc, automationPlanner, automationCompiler, automationConfirmationSvc, automationLifecycleSvc)
 	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)

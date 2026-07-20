@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -1039,9 +1040,11 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 		activity   models.AutomationActivityStatus
 	}{
 		{key: "running", transition: models.AutomationTransitionEntered, activity: models.AutomationActivityRunning},
-		{key: "waiting", transition: models.AutomationTransitionWaiting, activity: models.AutomationActivityCompleted},
+		{key: "position-only-running", transition: models.AutomationTransitionEntered, activity: models.AutomationActivityCompleted},
+		{key: "waiting", transition: models.AutomationTransitionWaiting, activity: models.AutomationActivityWaiting},
 		{key: "blocked", transition: models.AutomationTransitionBlocked, activity: models.AutomationActivityCompleted},
 		{key: "failed", transition: models.AutomationTransitionFailed, activity: models.AutomationActivityFailed},
+		{key: "completed", transition: models.AutomationTransitionCompleted, activity: models.AutomationActivityCompleted},
 	}
 	for _, tc := range cases {
 		_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
@@ -1066,20 +1069,101 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 		if node.ID != approval.ID {
 			continue
 		}
-		require.Greater(t, node.Counts.Running, 0)
-		require.Greater(t, node.Counts.Waiting, 0)
-		require.Greater(t, node.Counts.Blocked, 0)
+		require.Equal(t, 2, node.Counts.Running, "running work must include active positions and deduplicate matching activities")
+		require.Equal(t, 1, node.Counts.Waiting, "one waiting work item must not count once as an activity and again as a position")
+		require.Equal(t, 1, node.Counts.Blocked)
 		require.Equal(t, 2, node.Counts.Failed, "one failed work item must count once while an invocation-only failure remains visible")
+		require.Equal(t, 3, node.Counts.CompletedRecently, "one completed work item must not count once as an activity and again as a transition")
 		require.Equal(t, "failed", node.DisplayState)
 	}
 	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
-	require.Greater(t, cards[0].Counts.Running, 0)
-	require.Greater(t, cards[0].Counts.Waiting, 0)
-	require.Greater(t, cards[0].Counts.Blocked, 0)
+	require.Equal(t, 2, cards[0].Counts.Running)
+	require.Equal(t, 1, cards[0].Counts.Waiting)
+	require.Equal(t, 1, cards[0].Counts.Blocked)
 	require.Equal(t, 2, cards[0].Counts.Failed, "portfolio failures must retain Live provenance deduplication")
-	require.Greater(t, cards[0].Counts.CompletedRecently, 0)
+	require.Equal(t, 3, cards[0].Counts.CompletedRecently, "portfolio completion must use the same work-item identity as Live")
+}
+
+type fakeAutomationPullRequestProvider struct {
+	calls int
+	pull  GitHubPullRequest
+	err   error
+}
+
+func (f *fakeAutomationPullRequestProvider) ResolveRepo(context.Context, string, string) (*GitHubRepoRef, error) {
+	return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+}
+
+func (f *fakeAutomationPullRequestProvider) GetPullRequest(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	pull := f.pull
+	return &pull, nil
+}
+
+func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjection(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime"
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+
+	openPR := automationNodeByKey(t, fixture.definition, "open_pr")
+	review := automationNodeByKey(t, fixture.definition, "review")
+	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: openPR.ID}
+	contextValue := models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: contextValue, Binding: binding, WorkItemKey: "github:example/runtime:issue:42",
+		ActivityKey: "github:example/runtime:pull:7:open", ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}, {ResourceType: "pull_request", ResourceID: "github:example/runtime:pull:7"}},
+		EventKey:  "github:example/runtime:pull:7:review", FromNodeID: openPR.ID, ToNodeID: review.ID, Transition: models.AutomationTransitionWaiting,
+	})
+	require.NoError(t, err)
+
+	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	record := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 7, PRURL: "https://github.com/example/runtime/pull/7", PRState: "open"}
+	require.NoError(t, pullRequests.Upsert(ctx, &record))
+	now := time.Now().UTC().Truncate(time.Second)
+	_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = datetime(?) WHERE id = ?`, now.Add(-time.Hour).Format("2006-01-02 15:04:05"), record.ID)
+	require.NoError(t, err)
+
+	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 7, URL: record.PRURL, State: "closed", Merged: true}}
+	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
+	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
+	require.NoError(t, err)
+	require.Equal(t, 0, provider.calls, "ordinary graph reads must never call GitHub")
+	require.Equal(t, 1, graph.ExternalState.TrackedResources)
+	require.True(t, graph.ExternalState.Stale)
+
+	state, err := external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.calls)
+	require.False(t, state.Stale)
+	stored, err := pullRequests.GetByTaskID(ctx, fixture.task.ID)
+	require.NoError(t, err)
+	require.Equal(t, "merged", stored.PRState)
+	var completed int
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND status = 'completed'`, fixture.definition.Automation.ID).Scan(&completed))
+	require.Equal(t, 1, completed, "merged PR state must advance the persisted Automation projection")
+
+	state, err = external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, now.Add(30*time.Second))
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.calls, "a fresh explicit result must be served from the persisted cache")
+	require.False(t, state.Stale)
+
+	_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = datetime(?) WHERE id = ?`, now.Add(-time.Hour).Format("2006-01-02 15:04:05"), record.ID)
+	require.NoError(t, err)
+	provider.err = errors.New("github API request failed (429): rate limit exceeded")
+	_, err = external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
+	require.ErrorContains(t, err, "429")
+	require.Equal(t, 2, provider.calls, "provider rate-limit failures must not be retried")
+	graph, err = NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
+	require.NoError(t, err)
+	require.True(t, graph.ExternalState.Stale, "a failed external refresh must retain stale persisted freshness")
 }
 
 func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
