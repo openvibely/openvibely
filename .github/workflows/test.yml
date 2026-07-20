@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Prepare Linux desktop dependency cache
         id: linux-desktop-cache-key
@@ -31,7 +31,7 @@ jobs:
         run: |
           package_hash="$(printf '%s' "$LINUX_DESKTOP_PACKAGES" | sha256sum | cut -d' ' -f1)"
           runner_image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}-${RUNNER_ARCH}"
-          echo "key=linux-desktop-apt-${runner_image}-${package_hash}" >> "$GITHUB_OUTPUT"
+          echo "key=linux-desktop-apt-v1-${runner_image}-${package_hash}" >> "$GITHUB_OUTPUT"
 
           mkdir -p "$HOME/.cache/openvibely-apt/archives/partial"
           sudo chown -R _apt:"$(id -gn)" "$HOME/.cache/openvibely-apt/archives"
@@ -57,7 +57,7 @@ jobs:
           echo "Linux desktop dependencies installed in $((SECONDS - started_at))s (cache hit: ${{ steps.linux-desktop-cache.outputs.cache-hit }})"
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache: true
