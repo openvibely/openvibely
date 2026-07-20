@@ -62,6 +62,11 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Contains(t, detail.Body.String(), "Node resources")
 	require.Contains(t, detail.Body.String(), "Live automation graph")
 	require.Contains(t, detail.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
+	require.Contains(t, detail.Body.String(), `@keyframes automation-running-pulse`)
+	require.Contains(t, detail.Body.String(), `.automation-graph-node--running {`)
+	require.Contains(t, detail.Body.String(), `animation: automation-running-pulse`)
+	require.Contains(t, detail.Body.String(), `@media (prefers-reduced-motion: reduce)`)
+	require.Contains(t, detail.Body.String(), `.automation-graph-node--running { animation: none; }`)
 	require.Contains(t, detail.Body.String(), `class="automation-node-content"`)
 	require.Contains(t, detail.Body.String(), "No active work")
 	require.Contains(t, detail.Body.String(), `viewBox="-`)
@@ -111,6 +116,13 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}},
 	})
 	require.NoError(t, err)
+	_, err = tc.db.Exec(`UPDATE automations SET health_state = 'degraded', health_reason = 'One recent task failure' WHERE id = ?`, definition.Automation.ID)
+	require.NoError(t, err)
+	portfolio = tc.HTTP().Get(fmt.Sprintf("/automations?project_id=%s", project.ID)).Execute()
+	require.Equal(t, 200, portfolio.Code)
+	require.Contains(t, portfolio.Body.String(), `data-automation-counter="running"`)
+	require.Contains(t, portfolio.Body.String(), "1 running")
+	require.Contains(t, portfolio.Body.String(), "One recent task failure")
 	resources := tc.HTMX().Get(fmt.Sprintf("/automations/%s/nodes/%s/resources?project_id=%s", definition.Automation.ID, producerNode.ID, project.ID)).Execute()
 	require.Equal(t, 200, resources.Code)
 	require.Contains(t, resources.Body.String(), "Native Producer")
@@ -604,7 +616,14 @@ func TestAutomationBuilderWebFlowIsExplicitDraftOnlyAndProjectScoped(t *testing.
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("handler-confirmation-secret-32-bytes"))
 	lifecycle := service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo)
-	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	agentRepo := repository.NewAgentRepo(tc.db)
+	architect := models.Agent{Name: "Builder Architect", Key: "builder_architect", Scope: models.AgentScopeProject, ProjectID: project.ID,
+		Enabled: true, SelectableAsPrimary: true, Skills: []models.SkillConfig{{Name: "project-guidance", Description: "Guide", Content: "safe"}}}
+	require.NoError(t, agentRepo.Create(context.Background(), &architect))
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, agentRepo, tc.taskRepo, tc.settingsRepo)
+	drafts.SetCapabilitySnapshotBuilder(capabilities)
+	planner.SetAgentRepository(agentRepo)
+	compiler.SetAgentRepository(agentRepo)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, capabilities, planner, compiler, confirmation, lifecycle)
 
@@ -628,6 +647,11 @@ func TestAutomationBuilderWebFlowIsExplicitDraftOnlyAndProjectScoped(t *testing.
 	require.Contains(t, created.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
 	require.Contains(t, created.Body.String(), `class="automation-node-content"`)
 	require.Contains(t, created.Body.String(), `class="automation-draft-node`)
+	require.Contains(t, created.Body.String(), `name="node_vision_driver_agent_ref"`)
+	require.Contains(t, created.Body.String(), `value="builder_architect"`)
+	require.Contains(t, created.Body.String(), `name="node_vision_driver_skills"`)
+	require.Contains(t, created.Body.String(), `value="builder_architect:project-guidance"`)
+	require.Contains(t, created.Body.String(), `name="node_vision_driver_source_files"`)
 	require.NotContains(t, created.Body.String(), "fill-base-content")
 	require.NotContains(t, created.Body.String(), "fill-base-200")
 	require.Zero(t, tableCountHandler(t, tc, "tasks"))
@@ -636,6 +660,20 @@ func TestAutomationBuilderWebFlowIsExplicitDraftOnlyAndProjectScoped(t *testing.
 	var automationID, versionID string
 	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
 	require.Equal(t, fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID), created.Header().Get("HX-Push-Url"), "draft creation must give HTMX history the canonical builder URL")
+	configured := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
+		"project_id": {project.ID}, "node_vision_driver_agent_ref": {"builder_architect"},
+		"node_vision_driver_skills": {"builder_architect:project-guidance"}, "node_vision_driver_source_files": {},
+	}).Execute()
+	require.Equal(t, 200, configured.Code)
+	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+	require.NoError(t, err)
+	configuredCandidate, err := metadata.Candidate()
+	require.NoError(t, err)
+	require.Equal(t, "builder_architect", configuredCandidate.Nodes[1].Config["agent_ref"])
+	require.Equal(t, []any{"builder_architect:project-guidance"}, configuredCandidate.Nodes[1].Config["skills"])
+	directPlan, err := planner.Plan(context.Background(), project.ID, automationID, versionID)
+	require.NoError(t, err)
+	require.Empty(t, directPlan.Validation, "configured builder references must remain publishable: %+v", directPlan.Validation)
 	planPage := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, 200, planPage.Code)
 	require.Contains(t, planPage.Body.String(), "Review changes")
@@ -653,6 +691,13 @@ func TestAutomationBuilderWebFlowIsExplicitDraftOnlyAndProjectScoped(t *testing.
 	require.Contains(t, published.Header().Get("HX-Redirect"), "/automations/"+automationID)
 	require.NotZero(t, tableCountHandler(t, tc, "tasks"))
 	require.NotZero(t, tableCountHandler(t, tc, "schedules"))
+	compiledTasks, err := tc.taskRepo.ListByProject(context.Background(), project.ID, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, compiledTasks)
+	for _, task := range compiledTasks {
+		require.NotNil(t, task.AgentDefinitionID)
+		require.Equal(t, architect.ID, *task.AgentDefinitionID)
+	}
 
 	live := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID)).Execute()
 	require.Equal(t, 200, live.Code)

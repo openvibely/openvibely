@@ -50,6 +50,16 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 								<span class="badge badge-ghost">v{ fmt.Sprintf("%d", card.Version.Version) }</span>
 								<span class="badge badge-ghost">{ string(card.Automation.HealthState) }</span>
 							</div>
+							if strings.TrimSpace(card.Automation.HealthReason) != "" {
+								<p class="mt-2 line-clamp-2 text-xs text-base-content/65" data-automation-health-reason>{ card.Automation.HealthReason }</p>
+							}
+							<div class="mt-3 flex flex-wrap gap-1.5 text-xs" aria-label="Operational work summary">
+								<span class="badge badge-sm badge-ghost" data-automation-counter="running">{ fmt.Sprintf("%d running", card.Counts.Running) }</span>
+								<span class="badge badge-sm badge-ghost" data-automation-counter="waiting">{ fmt.Sprintf("%d waiting", card.Counts.Waiting) }</span>
+								<span class="badge badge-sm badge-ghost" data-automation-counter="blocked">{ fmt.Sprintf("%d blocked", card.Counts.Blocked) }</span>
+								<span class="badge badge-sm badge-ghost" data-automation-counter="failed">{ fmt.Sprintf("%d failed", card.Counts.Failed) }</span>
+								<span class="badge badge-sm badge-ghost" data-automation-counter="recent">{ fmt.Sprintf("%d recent", card.Counts.CompletedRecently) }</span>
+							</div>
 							<div class="mt-3 grid grid-cols-2 gap-2 text-xs text-base-content/70">
 								<div><span class="block font-medium text-base-content">Last activity</span>{ automationTime(card.LastRun, "Not run") }</div>
 								<div><span class="block font-medium text-base-content">Next activity</span>{ automationTime(card.NextRun, "Not scheduled") }</div>
@@ -772,7 +782,25 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				for _, node := range page.Result.Candidate.Nodes {
 					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Delete node</button></div></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
 						if automationDraftHasConfig(node, "prompt") {
-							<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea></label><div class="mt-3 grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option><option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option></select></label><label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label></div>
+							<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea></label>
+							<div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+								<label class="form-control"><span class="label-text">Primary Agent</span><select class="select select-bordered" name={ "node_" + node.Key + "_agent_ref" }><option value="" selected?={ automationDraftStringConfig(node, "agent_ref") == "" }>Default (no primary Agent)</option>
+									for _, agent := range page.Capabilities.Agents {
+										<option value={ agent.ID } selected?={ automationDraftStringConfig(node, "agent_ref") == agent.ID }>{ agent.Name }</option>
+									}
+								</select></label>
+								<label class="form-control"><span class="label-text">Skills</span><input type="hidden" name={ "node_" + node.Key + "_skills" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_skills" } multiple>
+									for _, skill := range page.Capabilities.Skills {
+										<option value={ skill.ID } selected?={ automationDraftStringSliceContains(node, "skills", skill.ID) }>{ skill.Name }</option>
+									}
+								</select></label>
+								<label class="form-control"><span class="label-text">Source files</span><input type="hidden" name={ "node_" + node.Key + "_source_files" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_source_files" } multiple>
+									for _, sourceFile := range page.Capabilities.SourceFiles {
+										<option value={ sourceFile } selected?={ automationDraftStringSliceContains(node, "source_files", sourceFile) }>{ sourceFile }</option>
+									}
+								</select></label>
+							</div>
+							<div class="mt-3 grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option><option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option></select></label><label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label></div>
 						}
 						if automationDraftHasConfig(node, "run_at") {
 							<div class="grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Time</span><input type="time" class="input input-bordered" name={ "node_" + node.Key + "_run_at" } value={ automationDraftStringConfig(node, "run_at") }/></label><label class="form-control"><span class="label-text">Repeat</span><select class="select select-bordered" name={ "node_" + node.Key + "_repeat_type" }>
@@ -828,9 +856,15 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							var prompt = builder.querySelector('[name="' + prefix + 'prompt"]');
 							var category = builder.querySelector('[name="' + prefix + 'category"]');
 							var priority = builder.querySelector('[name="' + prefix + 'priority"]');
+							var agentRef = builder.querySelector('[name="' + prefix + 'agent_ref"]');
+							var skills = builder.querySelector('select[name="' + prefix + 'skills"]');
+							var sourceFiles = builder.querySelector('select[name="' + prefix + 'source_files"]');
 							if (prompt) node.config.prompt = prompt.value;
 							if (category) node.config.category = category.value;
 							if (priority) node.config.priority = Number(priority.value);
+							if (agentRef) node.config.agent_ref = agentRef.value;
+							if (skills) node.config.skills = Array.from(skills.selectedOptions).map(function(option) { return option.value; });
+							if (sourceFiles) node.config.source_files = Array.from(sourceFiles.selectedOptions).map(function(option) { return option.value; });
 						}
 						if (node.config && Object.prototype.hasOwnProperty.call(node.config, 'run_at')) {
 							var runAt = builder.querySelector('[name="' + prefix + 'run_at"]');
@@ -1104,6 +1138,7 @@ func automationValidationMessages(issues []models.AutomationValidationIssue, pal
 }
 func automationDraftHasConfig(node models.AutomationDraftNode, key string) bool { _, ok := node.Config[key]; return ok }
 func automationDraftStringConfig(node models.AutomationDraftNode, key string) string { value, _ := node.Config[key].(string); return value }
+func automationDraftStringSliceContains(node models.AutomationDraftNode, key, expected string) bool { switch values := node.Config[key].(type) { case []string: for _, value := range values { if value == expected { return true } }; case []any: for _, value := range values { if text, ok := value.(string); ok && text == expected { return true } } }; return false }
 func automationDraftIntConfig(node models.AutomationDraftNode, key string) int { switch value := node.Config[key].(type) { case int: return value; case float64: return int(value); case json.Number: parsed, _ := value.Int64(); return int(parsed) }; return 0 }
 func automationDraftBoolConfig(node models.AutomationDraftNode, key string) bool { value, _ := node.Config[key].(bool); return value }
 func automationDraftHasNode(nodes []models.AutomationDraftNode, key string) bool { for _, node := range nodes { if node.Key == key { return true } }; return false }
@@ -1149,8 +1184,9 @@ templ automationGraphThemeStyles() {
 		.automation-graph-node--failed { fill: oklch(var(--er) / 0.15); stroke: oklch(var(--er)); }
 		.automation-graph-node--blocked { fill: oklch(var(--wa) / 0.15); stroke: oklch(var(--wa)); }
 		.automation-graph-node--waiting { fill: oklch(var(--in) / 0.15); stroke: oklch(var(--in)); }
-		.automation-graph-node--running { fill: oklch(var(--p) / 0.15); stroke: oklch(var(--p)); }
-		.automation-graph-node--completed { fill: oklch(var(--su) / 0.15); stroke: oklch(var(--su)); }
+			.automation-graph-node--running { fill: oklch(var(--p) / 0.15); stroke: oklch(var(--p)); animation: automation-running-pulse 1.8s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+			@keyframes automation-running-pulse { 0%, 100% { stroke-opacity: 0.72; } 50% { stroke-opacity: 1; stroke-width: 5; } }
+			@media (prefers-reduced-motion: reduce) { .automation-graph-node--running { animation: none; } }		.automation-graph-node--completed { fill: oklch(var(--su) / 0.15); stroke: oklch(var(--su)); }
 		.automation-graph-label { fill: oklch(var(--bc)); pointer-events: none; }
 		.automation-graph-label--primary { fill: oklch(var(--bc)); }
 		.automation-graph-label--secondary { fill: oklch(var(--bc) / 0.7); }

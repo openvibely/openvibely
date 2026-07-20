@@ -1072,6 +1072,14 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 		require.Equal(t, 2, node.Counts.Failed, "one failed work item must count once while an invocation-only failure remains visible")
 		require.Equal(t, "failed", node.DisplayState)
 	}
+	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
+	require.NoError(t, err)
+	require.Len(t, cards, 1)
+	require.Greater(t, cards[0].Counts.Running, 0)
+	require.Greater(t, cards[0].Counts.Waiting, 0)
+	require.Greater(t, cards[0].Counts.Blocked, 0)
+	require.Equal(t, 2, cards[0].Counts.Failed, "portfolio failures must retain Live provenance deduplication")
+	require.Greater(t, cards[0].Counts.CompletedRecently, 0)
 }
 
 func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {

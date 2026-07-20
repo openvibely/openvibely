@@ -148,6 +148,15 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 					node.Config["priority"] = priority
 				}
 			}
+			if value, exists := automationDraftFormValue(c, prefix+"agent_ref"); exists {
+				node.Config["agent_ref"] = strings.TrimSpace(value)
+			}
+			if values, exists := automationDraftFormValues(c, prefix+"skills"); exists {
+				node.Config["skills"] = values
+			}
+			if values, exists := automationDraftFormValues(c, prefix+"source_files"); exists {
+				node.Config["source_files"] = values
+			}
 		}
 		if _, ok := node.Config["run_at"]; ok {
 			if value, exists := automationDraftFormValue(c, prefix+"run_at"); exists {
@@ -183,6 +192,24 @@ func automationDraftFormValue(c echo.Context, key string) (string, bool) {
 		return "", false
 	}
 	return values[0], true
+}
+
+func automationDraftFormValues(c echo.Context, key string) ([]string, bool) {
+	if err := c.Request().ParseForm(); err != nil {
+		return nil, false
+	}
+	values, ok := c.Request().Form[key]
+	if !ok {
+		return nil, false
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out, true
 }
 
 func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models.AutomationDraftCandidate) error {
@@ -543,6 +570,13 @@ func (h *Handler) renderAutomationBuilder(c echo.Context, page models.Automation
 			page.NodePalette = palette.Nodes
 			page.EdgePalette = palette.Edges
 		}
+	}
+	if h.automationCapabilitySvc != nil {
+		capabilities, err := h.automationCapabilitySvc.Build(c.Request().Context(), projectID)
+		if err != nil {
+			return err
+		}
+		page.Capabilities = capabilities
 	}
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationBuilderContent(page, projectID))

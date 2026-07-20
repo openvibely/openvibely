@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -90,6 +93,90 @@ func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *
 	require.NoError(t, err)
 	require.Contains(t, issueCodes(plan.Validation), "unsupported_topology", "the publication planner must reject freeform topology")
 	require.Empty(t, plan.Effects, "unsupported topology must not produce runtime resource mutations")
+}
+
+func TestAutomationDraftRejectsMissingAndUnsupportedSchemaVersions(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Schema versions")
+	repo := repository.NewAutomationRepo(db)
+	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
+
+	for _, version := range []int{0, 2} {
+		candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
+		require.NoError(t, err)
+		candidate.SchemaVersion = version
+		normalized, err := svc.NormalizeCandidate(candidate)
+		require.NoError(t, err)
+		require.Equal(t, version, normalized.SchemaVersion, "normalization must preserve the supplied schema version")
+		require.Contains(t, issueCodes(svc.ValidateCandidate(normalized)), "schema_version")
+		_, err = svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
+		require.ErrorContains(t, err, "schema version")
+	}
+
+	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	created, err := svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
+	require.NoError(t, err)
+	candidate.SchemaVersion = 2
+	_, err = svc.UpdateDraft(context.Background(), created.Definition.Automation.ID, created.Definition.Version.ID, project.ID, candidate)
+	require.ErrorContains(t, err, "schema version")
+	unsupportedJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE automation_draft_metadata SET candidate_json = ? WHERE version_id = ?`, string(unsupportedJSON), created.Definition.Version.ID)
+	require.NoError(t, err)
+	_, err = svc.GetDraft(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.ErrorContains(t, err, "schema version")
+	_, err = svc.ClonePublishedVersion(context.Background(), project.ID, created.Definition.Automation.ID)
+	require.ErrorContains(t, err, "schema version")
+}
+
+func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Reference project")
+	project.RepoPath = t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(project.RepoPath, "VISION.md"), []byte("vision"), 0o600))
+	require.NoError(t, projectRepo.Update(ctx, &project))
+	other := automationTestProject(t, projectRepo, "Other reference project")
+	agentRepo := repository.NewAgentRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	settingsRepo := repository.NewSettingsRepo(db)
+	agent := models.Agent{Name: "Project Architect", Key: "project_architect", Scope: models.AgentScopeProject, ProjectID: project.ID,
+		Enabled: true, SelectableAsPrimary: true, Skills: []models.SkillConfig{{Name: "project-guidance", Description: "Guide project work", Content: "safe"}}}
+	require.NoError(t, agentRepo.Create(ctx, &agent))
+	foreign := models.Agent{Name: "Foreign Architect", Key: "foreign_architect", Scope: models.AgentScopeProject, ProjectID: other.ID,
+		Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, &foreign))
+
+	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, settingsRepo)
+	snapshot, err := capabilities.Build(ctx, project.ID)
+	require.NoError(t, err)
+	require.Contains(t, snapshot.Agents, models.AutomationCapabilityRef{ID: "project_architect", Name: "Project Architect"})
+	require.Contains(t, snapshot.Skills, models.AutomationCapabilityRef{ID: "project_architect:project-guidance", Name: "project-guidance"})
+
+	svc := NewAutomationDraftService(repository.NewAutomationRepo(db), NewAutomationAdapterRegistry())
+	svc.SetCapabilitySnapshotBuilder(capabilities)
+	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	candidate.Nodes[1].Config["agent_ref"] = "project_architect"
+	candidate.Nodes[1].Config["skills"] = []any{"project_architect:project-guidance"}
+	candidate.Nodes[1].Config["source_files"] = []any{"VISION.md"}
+	require.Empty(t, svc.ValidateCandidateWithCapabilities(candidate, snapshot))
+
+	candidate.Nodes[1].Config["agent_ref"] = "foreign_architect"
+	issues := svc.ValidateCandidateWithCapabilities(candidate, snapshot)
+	require.Contains(t, issueCodes(issues), "agent_ref")
+	created, err := svc.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
+	require.NoError(t, err)
+	require.Contains(t, issueCodes(created.ValidationErrors), "agent_ref", "unresolved references must remain visible without being guessed")
+
+	candidate.Nodes[1].Config["agent_ref"] = "project_architect"
+	candidate.Nodes[1].Config["skills"] = []any{"project_architect:missing"}
+	require.Contains(t, issueCodes(svc.ValidateCandidateWithCapabilities(candidate, snapshot)), "skill_ref")
+	candidate.Nodes[1].Config["skills"] = []any{"project_architect:project-guidance"}
+	candidate.Nodes[1].Config["source_files"] = []any{"missing.md"}
+	require.Contains(t, issueCodes(svc.ValidateCandidateWithCapabilities(candidate, snapshot)), "source_file")
 }
 
 func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t *testing.T) {

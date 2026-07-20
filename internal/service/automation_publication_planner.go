@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/models"
@@ -33,6 +34,7 @@ type AutomationPublicationPlanner struct {
 	projectRepo      *repository.ProjectRepo
 	settingsRepo     *repository.SettingsRepo
 	githubAuthRepo   *repository.GitHubAuthRepo
+	agentRepo        *repository.AgentRepo
 	githubConnection automationGitHubConnectionProvider
 }
 
@@ -44,6 +46,10 @@ func (p *AutomationPublicationPlanner) SetCapabilityDependencies(projectRepo *re
 	p.projectRepo = projectRepo
 	p.settingsRepo = settingsRepo
 	p.githubAuthRepo = githubAuthRepo
+}
+
+func (p *AutomationPublicationPlanner) SetAgentRepository(agentRepo *repository.AgentRepo) {
+	p.agentRepo = agentRepo
 }
 
 func (p *AutomationPublicationPlanner) SetGitHubConnectionProvider(provider automationGitHubConnectionProvider) {
@@ -118,7 +124,10 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 	if err != nil {
 		return nil, err
 	}
-	issues := p.drafts.ValidateCandidate(candidate)
+	issues, err := p.drafts.validateCandidateForProject(ctx, projectID, candidate)
+	if err != nil {
+		return nil, err
+	}
 	plan := &models.AutomationPublicationPlan{ProjectID: projectID, AutomationID: automationID, VersionID: versionID, Validation: issues,
 		WillNot: []string{"merge pull requests", "release software", "deploy software"}}
 	if len(issues) > 0 {
@@ -132,6 +141,12 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 	if err != nil {
 		return nil, err
 	}
+	agentDependencies, agentIssues, err := p.agentDependencies(ctx, projectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	dependencies = append(dependencies, agentDependencies...)
+	capabilityIssues = append(capabilityIssues, agentIssues...)
 	if len(capabilityIssues) > 0 {
 		plan.Validation = append(plan.Validation, capabilityIssues...)
 		automationobs.Event("automation.publication.validation_failure",
@@ -153,6 +168,11 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 	for _, node := range candidate.Nodes {
 		candidateNodes[node.Key] = node
 	}
+	referenceEffects, err := p.taskReferenceEffects(ctx, projectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	plan.Effects = append(plan.Effects, referenceEffects...)
 	for _, node := range adapter.Nodes {
 		candidateNode := candidateNodes[node.Key]
 		if node.AllowedResources["task"] {
@@ -205,6 +225,88 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
 		automationobs.String("version_id", versionID), automationobs.String("adapter_key", candidate.AdapterKey))
 	return plan, nil
+}
+
+func (p *AutomationPublicationPlanner) taskReferenceEffects(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) ([]models.AutomationPublicationEffect, error) {
+	var effects []models.AutomationPublicationEffect
+	for _, node := range candidate.Nodes {
+		if node.Type != models.AutomationNodeAgentTask {
+			continue
+		}
+		ref, _ := node.Config["agent_ref"].(string)
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			agent, err := resolveAutomationAgent(ctx, p.agentRepo, projectID, ref)
+			if err != nil {
+				return nil, err
+			}
+			if agent == nil {
+				return nil, fmt.Errorf("Agent selection for node %q is unavailable in this project", node.Key)
+			}
+			effects = append(effects, models.AutomationPublicationEffect{StepKey: "agent:" + node.Key, Operation: "reuse", TargetKey: "agent:" + node.Key, ResourceType: "agent", Name: agent.Name, ResourceID: agent.ID})
+		}
+		skills, _ := draftStringSlice(node.Config["skills"])
+		for index, skill := range normalizeDraftReferences(skills) {
+			name := skill
+			if separator := strings.Index(skill, ":"); separator >= 0 && separator+1 < len(skill) {
+				name = skill[separator+1:]
+			}
+			effects = append(effects, models.AutomationPublicationEffect{StepKey: fmt.Sprintf("skill:%s:%d", node.Key, index), Operation: "reuse", TargetKey: "skill:" + node.Key, ResourceType: "skill", Name: name, ResourceID: skill})
+		}
+		sourceFiles, _ := draftStringSlice(node.Config["source_files"])
+		for index, sourceFile := range normalizeDraftReferences(sourceFiles) {
+			effects = append(effects, models.AutomationPublicationEffect{StepKey: fmt.Sprintf("source_file:%s:%d", node.Key, index), Operation: "reuse", TargetKey: "source_file:" + node.Key, ResourceType: "source_file", Name: sourceFile, ResourceID: sourceFile})
+		}
+	}
+	return effects, nil
+}
+
+func (p *AutomationPublicationPlanner) agentDependencies(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) ([]automationPlanDependency, []models.AutomationValidationIssue, error) {
+	var dependencies []automationPlanDependency
+	var issues []models.AutomationValidationIssue
+	for _, node := range candidate.Nodes {
+		if node.Type != models.AutomationNodeAgentTask {
+			continue
+		}
+		ref, _ := node.Config["agent_ref"].(string)
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		agent, err := resolveAutomationAgent(ctx, p.agentRepo, projectID, ref)
+		if err != nil {
+			return nil, nil, err
+		}
+		if agent == nil {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection is unavailable in this project."})
+			continue
+		}
+		skills, _ := draftStringSlice(node.Config["skills"])
+		dependencies = append(dependencies, automationPlanDependency{Type: "agent", ID: agent.ID, ProjectID: projectID, NodeKey: node.Key,
+			Configured: map[string]any{"agent_ref": ref, "updated_at": agent.UpdatedAt.UTC().Format(time.RFC3339Nano), "skills": normalizeDraftReferences(skills)}})
+	}
+	return dependencies, issues, nil
+}
+
+func resolveAutomationAgent(ctx context.Context, agentRepo *repository.AgentRepo, projectID, ref string) (*models.Agent, error) {
+	if agentRepo == nil || strings.TrimSpace(ref) == "" {
+		return nil, nil
+	}
+	agents, err := agentRepo.ListSelectableForProject(ctx, projectID, automationCapabilityLimit)
+	if err != nil {
+		return nil, err
+	}
+	ref = strings.TrimSpace(ref)
+	for i := range agents {
+		key := strings.TrimSpace(agents[i].Key)
+		if key == "" {
+			key = agents[i].ID
+		}
+		if key == ref && (agents[i].ProjectID == "" || agents[i].ProjectID == projectID) {
+			return &agents[i], nil
+		}
+	}
+	return nil, nil
 }
 
 func (p *AutomationPublicationPlanner) capabilityDependencies(ctx context.Context, projectID, adapterKey string) ([]automationPlanDependency, []models.AutomationValidationIssue, error) {
@@ -333,13 +435,70 @@ func (p *AutomationPublicationPlanner) planTask(ctx context.Context, definition 
 	effect.ResourceID = task.ID
 	desiredPriority, _ := draftInt(node.Config["priority"])
 	desiredCategory, _ := node.Config["category"].(string)
-	desiredPrompt, _ := node.Config["prompt"].(string)
-	if task.Title == effect.Name && task.Prompt == desiredPrompt && string(task.Category) == desiredCategory && task.Priority == desiredPriority {
+	desiredPrompt := automationCompiledTaskPrompt(node)
+	desiredAgent, err := p.resolveNodeAgent(ctx, definition.Automation.ProjectID, node)
+	if err != nil {
+		return effect, dependency, err
+	}
+	var desiredAgentID *string
+	if desiredAgent != nil {
+		desiredAgentID = &desiredAgent.ID
+	}
+	if task.Title == effect.Name && task.Prompt == desiredPrompt && string(task.Category) == desiredCategory && task.Priority == desiredPriority && equalOptionalString(task.AgentDefinitionID, desiredAgentID) {
 		effect.Operation = "unchanged"
 	} else {
 		effect.Operation = "update"
 	}
 	return effect, dependency, nil
+}
+
+func (p *AutomationPublicationPlanner) resolveNodeAgent(ctx context.Context, projectID string, node models.AutomationDraftNode) (*models.Agent, error) {
+	ref, _ := node.Config["agent_ref"].(string)
+	if strings.TrimSpace(ref) == "" {
+		return nil, nil
+	}
+	agent, err := resolveAutomationAgent(ctx, p.agentRepo, projectID, ref)
+	if err != nil {
+		return nil, err
+	}
+	if agent == nil {
+		return nil, fmt.Errorf("Agent selection for node %q is unavailable in this project", node.Key)
+	}
+	return agent, nil
+}
+
+func equalOptionalString(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func automationCompiledTaskPrompt(node models.AutomationDraftNode) string {
+	prompt, _ := node.Config["prompt"].(string)
+	prompt = strings.TrimSpace(prompt)
+	skills, _ := draftStringSlice(node.Config["skills"])
+	sourceFiles, _ := draftStringSlice(node.Config["source_files"])
+	skills = normalizeDraftReferences(skills)
+	sourceFiles = normalizeDraftReferences(sourceFiles)
+	if len(skills) > 0 {
+		prompt += "\n\nConfigured Agent skills:\n- " + strings.Join(automationSkillNames(skills), "\n- ")
+	}
+	if len(sourceFiles) > 0 {
+		prompt += "\n\nFocus source files:\n- " + strings.Join(sourceFiles, "\n- ")
+	}
+	return prompt
+}
+
+func automationSkillNames(refs []string) []string {
+	names := make([]string, len(refs))
+	for i, ref := range refs {
+		names[i] = ref
+		if separator := strings.Index(ref, ":"); separator >= 0 && separator+1 < len(ref) {
+			names[i] = ref[separator+1:]
+		}
+	}
+	return names
 }
 
 func (p *AutomationPublicationPlanner) planSchedule(ctx context.Context, definition *models.AutomationDefinition, node models.AutomationDraftNode, existing models.AutomationDefinitionResource) (models.AutomationPublicationEffect, automationPlanDependency, bool, error) {

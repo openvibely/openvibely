@@ -42,6 +42,78 @@ func TestAutomationCapabilitySnapshotIsBoundedDeterministicAndSecretFree(t *test
 	require.LessOrEqual(t, len(first.ReusableResources), 50)
 }
 
+func TestAutomationDescriptionGenerationRepairsUnsupportedSchemaVersion(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	unsupported := candidate
+	unsupported.SchemaVersion = 2
+	unsupportedJSON, err := json.Marshal(unsupported)
+	require.NoError(t, err)
+	validJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	calls := 0
+
+	preview, err := svc.PreviewDescription(context.Background(), "Review vision daily", models.AutomationCapabilitySnapshot{}, func(_ context.Context, prompt string) (string, error) {
+		calls++
+		if calls == 1 {
+			return string(unsupportedJSON), nil
+		}
+		require.Contains(t, prompt, "schema_version")
+		return string(validJSON), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+	require.Equal(t, 1, preview.Candidate.SchemaVersion)
+}
+
+type automationCapabilityGitHubStatusStub struct {
+	status GitHubConnectionStatus
+	err    error
+}
+
+func (s automationCapabilityGitHubStatusStub) GetConnectionStatus(context.Context) (GitHubConnectionStatus, error) {
+	return s.status, s.err
+}
+
+func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "GitHub snapshot")
+	settingsRepo := repository.NewSettingsRepo(db)
+	builder := NewAutomationCapabilitySnapshotBuilder(projectRepo, nil, nil, settingsRepo)
+
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	snapshot, err := builder.Build(ctx, project.ID)
+	require.NoError(t, err)
+	require.False(t, snapshot.Integrations["github"].Configured, "selecting PAT mode without a credential or connection is not configured")
+
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "secret-not-rendered"))
+	builder.SetGitHubConnectionProvider(automationCapabilityGitHubStatusStub{status: GitHubConnectionStatus{AuthMode: GitHubAuthModePAT, Configured: true, Connected: false, HasPAT: true}})
+	snapshot, err = builder.Build(ctx, project.ID)
+	require.NoError(t, err)
+	require.False(t, snapshot.Integrations["github"].Configured, "usable credentials without a connected status are not configured")
+
+	builder.SetGitHubConnectionProvider(automationCapabilityGitHubStatusStub{status: GitHubConnectionStatus{AuthMode: GitHubAuthModePAT, Configured: true, Connected: true, HasPAT: true}})
+	snapshot, err = builder.Build(ctx, project.ID)
+	require.NoError(t, err)
+	require.True(t, snapshot.Integrations["github"].Configured)
+	encoded, err := json.Marshal(snapshot)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "secret-not-rendered")
+
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModeApp))
+	builder.SetGitHubConnectionProvider(automationCapabilityGitHubStatusStub{status: GitHubConnectionStatus{AuthMode: GitHubAuthModeApp, Configured: true, Connected: false, AppConfigured: true}})
+	snapshot, err = builder.Build(ctx, project.ID)
+	require.NoError(t, err)
+	require.False(t, snapshot.Integrations["github"].Configured)
+	builder.SetGitHubConnectionProvider(automationCapabilityGitHubStatusStub{status: GitHubConnectionStatus{AuthMode: GitHubAuthModeApp, Configured: true, Connected: true, AppConfigured: true, InstallationID: "42"}})
+	snapshot, err = builder.Build(ctx, project.ID)
+	require.NoError(t, err)
+	require.True(t, snapshot.Integrations["github"].Configured)
+}
+
 func TestAutomationDescriptionGenerationUsesOneRepairAndNoPersistence(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)

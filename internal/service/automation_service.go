@@ -144,6 +144,10 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 		return nil, err
 	}
 	cards := make([]models.AutomationCard, 0, len(automations))
+	portfolioCounts, err := s.repo.PortfolioOperationalCounts(ctx, projectID, time.Now().UTC().Add(-24*time.Hour))
+	if err != nil {
+		return nil, err
+	}
 	for _, automation := range automations {
 		definition, err := s.repo.GetDefinition(ctx, projectID, automation.ID)
 		if err != nil {
@@ -167,7 +171,7 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 				}
 			}
 		}
-		card := models.AutomationCard{Automation: definition.Automation, Version: definition.Version}
+		card := models.AutomationCard{Automation: definition.Automation, Version: definition.Version, Counts: portfolioCounts[automation.ID]}
 		if definition.Version.ID != "" {
 			card.Resources, err = s.repo.ListResourceSummaries(ctx, projectID, automation.ID, definition.Version.ID, 12)
 			if err != nil {

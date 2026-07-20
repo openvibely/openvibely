@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -495,21 +497,46 @@ func TestAutomationResumePreservesConfiguredDisabledTrigger(t *testing.T) {
 func TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwitchesTrigger(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
-	project := automationTestProject(t, repository.NewProjectRepo(db), "Replacement publication")
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Replacement publication")
+	project.RepoPath = t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(project.RepoPath, "VISION.md"), []byte("vision"), 0o600))
+	require.NoError(t, projectRepo.Update(ctx, &project))
 	automationRepo := repository.NewAutomationRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	scheduleRepo := repository.NewScheduleRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	firstAgent := models.Agent{Name: "First Architect", Key: "first_architect", Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true,
+		Skills: []models.SkillConfig{{Name: "project-guidance", Description: "Guide", Content: "safe"}}}
+	secondAgent := models.Agent{Name: "Second Architect", Key: "second_architect", Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true,
+		Skills: []models.SkillConfig{{Name: "implementation", Description: "Implement", Content: "safe"}}}
+	require.NoError(t, agentRepo.Create(ctx, &firstAgent))
+	require.NoError(t, agentRepo.Create(ctx, &secondAgent))
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(automationRepo, registry)
+	capabilities := NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, repository.NewSettingsRepo(db))
+	drafts.SetCapabilitySnapshotBuilder(capabilities)
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
+	for i := range candidate.Nodes {
+		if _, ok := candidate.Nodes[i].Config["prompt"]; ok {
+			candidate.Nodes[i].Config["agent_ref"] = "first_architect"
+			candidate.Nodes[i].Config["skills"] = []any{"first_architect:project-guidance"}
+			candidate.Nodes[i].Config["source_files"] = []any{"VISION.md"}
+		}
+	}
 	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
 	require.NoError(t, err)
 	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+	planner.SetAgentRepository(agentRepo)
 	taskService := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
 	compiler := NewAutomationCompiler(automationRepo, taskService, taskRepo, scheduleRepo, planner)
+	compiler.SetAgentRepository(agentRepo)
 	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
 	require.NoError(t, err)
+	require.True(t, publicationPlanHasEffect(plan, "agent", firstAgent.ID, "reuse"))
+	require.True(t, publicationPlanHasEffect(plan, "skill", "first_architect:project-guidance", "reuse"))
+	require.True(t, publicationPlanHasEffect(plan, "source_file", "VISION.md", "reuse"))
 	first, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
 	require.NoError(t, err)
 	firstScheduleID := publishedScheduleID(t, first)
@@ -517,6 +544,10 @@ func TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwi
 	priorTask, err := taskRepo.GetByID(ctx, firstTaskID)
 	require.NoError(t, err)
 	priorPrompt := priorTask.Prompt
+	require.Contains(t, priorPrompt, "Configured Agent skills:\n- project-guidance")
+	require.Contains(t, priorPrompt, "Focus source files:\n- VISION.md")
+	require.NotNil(t, priorTask.AgentDefinitionID)
+	require.Equal(t, firstAgent.ID, *priorTask.AgentDefinitionID)
 
 	cloned, err := drafts.ClonePublishedVersion(ctx, project.ID, created.Definition.Automation.ID)
 	require.NoError(t, err)
@@ -531,6 +562,8 @@ func TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwi
 	for i := range cloned.Candidate.Nodes {
 		if _, ok := cloned.Candidate.Nodes[i].Config["prompt"]; ok {
 			cloned.Candidate.Nodes[i].Config["prompt"] = cloned.Candidate.Nodes[i].Config["prompt"].(string) + " Updated."
+			cloned.Candidate.Nodes[i].Config["agent_ref"] = "second_architect"
+			cloned.Candidate.Nodes[i].Config["skills"] = []any{"second_architect:implementation"}
 		}
 		if _, ok := cloned.Candidate.Nodes[i].Config["run_at"]; ok {
 			cloned.Candidate.Nodes[i].Config["run_at"] = "10:30"
@@ -553,6 +586,8 @@ func TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwi
 	stillPriorTask, err := taskRepo.GetByID(ctx, firstTaskID)
 	require.NoError(t, err)
 	require.Equal(t, priorPrompt, stillPriorTask.Prompt, "failed replacement must not mutate behavior used by the active version")
+	require.NotNil(t, stillPriorTask.AgentDefinitionID)
+	require.Equal(t, firstAgent.ID, *stillPriorTask.AgentDefinitionID, "failed replacement must not switch the active task Agent")
 	var stagedTaskStatus string
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM automation_publication_steps WHERE attempt_id = ? AND step_key LIKE 'task:%'`, failed.Attempt.ID).Scan(&stagedTaskStatus))
 	require.Equal(t, "running", stagedTaskStatus, "a task update remains staged until version publication commits")
@@ -569,6 +604,8 @@ func TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwi
 	updatedTask, err := taskRepo.GetByID(ctx, firstTaskID)
 	require.NoError(t, err)
 	require.NotEqual(t, priorPrompt, updatedTask.Prompt)
+	require.NotNil(t, updatedTask.AgentDefinitionID)
+	require.Equal(t, secondAgent.ID, *updatedTask.AgentDefinitionID, "successful replacement must atomically switch the task Agent")
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM automation_publication_steps WHERE attempt_id = ? AND step_key LIKE 'task:%'`, second.Attempt.ID).Scan(&stagedTaskStatus))
 	require.Equal(t, "completed", stagedTaskStatus)
 	require.Equal(t, 2, tableCount(t, db, "schedules"), "cadence changes create a new exclusive trigger")
@@ -581,6 +618,18 @@ func TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwi
 	require.NoError(t, err)
 	require.NotNil(t, owner)
 	require.Equal(t, second.Definition.Version.ID, owner.VersionID)
+}
+
+func publicationPlanHasEffect(plan *models.AutomationPublicationPlan, resourceType, resourceID, operation string) bool {
+	if plan == nil {
+		return false
+	}
+	for _, effect := range plan.Effects {
+		if effect.ResourceType == resourceType && effect.ResourceID == resourceID && effect.Operation == operation {
+			return true
+		}
+	}
+	return false
 }
 
 func tableCount(t *testing.T, db interface{ QueryRow(string, ...any) *sql.Row }, table string) int {

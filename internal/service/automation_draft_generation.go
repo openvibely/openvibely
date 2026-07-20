@@ -29,17 +29,17 @@ func (s *AutomationDraftService) PreviewDescription(ctx context.Context, descrip
 	}
 	prompt := fmt.Sprintf(`Return strict JSON only for one supported Automation draft candidate.
 
-The JSON must match schema_version 1 with exactly these top-level fields: schema_version, name, description, automation_type, adapter_key, nodes, edges, assumptions, warnings. Choose exactly one registered adapter topology: native_sdlc, github_sdlc, or vision_driver. Node keys, types, roles, and edges must match that adapter's canonical template. Do not emit database IDs, project IDs, URLs, arbitrary tools, executable code, SQL, credentials, or unknown configuration fields. Fixed trigger config supports target_node_key, run_at, repeat_type, repeat_interval, enabled. Persisted task-node config supports prompt, category, priority. Human approval remains required and does not authorize merge, release, or deployment.
+The JSON must match schema_version 1 with exactly these top-level fields: schema_version, name, description, automation_type, adapter_key, nodes, edges, assumptions, warnings. Choose exactly one registered adapter topology: native_sdlc, github_sdlc, or vision_driver. Node keys, types, roles, and edges must match that adapter's canonical template. Do not emit database IDs, project IDs, URLs, arbitrary tools, executable code, SQL, credentials, or unknown configuration fields. Fixed trigger config supports target_node_key, run_at, repeat_type, repeat_interval, enabled. Persisted task-node config supports prompt, category, priority, optional agent_ref, skills, and source_files selected only from the supplied project capability snapshot. Human approval remains required and does not authorize merge, release, or deployment.
 
 Project capability snapshot:
 %s
 
 User description:
 %s`, string(snapshotJSON), description)
-	return s.generateCandidateWithRepair(ctx, prompt, generate)
+	return s.generateCandidateWithRepair(ctx, prompt, snapshot, generate)
 }
 
-func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context, prompt string, generate AutomationDescriptionGenerator) (*models.AutomationDraftResult, error) {
+func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context, prompt string, snapshot models.AutomationCapabilitySnapshot, generate AutomationDescriptionGenerator) (*models.AutomationDraftResult, error) {
 	output, err := generate(ctx, prompt)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context
 	}
 	var issues []models.AutomationValidationIssue
 	if parseErr == nil {
-		issues = s.ValidateCandidate(candidate)
+		issues = s.ValidateCandidateWithCapabilities(candidate, snapshot)
 		if len(issues) == 0 {
 			return draftPreviewResult(candidate, nil), nil
 		}
@@ -79,7 +79,7 @@ Previous output:
 	if err != nil {
 		return nil, err
 	}
-	issues = s.ValidateCandidate(candidate)
+	issues = s.ValidateCandidateWithCapabilities(candidate, snapshot)
 	if len(issues) > 0 {
 		return nil, fmt.Errorf("automation generation repair failed: %s", issues[0].Message)
 	}

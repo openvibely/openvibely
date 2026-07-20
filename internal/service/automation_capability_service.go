@@ -15,14 +15,19 @@ import (
 const automationCapabilityLimit = 50
 
 type AutomationCapabilitySnapshotBuilder struct {
-	projectRepo  *repository.ProjectRepo
-	agentRepo    *repository.AgentRepo
-	taskRepo     *repository.TaskRepo
-	settingsRepo *repository.SettingsRepo
+	projectRepo      *repository.ProjectRepo
+	agentRepo        *repository.AgentRepo
+	taskRepo         *repository.TaskRepo
+	settingsRepo     *repository.SettingsRepo
+	githubConnection automationGitHubConnectionProvider
 }
 
 func NewAutomationCapabilitySnapshotBuilder(projectRepo *repository.ProjectRepo, agentRepo *repository.AgentRepo, taskRepo *repository.TaskRepo, settingsRepo *repository.SettingsRepo) *AutomationCapabilitySnapshotBuilder {
 	return &AutomationCapabilitySnapshotBuilder{projectRepo: projectRepo, agentRepo: agentRepo, taskRepo: taskRepo, settingsRepo: settingsRepo}
+}
+
+func (b *AutomationCapabilitySnapshotBuilder) SetGitHubConnectionProvider(provider automationGitHubConnectionProvider) {
+	b.githubConnection = provider
 }
 
 func (b *AutomationCapabilitySnapshotBuilder) Build(ctx context.Context, projectID string) (models.AutomationCapabilitySnapshot, error) {
@@ -111,11 +116,22 @@ func supportedAutomationRoles() []string {
 }
 
 func (b *AutomationCapabilitySnapshotBuilder) githubConfigured(ctx context.Context) bool {
-	if b.settingsRepo == nil {
+	if b == nil || b.settingsRepo == nil || b.githubConnection == nil {
 		return false
 	}
 	mode, err := b.settingsRepo.Get(ctx, GitHubSettingAuthMode)
-	return err == nil && (mode == GitHubAuthModePAT || mode == GitHubAuthModeApp)
+	if err != nil {
+		return false
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != GitHubAuthModePAT && mode != GitHubAuthModeApp {
+		return false
+	}
+	status, err := b.githubConnection.GetConnectionStatus(ctx)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(status.AuthMode), mode) && status.Configured && status.Connected
 }
 
 func boundedAutomationSourceFiles(repoPath string) []string {

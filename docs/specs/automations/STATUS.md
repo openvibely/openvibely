@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Post-completion graph-editor UX follow-up is complete in the working tree. Phases 1-4 and the five Definition of Done safety repairs remain checkpointed; the connector-preview repair now requires a clean checkpoint followed by the still-pending separate read-only full-objective audit.
+The strict-audit repair is implemented and fully validated in the working tree. Phases 1-4 and prior safety/UX repairs remain checkpointed through `4c72be8`; the five findings from the strict audit of that checkpoint are repaired, and a new clean checkpoint is pending. The separate qualifying read-only full-objective audit must wait until authoritative managed memory is reconciled through an authorized mutation path.
 
 ## Status
 
-Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phase 4, graph-editor UX repairs, and Definition of Done safety repairs are checkpointed through `221b8d9`. The latest follow-up makes the in-progress drag connector unmistakably visible and adds production-browser evidence without changing graph persistence, publication, runtime behavior, Automation identity, or any stated exclusion.
+Phases 1-4, graph-editor UX repairs, Definition of Done safety repairs, connector preview, Blank publication semantics, public Chat identity, node-resource pagination, and Automation observability are checkpointed through `4c72be8`. The current working tree preserves strict draft schema identity, adds project-scoped Agent/skill/source-file task configuration through validation/builder/planning/compilation, adds set-based portfolio operational summaries and health reasons, makes described-draft GitHub readiness connection-accurate, and adds reduced-motion-safe running-node animation. Full validation passes; managed-memory reconciliation, checkpointing, and the separate strict audit remain.
 
 ## Phase 4 Checklist
 
@@ -482,7 +482,8 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 
 ## Open Findings Or Blockers
 
-- No known implementation or validation blocker remains after the reopened repair pass; the required separate strict read-only full-objective audit is pending from the clean checkpoint.
+- No known code, test, build, identity, or exclusion blocker remains after the strict-audit repair.
+- The qualifying read-only audit is blocked only by stale authoritative `automation_graphs.md` managed memory and the absence of an authorized memory mutation tool in this turn. A tracked counterpart does not exist.
 
 ## Reopened Full-Objective Audit Repair
 
@@ -517,13 +518,52 @@ Phases 1-3 are complete at checkpoints `6ff0e9a`, `2a8f511`, and `24286c1`. Phas
 
 - Treat the repair commit containing this evidence as the clean checkpoint, then perform the separate qualifying strict read-only full-objective audit from that immutable commit.
 
+## Reopened Strict-Audit Contract Repair
+
+### Contract Checklist
+
+- [x] Preserve caller/model-supplied `schema_version` through normalization and reject missing or unsupported versions during generation, draft create/update/clone, and publication planning rather than coercing them to version 1.
+- [x] Add project-scoped `agent_ref`, `skills`, and `source_files` task-node configuration using the bounded capability snapshot; reject unavailable/cross-project references, render editable builder controls, include resolved dependencies in publication planning, and assign the resolved primary Agent through normal Task creation and atomic replacement updates.
+- [x] Add bounded set-based Automation portfolio summaries for running, waiting-human, blocked, failed, and recently completed work, with deduplicated provenance and the persisted concise health reason.
+- [x] Report GitHub configured in described-draft capability snapshots only when the selected PAT/App mode is configured and connected, reusing the publication connection-status contract without exposing credentials.
+- [x] Add a bounded running-node pulse to graph nodes carrying the running state and disable it under `prefers-reduced-motion: reduce`.
+- [x] Add regression-first service/repository/handler/template/browser coverage for every repair, reconcile symmetric call sites, run generation/build/focused/full validation, perform a fresh implementation audit, and create a clean checkpoint.
+- [ ] Perform a separate strict read-only audit from the clean checkpoint against all four phases, all 17 Definition of Done items, explicit Automation identity, and every stated exclusion.
+
+### Requirements And Files
+
+- `NormalizeCandidate` now preserves the supplied schema version. Missing/future versions fail create/update/load/clone/planning or enter the one-repair described-generation path; constructors alone assign version 1. Implemented in `internal/service/automation_draft_service.go` and `internal/service/automation_draft_generation.go` with create/update/load/clone/repair regressions.
+- Task-node schema now accepts bounded `agent_ref`, `skills`, and `source_files`. Current project capabilities are rebuilt for draft persistence, display, clone, and planning; unavailable references remain visible validation errors and cannot produce publication effects. Builder controls round-trip through the existing candidate update path. Planning hashes resolved Agent revision and exposes Agent/skill/source-file reuse; compilation assigns `Task.AgentDefinitionID`, carries selected skill/source guidance into the task prompt, and atomically stages Agent changes with replacement publication. Implemented across Automation models, capability/draft/planner/compiler services, publication repository, handler/template, server wiring, and tests.
+- Portfolio cards now receive one set-based project-scoped operational summary with work-item provenance deduplication and render all five counters plus the persisted health reason. Implemented in `internal/repository/automation_runtime_repo.go`, `internal/service/automation_service.go`, Automation models/templates, and mixed-state/handler regressions.
+- Capability snapshots now require the selected PAT/App mode to match a configured and connected production `GitHubService` status. PAT/App connected and disconnected matrices are covered without rendering credentials.
+- Running graph nodes use a bounded 1.8-second stroke pulse; the concrete `prefers-reduced-motion: reduce` rule disables animation. Generated templ output and direct/HTMX/Chrome Automation coverage remain synchronized.
+
+### Regression, Validation, And Implementation Audit Evidence
+
+- Regression-first focused execution failed against `4c72be8` because capability-aware draft validation, GitHub connection injection, Agent planner/compiler wiring, and portfolio counters did not exist; this captured the pre-repair contract failures before production edits.
+- Focused schema/reference/readiness/publication/portfolio/render tests pass, including unsupported schema values `0` and `2`, bounded repair, cross-project Agent rejection, missing skill/source reporting, PAT/App connection matrices, resolved plan reuse effects, compiled task Agent/source/skill behavior, failed replacement Agent preservation, mixed-count deduplication, health reason rendering, animation, and reduced-motion CSS.
+- Automation-wide validation passed: `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./internal/automationobs ./web/templates/pages -run 'TestMigration11[3-6]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`, including the production Chrome graph fixture.
+- Full validation passed: `templ generate`, `git diff --check`, `go build ./...`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`. Every package passed; desktop emitted only the documented non-failing newer-SDK linker warnings.
+- Fresh implementation audit traced decode/normalize/validate/persist/load/clone/plan, page/Chat shared capability validation, create/replacement task configuration, project isolation, plan dependency/effect hashing, portfolio provenance identity, GitHub readiness, and rendered motion policy. It repaired handler Agent-repository overwrite and unresolved-reference draft behavior before the final validation chain.
+- Identity/exclusion search found no Register Existing, legacy detection, heuristic inference, confidence scoring, resource migration/backfill, arbitrary topology execution, or parallel task/worker/Workflow/Alert/GitHub runtime.
+
+### Managed Memory Gate
+
+- The authoritative `automation_graphs.md` managed view still records these five findings as open and names this repair as the next action. No tracked `.openvibely/memories/` counterpart exists.
+- This turn exposes `memory_view` but no authorized managed-memory mutation tool. Per the runbook/audit workflow, do not begin the qualifying strict read-only audit until an authorized mutation path updates that view to the new checkpoint and a subsequent `memory_view` confirms semantic agreement.
+
+### Identity And Scope Guard
+
+- Supported Automation identity remains only Template, Describe It, Blank, and maintained Native/GitHub setup registration. This pass must not add Register Existing, legacy detection, heuristic inference, migration or graph backfill, confidence scoring, arbitrary graph execution, or a parallel runtime engine.
+
 ## Remaining Phases
 
-- Final strict read-only Definition of Done audit only.
+- Reconcile authoritative managed memory through an authorized mutation path, verify it with `memory_view`, create/use the clean implementation checkpoint, and perform the separate qualifying strict read-only full-objective audit.
 
 ## Exact Next Action
 
-Use the repair commit containing this evidence as the clean checkpoint, then audit every phase, all 17 Definition of Done items, the three public creation identities plus maintained registration, and every explicit exclusion without editing the checkpoint.
+Update authoritative `automation_graphs.md` to record the completed five-finding repair and passing validation at the new checkpoint, verify no tracked counterpart exists and the managed view is semantically current, then begin a separate edit-free audit of all four phases, all 17 Definition of Done items, explicit Automation identity, and every exclusion.
+
 ## Update Contract
 
 After every implementation phase, record:

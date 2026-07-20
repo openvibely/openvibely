@@ -178,6 +178,7 @@ type AutomationCard struct {
 	Automation Automation                  `json:"automation"`
 	Version    AutomationVersion           `json:"version"`
 	Resources  []AutomationResourceSummary `json:"resources"`
+	Counts     AutomationNodeCounts        `json:"counts"`
 	NextRun    *time.Time                  `json:"next_run,omitempty"`
 	LastRun    *time.Time                  `json:"last_run,omitempty"`
 }

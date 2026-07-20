@@ -21,6 +21,7 @@ type AutomationCompiler struct {
 	automationRepo *repository.AutomationRepo
 	taskSvc        automationTaskMutationService
 	taskRepo       *repository.TaskRepo
+	agentRepo      *repository.AgentRepo
 	scheduleRepo   *repository.ScheduleRepo
 	planner        *AutomationPublicationPlanner
 	now            func() time.Time
@@ -41,6 +42,10 @@ type AutomationPublishResult struct {
 
 func NewAutomationCompiler(automationRepo *repository.AutomationRepo, taskSvc automationTaskMutationService, taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, planner *AutomationPublicationPlanner) *AutomationCompiler {
 	return &AutomationCompiler{automationRepo: automationRepo, taskSvc: taskSvc, taskRepo: taskRepo, scheduleRepo: scheduleRepo, planner: planner, now: time.Now}
+}
+
+func (c *AutomationCompiler) SetAgentRepository(agentRepo *repository.AgentRepo) {
+	c.agentRepo = agentRepo
 }
 
 func (c *AutomationCompiler) Publish(ctx context.Context, request AutomationPublishRequest) (*AutomationPublishResult, error) {
@@ -138,7 +143,7 @@ func (c *AutomationCompiler) Publish(ctx context.Context, request AutomationPubl
 		}
 		resources[step.StepKey] = resourceID
 	}
-	taskUpdates, err := publicationTaskUpdates(definition, candidate, effects, resources)
+	taskUpdates, err := c.publicationTaskUpdates(ctx, definition, candidate, effects, resources)
 	if err != nil {
 		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
 	}
@@ -200,12 +205,20 @@ func (c *AutomationCompiler) compileTask(ctx context.Context, request Automation
 			return "", err
 		}
 	}
-	prompt, _ := node.Config["prompt"].(string)
+	prompt := automationCompiledTaskPrompt(node)
 	category, _ := node.Config["category"].(string)
 	priority, _ := draftInt(node.Config["priority"])
+	agent, err := c.resolveNodeAgent(ctx, request.ProjectID, node)
+	if err != nil {
+		return "", err
+	}
+	var agentDefinitionID *string
+	if agent != nil {
+		agentDefinitionID = &agent.ID
+	}
 	if task == nil {
 		task = &models.Task{ProjectID: request.ProjectID, Title: automationTaskTitle(definition.Automation, node), Prompt: prompt,
-			Category: models.TaskCategory(category), Priority: priority, Status: models.StatusPending,
+			Category: models.TaskCategory(category), Priority: priority, Status: models.StatusPending, AgentDefinitionID: agentDefinitionID,
 			CreatedVia: repository.AutomationCompilerTaskCreatedVia(request.AutomationID, node.Key)}
 		if err := c.taskSvc.Create(ctx, task); err != nil {
 			if errors.Is(err, ErrDuplicateTask) {
@@ -228,7 +241,22 @@ func (c *AutomationCompiler) compileTask(ctx context.Context, request Automation
 	return task.ID, nil
 }
 
-func publicationTaskUpdates(definition *models.AutomationDefinition, candidate models.AutomationDraftCandidate, effects map[string]models.AutomationPublicationEffect, resources map[string]string) ([]repository.AutomationPublicationTaskUpdate, error) {
+func (c *AutomationCompiler) resolveNodeAgent(ctx context.Context, projectID string, node models.AutomationDraftNode) (*models.Agent, error) {
+	ref, _ := node.Config["agent_ref"].(string)
+	if strings.TrimSpace(ref) == "" {
+		return nil, nil
+	}
+	agent, err := resolveAutomationAgent(ctx, c.agentRepo, projectID, ref)
+	if err != nil {
+		return nil, err
+	}
+	if agent == nil {
+		return nil, fmt.Errorf("Agent selection for node %q is unavailable in this project", node.Key)
+	}
+	return agent, nil
+}
+
+func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definition *models.AutomationDefinition, candidate models.AutomationDraftCandidate, effects map[string]models.AutomationPublicationEffect, resources map[string]string) ([]repository.AutomationPublicationTaskUpdate, error) {
 	var updates []repository.AutomationPublicationTaskUpdate
 	for _, node := range candidate.Nodes {
 		stepKey := "task:" + node.Key
@@ -240,12 +268,20 @@ func publicationTaskUpdates(definition *models.AutomationDefinition, candidate m
 		if taskID == "" {
 			return nil, fmt.Errorf("publication task update %q has no reconciled resource", stepKey)
 		}
-		prompt, _ := node.Config["prompt"].(string)
+		prompt := automationCompiledTaskPrompt(node)
 		category, _ := node.Config["category"].(string)
 		priority, _ := draftInt(node.Config["priority"])
+		agent, err := c.resolveNodeAgent(ctx, definition.Automation.ProjectID, node)
+		if err != nil {
+			return nil, err
+		}
+		var agentDefinitionID *string
+		if agent != nil {
+			agentDefinitionID = &agent.ID
+		}
 		updates = append(updates, repository.AutomationPublicationTaskUpdate{
 			StepKey: stepKey, TaskID: taskID, Title: automationTaskTitle(definition.Automation, node),
-			Prompt: prompt, Category: models.TaskCategory(category), Priority: priority,
+			Prompt: prompt, Category: models.TaskCategory(category), Priority: priority, AgentDefinitionID: agentDefinitionID,
 		})
 	}
 	return updates, nil

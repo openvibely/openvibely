@@ -554,8 +554,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	settingsRepo := repository.NewSettingsRepo(db)
 	automationDraftSvc := service.NewAutomationDraftService(automationRepo, automationRegistry)
 	automationCapabilitySvc := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, settingsRepo)
+	automationDraftSvc.SetCapabilitySnapshotBuilder(automationCapabilitySvc)
 	automationPlanner := service.NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, automationRegistry, automationDraftSvc)
+	automationPlanner.SetAgentRepository(agentRepo)
 	automationCompiler := service.NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, automationPlanner)
+	automationCompiler.SetAgentRepository(agentRepo)
 	automationLifecycleSvc := service.NewAutomationLifecycleService(automationRepo, scheduleRepo)
 	automationConfirmationSecret, confirmationSecretErr := service.LoadOrCreateAutomationConfirmationSecret(context.Background(), settingsRepo)
 	if confirmationSecretErr != nil {
@@ -603,6 +606,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.ProjectRepoRoot,
 	)
 	automationPlanner.SetGitHubConnectionProvider(githubSvc)
+	automationCapabilitySvc.SetGitHubConnectionProvider(githubSvc)
 	llmSvc.SetGitHubIssueRuntimeProvider(githubSvc)
 	llmSvc.SetGitHubAuthRepo(githubAuthRepo)
 	llmSvc.SetTaskPullRequestRepo(taskPullRequestRepo)

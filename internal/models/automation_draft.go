@@ -160,13 +160,14 @@ type AutomationChatConfirmationReceipt struct {
 }
 
 type AutomationBuilderPage struct {
-	Result            AutomationDraftResult       `json:"result"`
-	Plan              *AutomationPublicationPlan  `json:"plan,omitempty"`
-	PublicationSteps  []AutomationPublicationStep `json:"publication_steps,omitempty"`
-	NodePalette       []AutomationDraftNode       `json:"node_palette,omitempty"`
-	EdgePalette       []AutomationDraftEdge       `json:"edge_palette,omitempty"`
-	ConfirmationToken string                      `json:"-"`
-	Error             string                      `json:"error,omitempty"`
+	Result            AutomationDraftResult        `json:"result"`
+	Plan              *AutomationPublicationPlan   `json:"plan,omitempty"`
+	PublicationSteps  []AutomationPublicationStep  `json:"publication_steps,omitempty"`
+	NodePalette       []AutomationDraftNode        `json:"node_palette,omitempty"`
+	EdgePalette       []AutomationDraftEdge        `json:"edge_palette,omitempty"`
+	Capabilities      AutomationCapabilitySnapshot `json:"capabilities"`
+	ConfirmationToken string                       `json:"-"`
+	Error             string                       `json:"error,omitempty"`
 }
 
 func (m AutomationDraftMetadata) Candidate() (AutomationDraftCandidate, error) {

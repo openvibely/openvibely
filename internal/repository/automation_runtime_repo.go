@@ -1198,6 +1198,60 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 	return counts, activeInvocations, activeWorkItems, nil
 }
 
+func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, projectID string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, error) {
+	rows, err := r.db.QueryContext(ctx, `WITH operational_state AS (
+		SELECT automation_id, 'running' AS state,
+			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END AS state_key
+		FROM automation_activities
+		WHERE project_id = ? AND status IN ('pending','running')
+		UNION
+		SELECT automation_id, 'waiting',
+			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
+		FROM automation_activities
+		WHERE project_id = ? AND status = 'waiting'
+		UNION
+		SELECT automation_id, 'failed',
+			CASE WHEN work_item_id IS NULL THEN 'activity:' || id ELSE 'work:' || work_item_id END
+		FROM automation_activities
+		WHERE project_id = ? AND status = 'failed'
+		UNION
+		SELECT automation_id, 'recent', 'activity:' || id
+		FROM automation_activities
+		WHERE project_id = ? AND status = 'completed' AND completed_at >= ?
+		UNION
+		SELECT automation_id,
+			CASE state WHEN 'active' THEN 'running' WHEN 'waiting' THEN 'waiting' WHEN 'blocked' THEN 'blocked' WHEN 'failed' THEN 'failed' END,
+			'work:' || work_item_id
+		FROM automation_work_item_positions
+		WHERE project_id = ? AND state IN ('active','waiting','blocked','failed')
+		UNION
+		SELECT automation_id, 'recent', 'transition:' || id
+		FROM automation_transitions
+		WHERE project_id = ? AND state = 'completed' AND occurred_at >= ?
+	)
+	SELECT automation_id,
+		SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN state = 'waiting' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN state = 'recent' THEN 1 ELSE 0 END)
+	FROM operational_state GROUP BY automation_id`, projectID, projectID, projectID, projectID, recentCutoff.UTC(), projectID, projectID, recentCutoff.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]models.AutomationNodeCounts)
+	for rows.Next() {
+		var automationID string
+		var counts models.AutomationNodeCounts
+		if err := rows.Scan(&automationID, &counts.Running, &counts.Waiting, &counts.Blocked, &counts.Failed, &counts.CompletedRecently); err != nil {
+			return nil, err
+		}
+		out[automationID] = counts
+	}
+	return out, rows.Err()
+}
+
 func (r *AutomationRepo) LiveOlderVersionPositions(ctx context.Context, projectID, automationID, currentVersionID string) (map[string]models.AutomationNodeCounts, []models.AutomationLegacyWorkGroup, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT COALESCE(current_node.id, ''), p.state, old_version.id, old_version.version, COUNT(*)
 		FROM automation_work_item_positions p

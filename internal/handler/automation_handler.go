@@ -24,6 +24,17 @@ func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftSe
 	h.automationCompiler = compiler
 	h.automationConfirmationSvc = confirmation
 	h.automationLifecycleSvc = lifecycle
+	if drafts != nil {
+		drafts.SetCapabilitySnapshotBuilder(capabilities)
+	}
+	if h.agentRepo != nil {
+		if planner != nil {
+			planner.SetAgentRepository(h.agentRepo)
+		}
+		if compiler != nil {
+			compiler.SetAgentRepository(h.agentRepo)
+		}
+	}
 }
 
 func (h *Handler) ListAutomations(c echo.Context) error {

@@ -24,8 +24,9 @@ const (
 )
 
 type AutomationDraftService struct {
-	repo     *repository.AutomationRepo
-	registry *AutomationAdapterRegistry
+	repo         *repository.AutomationRepo
+	registry     *AutomationAdapterRegistry
+	capabilities *AutomationCapabilitySnapshotBuilder
 }
 
 type AutomationDraftCreateRequest struct {
@@ -41,6 +42,10 @@ func NewAutomationDraftService(repo *repository.AutomationRepo, registry *Automa
 		registry = NewAutomationAdapterRegistry()
 	}
 	return &AutomationDraftService{repo: repo, registry: registry}
+}
+
+func (s *AutomationDraftService) SetCapabilitySnapshotBuilder(capabilities *AutomationCapabilitySnapshotBuilder) {
+	s.capabilities = capabilities
 }
 
 func DecodeAutomationDraftCandidate(raw []byte) (models.AutomationDraftCandidate, error) {
@@ -150,7 +155,6 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 	if !ok {
 		return candidate, fmt.Errorf("unsupported automation adapter %q", candidate.AdapterKey)
 	}
-	candidate.SchemaVersion = automationDraftSchemaVersion
 	candidate.Name = strings.TrimSpace(candidate.Name)
 	candidate.Description = strings.TrimSpace(candidate.Description)
 	candidate.AutomationType = adapter.AutomationType
@@ -166,6 +170,18 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 		node.Role = strings.TrimSpace(node.Role)
 		if node.Config == nil {
 			node.Config = map[string]any{}
+		}
+		if agentRef, exists := node.Config["agent_ref"]; exists {
+			if text, valid := agentRef.(string); valid {
+				node.Config["agent_ref"] = strings.TrimSpace(text)
+			}
+		}
+		for _, field := range []string{"skills", "source_files"} {
+			if value, exists := node.Config[field]; exists {
+				if values, valid := draftStringSlice(value); valid {
+					node.Config[field] = normalizeDraftReferences(values)
+				}
+			}
 		}
 		if canonical, exists := adapterNodes[node.Key]; exists {
 			if node.Name == "" {
@@ -208,6 +224,40 @@ func normalizeDraftMessages(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func normalizeDraftReferences(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func draftStringSlice(value any) ([]string, bool) {
+	switch values := value.(type) {
+	case []string:
+		return append([]string(nil), values...), true
+	case []any:
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			text, ok := value.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, text)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDraftCandidate) []models.AutomationValidationIssue {
@@ -325,15 +375,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			issues = append(issues, models.AutomationValidationIssue{Code: "missing_edge", Message: "Add every required transition before publication."})
 		}
 	}
-	sort.SliceStable(issues, func(i, j int) bool {
-		if issues[i].NodeKey != issues[j].NodeKey {
-			return issues[i].NodeKey < issues[j].NodeKey
-		}
-		if issues[i].Code != issues[j].Code {
-			return issues[i].Code < issues[j].Code
-		}
-		return issues[i].Message < issues[j].Message
-	})
+	sortAutomationValidationIssues(issues)
 	return issues
 }
 
@@ -345,7 +387,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	allowed := map[string]bool{}
 	switch node.Type {
 	case models.AutomationNodeAgentTask:
-		allowed = map[string]bool{"prompt": true, "category": true, "priority": true}
+		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "skills": true, "source_files": true}
 	case models.AutomationNodeTrigger:
 		allowed = map[string]bool{"run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
 	}
@@ -372,6 +414,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 		if !priorityOK || priority < 1 || priority > 4 {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "priority", Message: "Task priority must be between 1 and 4."})
 		}
+		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
 	}
 	if node.Type == models.AutomationNodeTrigger {
 		runAt, runAtOK := node.Config["run_at"].(string)
@@ -398,7 +441,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 func validateAutomationNodeConfig(adapter AutomationAdapter, canonical AutomationAdapterNode, node models.AutomationDraftNode) []models.AutomationValidationIssue {
 	allowed := map[string]bool{}
 	if canonical.AllowedResources["task"] {
-		allowed = map[string]bool{"prompt": true, "category": true, "priority": true}
+		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "skills": true, "source_files": true}
 	}
 	if canonical.AllowedResources["schedule"] {
 		allowed = map[string]bool{"target_node_key": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
@@ -426,6 +469,7 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		if !priorityOK || priority < 1 || priority > 4 {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "priority", Message: "Task priority must be between 1 and 4."})
 		}
+		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
 	}
 	if canonical.AllowedResources["schedule"] {
 		target, targetOK := node.Config["target_node_key"].(string)
@@ -451,6 +495,119 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		}
 	}
 	return issues
+}
+
+func validateAutomationTaskReferenceShape(node models.AutomationDraftNode) []models.AutomationValidationIssue {
+	var issues []models.AutomationValidationIssue
+	if value, exists := node.Config["agent_ref"]; exists {
+		ref, ok := value.(string)
+		if !ok || len(strings.TrimSpace(ref)) > 200 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection must use a supported project Agent reference."})
+		}
+	}
+	for _, field := range []struct {
+		key  string
+		code string
+		name string
+	}{{"skills", "skill_ref", "Skill"}, {"source_files", "source_file", "Source file"}} {
+		value, exists := node.Config[field.key]
+		if !exists {
+			continue
+		}
+		values, ok := draftStringSlice(value)
+		if !ok || len(values) > 20 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: field.code, Message: field.name + " selection must be a bounded list of supported references."})
+			continue
+		}
+		for _, value := range values {
+			if strings.TrimSpace(value) == "" || len(value) > 240 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: field.code, Message: field.name + " selection contains an unsupported reference."})
+				break
+			}
+		}
+	}
+	return issues
+}
+
+func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate models.AutomationDraftCandidate, snapshot models.AutomationCapabilitySnapshot) []models.AutomationValidationIssue {
+	issues := s.ValidateCandidate(candidate)
+	agents := make(map[string]bool, len(snapshot.Agents))
+	for _, agent := range snapshot.Agents {
+		agents[agent.ID] = true
+	}
+	skills := make(map[string]bool, len(snapshot.Skills))
+	for _, skill := range snapshot.Skills {
+		skills[skill.ID] = true
+	}
+	sourceFiles := make(map[string]bool, len(snapshot.SourceFiles))
+	for _, sourceFile := range snapshot.SourceFiles {
+		sourceFiles[sourceFile] = true
+	}
+	for _, node := range candidate.Nodes {
+		if node.Type != models.AutomationNodeAgentTask {
+			continue
+		}
+		agentRef, _ := node.Config["agent_ref"].(string)
+		agentRef = strings.TrimSpace(agentRef)
+		if agentRef != "" && !agents[agentRef] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection is unavailable in this project."})
+		}
+		if selected, ok := draftStringSlice(node.Config["skills"]); ok {
+			for _, skill := range normalizeDraftReferences(selected) {
+				if !skills[skill] || agentRef == "" || !strings.HasPrefix(skill, agentRef+":") {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "skill_ref", Message: "Skill selection is unavailable for the selected Agent in this project."})
+				}
+			}
+		}
+		if selected, ok := draftStringSlice(node.Config["source_files"]); ok {
+			for _, sourceFile := range normalizeDraftReferences(selected) {
+				if !sourceFiles[sourceFile] {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "source_file", Message: "Source file selection is unavailable in this project."})
+				}
+			}
+		}
+	}
+	sortAutomationValidationIssues(issues)
+	return issues
+}
+
+func (s *AutomationDraftService) validateCandidateForProject(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) ([]models.AutomationValidationIssue, error) {
+	if s.capabilities == nil {
+		issues := s.ValidateCandidate(candidate)
+		for _, node := range candidate.Nodes {
+			if node.Type != models.AutomationNodeAgentTask {
+				continue
+			}
+			if ref, _ := node.Config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection cannot be resolved because project capabilities are unavailable."})
+			}
+			if values, ok := draftStringSlice(node.Config["skills"]); ok && len(normalizeDraftReferences(values)) > 0 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "skill_ref", Message: "Skill selection cannot be resolved because project capabilities are unavailable."})
+			}
+			if values, ok := draftStringSlice(node.Config["source_files"]); ok && len(normalizeDraftReferences(values)) > 0 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "source_file", Message: "Source file selection cannot be resolved because project capabilities are unavailable."})
+			}
+		}
+		sortAutomationValidationIssues(issues)
+		return issues, nil
+	}
+	snapshot, err := s.capabilities.Build(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return s.ValidateCandidateWithCapabilities(candidate, snapshot), nil
+}
+
+func sortAutomationValidationIssues(issues []models.AutomationValidationIssue) {
+	sort.SliceStable(issues, func(i, j int) bool {
+		if issues[i].NodeKey != issues[j].NodeKey {
+			return issues[i].NodeKey < issues[j].NodeKey
+		}
+		if issues[i].Code != issues[j].Code {
+			return issues[i].Code < issues[j].Code
+		}
+		return issues[i].Message < issues[j].Message
+	})
 }
 
 func unsafeAutomationConfigValue(key string, value any) bool {
@@ -528,7 +685,10 @@ func (s *AutomationDraftService) CreateDraft(ctx context.Context, request Automa
 	if err != nil {
 		return nil, err
 	}
-	issues := s.ValidateCandidate(candidate)
+	issues, err := s.validateCandidateForProject(ctx, request.ProjectID, candidate)
+	if err != nil {
+		return nil, err
+	}
 	for _, issue := range issues {
 		if automationDraftIssuePreventsPersistence(issue.Code) {
 			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
@@ -581,10 +741,23 @@ func (s *AutomationDraftService) GetDraft(ctx context.Context, projectID, automa
 	if err != nil {
 		return nil, err
 	}
+	candidate, err = s.NormalizeCandidate(candidate)
+	if err != nil {
+		return nil, err
+	}
+	currentIssues, err := s.validateCandidateForProject(ctx, projectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	for _, issue := range currentIssues {
+		if automationDraftIssuePreventsPersistence(issue.Code) {
+			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
+		}
+	}
 	result := draftPreviewResult(candidate, definition)
 	result.Assumptions = metadata.Assumptions
 	result.Warnings = metadata.Warnings
-	result.ValidationErrors = metadata.ValidationErrors
+	result.ValidationErrors = currentIssues
 	result.URL = fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, projectID)
 	return result, nil
 }
@@ -597,7 +770,10 @@ func (s *AutomationDraftService) UpdateDraft(ctx context.Context, automationID, 
 	if err != nil {
 		return nil, err
 	}
-	issues := s.ValidateCandidate(candidate)
+	issues, err := s.validateCandidateForProject(ctx, projectID, candidate)
+	if err != nil {
+		return nil, err
+	}
 	for _, issue := range issues {
 		if automationDraftIssuePreventsPersistence(issue.Code) {
 			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
@@ -640,21 +816,7 @@ func (s *AutomationDraftService) ClonePublishedVersion(ctx context.Context, proj
 		return nil, err
 	}
 	if existing != nil {
-		candidate, err := existing.Candidate()
-		if err != nil {
-			return nil, err
-		}
-		definition, err := s.repo.GetDefinitionVersion(ctx, projectID, automationID, existing.VersionID)
-		if err != nil {
-			return nil, err
-		}
-		if definition == nil {
-			return nil, errors.New("automation draft not found")
-		}
-		result := draftPreviewResult(candidate, definition)
-		result.ValidationErrors = existing.ValidationErrors
-		result.URL = fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, existing.VersionID, projectID)
-		return result, nil
+		return s.GetDraft(ctx, projectID, automationID, existing.VersionID)
 	}
 	published, err := s.repo.GetDefinition(ctx, projectID, automationID)
 	if err != nil {
@@ -704,7 +866,15 @@ func (s *AutomationDraftService) ClonePublishedVersion(ctx context.Context, proj
 	if err != nil {
 		return nil, err
 	}
-	issues := s.ValidateCandidate(candidate)
+	issues, err := s.validateCandidateForProject(ctx, projectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	for _, issue := range issues {
+		if automationDraftIssuePreventsPersistence(issue.Code) {
+			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
+		}
+	}
 	definition, err := s.repo.CreateAutomationDraftVersion(ctx, repository.AutomationDraftWrite{ProjectID: projectID,
 		AutomationID: automationID, Source: "manual", Candidate: candidate, ValidationErrors: issues})
 	if err != nil {
