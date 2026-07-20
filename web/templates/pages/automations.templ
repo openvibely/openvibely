@@ -779,7 +779,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class="h-[calc(100dvh-15rem)] min-h-[42rem] w-full touch-none select-none" role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
 						@automationGraphThemeStyles()
 						<defs>
-							<marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker>
+							<marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow automation-edge-foreground-arrow"></path></marker>
 							<marker id="automation-draft-preview-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-preview-arrow"></path></marker>
 						</defs>
 						for _, edge := range page.Result.Candidate.Edges {
@@ -1328,7 +1328,8 @@ templ automationGraphThemeStyles() {
 			.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--p)); stroke-width: 5; }
 			.automation-edge-hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; }
 			.automation-draft-edge:focus { outline: none; }
-			.automation-edge-foreground { pointer-events: none; }
+			.automation-edge-foreground { pointer-events: none; stroke: oklch(var(--bc)); }
+			.automation-edge-foreground-arrow { fill: oklch(var(--bc)); }
 			.automation-edge-foreground--selected { stroke: oklch(var(--p)); stroke-width: 3; }
 			.automation-edge-endpoint, .automation-edge-delete { opacity: 0; pointer-events: none; }
 			.automation-draft-edge--selected .automation-edge-endpoint, .automation-draft-edge--selected .automation-edge-delete, .automation-draft-edge:focus-within .automation-edge-endpoint, .automation-draft-edge:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }

@@ -229,6 +229,15 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (!foregroundEdge) fail('Blank connection has no visible foreground edge');
 	    if (!(blankNode.compareDocumentPosition(foregroundEdge) & Node.DOCUMENT_POSITION_FOLLOWING)) fail('Blank connection line is rendered behind graph nodes');
 	    if (getComputedStyle(foregroundEdge).pointerEvents !== 'none') fail('foreground connection line blocks node connectors');
+	    function colorAlpha(value) {
+	      var slash = value.match(/\/\s*([0-9.]+)(%)?\s*\)/);
+	      if (slash) return Number(slash[1]) / (slash[2] ? 100 : 1);
+	      var rgba = value.match(/^rgba\([^,]+,[^,]+,[^,]+,\s*([0-9.]+)\)$/);
+	      return rgba ? Number(rgba[1]) : 1;
+	    }
+	    if (colorAlpha(getComputedStyle(foregroundEdge).stroke) < 1) fail('foreground connection line is translucent and looks behind graph nodes');
+	    var foregroundArrow = document.querySelector('#automation-draft-arrow .automation-graph-arrow');
+	    if (!foregroundArrow || colorAlpha(getComputedStyle(foregroundArrow).fill) < 1) fail('foreground connection arrow is translucent and looks behind connector circles');
 
 	    click('#automation-builder > a[href^="/automations?"]', 'Automations back link from blank builder');
 	    await waitFor(portfolioReady, 'portfolio before draft selection');

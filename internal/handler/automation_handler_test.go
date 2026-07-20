@@ -698,6 +698,63 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	require.Equal(t, "pull_request_review", candidate.Nodes[len(candidate.Nodes)-1].Role)
 }
 
+func TestAutomationBlankAppliedScheduleUsesScheduleNodeNameOnSchedulePage(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Automation Schedule Projection").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
+	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("schedule-projection-secret-32bytes"))
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, confirmation, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	created := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"blank"},
+	}).Execute()
+	require.Equal(t, 200, created.Code, created.Body.String())
+
+	var automationID, versionID string
+	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
+	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+	require.NoError(t, err)
+	candidate, err := metadata.Candidate()
+	require.NoError(t, err)
+	post := func(values url.Values) {
+		t.Helper()
+		raw, marshalErr := json.Marshal(candidate)
+		require.NoError(t, marshalErr)
+		values.Set("project_id", project.ID)
+		values.Set("candidate_json", string(raw))
+		response := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(values).Execute()
+		require.Equal(t, 200, response.Code, response.Body.String())
+		metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
+		require.NoError(t, err)
+		candidate, err = metadata.Candidate()
+		require.NoError(t, err)
+	}
+	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Weekday review"}})
+	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"agent_task"}, "node_name": {"Review support queue"}})
+	post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {candidate.Nodes[0].Key}, "to_key": {candidate.Nodes[1].Key}})
+
+	planPage := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	require.Equal(t, 200, planPage.Code, planPage.Body.String())
+	tokenMatch := regexp.MustCompile(`name="confirmation_token" value="([^"]+)"`).FindStringSubmatch(planPage.Body.String())
+	require.Len(t, tokenMatch, 2)
+	revisionMatch := regexp.MustCompile(`name="plan_revision" value="([^"]+)"`).FindStringSubmatch(planPage.Body.String())
+	require.Len(t, revisionMatch, 2)
+	published := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s/publish?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
+		"project_id": {project.ID}, "plan_revision": {revisionMatch[1]}, "confirmation_token": {tokenMatch[1]},
+	}).Execute()
+	require.Equal(t, 204, published.Code, published.Body.String())
+
+	schedulePage := tc.HTTP().Get("/schedule?project_id=" + project.ID).Execute()
+	require.Equal(t, 200, schedulePage.Code, schedulePage.Body.String())
+	require.Contains(t, schedulePage.Body.String(), `title="Weekday review"`, "the Schedules page must identify the Automation schedule node, not masquerade it as its target agent task")
+	require.NotRegexp(t, `title="[^"]*Review support queue`, schedulePage.Body.String(), "the target agent task must not replace the Automation schedule identity on the calendar")
+}
+
 func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Freeform Builder Project").Build()

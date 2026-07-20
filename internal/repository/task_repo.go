@@ -783,18 +783,25 @@ func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.
 
 // TaskWithSchedule represents a task with its schedule information for calendar view
 type TaskWithSchedule struct {
-	Task     models.Task
-	Schedule *models.Schedule
+	Task                   models.Task
+	Schedule               *models.Schedule
+	AutomationScheduleName string
 }
 
 func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID string) ([]TaskWithSchedule, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id, t.created_at, t.updated_at, t.completed_at,
-		 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run, s.last_run, s.created_at, s.updated_at
-		 FROM tasks t
-		 LEFT JOIN schedules s ON t.id = s.task_id
-		 WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)
-		 ORDER BY s.next_run ASC`, projectID)
+			 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run, s.last_run, s.created_at, s.updated_at,
+			 COALESCE(automation_node.name, '')
+			 FROM tasks t
+			 LEFT JOIN schedules s ON t.id = s.task_id
+			 LEFT JOIN automation_trigger_owners automation_owner ON automation_owner.schedule_id = s.id AND automation_owner.project_id = t.project_id
+			 LEFT JOIN automation_nodes automation_node ON automation_node.id = automation_owner.node_id
+				AND automation_node.version_id = automation_owner.version_id
+				AND automation_node.automation_id = automation_owner.automation_id
+				AND automation_node.project_id = automation_owner.project_id
+			 WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)
+			 ORDER BY s.next_run ASC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing tasks with schedules: %w", err)
 	}
@@ -812,6 +819,7 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 			&tws.Task.ID, &tws.Task.ProjectID, &tws.Task.Title, &tws.Task.Category,
 			&tws.Task.Priority, &tws.Task.Status, &tws.Task.Prompt, &tws.Task.AgentID, &tws.Task.AgentDefinitionID, &tws.Task.Tag, &tws.Task.DisplayOrder, &tws.Task.ParentTaskID, &tws.Task.ChainConfig, &tws.Task.SwarmRole, &tws.Task.SwarmStatus, &tws.Task.SwarmConfig, &tws.Task.SwarmSequence, &tws.Task.WorktreePath, &tws.Task.WorktreeBranch, &tws.Task.AutoMerge, &tws.Task.MergeTargetBranch, &tws.Task.MergeStatus, &tws.Task.BaseBranch, &tws.Task.BaseCommitSHA, &tws.Task.LineageDepth, &tws.Task.CreatedVia, &tws.Task.TelegramChatID, &tws.Task.CreatedAt, &tws.Task.UpdatedAt, &tws.Task.CompletedAt,
 			&schedID, &schedTaskID, &schedRunAt, &schedRepeatType, &schedRepeatInterval, &schedEnabled, &schedNextRun, &schedLastRun, &schedCreatedAt, &schedUpdatedAt,
+			&tws.AutomationScheduleName,
 		); err != nil {
 			return nil, fmt.Errorf("scanning task with schedule: %w", err)
 		}
