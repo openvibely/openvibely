@@ -93,6 +93,31 @@ func TestMethodOverrideSkipsExactAuthenticationProtocolPaths(t *testing.T) {
 	}
 }
 
+func TestStart_RejectsDirectHostedSSOAuthModeInDesktop(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Mode:                     config.ModeDesktop,
+		Port:                     "0",
+		DatabasePath:             filepath.Join(tmpDir, "hosted.db"),
+		ProjectRepoRoot:          filepath.Join(tmpDir, "repos"),
+		AppDataDir:               filepath.Join(tmpDir, "appdata"),
+		Environment:              "production",
+		EnvironmentExplicitlySet: true,
+		AuthMode:                 auth.AuthModeHostedSSO,
+		HostedSSOControlURL:      "https://openvibely.ai",
+		HostedSSOInstanceID:      "instance-1",
+		AppBaseURL:               "https://alice.openvibely.ai",
+		AuthSessionSecret:        base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+	}
+	instance, err := Start(context.Background(), cfg)
+	if instance != nil {
+		instance.Shutdown()
+	}
+	if err == nil || !strings.Contains(err.Error(), "desktop mode") {
+		t.Fatalf("Start instance=%#v error=%v, want desktop hosted SSO rejection", instance, err)
+	}
+}
+
 func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
 	var providerConnections atomic.Int32
 	provider := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -91,6 +91,22 @@ func TestHostedSSODesktopRejectedAndLocalCompatibilityPreserved(t *testing.T) {
 	}
 }
 
+func TestHostedSSODesktopRejectsDirectAuthMode(t *testing.T) {
+	cfg := Config{
+		Mode:                     ModeDesktop,
+		AuthMode:                 auth.AuthModeHostedSSO,
+		HostedSSOControlURL:      "https://openvibely.ai",
+		HostedSSOInstanceID:      "instance-1",
+		AppBaseURL:               "https://alice.openvibely.ai",
+		AuthSessionSecret:        hostedSecretFixture(),
+		Environment:              "production",
+		EnvironmentExplicitlySet: true,
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "desktop mode") {
+		t.Fatalf("Validate error=%v, want desktop hosted SSO rejection", err)
+	}
+}
+
 func TestHostedSSOCanonicalConfiguration(t *testing.T) {
 	valid := Config{
 		Mode:                     ModeServer,

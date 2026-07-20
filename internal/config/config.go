@@ -267,7 +267,7 @@ func (c *Config) Validate() error {
 	if c.hostedSSOSwitchSet && !c.hostedSSOSwitchOK {
 		return errors.New("OPENVIBELY_HOSTED_SSO_ENABLED must be exactly true or false")
 	}
-	if c.Mode == ModeDesktop && (c.HostedSSORequested || c.HostedSSOEnabled) {
+	if c.Mode == ModeDesktop && (c.HostedSSORequested || c.HostedSSOEnabled || c.AuthMode == auth.AuthModeHostedSSO) {
 		return errors.New("hosted SSO is not supported in desktop mode")
 	}
 	if c.AuthMode == "" {

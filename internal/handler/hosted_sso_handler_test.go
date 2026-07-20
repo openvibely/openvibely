@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -363,6 +364,141 @@ func TestHostedCookiesUseConfiguredExternalScheme(t *testing.T) {
 	h.SetAppBaseURL("https://alice.openvibely.ai")
 	if !h.hostedBrowserCookie("value").Secure || !h.hostedSessionCookie("value", time.Now()).Secure || !h.hostedSessionDeletionCookie().Secure || !h.clearHostedBrowserCookie().Secure {
 		t.Fatal("HTTPS external-origin cookies were not marked Secure")
+	}
+}
+
+func TestHostedHTTPLoopbackCookieLifecycle(t *testing.T) {
+	const appBaseURL = "http://127.0.0.1:3001"
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/sso/token" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"sub":"subject","email":"user@example.com","email_verified":true,"instance_id":"instance-1","instance_slug":"alice","instance_host":"127.0.0.1"}`)
+	}))
+	defer provider.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := auth.NewPendingStore(ctx, time.Now)
+	defer store.Close()
+	h, _, _ := setupTestHandler(t)
+	h.SetHostedSSO(
+		auth.NewHostedSSOClient(provider.URL, "instance-1", appBaseURL+"/auth/sso/callback"),
+		store,
+		hostedHandlerKey,
+		"instance-1",
+		appBaseURL,
+	)
+	e := echo.New()
+	e.Use(h.AuthMiddleware())
+	h.RegisterRoutes(e)
+	workspace := httptest.NewServer(e)
+	defer workspace.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	startResponse, err := client.Get(workspace.URL + auth.HostedSSOStartURL("/projects"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startResponse.Body.Close()
+	if startResponse.StatusCode != http.StatusFound {
+		t.Fatalf("start status=%d", startResponse.StatusCode)
+	}
+	authorizeURL, err := url.Parse(startResponse.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if authorizeURL.Query().Get("redirect_uri") != appBaseURL+"/auth/sso/callback" {
+		t.Fatalf("redirect_uri=%q", authorizeURL.Query().Get("redirect_uri"))
+	}
+	var binding *http.Cookie
+	for _, cookie := range startResponse.Cookies() {
+		if cookie.Name == "ov_sso_browser" {
+			binding = cookie
+		}
+	}
+	if binding == nil || binding.Value == "" || binding.Domain != "" || binding.Path != "/auth/sso" ||
+		!binding.HttpOnly || binding.Secure || binding.SameSite != http.SameSiteLaxMode || binding.MaxAge != 600 || !binding.Expires.After(time.Now()) {
+		t.Fatalf("unexpected HTTP browser binding %#v", binding)
+	}
+
+	callbackResponse, err := client.Get(workspace.URL + "/auth/sso/callback?code=" + canonicalHostedValue("c") + "&state=" + authorizeURL.Query().Get("state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackResponse.Body.Close()
+	if callbackResponse.StatusCode != http.StatusFound || callbackResponse.Header.Get("Location") != "/projects" {
+		t.Fatalf("callback status=%d location=%q", callbackResponse.StatusCode, callbackResponse.Header.Get("Location"))
+	}
+	var session, bindingDeletion *http.Cookie
+	for _, cookie := range callbackResponse.Cookies() {
+		switch cookie.Name {
+		case auth.DefaultCookieName:
+			session = cookie
+		case "ov_sso_browser":
+			bindingDeletion = cookie
+		}
+	}
+	if session == nil || session.Value == "" || session.Domain != "" || session.Path != "/" ||
+		!session.HttpOnly || session.Secure || session.SameSite != http.SameSiteLaxMode || session.MaxAge != 3600 || !session.Expires.After(time.Now()) {
+		t.Fatalf("unexpected HTTP hosted session %#v", session)
+	}
+	if bindingDeletion == nil || bindingDeletion.Value != "" || bindingDeletion.Domain != binding.Domain || bindingDeletion.Path != binding.Path ||
+		bindingDeletion.HttpOnly != binding.HttpOnly || bindingDeletion.Secure != binding.Secure || bindingDeletion.SameSite != binding.SameSite ||
+		bindingDeletion.MaxAge != -1 || !bindingDeletion.Expires.Equal(time.Unix(0, 0).UTC()) {
+		t.Fatalf("HTTP binding deletion did not replace issuance: issued=%#v deleted=%#v", binding, bindingDeletion)
+	}
+
+	meResponse, err := client.Get(workspace.URL + "/auth/me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meResponse.Body.Close()
+	if meResponse.StatusCode != http.StatusOK {
+		t.Fatalf("HTTP hosted session did not survive callback: status=%d", meResponse.StatusCode)
+	}
+	logoutRequest, err := http.NewRequest(http.MethodPost, workspace.URL+"/logout", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logoutRequest.Header.Set("Origin", appBaseURL)
+	logoutResponse, err := client.Do(logoutRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logoutResponse.Body.Close()
+	if logoutResponse.StatusCode != http.StatusFound || logoutResponse.Header.Get("Location") != "/logged-out" {
+		t.Fatalf("logout status=%d location=%q", logoutResponse.StatusCode, logoutResponse.Header.Get("Location"))
+	}
+	logoutCookies := logoutResponse.Cookies()
+	if len(logoutCookies) != 1 {
+		t.Fatalf("logout cookies=%#v", logoutCookies)
+	}
+	sessionDeletion := logoutCookies[0]
+	if sessionDeletion.Name != session.Name || sessionDeletion.Value != "" || sessionDeletion.Domain != session.Domain || sessionDeletion.Path != session.Path ||
+		sessionDeletion.HttpOnly != session.HttpOnly || sessionDeletion.Secure != session.Secure || sessionDeletion.SameSite != session.SameSite ||
+		sessionDeletion.MaxAge != -1 || !sessionDeletion.Expires.Equal(time.Unix(0, 0).UTC()) {
+		t.Fatalf("HTTP session deletion did not replace issuance: issued=%#v deleted=%#v", session, sessionDeletion)
+	}
+	workspaceURL, err := url.Parse(workspace.URL + "/auth/sso/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cookie := range jar.Cookies(workspaceURL) {
+		if cookie.Name == auth.DefaultCookieName || cookie.Name == "ov_sso_browser" {
+			t.Fatalf("deleted auth cookie remains in HTTP jar: %#v", cookie)
+		}
 	}
 }
 
