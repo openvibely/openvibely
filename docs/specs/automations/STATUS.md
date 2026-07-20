@@ -6,7 +6,25 @@ Phase 5 is active after direct product feedback showed the completed first-relea
 
 ## Status
 
-Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 now has a validated custom foundation, deterministic multi-task execution, Native human approval, configurable GitHub lifecycle capabilities, and Describe It/Chat parity for the surfaced custom schema. Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are inserted, unsupported capability handoffs remain fail-closed draft errors, and publication derives only real task/schedule effects plus explicit Alert/GitHub/human-gate configuration from user-owned nodes and edges. Runtime Alert and GitHub activity uses existing services and exact immutable Automation-version provenance. Per the user's correction, the old JSON-only hidden Workflow subsystem is not an Automation builder capability and will be removed separately rather than exposed here. Remaining Phase 5 work is managed-memory reconciliation, a clean checkpoint, and the fresh edit-free full-objective audit.
+Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 now has a validated custom foundation, deterministic multi-task execution, Native human approval, configurable GitHub lifecycle capabilities, Describe It/Chat parity for the surfaced custom schema, and a repaired Blank connector interaction. Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are inserted, and its empty supported-edge palette is serialized as `[]` rather than `null`, so direct node-to-node drags cannot fail in the browser before creating an edge. Visible lines and arrows render in a final pointer-transparent foreground above nodes and connector circles, while selection hit areas remain behind nodes and captured pointer releases resolve the real connector under the release coordinates. Unsupported capability handoffs remain fail-closed draft errors, and publication derives only real task/schedule effects plus explicit Alert/GitHub/human-gate configuration from user-owned nodes and edges. Runtime Alert and GitHub activity uses existing services and exact immutable Automation-version provenance. Per the user's correction, the old JSON-only hidden Workflow subsystem is not an Automation builder capability and will be removed separately rather than exposed here. Remaining Phase 5 work is managed-memory reconciliation, a clean checkpoint, and the fresh edit-free full-objective audit.
+
+## Phase 5 Blank Connector Regression Checkpoint
+
+### Completed Requirements
+
+- Blank custom drafts now serialize a missing supported-edge palette as `[]`; the prior `null` value caused `canonicalEdge(...).find` to throw before the first user-defined connection could be added.
+- Connection completion hit-tests the actual release coordinates before falling back to the event target, so touch/pen implicit pointer capture and equivalent captured releases cannot mistake the source connector for the destination.
+- Selectable transparent edge hit areas remain behind nodes. Visible edge lines, arrowheads, and the active connection preview render after all nodes in a pointer-transparent foreground, keeping them visually above node cards and connector circles without blocking drops.
+- Dynamic add, reconnect, delete-edge, delete-node, node movement, selection highlighting, arbitrary multi-edge/cycle geometry, ordinary page wheel scrolling, and Ctrl/Meta pinch-style zoom all update both the interaction and foreground edge surfaces.
+
+### Regression And Validation Evidence
+
+- The production real-Chrome fixture now enters through an actually empty Blank Automation, uses the visible Add first node flow, receives a custom multi-node graph, and reproduces a captured source `pointerup` at another node's connector coordinates. It failed first with no saved edge and then exposed the `null.find` exception before passing with exact candidate JSON persistence.
+- The browser fixture asserts the destination connector wins coordinate hit-testing, the visible edge follows node elements in SVG paint order, and the foreground edge has `pointer-events: none`. Existing consecutive connection, cycle, selection, reconnection, deletion, node movement, wheel-scroll, and pinch-zoom assertions remain passing.
+- `templ generate`, `gofmt`, `git diff --check`, and `go build ./...` pass; desktop emits only the documented non-failing newer-SDK linker warnings.
+- `go test ./web/templates/pages -count=1 -timeout 120s` passes, including the production Chrome graph fixture.
+- `go test ./internal/... -count=1 -timeout 120s` passes every internal package.
+- `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passes every package.
 
 ## Phase 5 Custom Builder Checklist
 

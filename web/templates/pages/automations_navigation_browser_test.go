@@ -91,7 +91,11 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 	renderBlankBuilder := func(withNode bool) string {
 		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Blank Automation", AutomationType: "custom", AdapterKey: "custom"}
 		if withNode {
-			candidate.Nodes = []models.AutomationDraftNode{{Key: "first_step", Name: "First step", Type: models.AutomationNodeAgentTask, Role: "custom_agent_task", Config: map[string]any{"prompt": "Describe the work this node should perform.", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}}}
+			candidate.Nodes = []models.AutomationDraftNode{
+				{Key: "first_step", Name: "First step", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Describe the work this node should perform.", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
+				{Key: "second_step", Name: "Second step", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Continue the work.", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 260, Y: 0}},
+				{Key: "third_step", Name: "Third step", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
+			}
 		}
 		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate, Definition: &models.AutomationDefinition{Automation: models.Automation{ID: "automation-blank", Name: "Blank Automation"}, Version: models.AutomationVersion{ID: "version-blank", AdapterKey: "custom"}}}}
 		var out bytes.Buffer
@@ -216,6 +220,15 @@ window.addEventListener('DOMContentLoaded', function() {
 	    nodeForm.requestSubmit(nodeDialog.querySelector('[data-automation-create-node]'));
 	    await report('progress', 'add-node-submitted');
 	    await waitFor(function() { return !!document.querySelector('[data-node-key="first_step"]'); }, 'new node on blank canvas');
+	    var blankCandidateInput = document.querySelector('[data-automation-draft-form] [data-candidate-json]');
+	    dragCapturedConnection('first_step', 'right', 'second_step', 'left', 10);
+	    var blankCandidate = JSON.parse(blankCandidateInput.value);
+	    if (!(blankCandidate.edges || []).some(function(edge) { return edge.from === 'first_step' && edge.to === 'second_step'; })) fail('captured pointer release over another Blank node did not create a connection');
+	    var blankNode = document.querySelector('[data-node-key="first_step"]');
+	    var foregroundEdge = document.querySelector('[data-edge-foreground][data-edge-key]');
+	    if (!foregroundEdge) fail('Blank connection has no visible foreground edge');
+	    if (!(blankNode.compareDocumentPosition(foregroundEdge) & Node.DOCUMENT_POSITION_FOLLOWING)) fail('Blank connection line is rendered behind graph nodes');
+	    if (getComputedStyle(foregroundEdge).pointerEvents !== 'none') fail('foreground connection line blocks node connectors');
 
 	    click('#automation-builder > a[href^="/automations?"]', 'Automations back link from blank builder');
 	    await waitFor(portfolioReady, 'portfolio before draft selection');
@@ -235,6 +248,20 @@ window.addEventListener('DOMContentLoaded', function() {
 	      event.stopImmediatePropagation();
 	    });
 	    function port(node, side) { return document.querySelector('[data-connect-port="' + node + '"][data-port-side="' + side + '"]'); }
+	    function dragCapturedConnection(from, fromSide, to, toSide, pointerId) {
+	      var sourceHandle = port(from, fromSide);
+	      var targetHandle = port(to, toSide);
+	      if (!sourceHandle || !targetHandle) fail('missing Blank drag connector for ' + from + ' to ' + to);
+	      sourceHandle.scrollIntoView({block:'center', inline:'center'});
+	      var sourceRect = sourceHandle.getBoundingClientRect();
+	      var targetRect = targetHandle.getBoundingClientRect();
+	      sourceHandle.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:sourceRect.left+sourceRect.width/2, clientY:sourceRect.top+sourceRect.height/2}));
+	      sourceHandle.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
+	      var releaseHit = document.elementFromPoint(targetRect.left+targetRect.width/2, targetRect.top+targetRect.height/2);
+	      var releasePort = releaseHit && releaseHit.closest('[data-connect-port]');
+	      if (!releasePort || releasePort.dataset.connectPort !== to) fail('Blank release coordinates hit ' + (releaseHit ? releaseHit.tagName + '.' + releaseHit.getAttribute('class') : 'nothing') + ' instead of the destination connector');
+	      sourceHandle.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
+	    }
 	    function dragConnection(from, fromSide, to, toSide, pointerId) {
 	      var sourceHandle = port(from, fromSide);
 	      var targetHandle = port(to, toSide);

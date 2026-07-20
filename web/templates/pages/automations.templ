@@ -786,14 +786,12 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
 								<g class="automation-draft-edge" data-edge-key={ edge.Key } data-from={ edge.From } data-to={ edge.To } tabindex="0" role="group" aria-label={ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) + " connection" }>
 									<line data-edge-hit x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-edge-hit"></line>
-									<line data-edge-line x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-graph-edge" stroke-width="2" marker-end="url(#automation-draft-arrow)"></line>
 									<circle data-reconnect-edge data-edge-endpoint="from" cx={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } r="7" class="automation-edge-endpoint" tabindex="0" role="button" aria-label="Reconnect connection start"></circle>
 									<circle data-reconnect-edge data-edge-endpoint="to" cx={ fmt.Sprintf("%.0f", target.Position.X) } cy={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } r="7" class="automation-edge-endpoint" tabindex="0" role="button" aria-label="Reconnect connection end"></circle>
 									<g data-delete-edge transform={ fmt.Sprintf("translate(%.0f %.0f)", (source.Position.X+automationGraphNodeWidth+target.Position.X)/2, (source.Position.Y+target.Position.Y)/2+automationGraphNodeHeight/2) } class="automation-edge-delete" tabindex="0" role="button" aria-label="Delete connection"><circle r="11"></circle><text text-anchor="middle" dominant-baseline="central">×</text></g>
 								</g>
 							}
 						}
-						<line data-automation-edge-preview x1="0" y1="0" x2="0" y2="0" class="automation-graph-edge automation-graph-edge--preview" marker-end="url(#automation-draft-preview-arrow)" hidden></line>
 						for _, node := range page.Result.Candidate.Nodes {
 							if node.Position != nil {
 								<g class="automation-draft-node automation-graph-focus cursor-grab active:cursor-grabbing" data-node-key={ node.Key } data-node-x={ fmt.Sprintf("%.0f", node.Position.X) } data-node-y={ fmt.Sprintf("%.0f", node.Position.Y) } data-default-x={ fmt.Sprintf("%.0f", automationDraftDefaultX(page.NodePalette, node.Key)) } data-default-y={ fmt.Sprintf("%.0f", automationDraftDefaultY(page.NodePalette, node.Key)) } transform={ fmt.Sprintf("translate(%.0f %.0f)", node.Position.X, node.Position.Y) } tabindex="0" role="group" aria-label={ node.Name + ", " + string(node.Type) + ", use arrow keys to move" }>
@@ -803,11 +801,17 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 									<circle cx={ fmt.Sprintf("%.0f", automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", automationGraphNodeHeight/2) } r="9" class="automation-connect-handle" data-connect-port={ node.Key } data-port-side="right" tabindex="0" role="button" aria-label={ "Connect from or to the right side of " + node.Name }></circle>
 									<g data-delete-node transform={ fmt.Sprintf("translate(%.0f 16)", automationGraphNodeWidth-16) } class="automation-node-delete" tabindex="0" role="button" aria-label={ "Delete " + node.Name }><circle r="11"></circle><text text-anchor="middle" dominant-baseline="central">×</text></g>
 								</g>
+								}
 							}
-						}
-					</svg>
-					if len(page.Result.Candidate.Nodes) == 0 {
-						<div class="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+							for _, edge := range page.Result.Candidate.Edges {
+								if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
+									<line data-edge-foreground data-edge-key={ edge.Key } x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-graph-edge automation-edge-foreground" stroke-width="2" marker-end="url(#automation-draft-arrow)"></line>
+								}
+							}
+							<line data-automation-edge-preview x1="0" y1="0" x2="0" y2="0" class="automation-graph-edge automation-graph-edge--preview" marker-end="url(#automation-draft-preview-arrow)" hidden></line>
+						</svg>
+						if len(page.Result.Candidate.Nodes) == 0 {
+							<div class="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
 							<div class="pointer-events-auto max-w-sm rounded-box border border-base-300 bg-base-100/95 p-6 text-center shadow-xl"><h4 class="text-lg font-semibold">Start your graph</h4><p class="mt-2 text-sm text-base-content/65">Add a node, drag it into place, then connect its side dots to other nodes.</p><button class="btn btn-primary mt-4" type="button" data-automation-add-first-node onclick="document.getElementById('automation-node-dialog').showModal()">Add first node</button></div>
 						</div>
 					}
@@ -912,6 +916,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					function edgeCandidate(key) { return (candidate.edges || []).find(function(edge) { return edge.key === key; }); }
 					function nodeName(key) { var node = nodeCandidate(key); return node ? node.name : key; }
 					function nodeGroup(key) { return svg.querySelector('[data-node-key="' + CSS.escape(key) + '"]'); }
+					function foregroundEdge(key) { return svg.querySelector('[data-edge-foreground][data-edge-key="' + CSS.escape(key) + '"]'); }
 					function nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }
 					function syncCandidate() {
 						var automationName = builder.querySelector('[data-automation-name]');
@@ -998,7 +1003,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					function renderEdge(group) {
 						var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!edge || !points) return;
 						group.dataset.from = edge.from; group.dataset.to = edge.to;
-						group.querySelectorAll('[data-edge-line], [data-edge-hit]').forEach(function(line) { setEdgeLine(line, points); });
+						group.querySelectorAll('[data-edge-hit]').forEach(function(line) { setEdgeLine(line, points); });
+						var foreground = foregroundEdge(edge.key); if (foreground) setEdgeLine(foreground, points);
 						var start = group.querySelector('[data-edge-endpoint="from"]'), finish = group.querySelector('[data-edge-endpoint="to"]');
 						start.setAttribute('cx', points.start.x); start.setAttribute('cy', points.start.y); finish.setAttribute('cx', points.finish.x); finish.setAttribute('cy', points.finish.y);
 						group.querySelector('[data-delete-edge]').setAttribute('transform', 'translate(' + ((points.start.x + points.finish.x) / 2) + ' ' + ((points.start.y + points.finish.y) / 2) + ')');
@@ -1017,10 +1023,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					function svgElement(name, attributes) { var element = document.createElementNS('http://www.w3.org/2000/svg', name); Object.keys(attributes || {}).forEach(function(key) { element.setAttribute(key, attributes[key]); }); return element; }
 					function appendEdgeGroup(edge) {
 						var group = svgElement('g', {class: 'automation-draft-edge', tabindex: '0', role: 'group', 'aria-label': nodeName(edge.from) + ' to ' + nodeName(edge.to) + ' connection'}); group.dataset.edgeKey = edge.key; group.dataset.from = edge.from; group.dataset.to = edge.to;
-						group.appendChild(svgElement('line', {class: 'automation-edge-hit', 'data-edge-hit': ''})); group.appendChild(svgElement('line', {class: 'automation-graph-edge', 'stroke-width': '2', 'marker-end': 'url(#automation-draft-arrow)', 'data-edge-line': ''}));
+						group.appendChild(svgElement('line', {class: 'automation-edge-hit', 'data-edge-hit': ''}));
 						['from', 'to'].forEach(function(endpoint) { group.appendChild(svgElement('circle', {r: '7', class: 'automation-edge-endpoint', tabindex: '0', role: 'button', 'data-reconnect-edge': '', 'data-edge-endpoint': endpoint, 'aria-label': 'Reconnect connection ' + (endpoint === 'from' ? 'start' : 'end')})); });
 						var remove = svgElement('g', {class: 'automation-edge-delete', tabindex: '0', role: 'button', 'data-delete-edge': '', 'aria-label': 'Delete connection'}); remove.appendChild(svgElement('circle', {r: '11'})); var x = svgElement('text', {'text-anchor': 'middle', 'dominant-baseline': 'central'}); x.textContent = '×'; remove.appendChild(x); group.appendChild(remove);
-						svg.insertBefore(group, svg.querySelector('.automation-draft-node')); bindEdgeGroup(group); renderEdge(group);
+						var foreground = svgElement('line', {class: 'automation-graph-edge automation-edge-foreground', 'stroke-width': '2', 'marker-end': 'url(#automation-draft-arrow)', 'data-edge-foreground': '', 'data-edge-key': edge.key});
+						svg.insertBefore(group, svg.querySelector('.automation-draft-node')); svg.insertBefore(foreground, preview); bindEdgeGroup(group); renderEdge(group);
 					}
 					function canonicalEdge(from, to, exceptKey) { return edgePalette.find(function(edge) { return edge.from === from && edge.to === to && !(candidate.edges || []).some(function(current) { return current.key !== exceptKey && current.key === edge.key; }); }); }
 					function addConnection(from, to, fromSide, toSide) {
@@ -1038,18 +1045,22 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						if (!from || !to || from === to || connectionExists(from, to, key)) { if (connectStatus) connectStatus.textContent = 'That reconnection would duplicate or loop back to the same node.'; return; }
 						var oldKey = edge.key, canonical = canonicalEdge(from, to, oldKey); edge.from = from; edge.to = to; if (endpoint === 'from') edge.from_port = side; else edge.to_port = side;
 						if (canonical) { edge.key = canonical.key; edge.label = canonical.label || ''; edge.condition = canonical.condition || {}; } else if (edgePalette.some(function(item) { return item.key === edge.key; })) { edge.key = uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), oldKey); edge.condition = {}; }
-						var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(oldKey) + '"]'); if (group) { group.dataset.edgeKey = edge.key; renderEdge(group); } syncCandidate(); if (connectStatus) connectStatus.textContent = 'Reconnected ' + nodeName(from) + ' to ' + nodeName(to) + '.';
+						var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(oldKey) + '"]');
+						var foreground = foregroundEdge(oldKey); if (foreground) foreground.dataset.edgeKey = edge.key;
+						if (group) { group.dataset.edgeKey = edge.key; renderEdge(group); } syncCandidate(); if (connectStatus) connectStatus.textContent = 'Reconnected ' + nodeName(from) + ' to ' + nodeName(to) + '.';
 					}
 					function removeEdge(key) {
 						candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.key !== key; });
 						var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(key) + '"]'); if (group) group.remove();
+						var foreground = foregroundEdge(key); if (foreground) foreground.remove();
 						if (selectedEdgeKey === key) selectEdge(null);
 						syncCandidate(); if (connectStatus) connectStatus.textContent = 'Connection disconnected. Draw a new one from either side when ready.';
 					}
-					function removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); if (selectedEdgeKey && !edgeCandidate(selectedEdgeKey)) selectEdge(null); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }
+					function removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); svg.querySelectorAll('[data-edge-foreground]').forEach(function(edgeLine) { if (!edgeCandidate(edgeLine.dataset.edgeKey)) edgeLine.remove(); }); if (selectedEdgeKey && !edgeCandidate(selectedEdgeKey)) selectEdge(null); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }
 					function selectEdge(group) {
 						selectedEdgeKey = group ? group.dataset.edgeKey : '';
 						svg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); });
+						svg.querySelectorAll('[data-edge-foreground]').forEach(function(edge) { edge.classList.toggle('automation-edge-foreground--selected', !!group && edge.dataset.edgeKey === selectedEdgeKey); });
 						if (disconnectEdge) disconnectEdge.disabled = !selectedEdgeKey;
 						if (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or choose Delete connection.';
 					}
@@ -1087,8 +1098,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				}
 					function finishConnection(event) {
 						if (!activeConnection || event.pointerId !== activeConnection.pointerId) return;
-						var target = event.target instanceof Element ? event.target.closest('[data-connect-port]') : null;
-						if (!target && document.elementFromPoint) { var underPointer = document.elementFromPoint(event.clientX, event.clientY); target = underPointer && underPointer.closest('[data-connect-port]'); }
+						var target = null;
+						if (document.elementFromPoint) { var underPointer = document.elementFromPoint(event.clientX, event.clientY); target = underPointer && underPointer.closest('[data-connect-port]'); }
+						if (!target && event.target instanceof Element) target = event.target.closest('[data-connect-port]');
 						var connection = activeConnection; clearActiveConnection();
 						if (target) {
 							if (connection.reconnectKey) reconnectEdge(connection.reconnectKey, connection.endpoint, target.dataset.connectPort, target.dataset.portSide);
@@ -1207,7 +1219,13 @@ const (
 
 func automationDraftCandidateJSON(candidate models.AutomationDraftCandidate) string { value, _ := json.Marshal(candidate); return string(value) }
 func automationPublicationEffectBadge(effect models.AutomationPublicationEffect) string { switch effect.ResourceType { case "alert_configuration": return "Configure notification handoff"; case "human_approval": return "Configure human approval"; case "github_issue_configuration": return "Configure GitHub issue handoff"; case "github_assignment": return "Configure human assignment"; case "implementation_task_template": return "Configure implementation task template"; case "pull_request_configuration": return "Configure pull request handoff"; case "pull_request_review": return "Configure human PR review" }; return effect.Operation+" "+effect.ResourceType }
-func automationDraftEdgesJSON(edges []models.AutomationDraftEdge) string { value, _ := json.Marshal(edges); return string(value) }
+func automationDraftEdgesJSON(edges []models.AutomationDraftEdge) string {
+	if edges == nil {
+		return "[]"
+	}
+	value, _ := json.Marshal(edges)
+	return string(value)
+}
 func automationValidationMessages(issues []models.AutomationValidationIssue, palette []models.AutomationDraftNode) []string {
 	missingNodes := []string{}
 	missingEdges := 0
@@ -1310,9 +1328,10 @@ templ automationGraphThemeStyles() {
 			.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--p)); stroke-width: 5; }
 			.automation-edge-hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; }
 			.automation-draft-edge:focus { outline: none; }
-			.automation-draft-edge [data-edge-line] { pointer-events: none; }
+			.automation-edge-foreground { pointer-events: none; }
+			.automation-edge-foreground--selected { stroke: oklch(var(--p)); stroke-width: 3; }
 			.automation-edge-endpoint, .automation-edge-delete { opacity: 0; pointer-events: none; }
-			.automation-draft-edge--selected .automation-graph-edge { stroke: oklch(var(--p)); stroke-width: 3; }			.automation-draft-edge--selected .automation-edge-endpoint, .automation-draft-edge--selected .automation-edge-delete, .automation-draft-edge:focus-within .automation-edge-endpoint, .automation-draft-edge:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }
+			.automation-draft-edge--selected .automation-edge-endpoint, .automation-draft-edge--selected .automation-edge-delete, .automation-draft-edge:focus-within .automation-edge-endpoint, .automation-draft-edge:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }
 			.automation-edge-endpoint { fill: oklch(var(--p)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }
 			.automation-edge-delete circle, .automation-node-delete circle { fill: oklch(var(--er)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; }
 			.automation-edge-delete text, .automation-node-delete text { fill: oklch(var(--b1)); font-size: 15px; font-weight: 700; pointer-events: none; }
