@@ -187,12 +187,13 @@ func TestPendingStoreBoundsConsumptionAndExpiry(t *testing.T) {
 		counter++
 		return base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat(string(rune('a'+counter)), 32))), verifierFixture, nil
 	}
-	var first string
+	var first, state string
 	for i := 0; i < 5; i++ {
 		tx, err := store.Admit(browser, "/", gen)
 		if err != nil {
 			t.Fatal(err)
 		}
+		state = tx.State
 		if i == 0 {
 			first = tx.State
 		}
@@ -203,8 +204,6 @@ func TestPendingStoreBoundsConsumptionAndExpiry(t *testing.T) {
 	if _, ok, _ := store.Consume(first, browser); ok {
 		t.Fatal("oldest per-browser transaction was not evicted")
 	}
-	var state string
-	store.ForEach(func(tx PendingTransaction) { state = tx.State })
 	if _, ok, remaining := store.Consume(state, strings.Repeat("x", 43)); ok || !remaining {
 		t.Fatal("wrong browser consumed transaction")
 	}
@@ -351,14 +350,15 @@ func TestPendingStoreRollingRateIndependentOfRemoval(t *testing.T) {
 		digest := sha256.Sum256([]byte(fmt.Sprintf("rate-state-%d", counter)))
 		return base64.RawURLEncoding.EncodeToString(digest[:]), canonicalAuthTestValue("v"), nil
 	}
+	var states []string
 	for i := 0; i < startsPerMinute; i++ {
 		browserDigest := sha256.Sum256([]byte(fmt.Sprintf("browser-%d", i)))
-		if _, err := store.Admit(base64.RawURLEncoding.EncodeToString(browserDigest[:]), "/", generate); err != nil {
+		tx, err := store.Admit(base64.RawURLEncoding.EncodeToString(browserDigest[:]), "/", generate)
+		if err != nil {
 			t.Fatalf("admit %d: %v", i, err)
 		}
+		states = append(states, tx.State)
 	}
-	var states []string
-	store.ForEach(func(tx PendingTransaction) { states = append(states, tx.State) })
 	for _, state := range states {
 		store.Discard(state)
 	}

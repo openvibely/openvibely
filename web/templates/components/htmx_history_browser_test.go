@@ -88,63 +88,7 @@ func TestHTMXHistoryNavigationAndTitlesInChrome(t *testing.T) {
 	}))
 	defer fixtureServer.Close()
 
-	stdoutPath := filepath.Join(t.TempDir(), "chrome-stdout.html")
-	stderrPath := filepath.Join(t.TempDir(), "chrome-stderr.log")
-	stdoutFile, err := os.Create(stdoutPath)
-	if err != nil {
-		t.Fatalf("create Chrome stdout file: %v", err)
-	}
-	defer stdoutFile.Close()
-	stderrFile, err := os.Create(stderrPath)
-	if err != nil {
-		t.Fatalf("create Chrome stderr file: %v", err)
-	}
-	defer stderrFile.Close()
-
-	cmd := exec.Command(chrome,
-		"--headless=new",
-		"--no-sandbox",
-		"--disable-gpu",
-		"--disable-software-rasterizer",
-		"--disable-dev-shm-usage",
-		"--disable-background-networking",
-		"--no-first-run",
-		"--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "chrome-profile"),
-		"--virtual-time-budget=10000",
-		"--dump-dom",
-		fixtureServer.URL+"/alpha",
-	)
-	cmd.Stdout = stdoutFile
-	cmd.Stderr = stderrFile
-	configureTestBrowserProcess(cmd)
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start Chrome history fixture: %v", err)
-	}
-
-	deadline := time.Now().Add(25 * time.Second)
-	var result string
-	for time.Now().Before(deadline) {
-		if output, readErr := os.ReadFile(stdoutPath); readErr == nil {
-			result = string(output)
-			if strings.Contains(result, `data-test-result="pass"`) || strings.Contains(result, `data-test-result="fail"`) {
-				break
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	stopTestBrowserProcess(cmd)
-
-	if !strings.Contains(result, `data-test-result="pass"`) {
-		stderr, _ := os.ReadFile(stderrPath)
-		if len(result) > 5000 {
-			result = result[len(result)-5000:]
-		}
-		if len(stderr) > 5000 {
-			stderr = stderr[len(stderr)-5000:]
-		}
-		t.Fatalf("real HTMX history fixture failed:\nDOM tail:\n%s\nChrome stderr tail:\n%s", result, stderr)
-	}
+	runHeadlessChromeFixture(t, chrome, fixtureServer.URL+"/alpha", "history", 10000, 25*time.Second)
 	if got := ordinaryBetaRequests.Load(); got != 1 {
 		t.Fatalf("ordinary programmatic navigation requests to beta = %d, want 1; cache-hit Back/Forward unexpectedly used the server", got)
 	}
@@ -240,18 +184,23 @@ func TestSidebarHostedIdentityPayloadIsInertInChrome(t *testing.T) {
 	}))
 	defer fixtureServer.Close()
 
-	stdoutPath := filepath.Join(t.TempDir(), "hosted-identity-chrome-stdout.html")
-	stderrPath := filepath.Join(t.TempDir(), "hosted-identity-chrome-stderr.log")
+	runHeadlessChromeFixture(t, chrome, fixtureServer.URL+"/", "hosted identity", 5000, 20*time.Second)
+}
+
+func runHeadlessChromeFixture(t *testing.T, chrome, targetURL, name string, virtualTimeBudget int, timeout time.Duration) {
+	t.Helper()
+	tempDir := t.TempDir()
+	stdoutPath := filepath.Join(tempDir, "chrome-stdout.html")
+	stderrPath := filepath.Join(tempDir, "chrome-stderr.log")
 	stdoutFile, err := os.Create(stdoutPath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("create Chrome stdout file: %v", err)
 	}
-	defer stdoutFile.Close()
 	stderrFile, err := os.Create(stderrPath)
 	if err != nil {
-		t.Fatal(err)
+		_ = stdoutFile.Close()
+		t.Fatalf("create Chrome stderr file: %v", err)
 	}
-	defer stderrFile.Close()
 
 	cmd := exec.Command(chrome,
 		"--headless=new",
@@ -262,19 +211,21 @@ func TestSidebarHostedIdentityPayloadIsInertInChrome(t *testing.T) {
 		"--disable-background-networking",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--user-data-dir="+filepath.Join(t.TempDir(), "hosted-identity-chrome-profile"),
-		"--virtual-time-budget=5000",
+		"--user-data-dir="+filepath.Join(tempDir, "chrome-profile"),
+		fmt.Sprintf("--virtual-time-budget=%d", virtualTimeBudget),
 		"--dump-dom",
-		fixtureServer.URL+"/",
+		targetURL,
 	)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 	configureTestBrowserProcess(cmd)
 	if err := cmd.Start(); err != nil {
-		t.Fatalf("start Chrome hosted identity fixture: %v", err)
+		_ = stdoutFile.Close()
+		_ = stderrFile.Close()
+		t.Fatalf("start Chrome %s fixture: %v", name, err)
 	}
 
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(timeout)
 	var result string
 	for time.Now().Before(deadline) {
 		if output, readErr := os.ReadFile(stdoutPath); readErr == nil {
@@ -286,17 +237,20 @@ func TestSidebarHostedIdentityPayloadIsInertInChrome(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	stopTestBrowserProcess(cmd)
+	_ = stdoutFile.Close()
+	_ = stderrFile.Close()
 
-	if !strings.Contains(result, `data-test-result="pass"`) {
-		stderr, _ := os.ReadFile(stderrPath)
-		if len(result) > 5000 {
-			result = result[len(result)-5000:]
-		}
-		if len(stderr) > 5000 {
-			stderr = stderr[len(stderr)-5000:]
-		}
-		t.Fatalf("real hosted identity browser fixture failed:\nDOM tail:\n%s\nChrome stderr tail:\n%s", result, stderr)
+	if strings.Contains(result, `data-test-result="pass"`) {
+		return
 	}
+	stderr, _ := os.ReadFile(stderrPath)
+	if len(result) > 5000 {
+		result = result[len(result)-5000:]
+	}
+	if len(stderr) > 5000 {
+		stderr = stderr[len(stderr)-5000:]
+	}
+	t.Fatalf("real %s fixture failed:\nDOM tail:\n%s\nChrome stderr tail:\n%s", name, result, stderr)
 }
 
 func testChromePath(t *testing.T) string {

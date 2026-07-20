@@ -954,13 +954,6 @@ func (h *Handler) configuredAppBaseURL() string {
 	return config.ResolveAppBaseURL(os.Getenv("APP_BASE_URL"))
 }
 
-// buildAbsoluteURL preserves the package-level helper used by older focused
-// tests and non-server construction. Production handlers use the injected method.
-func buildAbsoluteURL(c echo.Context, path string) string {
-	h := &Handler{}
-	return h.buildAbsoluteURL(c, path)
-}
-
 func templateEscape(s string) string {
 	replacer := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", "\"", "&quot;")
 	return replacer.Replace(s)

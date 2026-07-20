@@ -35,7 +35,6 @@ const (
 var (
 	hostedSessionDomain  = []byte("openvibely/session/v1\x00")
 	browserBindingDomain = []byte("openvibely/sso-browser/v1\x00")
-	ErrPendingNotFound   = errors.New("pending SSO transaction not found")
 	ErrPendingFull       = errors.New("pending SSO transaction store is full")
 	ErrStartRateLimited  = errors.New("SSO start rate limit exceeded")
 )
@@ -545,21 +544,6 @@ func (s *PendingStore) BrowserCount(browserNonce string) int {
 	defer s.mu.Unlock()
 	s.pruneLocked(s.now())
 	return s.browserCounts[browserNonce]
-}
-
-func (s *PendingStore) ForEach(fn func(PendingTransaction)) {
-	if fn == nil {
-		return
-	}
-	s.mu.Lock()
-	copyEntries := make([]PendingTransaction, 0, len(s.entries))
-	for _, tx := range s.entries {
-		copyEntries = append(copyEntries, tx)
-	}
-	s.mu.Unlock()
-	for _, tx := range copyEntries {
-		fn(tx)
-	}
 }
 
 func (s *PendingStore) Close() {

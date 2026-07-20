@@ -1341,13 +1341,13 @@ func Test_resolveOAuthExpiryAt(t *testing.T) {
 
 func Test_buildAbsoluteURL_UsesConfiguredAppBaseURL(t *testing.T) {
 	t.Setenv("APP_BASE_URL", "https://dubee.org")
-	_, e, _ := setupTestHandler(t)
+	h, e, _ := setupTestHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/models", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	url := buildAbsoluteURL(c, "/models")
+	url := h.buildAbsoluteURL(c, "/models")
 	require.Equal(t, "https://dubee.org/models", url)
 }
 
