@@ -48,6 +48,20 @@ func (c *AutomationCompiler) SetAgentRepository(agentRepo *repository.AgentRepo)
 	c.agentRepo = agentRepo
 }
 
+func (c *AutomationCompiler) Retry(ctx context.Context, request AutomationPublishRequest) (*AutomationPublishResult, error) {
+	if c == nil || c.automationRepo == nil {
+		return nil, errors.New("automation compiler is unavailable")
+	}
+	existing, err := c.automationRepo.GetPublicationAttempt(ctx, request.ProjectID, request.AutomationID, request.VersionID, request.PlanRevision)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil || (existing.Attempt.Status != "failed" && existing.Attempt.Status != "completed") {
+		return nil, errors.New("automation publication retry not found")
+	}
+	return c.Publish(ctx, request)
+}
+
 func (c *AutomationCompiler) Publish(ctx context.Context, request AutomationPublishRequest) (*AutomationPublishResult, error) {
 	if c == nil || c.automationRepo == nil || c.planner == nil || c.taskSvc == nil || c.taskRepo == nil || c.scheduleRepo == nil {
 		return nil, errors.New("automation compiler is unavailable")

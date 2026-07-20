@@ -160,15 +160,18 @@ type AutomationChatConfirmationReceipt struct {
 }
 
 type AutomationBuilderPage struct {
-	Result           AutomationDraftResult        `json:"result"`
-	AutomationID     string                       `json:"automation_id,omitempty"`
-	BaseVersionID    string                       `json:"base_version_id,omitempty"`
-	Source           string                       `json:"source,omitempty"`
-	PublicationSteps []AutomationPublicationStep  `json:"publication_steps,omitempty"`
-	NodePalette      []AutomationDraftNode        `json:"node_palette,omitempty"`
-	EdgePalette      []AutomationDraftEdge        `json:"edge_palette,omitempty"`
-	Capabilities     AutomationCapabilitySnapshot `json:"capabilities"`
-	Error            string                       `json:"error,omitempty"`
+	Result            AutomationDraftResult        `json:"result"`
+	AutomationID      string                       `json:"automation_id,omitempty"`
+	BaseVersionID     string                       `json:"base_version_id,omitempty"`
+	RetryAutomationID string                       `json:"retry_automation_id,omitempty"`
+	RetryVersionID    string                       `json:"retry_version_id,omitempty"`
+	RetryPlanRevision string                       `json:"retry_plan_revision,omitempty"`
+	Source            string                       `json:"source,omitempty"`
+	PublicationSteps  []AutomationPublicationStep  `json:"publication_steps,omitempty"`
+	NodePalette       []AutomationDraftNode        `json:"node_palette,omitempty"`
+	EdgePalette       []AutomationDraftEdge        `json:"edge_palette,omitempty"`
+	Capabilities      AutomationCapabilitySnapshot `json:"capabilities"`
+	Error             string                       `json:"error,omitempty"`
 }
 
 func (m AutomationDraftMetadata) Candidate() (AutomationDraftCandidate, error) {

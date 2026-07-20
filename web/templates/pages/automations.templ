@@ -746,7 +746,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							}
 						</div>
 					<form class="mt-5 space-y-4" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content">
-						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" name="base_version_id" value={ page.BaseVersionID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
+						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" name="base_version_id" value={ page.BaseVersionID }/><input type="hidden" name="retry_automation_id" value={ page.RetryAutomationID }/><input type="hidden" name="retry_version_id" value={ page.RetryVersionID }/><input type="hidden" name="retry_plan_revision" value={ page.RetryPlanRevision }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
 						<label class="form-control"><span class="label-text">Node purpose</span><select class="select select-bordered" name="node_kind" required>
 							if page.Result.Candidate.AdapterKey == "custom" {
 								<option value="schedule">Schedule</option><option value="agent_task">Agent task</option><option value="create_notification">Create notification</option><option value="human_approval">Human approval</option><option value="create_github_issue">Create GitHub issue</option><option value="human_assignment">Human assignment</option><option value="github_inbox">GitHub inbox</option><option value="implementation">Implementation task</option><option value="open_pull_request">Open pull request</option><option value="human_review">Human review</option><option value="outcome">Outcome</option>
@@ -766,7 +766,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							<div class="mt-2 space-y-1">
 								for _, node := range page.NodePalette {
 									if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
-										<form method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" name="base_version_id" value={ page.BaseVersionID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
+										<form method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" name="base_version_id" value={ page.BaseVersionID }/><input type="hidden" name="retry_automation_id" value={ page.RetryAutomationID }/><input type="hidden" name="retry_version_id" value={ page.RetryVersionID }/><input type="hidden" name="retry_plan_revision" value={ page.RetryPlanRevision }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
 									}
 								}
 							</div>
@@ -829,6 +829,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<input type="hidden" name="project_id" value={ currentProjectID }/>
 					<input type="hidden" name="builder_source" value={ page.Source }/>
 					<input type="hidden" name="base_version_id" value={ page.BaseVersionID }/>
+					<input type="hidden" name="retry_automation_id" value={ page.RetryAutomationID }/>
+					<input type="hidden" name="retry_version_id" value={ page.RetryVersionID }/>
+					<input type="hidden" name="retry_plan_revision" value={ page.RetryPlanRevision }/>
 					<input type="hidden" name="save_changes" value="true"/>
 					<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
 					<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -1225,9 +1228,6 @@ func automationBuilderPostURL(page models.AutomationBuilderPage, currentProjectI
 	if page.AutomationID != "" {
 		return fmt.Sprintf("/automations/%s/drafts?project_id=%s", page.AutomationID, currentProjectID)
 	}
-	if page.Result.Definition != nil {
-		return fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)
-	}
 	return fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)
 }
 
@@ -1286,9 +1286,6 @@ func automationNodeName(nodes []models.AutomationNode, nodeID string) string { f
 func automationInvocationNodeClass(history models.AutomationInvocationHistory, nodeID string) string { for _, touchedNodeID := range history.TouchedNodeIDs { if touchedNodeID == nodeID { return "automation-graph-node automation-graph-node--running" } }; return "automation-graph-node automation-graph-node--idle" }
 
 func automationCardURL(card models.AutomationCard, currentProjectID string) string {
-	if card.Automation.PublishedVersionID == nil && card.Version.ID != "" {
-		return fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", card.Automation.ID, card.Version.ID, currentProjectID)
-	}
 	return fmt.Sprintf("/automations/%s?project_id=%s", card.Automation.ID, currentProjectID)
 }
 func automationCardSearchText(card models.AutomationCard) string { return strings.Join([]string{card.Automation.Name, card.Automation.Description, card.Version.AdapterKey, string(card.Automation.LifecycleState), string(card.Automation.HealthState)}, " ") }

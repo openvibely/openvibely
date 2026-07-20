@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -38,6 +40,7 @@ func (h *Handler) CreateAutomationDraftWeb(c echo.Context) error {
 	}
 	var candidate models.AutomationDraftCandidate
 	hasPostedCandidate := strings.TrimSpace(c.FormValue("candidate_json")) != ""
+	retryPending := automationBuilderRetryPending(c)
 	if hasPostedCandidate {
 		candidate, err = service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
 	} else {
@@ -66,7 +69,7 @@ func (h *Handler) CreateAutomationDraftWeb(c echo.Context) error {
 		}
 		return err
 	}
-	if hasPostedCandidate {
+	if hasPostedCandidate && (!retryPending || automationBuilderSaveRequested(c)) {
 		applyAutomationDraftFormValues(c, &candidate)
 		if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -77,6 +80,11 @@ func (h *Handler) CreateAutomationDraftWeb(c echo.Context) error {
 		return err
 	}
 	page := models.AutomationBuilderPage{Result: *result, Source: source}
+	applyAutomationBuilderRetryForm(c, &page)
+	if retryPending && !automationBuilderSaveRequested(c) {
+		page.Error = "This publication already created resources. Retry Save changes without editing, or reopen the builder to start over."
+		return h.renderAutomationBuilder(c, page)
+	}
 	if !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
@@ -102,32 +110,44 @@ func (h *Handler) CloneAutomationDraftWeb(c echo.Context) error {
 	}
 	candidate := published.Candidate
 	hasPostedCandidate := strings.TrimSpace(c.FormValue("candidate_json")) != ""
+	retryPending := automationBuilderRetryPending(c)
+	submittedBaseVersionID := strings.TrimSpace(c.FormValue("base_version_id"))
 	if hasPostedCandidate {
 		candidate, err = service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		applyAutomationDraftFormValues(c, &candidate)
-		if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if !retryPending || automationBuilderSaveRequested(c) {
+			applyAutomationDraftFormValues(c, &candidate)
+			if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			}
 		}
 	}
 	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, candidate, published.Definition)
 	if err != nil {
 		return err
 	}
+	baseVersionID := published.Definition.Version.ID
+	if hasPostedCandidate {
+		baseVersionID = submittedBaseVersionID
+	}
 	page := models.AutomationBuilderPage{
-		Result: *result, AutomationID: automationID, BaseVersionID: published.Definition.Version.ID,
+		Result: *result, AutomationID: automationID, BaseVersionID: baseVersionID,
 		Source: published.Definition.Version.Source,
 	}
+	applyAutomationBuilderRetryForm(c, &page)
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"?project_id="+projectID+"&view=definition")
+	}
+	if retryPending && !automationBuilderSaveRequested(c) {
+		page.Error = "This publication already created resources. Retry Save changes without editing, or reopen the builder to start over."
+		return h.renderAutomationBuilder(c, page)
 	}
 	if !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
-	baseVersionID := strings.TrimSpace(c.FormValue("base_version_id"))
-	if baseVersionID == "" || baseVersionID != published.Definition.Version.ID {
+	if submittedBaseVersionID == "" || submittedBaseVersionID != published.Definition.Version.ID {
 		page.Error = "This Automation changed after you opened it. Reopen the editor before saving."
 		return h.renderAutomationBuilder(c, page)
 	}
@@ -139,12 +159,36 @@ func automationBuilderSaveRequested(c echo.Context) bool {
 		strings.TrimSpace(c.FormValue("remove_node")) == "" && strings.TrimSpace(c.FormValue("remove_edge")) == ""
 }
 
+func automationBuilderRetryPending(c echo.Context) bool {
+	return strings.TrimSpace(c.FormValue("retry_automation_id")) != "" ||
+		strings.TrimSpace(c.FormValue("retry_version_id")) != "" ||
+		strings.TrimSpace(c.FormValue("retry_plan_revision")) != ""
+}
+
+func applyAutomationBuilderRetryForm(c echo.Context, page *models.AutomationBuilderPage) {
+	if page == nil {
+		return
+	}
+	page.RetryAutomationID = strings.TrimSpace(c.FormValue("retry_automation_id"))
+	page.RetryVersionID = strings.TrimSpace(c.FormValue("retry_version_id"))
+	page.RetryPlanRevision = strings.TrimSpace(c.FormValue("retry_plan_revision"))
+}
+
+func automationDraftCandidatesEqual(left, right models.AutomationDraftCandidate) bool {
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
+}
+
 func (h *Handler) publishAutomationBuilderCandidate(c echo.Context, projectID string, page models.AutomationBuilderPage) error {
 	if h.automationPlanner == nil || h.automationCompiler == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation publication unavailable")
 	}
 	if len(page.Result.ValidationErrors) > 0 {
 		return h.renderAutomationBuilder(c, page)
+	}
+	if page.RetryAutomationID != "" || page.RetryVersionID != "" || page.RetryPlanRevision != "" {
+		return h.retryAutomationBuilderPublication(c, projectID, page)
 	}
 	ctx := c.Request().Context()
 	source := "manual"
@@ -184,73 +228,56 @@ func (h *Handler) publishAutomationBuilderCandidate(c echo.Context, projectID st
 	})
 	if publishErr != nil {
 		page.Error = publishErr.Error()
+		page.RetryAutomationID = automationID
+		page.RetryVersionID = versionID
+		page.RetryPlanRevision = plan.PlanRevision
 		if published != nil {
 			page.PublicationSteps = published.Resources
 		}
 		return h.renderAutomationBuilder(c, page)
 	}
-	url := "/automations/" + automationID + "?project_id=" + projectID
-	if isHTMX(c) {
-		c.Response().Header().Set("HX-Redirect", url)
-		return c.NoContent(http.StatusNoContent)
-	}
-	return c.Redirect(http.StatusSeeOther, url)
+	return h.redirectToAutomation(c, projectID, automationID)
 }
 
-func (h *Handler) GetAutomationDraftWeb(c echo.Context) error {
-	result, err := h.loadAutomationDraftWeb(c)
-	if err != nil {
-		return err
+func (h *Handler) retryAutomationBuilderPublication(c echo.Context, projectID string, page models.AutomationBuilderPage) error {
+	if page.RetryAutomationID == "" || page.RetryVersionID == "" || page.RetryPlanRevision == "" {
+		page.Error = "The publication retry is incomplete. Reopen the builder before saving again."
+		return h.renderAutomationBuilder(c, page)
 	}
-	return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *result})
-}
-
-func (h *Handler) UpdateAutomationDraftWeb(c echo.Context) error {
-	result, err := h.loadAutomationDraftWeb(c)
-	if err != nil {
-		return err
+	if page.AutomationID != "" && page.AutomationID != page.RetryAutomationID {
+		page.Error = "The publication retry does not belong to this Automation. Reopen the editor before saving."
+		return h.renderAutomationBuilder(c, page)
 	}
-	candidate := result.Candidate
-	if raw := strings.TrimSpace(c.FormValue("candidate_json")); raw != "" {
-		candidate, err = service.DecodeAutomationDraftCandidate([]byte(raw))
-		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
+	ctx := c.Request().Context()
+	staged, err := h.automationDraftSvc.GetDraft(ctx, projectID, page.RetryAutomationID, page.RetryVersionID)
+	if err != nil || staged == nil || staged.Definition == nil || staged.Definition.Version.State != models.AutomationVersionDraft {
+		page.Error = "The failed publication can no longer be retried. Reopen the builder before saving."
+		return h.renderAutomationBuilder(c, page)
 	}
-	applyAutomationDraftFormValues(c, &candidate)
-	if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	if !automationDraftCandidatesEqual(staged.Candidate, page.Result.Candidate) {
+		page.Error = "The failed publication can only retry its exact saved design. Reopen the builder to make different changes."
+		return h.renderAutomationBuilder(c, page)
 	}
-	projectID, _ := h.getCurrentProjectID(c)
-	updated, err := h.automationDraftSvc.UpdateDraft(c.Request().Context(), c.Param("automationId"), c.Param("versionId"), projectID, candidate)
-	if err != nil {
-		return err
+	plan, err := h.automationPlanner.Plan(ctx, projectID, page.RetryAutomationID, page.RetryVersionID)
+	if err != nil || plan.PlanRevision != page.RetryPlanRevision || len(plan.Validation) > 0 {
+		page.Error = "The failed publication plan changed and cannot be retried. Reopen the builder before saving."
+		return h.renderAutomationBuilder(c, page)
 	}
-	if c.FormValue("save_changes") != "true" || strings.TrimSpace(c.FormValue("builder_action")) != "" || strings.TrimSpace(c.FormValue("remove_node")) != "" || strings.TrimSpace(c.FormValue("remove_edge")) != "" {
-		return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *updated})
-	}
-	if h.automationPlanner == nil || h.automationCompiler == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation publication unavailable")
-	}
-	plan, err := h.automationPlanner.Plan(c.Request().Context(), projectID, c.Param("automationId"), c.Param("versionId"))
-	if err != nil {
-		return err
-	}
-	if len(plan.Validation) > 0 {
-		updated.ValidationErrors = plan.Validation
-		return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *updated})
-	}
-	published, publishErr := h.automationCompiler.Publish(c.Request().Context(), service.AutomationPublishRequest{
-		ProjectID: projectID, AutomationID: c.Param("automationId"), VersionID: c.Param("versionId"), PlanRevision: plan.PlanRevision,
+	published, publishErr := h.automationCompiler.Retry(ctx, service.AutomationPublishRequest{
+		ProjectID: projectID, AutomationID: page.RetryAutomationID, VersionID: page.RetryVersionID, PlanRevision: page.RetryPlanRevision,
 	})
 	if publishErr != nil {
-		page := models.AutomationBuilderPage{Result: *updated, Error: publishErr.Error()}
+		page.Error = publishErr.Error()
 		if published != nil {
 			page.PublicationSteps = published.Resources
 		}
 		return h.renderAutomationBuilder(c, page)
 	}
-	url := "/automations/" + c.Param("automationId") + "?project_id=" + projectID
+	return h.redirectToAutomation(c, projectID, page.RetryAutomationID)
+}
+
+func (h *Handler) redirectToAutomation(c echo.Context, projectID, automationID string) error {
+	url := "/automations/" + automationID + "?project_id=" + projectID
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Redirect", url)
 		return c.NoContent(http.StatusNoContent)
@@ -678,24 +705,6 @@ func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+projectID)
-}
-
-func (h *Handler) loadAutomationDraftWeb(c echo.Context) (*models.AutomationDraftResult, error) {
-	if h.automationDraftSvc == nil {
-		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, "automation builder unavailable")
-	}
-	projectID, err := h.getCurrentProjectID(c)
-	if err != nil {
-		return nil, err
-	}
-	result, err := h.automationDraftSvc.GetDraft(c.Request().Context(), projectID, c.Param("automationId"), c.Param("versionId"))
-	if err != nil {
-		return nil, err
-	}
-	if result == nil {
-		return nil, echo.NewHTTPError(http.StatusNotFound, "automation draft not found")
-	}
-	return result, nil
 }
 
 func (h *Handler) renderAutomationBuilder(c echo.Context, page models.AutomationBuilderPage) error {

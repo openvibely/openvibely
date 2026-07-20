@@ -155,23 +155,8 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 		if err != nil {
 			return nil, err
 		}
-		if definition == nil {
+		if definition == nil || definition.Version.ID == "" || definition.Version.State != models.AutomationVersionPublished {
 			continue
-		}
-		if definition.Version.ID == "" {
-			metadata, err := s.repo.GetLatestAutomationDraftMetadata(ctx, projectID, automation.ID)
-			if err != nil {
-				return nil, err
-			}
-			if metadata != nil {
-				definition, err = s.repo.GetDefinitionVersion(ctx, projectID, automation.ID, metadata.VersionID)
-				if err != nil {
-					return nil, err
-				}
-				if definition == nil {
-					continue
-				}
-			}
 		}
 		card := models.AutomationCard{Automation: definition.Automation, Version: definition.Version, Counts: portfolioCounts[automation.ID]}
 		if definition.Version.ID != "" {
@@ -206,6 +191,9 @@ func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automat
 	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
 	if err != nil || definition == nil {
 		return nil, err
+	}
+	if definition.Version.ID == "" || definition.Version.State != models.AutomationVersionPublished {
+		return nil, nil
 	}
 	cutoff := now.UTC().Add(-24 * time.Hour)
 	counts, activeInvocations, activeWorkItems, err := s.repo.LiveNodeCounts(ctx, projectID, automationID, definition.Version.ID, cutoff)

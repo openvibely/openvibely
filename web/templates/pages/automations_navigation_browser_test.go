@@ -39,12 +39,19 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 	cards := []models.AutomationCard{
 		{Automation: models.Automation{ID: "automation-a", Name: "Automation A", Description: "First", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"}},
 		{Automation: models.Automation{ID: "automation-b", Name: "Automation B", Description: "Second", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"}},
-		{Automation: models.Automation{ID: "automation-draft", Name: "Visual Draft", Description: "Working design", LifecycleState: models.AutomationDraft}, Version: models.AutomationVersion{ID: "version-draft", Version: 1, State: models.AutomationVersionDraft, AdapterKey: "vision_driver"}},
+		{Automation: models.Automation{ID: "automation-visual", Name: "Visual Automation", Description: "Published design", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{ID: "version-visual", Version: 1, State: models.AutomationVersionPublished, AdapterKey: "vision_driver"}},
 	}
 	renderPortfolio := func() string {
 		var out bytes.Buffer
 		if err := AutomationsContent(cards, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Automation portfolio: %v", err)
+		}
+		return out.String()
+	}
+	renderNew := func() string {
+		var out bytes.Buffer
+		if err := AutomationNewContent(projectID).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render new Automation choices: %v", err)
 		}
 		return out.String()
 	}
@@ -97,7 +104,7 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 				{Key: "third_step", Name: "Third step", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
 			}
 		}
-		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate, Definition: &models.AutomationDefinition{Automation: models.Automation{ID: "automation-blank", Name: "Blank Automation"}, Version: models.AutomationVersion{ID: "version-blank", AdapterKey: "custom"}}}}
+		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}}
 		var out bytes.Buffer
 		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render blank Automation builder: %v", err)
@@ -111,7 +118,7 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 		result := models.AutomationDraftNode{Key: "result", Name: "Result", Type: models.AutomationNodeOutcome, Role: "custom_outcome", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 480, Y: 160}}
 		edge := models.AutomationDraftEdge{Key: "trigger_to_driver", From: "vision_trigger", To: "vision_driver"}
 		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Visual Draft", AutomationType: "vision_driver", AdapterKey: "vision_driver", Nodes: []models.AutomationDraftNode{trigger, driver, result}}
-		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate, Definition: &models.AutomationDefinition{Automation: models.Automation{ID: "automation-draft", Name: "Visual Draft"}, Version: models.AutomationVersion{ID: "version-draft", AdapterKey: "vision_driver"}}}, NodePalette: []models.AutomationDraftNode{trigger, driver}, EdgePalette: []models.AutomationDraftEdge{edge}}
+		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, AutomationID: "automation-visual", BaseVersionID: "version-visual", NodePalette: []models.AutomationDraftNode{trigger, driver}, EdgePalette: []models.AutomationDraftEdge{edge}}
 		var out bytes.Buffer
 		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Automation builder: %v", err)
@@ -213,7 +220,13 @@ window.addEventListener('DOMContentLoaded', function() {
     editedNodeDialog.close();
     await report('progress', 'edit-automation-builder-operable');
 
-	    await window.openVibelyNavigate('/automations/automation-blank/drafts/version-blank?project_id=project-browser');
+	    await window.openVibelyNavigate('/automations/new?project_id=project-browser');
+	    await waitFor(function() { return !!document.querySelector('input[name="source"][value="blank"]'); }, 'new Automation choices');
+	    var blankStart = document.querySelector('input[name="source"][value="blank"]');
+	    var blankStartForm = blankStart && blankStart.closest('form');
+	    if (!blankStartForm) fail('Blank creation form is missing');
+	    htmx.process(blankStartForm);
+	    blankStartForm.requestSubmit(blankStartForm.querySelector('button[type="submit"]'));
 	    await waitFor(function() { return !!document.querySelector('[data-automation-add-first-node]'); }, 'empty Blank Automation canvas');
 	    await report('progress', 'blank-canvas-loaded');
 	    click('[data-automation-add-first-node]', 'Add first node action');
@@ -258,11 +271,13 @@ window.addEventListener('DOMContentLoaded', function() {
 		    var blankDeleteHit = document.elementFromPoint(blankDeleteRect.left + blankDeleteRect.width / 2, blankDeleteRect.top + blankDeleteRect.height / 2);
 		    if (!blankDeleteHit || !blankDeleteHit.closest('[data-delete-edge]')) fail('connection delete control is not the topmost interactive element at its center');
 
-		    click('#automation-builder > a[href^="/automations?"]', 'Automations back link from blank builder');	    await waitFor(portfolioReady, 'portfolio before draft selection');
-	    click('a[href^="/automations/automation-draft/drafts/version-draft?"]', 'draft Automation card');
-	    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder selected from portfolio');
+		    click('#automation-builder > a[href^="/automations?"]', 'Automations back link from blank builder');	    await waitFor(portfolioReady, 'portfolio before published Automation selection');
+	    click('a[href^="/automations/automation-visual?"]', 'published visual Automation card');
+	    await waitFor(function() { return liveID() === 'automation-visual'; }, 'published visual Automation');
+	    click('#automation-live form[hx-post*="/drafts"] button[type="submit"]', 'Edit published visual Automation');
+	    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder opened from published Automation');
 	    var automationName = document.querySelector('[name="automation_name"]');
-	    if (!automationName) fail('selected draft did not expose an Automation name field');
+	    if (!automationName) fail('published Automation editor did not expose an Automation name field');
 	    automationName.value = 'Browser Named Automation';
 	    automationName.dispatchEvent(new Event('input', {bubbles:true}));
 	    var namedCandidate = JSON.parse(document.querySelector('[data-automation-draft-form] [data-candidate-json]').value);
@@ -404,9 +419,14 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = w.Write([]byte(renderDefinition("automation-a", "Automation A")))
 		case "/automations/automation-b":
 			_, _ = w.Write([]byte(renderLive("automation-b", "Automation B")))
-		case "/automations/automation-blank/drafts/version-blank":
-			_, _ = w.Write([]byte(renderBlankBuilder(r.Method == http.MethodPost)))
-		case "/automations/automation-draft/drafts/version-draft":
+		case "/automations/new":
+			_, _ = w.Write([]byte(renderNew()))
+		case "/automations/drafts":
+			_ = r.ParseForm()
+			_, _ = w.Write([]byte(renderBlankBuilder(r.FormValue("builder_action") == "create_node")))
+		case "/automations/automation-visual":
+			_, _ = w.Write([]byte(renderLive("automation-visual", "Visual Automation")))
+		case "/automations/automation-visual/drafts":
 			_, _ = w.Write([]byte(renderBuilder()))
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")

@@ -70,19 +70,6 @@ func (h *Handler) GetAutomationLive(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if h.automationDraftSvc != nil {
-		draft, draftErr := h.automationDraftSvc.GetCurrentDraft(ctx, projectID, c.Param("automationId"))
-		if draftErr != nil {
-			return draftErr
-		}
-		if draft != nil && draft.Definition != nil && draft.Definition.Automation.PublishedVersionID == nil {
-			if isHTMX(c) {
-				c.Response().Header().Set("HX-Push-Url", draft.URL)
-				return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *draft})
-			}
-			return c.Redirect(http.StatusSeeOther, draft.URL)
-		}
-	}
 	graph, err := h.automationGraphSvc.GetLive(ctx, projectID, c.Param("automationId"), time.Now())
 	if err != nil {
 		return err
@@ -229,7 +216,7 @@ func (h *Handler) GetAutomationDefinition(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if definition == nil {
+	if definition == nil || definition.Version.ID == "" || definition.Version.State != models.AutomationVersionPublished {
 		return echo.NewHTTPError(http.StatusNotFound, "automation not found")
 	}
 	if isHTMX(c) {
