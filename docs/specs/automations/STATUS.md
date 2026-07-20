@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-The strict-audit repair is implemented and fully validated in the working tree. Phases 1-4 and prior safety/UX repairs remain checkpointed through `4c72be8`; the five findings from the strict audit of that checkpoint are repaired, and a new clean checkpoint is pending. The separate qualifying read-only full-objective audit must wait until authoritative managed memory is reconciled through an authorized mutation path.
+The strict-audit repair is implemented and fully validated at checkpoint `d023f0e`. Phases 1-4 and prior safety/UX repairs remain checkpointed through `4c72be8`; the five findings from the strict audit of that checkpoint are repaired. The separate qualifying read-only full-objective audit must wait until authoritative managed memory is reconciled through an authorized mutation path.
 
 ## Status
 
-Phases 1-4, graph-editor UX repairs, Definition of Done safety repairs, connector preview, Blank publication semantics, public Chat identity, node-resource pagination, and Automation observability are checkpointed through `4c72be8`. The current working tree preserves strict draft schema identity, adds project-scoped Agent/skill/source-file task configuration through validation/builder/planning/compilation, adds set-based portfolio operational summaries and health reasons, makes described-draft GitHub readiness connection-accurate, and adds reduced-motion-safe running-node animation. Full validation passes; managed-memory reconciliation, checkpointing, and the separate strict audit remain.
+Phases 1-4, graph-editor UX repairs, Definition of Done safety repairs, connector preview, Blank publication semantics, public Chat identity, node-resource pagination, and Automation observability are checkpointed through `4c72be8`. Checkpoint `d023f0e` preserves strict draft schema identity, adds project-scoped Agent/skill/source-file task configuration through validation/builder/planning/compilation, adds set-based portfolio operational summaries and health reasons, makes described-draft GitHub readiness connection-accurate, and adds reduced-motion-safe running-node animation. Full validation passes; managed-memory reconciliation and the separate strict audit remain.
 
 ## Phase 4 Checklist
 
@@ -549,7 +549,7 @@ Phases 1-4, graph-editor UX repairs, Definition of Done safety repairs, connecto
 
 ### Managed Memory Gate
 
-- The authoritative `automation_graphs.md` managed view still records these five findings as open and names this repair as the next action. No tracked `.openvibely/memories/` counterpart exists.
+- The authoritative `automation_graphs.md` managed view still records these five findings as open and names this repair as the next action instead of checkpoint `d023f0e`. No tracked `.openvibely/memories/` counterpart exists.
 - This turn exposes `memory_view` but no authorized managed-memory mutation tool. Per the runbook/audit workflow, do not begin the qualifying strict read-only audit until an authorized mutation path updates that view to the new checkpoint and a subsequent `memory_view` confirms semantic agreement.
 
 ### Identity And Scope Guard
