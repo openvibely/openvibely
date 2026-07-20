@@ -2,11 +2,29 @@
 
 ## Current Phase
 
-The Automation implementation is fully validated through checkpoint `4e971f0`. A fresh separate edit-free full-objective audit of that immutable checkpoint passes all four phases, all 17 Definition of Done items, explicit Automation identity, and every exclusion. Completion remains blocked only by the unavailable authoritative managed-memory mutation capability needed to reconcile the stale checkpoint wording in `automation_graphs.md`.
+Phase 5 is active after direct product feedback showed the completed first-release Blank flow was still a preset-topology assembler rather than a custom Automation builder. The active correction replaces Blank's implicit Vision Driver adapter and required-node checklist with a registered `custom` capability adapter. The first regression-covered slice supports user-defined Schedule, Agent task, and Outcome nodes; a supported Schedule → Agent task → Outcome graph plans and publishes a real visible task and an enabled schedule through the existing services.
 
 ## Status
 
-Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `f3d0524`. The current repair deduplicates Live and portfolio counters by work-item identity, adds explicit persisted GitHub PR refresh/freshness without provider calls from graph reads, resolves every supported resource to its real native/GitHub detail destination, and records successful lifecycle mutations through safe Automation observability. Confirmed publication continues to compile registered adapter task nodes and trigger schedules into ordinary visible OpenVibely tasks/schedules; runtime notifications, implementation tasks, issues, PRs, reviews, goals, executions, and Workflow executions remain authoritative existing-domain resources projected onto the graph through explicit provenance.
+Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 currently has a validated custom foundation: Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are required, unsupported capability handoffs remain fail-closed draft errors, and custom publication derives task/schedule effects from user-owned nodes and edges. Remaining Phase 5 work is to add deterministic multi-task, approval, GitHub, and existing-Workflow capability handoffs with exact provenance and Live projection, then rerun the full validation/audit/checkpoint sequence.
+
+## Phase 5 Custom Builder Checklist
+
+- [x] Reproduce the preset-only Blank defect in handler, draft-service, planner, and publication tests.
+- [x] Register a dynamic `custom` compiler adapter while keeping maintained bootstrap registration restricted to Native/GitHub.
+- [x] Make Blank create an empty custom draft instead of silently selecting Vision Driver.
+- [x] Replace `Runtime behavior` plus `Design-only type` with one user-facing `Node purpose` control.
+- [x] Remove preset required-node/required-connection errors from custom drafts.
+- [x] Validate the initial Schedule → Agent task → Outcome capability handoff and fail closed for unsupported capabilities, handoffs, conditions, and invalid targets.
+- [x] Plan and compile a user-named, user-configured custom Agent task and Schedule into real existing-domain resources.
+- [x] Preserve draft-only geometry, project isolation, explicit Automation identity, confirmation, idempotency, trigger ownership, lifecycle, and no-inference boundaries.
+- [ ] Compile Agent task → Agent task handoffs through existing task/Workflow machinery with exact Automation provenance and Live projection.
+- [ ] Add native approval/notification capability nodes through the existing Alert service.
+- [ ] Add GitHub issue/assignment/PR/review capability nodes through the existing GitHub services and human boundaries.
+- [ ] Add existing Workflow capability selection/execution without copying Workflow steps or creating a second engine.
+- [ ] Extend Describe It and Chat schemas/capability snapshots to generate the same custom graph contract.
+- [ ] Add focused and real-browser coverage for every custom capability and supported/unsupported analogous handoff class.
+- [ ] Run generation, build, focused Automation, internal, and full validation; update managed memory; create a clean checkpoint; perform a fresh edit-free Phase 5/full-objective audit.
 
 ## Phase 4 Checklist
 
@@ -637,7 +655,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 12. Public creation remains Template, Describe It, and Blank; maintained registration remains Native/GitHub-only.
 13. Canonical Chat tests prove persisted draft, visible exact plan, later explicit confirmation, and durable activation.
 14. Page and Chat share draft normalization, validation, planning, compilation, and publication services.
-15. Every publishable topology is accepted by one registered adapter; custom graphs remain inert drafts and edges are never generically executed.
+15. Every publishable topology is accepted by one registered adapter; the registered custom adapter compiles only allowlisted capability handoffs into existing services, and unsupported edges never execute generically.
 16. Confirmation, publication journal, trigger ownership, dispatch, execution, work-item, activity, and transition identities are retry/crash/concurrency-safe.
 17. Migration, repository, service, handler, Chat, runtime, SSE, UI, accessibility, browser-navigation, restart, build, internal, and uncached full repository validation pass.
 
@@ -646,15 +664,15 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 - Supported identity remains explicit persisted Automation identity through Template, Describe It, Blank, and maintained Native/GitHub setup registration. No Register Existing, legacy detection, heuristic inference, confidence scoring, migration/backfill of prior resources, or prompt/title/URL identity inference exists.
 - No generic edge interpreter, parallel worker/executor/queue, duplicate Workflow/Alert/GitHub subsystem, auto-merge, release, deployment, arbitrary executable node, or silent schema coercion was introduced.
 - Confirmed publication creates/reuses fixed visible adapter tasks and schedules through existing services. Dynamic Implementation nodes represent ordinary Alert/GitHub-linked OpenVibely tasks created after existing approval/assignment gates and projected through explicit provenance.
-- Audit outcome: no material code/spec/test finding remains at `4e971f0`. The worktree was clean throughout the audit. The only remaining blocker is authoritative managed-memory mutation capability.
+- The prior full-objective audit passed at `4e971f0` and was recorded at `d2512dd`; authoritative managed memory was subsequently reconciled. Direct product feedback then opened Phase 5 because Blank still assembled preset topology instead of creating custom runnable Automations.
 
 ## Remaining Phases
 
-- No implementation phase or code audit remains. Reconcile the authoritative managed memory through an authorized mutation path, reload-verify it, and verify the final worktree is clean.
+- Complete the unchecked Phase 5 custom capability and handoff classes, reconcile Describe It/Chat/Live behavior, run the full validation chain, update managed memory, create clean checkpoints, and perform a new edit-free full-objective audit.
 
 ## Exact Next Action
 
-Expose an authorized managed-memory mutation path, update `automation_graphs.md` with checkpoints `8601d36`, `c48f7c8`, and `4e971f0` plus the passing full-objective audit, reload-verify the topic, and verify the final clean repository state before claiming completion.
+Add regression-first Agent task → Agent task handoff compilation using existing task/Workflow machinery, including exact Automation/node provenance for dynamically created work and Live graph projection; then continue through approval, GitHub, and existing-Workflow capability nodes.
 
 ## Update Contract
 

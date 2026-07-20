@@ -133,7 +133,7 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 
 func (s *AutomationDraftService) BlankCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
 	if strings.TrimSpace(adapterKey) == "" {
-		adapterKey = AutomationAdapterVisionDriver
+		adapterKey = AutomationAdapterCustom
 	}
 	adapter, ok := s.registry.Get(strings.TrimSpace(adapterKey))
 	if !ok {
@@ -199,6 +199,24 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 		candidate.Edges[i].Label = strings.TrimSpace(candidate.Edges[i].Label)
 		if candidate.Edges[i].Condition == nil {
 			candidate.Edges[i].Condition = map[string]any{}
+		}
+	}
+	if adapter.DynamicTopology {
+		nodeTypes := make(map[string]models.AutomationNodeType, len(candidate.Nodes))
+		for _, node := range candidate.Nodes {
+			nodeTypes[node.Key] = node.Type
+		}
+		for i := range candidate.Nodes {
+			if candidate.Nodes[i].Type != models.AutomationNodeTrigger {
+				continue
+			}
+			delete(candidate.Nodes[i].Config, "target_node_key")
+			for _, edge := range candidate.Edges {
+				if edge.From == candidate.Nodes[i].Key && nodeTypes[edge.To] == models.AutomationNodeAgentTask {
+					candidate.Nodes[i].Config["target_node_key"] = edge.To
+					break
+				}
+			}
 		}
 	}
 	candidate.Assumptions = normalizeDraftMessages(candidate.Assumptions)
@@ -306,6 +324,14 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		if node.Name == "" || len(node.Name) > 200 {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "node_name", Message: "Node name must be between 1 and 200 characters."})
 		}
+		if adapter.DynamicTopology {
+			if !validNodeTypes[node.Type] {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "invalid_node", Message: "Node type is not supported by the graph editor."})
+				continue
+			}
+			issues = append(issues, validateCustomAutomationNodeConfig(node)...)
+			continue
+		}
 		canonical, exists := canonicalNodes[node.Key]
 		if !exists {
 			if !validNodeTypes[node.Type] {
@@ -347,6 +373,12 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Graph edge references an invalid node."})
 			continue
 		}
+		if adapter.DynamicTopology {
+			if len(edge.Condition) != 0 {
+				issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Custom connection conditions are not supported yet."})
+			}
+			continue
+		}
 		canonical, isCanonical := canonicalEdges[edge.Key]
 		if !isCanonical || edge.From != canonical.From || edge.To != canonical.To {
 			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_topology", Message: "Custom graph connections can be saved, but publication requires a registered runtime adapter."})
@@ -375,7 +407,80 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			issues = append(issues, models.AutomationValidationIssue{Code: "missing_edge", Message: "Add every required transition before publication."})
 		}
 	}
+	if adapter.DynamicTopology {
+		issues = append(issues, validateCustomAutomationTopology(candidate)...)
+	}
 	sortAutomationValidationIssues(issues)
+	return issues
+}
+
+func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate) []models.AutomationValidationIssue {
+	if len(candidate.Nodes) == 0 {
+		return []models.AutomationValidationIssue{{Code: "empty_graph", Message: "Add a Schedule and an Agent task to make this custom automation runnable."}}
+	}
+	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	incoming := make(map[string][]models.AutomationDraftEdge, len(candidate.Nodes))
+	outgoing := make(map[string][]models.AutomationDraftEdge, len(candidate.Nodes))
+	triggerCount, taskCount := 0, 0
+	var issues []models.AutomationValidationIssue
+	for _, node := range candidate.Nodes {
+		nodes[node.Key] = node
+		switch node.Type {
+		case models.AutomationNodeTrigger:
+			triggerCount++
+		case models.AutomationNodeAgentTask:
+			taskCount++
+		case models.AutomationNodeOutcome:
+		default:
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This capability is not executable in custom automations yet."})
+		}
+	}
+	for _, edge := range candidate.Edges {
+		from, fromOK := nodes[edge.From]
+		to, toOK := nodes[edge.To]
+		if !fromOK || !toOK || edge.From == edge.To {
+			continue
+		}
+		outgoing[edge.From] = append(outgoing[edge.From], edge)
+		incoming[edge.To] = append(incoming[edge.To], edge)
+		valid := from.Type == models.AutomationNodeTrigger && to.Type == models.AutomationNodeAgentTask ||
+			from.Type == models.AutomationNodeAgentTask && to.Type == models.AutomationNodeOutcome
+		if !valid {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: from.Key, Code: "unsupported_handoff", Message: "Custom automations currently support Schedule → Agent task → Outcome handoffs."})
+		}
+	}
+	if triggerCount == 0 {
+		issues = append(issues, models.AutomationValidationIssue{Code: "missing_trigger", Message: "Add at least one Schedule to start this custom automation."})
+	}
+	if taskCount == 0 {
+		issues = append(issues, models.AutomationValidationIssue{Code: "missing_task", Message: "Add at least one Agent task for this custom automation to run."})
+	}
+	for _, node := range candidate.Nodes {
+		switch node.Type {
+		case models.AutomationNodeTrigger:
+			if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Type != models.AutomationNodeAgentTask {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "schedule_target", Message: "Connect this Schedule to exactly one Agent task."})
+			}
+		case models.AutomationNodeAgentTask:
+			hasTrigger := false
+			for _, edge := range incoming[node.Key] {
+				if nodes[edge.From].Type == models.AutomationNodeTrigger {
+					hasTrigger = true
+					break
+				}
+			}
+			if !hasTrigger {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_trigger", Message: "Connect a Schedule to this Agent task so it can run."})
+			}
+			if len(outgoing[node.Key]) > 1 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_outcome", Message: "An Agent task can connect to at most one Outcome."})
+			}
+		case models.AutomationNodeOutcome:
+			if len(outgoing[node.Key]) != 0 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "outcome_terminal", Message: "An Outcome must be the end of a path."})
+			}
+		}
+	}
 	return issues
 }
 
@@ -389,7 +494,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	case models.AutomationNodeAgentTask:
 		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "skills": true, "source_files": true}
 	case models.AutomationNodeTrigger:
-		allowed = map[string]bool{"run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
+		allowed = map[string]bool{"target_node_key": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
 	}
 	var issues []models.AutomationValidationIssue
 	for key, value := range node.Config {

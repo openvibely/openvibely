@@ -467,7 +467,8 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	require.Equal(t, 200, newPage.Code)
 	require.NotContains(t, newPage.Body.String(), `aria-label="Blank topology"`)
 	require.NotContains(t, newPage.Body.String(), `<option value="vision_driver">Vision Driver</option><option value="native_sdlc">Native SDLC</option>`)
-
+	require.Contains(t, newPage.Body.String(), "Build your own runnable Automation")
+	require.Contains(t, newPage.Body.String(), "Open custom builder")
 	created := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
@@ -495,10 +496,9 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	require.NotContains(t, created.Body.String(), "Save draft")
 	require.NotContains(t, created.Body.String(), "Suggested nodes", "blank drafts must not show a template-derived node list")
 	require.Contains(t, created.Body.String(), `data-automation-create-node`, "blank drafts must create named nodes directly")
-	require.Contains(t, created.Body.String(), "6 required nodes remain")
-	require.Contains(t, created.Body.String(), "5 required connections remain")
-	require.Equal(t, 1, strings.Count(created.Body.String(), "required nodes remain"))
-	require.Equal(t, 1, strings.Count(created.Body.String(), "required connections remain"))
+	require.Contains(t, created.Body.String(), "Add a Schedule and an Agent task")
+	require.NotContains(t, created.Body.String(), "required nodes remain")
+	require.NotContains(t, created.Body.String(), "required connections remain")
 	require.NotContains(t, created.Body.String(), "Add transitions")
 	require.NotContains(t, created.Body.String(), `class="automation-draft-node"`, "blank canvas must not start with template nodes")
 
@@ -513,10 +513,10 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	require.NoError(t, err)
 
 	added := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"add_node"}, "node_key": {"vision_trigger"},
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Schedule"},
 	}).Execute()
 	require.Equal(t, 200, added.Code)
-	require.Contains(t, added.Body.String(), `data-node-key="vision_trigger"`)
+	require.Contains(t, added.Body.String(), `data-node-key="schedule"`)
 	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
 	require.NoError(t, err)
 	candidate, err = metadata.Candidate()
@@ -526,21 +526,21 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	candidateJSON, err = json.Marshal(candidate)
 	require.NoError(t, err)
 	added = tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"add_node"}, "node_key": {"vision_driver"},
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"create_node"}, "node_kind": {"agent_task"}, "node_name": {"Task"},
 	}).Execute()
 	require.Equal(t, 200, added.Code)
 	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
 	require.NoError(t, err)
 	candidate, err = metadata.Candidate()
 	require.NoError(t, err)
-	require.Contains(t, added.Body.String(), `data-connect-port="vision_trigger"`)
-	require.Contains(t, added.Body.String(), `data-connect-port="vision_driver"`)
+	require.Contains(t, added.Body.String(), `data-connect-port="schedule"`)
+	require.Contains(t, added.Body.String(), `data-connect-port="task"`)
 	require.Equal(t, 4, strings.Count(added.Body.String(), `class="automation-connect-handle" data-connect-port=`), "each node must connect from either side")
 	require.Contains(t, added.Body.String(), `data-delete-node`, "nodes must be deletable on the canvas")
 	candidateJSON, err = json.Marshal(candidate)
 	require.NoError(t, err)
 	invalidConnection := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"connect_nodes"}, "from_key": {"vision_trigger"}, "to_key": {"vision_trigger"},
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"connect_nodes"}, "from_key": {"schedule"}, "to_key": {"schedule"},
 	}).Execute()
 	require.Equal(t, 400, invalidConnection.Code)
 	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
@@ -551,7 +551,7 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	candidateJSON, err = json.Marshal(candidate)
 	require.NoError(t, err)
 	connected := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"connect_nodes"}, "from_key": {"vision_trigger"}, "to_key": {"vision_driver"},
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"connect_nodes"}, "from_key": {"schedule"}, "to_key": {"task"},
 	}).Execute()
 	require.Equal(t, 200, connected.Code)
 	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
@@ -567,7 +567,7 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	candidateJSON, err = json.Marshal(candidate)
 	require.NoError(t, err)
 	unchanged := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"add_node"}, "node_key": {"vision_driver"},
+		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)},
 	}).Execute()
 	require.Equal(t, 200, unchanged.Code)
 	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
@@ -584,9 +584,9 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	require.Nil(t, gone)
 }
 
-func TestAutomationBlankCanAssembleRegisteredTopologyWithoutTemplate(t *testing.T) {
+func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	tc := NewTestContext(t)
-	project := tc.CreateProject().WithName("Publishable Blank Project").Build()
+	project := tc.CreateProject().WithName("Publishable Custom Project").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
@@ -598,10 +598,17 @@ func TestAutomationBlankCanAssembleRegisteredTopologyWithoutTemplate(t *testing.
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
 	require.Equal(t, 200, created.Code)
-	require.Contains(t, created.Body.String(), `name="runtime_node_key"`, "Blank Add node must expose registered adapter semantics")
-	require.Contains(t, created.Body.String(), `value="vision_trigger"`)
-	require.Contains(t, created.Body.String(), "Vision Schedule")
-	require.NotContains(t, created.Body.String(), "Suggested nodes", "Blank must not present a template node list")
+	require.Contains(t, created.Body.String(), `name="node_kind"`)
+	require.Contains(t, created.Body.String(), "Node purpose")
+	require.Contains(t, created.Body.String(), `value="schedule"`)
+	require.Contains(t, created.Body.String(), `value="agent_task"`)
+	require.Contains(t, created.Body.String(), `value="outcome"`)
+	require.Contains(t, created.Body.String(), "Custom")
+	require.NotContains(t, created.Body.String(), "Runtime behavior")
+	require.NotContains(t, created.Body.String(), "Design-only type")
+	require.NotContains(t, created.Body.String(), `name="runtime_node_key"`)
+	require.NotContains(t, created.Body.String(), "Vision Schedule")
+	require.NotContains(t, created.Body.String(), "Suggested nodes")
 
 	var automationID, versionID string
 	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
@@ -609,6 +616,7 @@ func TestAutomationBlankCanAssembleRegisteredTopologyWithoutTemplate(t *testing.
 	require.NoError(t, err)
 	candidate, err := metadata.Candidate()
 	require.NoError(t, err)
+	require.Equal(t, service.AutomationAdapterCustom, candidate.AdapterKey)
 	post := func(values url.Values) {
 		t.Helper()
 		raw, marshalErr := json.Marshal(candidate)
@@ -623,40 +631,24 @@ func TestAutomationBlankCanAssembleRegisteredTopologyWithoutTemplate(t *testing.
 		require.NoError(t, err)
 	}
 
-	canonical, err := drafts.TemplateCandidate(service.AutomationAdapterVisionDriver)
-	require.NoError(t, err)
-	for _, node := range canonical.Nodes {
-		post(url.Values{
-			"builder_action": {"create_node"}, "runtime_node_key": {node.Key},
-			"node_name": {node.Name}, "node_type": {string(node.Type)},
-		})
-	}
-	for _, edge := range canonical.Edges {
-		post(url.Values{
-			"builder_action": {"connect_nodes"}, "from_key": {edge.From}, "to_key": {edge.To},
-		})
-	}
+	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Weekday review"}})
+	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"agent_task"}, "node_name": {"Review support queue"}})
+	require.Len(t, candidate.Nodes, 2)
+	require.Equal(t, models.AutomationNodeTrigger, candidate.Nodes[0].Type)
+	require.Equal(t, models.AutomationNodeAgentTask, candidate.Nodes[1].Type)
+	post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {candidate.Nodes[0].Key}, "to_key": {candidate.Nodes[1].Key}})
 
-	require.Len(t, candidate.Nodes, len(canonical.Nodes))
-	require.Len(t, candidate.Edges, len(canonical.Edges))
-	for i := range canonical.Nodes {
-		require.Equal(t, canonical.Nodes[i].Key, candidate.Nodes[i].Key)
-		require.Equal(t, canonical.Nodes[i].Role, candidate.Nodes[i].Role)
-		require.Equal(t, canonical.Nodes[i].Type, candidate.Nodes[i].Type)
-		wantConfig, marshalErr := json.Marshal(canonical.Nodes[i].Config)
-		require.NoError(t, marshalErr)
-		gotConfig, marshalErr := json.Marshal(candidate.Nodes[i].Config)
-		require.NoError(t, marshalErr)
-		require.JSONEq(t, string(wantConfig), string(gotConfig))
-	}
-	require.Empty(t, drafts.ValidateCandidate(candidate), "an explicitly assembled registered topology must be publishable")
+	require.Len(t, candidate.Edges, 1)
+	require.Equal(t, candidate.Nodes[1].Key, candidate.Nodes[0].Config["target_node_key"])
+	require.Empty(t, drafts.ValidateCandidate(candidate), "a user-defined Schedule → Agent task graph must be publishable")
 	plan, err := planner.Plan(context.Background(), project.ID, automationID, versionID)
 	require.NoError(t, err)
 	require.Empty(t, plan.Validation)
-	require.NotEmpty(t, plan.Effects)
+	require.Len(t, plan.Effects, 2)
+	require.ElementsMatch(t, []string{"task", "schedule"}, []string{plan.Effects[0].ResourceType, plan.Effects[1].ResourceType})
 }
 
-func TestAutomationBuilderCreatesCustomNodesAndCyclicDraftConnections(t *testing.T) {
+func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Freeform Builder Project").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
@@ -691,8 +683,8 @@ func TestAutomationBuilderCreatesCustomNodesAndCyclicDraftConnections(t *testing
 		return response
 	}
 
-	for _, node := range []struct{ name, nodeType string }{{"Alpha", "agent_task"}, {"Beta", "condition"}, {"Gamma", "action"}} {
-		response := post(url.Values{"builder_action": {"create_node"}, "node_name": {node.name}, "node_type": {node.nodeType}})
+	for _, node := range []struct{ name, purpose string }{{"Every morning", "schedule"}, {"Review project", "agent_task"}, {"Reviewed", "outcome"}} {
+		response := post(url.Values{"builder_action": {"create_node"}, "node_name": {node.name}, "node_kind": {node.purpose}})
 		require.Equal(t, 200, response.Code)
 	}
 	require.Len(t, candidate.Nodes, 3)
@@ -702,7 +694,7 @@ func TestAutomationBuilderCreatesCustomNodesAndCyclicDraftConnections(t *testing
 		require.Equal(t, 200, response.Code)
 	}
 	require.Len(t, candidate.Edges, 3)
-	require.Contains(t, issueCodesHandler(candidate, drafts), "unsupported_topology", "freeform graph must be saved but remain unpublished")
+	require.Contains(t, issueCodesHandler(candidate, drafts), "unsupported_handoff", "unsupported custom handoffs may be saved but must not publish")
 }
 
 func issueCodesHandler(candidate models.AutomationDraftCandidate, drafts *service.AutomationDraftService) []string {

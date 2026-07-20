@@ -39,20 +39,17 @@ func TestAutomationBlankDraftStartsEmptyAndPersistsUserLayout(t *testing.T) {
 
 	blank, err := svc.BlankCandidate("")
 	require.NoError(t, err)
-	require.Equal(t, AutomationAdapterVisionDriver, blank.AdapterKey)
-	require.Empty(t, blank.Nodes, "Blank must start with an empty canvas, not a populated template")
+	require.Equal(t, AutomationAdapterCustom, blank.AdapterKey)
+	require.Empty(t, blank.Nodes, "Blank must start with an empty custom canvas")
 	require.Empty(t, blank.Edges)
-	require.Contains(t, issueCodes(svc.ValidateCandidate(blank)), "missing_node")
+	require.Contains(t, issueCodes(svc.ValidateCandidate(blank)), "empty_graph")
 
 	created, err := svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: blank})
 	require.NoError(t, err)
 	require.Empty(t, created.Candidate.Nodes)
 	require.NotEmpty(t, created.ValidationErrors)
 
-	palette, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
-	require.NoError(t, err)
-	dragged := palette.Nodes[0]
-	dragged.Position = &models.AutomationDraftPoint{X: 37, Y: 83}
+	dragged := models.AutomationDraftNode{Key: "my_schedule", Name: "My schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{X: 37, Y: 83}}
 	created.Candidate.Nodes = append(created.Candidate.Nodes, dragged)
 	updated, err := svc.UpdateDraft(context.Background(), created.Definition.Automation.ID, created.Definition.Version.ID, project.ID, created.Candidate)
 	require.NoError(t, err)
@@ -64,7 +61,7 @@ func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Freeform draft")
 	repo := repository.NewAutomationRepo(db)
 	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
-	candidate, err := svc.BlankCandidate(AutomationAdapterVisionDriver)
+	candidate, err := svc.BlankCandidate(AutomationAdapterCustom)
 	require.NoError(t, err)
 	candidate.Nodes = []models.AutomationDraftNode{
 		{Key: "alpha", Name: "Alpha", Type: models.AutomationNodeAgentTask, Role: "custom_agent_task", Config: map[string]any{"prompt": "Do alpha work", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
@@ -78,20 +75,20 @@ func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *
 	}
 
 	issues := svc.ValidateCandidate(candidate)
-	require.Contains(t, issueCodes(issues), "unsupported_topology", "freeform topology must remain visibly unpublished")
-	require.NotContains(t, issueCodes(issues), "invalid_edge", "a multi-node cycle is valid draft geometry")
+	require.Contains(t, issueCodes(issues), "unsupported_capability", "unsupported capability nodes must remain visibly unpublished")
+	require.NotContains(t, issueCodes(issues), "invalid_edge", "a multi-node cycle remains valid saved geometry")
 	created, err := svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	require.Len(t, created.Candidate.Nodes, 3)
 	require.Len(t, created.Candidate.Edges, 3)
 	require.Equal(t, "left", created.Candidate.Edges[0].FromPort, "chosen connector side must survive draft persistence")
 	require.Equal(t, "right", created.Candidate.Edges[0].ToPort, "chosen connector side must survive draft persistence")
-	require.Contains(t, issueCodes(created.ValidationErrors), "unsupported_topology")
+	require.Contains(t, issueCodes(created.ValidationErrors), "unsupported_capability")
 
 	planner := NewAutomationPublicationPlanner(repo, nil, nil, svc.registry, svc)
 	plan, err := planner.Plan(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
 	require.NoError(t, err)
-	require.Contains(t, issueCodes(plan.Validation), "unsupported_topology", "the publication planner must reject freeform topology")
+	require.Contains(t, issueCodes(plan.Validation), "unsupported_capability", "unsupported capability graphs must not publish")
 	require.Empty(t, plan.Effects, "unsupported topology must not produce runtime resource mutations")
 }
 

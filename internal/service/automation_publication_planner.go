@@ -173,7 +173,21 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 		return nil, err
 	}
 	plan.Effects = append(plan.Effects, referenceEffects...)
-	for _, node := range adapter.Nodes {
+	resourceNodes := adapter.Nodes
+	if adapter.DynamicTopology {
+		resourceNodes = make([]AutomationAdapterNode, 0, len(candidate.Nodes))
+		for _, node := range candidate.Nodes {
+			resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
+			switch node.Type {
+			case models.AutomationNodeAgentTask:
+				resource.AllowedResources["task"] = true
+			case models.AutomationNodeTrigger:
+				resource.AllowedResources["schedule"] = true
+			}
+			resourceNodes = append(resourceNodes, resource)
+		}
+	}
+	for _, node := range resourceNodes {
 		candidateNode := candidateNodes[node.Key]
 		if node.AllowedResources["task"] {
 			effect, dependency, effectErr := p.planTask(ctx, definition, candidateNode, publishedResources[node.Key+"\x00task"])
@@ -186,7 +200,7 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 			}
 		}
 	}
-	for _, node := range adapter.Nodes {
+	for _, node := range resourceNodes {
 		if !node.AllowedResources["schedule"] {
 			continue
 		}

@@ -644,7 +644,7 @@ templ automationNewContent(currentProjectID string, errorMessage string) {
 		<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
 			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Template</h3><p class="mt-1 text-sm text-base-content/60">Start from a maintained supported topology.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4 space-y-3"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="template"/><select name="template_key" class="select select-bordered w-full" aria-label="Automation template"><option value="native_sdlc">Native SDLC</option><option value="github_sdlc">GitHub SDLC</option><option value="vision_driver">Vision Driver</option></select><button class="btn btn-primary w-full" type="submit">Use template</button></form></section>
 			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Describe It</h3><p class="mt-1 text-sm text-base-content/60">Generate a design through the shared safe schema. Nothing runs yet.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" hx-indicator="#automation-describe-loading" hx-disabled-elt="button" class="mt-4 space-y-3"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="describe"/><textarea name="description" class="textarea textarea-bordered h-32 w-full" maxlength="4000" required placeholder="Review project vision daily, request approval, then create implementation work."></textarea><button class="btn btn-primary w-full" type="submit">Generate design</button><div id="automation-describe-loading" class="htmx-indicator text-center text-sm text-base-content/65" role="status" aria-live="polite">Generating and validating design…</div></form></section>
-			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Blank</h3><p class="mt-1 text-sm text-base-content/60">Start with an empty canvas. Add supported nodes, connect transitions, and arrange the graph yourself.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="blank"/><button class="btn btn-outline w-full" type="submit">Open blank canvas</button></form></section>
+			<section class="rounded-box border border-base-300 bg-base-100 p-5"><h3 class="text-lg font-semibold">Blank</h3><p class="mt-1 text-sm text-base-content/60">Build your own runnable Automation from configurable OpenVibely capabilities. Add schedules, Agent tasks, and outcomes, then connect and configure them yourself.</p><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/drafts?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="source" value="blank"/><button class="btn btn-outline w-full" type="submit">Open custom builder</button></form></section>
 		</div>
 	</div>
 }
@@ -726,7 +726,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			}
 			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 				<div class="flex flex-wrap items-start justify-between gap-3">
-					<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">Runtime: { automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect from either side:</span> drag either dot on one node to either dot on another. Select a line, then use Delete connection or drag an endpoint to reconnect it.</p></div>
+					<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">{ automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect from either side:</span> drag either dot on one node to either dot on another. Select a line, then use Delete connection or drag an endpoint to reconnect it.</p></div>
 					<div class="flex flex-wrap items-center gap-2" aria-label="Canvas controls">
 						<div data-automation-node-tool>
 							<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
@@ -738,18 +738,27 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				<dialog id="automation-node-dialog" class="modal" data-automation-node-dialog>
 					<div class="modal-box relative max-w-md">
 						<div class="absolute right-4 top-4">@ModalCloseButton("document.getElementById('automation-node-dialog')", "Close add node dialog")</div>
-						<div class="pr-10"><h3 class="text-lg font-semibold">Add node</h3><p class="mt-1 text-sm text-base-content/65">Choose a supported runtime behavior or add a design-only node, then drag it anywhere on the canvas.</p></div>
+						<div class="pr-10"><h3 class="text-lg font-semibold">Add node</h3>
+							if page.Result.Candidate.AdapterKey == "custom" {
+								<p class="mt-1 text-sm text-base-content/65">Add an OpenVibely capability, then configure it and connect it to the next step.</p>
+							} else {
+								<p class="mt-1 text-sm text-base-content/65">Add a step from this maintained Automation template.</p>
+							}
+						</div>
 					<form class="mt-5 space-y-4" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content">
 						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
-						<label class="form-control"><span class="label-text">Runtime behavior</span><select class="select select-bordered" name="runtime_node_key"><option value="">Design-only node</option>
-							for _, node := range page.NodePalette {
-								if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
-									<option value={ node.Key }>{ node.Name } · { automationNodeTypeLabel(node.Type) }</option>
+						<label class="form-control"><span class="label-text">Node purpose</span><select class="select select-bordered" name="node_kind" required>
+							if page.Result.Candidate.AdapterKey == "custom" {
+								<option value="schedule">Schedule</option><option value="agent_task">Agent task</option><option value="outcome">Outcome</option>
+							} else {
+								for _, node := range page.NodePalette {
+									if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
+										<option value={ "runtime:" + node.Key }>{ node.Name } · { automationNodeTypeLabel(node.Type) }</option>
+									}
 								}
 							}
-						</select><span class="label-text-alt mt-1">Runtime behaviors come from the selected registered adapter. Design-only nodes can be saved but cannot run.</span></label>
+						</select><span class="label-text-alt mt-1">Schedules start real Agent tasks. Outcomes mark the end of a path.</span></label>
 						<label class="form-control"><span class="label-text">Name</span><input class="input input-bordered" name="node_name" maxlength="200" placeholder="Review result" required autofocus/></label>
-						<label class="form-control"><span class="label-text">Design-only type</span><select class="select select-bordered" name="node_type"><option value="agent_task">Agent task</option><option value="trigger">Trigger</option><option value="human_gate">Human gate</option><option value="condition">Condition</option><option value="action">Action</option><option value="outcome">Outcome</option></select></label>
 						<div class="modal-action"><button class="btn btn-ghost" type="button" onclick="document.getElementById('automation-node-dialog').close()">Cancel</button><button class="btn btn-primary" type="submit" data-automation-create-node>Add node</button></div>
 					</form>
 					if page.Result.Definition.Version.Source == "template" {

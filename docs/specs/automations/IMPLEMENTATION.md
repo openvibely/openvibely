@@ -387,7 +387,7 @@ Example generated draft:
 
 ### Blank Builder Flow
 
-`Start blank` creates one unpublished version and opens the advanced builder. The user adds supported nodes, connects them, and configures each selected node in a side panel. The builder exposes only node/edge combinations accepted by a registered automation adapter. It is not a free-form workflow language.
+`Start blank` creates one unpublished version with the registered `custom` compiler adapter and opens the advanced builder. The user adds configurable OpenVibely capability nodes, connects them, and configures each selected node in a side panel. Preset adapters remain optional starting points, not required node lists for a blank graph. The custom adapter publishes only explicitly supported capability handoffs through existing OpenVibely services; unsupported node types, edges, cycles, and conditions may remain visible as draft validation errors but never execute.
 
 Example Agent Task panel:
 
@@ -410,7 +410,7 @@ Approval method:
 
 Node configuration controls must be schema-driven so template, described, blank, and Chat-created drafts share the same validation rules.
 
-The builder must continuously show the selected compiler adapter and reject topologies that adapter cannot compile. A graph with individually valid nodes is not publishable merely because its edges form a DAG.
+The builder must continuously show the selected compiler adapter and reject topology or handoff semantics that adapter cannot compile. The registered `custom` adapter accepts user-defined nodes and edges only when each node maps to an allowlisted OpenVibely capability and each edge maps to a supported handoff implemented through existing services. A graph with individually valid nodes is not publishable merely because its edges form a DAG.
 
 ### Validation And Publication Preview
 
@@ -614,16 +614,17 @@ OpenVibely already has `workflows`, `workflow_steps`, `workflow_executions`, and
 
 An automation node may invoke or observe an existing Workflow as a bounded action when a registered adapter supports it. In that case, do not copy Workflow steps into automation nodes or duplicate Workflow execution state. Link the `workflow_execution` as an activity resource and project its aggregate status onto the automation node.
 
-The first automation builder release supports only topologies implemented by registered adapters such as:
+The automation builder supports both maintained preset adapters and a registered `custom` capability adapter:
 
 ```text
+custom
 native_sdlc
 github_sdlc
 vision_driver
 scheduled_finder
 ```
 
-Adding a new topology requires a new adapter with schema, validation, publication planning, compilation, provenance hooks, and tests. If arbitrary user-defined graph execution becomes a future requirement, extend the existing Workflow engine through a separate design rather than silently adding execution semantics to Automation edges.
+Adding a new capability or handoff requires schema, validation, deterministic publication planning, compilation into an existing OpenVibely service, provenance hooks, and tests. The `custom` adapter does not interpret arbitrary edges at runtime: each accepted edge compiles to a specific existing task, Scheduler, Workflow, Alert, or GitHub mechanism. Unsupported graph semantics fail closed rather than creating a second Workflow engine, worker pool, or queue.
 
 ## Data Model
 
@@ -1452,7 +1453,7 @@ Will update:
 
 Only after confirmation should the compiler create/update resources and publish the version. If resource creation partially fails, keep the draft unpublished and report exact created/reused resources; use idempotency keys to make retry safe.
 
-For the first builder release, support registered template topologies with explicit human gates. Do not promise arbitrary workflow expressions, automations within automations, automatic rollback, or generic code execution. Recurrence remains owned by fixed schedules. Dynamic wakeups may be offered later only when that separately persisted feature is available through the adapter capability registry; this implementation must not assume it exists. Work remains owned by tasks and existing runtime tools.
+For the custom builder, support only capability nodes and handoffs with deterministic compilers into existing OpenVibely services. Do not promise arbitrary workflow expressions, automations within automations, automatic rollback, or generic code execution. Recurrence remains owned by fixed schedules. Dynamic wakeups may be offered only when separately persisted through the capability registry; the custom adapter must not invent them. Work remains owned by tasks, existing Workflow/Alert/GitHub services, and existing runtime tools.
 
 ## Service And Repository Shape
 

@@ -6,6 +6,7 @@ import (
 )
 
 const (
+	AutomationAdapterCustom       = "custom"
 	AutomationAdapterNativeSDLC   = "native_sdlc"
 	AutomationAdapterGitHubSDLC   = "github_sdlc"
 	AutomationAdapterVisionDriver = "vision_driver"
@@ -30,19 +31,20 @@ type AutomationAdapterEdge struct {
 }
 
 type AutomationAdapter struct {
-	Key            string
-	AutomationType string
-	DefaultName    string
-	Description    string
-	Nodes          []AutomationAdapterNode
-	Edges          []AutomationAdapterEdge
+	Key             string
+	AutomationType  string
+	DefaultName     string
+	Description     string
+	DynamicTopology bool
+	Nodes           []AutomationAdapterNode
+	Edges           []AutomationAdapterEdge
 }
 
 type AutomationAdapterRegistry struct{ adapters map[string]AutomationAdapter }
 
 func NewAutomationAdapterRegistry() *AutomationAdapterRegistry {
 	registry := &AutomationAdapterRegistry{adapters: make(map[string]AutomationAdapter)}
-	for _, adapter := range []AutomationAdapter{nativeSDLCAdapter(), githubSDLCAdapter(), visionDriverAdapter()} {
+	for _, adapter := range []AutomationAdapter{customAutomationAdapter(), nativeSDLCAdapter(), githubSDLCAdapter(), visionDriverAdapter()} {
 		registry.adapters[adapter.Key] = adapter
 	}
 	return registry
@@ -81,6 +83,13 @@ func resourceTypes(values ...string) map[string]bool {
 		out[value] = true
 	}
 	return out
+}
+
+func customAutomationAdapter() AutomationAdapter {
+	return AutomationAdapter{
+		Key: AutomationAdapterCustom, AutomationType: "custom", DefaultName: "Custom Automation",
+		Description: "Connect configurable OpenVibely capabilities into a runnable automation.", DynamicTopology: true,
+	}
 }
 
 func nativeSDLCAdapter() AutomationAdapter {

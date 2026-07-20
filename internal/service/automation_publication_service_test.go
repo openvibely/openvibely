@@ -61,6 +61,65 @@ func TestAutomationPublicationPlanIsDeterministicAndCompilerIsIdempotent(t *test
 	require.Equal(t, scheduleCount, tableCount(t, db, "schedules"))
 }
 
+func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Custom publish")
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	candidate, err := drafts.BlankCandidate("")
+	require.NoError(t, err)
+	candidate.Name = "My support review"
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "weekday_schedule", Name: "Weekday schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "08:30", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
+		{Key: "review_support", Name: "Review support queue", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review unresolved support requests and propose the next action.", "category": "scheduled", "priority": 3}, Position: &models.AutomationDraftPoint{X: 260, Y: 0}},
+		{Key: "reviewed", Name: "Reviewed", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{
+		{Key: "schedule_to_review", From: "weekday_schedule", To: "review_support", Condition: map[string]any{}},
+		{Key: "review_to_done", From: "review_support", To: "reviewed", Condition: map[string]any{}},
+	}
+	created, err := drafts.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.Empty(t, created.ValidationErrors)
+
+	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+	plan, err := planner.Plan(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Empty(t, plan.Validation)
+	require.ElementsMatch(t, []string{"task", "schedule"}, []string{plan.Effects[0].ResourceType, plan.Effects[1].ResourceType})
+
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
+	published, err := compiler.Publish(context.Background(), AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+	require.NoError(t, err)
+	require.Equal(t, "custom", published.Definition.Version.AdapterKey)
+	require.Equal(t, models.AutomationActive, published.Definition.Automation.LifecycleState)
+	require.Len(t, published.Definition.Resources, 2)
+
+	var taskID, scheduleID string
+	for _, resource := range published.Definition.Resources {
+		switch resource.ResourceType {
+		case "task":
+			taskID = resource.ResourceID
+		case "schedule":
+			scheduleID = resource.ResourceID
+		}
+	}
+	task, err := taskRepo.GetByID(context.Background(), taskID)
+	require.NoError(t, err)
+	require.Contains(t, task.Title, "My support review: Review support queue")
+	require.Equal(t, "Review unresolved support requests and propose the next action.", task.Prompt)
+	require.Equal(t, models.CategoryScheduled, task.Category)
+	require.Equal(t, 3, task.Priority)
+	schedule, err := scheduleRepo.GetByID(context.Background(), scheduleID)
+	require.NoError(t, err)
+	require.Equal(t, task.ID, schedule.TaskID)
+	require.Equal(t, models.RepeatDaily, schedule.RepeatType)
+	require.True(t, schedule.Enabled)
+}
+
 func TestAutomationPublicationRejectsStalePlanAndLifecycleTouchesOwnedTriggersOnly(t *testing.T) {
 	automationobs.ResetForTest()
 	db := testutil.NewTestDB(t)

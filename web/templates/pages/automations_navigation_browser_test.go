@@ -89,11 +89,11 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 	}
 
 	renderBlankBuilder := func(withNode bool) string {
-		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Blank Automation", AutomationType: "vision_driver", AdapterKey: "vision_driver"}
+		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Blank Automation", AutomationType: "custom", AdapterKey: "custom"}
 		if withNode {
 			candidate.Nodes = []models.AutomationDraftNode{{Key: "first_step", Name: "First step", Type: models.AutomationNodeAgentTask, Role: "custom_agent_task", Config: map[string]any{"prompt": "Describe the work this node should perform.", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}}}
 		}
-		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate, Definition: &models.AutomationDefinition{Automation: models.Automation{ID: "automation-blank", Name: "Blank Automation"}, Version: models.AutomationVersion{ID: "version-blank", AdapterKey: "vision_driver"}}}}
+		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate, Definition: &models.AutomationDefinition{Automation: models.Automation{ID: "automation-blank", Name: "Blank Automation"}, Version: models.AutomationVersion{ID: "version-blank", AdapterKey: "custom"}}}}
 		var out bytes.Buffer
 		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render blank Automation builder: %v", err)
@@ -205,7 +205,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (!nodeDialog || !nodeDialog.open) fail('Add first node did not open the node dialog');
 	    await report('progress', 'add-node-dialog-opened');
 	    nodeDialog.querySelector('[name="node_name"]').value = 'First step';
-	    nodeDialog.querySelector('[name="node_type"]').value = 'agent_task';
+	    nodeDialog.querySelector('[name="node_kind"]').value = 'agent_task';
 	    var nodeForm = nodeDialog.querySelector('form[hx-post]');
 	    if (!nodeForm || !nodeForm.checkValidity()) fail('Add node form is not submittable: ' + (nodeDialog.querySelector(':invalid') && nodeDialog.querySelector(':invalid').validationMessage));
 	    htmx.process(nodeForm);

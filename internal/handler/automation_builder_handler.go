@@ -230,8 +230,9 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 	switch action {
 	case "create_node":
 		name := strings.TrimSpace(c.FormValue("node_name"))
-		runtimeNodeKey := strings.TrimSpace(c.FormValue("runtime_node_key"))
-		if runtimeNodeKey != "" {
+		nodeKind := strings.TrimSpace(c.FormValue("node_kind"))
+		if strings.HasPrefix(nodeKind, "runtime:") {
+			runtimeNodeKey := strings.TrimSpace(strings.TrimPrefix(nodeKind, "runtime:"))
 			for _, existing := range candidate.Nodes {
 				if existing.Key == runtimeNodeKey {
 					return nil
@@ -247,23 +248,30 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 				candidate.Nodes = append(candidate.Nodes, node)
 				return nil
 			}
-			return echo.NewHTTPError(http.StatusBadRequest, "unsupported runtime behavior")
+			return echo.NewHTTPError(http.StatusBadRequest, "unsupported automation step")
 		}
-		nodeType := models.AutomationNodeType(strings.TrimSpace(c.FormValue("node_type")))
-		if name == "" || len(name) > 200 || !automationDraftEditableNodeType(nodeType) {
-			return echo.NewHTTPError(http.StatusBadRequest, "node name and type are required")
+		if name == "" || len(name) > 200 {
+			return echo.NewHTTPError(http.StatusBadRequest, "node name and purpose are required")
+		}
+		var nodeType models.AutomationNodeType
+		var role string
+		config := map[string]any{}
+		switch nodeKind {
+		case "schedule":
+			nodeType, role = models.AutomationNodeTrigger, "fixed_schedule"
+			config = map[string]any{"run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1, "enabled": true}
+		case "agent_task":
+			nodeType, role = models.AutomationNodeAgentTask, "task"
+			config = map[string]any{"prompt": "Describe the work this node should perform.", "category": string(models.CategoryScheduled), "priority": 2}
+		case "outcome":
+			nodeType, role = models.AutomationNodeOutcome, "completed"
+		default:
+			return echo.NewHTTPError(http.StatusBadRequest, "unsupported automation node purpose")
 		}
 		key := automationDraftUniqueKey(candidate, automationDraftKey(name, "node"), false)
-		config := map[string]any{}
-		switch nodeType {
-		case models.AutomationNodeAgentTask:
-			config = map[string]any{"prompt": "Describe the work this node should perform.", "category": string(models.CategoryBacklog), "priority": 2}
-		case models.AutomationNodeTrigger:
-			config = map[string]any{"run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1, "enabled": true}
-		}
 		index := len(candidate.Nodes)
 		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{
-			Key: key, Name: name, Type: nodeType, Role: "custom_" + string(nodeType), Config: config,
+			Key: key, Name: name, Type: nodeType, Role: role, Config: config,
 			Position: &models.AutomationDraftPoint{X: float64((index % 4) * 260), Y: float64((index / 4) * 180)},
 		})
 		return nil
