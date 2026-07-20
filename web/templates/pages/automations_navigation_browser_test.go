@@ -267,14 +267,17 @@ window.addEventListener('DOMContentLoaded', function() {
 	    automationName.dispatchEvent(new Event('input', {bubbles:true}));
 	    var namedCandidate = JSON.parse(document.querySelector('[data-automation-draft-form] [data-candidate-json]').value);
 	    if (namedCandidate.name !== 'Browser Named Automation') fail('Automation name was not synchronized into the saved design');
-	    var draftForm = document.querySelector('[data-automation-draft-form]');
-	    var connectionSubmissions = 0;
-	    draftForm.addEventListener('submit', function(event) {
-	      connectionSubmissions++;
-	      event.preventDefault();
-	      event.stopImmediatePropagation();
-	    });
-	    function port(node, side) { return document.querySelector('[data-connect-port="' + node + '"][data-port-side="' + side + '"]'); }
+		    var draftForm = document.querySelector('[data-automation-draft-form]');
+		    if (!draftForm.querySelector('[name="save_changes"][value="true"]')) fail('visible Save form does not apply the draft immediately');
+		    if (Array.from(document.querySelectorAll('button')).some(function(button) { return /review and apply|apply changes/i.test(button.textContent); })) fail('builder still exposes a second review/apply action');
+		    var connectionSubmissions = 0;
+		    var saveSubmission = null;
+		    draftForm.addEventListener('submit', function(event) {
+		      connectionSubmissions++;
+		      saveSubmission = new FormData(draftForm);
+		      event.preventDefault();
+		      event.stopImmediatePropagation();
+		    });	    function port(node, side) { return document.querySelector('[data-connect-port="' + node + '"][data-port-side="' + side + '"]'); }
 	    function dragCapturedConnection(from, fromSide, to, toSide, pointerId) {
 	      var sourceHandle = port(from, fromSide);
 	      var targetHandle = port(to, toSide);
@@ -358,10 +361,14 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (JSON.parse(candidateInput.value).nodes[0].position.x !== beforeX) fail('builder reset did not restore canonical position');
 	    click('[data-node-key="result"] [data-delete-node]', 'node delete control');
 	    var afterNodeDelete = JSON.parse(candidateInput.value);
-	    if (afterNodeDelete.nodes.some(function(node) { return node.key === 'result'; })) fail('node delete control did not remove the node');
-	    if (afterNodeDelete.edges.some(function(edge) { return edge.from === 'result' || edge.to === 'result'; })) fail('node deletion left connected edges behind');
-	    await report('pass', '');  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
-});
+		    if (afterNodeDelete.nodes.some(function(node) { return node.key === 'result'; })) fail('node delete control did not remove the node');
+		    if (afterNodeDelete.edges.some(function(edge) { return edge.from === 'result' || edge.to === 'result'; })) fail('node deletion left connected edges behind');
+		    click('#automation-builder button[form="automation-design-form"]', 'top Save changes action');
+		    if (connectionSubmissions !== 1 || !saveSubmission) fail('visible Save changes action did not submit the design form exactly once');
+		    if (saveSubmission.get('save_changes') !== 'true') fail('visible Save changes action omitted immediate-apply intent');
+		    var savedCandidate = JSON.parse(String(saveSubmission.get('candidate_json') || '{}'));
+		    if (savedCandidate.name !== 'Browser Named Automation' || savedCandidate.nodes.some(function(node) { return node.key === 'result'; })) fail('visible Save changes action did not submit the latest graph state');
+		    await report('pass', '');  })().catch(function(error) { report('fail', String(error && error.stack || error)); });});
 </script>`
 	style := `<style>
 	:root { --bc: 0.746477 0.0216 264.436; --b2: 0.253267 0.015896 252.417; --p: 0.6569 0.196 275.75; --er: 0.7176 0.221 22.18; --wa: 0.8471 0.199 83.87; --in: 0.7206 0.191 231.6; --su: 0.648 0.15 160; }

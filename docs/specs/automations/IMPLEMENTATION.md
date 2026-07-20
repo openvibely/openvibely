@@ -138,20 +138,20 @@ The initial release may render only registered definitions. Later releases can l
 
 The Automations page and Chat must use the same draft-generation, validation, publication-plan, and compilation services. They are two entry points into one automation-definition system, not separate implementations.
 
-Creating an automation is always a draft-and-publish workflow:
+Creating an automation uses one shared draft, plan, and compiler pipeline with surface-appropriate publication intent:
 
 ```text
 Describe/select template
   -> generate draft
   -> inspect/edit graph
-  -> validate
-  -> preview concrete resource changes
-  -> confirm publication
+  -> validate and compute the concrete resource plan
+  -> web: Save changes and publish immediately
+     Chat: show the plan, then require a later explicit confirmation
   -> create/reuse resources and activate
   -> observe in Live view
 ```
 
-Generating or saving a draft must not create tasks, schedules, alerts, issues, executions, or PRs. Runtime resources change only during confirmed publication.
+Generating a draft and changing canvas geometry must not create tasks, schedules, alerts, issues, executions, or PRs. On the Automations page, the visible `Save changes` action is the explicit request to validate and publish the saved draft immediately. In Chat, runtime resources change only after the separately displayed plan is confirmed by a later user-authored input.
 
 ### Automations Page Entry Point
 
@@ -412,7 +412,7 @@ Node configuration controls must be schema-driven so template, described, blank,
 
 The builder must continuously show the selected compiler adapter and reject topology or handoff semantics that adapter cannot compile. The registered `custom` adapter accepts user-defined nodes and edges only when each node maps to an allowlisted OpenVibely capability and each edge maps to a supported handoff implemented through existing services. A graph with individually valid nodes is not publishable merely because its edges form a DAG.
 
-### Validation And Publication Preview
+### Validation And Publication
 
 `Validate` checks at least:
 
@@ -429,27 +429,9 @@ The builder must continuously show the selected compiler adapter and reject topo
 
 Show validation failures on the affected nodes and in a summary panel.
 
-After validation, `Publish` first displays a concrete plan:
+After validation, the publication planner computes the concrete create/reuse/update plan before any resource mutation. The Automations page does not require a separate review/apply screen: `Save changes` persists the latest candidate, computes that plan, and immediately invokes the compiler when validation succeeds. Chat displays the same plan before accepting its later explicit confirmation.
 
-```text
-Will create:
-- 1 Offering Manager task
-- 1 Dev Inbox task
-- 2 recurring schedules
-- 1 GitHub assignment approval gate
-
-Will reuse:
-- Existing GitHub channel
-- Coding Agent
-- VISION.md
-
-Will not:
-- Merge pull requests
-- Release or deploy code
-- Modify unrelated tasks
-```
-
-Publication begins only after explicit confirmation. On success, navigate to the automation's `Live` view. On partial failure, keep the draft unpublished, retain the prior published version, and report created/reused resources so an idempotent retry can reconcile them.
+On a successful web Save, navigate to the automation's `Live` view. If validation fails, keep the saved draft in the editor, display its setup errors, and create no runtime resources. On partial compilation failure, keep the draft unpublished, retain the prior published version, and report created/reused resources so an idempotent retry can reconcile them. Web Save and confirmed Chat publication both preserve stale-plan checks, immutable versions, and the same compiler journal.
 
 ### Editing An Active Automation
 
@@ -1439,19 +1421,9 @@ Supported node types should be constrained and validated:
 | Open PR | Existing task PR operation. |
 | Outcome | Graph-only terminal classification backed by resource state. |
 
-Saving a draft must not create or change runtime resources. Publishing shows a confirmation plan:
+The Automations-page builder keeps canvas/node/edge mutations draft-only until the user selects `Save changes`. That one action persists the latest graph, computes the deterministic publication plan, and immediately creates or updates resources and publishes the version when validation succeeds. There is no separate web confirmation plan or Apply step. Chat continues to display its confirmation plan before compilation.
 
-```text
-Will create:
-- 3 visible tasks
-- 3 schedules
-- 1 native approval gate
-
-Will update:
-- Shared GitHub Dev Inbox task
-```
-
-Only after confirmation should the compiler create/update resources and publish the version. If resource creation partially fails, keep the draft unpublished and report exact created/reused resources; use idempotency keys to make retry safe.
+If resource creation partially fails, keep the draft unpublished and report exact created/reused resources; use idempotency keys to make retry safe.
 
 For the custom builder, support only capability nodes and handoffs with deterministic compilers into existing OpenVibely services. Do not promise arbitrary workflow expressions, automations within automations, automatic rollback, or generic code execution. Recurrence remains owned by fixed schedules. Dynamic wakeups may be offered only when separately persisted through the capability registry; the custom adapter must not invent them. Work remains owned by tasks, existing Workflow/Alert/GitHub services, and existing runtime tools.
 
@@ -1636,14 +1608,15 @@ Acceptance:
 4. Implement constrained node/edge editing and validation.
 5. Add shared described-draft generation for the page and Chat.
 6. Register `preview_automation_description`, `create_automation_draft`, `plan_automation_publication`, and confirmed `publish_automation_draft` Chat actions.
-7. Add publish preview, stale-plan protection, and idempotent resource compilation.
+7. Add direct Automations-page Save publication, Chat publication preview, stale-plan protection, and idempotent resource compilation.
 8. Add safe pause/resume behavior for shared resources.
 
 Acceptance:
 
 - users can create multiple automations from templates;
 - users can describe an automation on the Automations page or in Chat through the same normalized schema and generation service;
-- saving a draft causes no runtime mutation;
+- canvas editing and draft generation cause no runtime mutation;
+- the Automations-page `Save changes` action validates and publishes immediately without a second Review/Apply step;
 - Chat does not publish an unseen plan and requires explicit confirmation after preview;
 - publishing creates/reuses visible tasks and schedules;
 - failed publication leaves the prior version active;
@@ -1715,7 +1688,7 @@ Acceptance:
 - publication planning is read-only and reports exact create/reuse/update effects;
 - publication rejects a stale plan revision after the draft or dependency state changes;
 - publication-plan golden fixtures cover canonical serialization, all enumerated dependency revisions, compiler/adapter versions, and exclusion of volatile operational fields;
-- an initial natural-language request cannot publish before the plan is shown and explicitly confirmed;
+- an initial natural-language Chat request cannot publish before the plan is shown and explicitly confirmed;
 - Chat rejects missing, expired, cross-user, cross-thread, cross-project, same-turn, replayed, and stale confirmation tokens;
 - negative, unrelated, and ambiguous later messages cannot satisfy confirmation; only a structured button or documented normalized publish command can;
 - retrying a consumed confirmation token returns the existing publication attempt/result without creating another attempt;
@@ -1755,8 +1728,8 @@ Acceptance:
 - New Automation exposes Template, Describe It, and Blank paths;
 - described generation displays progress, assumptions, warnings, and validation failures;
 - node configuration uses the same schema and validation as template/Chat drafts;
-- publish preview clearly separates resources that will be created, reused, updated, and left unchanged;
-- successful publication navigates to Live view while failed publication preserves the draft;
+- the Automations-page `Save changes` action validates and immediately publishes through the shared planner/compiler, with no separate Review/Apply controls;
+- successful web Save or confirmed Chat publication navigates to Live view while failed publication preserves the draft;
 - graph initializes after direct load and HTMX navigation;
 - renderer is destroyed when navigating away;
 - live events debounce and update node state;

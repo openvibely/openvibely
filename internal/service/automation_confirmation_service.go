@@ -206,36 +206,6 @@ func (s *AutomationConfirmationService) ConfirmChat(ctx context.Context, input A
 	return snapshot, returnErr
 }
 
-func (s *AutomationConfirmationService) ConfirmWeb(ctx context.Context, token, projectID, automationID, versionID, planRevision, principalID string, effects []models.AutomationPublicationEffect) (*repository.AutomationPublicationSnapshot, error) {
-	if s == nil || s.repo == nil || len(s.secret) < 16 {
-		return nil, errors.New("automation confirmation service is unavailable")
-	}
-	tokenID, err := s.verifyToken(token)
-	if err != nil {
-		return nil, err
-	}
-	receipt, err := s.repo.GetAutomationConfirmationReceipt(ctx, tokenID)
-	if err != nil {
-		return nil, err
-	}
-	if receipt == nil || receipt.ProjectID != projectID || receipt.AutomationID != automationID || receipt.VersionID != versionID || receipt.PlanRevision != planRevision || receipt.PrincipalID != principalID || receipt.ThreadID != "web:"+automationID {
-		return nil, errors.New("automation confirmation receipt scope does not match")
-	}
-	now := s.now().UTC()
-	if !now.Before(receipt.ExpiresAt) {
-		return nil, errors.New("automation confirmation receipt expired")
-	}
-	confirmingID := "web:" + repository.NewID()
-	if receipt.ConsumedAt != nil {
-		confirmingID = receipt.ConfirmingUserInputID
-	}
-	return s.repo.ConsumeAutomationConfirmationAndReserve(ctx, repository.AutomationConfirmationConsume{
-		TokenID: tokenID, ProjectID: projectID, AutomationID: automationID, VersionID: versionID,
-		PlanRevision: planRevision, PrincipalID: principalID, ThreadID: receipt.ThreadID,
-		ConfirmingUserInputID: confirmingID, Method: "button", Now: now, Effects: effects,
-	})
-}
-
 func normalizeAutomationPublishCommand(value string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
 }

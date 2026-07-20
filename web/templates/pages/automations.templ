@@ -662,11 +662,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 		<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
 			<div class="min-w-0 flex-1">
 				<label class="form-control max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
-				if page.Result.Definition.Automation.PublishedVersionID != nil {
-					<p class="mt-2 text-sm text-base-content/65">Editing this Automation. Save the design here, then apply executable changes when ready.</p>
-				} else {
-					<p class="mt-2 text-sm text-base-content/65">Build the design, save your work, then apply it when it is ready to run.</p>
-				}
+				<p class="mt-2 text-sm text-base-content/65">Saving validates and applies this Automation immediately.</p>
 			</div>
 			<div class="flex flex-wrap gap-2">
 				<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form">Save changes</button>
@@ -825,9 +821,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			</section>
 			<details class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 				<summary class="cursor-pointer font-semibold">Node and connection settings</summary>
-				<form id="automation-design-form" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content" class="mt-4 space-y-4" data-automation-draft-form>			<input type="hidden" name="project_id" value={ currentProjectID }/>
-			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
-			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
+				<form id="automation-design-form" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } hx-target="#main-content" class="mt-4 space-y-4" data-automation-draft-form>
+					<input type="hidden" name="project_id" value={ currentProjectID }/>
+					<input type="hidden" name="save_changes" value="true"/>
+					<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
+					<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
 				for _, node := range page.Result.Candidate.Nodes {
 					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Delete node</button></div></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
 						if automationDraftHasConfig(node, "prompt") {
@@ -902,9 +900,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							}
 						</div>				}
 			</div></div>
-				<div class="flex flex-wrap gap-3"><button class="btn btn-primary" type="submit">Save changes</button><button class="btn btn-outline" type="submit" formaction={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) }>Review and apply</button></div>
-				</form>
-			</details>
+					<div class="flex flex-wrap gap-3"><button class="btn btn-primary" type="submit">Save changes</button></div>
+				</form>			</details>
 			<script>
 			(function() {
 				var root = document.querySelector('[data-automation-draft-canvas]');
@@ -1209,19 +1206,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					renderEdges(); syncCandidate();
 				})();
 		</script>
-		if page.Plan != nil {
-			<section class="mt-5 rounded-box border border-primary/30 bg-base-100 p-5"><h3 class="text-lg font-semibold">Review changes</h3><p class="mt-1 text-sm text-base-content/65">Review every effect before applying this design. Nothing has changed in the runtime yet.</p><div class="mt-4 space-y-2">
-				for _, effect := range page.Plan.Effects {
-					<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-base-200/60 px-3 py-2"><span class="text-sm">{ effect.Name }</span><span class="badge badge-outline">{ automationPublicationEffectBadge(effect) }</span></div>
-				}
-			</div>
-				if len(page.Plan.Validation) > 0 {
-					<div class="mt-4 rounded-box border border-base-300 bg-base-200/40 px-3 py-2 text-sm">Resolve the setup items above before applying changes.</div>
-				} else {
-					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s/publish?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s/publish?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) } class="mt-4"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="plan_revision" value={ page.Plan.PlanRevision }/><input type="hidden" name="confirmation_token" value={ page.ConfirmationToken }/><button class="btn btn-primary" type="submit">Apply changes</button></form>
-				}
-			</section>
-		}
 	</div>
 }
 
@@ -1232,7 +1216,6 @@ const (
 )
 
 func automationDraftCandidateJSON(candidate models.AutomationDraftCandidate) string { value, _ := json.Marshal(candidate); return string(value) }
-func automationPublicationEffectBadge(effect models.AutomationPublicationEffect) string { switch effect.ResourceType { case "alert_configuration": return "Configure notification handoff"; case "human_approval": return "Configure human approval"; case "github_issue_configuration": return "Configure GitHub issue handoff"; case "github_assignment": return "Configure human assignment"; case "implementation_task_template": return "Configure implementation task template"; case "pull_request_configuration": return "Configure pull request handoff"; case "pull_request_review": return "Configure human PR review" }; return effect.Operation+" "+effect.ResourceType }
 func automationDraftEdgesJSON(edges []models.AutomationDraftEdge) string {
 	if edges == nil {
 		return "[]"

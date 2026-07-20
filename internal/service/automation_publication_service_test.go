@@ -243,7 +243,7 @@ func TestCustomAutomationPublicationRunsNativeAlertApprovalOnExactUserNodes(t *t
 		effectTypes = append(effectTypes, effect.ResourceType)
 	}
 	require.ElementsMatch(t, []string{"task", "task", "task", "schedule", "alert_configuration", "human_approval"}, effectTypes,
-		"Review and apply must distinguish real resources from the configured runtime Alert handoff")
+		"Publication planning must distinguish real resources from the configured runtime Alert handoff")
 	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
 	published, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
 	require.NoError(t, err)

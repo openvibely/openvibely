@@ -7,7 +7,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -120,7 +119,36 @@ func (h *Handler) UpdateAutomationDraftWeb(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *updated})
+	if c.FormValue("save_changes") != "true" || strings.TrimSpace(c.FormValue("builder_action")) != "" || strings.TrimSpace(c.FormValue("remove_node")) != "" || strings.TrimSpace(c.FormValue("remove_edge")) != "" {
+		return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *updated})
+	}
+	if h.automationPlanner == nil || h.automationCompiler == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation publication unavailable")
+	}
+	plan, err := h.automationPlanner.Plan(c.Request().Context(), projectID, c.Param("automationId"), c.Param("versionId"))
+	if err != nil {
+		return err
+	}
+	if len(plan.Validation) > 0 {
+		updated.ValidationErrors = plan.Validation
+		return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *updated})
+	}
+	published, publishErr := h.automationCompiler.Publish(c.Request().Context(), service.AutomationPublishRequest{
+		ProjectID: projectID, AutomationID: c.Param("automationId"), VersionID: c.Param("versionId"), PlanRevision: plan.PlanRevision,
+	})
+	if publishErr != nil {
+		page := models.AutomationBuilderPage{Result: *updated, Error: publishErr.Error()}
+		if published != nil {
+			page.PublicationSteps = published.Resources
+		}
+		return h.renderAutomationBuilder(c, page)
+	}
+	url := "/automations/" + c.Param("automationId") + "?project_id=" + projectID
+	if isHTMX(c) {
+		c.Response().Header().Set("HX-Redirect", url)
+		return c.NoContent(http.StatusNoContent)
+	}
+	return c.Redirect(http.StatusSeeOther, url)
 }
 
 func applyAutomationDraftFormValues(c echo.Context, candidate *models.AutomationDraftCandidate) {
@@ -493,68 +521,6 @@ func automationDraftContainsNode(nodes []models.AutomationDraftNode, key string)
 		}
 	}
 	return false
-}
-
-func (h *Handler) PlanAutomationDraftWeb(c echo.Context) error {
-	if h.automationPlanner == nil || h.automationConfirmationSvc == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation publication planning unavailable")
-	}
-	result, err := h.loadAutomationDraftWeb(c)
-	if err != nil {
-		return err
-	}
-	projectID, _ := h.getCurrentProjectID(c)
-	plan, err := h.automationPlanner.Plan(c.Request().Context(), projectID, c.Param("automationId"), c.Param("versionId"))
-	if err != nil {
-		return err
-	}
-	page := models.AutomationBuilderPage{Result: *result, Plan: plan}
-	if len(plan.Validation) == 0 {
-		page.ConfirmationToken, err = h.automationConfirmationSvc.Issue(c.Request().Context(), service.AutomationConfirmationIssue{ProjectID: projectID, AutomationID: c.Param("automationId"), VersionID: c.Param("versionId"), PlanRevision: plan.PlanRevision, PrincipalID: h.authPrincipalID(c), ThreadID: "web:" + c.Param("automationId"), PlanMessageID: "web:" + repository.NewID()})
-		if err != nil {
-			return err
-		}
-	}
-	return h.renderAutomationBuilder(c, page)
-}
-
-func (h *Handler) PublishAutomationDraftWeb(c echo.Context) error {
-	if h.automationPlanner == nil || h.automationConfirmationSvc == nil || h.automationCompiler == nil {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation publication unavailable")
-	}
-	ctx := c.Request().Context()
-	projectID, _ := h.getCurrentProjectID(c)
-	if _, err := h.loadAutomationDraftWeb(c); err != nil {
-		return err
-	}
-	plan, err := h.automationPlanner.Plan(ctx, projectID, c.Param("automationId"), c.Param("versionId"))
-	if err != nil {
-		return err
-	}
-	if plan.PlanRevision != c.FormValue("plan_revision") {
-		return echo.NewHTTPError(http.StatusConflict, "publication plan changed; preview again")
-	}
-	if _, err := h.automationConfirmationSvc.ConfirmWeb(ctx, c.FormValue("confirmation_token"), projectID, c.Param("automationId"), c.Param("versionId"), plan.PlanRevision, h.authPrincipalID(c), plan.Effects); err != nil {
-		return echo.NewHTTPError(http.StatusForbidden, err.Error())
-	}
-	published, publishErr := h.automationCompiler.Publish(ctx, service.AutomationPublishRequest{ProjectID: projectID, AutomationID: c.Param("automationId"), VersionID: c.Param("versionId"), PlanRevision: plan.PlanRevision})
-	if publishErr != nil {
-		result, _ := h.loadAutomationDraftWeb(c)
-		if result != nil {
-			page := models.AutomationBuilderPage{Result: *result, Plan: plan, Error: publishErr.Error()}
-			if published != nil {
-				page.PublicationSteps = published.Resources
-			}
-			return h.renderAutomationBuilder(c, page)
-		}
-		return publishErr
-	}
-	url := "/automations/" + c.Param("automationId") + "?project_id=" + projectID
-	if isHTMX(c) {
-		c.Response().Header().Set("HX-Redirect", url)
-		return c.NoContent(http.StatusNoContent)
-	}
-	return c.Redirect(http.StatusSeeOther, url)
 }
 
 func (h *Handler) PauseAutomation(c echo.Context) error {
