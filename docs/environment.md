@@ -30,18 +30,40 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 | `AUTH_ENABLED` | Explicitly enable/disable built-in login middleware | Optional (explicit toggle) | `1,true,yes,on,0,false,no,off` | If unset/invalid, inferred from credentials: enabled only when both `AUTH_USERNAME` and `AUTH_PASSWORD` are set | Prefer explicit `true`/`false` in production to avoid accidental enablement from partial env changes | `true` |
 | `AUTH_USERNAME` | Login username for built-in auth | Required when auth is enabled | String | Empty by default; if set with `AUTH_PASSWORD` and `AUTH_ENABLED` unset, auth is inferred enabled | Keep non-sensitive but unique; avoid obvious defaults like `admin` in internet-exposed deployments | `openvibely_admin` |
 | `AUTH_PASSWORD` | Login password for built-in auth | Required when auth is enabled | String | Empty by default | Treat as a secret; generate a long random password and store in secret manager/env file with restricted permissions | `__REPLACE_WITH_LONG_RANDOM_PASSWORD__` |
-| `AUTH_SESSION_SECRET` | HMAC signing secret for `ov_session` cookie tokens | Required when auth is enabled | String | Empty by default | Treat as high-sensitivity secret; use at least 32 random bytes. Rotating this invalidates existing login sessions | `__REPLACE_WITH_32+_BYTE_RANDOM_SECRET__` |
+| `AUTH_SESSION_SECRET` | HMAC signing secret for `ov_session` cookie tokens | Required when auth is enabled | Local auth accepts the existing string format. Hosted SSO requires exactly 43 canonical unpadded-base64url characters decoding to 32 bytes | Empty by default | Treat as high-sensitivity secret. Hosted mode decodes the 32 bytes once and uses them directly as HMAC key material; rotation invalidates workspace sessions | Generate as documented below |
 | `AUTH_SESSION_TTL` | Session lifetime for signed auth cookies | Optional | Go duration string (`24h`, `12h`, `30m`) | `24h`; invalid/non-positive values fall back to `24h` | Keep long enough for usability but short enough for risk tolerance; avoid very short TTLs that cause frequent logouts | `24h` |
 
 Runtime enforcement from code:
-- If auth resolves enabled and `AUTH_USERNAME`/`AUTH_PASSWORD`/`AUTH_SESSION_SECRET` is missing, startup fails with `invalid auth configuration: ...`.
-- If `AUTH_ENABLED` is unset, setting both `AUTH_USERNAME` and `AUTH_PASSWORD` implicitly enables auth.
+- If local auth resolves enabled and `AUTH_USERNAME`/`AUTH_PASSWORD`/`AUTH_SESSION_SECRET` is missing, startup fails with `invalid auth configuration: ...`.
+- If `AUTH_ENABLED` is unset, setting both `AUTH_USERNAME` and `AUTH_PASSWORD` implicitly enables local auth.
+
+## Hosted Workspace SSO
+
+| Variable | Purpose | Required? | Exact contract |
+|---|---|---|---|
+| `OPENVIBELY_HOSTED_SSO_ENABLED` | Selects hosted control-plane SSO | Optional, server mode only | Unset means not requested. After trimming and case folding, only `true` or `false` is accepted. A present empty value or values such as `1`, `yes`, and `on` fail startup. `true` is rejected in desktop mode and takes precedence over local credentials in server mode. |
+| `OPENVIBELY_HOSTED_CONTROL_URL` | Hosted identity-provider origin | Required when hosted SSO is enabled | An already-canonical HTTPS origin such as `https://openvibely.ai`; no path, trailing slash, userinfo, query, fragment, or explicit default port. |
+| `OPENVIBELY_HOSTED_INSTANCE_ID` | Immutable provider registration/client ID | Required when hosted SSO is enabled | 1-128 valid UTF-8 bytes, no ASCII controls, and no leading or trailing whitespace. |
+| `APP_BASE_URL` | Canonical workspace origin and callback source | Required when hosted SSO is enabled | An already-canonical HTTPS origin such as `https://alice.openvibely.ai`. Hosted SSO derives exactly `<APP_BASE_URL>/auth/sso/callback`. The same injected value is used by model/channel OAuth, absolute URL generation, cookie security, and logout-origin checks. |
+| `AUTH_SESSION_SECRET` | Workspace session and browser-binding HMAC key | Required when hosted SSO is enabled | Exactly the canonical unpadded-base64url encoding of 32 CSPRNG bytes: 43 ASCII characters. This stronger format applies to hosted SSO in every environment and does not change local-auth compatibility. |
+
+Generate a manual development secret without printing it in application logs:
+
+```sh
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n'
+```
+
+Hosted mode creates a host-only `ov_session` in the exact `<payload_b64>.<signature_b64>` format with a fixed one-hour lifetime. The temporary host-only `ov_sso_browser` uses exact `<nonce_b64>.<signature_b64>` framing, `Path=/auth/sso`, and a ten-minute lifetime. The decoded key is used directly: session HMAC input is `"openvibely/session/v1\x00" || canonical-session-payload`, and browser-binding HMAC input is `"openvibely/sso-browser/v1\x00" || nonce_b64`, where `\x00` denotes one raw NUL byte. The signatures use separate purpose domains; no KDF, subkey derivation, or extra key hashing is applied. `AUTH_SESSION_TTL` remains local-auth-only.
+
+HTTPS is required by default. Plain HTTP is accepted only when `ENVIRONMENT` was explicitly supplied as `development` and each HTTP origin uses exactly `localhost` or a parsed loopback IP. An unset environment that merely defaults to development does not qualify; neither do `0.0.0.0`, `::`, private addresses, or `*.localhost`.
+
+Pending SSO transactions are bounded and process-local. Run exactly one OpenVibely application replica per hosted workspace. A restart safely loses an in-progress login and presents a manual restart link; shared transaction storage is required before enabling multiple replicas. Workspace logout clears only the workspace cookie and does not claim to sign out the hosted control-plane account.
 
 ## OAuth and Deployment Variables
 
 | Variable | Purpose | Required? | Allowed values | Default behavior (from code) | Security notes | Examples (local / VPS-public) |
 |---|---|---|---|---|---|---|
-| `APP_BASE_URL` | External origin used for absolute callback/redirect URLs | Required for hosted OAuth mode | Absolute `http://` or `https://` URL, no query/fragment/userinfo | Unset/invalid -> ignored; app falls back to forwarded/request host. OAuth `auto` then uses localhost mode when no valid base URL is available | Not a secret, but must be accurate for OAuth redirects and reverse-proxy setups | unset \| `https://app.example.com` |
+| `APP_BASE_URL` | External origin used for absolute callback/redirect URLs | Required for hosted OAuth and hosted workspace SSO | Outside hosted SSO: absolute `http://` or `https://` URL with no query/fragment/userinfo. Hosted SSO: exact canonical origin rules above | Outside hosted SSO, unset/invalid values preserve current forwarded/request-host fallback. Hosted SSO rejects missing, invalid, or noncanonical values at startup and never falls back to request headers | Not a secret, but must exactly match provider registration in hosted SSO | unset \| `https://app.example.com` |
 | `OAUTH_REDIRECT_MODE` | OAuth callback strategy | Optional | `auto`, `hosted`, `localhost_manual` | Unset/invalid -> `auto`; invalid values are logged and treated as `auto`; `hosted` without `APP_BASE_URL` returns `400` on OAuth initiate | `hosted` is safest for public deployments with proper callback registration; `localhost_manual` is fallback for providers that only accept localhost redirect URIs | `localhost_manual` or `auto` \| `auto` or `hosted` |
 | `ANTHROPIC_OAUTH_CLIENT_ID` | Hosted Anthropic OAuth client ID override | Optional (hosted mode strongly recommended) | String | Used only for hosted callback mode; fallback is built-in Anthropic client ID | Client ID is not secret, but should match your registered OAuth app | unset \| `your_anthropic_client_id` |
 | `ANTHROPIC_OAUTH_CLIENT_SECRET` | Hosted Anthropic OAuth client secret override | Optional | String | Used only for hosted callback mode; default empty | Secret: store in env/secret manager, never in git | unset \| `__REPLACE_WITH_ANTHROPIC_OAUTH_CLIENT_SECRET__` |

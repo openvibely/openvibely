@@ -81,6 +81,12 @@ type Handler struct {
 	agentLibraryMaintenanceSvc *service.AgentLibraryMaintenanceService
 	agentSkillRoot             string
 	authCfg                    *auth.Config
+	authMode                   auth.AuthMode
+	hostedSSOClient            *auth.HostedSSOClient
+	hostedPendingStore         *auth.PendingStore
+	hostedSSOKey               []byte
+	hostedSSOInstanceID        string
+	appBaseURL                 string
 	desktopMode                bool
 
 	loginFailuresMu   sync.Mutex
@@ -511,6 +517,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/login", h.AuthLogin)
 	e.POST("/logout", h.AuthLogout)
 	e.GET("/auth/me", h.AuthMe)
+	e.GET("/auth/sso/start", h.HostedSSOStart)
+	e.GET("/auth/sso/callback", h.HostedSSOCallback)
+	e.GET("/logged-out", h.LoggedOut)
 
 	// Dashboard
 	e.GET("/", h.Home)

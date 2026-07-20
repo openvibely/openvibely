@@ -91,8 +91,8 @@ var (
 	openOAuthURL = browser.OpenURL
 )
 
-func modelsReturnURL(c echo.Context, projectID string) string {
-	return modelsReturnURLFromRequest(c.Request(), projectID, buildAbsoluteURL(c, "/models"))
+func (h *Handler) modelsReturnURL(c echo.Context, projectID string) string {
+	return modelsReturnURLFromRequest(c.Request(), projectID, h.buildAbsoluteURL(c, "/models"))
 }
 
 func modelsReturnURLFromRequest(r *http.Request, projectID string, fallback string) string {
@@ -132,7 +132,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	}
 
 	redirectMode := resolveOAuthRedirectMode()
-	publicBaseURL := resolveConfiguredAppBaseURL()
+	publicBaseURL := h.configuredAppBaseURL()
 	if redirectMode == oauthRedirectModeHosted && publicBaseURL == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "OAUTH_REDIRECT_MODE=hosted requires APP_BASE_URL")
 	}
@@ -194,7 +194,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	// Cancel any previous callback server for this config before starting a new one.
 	shutdownPreviousOAuthServer(id)
 
-	modelsURL := modelsReturnURL(c, c.QueryParam("project_id"))
+	modelsURL := h.modelsReturnURL(c, c.QueryParam("project_id"))
 	// Redirect paths must match what the OAuth providers accept for their
 	// registered client IDs:
 	//   Anthropic: /callback   (matches http://localhost:<port>/callback pattern)
@@ -364,7 +364,7 @@ func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.C
 // OAuthCallback handles OAuth provider callbacks for both hosted and localhost flows.
 // GET /models/oauth/callback
 func (h *Handler) OAuthCallback(c echo.Context) error {
-	h.handleOAuthCallbackResponse(c.Response().Writer, c.Request(), buildAbsoluteURL(c, "/models"), nil)
+	h.handleOAuthCallbackResponse(c.Response().Writer, c.Request(), h.buildAbsoluteURL(c, "/models"), nil)
 	return nil
 }
 

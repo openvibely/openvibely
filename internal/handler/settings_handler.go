@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -665,7 +666,7 @@ func (h *Handler) handleSlackConnect(c echo.Context) error {
 	if h.slackSvc == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Slack integration is not configured")
 	}
-	redirectURI := buildAbsoluteURL(c, "/channels/slack/callback")
+	redirectURI := h.buildAbsoluteURL(c, "/channels/slack/callback")
 	connectURL, err := h.slackSvc.ConnectURL(c.Request().Context(), redirectURI)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -677,7 +678,7 @@ func (h *Handler) handleSlackCallback(c echo.Context) error {
 	if h.slackSvc == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Slack integration is not configured")
 	}
-	redirectURI := buildAbsoluteURL(c, "/channels/slack/callback")
+	redirectURI := h.buildAbsoluteURL(c, "/channels/slack/callback")
 	code := c.QueryParam("code")
 	state := c.QueryParam("state")
 	if err := h.slackSvc.HandleOAuthCallback(c.Request().Context(), code, state, redirectURI); err != nil {
@@ -921,8 +922,8 @@ func boolFormValue(value string, fallback bool) string {
 	return "false"
 }
 
-func buildAbsoluteURL(c echo.Context, path string) string {
-	if base := resolveConfiguredAppBaseURL(); base != "" {
+func (h *Handler) buildAbsoluteURL(c echo.Context, path string) string {
+	if base := h.configuredAppBaseURL(); base != "" {
 		return strings.TrimRight(base, "/") + path
 	}
 
@@ -943,8 +944,21 @@ func buildAbsoluteURL(c echo.Context, path string) string {
 	return base
 }
 
-func resolveConfiguredAppBaseURL() string {
+func (h *Handler) configuredAppBaseURL() string {
+	if h.appBaseURL != "" {
+		return h.appBaseURL
+	}
+	if h.authMode == auth.AuthModeHostedSSO {
+		return ""
+	}
 	return config.ResolveAppBaseURL(os.Getenv("APP_BASE_URL"))
+}
+
+// buildAbsoluteURL preserves the package-level helper used by older focused
+// tests and non-server construction. Production handlers use the injected method.
+func buildAbsoluteURL(c echo.Context, path string) string {
+	h := &Handler{}
+	return h.buildAbsoluteURL(c, path)
 }
 
 func templateEscape(s string) string {

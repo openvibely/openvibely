@@ -324,6 +324,29 @@ func copyDir(from, to string) error {
 	})
 }
 
+func requestLoggerConfig(output io.Writer) middleware.LoggerConfig {
+	cfg := middleware.LoggerConfig{
+		Format: "${time_rfc3339} method=${method} path=${path} status=${status} latency=${latency_human} request_id=${id}\n",
+	}
+	if output != nil {
+		cfg.Output = output
+	}
+	return cfg
+}
+
+func configureMethodOverride(e *echo.Echo) {
+	authProtocolPaths := map[string]struct{}{
+		"/login": {}, "/logout": {}, "/auth/me": {}, "/auth/sso/start": {},
+		"/auth/sso/callback": {}, "/logged-out": {},
+	}
+	e.Pre(middleware.MethodOverrideWithConfig(middleware.MethodOverrideConfig{
+		Skipper: func(c echo.Context) bool {
+			_, skip := authProtocolPaths[c.Request().URL.Path]
+			return skip
+		},
+	}))
+}
+
 // Start wires the full OpenVibely backend and starts serving HTTP on cfg.Port.
 // It blocks until the HTTP listener is bound and background services are started,
 // then returns an Instance with the bound address and a shutdown handle.
@@ -335,12 +358,17 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		return nil, fmt.Errorf("config is nil")
 	}
 	cfg.NormalizeForMode()
-	if err := config.ValidateAppBaseURL(os.Getenv("APP_BASE_URL")); err != nil {
-		applog.Infof("warning: %v", err)
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+	if cfg.AuthMode != auth.AuthModeHostedSSO {
+		if err := config.ValidateAppBaseURL(os.Getenv("APP_BASE_URL")); err != nil {
+			applog.Infof("warning: %v", err)
+		}
 	}
 
 	authCfg := auth.Config{
-		Enabled:       cfg.AuthEnabled,
+		Enabled:       cfg.AuthMode == auth.AuthModeLocal,
 		Username:      cfg.AuthUsername,
 		Password:      cfg.AuthPassword,
 		SessionSecret: cfg.AuthSessionSecret,
@@ -348,6 +376,14 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 	if err := authCfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid auth configuration: %w", err)
+	}
+	var hostedSSOClient *auth.HostedSSOClient
+	if cfg.AuthMode == auth.AuthModeHostedSSO {
+		hostedSSOClient = auth.NewHostedSSOClient(
+			cfg.HostedSSOControlURL,
+			cfg.HostedSSOInstanceID,
+			cfg.AppBaseURL+"/auth/sso/callback",
+		)
 	}
 
 	if err := migrateLegacyStorage(cfg); err != nil {
@@ -812,6 +848,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	// Start background services
 	srvCtx, srvCancel := context.WithCancel(ctx)
+	var hostedPendingStore *auth.PendingStore
+	if cfg.AuthMode == auth.AuthModeHostedSSO {
+		hostedPendingStore = auth.NewPendingStore(srvCtx, time.Now)
+	}
 
 	workerSvc.Start(srvCtx)
 	schedulerSvc.Start(srvCtx)
@@ -819,11 +859,12 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	// HTTP Server
 	e := echo.New()
 	e.HideBanner = true
-	e.Use(middleware.Logger())
+	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(nil)))
 	e.Use(middleware.Recover())
 
-	// Handle PUT/PATCH/DELETE via form _method field
-	e.Pre(middleware.MethodOverride())
+	// Handle PUT/PATCH/DELETE via form _method field, except on exact
+	// authentication protocol routes where the original method is security-sensitive.
+	configureMethodOverride(e)
 
 	// Prevent browser from serving cached HTMX partials when a full page is needed
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -909,7 +950,12 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 	h.SetLocalRepoPathEnabled(cfg.EnableLocalRepoPath)
 	h.SetDesktopMode(cfg.Mode == config.ModeDesktop)
+	h.SetAppBaseURL(cfg.AppBaseURL)
+	h.SetAuthMode(cfg.AuthMode)
 	h.SetAuthConfig(authCfg)
+	if cfg.AuthMode == auth.AuthModeHostedSSO {
+		h.SetHostedSSO(hostedSSOClient, hostedPendingStore, cfg.HostedSSOKey, cfg.HostedSSOInstanceID, cfg.AppBaseURL)
+	}
 	e.Use(h.AuthMiddleware())
 	llmSvc.SetAgentRepo(agentRepo)
 	llmSvc.SetFileChangeBroadcaster(fileChangeBroadcaster)
@@ -953,6 +999,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		close(shutdownOnce)
 		applog.Infof("shutting down...")
 		srvCancel()
+		if hostedPendingStore != nil {
+			hostedPendingStore.Close()
+		}
 		workerSvc.Stop()
 		schedulerSvc.Stop()
 		if telegramSvc != nil {

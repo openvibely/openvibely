@@ -308,6 +308,18 @@ func TestSidebar_UserAreaAndThemeToggleCoexist(t *testing.T) {
 	if !strings.Contains(html, `action="/logout"`) {
 		t.Fatal("sidebar user menus must preserve logout form action")
 	}
+	for _, snippet := range []string{
+		"name.textContent = data.display || data.username",
+		"logoutLabel.textContent = 'Log out of this workspace'",
+		"data.auth_source === 'hosted_sso'",
+	} {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("sidebar hosted identity/logout behavior missing: %s", snippet)
+		}
+	}
+	if strings.Contains(html, "name.innerHTML =") || strings.Contains(html, "logoutLabel.innerHTML =") {
+		t.Fatal("identity and logout labels must use text-only DOM assignment")
+	}
 }
 
 func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
@@ -323,7 +335,7 @@ func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 		`sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2`,
 		`id="sidebar-user-menu-trigger"`,
 		`class="sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case"`,
-		`class="text-sm" role="menuitem">Logout</button>`,
+		`id="sidebar-logout-label" type="submit" class="text-sm" role="menuitem">Logout</button>`,
 		`aria-label="Open user menu"`,
 		`.sidebar-theme-toggle-container {`,
 		`min-height: 3.25rem;`,

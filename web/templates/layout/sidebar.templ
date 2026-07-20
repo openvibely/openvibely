@@ -648,7 +648,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					<ul id="sidebar-user-menu" tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-44 z-[120] border border-base-300" role="menu" aria-label="User menu">
 						<li role="none">
 							<form method="POST" action="/logout" class="w-full" role="none">
-								<button type="submit" class="text-sm" role="menuitem">Logout</button>
+									<button id="sidebar-logout-label" type="submit" class="text-sm" role="menuitem">Logout</button>
 							</form>
 						</li>
 					</ul>
@@ -783,12 +783,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							var name = document.getElementById('sidebar-auth-name');
 							var avatar = document.getElementById('sidebar-auth-avatar');
 							var avatarCollapsed = document.getElementById('sidebar-auth-avatar-collapsed');
+							var logoutLabel = document.getElementById('sidebar-logout-label');
 							if (user) user.classList.remove('hidden');
 							if (userCollapsed) userCollapsed.classList.remove('hidden');
 							if (name) name.textContent = data.display || data.username;
 							var initial = ((data.display || data.username || 'U').trim().charAt(0) || 'U').toUpperCase();
 							if (avatar) avatar.textContent = initial;
 							if (avatarCollapsed) avatarCollapsed.textContent = initial;
+							if (logoutLabel && data.auth_source === 'hosted_sso') logoutLabel.textContent = 'Log out of this workspace';
 						})
 						.catch(function() {});
 				})();

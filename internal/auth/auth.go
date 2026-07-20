@@ -18,6 +18,14 @@ const (
 	DefaultSessionTTL = 24 * time.Hour
 )
 
+type AuthMode string
+
+const (
+	AuthModeDisabled  AuthMode = "disabled"
+	AuthModeLocal     AuthMode = "local"
+	AuthModeHostedSSO AuthMode = "hosted_sso"
+)
+
 var (
 	ErrInvalidToken = errors.New("invalid session token")
 	ErrExpiredToken = errors.New("expired session token")
