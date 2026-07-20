@@ -97,6 +97,43 @@ func TestAutomationDescriptionGenerationSupportsExpandedCustomBuilderContract(t 
 	require.Equal(t, expected.Edges, preview.Candidate.Edges)
 }
 
+func TestAutomationDescriptionGenerationNormalizesOutOfRangeTaskPriority(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := svc.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Urgent review"
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review the request.", "category": "backlog", "priority": 5}},
+		{Key: "reminder", Name: "Reminder", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the reminder.", "category": "scheduled", "priority": 0, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+	}
+	candidateJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	calls := 0
+
+	preview, err := svc.PreviewDescription(context.Background(), "Urgently review the request", models.AutomationCapabilitySnapshot{}, func(_ context.Context, prompt string) (string, error) {
+		calls++
+		require.Contains(t, prompt, "priority must be an integer from 1 to 4")
+		return string(candidateJSON), nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, calls, "a safely normalizable generated value must not consume the repair attempt")
+	priority, ok := draftInt(preview.Candidate.Nodes[0].Config["priority"])
+	require.True(t, ok)
+	require.Equal(t, 4, priority)
+	schedulePriority, ok := draftInt(preview.Candidate.Nodes[1].Config["priority"])
+	require.True(t, ok)
+	require.Equal(t, 1, schedulePriority)
+
+	manualCandidate, err := DecodeAutomationDraftCandidate(candidateJSON)
+	require.NoError(t, err)
+	manualCandidate, err = svc.NormalizeCandidate(manualCandidate)
+	require.NoError(t, err)
+	issues := svc.ValidateCandidate(manualCandidate)
+	require.Contains(t, issues, models.AutomationValidationIssue{NodeKey: "review", Code: "priority", Message: "Task priority must be between 1 and 4."}, "normal Save validation must remain strict")
+	require.Contains(t, issues, models.AutomationValidationIssue{NodeKey: "reminder", Code: "priority", Message: "Schedule task priority must be between 1 and 4."}, "normal Save validation must remain strict")
+}
+
 func TestAutomationDescriptionGenerationRepairsUnsupportedSchemaVersion(t *testing.T) {
 	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)

@@ -24,6 +24,7 @@ Choose the registered adapter that represents the user's request:
 - Use adapter_key custom and automation_type custom for a user-defined graph assembled from the surfaced capabilities below. Node keys and names are user-owned.
 
 Supported custom nodes and configuration:
+- Every Schedule or Agent task priority must be an integer from 1 to 4: 1 low, 2 normal, 3 high, 4 urgent.
 - Schedule: type trigger, role fixed_schedule; this is the scheduled task, with config prompt, category scheduled, priority, optional agent_ref, target_node_key when connected, run_at in HH:MM, repeat_type, repeat_interval, enabled. It may run by itself and may connect to supported task, action, or Outcome capabilities.
 - Agent task: type agent_task, role task; this is an ordinary task, with config prompt, category, priority, and optional agent_ref selected only from the project capability snapshot. Never add skills or source_files to task config. It may be a standalone ordinary task or connect to supported task, action, or Outcome capabilities. Scheduling belongs only to the Schedule node.
 - Create notification: type action, role create_notification; config notification_type and instructions.
@@ -88,6 +89,9 @@ func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context
 	candidate, parseErr := DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(output)))
 	if parseErr == nil {
 		candidate, parseErr = s.NormalizeCandidate(candidate)
+		if parseErr == nil {
+			normalizeGeneratedTaskPriorities(&candidate)
+		}
 	}
 	var issues []models.AutomationValidationIssue
 	if parseErr == nil {
@@ -115,11 +119,31 @@ func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	normalizeGeneratedTaskPriorities(&candidate)
 	issues = s.ValidateCandidateWithCapabilities(candidate, snapshot)
 	if len(issues) > 0 {
 		return nil, fmt.Errorf("automation generation repair failed: %s", issues[0].Message)
 	}
 	return draftPreviewResult(candidate, nil), nil
+}
+
+func normalizeGeneratedTaskPriorities(candidate *models.AutomationDraftCandidate) {
+	for i := range candidate.Nodes {
+		node := &candidate.Nodes[i]
+		if node.Type != models.AutomationNodeTrigger && node.Type != models.AutomationNodeAgentTask {
+			continue
+		}
+		priority, ok := draftInt(node.Config["priority"])
+		if !ok {
+			continue
+		}
+		switch {
+		case priority < 1:
+			node.Config["priority"] = 1
+		case priority > 4:
+			node.Config["priority"] = 4
+		}
+	}
 }
 
 func boundedAutomationGenerationOutput(output string) string {
