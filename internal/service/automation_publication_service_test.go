@@ -75,7 +75,7 @@ func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *test
 	require.NoError(t, err)
 	candidate.Name = "My support review"
 	candidate.Nodes = []models.AutomationDraftNode{
-		{Key: "weekday_schedule", Name: "Weekday schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "08:30", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
+		{Key: "weekday_schedule", Name: "Weekday schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Collect the weekday support summary.", "category": "scheduled", "priority": 1, "run_at": "08:30", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
 		{Key: "review_support", Name: "Review support queue", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review unresolved support requests and propose the next action.", "category": "backlog", "priority": 3}, Position: &models.AutomationDraftPoint{X: 260, Y: 0}},
 		{Key: "reviewed", Name: "Reviewed", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
 	}
@@ -113,13 +113,21 @@ func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *test
 	require.NoError(t, err)
 	require.NotNil(t, scheduleTask)
 	require.Contains(t, scheduleTask.Title, "My support review: Weekday schedule")
+	require.Equal(t, "Collect the weekday support summary.", scheduleTask.Prompt)
 	require.Equal(t, models.CategoryScheduled, scheduleTask.Category)
+	require.Equal(t, 1, scheduleTask.Priority)
+	scheduleChain, err := scheduleTask.ParseChainConfig()
+	require.NoError(t, err)
+	require.True(t, scheduleChain.Enabled, "the Schedule task must use the existing task-chain handoff")
+	require.Equal(t, models.CategoryActive, models.TaskCategory(scheduleChain.ChildCategory), "completion activates the ordinary Agent Task without making it scheduled")
 
 	task, err := taskRepo.GetByID(context.Background(), resources["review_support:task"])
 	require.NoError(t, err)
 	require.Contains(t, task.Title, "My support review: Review support queue")
 	require.Equal(t, "Review unresolved support requests and propose the next action.", task.Prompt)
 	require.Equal(t, models.CategoryBacklog, task.Category, "an Agent Task node is an ordinary task, not the Schedule node's scheduled task")
+	require.Equal(t, models.StatusBlocked, task.Status, "the ordinary Agent Task waits for the Schedule task to complete")
+	require.Equal(t, task.ID, scheduleChain.ChildTaskID)
 	require.Equal(t, 3, task.Priority)
 	schedule, err := scheduleRepo.GetByID(context.Background(), resources["weekday_schedule:schedule"])
 	require.NoError(t, err)
@@ -159,13 +167,17 @@ func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *test
 	_, dispatch, err := automationRepo.ClaimScheduledOccurrence(context.Background(), *schedule, time.Now().UTC(), &nextRun)
 	require.NoError(t, err)
 	require.NotNil(t, dispatch)
-	require.Equal(t, task.ID, dispatch.TaskID, "the existing Automation dispatcher must follow the immutable Schedule-to-Agent edge")
-	dispatchedTask, err := taskRepo.GetByID(context.Background(), task.ID)
+	require.Equal(t, scheduleTask.ID, dispatch.TaskID, "a due Schedule must execute its own scheduled task and prompt")
+	dispatchedScheduleTask, err := taskRepo.GetByID(context.Background(), scheduleTask.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.CategoryActive, dispatchedTask.Category, "a due Schedule activates the ordinary Agent task without turning it into the scheduled task")
-	unchangedScheduleTask, err := taskRepo.GetByID(context.Background(), scheduleTask.ID)
+	require.Equal(t, models.CategoryScheduled, dispatchedScheduleTask.Category)
+	require.Equal(t, "Collect the weekday support summary.", dispatchedScheduleTask.Prompt)
+	unchangedAgentTask, err := taskRepo.GetByID(context.Background(), task.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.CategoryScheduled, unchangedScheduleTask.Category)
+	require.Equal(t, models.CategoryBacklog, unchangedAgentTask.Category, "the connected Agent Task remains an ordinary task while it waits for the Schedule task")
+	require.Equal(t, models.StatusBlocked, unchangedAgentTask.Status)
+	require.NotNil(t, unchangedAgentTask.ParentTaskID)
+	require.Equal(t, scheduleTask.ID, *unchangedAgentTask.ParentTaskID, "the immutable Schedule-to-Agent edge must compile as the existing task handoff")
 
 	execRepo := repository.NewExecutionRepo(db)
 	invocationID := repository.NewID()
@@ -203,7 +215,7 @@ func TestCustomAutomationPublicationRunsNativeAlertApprovalOnExactUserNodes(t *t
 	require.NoError(t, err)
 	candidate.Name = "Change approval"
 	candidate.Nodes = []models.AutomationDraftNode{
-		{Key: "morning", Name: "Morning", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "08:30", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "morning", Name: "Morning", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "08:30", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
 		{Key: "research", Name: "Research changes", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Research likely changes.", "category": "backlog", "priority": 2}},
 		{Key: "inspect", Name: "Inspect changes", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Inspect likely changes.", "category": "active", "priority": 2}},
 		{Key: "ask_human", Name: "Ask a human", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "change_proposal", "instructions": "Summarize one proposed change and why it is useful."}},
@@ -357,11 +369,11 @@ func TestCustomAutomationPublicationConfiguresGitHubRuntimeWithoutCrossingHumanG
 	require.NoError(t, err)
 	candidate.Name = "Custom GitHub lifecycle"
 	candidate.Nodes = []models.AutomationDraftNode{
-		{Key: "daily", Name: "Daily", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "daily", Name: "Daily", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
 		{Key: "finder", Name: "Find suggestion", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Find one focused suggestion.", "category": "backlog", "priority": 2}},
 		{Key: "file_issue", Name: "File issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Create one concise suggestion issue.", "labels": []any{"suggestion"}}},
 		{Key: "assigned", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
-		{Key: "hourly", Name: "Hourly inbox", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:15", "repeat_type": "hours", "repeat_interval": 1, "enabled": true}},
+		{Key: "hourly", Name: "Hourly inbox", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:15", "repeat_type": "hours", "repeat_interval": 1, "enabled": true}},
 		{Key: "poll", Name: "Poll assigned issues", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process only actionable assigned issues.", "category": "backlog", "priority": 3}},
 		{Key: "build", Name: "Implement issue", Type: models.AutomationNodeAgentTask, Role: "implementation", Config: map[string]any{"prompt": "Implement the accepted issue and run relevant tests.", "category": "active", "priority": 3}},
 		{Key: "publish_pr", Name: "Open PR", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a PR linked to the source issue.", "base": "main", "draft": true}},
@@ -546,7 +558,7 @@ func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskCha
 	require.NoError(t, err)
 	candidate.Name = "Research then implement"
 	candidate.Nodes = []models.AutomationDraftNode{
-		{Key: "schedule", Name: "Daily", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "08:30", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "schedule", Name: "Daily", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "08:30", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
 		{Key: "research", Name: "Research", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Research the requested change.", "category": "backlog", "priority": 2}},
 		{Key: "implement", Name: "Implement", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the researched change.", "category": "active", "priority": 3}},
 		{Key: "done", Name: "Done", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
@@ -578,7 +590,16 @@ func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskCha
 	require.NoError(t, err)
 	require.NotNil(t, research)
 	require.NotNil(t, implement)
-	require.Equal(t, models.StatusPending, research.Status)
+	scheduleTask, err := taskRepo.GetByID(ctx, resources["schedule:task"])
+	require.NoError(t, err)
+	require.NotNil(t, scheduleTask)
+	require.Equal(t, models.StatusBlocked, research.Status)
+	require.NotNil(t, research.ParentTaskID)
+	require.Equal(t, scheduleTask.ID, *research.ParentTaskID)
+	scheduleChain, err := scheduleTask.ParseChainConfig()
+	require.NoError(t, err)
+	require.Equal(t, research.ID, scheduleChain.ChildTaskID)
+	require.Equal(t, string(models.CategoryActive), scheduleChain.ChildCategory)
 	require.Equal(t, models.StatusBlocked, implement.Status)
 	require.NotNil(t, implement.ParentTaskID)
 	require.Equal(t, research.ID, *implement.ParentTaskID)
@@ -590,6 +611,38 @@ func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskCha
 	require.Equal(t, "implement", chain.ChildAutomationNodeKey)
 	require.Equal(t, string(models.CategoryActive), chain.ChildCategory)
 	require.Equal(t, "Implement the researched change.", chain.ChildPromptPrefix)
+
+	var scheduleNodeID string
+	for _, node := range published.Definition.Nodes {
+		if node.NodeKey == "schedule" {
+			scheduleNodeID = node.ID
+			break
+		}
+	}
+	require.NotEmpty(t, scheduleNodeID)
+	supported, scheduledChild, scheduledChildTaskID, err := automationRepo.GetCustomTaskHandoff(ctx, project.ID, published.Definition.Automation.ID, published.Definition.Version.ID, scheduleNodeID)
+	require.NoError(t, err)
+	require.True(t, supported)
+	require.NotNil(t, scheduledChild)
+	require.Equal(t, "research", scheduledChild.NodeKey)
+	require.Equal(t, research.ID, scheduledChildTaskID, "runtime must resolve the Schedule completion handoff from immutable graph provenance")
+
+	scheduleExecutionRepo := repository.NewExecutionRepo(db)
+	scheduleExecution := models.Execution{TaskID: scheduleTask.ID, Status: models.ExecCompleted, PromptSent: scheduleTask.Prompt}
+	require.NoError(t, scheduleExecutionRepo.Create(ctx, &scheduleExecution))
+	scheduleBinding := models.AutomationBinding{AutomationID: published.Definition.Automation.ID, VersionID: published.Definition.Version.ID, NodeID: scheduleNodeID}
+	scheduleContext := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{scheduleBinding}})
+	scheduleContext = withAutomationExecution(scheduleContext, scheduleTask.ID, scheduleExecution.ID)
+	scheduleWorker := NewWorkerService(nil, 0, nil)
+	scheduleTaskService := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), scheduleWorker)
+	scheduleLLMService := NewLLMService(repository.NewLLMConfigRepo(db), scheduleExecutionRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, repository.NewAttachmentRepo(db))
+	scheduleLLMService.SetTaskService(scheduleTaskService)
+	scheduleLLMService.SetAutomationRepo(automationRepo)
+	require.NoError(t, scheduleLLMService.triggerTaskChain(scheduleContext, *scheduleTask, "Scheduled work completed"))
+	research, err = taskRepo.GetByID(ctx, research.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, research.Category, "Schedule completion must activate the linked ordinary Agent Task")
+	require.Equal(t, models.StatusPending, research.Status)
 
 	chain.ChildTaskID = repository.NewID()
 	chain.ChildAutomationNodeKey = "newer_version_target"
@@ -636,9 +689,15 @@ func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskCha
 	require.Equal(t, "Implement the researched change.\n\nResearch findings", activated.Prompt)
 	childContext, err := automationRepo.ContextForTask(ctx, project.ID, activated.ID)
 	require.NoError(t, err)
-	require.Len(t, childContext.Bindings, 1)
-	require.Equal(t, implementNodeID, childContext.Bindings[0].NodeID)
-	require.NotEmpty(t, childContext.Bindings[0].WorkItemID)
+	var childBinding models.AutomationBinding
+	for _, candidateBinding := range childContext.Bindings {
+		if candidateBinding.NodeID == implementNodeID {
+			childBinding = candidateBinding
+			break
+		}
+	}
+	require.Equal(t, implementNodeID, childBinding.NodeID)
+	require.NotEmpty(t, childBinding.WorkItemID)
 	var handoffs int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ? AND from_node_id = ? AND to_node_id = ?`,
 		published.Definition.Automation.ID, researchNodeID, implementNodeID).Scan(&handoffs))
@@ -661,7 +720,6 @@ func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskCha
 
 	childExecution := models.Execution{TaskID: activated.ID, Status: models.ExecRunning, PromptSent: activated.Prompt}
 	require.NoError(t, execRepo.Create(ctx, &childExecution))
-	childBinding := childContext.Bindings[0]
 	_, _, err = automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
 		Context: childContext, Binding: childBinding,
 		ActivityKey: "execution:" + childExecution.ID + ":run", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
@@ -817,7 +875,7 @@ func TestAutomationPublicationPlanGoldenRevisionExcludesLayoutAndMessages(t *tes
 	planner := NewAutomationPublicationPlanner(automationRepo, repository.NewTaskRepo(db, nil), repository.NewScheduleRepo(db), registry, drafts)
 	first, err := planner.Plan(context.Background(), project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "c019c30abea2189b18ed76e950ac61cfb0c9d91640ed51079a212c80a7caccd6", first.PlanRevision)
+	require.Equal(t, "7f9432ac4ec164bc6e8744013fea6d805abd4fa77bef8ce773bd7e5a9551a760", first.PlanRevision)
 
 	candidate.Assumptions = []string{"Layout-only author note"}
 	candidate.Warnings = []string{"Operational observation"}
@@ -856,7 +914,7 @@ func TestAutomationPublicationPlanGoldenGitHubDependenciesAndConfigurationChange
 	planner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	first, err := planner.Plan(ctx, project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "62cb4df5a4dbddd7723bdd94a78f231fcb9d2ff3e5aba6b7cb789dea544c026a", first.PlanRevision)
+	require.Equal(t, "e29c4eae794a17c4ea419147fde3319f53e568e7607d1be1fd27091013e2ba84", first.PlanRevision)
 
 	inbox.Enabled = false
 	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))

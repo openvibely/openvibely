@@ -496,7 +496,7 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	require.NotContains(t, created.Body.String(), "Save draft")
 	require.NotContains(t, created.Body.String(), "Suggested nodes", "blank drafts must not show a template-derived node list")
 	require.Contains(t, created.Body.String(), `data-automation-create-node`, "blank drafts must create named nodes directly")
-	require.Contains(t, created.Body.String(), "Add a Schedule and an Agent task")
+	require.Contains(t, created.Body.String(), "Add a Schedule")
 	require.NotContains(t, created.Body.String(), "required nodes remain")
 	require.NotContains(t, created.Body.String(), "required connections remain")
 	require.NotContains(t, created.Body.String(), "Add transitions")
@@ -517,11 +517,16 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	}).Execute()
 	require.Equal(t, 200, added.Code)
 	require.Contains(t, added.Body.String(), `data-node-key="schedule"`)
+	require.Contains(t, added.Body.String(), `name="node_schedule_prompt"`, "a Schedule node is a scheduled task and must expose its task prompt")
+	require.Contains(t, added.Body.String(), `name="node_schedule_priority"`)
+	require.Contains(t, added.Body.String(), `Scheduled task`, "the Schedule task category must be fixed and explicit")
+	require.NotContains(t, added.Body.String(), `name="node_schedule_category"`, "a Schedule node must not offer a category that can stop it being scheduled")
 	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
 	require.NoError(t, err)
 	candidate, err = metadata.Candidate()
 	require.NoError(t, err)
 	require.Len(t, candidate.Nodes, 1)
+	require.Equal(t, "Describe the scheduled work this node should perform.", candidate.Nodes[0].Config["prompt"])
 
 	candidateJSON, err = json.Marshal(candidate)
 	require.NoError(t, err)
@@ -535,6 +540,9 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	require.NoError(t, err)
 	require.Contains(t, added.Body.String(), `data-connect-port="schedule"`)
 	require.Contains(t, added.Body.String(), `data-connect-port="task"`)
+	require.NotContains(t, added.Body.String(), `<option value="scheduled"`, "an Agent Task is an ordinary task and must never offer the scheduled category")
+	require.NotContains(t, added.Body.String(), `>Skills</span>`, "ordinary tasks do not have per-task Skill selection")
+	require.NotContains(t, added.Body.String(), `>Source files</span>`, "ordinary tasks do not have per-task Source file selection")
 	require.Equal(t, 4, strings.Count(added.Body.String(), `class="automation-connect-handle" data-connect-port=`), "each node must connect from either side")
 	require.Contains(t, added.Body.String(), `data-delete-node`, "nodes must be deletable on the canvas")
 	candidateJSON, err = json.Marshal(candidate)
@@ -702,7 +710,7 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	require.Equal(t, "pull_request_review", candidate.Nodes[len(candidate.Nodes)-1].Role)
 }
 
-func TestAutomationBlankAppliedScheduleUsesScheduleNodeNameOnSchedulePage(t *testing.T) {
+func TestAutomationBlankAppliedStandaloneScheduleUsesScheduleNodeNameOnSchedulePage(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Automation Schedule Projection").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
@@ -739,8 +747,6 @@ func TestAutomationBlankAppliedScheduleUsesScheduleNodeNameOnSchedulePage(t *tes
 		require.NoError(t, err)
 	}
 	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Weekday review"}})
-	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"agent_task"}, "node_name": {"Review support queue"}})
-	post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {candidate.Nodes[0].Key}, "to_key": {candidate.Nodes[1].Key}})
 
 	planPage := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, 200, planPage.Code, planPage.Body.String())
@@ -753,31 +759,23 @@ func TestAutomationBlankAppliedScheduleUsesScheduleNodeNameOnSchedulePage(t *tes
 	}).Execute()
 	require.Equal(t, 204, published.Code, published.Body.String())
 
-	var scheduleTaskID, agentTaskID string
+	var scheduleTaskID string
 	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources r
 		JOIN automation_nodes n ON n.id = r.node_id AND n.version_id = r.version_id
 		WHERE r.automation_id = ? AND r.version_id = ? AND n.node_key = ? AND r.resource_type = 'task'`,
 		automationID, versionID, candidate.Nodes[0].Key).Scan(&scheduleTaskID))
-	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources r
-		JOIN automation_nodes n ON n.id = r.node_id AND n.version_id = r.version_id
-		WHERE r.automation_id = ? AND r.version_id = ? AND n.node_key = ? AND r.resource_type = 'task'`,
-		automationID, versionID, candidate.Nodes[1].Key).Scan(&agentTaskID))
-	require.NotEqual(t, scheduleTaskID, agentTaskID, "Schedule and Agent Task nodes must compile to distinct tasks")
 	var linkedTaskID string
 	require.NoError(t, tc.db.QueryRow(`SELECT task_id FROM schedules WHERE id IN
 		(SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?)`, automationID).Scan(&linkedTaskID))
-	require.Equal(t, scheduleTaskID, linkedTaskID, "the Schedules page entry must be backed by the Schedule node's task")
+	require.Equal(t, scheduleTaskID, linkedTaskID, "the standalone Schedules page entry must be backed by the Schedule node's task")
 	scheduleTask, err := tc.taskRepo.GetByID(context.Background(), scheduleTaskID)
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryScheduled, scheduleTask.Category)
-	agentTask, err := tc.taskRepo.GetByID(context.Background(), agentTaskID)
-	require.NoError(t, err)
-	require.Equal(t, models.CategoryBacklog, agentTask.Category, "the connected Agent Task must remain an ordinary task")
+	require.Equal(t, "Describe the scheduled work this node should perform.", scheduleTask.Prompt)
 
 	schedulePage := tc.HTTP().Get("/schedule?project_id=" + project.ID).Execute()
 	require.Equal(t, 200, schedulePage.Code, schedulePage.Body.String())
-	require.Contains(t, schedulePage.Body.String(), `title="Weekday review"`, "the Schedules page must identify the Automation schedule node, not masquerade it as its target agent task")
-	require.NotRegexp(t, `title="[^"]*Review support queue`, schedulePage.Body.String(), "the target agent task must not replace the Automation schedule identity on the calendar")
+	require.Contains(t, schedulePage.Body.String(), `title="Weekday review"`, "the standalone Schedule node must create a visible Schedules page entry")
 }
 
 func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(t *testing.T) {
@@ -994,7 +992,7 @@ func automationChatCustomApprovalCandidate(t *testing.T, drafts *service.Automat
 	require.NoError(t, err)
 	candidate.Name = "Custom approval review"
 	candidate.Nodes = []models.AutomationDraftNode{
-		{Key: "morning", Name: "Morning", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "morning", Name: "Morning", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
 		{Key: "review", Name: "Review changes", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review one focused change.", "category": "backlog", "priority": 2}},
 		{Key: "notify", Name: "Request approval", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "change_proposal", "instructions": "Summarize the proposed change."}},
 		{Key: "approval", Name: "Human approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{"approval_method": "native_alert"}},

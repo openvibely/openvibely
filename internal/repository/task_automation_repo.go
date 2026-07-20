@@ -58,11 +58,16 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 	}
 	var publishedHandoff int
 	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_edges edge
-		JOIN automation_nodes source ON source.id = edge.source_node_id AND source.node_type = 'agent_task'
-		JOIN automation_nodes target ON target.id = edge.target_node_id AND target.node_type = 'agent_task'
-		JOIN automation_definition_resources source_resource ON source_resource.version_id = edge.version_id
+		JOIN automation_nodes source ON source.id = edge.source_node_id AND source.project_id = edge.project_id
+			AND source.automation_id = edge.automation_id AND source.version_id = edge.version_id
+			AND (source.node_type = 'trigger' OR source.node_type = 'agent_task' AND source.role = 'task')
+		JOIN automation_nodes target ON target.id = edge.target_node_id AND target.project_id = edge.project_id
+			AND target.automation_id = edge.automation_id AND target.version_id = edge.version_id AND target.node_type = 'agent_task'
+		JOIN automation_definition_resources source_resource ON source_resource.project_id = edge.project_id
+			AND source_resource.automation_id = edge.automation_id AND source_resource.version_id = edge.version_id
 			AND source_resource.node_id = source.id AND source_resource.resource_type = 'task' AND source_resource.resource_id = ?
-		JOIN automation_definition_resources target_resource ON target_resource.version_id = edge.version_id
+		JOIN automation_definition_resources target_resource ON target_resource.project_id = edge.project_id
+			AND target_resource.automation_id = edge.automation_id AND target_resource.version_id = edge.version_id
 			AND target_resource.node_id = target.id AND target_resource.resource_type = 'task' AND target_resource.resource_id = ?
 		WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ?
 		AND edge.source_node_id = ? AND edge.target_node_id = ?`, parent.ID, child.ID, event.Context.ProjectID,

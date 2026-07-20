@@ -786,9 +786,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
 								<g class="automation-draft-edge" data-edge-key={ edge.Key } data-from={ edge.From } data-to={ edge.To } tabindex="0" role="group" aria-label={ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) + " to " + automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) + " connection" }>
 									<line data-edge-hit x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-edge-hit"></line>
-									<circle data-reconnect-edge data-edge-endpoint="from" cx={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } r="7" class="automation-edge-endpoint" tabindex="0" role="button" aria-label="Reconnect connection start"></circle>
-									<circle data-reconnect-edge data-edge-endpoint="to" cx={ fmt.Sprintf("%.0f", target.Position.X) } cy={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } r="7" class="automation-edge-endpoint" tabindex="0" role="button" aria-label="Reconnect connection end"></circle>
-									<g data-delete-edge transform={ fmt.Sprintf("translate(%.0f %.0f)", (source.Position.X+automationGraphNodeWidth+target.Position.X)/2, (source.Position.Y+target.Position.Y)/2+automationGraphNodeHeight/2) } class="automation-edge-delete" tabindex="0" role="button" aria-label="Delete connection"><circle r="11"></circle><text text-anchor="middle" dominant-baseline="central">×</text></g>
 								</g>
 							}
 						}
@@ -809,6 +806,15 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								}
 							}
 							<line data-automation-edge-preview x1="0" y1="0" x2="0" y2="0" class="automation-graph-edge automation-graph-edge--preview" marker-end="url(#automation-draft-preview-arrow)" hidden></line>
+							for _, edge := range page.Result.Candidate.Edges {
+								if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
+									<g data-edge-controls data-edge-key={ edge.Key } class="automation-edge-controls">
+										<circle data-reconnect-edge data-edge-endpoint="from" cx={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } cy={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } r="7" class="automation-edge-endpoint" tabindex="0" role="button" aria-label="Reconnect connection start"></circle>
+										<circle data-reconnect-edge data-edge-endpoint="to" cx={ fmt.Sprintf("%.0f", target.Position.X) } cy={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } r="7" class="automation-edge-endpoint" tabindex="0" role="button" aria-label="Reconnect connection end"></circle>
+										<g data-delete-edge transform={ fmt.Sprintf("translate(%.0f %.0f)", (source.Position.X+automationGraphNodeWidth+target.Position.X)/2, (source.Position.Y+target.Position.Y)/2+automationGraphNodeHeight/2) } class="automation-edge-delete" tabindex="0" role="button" aria-label="Delete connection"><circle r="11"></circle><text text-anchor="middle" dominant-baseline="central">×</text></g>
+									</g>
+								}
+							}
 						</svg>
 						if len(page.Result.Candidate.Nodes) == 0 {
 							<div class="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
@@ -826,34 +832,39 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Delete node</button></div></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
 						if automationDraftHasConfig(node, "prompt") {
 							<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea></label>
-							<div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
-								<label class="form-control"><span class="label-text">Primary Agent</span><select class="select select-bordered" name={ "node_" + node.Key + "_agent_ref" }><option value="" selected?={ automationDraftStringConfig(node, "agent_ref") == "" }>Default (no primary Agent)</option>
-									for _, agent := range page.Capabilities.Agents {
-										<option value={ agent.ID } selected?={ automationDraftStringConfig(node, "agent_ref") == agent.ID }>{ agent.Name }</option>
-									}
-								</select></label>
-								<label class="form-control"><span class="label-text">Skills</span><input type="hidden" name={ "node_" + node.Key + "_skills" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_skills" } multiple>
-									for _, skill := range page.Capabilities.Skills {
-										<option value={ skill.ID } selected?={ automationDraftStringSliceContains(node, "skills", skill.ID) }>{ skill.Name }</option>
-									}
-								</select></label>
-								<label class="form-control"><span class="label-text">Source files</span><input type="hidden" name={ "node_" + node.Key + "_source_files" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_source_files" } multiple>
-									for _, sourceFile := range page.Capabilities.SourceFiles {
-										<option value={ sourceFile } selected?={ automationDraftStringSliceContains(node, "source_files", sourceFile) }>{ sourceFile }</option>
-									}
-								</select></label>
-							</div>
-								<div class="mt-3 grid grid-cols-2 gap-3">
-									<label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option>
-										if page.Result.Candidate.AdapterKey == "custom" {
-											<option value="active" selected?={ automationDraftStringConfig(node, "category") == "active" }>Active follow-up</option>
-										} else {
-											<option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option>
+								<div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
+									<label class="form-control"><span class="label-text">Primary Agent</span><select class="select select-bordered" name={ "node_" + node.Key + "_agent_ref" }><option value="" selected?={ automationDraftStringConfig(node, "agent_ref") == "" }>Default (no primary Agent)</option>
+										for _, agent := range page.Capabilities.Agents {
+											<option value={ agent.ID } selected?={ automationDraftStringConfig(node, "agent_ref") == agent.ID }>{ agent.Name }</option>
 										}
 									</select></label>
-									<label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label>
-								</div>						}
-						if automationDraftHasConfig(node, "run_at") {
+									if page.Result.Candidate.AdapterKey != "custom" {
+										<label class="form-control"><span class="label-text">Skills</span><input type="hidden" name={ "node_" + node.Key + "_skills" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_skills" } multiple>
+											for _, skill := range page.Capabilities.Skills {
+												<option value={ skill.ID } selected?={ automationDraftStringSliceContains(node, "skills", skill.ID) }>{ skill.Name }</option>
+											}
+										</select></label>
+										<label class="form-control"><span class="label-text">Source files</span><input type="hidden" name={ "node_" + node.Key + "_source_files" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_source_files" } multiple>
+											for _, sourceFile := range page.Capabilities.SourceFiles {
+												<option value={ sourceFile } selected?={ automationDraftStringSliceContains(node, "source_files", sourceFile) }>{ sourceFile }</option>
+											}
+										</select></label>
+									}
+								</div>
+									<div class="mt-3 grid grid-cols-2 gap-3">
+										if page.Result.Candidate.AdapterKey == "custom" && node.Type == models.AutomationNodeTrigger {
+											<label class="form-control"><span class="label-text">Category</span><span class="input input-bordered flex items-center bg-base-200 text-base-content/70">Scheduled task</span></label>
+										} else {
+											<label class="form-control"><span class="label-text">Category</span><select class="select select-bordered" name={ "node_" + node.Key + "_category" }><option value="backlog" selected?={ automationDraftStringConfig(node, "category") == "backlog" }>Backlog</option>
+												if page.Result.Candidate.AdapterKey == "custom" {
+													<option value="active" selected?={ automationDraftStringConfig(node, "category") == "active" }>Active follow-up</option>
+												} else {
+													<option value="scheduled" selected?={ automationDraftStringConfig(node, "category") == "scheduled" }>Scheduled</option>
+												}
+											</select></label>
+										}
+										<label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label>
+									</div>						}						if automationDraftHasConfig(node, "run_at") {
 							<div class="grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Time</span><input type="time" class="input input-bordered" name={ "node_" + node.Key + "_run_at" } value={ automationDraftStringConfig(node, "run_at") }/></label><label class="form-control"><span class="label-text">Repeat</span><select class="select select-bordered" name={ "node_" + node.Key + "_repeat_type" }>
 								for _, repeat := range []string{"once","minutes","hours","daily","weekly","monthly"} {
 									<option value={ repeat } selected?={ automationDraftStringConfig(node, "repeat_type") == repeat }>{ repeat }</option>
@@ -917,9 +928,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					function nodeCandidate(key) { return (candidate.nodes || []).find(function(node) { return node.key === key; }); }
 					function edgeCandidate(key) { return (candidate.edges || []).find(function(edge) { return edge.key === key; }); }
 					function nodeName(key) { var node = nodeCandidate(key); return node ? node.name : key; }
-					function nodeGroup(key) { return svg.querySelector('[data-node-key="' + CSS.escape(key) + '"]'); }
-					function foregroundEdge(key) { return svg.querySelector('[data-edge-foreground][data-edge-key="' + CSS.escape(key) + '"]'); }
-					function nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }
+						function nodeGroup(key) { return svg.querySelector('[data-node-key="' + CSS.escape(key) + '"]'); }
+						function foregroundEdge(key) { return svg.querySelector('[data-edge-foreground][data-edge-key="' + CSS.escape(key) + '"]'); }
+						function edgeControls(key) { return svg.querySelector('[data-edge-controls][data-edge-key="' + CSS.escape(key) + '"]'); }					function nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }
 					function syncCandidate() {
 						var automationName = builder.querySelector('[data-automation-name]');
 						if (automationName) candidate.name = automationName.value;
@@ -1006,11 +1017,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!edge || !points) return;
 						group.dataset.from = edge.from; group.dataset.to = edge.to;
 						group.querySelectorAll('[data-edge-hit]').forEach(function(line) { setEdgeLine(line, points); });
-						var foreground = foregroundEdge(edge.key); if (foreground) setEdgeLine(foreground, points);
-						var start = group.querySelector('[data-edge-endpoint="from"]'), finish = group.querySelector('[data-edge-endpoint="to"]');
-						start.setAttribute('cx', points.start.x); start.setAttribute('cy', points.start.y); finish.setAttribute('cx', points.finish.x); finish.setAttribute('cy', points.finish.y);
-						group.querySelector('[data-delete-edge]').setAttribute('transform', 'translate(' + ((points.start.x + points.finish.x) / 2) + ' ' + ((points.start.y + points.finish.y) / 2) + ')');
-					}
+							var foreground = foregroundEdge(edge.key); if (foreground) setEdgeLine(foreground, points);
+							var controls = edgeControls(edge.key); if (!controls) return;
+							var start = controls.querySelector('[data-edge-endpoint="from"]'), finish = controls.querySelector('[data-edge-endpoint="to"]');
+							start.setAttribute('cx', points.start.x); start.setAttribute('cy', points.start.y); finish.setAttribute('cx', points.finish.x); finish.setAttribute('cy', points.finish.y);
+							controls.querySelector('[data-delete-edge]').setAttribute('transform', 'translate(' + ((points.start.x + points.finish.x) / 2) + ' ' + ((points.start.y + points.finish.y) / 2) + ')');					}
 					function renderEdges() { svg.querySelectorAll('.automation-draft-edge').forEach(renderEdge); }
 					function connectionExists(from, to, exceptKey) { return (candidate.edges || []).some(function(edge) { return edge.key !== exceptKey && edge.from === from && edge.to === to; }); }
 					function safeKey(value, fallback) {
@@ -1023,15 +1034,15 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						for (var suffix = 2; ; suffix++) if (!keys.has(base + '_' + suffix)) return base + '_' + suffix;
 					}
 					function svgElement(name, attributes) { var element = document.createElementNS('http://www.w3.org/2000/svg', name); Object.keys(attributes || {}).forEach(function(key) { element.setAttribute(key, attributes[key]); }); return element; }
-					function appendEdgeGroup(edge) {
-						var group = svgElement('g', {class: 'automation-draft-edge', tabindex: '0', role: 'group', 'aria-label': nodeName(edge.from) + ' to ' + nodeName(edge.to) + ' connection'}); group.dataset.edgeKey = edge.key; group.dataset.from = edge.from; group.dataset.to = edge.to;
-						group.appendChild(svgElement('line', {class: 'automation-edge-hit', 'data-edge-hit': ''}));
-						['from', 'to'].forEach(function(endpoint) { group.appendChild(svgElement('circle', {r: '7', class: 'automation-edge-endpoint', tabindex: '0', role: 'button', 'data-reconnect-edge': '', 'data-edge-endpoint': endpoint, 'aria-label': 'Reconnect connection ' + (endpoint === 'from' ? 'start' : 'end')})); });
-						var remove = svgElement('g', {class: 'automation-edge-delete', tabindex: '0', role: 'button', 'data-delete-edge': '', 'aria-label': 'Delete connection'}); remove.appendChild(svgElement('circle', {r: '11'})); var x = svgElement('text', {'text-anchor': 'middle', 'dominant-baseline': 'central'}); x.textContent = '×'; remove.appendChild(x); group.appendChild(remove);
-						var foreground = svgElement('line', {class: 'automation-graph-edge automation-edge-foreground', 'stroke-width': '2', 'marker-end': 'url(#automation-draft-arrow)', 'data-edge-foreground': '', 'data-edge-key': edge.key});
-						svg.insertBefore(group, svg.querySelector('.automation-draft-node')); svg.insertBefore(foreground, preview); bindEdgeGroup(group); renderEdge(group);
-					}
-					function canonicalEdge(from, to, exceptKey) { return edgePalette.find(function(edge) { return edge.from === from && edge.to === to && !(candidate.edges || []).some(function(current) { return current.key !== exceptKey && current.key === edge.key; }); }); }
+						function appendEdgeGroup(edge) {
+							var group = svgElement('g', {class: 'automation-draft-edge', tabindex: '0', role: 'group', 'aria-label': nodeName(edge.from) + ' to ' + nodeName(edge.to) + ' connection'}); group.dataset.edgeKey = edge.key; group.dataset.from = edge.from; group.dataset.to = edge.to;
+							group.appendChild(svgElement('line', {class: 'automation-edge-hit', 'data-edge-hit': ''}));
+							var controls = svgElement('g', {class: 'automation-edge-controls', 'data-edge-controls': '', 'data-edge-key': edge.key});
+							['from', 'to'].forEach(function(endpoint) { controls.appendChild(svgElement('circle', {r: '7', class: 'automation-edge-endpoint', tabindex: '0', role: 'button', 'data-reconnect-edge': '', 'data-edge-endpoint': endpoint, 'aria-label': 'Reconnect connection ' + (endpoint === 'from' ? 'start' : 'end')})); });
+							var remove = svgElement('g', {class: 'automation-edge-delete', tabindex: '0', role: 'button', 'data-delete-edge': '', 'aria-label': 'Delete connection'}); remove.appendChild(svgElement('circle', {r: '11'})); var x = svgElement('text', {'text-anchor': 'middle', 'dominant-baseline': 'central'}); x.textContent = '×'; remove.appendChild(x); controls.appendChild(remove);
+							var foreground = svgElement('line', {class: 'automation-graph-edge automation-edge-foreground', 'stroke-width': '2', 'marker-end': 'url(#automation-draft-arrow)', 'data-edge-foreground': '', 'data-edge-key': edge.key});
+							svg.insertBefore(group, svg.querySelector('.automation-draft-node')); svg.insertBefore(foreground, preview); svg.appendChild(controls); bindEdgeGroup(group); renderEdge(group);
+						}					function canonicalEdge(from, to, exceptKey) { return edgePalette.find(function(edge) { return edge.from === from && edge.to === to && !(candidate.edges || []).some(function(current) { return current.key !== exceptKey && current.key === edge.key; }); }); }
 					function addConnection(from, to, fromSide, toSide) {
 						if (!from || !to || from === to) { if (connectStatus) connectStatus.textContent = 'Connect two different nodes.'; return; }
 						if (connectionExists(from, to, '')) { if (connectStatus) connectStatus.textContent = 'Those nodes are already connected in that direction.'; return; }
@@ -1047,23 +1058,23 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						if (!from || !to || from === to || connectionExists(from, to, key)) { if (connectStatus) connectStatus.textContent = 'That reconnection would duplicate or loop back to the same node.'; return; }
 						var oldKey = edge.key, canonical = canonicalEdge(from, to, oldKey); edge.from = from; edge.to = to; if (endpoint === 'from') edge.from_port = side; else edge.to_port = side;
 						if (canonical) { edge.key = canonical.key; edge.label = canonical.label || ''; edge.condition = canonical.condition || {}; } else if (edgePalette.some(function(item) { return item.key === edge.key; })) { edge.key = uniqueEdgeKey('edge_' + safeKey(from, 'source') + '_' + safeKey(to, 'target'), oldKey); edge.condition = {}; }
-						var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(oldKey) + '"]');
-						var foreground = foregroundEdge(oldKey); if (foreground) foreground.dataset.edgeKey = edge.key;
-						if (group) { group.dataset.edgeKey = edge.key; renderEdge(group); } syncCandidate(); if (connectStatus) connectStatus.textContent = 'Reconnected ' + nodeName(from) + ' to ' + nodeName(to) + '.';
-					}
+							var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(oldKey) + '"]');
+							var foreground = foregroundEdge(oldKey); if (foreground) foreground.dataset.edgeKey = edge.key;
+							var controls = edgeControls(oldKey); if (controls) controls.dataset.edgeKey = edge.key;
+							if (group) { group.dataset.edgeKey = edge.key; renderEdge(group); } syncCandidate(); if (connectStatus) connectStatus.textContent = 'Reconnected ' + nodeName(from) + ' to ' + nodeName(to) + '.';					}
 					function removeEdge(key) {
 						candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.key !== key; });
-						var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(key) + '"]'); if (group) group.remove();
-						var foreground = foregroundEdge(key); if (foreground) foreground.remove();
-						if (selectedEdgeKey === key) selectEdge(null);
+							var group = svg.querySelector('.automation-draft-edge[data-edge-key="' + CSS.escape(key) + '"]'); if (group) group.remove();
+							var foreground = foregroundEdge(key); if (foreground) foreground.remove();
+							var controls = edgeControls(key); if (controls) controls.remove();						if (selectedEdgeKey === key) selectEdge(null);
 						syncCandidate(); if (connectStatus) connectStatus.textContent = 'Connection disconnected. Draw a new one from either side when ready.';
 					}
-					function removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); svg.querySelectorAll('[data-edge-foreground]').forEach(function(edgeLine) { if (!edgeCandidate(edgeLine.dataset.edgeKey)) edgeLine.remove(); }); if (selectedEdgeKey && !edgeCandidate(selectedEdgeKey)) selectEdge(null); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }
+					function removeNode(key) { var name = nodeName(key); candidate.nodes = (candidate.nodes || []).filter(function(node) { return node.key !== key; }); candidate.edges = (candidate.edges || []).filter(function(edge) { return edge.from !== key && edge.to !== key; }); var group = nodeGroup(key); if (group) group.remove(); svg.querySelectorAll('.automation-draft-edge').forEach(function(edgeGroup) { if (!edgeCandidate(edgeGroup.dataset.edgeKey)) edgeGroup.remove(); }); svg.querySelectorAll('[data-edge-foreground]').forEach(function(edgeLine) { if (!edgeCandidate(edgeLine.dataset.edgeKey)) edgeLine.remove(); }); svg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { if (!edgeCandidate(controls.dataset.edgeKey)) controls.remove(); }); if (selectedEdgeKey && !edgeCandidate(selectedEdgeKey)) selectEdge(null); syncCandidate(); if (connectStatus) connectStatus.textContent = name + ' deleted with its connections.'; }
 					function selectEdge(group) {
 						selectedEdgeKey = group ? group.dataset.edgeKey : '';
-						svg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); });
-						svg.querySelectorAll('[data-edge-foreground]').forEach(function(edge) { edge.classList.toggle('automation-edge-foreground--selected', !!group && edge.dataset.edgeKey === selectedEdgeKey); });
-						if (disconnectEdge) disconnectEdge.disabled = !selectedEdgeKey;
+							svg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); });
+							svg.querySelectorAll('[data-edge-foreground]').forEach(function(edge) { edge.classList.toggle('automation-edge-foreground--selected', !!group && edge.dataset.edgeKey === selectedEdgeKey); });
+							svg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { controls.classList.toggle('automation-edge-controls--selected', !!group && controls.dataset.edgeKey === selectedEdgeKey); });						if (disconnectEdge) disconnectEdge.disabled = !selectedEdgeKey;
 						if (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or choose Delete connection.';
 					}
 					function beginReconnect(group, handle, event) {
@@ -1073,8 +1084,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					}
 					function bindEdgeGroup(group) {
 						var hit = group.querySelector('[data-edge-hit]'); hit.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); hit.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); selectEdge(group); });
-						group.querySelectorAll('[data-reconnect-edge]').forEach(function(handle) { handle.addEventListener('pointerdown', function(event) { beginReconnect(group, handle, event); }); });
-						var remove = group.querySelector('[data-delete-edge]'); function deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeEdge(group.dataset.edgeKey); } remove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent); remove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });
+						var controls = edgeControls(group.dataset.edgeKey); if (!controls) return;
+						controls.querySelectorAll('[data-reconnect-edge]').forEach(function(handle) { handle.addEventListener('pointerdown', function(event) { beginReconnect(group, handle, event); }); });
+						var remove = controls.querySelector('[data-delete-edge]'); function deleteCurrent(event) { event.preventDefault(); event.stopPropagation(); removeEdge(group.dataset.edgeKey); } remove.addEventListener('pointerdown', function(event) { event.stopPropagation(); }); remove.addEventListener('click', deleteCurrent); remove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });
 						group.addEventListener('keydown', function(event) { if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeEdge(group.dataset.edgeKey); } });
 					}
 					function clearConnectionHandles() {
@@ -1334,8 +1346,7 @@ templ automationGraphThemeStyles() {
 			.automation-edge-foreground-arrow { fill: oklch(var(--bc)); }
 			.automation-edge-foreground--selected { stroke: oklch(var(--p)); stroke-width: 3; }
 			.automation-edge-endpoint, .automation-edge-delete { opacity: 0; pointer-events: none; }
-			.automation-draft-edge--selected .automation-edge-endpoint, .automation-draft-edge--selected .automation-edge-delete, .automation-draft-edge:focus-within .automation-edge-endpoint, .automation-draft-edge:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }
-			.automation-edge-endpoint { fill: oklch(var(--p)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }
+				.automation-edge-controls--selected .automation-edge-endpoint, .automation-edge-controls--selected .automation-edge-delete, .automation-edge-controls:focus-within .automation-edge-endpoint, .automation-edge-controls:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }			.automation-edge-endpoint { fill: oklch(var(--p)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }
 			.automation-edge-delete circle, .automation-node-delete circle { fill: oklch(var(--er)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; }
 			.automation-edge-delete text, .automation-node-delete text { fill: oklch(var(--b1)); font-size: 15px; font-weight: 700; pointer-events: none; }
 			.automation-edge-delete, .automation-node-delete { cursor: pointer; }

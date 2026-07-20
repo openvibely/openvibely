@@ -281,6 +281,9 @@ func (s *LLMService) activatePublishedCustomAutomationChild(ctx context.Context,
 			promptCandidate.Edges = append(promptCandidate.Edges, models.AutomationDraftEdge{From: targetNode.NodeKey, To: notificationNode.NodeKey})
 		}
 		category, _ := config["category"].(string)
+		if sourceNode.NodeType == models.AutomationNodeTrigger {
+			category = string(models.CategoryActive)
+		}
 		chain := &models.ChainConfiguration{
 			Enabled: true, Trigger: "on_completion", ChildTaskID: childTaskID, ChildAutomationNodeKey: targetNode.NodeKey,
 			ChildCategory: category, ChildPromptPrefix: automationCompiledTaskPrompt(promptCandidate, targetDraft),

@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	automationAdapterContractVersion  = 5
-	automationCompilerContractVersion = 5
+	automationAdapterContractVersion  = 6
+	automationCompilerContractVersion = 6
 )
 
 type automationGitHubConnectionProvider interface {
@@ -272,7 +272,7 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 func (p *AutomationPublicationPlanner) taskReferenceEffects(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) ([]models.AutomationPublicationEffect, error) {
 	var effects []models.AutomationPublicationEffect
 	for _, node := range candidate.Nodes {
-		if node.Type != models.AutomationNodeAgentTask {
+		if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
 			continue
 		}
 		ref, _ := node.Config["agent_ref"].(string)
@@ -307,7 +307,7 @@ func (p *AutomationPublicationPlanner) agentDependencies(ctx context.Context, pr
 	var dependencies []automationPlanDependency
 	var issues []models.AutomationValidationIssue
 	for _, node := range candidate.Nodes {
-		if node.Type != models.AutomationNodeAgentTask {
+		if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
 			continue
 		}
 		ref, _ := node.Config["agent_ref"].(string)
@@ -569,10 +569,15 @@ func customAutomationTaskNeighbors(candidate models.AutomationDraftCandidate, no
 	for _, edge := range candidate.Edges {
 		source := nodes[edge.From]
 		target := nodes[edge.To]
-		if edge.To == nodeKey && source.Type == models.AutomationNodeAgentTask && source.Role == "task" && target.Role == "task" {
+		isTaskHandoff := (source.Type == models.AutomationNodeTrigger && target.Type == models.AutomationNodeAgentTask && (target.Role == "task" || target.Role == "github_inbox")) ||
+			(source.Type == models.AutomationNodeAgentTask && source.Role == "task" && target.Type == models.AutomationNodeAgentTask && target.Role == "task")
+		if !isTaskHandoff {
+			continue
+		}
+		if edge.To == nodeKey {
 			parentKey = edge.From
 		}
-		if edge.From == nodeKey && source.Role == "task" && target.Type == models.AutomationNodeAgentTask && target.Role == "task" {
+		if edge.From == nodeKey {
 			value := target
 			child = &value
 		}
@@ -586,6 +591,14 @@ func customAutomationTaskChainConfig(automation models.Automation, candidate mod
 		ChildTitle: automationTaskTitle(automation, child), ChildPromptPrefix: automationCompiledTaskPrompt(candidate, child),
 	}
 	category, _ := child.Config["category"].(string)
+	if parentKey, _ := customAutomationTaskNeighbors(candidate, child.Key); parentKey != "" {
+		for _, node := range candidate.Nodes {
+			if node.Key == parentKey && node.Type == models.AutomationNodeTrigger {
+				category = string(models.CategoryActive)
+				break
+			}
+		}
+	}
 	config.ChildCategory = category
 	encoded, err := json.Marshal(config)
 	if err != nil {
@@ -595,9 +608,6 @@ func customAutomationTaskChainConfig(automation models.Automation, candidate mod
 }
 
 func automationNodeTaskConfiguration(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) (string, models.TaskCategory, int) {
-	if node.Type == models.AutomationNodeTrigger {
-		return "Automation Scheduler trigger. Runtime work is dispatched through the published graph connection.", models.CategoryScheduled, 2
-	}
 	prompt := automationCompiledTaskPrompt(candidate, node)
 	category, _ := node.Config["category"].(string)
 	priority, _ := draftInt(node.Config["priority"])

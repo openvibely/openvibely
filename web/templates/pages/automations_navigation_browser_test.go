@@ -237,10 +237,16 @@ window.addEventListener('DOMContentLoaded', function() {
 	    }
 	    if (colorAlpha(getComputedStyle(foregroundEdge).stroke) < 1) fail('foreground connection line is translucent and looks behind graph nodes');
 	    var foregroundArrow = document.querySelector('#automation-draft-arrow .automation-graph-arrow');
-	    if (!foregroundArrow || colorAlpha(getComputedStyle(foregroundArrow).fill) < 1) fail('foreground connection arrow is translucent and looks behind connector circles');
+		    if (!foregroundArrow || colorAlpha(getComputedStyle(foregroundArrow).fill) < 1) fail('foreground connection arrow is translucent and looks behind connector circles');
+		    click('[data-edge-key][data-from="first_step"][data-to="second_step"] [data-edge-hit]', 'Blank connection for delete control layering');
+		    var blankDeleteControl = document.querySelector('[data-edge-controls][data-edge-key] [data-delete-edge]');
+		    if (!blankDeleteControl) fail('selected Blank connection has no midpoint delete control overlay');
+		    if (!(foregroundEdge.compareDocumentPosition(blankDeleteControl) & Node.DOCUMENT_POSITION_FOLLOWING)) fail('connection delete control is painted behind the foreground line');
+		    var blankDeleteRect = blankDeleteControl.getBoundingClientRect();
+		    var blankDeleteHit = document.elementFromPoint(blankDeleteRect.left + blankDeleteRect.width / 2, blankDeleteRect.top + blankDeleteRect.height / 2);
+		    if (!blankDeleteHit || !blankDeleteHit.closest('[data-delete-edge]')) fail('connection delete control is not the topmost interactive element at its center');
 
-	    click('#automation-builder > a[href^="/automations?"]', 'Automations back link from blank builder');
-	    await waitFor(portfolioReady, 'portfolio before draft selection');
+		    click('#automation-builder > a[href^="/automations?"]', 'Automations back link from blank builder');	    await waitFor(portfolioReady, 'portfolio before draft selection');
 	    click('a[href^="/automations/automation-draft/drafts/version-draft?"]', 'draft Automation card');
 	    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder selected from portfolio');
 	    var automationName = document.querySelector('[name="automation_name"]');
@@ -303,7 +309,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			    if (!selectedEdge) fail('selected connection group is missing');
 			    selectedEdge.focus();
 			    if (getComputedStyle(selectedEdge).outlineStyle !== 'none') fail('selected connection shows an unnecessary bounding outline');
-			    var reconnectHandle = document.querySelector('[data-edge-key][data-from="result"][data-to="vision_trigger"] [data-reconnect-edge][data-edge-endpoint="to"]');
+			    var reconnectHandle = document.querySelector('[data-edge-controls][data-edge-key="' + CSS.escape(selectedEdge.dataset.edgeKey) + '"] [data-reconnect-edge][data-edge-endpoint="to"]');
 			    var reconnectTarget = port('vision_driver', 'left');
 			    if (!reconnectHandle || !reconnectTarget) fail('selected connection did not expose a draggable endpoint');		    var reconnectRect = reconnectHandle.getBoundingClientRect();
 		    var reconnectTargetRect = reconnectTarget.getBoundingClientRect();

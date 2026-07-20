@@ -173,32 +173,6 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 		if triggerTaskMemberships != 1 {
 			return nil, nil, ErrAutomationScheduleChanged
 		}
-		rows, queryErr := conn.QueryContext(ctx, `SELECT dr.resource_id
-			FROM automation_edges e
-			JOIN automation_definition_resources dr ON dr.project_id = e.project_id
-				AND dr.automation_id = e.automation_id AND dr.version_id = e.version_id
-				AND dr.node_id = e.target_node_id AND dr.resource_type = 'task'
-			WHERE e.project_id = ? AND e.automation_id = ? AND e.version_id = ? AND e.source_node_id = ?
-			ORDER BY e.display_order, e.id, dr.id`, owner.ProjectID, owner.AutomationID, owner.VersionID, owner.NodeID)
-		if queryErr != nil {
-			return nil, nil, queryErr
-		}
-		var targets []string
-		for rows.Next() {
-			var target string
-			if err := rows.Scan(&target); err != nil {
-				rows.Close()
-				return nil, nil, err
-			}
-			targets = append(targets, target)
-		}
-		if err := rows.Close(); err != nil {
-			return nil, nil, err
-		}
-		if len(targets) != 1 {
-			return nil, nil, ErrAutomationScheduleChanged
-		}
-		taskID = targets[0]
 	}
 
 	var taskProject, taskTitle string
@@ -213,7 +187,9 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	}
 	preparedCategory := taskCategory
 	if adapterKey == "custom" {
-		preparedCategory = models.CategoryActive
+		if preparedCategory != models.CategoryScheduled {
+			return nil, nil, ErrAutomationScheduleChanged
+		}
 	} else if preparedCategory != models.CategoryActive && preparedCategory != models.CategoryScheduled {
 		preparedCategory = models.CategoryScheduled
 	}
@@ -1460,9 +1436,14 @@ func (r *AutomationRepo) GetCustomTaskHandoff(ctx context.Context, projectID, au
 		target.node_key, target.name, target.node_type, target.role, target.config_json, target.position_x, target.position_y,
 		target.created_at, target.updated_at, resource.resource_id
 		FROM automation_edges edge
-		JOIN automation_nodes source ON source.id = edge.source_node_id AND source.version_id = edge.version_id AND source.node_type = 'agent_task'
-		JOIN automation_nodes target ON target.id = edge.target_node_id AND target.version_id = edge.version_id AND target.node_type = 'agent_task'
-		JOIN automation_definition_resources resource ON resource.version_id = edge.version_id AND resource.node_id = target.id
+		JOIN automation_nodes source ON source.id = edge.source_node_id AND source.project_id = edge.project_id
+			AND source.automation_id = edge.automation_id AND source.version_id = edge.version_id
+			AND (source.node_type = 'trigger' OR source.node_type = 'agent_task' AND source.role = 'task')
+		JOIN automation_nodes target ON target.id = edge.target_node_id AND target.project_id = edge.project_id
+			AND target.automation_id = edge.automation_id AND target.version_id = edge.version_id
+			AND target.node_type = 'agent_task' AND target.role IN ('task', 'github_inbox')
+		JOIN automation_definition_resources resource ON resource.project_id = edge.project_id
+			AND resource.automation_id = edge.automation_id AND resource.version_id = edge.version_id AND resource.node_id = target.id
 			AND resource.resource_type = 'task'
 		WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ? AND edge.source_node_id = ?
 		ORDER BY edge.display_order, edge.id LIMIT 1`, projectID, automationID, versionID, sourceNodeID).

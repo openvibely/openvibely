@@ -151,11 +151,13 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 			if value, exists := automationDraftFormValue(c, prefix+"agent_ref"); exists {
 				node.Config["agent_ref"] = strings.TrimSpace(value)
 			}
-			if values, exists := automationDraftFormValues(c, prefix+"skills"); exists {
-				node.Config["skills"] = values
-			}
-			if values, exists := automationDraftFormValues(c, prefix+"source_files"); exists {
-				node.Config["source_files"] = values
+			if candidate.AdapterKey != service.AutomationAdapterCustom {
+				if values, exists := automationDraftFormValues(c, prefix+"skills"); exists {
+					node.Config["skills"] = values
+				}
+				if values, exists := automationDraftFormValues(c, prefix+"source_files"); exists {
+					node.Config["source_files"] = values
+				}
 			}
 		}
 		if _, ok := node.Config["run_at"]; ok {
@@ -299,7 +301,7 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		switch nodeKind {
 		case "schedule":
 			nodeType, role = models.AutomationNodeTrigger, "fixed_schedule"
-			config = map[string]any{"run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1, "enabled": true}
+			config = map[string]any{"prompt": "Describe the scheduled work this node should perform.", "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1, "enabled": true}
 		case "agent_task":
 			nodeType, role = models.AutomationNodeAgentTask, "task"
 			config = map[string]any{"prompt": "Describe the work this node should perform.", "category": string(models.CategoryBacklog), "priority": 2}

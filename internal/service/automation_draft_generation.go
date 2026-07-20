@@ -21,20 +21,20 @@ Choose the registered adapter that represents the user's request:
 - Use adapter_key custom and automation_type custom for a user-defined graph assembled from the surfaced capabilities below. Node keys and names are user-owned.
 
 Supported custom nodes and configuration:
-- Schedule: type trigger, role fixed_schedule; config target_node_key, run_at in HH:MM, repeat_type, repeat_interval, enabled.
-- Agent task: type agent_task, role task; config prompt, category, priority, and optional agent_ref, skills, source_files selected only from the project capability snapshot. A task started by a Schedule remains an ordinary backlog task; a task started by another task uses active. The Schedule node owns its separate scheduled task.
+- Schedule: type trigger, role fixed_schedule; this is the scheduled task, with config prompt, category scheduled, priority, optional agent_ref, target_node_key when connected, run_at in HH:MM, repeat_type, repeat_interval, enabled. It may run by itself or hand off to one Agent task.
+- Agent task: type agent_task, role task; this is an ordinary task, with config prompt, category, priority, and optional agent_ref selected only from the project capability snapshot. Never add skills or source_files to task config. An Agent task connected after a Schedule remains backlog until the Schedule task completes; a task started by another task uses active. Scheduling belongs only to the Schedule node.
 - Create notification: type action, role create_notification; config notification_type and instructions.
 - Human approval: type human_gate, role native_approval; config approval_method native_alert.
 - Create GitHub issue: type action, role create_github_issue; config instructions and labels. Never configure assignees.
 - Human assignment: type human_gate, role github_assignment; config approval_method github_assignment.
-- GitHub inbox: type agent_task, role github_inbox; ordinary task config with category backlog. Its connected Schedule owns the scheduled task.
+- GitHub inbox: type agent_task, role github_inbox; ordinary task config with category backlog. Its connected Schedule is the scheduled task.
 - Implementation task template: type agent_task, role implementation; task config with category active.
 - Open pull request: type action, role open_pull_request; config instructions, base, draft.
 - Human review: type human_gate, role pull_request_review; config approval_method pull_request_review.
 - Outcome: type outcome, role completed; empty config.
 
 Supported custom handoffs are deterministic:
-- Schedule -> Agent task -> zero or more linear Agent tasks -> Outcome.
+- A Schedule may run as a standalone scheduled task, or use Schedule -> Agent task -> zero or more linear Agent tasks -> Outcome.
 - A terminal Agent task may instead use Agent task -> Create notification -> Human approval -> one approved Outcome and one rejected Outcome. Those two gate edges use condition state approved and rejected.
 - The GitHub lifecycle uses producer Schedule -> Agent task -> Create GitHub issue -> Human assignment, plus inbox Schedule -> GitHub inbox. Human assignment -> GitHub inbox uses condition state assigned. Continue GitHub inbox -> Implementation task template -> Open pull request -> Human review -> Outcome.
 - Do not branch Agent tasks, add multiple task parents, create cycles, bypass a human assignment/review gate, or attach conditions to other edges.
