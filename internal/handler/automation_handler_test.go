@@ -604,6 +604,12 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	require.Contains(t, created.Body.String(), `value="agent_task"`)
 	require.Contains(t, created.Body.String(), `value="create_notification"`)
 	require.Contains(t, created.Body.String(), `value="human_approval"`)
+	require.Contains(t, created.Body.String(), `value="create_github_issue"`)
+	require.Contains(t, created.Body.String(), `value="human_assignment"`)
+	require.Contains(t, created.Body.String(), `value="github_inbox"`)
+	require.Contains(t, created.Body.String(), `value="implementation"`)
+	require.Contains(t, created.Body.String(), `value="open_pull_request"`)
+	require.Contains(t, created.Body.String(), `value="human_review"`)
 	require.Contains(t, created.Body.String(), `value="outcome"`)
 	require.Contains(t, created.Body.String(), "Custom")
 	require.NotContains(t, created.Body.String(), "Runtime behavior")
@@ -663,6 +669,33 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	conditionHTML := post(url.Values{"edge_" + edge.Key + "_state": {"approved"}})
 	require.Contains(t, conditionHTML, "Human result")
 	require.Equal(t, map[string]any{"state": "approved"}, candidate.Edges[len(candidate.Edges)-1].Condition)
+
+	githubIssueHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"create_github_issue"}, "node_name": {"Open suggestion issue"}})
+	require.Contains(t, githubIssueHTML, `name="node_open_suggestion_issue_labels"`)
+	require.Contains(t, githubIssueHTML, "Assignment is intentionally unavailable here")
+	require.Equal(t, "create_github_issue", candidate.Nodes[len(candidate.Nodes)-1].Role)
+	assignmentHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"human_assignment"}, "node_name": {"Assigned by human"}})
+	require.Contains(t, assignmentHTML, "GitHub assignment is the approval signal")
+	require.Equal(t, "github_assignment", candidate.Nodes[len(candidate.Nodes)-1].Role)
+	assignmentKey := candidate.Nodes[len(candidate.Nodes)-1].Key
+	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"github_inbox"}, "node_name": {"Assigned issue inbox"}})
+	require.Equal(t, "github_inbox", candidate.Nodes[len(candidate.Nodes)-1].Role)
+	inboxKey := candidate.Nodes[len(candidate.Nodes)-1].Key
+	post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {assignmentKey}, "to_key": {inboxKey}})
+	assignmentEdge := candidate.Edges[len(candidate.Edges)-1]
+	require.Empty(t, assignmentEdge.Condition, "a newly connected human gate must persist before its result is selected")
+	assignedHTML := post(url.Values{"edge_" + assignmentEdge.Key + "_state": {"assigned"}})
+	require.Contains(t, assignedHTML, "Assigned in GitHub")
+	require.Equal(t, map[string]any{"state": "assigned"}, candidate.Edges[len(candidate.Edges)-1].Condition)
+	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"implementation"}, "node_name": {"Issue implementation"}})
+	require.Equal(t, "implementation", candidate.Nodes[len(candidate.Nodes)-1].Role)
+	prHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"open_pull_request"}, "node_name": {"Open review PR"}})
+	require.Contains(t, prHTML, `name="node_open_review_pr_base"`)
+	require.Contains(t, prHTML, "Human review and merge remain outside Automation authority")
+	require.Equal(t, "open_pull_request", candidate.Nodes[len(candidate.Nodes)-1].Role)
+	reviewHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"human_review"}, "node_name": {"Human PR review"}})
+	require.Contains(t, reviewHTML, "Automation only observes the linked PR")
+	require.Equal(t, "pull_request_review", candidate.Nodes[len(candidate.Nodes)-1].Role)
 }
 
 func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(t *testing.T) {

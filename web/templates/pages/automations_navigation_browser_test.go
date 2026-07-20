@@ -203,6 +203,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	    click('[data-automation-add-first-node]', 'Add first node action');
 	    var nodeDialog = document.querySelector('[data-automation-node-dialog]');
 	    if (!nodeDialog || !nodeDialog.open) fail('Add first node did not open the node dialog');
+	    var purposes = Array.from(nodeDialog.querySelectorAll('[name="node_kind"] option')).map(function(option) { return option.value; });
+	    ['schedule', 'agent_task', 'create_notification', 'human_approval', 'create_github_issue', 'human_assignment', 'github_inbox', 'implementation', 'open_pull_request', 'human_review', 'outcome'].forEach(function(purpose) {
+	      if (!purposes.includes(purpose)) fail('Blank node palette is missing ' + purpose);
+	    });
 	    await report('progress', 'add-node-dialog-opened');
 	    nodeDialog.querySelector('[name="node_name"]').value = 'First step';
 	    nodeDialog.querySelector('[name="node_kind"]').value = 'agent_task';

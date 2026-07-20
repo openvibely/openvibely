@@ -161,6 +161,61 @@ func TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogous
 	require.Contains(t, issueCodes(svc.ValidateCandidate(unsupportedCondition)), "unsupported_condition")
 }
 
+func TestCustomAutomationValidatesGitHubHandoffsAndRejectsHumanBoundaryBypasses(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := svc.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "producer_schedule", Name: "Daily suggestions", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "producer", Name: "Find improvements", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Find one focused improvement.", "category": "scheduled", "priority": 2}},
+		{Key: "issue", Name: "Create issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Open one reviewable suggestion issue.", "labels": []any{"suggestion"}}},
+		{Key: "assignment", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
+		{Key: "inbox_schedule", Name: "Hourly inbox", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:15", "repeat_type": "hours", "repeat_interval": 1, "enabled": true}},
+		{Key: "inbox", Name: "Process assigned issues", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process newly assigned issues.", "category": "scheduled", "priority": 3}},
+		{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "implementation", Config: map[string]any{"prompt": "Implement the accepted issue and run relevant validation.", "category": "active", "priority": 3}},
+		{Key: "open_pr", Name: "Open pull request", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "main", "draft": false}},
+		{Key: "review", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},
+		{Key: "complete", Name: "Merged", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{
+		{Key: "producer_schedule_to_producer", From: "producer_schedule", To: "producer", Condition: map[string]any{}},
+		{Key: "producer_to_issue", From: "producer", To: "issue", Condition: map[string]any{}},
+		{Key: "issue_to_assignment", From: "issue", To: "assignment", Condition: map[string]any{}},
+		{Key: "inbox_schedule_to_inbox", From: "inbox_schedule", To: "inbox", Condition: map[string]any{}},
+		{Key: "assignment_to_inbox", From: "assignment", To: "inbox", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
+		{Key: "inbox_to_implementation", From: "inbox", To: "implementation", Condition: map[string]any{}},
+		{Key: "implementation_to_pr", From: "implementation", To: "open_pr", Condition: map[string]any{}},
+		{Key: "pr_to_review", From: "open_pr", To: "review", Condition: map[string]any{}},
+		{Key: "review_to_complete", From: "review", To: "complete", Condition: map[string]any{}},
+	}
+
+	require.Empty(t, svc.ValidateCandidate(candidate), "the GitHub graph must map to the existing assignment, inbox, task, PR, and review machinery")
+
+	missingAssignment := candidate
+	missingAssignment.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+	missingAssignment.Edges[1].To = "inbox"
+	require.Contains(t, issueCodes(svc.ValidateCandidate(missingAssignment)), "unsupported_handoff", "a producer must not bypass human assignment")
+
+	autoAssigned := candidate
+	autoAssigned.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
+	for i := range autoAssigned.Nodes {
+		if autoAssigned.Nodes[i].Key == "issue" {
+			autoAssigned.Nodes[i].Config = map[string]any{"instructions": "Open one issue.", "labels": []any{"suggestion"}, "assignees": []any{"bot"}}
+		}
+	}
+	require.Contains(t, issueCodes(svc.ValidateCandidate(autoAssigned)), "unknown_config", "issue actions must not assign around the human gate")
+
+	wrongGateResult := candidate
+	wrongGateResult.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+	wrongGateResult.Edges[4].Condition = map[string]any{"state": "approved"}
+	require.Contains(t, issueCodes(svc.ValidateCandidate(wrongGateResult)), "unsupported_condition")
+
+	reviewBypass := candidate
+	reviewBypass.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+	reviewBypass.Edges[6].To = "complete"
+	require.Contains(t, issueCodes(svc.ValidateCandidate(reviewBypass)), "unsupported_handoff", "opening a PR must not skip human review")
+}
+
 func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Freeform draft")

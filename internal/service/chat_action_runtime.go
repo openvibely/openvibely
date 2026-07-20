@@ -59,12 +59,13 @@ type channelActionSummaryCollector struct {
 }
 
 type channelTaskActionHandlerOptions struct {
-	ProjectID      string
-	TaskSvc        *TaskService
-	SwarmSvc       *SwarmService
-	LLMConfigRepo  *repository.LLMConfigRepo
-	Collector      *channelActionSummaryCollector
-	OnTasksCreated func(context.Context, []TaskCreationRequest, []models.Task) error
+	ProjectID           string
+	TaskSvc             *TaskService
+	SwarmSvc            *SwarmService
+	LLMConfigRepo       *repository.LLMConfigRepo
+	Collector           *channelActionSummaryCollector
+	PrepareTaskCreation func(context.Context, *TaskCreationRequest) error
+	OnTasksCreated      func(context.Context, []TaskCreationRequest, []models.Task) error
 }
 
 // channelCreateSwarmTaskInput mirrors the canonical create_swarm_task runtime
@@ -149,6 +150,11 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			var req TaskCreationRequest
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
+			}
+			if opts.PrepareTaskCreation != nil {
+				if err := opts.PrepareTaskCreation(ctx, &req); err != nil {
+					return "", err
+				}
 			}
 			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
 				return "", fmt.Errorf("create_task requires title and prompt")

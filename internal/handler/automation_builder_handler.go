@@ -182,6 +182,29 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 				node.Config["instructions"] = value
 			}
 		}
+		if node.Role == "create_github_issue" {
+			if value, exists := automationDraftFormValue(c, prefix+"instructions"); exists {
+				node.Config["instructions"] = value
+			}
+			if value, exists := automationDraftFormValue(c, prefix+"labels"); exists {
+				labels := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '\n' })
+				for i := range labels {
+					labels[i] = strings.TrimSpace(labels[i])
+				}
+				node.Config["labels"] = labels
+			}
+		}
+		if node.Role == "open_pull_request" {
+			if value, exists := automationDraftFormValue(c, prefix+"instructions"); exists {
+				node.Config["instructions"] = value
+			}
+			if value, exists := automationDraftFormValue(c, prefix+"base"); exists {
+				node.Config["base"] = strings.TrimSpace(value)
+			}
+			if _, exists := automationDraftFormValue(c, prefix+"draft"); exists || strings.TrimSpace(c.FormValue("builder_action")) == "" {
+				node.Config["draft"] = c.FormValue(prefix+"draft") == "true"
+			}
+		}
 	}
 	for i := range candidate.Edges {
 		key := "edge_" + candidate.Edges[i].Key + "_label"
@@ -286,6 +309,24 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		case "human_approval":
 			nodeType, role = models.AutomationNodeHumanGate, "native_approval"
 			config = map[string]any{"approval_method": "native_alert"}
+		case "create_github_issue":
+			nodeType, role = models.AutomationNodeAction, "create_github_issue"
+			config = map[string]any{"instructions": "Open one focused, reviewable GitHub issue.", "labels": []string{}}
+		case "human_assignment":
+			nodeType, role = models.AutomationNodeHumanGate, "github_assignment"
+			config = map[string]any{"approval_method": "github_assignment"}
+		case "github_inbox":
+			nodeType, role = models.AutomationNodeAgentTask, "github_inbox"
+			config = map[string]any{"prompt": "Process newly assigned GitHub issues.", "category": string(models.CategoryScheduled), "priority": 2}
+		case "implementation":
+			nodeType, role = models.AutomationNodeAgentTask, "implementation"
+			config = map[string]any{"prompt": "Implement the accepted GitHub issue and run relevant validation.", "category": string(models.CategoryActive), "priority": 2}
+		case "open_pull_request":
+			nodeType, role = models.AutomationNodeAction, "open_pull_request"
+			config = map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "", "draft": false}
+		case "human_review":
+			nodeType, role = models.AutomationNodeHumanGate, "pull_request_review"
+			config = map[string]any{"approval_method": "pull_request_review"}
 		case "outcome":
 			nodeType, role = models.AutomationNodeOutcome, "completed"
 		default:

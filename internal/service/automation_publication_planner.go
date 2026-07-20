@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	automationAdapterContractVersion  = 3
-	automationCompilerContractVersion = 3
+	automationAdapterContractVersion  = 4
+	automationCompilerContractVersion = 4
 )
 
 type automationGitHubConnectionProvider interface {
@@ -137,7 +137,7 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 		return plan, nil
 	}
 	adapter, _ := p.registry.Get(candidate.AdapterKey)
-	dependencies, capabilityIssues, err := p.capabilityDependencies(ctx, projectID, candidate.AdapterKey)
+	dependencies, capabilityIssues, err := p.capabilityDependencies(ctx, projectID, candidate)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,9 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 			resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
 			switch node.Type {
 			case models.AutomationNodeAgentTask:
-				resource.AllowedResources["task"] = true
+				if node.Role != "implementation" {
+					resource.AllowedResources["task"] = true
+				}
 			case models.AutomationNodeTrigger:
 				resource.AllowedResources["schedule"] = true
 			}
@@ -202,17 +204,25 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 	}
 	if candidate.AdapterKey == AutomationAdapterCustom {
 		for _, node := range candidate.Nodes {
+			var effect *models.AutomationPublicationEffect
 			switch {
 			case node.Type == models.AutomationNodeAction && node.Role == "create_notification":
-				plan.Effects = append(plan.Effects, models.AutomationPublicationEffect{
-					StepKey: "alert_configuration:" + node.Key, Operation: "configure", TargetKey: "alert_configuration:" + node.Key,
-					ResourceType: "alert_configuration", Name: node.Name,
-				})
+				effect = &models.AutomationPublicationEffect{StepKey: "alert_configuration:" + node.Key, Operation: "configure", TargetKey: "alert_configuration:" + node.Key, ResourceType: "alert_configuration", Name: node.Name}
 			case node.Type == models.AutomationNodeHumanGate && node.Role == "native_approval":
-				plan.Effects = append(plan.Effects, models.AutomationPublicationEffect{
-					StepKey: "human_approval:" + node.Key, Operation: "configure", TargetKey: "human_approval:" + node.Key,
-					ResourceType: "human_approval", Name: node.Name,
-				})
+				effect = &models.AutomationPublicationEffect{StepKey: "human_approval:" + node.Key, Operation: "configure", TargetKey: "human_approval:" + node.Key, ResourceType: "human_approval", Name: node.Name}
+			case node.Type == models.AutomationNodeAction && node.Role == "create_github_issue":
+				effect = &models.AutomationPublicationEffect{StepKey: "github_issue_configuration:" + node.Key, Operation: "configure", TargetKey: "github_issue_configuration:" + node.Key, ResourceType: "github_issue_configuration", Name: node.Name}
+			case node.Type == models.AutomationNodeHumanGate && node.Role == "github_assignment":
+				effect = &models.AutomationPublicationEffect{StepKey: "github_assignment:" + node.Key, Operation: "configure", TargetKey: "github_assignment:" + node.Key, ResourceType: "github_assignment", Name: node.Name}
+			case node.Type == models.AutomationNodeAgentTask && node.Role == "implementation":
+				effect = &models.AutomationPublicationEffect{StepKey: "implementation_task_template:" + node.Key, Operation: "configure", TargetKey: "implementation_task_template:" + node.Key, ResourceType: "implementation_task_template", Name: node.Name}
+			case node.Type == models.AutomationNodeAction && node.Role == "open_pull_request":
+				effect = &models.AutomationPublicationEffect{StepKey: "pull_request_configuration:" + node.Key, Operation: "configure", TargetKey: "pull_request_configuration:" + node.Key, ResourceType: "pull_request_configuration", Name: node.Name}
+			case node.Type == models.AutomationNodeHumanGate && node.Role == "pull_request_review":
+				effect = &models.AutomationPublicationEffect{StepKey: "pull_request_review:" + node.Key, Operation: "configure", TargetKey: "pull_request_review:" + node.Key, ResourceType: "pull_request_review", Name: node.Name}
+			}
+			if effect != nil {
+				plan.Effects = append(plan.Effects, *effect)
 			}
 		}
 	}
@@ -339,7 +349,7 @@ func resolveAutomationAgent(ctx context.Context, agentRepo *repository.AgentRepo
 	return nil, nil
 }
 
-func (p *AutomationPublicationPlanner) capabilityDependencies(ctx context.Context, projectID, adapterKey string) ([]automationPlanDependency, []models.AutomationValidationIssue, error) {
+func (p *AutomationPublicationPlanner) capabilityDependencies(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) ([]automationPlanDependency, []models.AutomationValidationIssue, error) {
 	var dependencies []automationPlanDependency
 	var issues []models.AutomationValidationIssue
 	var project *models.Project
@@ -355,7 +365,7 @@ func (p *AutomationPublicationPlanner) capabilityDependencies(ctx context.Contex
 		dependencies = append(dependencies, automationPlanDependency{Type: "project", ID: project.ID,
 			ProjectID: project.ID, NodeKey: "", Configured: map[string]any{"repository_url": strings.TrimSpace(project.RepoURL)}})
 	}
-	if adapterKey != AutomationAdapterGitHubSDLC {
+	if candidate.AdapterKey != AutomationAdapterGitHubSDLC && !customAutomationUsesGitHub(candidate) {
 		return dependencies, nil, nil
 	}
 
@@ -431,6 +441,19 @@ func (p *AutomationPublicationPlanner) capabilityDependencies(ctx context.Contex
 	}
 	dependencies = append(dependencies, automationPlanDependency{Type: "integration", ID: "github", ProjectID: projectID, Configured: configured})
 	return dependencies, issues, nil
+}
+
+func customAutomationUsesGitHub(candidate models.AutomationDraftCandidate) bool {
+	if candidate.AdapterKey != AutomationAdapterCustom {
+		return false
+	}
+	for _, node := range candidate.Nodes {
+		switch node.Role {
+		case "create_github_issue", "github_assignment", "github_inbox", "implementation", "open_pull_request", "pull_request_review":
+			return true
+		}
+	}
+	return false
 }
 
 func canonicalAutomationPlanCandidate(candidate models.AutomationDraftCandidate) automationPlanCandidateCanonical {
@@ -544,11 +567,13 @@ func customAutomationTaskNeighbors(candidate models.AutomationDraftCandidate, no
 	parentKey := ""
 	var child *models.AutomationDraftNode
 	for _, edge := range candidate.Edges {
-		if edge.To == nodeKey && nodes[edge.From].Type == models.AutomationNodeAgentTask {
+		source := nodes[edge.From]
+		target := nodes[edge.To]
+		if edge.To == nodeKey && source.Type == models.AutomationNodeAgentTask && source.Role == "task" && target.Role == "task" {
 			parentKey = edge.From
 		}
-		if edge.From == nodeKey && nodes[edge.To].Type == models.AutomationNodeAgentTask {
-			value := nodes[edge.To]
+		if edge.From == nodeKey && source.Role == "task" && target.Type == models.AutomationNodeAgentTask && target.Role == "task" {
+			value := target
 			child = &value
 		}
 	}
@@ -589,6 +614,22 @@ func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, nod
 			"\nWhen you have prepared the proposal, call create_notification exactly once with type \"" + strings.TrimSpace(notificationType) +
 			"\" and include the proposal in its body. Creating the notification requests review; it does not approve, merge, release, or deploy anything."
 	}
+	if issue := customAutomationTargetByRole(candidate, node.Key, "create_github_issue"); issue != nil {
+		instructions, _ := issue.Config["instructions"].(string)
+		labels, _ := draftStringSlice(issue.Config["labels"])
+		prompt += "\n\nGitHub issue handoff:\n" + strings.TrimSpace(instructions) +
+			"\nWhen the suggestion is ready, call github_create_issue exactly once for the current project's repository. Use the suggestion as the issue title/body and these labels: " + strings.Join(normalizeDraftReferences(labels), ", ") +
+			". Do not assign the issue. A human assignment in GitHub is the approval signal; creating the issue must not approve, implement, merge, release, or deploy anything."
+	}
+	if node.Role == "github_inbox" {
+		if implementation := customAutomationTargetByRole(candidate, node.Key, "implementation"); implementation != nil {
+			implementationPrompt := automationCompiledImplementationPrompt(candidate, *implementation)
+			category, _ := implementation.Config["category"].(string)
+			priority, _ := draftInt(implementation.Config["priority"])
+			prompt += "\n\nGitHub assignment handoff:\nCall github_get_project_inbox, then github_list_assigned_issues for an authorized configured inbox login. Reconcile existing work with list_tasks before calling create_task. Create at most one visible task per actionable assigned issue and include source_github_issue_number and source_github_repo_url so existing GitHub/Automation provenance is preserved. Use category " + category + " and priority " + fmt.Sprintf("%d", priority) + ". The implementation task prompt must include:\n" + implementationPrompt +
+				"\nAssignment is a human approval signal only. You must not approve an issue, approve a PR, merge, release, or deploy on the human's behalf."
+		}
+	}
 	return prompt
 }
 
@@ -607,6 +648,36 @@ func customAutomationNotificationTarget(candidate models.AutomationDraftCandidat
 		}
 	}
 	return nil
+}
+
+func customAutomationTargetByRole(candidate models.AutomationDraftCandidate, sourceNodeKey, role string) *models.AutomationDraftNode {
+	if candidate.AdapterKey != AutomationAdapterCustom {
+		return nil
+	}
+	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		nodes[node.Key] = node
+	}
+	for _, edge := range candidate.Edges {
+		target := nodes[edge.To]
+		if edge.From == sourceNodeKey && target.Role == role {
+			return &target
+		}
+	}
+	return nil
+}
+
+func automationCompiledImplementationPrompt(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) string {
+	prompt := automationCompiledTaskPrompt(candidate, node)
+	if pullRequest := customAutomationTargetByRole(candidate, node.Key, "open_pull_request"); pullRequest != nil {
+		instructions, _ := pullRequest.Config["instructions"].(string)
+		base, _ := pullRequest.Config["base"].(string)
+		draft, _ := pullRequest.Config["draft"].(bool)
+		prompt += "\n\nPull request handoff:\n" + strings.TrimSpace(instructions) +
+			"\nAfter the implementation and validation are complete, call github_open_pull_request exactly once for this task and its source issue. Use base \"" + strings.TrimSpace(base) + "\" and draft=" + fmt.Sprintf("%t", draft) +
+			". Opening a PR requests human review; it must not approve, merge, release, or deploy anything."
+	}
+	return prompt
 }
 
 func automationSkillNames(refs []string) []string {

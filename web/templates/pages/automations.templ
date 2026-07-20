@@ -749,7 +749,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
 						<label class="form-control"><span class="label-text">Node purpose</span><select class="select select-bordered" name="node_kind" required>
 							if page.Result.Candidate.AdapterKey == "custom" {
-								<option value="schedule">Schedule</option><option value="agent_task">Agent task</option><option value="create_notification">Create notification</option><option value="human_approval">Human approval</option><option value="outcome">Outcome</option>
+								<option value="schedule">Schedule</option><option value="agent_task">Agent task</option><option value="create_notification">Create notification</option><option value="human_approval">Human approval</option><option value="create_github_issue">Create GitHub issue</option><option value="human_assignment">Human assignment</option><option value="github_inbox">GitHub inbox</option><option value="implementation">Implementation task</option><option value="open_pull_request">Open pull request</option><option value="human_review">Human review</option><option value="outcome">Outcome</option>
 							} else {
 								for _, node := range page.NodePalette {
 									if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
@@ -757,7 +757,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 									}
 								}
 							}
-						</select><span class="label-text-alt mt-1">Add real schedules, Agent tasks, Native Alert approvals, and outcomes. Connect them to define the handoff.</span></label>
+						</select><span class="label-text-alt mt-1">Add real schedules, tasks, Native Alert approvals, GitHub issue/assignment/PR/review steps, and outcomes. Connect them to define supported handoffs.</span></label>
 						<label class="form-control"><span class="label-text">Name</span><input class="input input-bordered" name="node_name" maxlength="200" placeholder="Review result" required autofocus/></label>
 						<div class="modal-action"><button class="btn btn-ghost" type="button" onclick="document.getElementById('automation-node-dialog').close()">Cancel</button><button class="btn btn-primary" type="submit" data-automation-create-node>Add node</button></div>
 					</form>
@@ -857,8 +857,20 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						if automationDraftHasConfig(node, "notification_type") {
 							<div class="mt-3 grid grid-cols-1 gap-3"><label class="form-control"><span class="label-text">Notification type</span><input class="input input-bordered" name={ "node_" + node.Key + "_notification_type" } value={ automationDraftStringConfig(node, "notification_type") } maxlength="100"/></label><label class="form-control"><span class="label-text">What needs review</span><textarea class="textarea textarea-bordered h-24" name={ "node_" + node.Key + "_instructions" } maxlength="2000">{ automationDraftStringConfig(node, "instructions") }</textarea><span class="label-text-alt mt-1">The connected Agent task is configured to create the notification. The Alert is created only when that task runs.</span></label></div>
 						}
+						if node.Role == "create_github_issue" {
+							<div class="mt-3 grid grid-cols-1 gap-3"><label class="form-control"><span class="label-text">Issue instructions</span><textarea class="textarea textarea-bordered h-24" name={ "node_" + node.Key + "_instructions" } maxlength="2000">{ automationDraftStringConfig(node, "instructions") }</textarea></label><label class="form-control"><span class="label-text">Labels</span><input class="input input-bordered" name={ "node_" + node.Key + "_labels" } value={ automationDraftStringSliceConfig(node, "labels") } maxlength="1000" placeholder="suggestion, bug"/><span class="label-text-alt mt-1">Comma-separated plain GitHub labels. Assignment is intentionally unavailable here because the connected Human assignment gate is authoritative.</span></label></div>
+						}
+						if node.Role == "open_pull_request" {
+							<div class="mt-3 grid grid-cols-1 gap-3"><label class="form-control"><span class="label-text">Pull request instructions</span><textarea class="textarea textarea-bordered h-24" name={ "node_" + node.Key + "_instructions" } maxlength="2000">{ automationDraftStringConfig(node, "instructions") }</textarea></label><label class="form-control"><span class="label-text">Base branch</span><input class="input input-bordered" name={ "node_" + node.Key + "_base" } value={ automationDraftStringConfig(node, "base") } maxlength="200" placeholder="Repository default"/></label><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox" name={ "node_" + node.Key + "_draft" } value="true" checked?={ automationDraftBoolConfig(node, "draft") }/><span class="label-text">Open as draft PR</span></label><div class="alert text-sm"><span>This action can open or reuse a PR. Human review and merge remain outside Automation authority.</span></div></div>
+						}
 						if automationDraftHasConfig(node, "approval_method") {
-							<div class="alert mt-3 text-sm"><span>Native Alert approval. A human approves or rejects the real notification from Alerts; this graph cannot decide for them.</span></div>
+							if node.Role == "native_approval" {
+								<div class="alert mt-3 text-sm"><span>Native Alert approval. A human approves or rejects the real notification from Alerts; this graph cannot decide for them.</span></div>
+							} else if node.Role == "github_assignment" {
+								<div class="alert mt-3 text-sm"><span>GitHub assignment is the approval signal. A configured human assigns the real issue before the GitHub inbox may create implementation work.</span></div>
+							} else if node.Role == "pull_request_review" {
+								<div class="alert mt-3 text-sm"><span>Human PR review and merge remain in GitHub. Automation only observes the linked PR and cannot approve or merge it.</span></div>
+							}
 						}
 					</section>
 				}
@@ -868,6 +880,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						<div class="rounded-box bg-base-200/40 p-3"><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Delete connection</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label>
 							if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "native_approval" {
 								<label class="form-control mt-2"><span class="label-text">Human result</span><select class="select select-bordered" name={ "edge_" + edge.Key + "_state" }><option value="">Choose result</option><option value="approved" selected?={ automationDraftEdgeConditionState(edge) == "approved" }>Approved</option><option value="rejected" selected?={ automationDraftEdgeConditionState(edge) == "rejected" }>Rejected</option></select></label>
+							} else if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "github_assignment" {
+								<label class="form-control mt-2"><span class="label-text">Human result</span><select class="select select-bordered" name={ "edge_" + edge.Key + "_state" }><option value="">Choose result</option><option value="assigned" selected?={ automationDraftEdgeConditionState(edge) == "assigned" }>Assigned in GitHub</option></select></label>
 							}
 						</div>				}
 			</div></div>
@@ -935,6 +949,20 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							var instructions = builder.querySelector('[name="' + prefix + 'instructions"]');
 							if (notificationType) node.config.notification_type = notificationType.value;
 							if (instructions) node.config.instructions = instructions.value;
+						}
+						if (node.role === 'create_github_issue') {
+							var issueInstructions = builder.querySelector('[name="' + prefix + 'instructions"]');
+							var labels = builder.querySelector('[name="' + prefix + 'labels"]');
+							if (issueInstructions) node.config.instructions = issueInstructions.value;
+							if (labels) node.config.labels = labels.value.split(',').map(function(label) { return label.trim(); }).filter(Boolean);
+						}
+						if (node.role === 'open_pull_request') {
+							var prInstructions = builder.querySelector('[name="' + prefix + 'instructions"]');
+							var base = builder.querySelector('[name="' + prefix + 'base"]');
+							var draft = builder.querySelector('[name="' + prefix + 'draft"]');
+							if (prInstructions) node.config.instructions = prInstructions.value;
+							if (base) node.config.base = base.value;
+							if (draft) node.config.draft = draft.checked;
 						}
 					});
 					(candidate.edges || []).forEach(function(edge) {
@@ -1178,7 +1206,7 @@ const (
 )
 
 func automationDraftCandidateJSON(candidate models.AutomationDraftCandidate) string { value, _ := json.Marshal(candidate); return string(value) }
-func automationPublicationEffectBadge(effect models.AutomationPublicationEffect) string { switch effect.ResourceType { case "alert_configuration": return "Configure notification handoff"; case "human_approval": return "Configure human approval" }; return effect.Operation+" "+effect.ResourceType }
+func automationPublicationEffectBadge(effect models.AutomationPublicationEffect) string { switch effect.ResourceType { case "alert_configuration": return "Configure notification handoff"; case "human_approval": return "Configure human approval"; case "github_issue_configuration": return "Configure GitHub issue handoff"; case "github_assignment": return "Configure human assignment"; case "implementation_task_template": return "Configure implementation task template"; case "pull_request_configuration": return "Configure pull request handoff"; case "pull_request_review": return "Configure human PR review" }; return effect.Operation+" "+effect.ResourceType }
 func automationDraftEdgesJSON(edges []models.AutomationDraftEdge) string { value, _ := json.Marshal(edges); return string(value) }
 func automationValidationMessages(issues []models.AutomationValidationIssue, palette []models.AutomationDraftNode) []string {
 	missingNodes := []string{}
@@ -1201,6 +1229,7 @@ func automationValidationMessages(issues []models.AutomationValidationIssue, pal
 }
 func automationDraftHasConfig(node models.AutomationDraftNode, key string) bool { _, ok := node.Config[key]; return ok }
 func automationDraftStringConfig(node models.AutomationDraftNode, key string) string { value, _ := node.Config[key].(string); return value }
+func automationDraftStringSliceConfig(node models.AutomationDraftNode, key string) string { values := []string{}; switch configured := node.Config[key].(type) { case []string: values = append(values, configured...); case []any: for _, value := range configured { if text, ok := value.(string); ok { values = append(values, text) } } }; return strings.Join(values, ", ") }
 func automationDraftStringSliceContains(node models.AutomationDraftNode, key, expected string) bool { switch values := node.Config[key].(type) { case []string: for _, value := range values { if value == expected { return true } }; case []any: for _, value := range values { if text, ok := value.(string); ok && text == expected { return true } } }; return false }
 func automationDraftIntConfig(node models.AutomationDraftNode, key string) int { switch value := node.Config[key].(type) { case int: return value; case float64: return int(value); case json.Number: parsed, _ := value.Int64(); return int(parsed) }; return 0 }
 func automationDraftBoolConfig(node models.AutomationDraftNode, key string) bool { value, _ := node.Config[key].(bool); return value }

@@ -115,7 +115,7 @@ func (s *AutomationExternalStateService) reconcilePullRequestState(ctx context.C
 		return err
 	}
 	for _, sourceBinding := range automationContext.Bindings {
-		review, err := s.automations.GetNodeByKey(ctx, projectID, automationID, sourceBinding.VersionID, "review")
+		review, err := s.automations.GetConnectedNodeByRole(ctx, projectID, automationID, sourceBinding.VersionID, sourceBinding.NodeID, "pull_request_review", true)
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func (s *AutomationExternalStateService) reconcilePullRequestState(ctx context.C
 			EventKey:  resourceID + ":state:" + state, FromNodeID: review.ID,
 		}
 		if state == "merged" {
-			completed, nodeErr := s.automations.GetNodeByKey(ctx, projectID, automationID, sourceBinding.VersionID, "completed")
+			completed, nodeErr := s.automations.GetConnectedNodeByRole(ctx, projectID, automationID, sourceBinding.VersionID, review.ID, "completed", true)
 			if nodeErr != nil {
 				return nodeErr
 			}

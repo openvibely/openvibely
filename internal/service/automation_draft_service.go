@@ -390,14 +390,23 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		if adapter.DynamicTopology {
 			conditionState, hasCondition := customAutomationEdgeConditionState(edge.Condition)
 			fromNode := draftNodes[edge.From]
-			if fromNode.Role == "native_approval" {
+			switch fromNode.Role {
+			case "native_approval":
 				if len(edge.Condition) == 0 {
 					issues = append(issues, models.AutomationValidationIssue{Code: "missing_condition", Message: "Choose whether this Human approval connection is the approved or rejected result."})
 				} else if !hasCondition || (conditionState != "approved" && conditionState != "rejected") {
 					issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Human approval connections must select the approved or rejected result."})
 				}
-			} else if len(edge.Condition) != 0 {
-				issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Only Human approval connections may have a result condition."})
+			case "github_assignment":
+				if len(edge.Condition) == 0 {
+					issues = append(issues, models.AutomationValidationIssue{Code: "missing_condition", Message: "Choose the assigned result for this Human assignment connection."})
+				} else if !hasCondition || conditionState != "assigned" {
+					issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Human assignment connections must use the assigned result."})
+				}
+			default:
+				if len(edge.Condition) != 0 {
+					issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Only supported human gate connections may have a result condition."})
+				}
 			}
 			continue
 		}
@@ -459,13 +468,18 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 		case models.AutomationNodeTrigger:
 			triggerCount++
 		case models.AutomationNodeAgentTask:
-			taskCount++
+			if node.Role != "implementation" {
+				taskCount++
+			}
+			if node.Role != "task" && node.Role != "github_inbox" && node.Role != "implementation" {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This Agent task role is not executable in custom automations yet."})
+			}
 		case models.AutomationNodeAction:
-			if node.Role != "create_notification" {
+			if node.Role != "create_notification" && node.Role != "create_github_issue" && node.Role != "open_pull_request" {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This action is not executable in custom automations yet."})
 			}
 		case models.AutomationNodeHumanGate:
-			if node.Role != "native_approval" {
+			if node.Role != "native_approval" && node.Role != "github_assignment" && node.Role != "pull_request_review" {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This human gate is not executable in custom automations yet."})
 			}
 		case models.AutomationNodeOutcome:
@@ -481,10 +495,16 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 		}
 		outgoing[edge.From] = append(outgoing[edge.From], edge)
 		incoming[edge.To] = append(incoming[edge.To], edge)
-		valid := from.Type == models.AutomationNodeTrigger && to.Type == models.AutomationNodeAgentTask ||
-			from.Type == models.AutomationNodeAgentTask && (to.Type == models.AutomationNodeAgentTask || to.Type == models.AutomationNodeOutcome || to.Type == models.AutomationNodeAction && to.Role == "create_notification") ||
+		valid := from.Type == models.AutomationNodeTrigger && to.Type == models.AutomationNodeAgentTask && (to.Role == "task" || to.Role == "github_inbox") ||
+			from.Type == models.AutomationNodeAgentTask && from.Role == "task" && (to.Type == models.AutomationNodeAgentTask && to.Role == "task" || to.Type == models.AutomationNodeOutcome || to.Type == models.AutomationNodeAction && (to.Role == "create_notification" || to.Role == "create_github_issue")) ||
 			from.Type == models.AutomationNodeAction && from.Role == "create_notification" && to.Type == models.AutomationNodeHumanGate && to.Role == "native_approval" ||
-			from.Type == models.AutomationNodeHumanGate && from.Role == "native_approval" && to.Type == models.AutomationNodeOutcome
+			from.Type == models.AutomationNodeHumanGate && from.Role == "native_approval" && to.Type == models.AutomationNodeOutcome ||
+			from.Type == models.AutomationNodeAction && from.Role == "create_github_issue" && to.Type == models.AutomationNodeHumanGate && to.Role == "github_assignment" ||
+			from.Type == models.AutomationNodeHumanGate && from.Role == "github_assignment" && to.Type == models.AutomationNodeAgentTask && to.Role == "github_inbox" ||
+			from.Type == models.AutomationNodeAgentTask && from.Role == "github_inbox" && to.Type == models.AutomationNodeAgentTask && to.Role == "implementation" ||
+			from.Type == models.AutomationNodeAgentTask && from.Role == "implementation" && to.Type == models.AutomationNodeAction && to.Role == "open_pull_request" ||
+			from.Type == models.AutomationNodeAction && from.Role == "open_pull_request" && to.Type == models.AutomationNodeHumanGate && to.Role == "pull_request_review" ||
+			from.Type == models.AutomationNodeHumanGate && from.Role == "pull_request_review" && to.Type == models.AutomationNodeOutcome
 		if !valid {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: from.Key, Code: "unsupported_handoff", Message: "This connection does not map to a supported OpenVibely capability handoff."})
 		}
@@ -505,47 +525,100 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "schedule_target", Message: "Connect this Schedule to exactly one Agent task."})
 			}
 		case models.AutomationNodeAgentTask:
-			if len(incoming[node.Key]) != 1 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_parents", Message: "Connect this Agent task to exactly one Schedule or previous Agent task."})
-			} else {
-				parent := nodes[incoming[node.Key][0].From]
-				category, _ := node.Config["category"].(string)
-				if parent.Type == models.AutomationNodeTrigger && category != string(models.CategoryScheduled) {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_category", Message: "An Agent task started by a Schedule must use the Scheduled category."})
+			switch node.Role {
+			case "task":
+				if len(incoming[node.Key]) != 1 {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_parents", Message: "Connect this Agent task to exactly one Schedule or previous Agent task."})
+				} else {
+					parent := nodes[incoming[node.Key][0].From]
+					category, _ := node.Config["category"].(string)
+					if parent.Type == models.AutomationNodeTrigger && category != string(models.CategoryScheduled) {
+						issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_category", Message: "An Agent task started by a Schedule must use the Scheduled category."})
+					}
+					if parent.Type == models.AutomationNodeAgentTask && category != string(models.CategoryActive) {
+						issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_category", Message: "A connected follow-up Agent task must use the Active category so the existing task chain runs it."})
+					}
 				}
-				if parent.Type == models.AutomationNodeAgentTask && category != string(models.CategoryActive) {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_category", Message: "A connected follow-up Agent task must use the Active category so the existing task chain runs it."})
+				if len(outgoing[node.Key]) > 1 {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_branching", Message: "An Agent task can connect to only one next capability."})
 				}
-			}
-			if len(outgoing[node.Key]) > 1 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_branching", Message: "An Agent task can connect to only one next capability."})
+			case "github_inbox":
+				sources := map[string]int{}
+				for _, edge := range incoming[node.Key] {
+					sources[nodes[edge.From].Role]++
+				}
+				if len(incoming[node.Key]) != 2 || sources["fixed_schedule"] != 1 || sources["github_assignment"] != 1 {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_inbox_sources", Message: "Connect one Schedule and one Human assignment gate to this GitHub inbox."})
+				}
+				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "implementation" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_inbox_target", Message: "Connect this GitHub inbox to exactly one Implementation task template."})
+				}
+			case "implementation":
+				if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Role != "github_inbox" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "implementation_source", Message: "Connect exactly one GitHub inbox to this Implementation task template."})
+				}
+				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "open_pull_request" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "implementation_target", Message: "Connect this Implementation task template to exactly one Open pull request action."})
+				}
 			}
 		case models.AutomationNodeAction:
-			if node.Role != "create_notification" {
-				continue
-			}
-			if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Type != models.AutomationNodeAgentTask {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_source", Message: "Connect exactly one Agent task to this Create notification action."})
-			}
-			if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "native_approval" {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_target", Message: "Connect this Create notification action to exactly one Human approval node."})
-			}
-		case models.AutomationNodeHumanGate:
-			if node.Role != "native_approval" {
-				continue
-			}
-			if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Role != "create_notification" {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_source", Message: "Connect exactly one Create notification action to this Human approval node."})
-			}
-			states := map[string]int{}
-			for _, edge := range outgoing[node.Key] {
-				state, ok := customAutomationEdgeConditionState(edge.Condition)
-				if ok && nodes[edge.To].Type == models.AutomationNodeOutcome {
-					states[state]++
+			switch node.Role {
+			case "create_notification":
+				if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Role != "task" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_source", Message: "Connect exactly one Agent task to this Create notification action."})
+				}
+				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "native_approval" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_target", Message: "Connect this Create notification action to exactly one Human approval node."})
+				}
+			case "create_github_issue":
+				if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Role != "task" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_issue_source", Message: "Connect exactly one Agent task to this Create GitHub issue action."})
+				}
+				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "github_assignment" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_issue_target", Message: "Connect this Create GitHub issue action to exactly one Human assignment gate."})
+				}
+			case "open_pull_request":
+				if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Role != "implementation" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_source", Message: "Connect exactly one Implementation task template to this Open pull request action."})
+				}
+				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "pull_request_review" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_target", Message: "Connect this Open pull request action to exactly one Human review gate."})
 				}
 			}
-			if len(outgoing[node.Key]) != 2 || states["approved"] != 1 || states["rejected"] != 1 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_branches", Message: "Connect Human approval to one approved Outcome and one rejected Outcome."})
+		case models.AutomationNodeHumanGate:
+			switch node.Role {
+			case "native_approval":
+				if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Role != "create_notification" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_source", Message: "Connect exactly one Create notification action to this Human approval node."})
+				}
+				states := map[string]int{}
+				for _, edge := range outgoing[node.Key] {
+					state, ok := customAutomationEdgeConditionState(edge.Condition)
+					if ok && nodes[edge.To].Type == models.AutomationNodeOutcome {
+						states[state]++
+					}
+				}
+				if len(outgoing[node.Key]) != 2 || states["approved"] != 1 || states["rejected"] != 1 {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_branches", Message: "Connect Human approval to one approved Outcome and one rejected Outcome."})
+				}
+			case "github_assignment":
+				if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Role != "create_github_issue" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_assignment_source", Message: "Connect exactly one Create GitHub issue action to this Human assignment gate."})
+				}
+				state, validState := "", false
+				if len(outgoing[node.Key]) == 1 {
+					state, validState = customAutomationEdgeConditionState(outgoing[node.Key][0].Condition)
+				}
+				if len(outgoing[node.Key]) != 1 || !validState || state != "assigned" || nodes[outgoing[node.Key][0].To].Role != "github_inbox" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_assignment_target", Message: "Connect Human assignment to one GitHub inbox using the assigned result."})
+				}
+			case "pull_request_review":
+				if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Role != "open_pull_request" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_review_source", Message: "Connect exactly one Open pull request action to this Human review gate."})
+				}
+				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Type != models.AutomationNodeOutcome {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_review_target", Message: "Connect this Human review gate to exactly one terminal Outcome."})
+				}
 			}
 		case models.AutomationNodeOutcome:
 			if len(incoming[node.Key]) == 0 {
@@ -597,19 +670,34 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	case models.AutomationNodeTrigger:
 		allowed = map[string]bool{"target_node_key": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
 	case models.AutomationNodeAction:
-		allowed = map[string]bool{"notification_type": true, "instructions": true}
+		switch node.Role {
+		case "create_notification":
+			allowed = map[string]bool{"notification_type": true, "instructions": true}
+		case "create_github_issue":
+			allowed = map[string]bool{"instructions": true, "labels": true}
+		case "open_pull_request":
+			allowed = map[string]bool{"instructions": true, "base": true, "draft": true}
+		}
 	case models.AutomationNodeHumanGate:
 		allowed = map[string]bool{"approval_method": true}
 	case models.AutomationNodeOutcome:
 		allowed = map[string]bool{}
 	}
 	var issues []models.AutomationValidationIssue
-	expectedRole := map[models.AutomationNodeType]string{
-		models.AutomationNodeTrigger: "fixed_schedule", models.AutomationNodeAgentTask: "task",
-		models.AutomationNodeAction: "create_notification", models.AutomationNodeHumanGate: "native_approval",
-		models.AutomationNodeOutcome: "completed",
-	}[node.Type]
-	if expectedRole != "" && node.Role != expectedRole {
+	validRole := false
+	switch node.Type {
+	case models.AutomationNodeTrigger:
+		validRole = node.Role == "fixed_schedule"
+	case models.AutomationNodeAgentTask:
+		validRole = node.Role == "task" || node.Role == "github_inbox" || node.Role == "implementation"
+	case models.AutomationNodeAction:
+		validRole = node.Role == "create_notification" || node.Role == "create_github_issue" || node.Role == "open_pull_request"
+	case models.AutomationNodeHumanGate:
+		validRole = node.Role == "native_approval" || node.Role == "github_assignment" || node.Role == "pull_request_review"
+	case models.AutomationNodeOutcome:
+		validRole = node.Role == "completed"
+	}
+	if !validRole {
 		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This node purpose is not an allowlisted custom Automation capability."})
 	}
 	for key, value := range node.Config {
@@ -656,22 +744,44 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 		}
 	}
 	if node.Type == models.AutomationNodeAction {
-		if node.Role != "create_notification" {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "Only the Create notification action is supported here."})
-		}
-		notificationType, typeOK := node.Config["notification_type"].(string)
-		if !typeOK || strings.TrimSpace(notificationType) == "" || len(notificationType) > 100 {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_type", Message: "Create notification requires a notification type of at most 100 characters."})
-		}
 		instructions, instructionsOK := node.Config["instructions"].(string)
 		if !instructionsOK || strings.TrimSpace(instructions) == "" || len(instructions) > 2000 {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_instructions", Message: "Create notification requires reviewer instructions of at most 2000 characters."})
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "action_instructions", Message: "This action requires instructions of at most 2000 characters."})
+		}
+		switch node.Role {
+		case "create_notification":
+			notificationType, typeOK := node.Config["notification_type"].(string)
+			if !typeOK || strings.TrimSpace(notificationType) == "" || len(notificationType) > 100 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_type", Message: "Create notification requires a notification type of at most 100 characters."})
+			}
+		case "create_github_issue":
+			labels, labelsOK := draftStringSlice(node.Config["labels"])
+			if !labelsOK || len(labels) > 10 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_issue_labels", Message: "GitHub issue labels must be a list of at most 10 labels."})
+			} else {
+				for _, label := range labels {
+					label = strings.TrimSpace(label)
+					if label == "" || len(label) > 100 || strings.HasPrefix(strings.ToLower(label), "openvibely:") {
+						issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_issue_labels", Message: "GitHub issue labels must be non-empty plain labels of at most 100 characters and must not use the openvibely: prefix."})
+						break
+					}
+				}
+			}
+		case "open_pull_request":
+			base, baseOK := node.Config["base"].(string)
+			if !baseOK || len(strings.TrimSpace(base)) > 200 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_base", Message: "Pull request base must be blank or at most 200 characters."})
+			}
+			if _, draftOK := node.Config["draft"].(bool); !draftOK {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_draft", Message: "Pull request draft state must be true or false."})
+			}
 		}
 	}
 	if node.Type == models.AutomationNodeHumanGate {
 		method, methodOK := node.Config["approval_method"].(string)
-		if node.Role != "native_approval" || !methodOK || method != "native_alert" {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_method", Message: "This Human approval node must use Native Alert approval."})
+		expectedMethod := map[string]string{"native_approval": "native_alert", "github_assignment": "github_assignment", "pull_request_review": "pull_request_review"}[node.Role]
+		if !methodOK || expectedMethod == "" || method != expectedMethod {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_method", Message: "This human gate must use its matching human-controlled approval method."})
 		}
 	}
 	return issues

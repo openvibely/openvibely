@@ -1361,6 +1361,33 @@ func (r *AutomationRepo) GetNodeByKey(ctx context.Context, projectID, automation
 	return &node, err
 }
 
+func (r *AutomationRepo) GetConnectedNodeByRole(ctx context.Context, projectID, automationID, versionID, nodeID, role string, outgoing bool) (*models.AutomationNode, error) {
+	anchorColumn := "source.id"
+	selectedAlias := "target"
+	if !outgoing {
+		anchorColumn = "target.id"
+		selectedAlias = "source"
+	}
+	query := fmt.Sprintf(`SELECT %[1]s.id, %[1]s.project_id, %[1]s.automation_id, %[1]s.version_id,
+		%[1]s.node_key, %[1]s.name, %[1]s.node_type, %[1]s.role, %[1]s.config_json, %[1]s.position_x, %[1]s.position_y,
+		%[1]s.created_at, %[1]s.updated_at
+		FROM automation_edges edge
+		JOIN automation_nodes source ON source.project_id = edge.project_id AND source.automation_id = edge.automation_id
+			AND source.version_id = edge.version_id AND source.id = edge.source_node_id
+		JOIN automation_nodes target ON target.project_id = edge.project_id AND target.automation_id = edge.automation_id
+			AND target.version_id = edge.version_id AND target.id = edge.target_node_id
+		WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ? AND %[2]s = ? AND %[1]s.role = ?
+		ORDER BY edge.display_order, edge.id LIMIT 1`, selectedAlias, anchorColumn)
+	var node models.AutomationNode
+	err := r.db.QueryRowContext(ctx, query, projectID, automationID, versionID, nodeID, role).
+		Scan(&node.ID, &node.ProjectID, &node.AutomationID, &node.VersionID, &node.NodeKey, &node.Name, &node.NodeType,
+			&node.Role, &node.ConfigJSON, &node.PositionX, &node.PositionY, &node.CreatedAt, &node.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &node, err
+}
+
 func (r *AutomationRepo) GetCustomTaskHandoff(ctx context.Context, projectID, automationID, versionID, sourceNodeID string) (bool, *models.AutomationNode, string, error) {
 	var adapterKey string
 	err := r.db.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions

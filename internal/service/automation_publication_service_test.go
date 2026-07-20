@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -298,6 +300,205 @@ func TestCustomAutomationPublicationRunsNativeAlertApprovalOnExactUserNodes(t *t
 	}
 }
 
+func TestCustomAutomationPublicationConfiguresGitHubRuntimeWithoutCrossingHumanGates(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Custom GitHub")
+	project.RepoURL = "https://github.com/example/custom-automation"
+	project.RepoPath = t.TempDir()
+	require.NoError(t, projectRepo.Update(ctx, &project))
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token-not-rendered"))
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	inbox := &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "human-inbox", Enabled: true}
+	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	candidate, err := drafts.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Custom GitHub lifecycle"
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "daily", Name: "Daily", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "finder", Name: "Find suggestion", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Find one focused suggestion.", "category": "scheduled", "priority": 2}},
+		{Key: "file_issue", Name: "File issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Create one concise suggestion issue.", "labels": []any{"suggestion"}}},
+		{Key: "assigned", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
+		{Key: "hourly", Name: "Hourly inbox", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:15", "repeat_type": "hours", "repeat_interval": 1, "enabled": true}},
+		{Key: "poll", Name: "Poll assigned issues", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process only actionable assigned issues.", "category": "scheduled", "priority": 3}},
+		{Key: "build", Name: "Implement issue", Type: models.AutomationNodeAgentTask, Role: "implementation", Config: map[string]any{"prompt": "Implement the accepted issue and run relevant tests.", "category": "active", "priority": 3}},
+		{Key: "publish_pr", Name: "Open PR", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a PR linked to the source issue.", "base": "main", "draft": true}},
+		{Key: "review_pr", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},
+		{Key: "merged", Name: "Merged", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{
+		{Key: "daily_finder", From: "daily", To: "finder", Condition: map[string]any{}},
+		{Key: "finder_issue", From: "finder", To: "file_issue", Condition: map[string]any{}},
+		{Key: "issue_assigned", From: "file_issue", To: "assigned", Condition: map[string]any{}},
+		{Key: "hourly_poll", From: "hourly", To: "poll", Condition: map[string]any{}},
+		{Key: "assigned_poll", From: "assigned", To: "poll", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
+		{Key: "poll_build", From: "poll", To: "build", Condition: map[string]any{}},
+		{Key: "build_pr", From: "build", To: "publish_pr", Condition: map[string]any{}},
+		{Key: "pr_review", From: "publish_pr", To: "review_pr", Condition: map[string]any{}},
+		{Key: "review_merged", From: "review_pr", To: "merged", Condition: map[string]any{}},
+	}
+	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.Empty(t, created.ValidationErrors)
+	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+	planner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
+	inbox.Enabled = false
+	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
+	blockedPlan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Contains(t, issueCodes(blockedPlan.Validation), "github_approval_inbox_unavailable")
+	require.Empty(t, blockedPlan.Effects, "custom GitHub publication must fail closed before any resource effect")
+	inbox.Enabled = true
+	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
+	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	require.Empty(t, plan.Validation)
+	var effectTypes []string
+	for _, effect := range plan.Effects {
+		effectTypes = append(effectTypes, effect.ResourceType)
+	}
+	require.ElementsMatch(t, []string{"task", "task", "schedule", "schedule", "github_issue_configuration", "github_assignment", "implementation_task_template", "pull_request_configuration", "pull_request_review"}, effectTypes)
+
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
+	published, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+	require.NoError(t, err)
+	resources := map[string]string{}
+	for _, resource := range published.Definition.Resources {
+		resources[resource.NodeKey+":"+resource.ResourceType] = resource.ResourceID
+	}
+	require.NotEmpty(t, resources["finder:task"])
+	require.NotEmpty(t, resources["poll:task"])
+	require.NotEmpty(t, resources["daily:schedule"])
+	require.NotEmpty(t, resources["hourly:schedule"])
+	require.Empty(t, resources["build:task"], "implementation must remain an issue-specific runtime task, not one shared publication task")
+	require.Equal(t, 2, tableCount(t, db, "tasks"))
+	require.Equal(t, 2, tableCount(t, db, "schedules"))
+	finder, err := taskRepo.GetByID(ctx, resources["finder:task"])
+	require.NoError(t, err)
+	require.Contains(t, finder.Prompt, "github_create_issue")
+	require.Contains(t, finder.Prompt, "suggestion")
+	require.NotContains(t, finder.Prompt, "assignees", "the issue producer must not cross the human assignment boundary")
+	poll, err := taskRepo.GetByID(ctx, resources["poll:task"])
+	require.NoError(t, err)
+	for _, expected := range []string{"github_get_project_inbox", "github_list_assigned_issues", "create_task", "Implement the accepted issue", "github_open_pull_request", "must not approve", "merge, release"} {
+		require.Contains(t, poll.Prompt, expected)
+	}
+
+	nodeIDs := map[string]string{}
+	for _, node := range published.Definition.Nodes {
+		nodeIDs[node.NodeKey] = node.ID
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	createInvocation := func(triggerKey, scheduleKey string) string {
+		t.Helper()
+		invocationID := repository.NewID()
+		_, insertErr := db.Exec(`INSERT INTO automation_invocations
+			(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status)
+			VALUES (?, ?, ?, ?, ?, 'schedule', ?, ?, 'running')`, invocationID, project.ID, published.Definition.Automation.ID,
+			published.Definition.Version.ID, nodeIDs[triggerKey], resources[scheduleKey+":schedule"], "custom-github:"+repository.NewID())
+		require.NoError(t, insertErr)
+		return invocationID
+	}
+	finderExecution := models.Execution{TaskID: finder.ID, Status: models.ExecRunning, PromptSent: finder.Prompt}
+	require.NoError(t, execRepo.Create(ctx, &finderExecution))
+	finderBinding := models.AutomationBinding{AutomationID: published.Definition.Automation.ID, VersionID: published.Definition.Version.ID, InvocationID: createInvocation("daily", "daily"), NodeID: nodeIDs["finder"]}
+	finderContext := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{finderBinding}})
+	finderContext = withAutomationExecution(finderContext, finder.ID, finderExecution.ID)
+	createCalls := 0
+	var resolvedRepoURLs []string
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(_ context.Context, repoURL, _ string) (*GitHubRepoRef, error) {
+			resolvedRepoURLs = append(resolvedRepoURLs, repoURL)
+			return &GitHubRepoRef{Owner: "example", Name: "custom-automation", FullName: "example/custom-automation"}, nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, request GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createCalls++
+			require.Empty(t, request.Assignees, "runtime issue creation must not bypass human assignment")
+			require.Equal(t, []string{"suggestion"}, request.Labels, "runtime must use immutable published issue labels")
+			return &GitHubIssue{Number: 42, URL: "https://github.com/example/custom-automation/issues/42", Title: request.Title, State: "open"}, nil
+		},
+		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			return &GitHubAuthenticatedUser{Login: "human-inbox"}, []GitHubIssue{{Number: 42, URL: "https://github.com/example/custom-automation/issues/42", Title: "Exact custom issue", State: "open", Assignees: []string{"human-inbox"}}}, nil
+		},
+		createPRFn: func(_ context.Context, _ *GitHubRepoRef, request GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			require.Equal(t, "main", request.Base)
+			require.True(t, request.Draft, "runtime must use the immutable published PR mode")
+			return &GitHubPullRequest{Number: 7, URL: "https://github.com/example/custom-automation/pull/7", State: "open"}, nil
+		},
+	}
+	pullRepo := repository.NewTaskPullRequestRepo(db)
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: project.ID, ProjectRepo: projectRepo, TaskRepo: taskRepo,
+		TaskPullRequestRepo: pullRepo, AutomationRepo: automationRepo, GitHub: provider})
+	_, err = handlers["github_create_issue"](finderContext, json.RawMessage(`{"title":"Forbidden auto assignment","assignees":["human-inbox"]}`))
+	require.ErrorContains(t, err, "requires human GitHub assignment")
+	require.Zero(t, createCalls, "a boundary violation must fail before calling GitHub")
+	issueInput := json.RawMessage(`{"title":"Exact custom issue","body":"review this","labels":["wrong-runtime-label"],"repo_url":"https://github.com/foreign/repository"}`)
+	_, err = handlers["github_create_issue"](finderContext, issueInput)
+	require.NoError(t, err)
+	retriedIssue, err := handlers["github_create_issue"](finderContext, issueInput)
+	require.NoError(t, err)
+	require.Contains(t, retriedIssue, `"reused":true`)
+	require.Equal(t, 1, createCalls, "the same immutable Automation source must reuse its real GitHub issue")
+	require.NotEmpty(t, resolvedRepoURLs)
+	require.Equal(t, project.RepoURL, resolvedRepoURLs[0], "Automation-bound issue creation must use the selected project's repository")
+
+	pollExecution := models.Execution{TaskID: poll.ID, Status: models.ExecRunning, PromptSent: poll.Prompt}
+	require.NoError(t, execRepo.Create(ctx, &pollExecution))
+	pollBinding := models.AutomationBinding{AutomationID: published.Definition.Automation.ID, VersionID: published.Definition.Version.ID, InvocationID: createInvocation("hourly", "hourly"), NodeID: nodeIDs["poll"]}
+	pollContext := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{pollBinding}})
+	pollContext = withAutomationExecution(pollContext, poll.ID, pollExecution.ID)
+	_, err = handlers["github_list_my_assigned_issues"](pollContext, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	llmSvc := &LLMService{automationRepo: automationRepo, githubIssueRuntime: provider, projectRepo: projectRepo}
+	prepared := TaskCreationRequest{Title: "Implement exact custom issue", Prompt: "Issue 42 asks for exact behavior.", Category: "backlog", Priority: 1,
+		SourceGitHubIssueNumber: 42, SourceGitHubRepoURL: project.RepoURL}
+	require.NoError(t, llmSvc.prepareAutomationTaskCreation(pollContext, project.ID, &prepared))
+	require.Equal(t, "active", prepared.Category)
+	require.Equal(t, 3, prepared.Priority)
+	require.Contains(t, prepared.Prompt, "Implement the accepted issue and run relevant tests.")
+	require.Contains(t, prepared.Prompt, "Issue-specific context")
+	require.Contains(t, prepared.Prompt, "github_open_pull_request")
+	implementationTask := models.Task{ProjectID: project.ID, Title: prepared.Title, Prompt: prepared.Prompt, Category: models.TaskCategory(prepared.Category),
+		Status: models.StatusPending, Priority: prepared.Priority, WorktreePath: project.RepoPath, WorktreeBranch: "task/custom-42"}
+	require.NoError(t, taskRepo.Create(ctx, &implementationTask))
+	require.NoError(t, llmSvc.recordAutomationTasksCreated(pollContext, project.ID,
+		[]TaskCreationRequest{prepared}, []models.Task{implementationTask}))
+	implementationContext, err := automationRepo.ContextForTask(ctx, project.ID, implementationTask.ID)
+	require.NoError(t, err)
+	require.Len(t, implementationContext.Bindings, 1)
+	require.Equal(t, nodeIDs["build"], implementationContext.Bindings[0].NodeID)
+	_, err = handlers["github_open_pull_request"](ctx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"issue_number":42,"pr_title":"Custom PR","base":"wrong-runtime-base","draft":false}`, implementationTask.ID)))
+	require.NoError(t, err)
+
+	for _, edgeKey := range []string{"finder_issue", "issue_assigned", "assigned_poll", "poll_build", "build_pr", "pr_review"} {
+		var transitions int
+		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_transitions tr JOIN automation_edges edge ON edge.id = tr.edge_id
+			WHERE tr.automation_id = ? AND edge.edge_key = ?`, published.Definition.Automation.ID, edgeKey).Scan(&transitions))
+		require.Equal(t, 1, transitions, edgeKey+" must project on the exact user-defined edge")
+	}
+	graph, err := NewAutomationGraphService(automationRepo).GetLive(ctx, project.ID, published.Definition.Automation.ID, time.Now())
+	require.NoError(t, err)
+	for _, node := range graph.Nodes {
+		if node.NodeKey == "review_pr" {
+			require.Equal(t, 1, node.Counts.Waiting, "the real open PR must wait at the configured Human review gate")
+		}
+	}
+	external := NewAutomationExternalStateService(automationRepo, pullRepo, projectRepo, provider)
+	require.NoError(t, external.reconcilePullRequestState(ctx, project.ID, published.Definition.Automation.ID, implementationTask.ID, "github:example/custom-automation:pull:7", "merged"))
+	var completed int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_transitions tr JOIN automation_edges edge ON edge.id = tr.edge_id
+		WHERE tr.automation_id = ? AND edge.edge_key = 'review_merged' AND tr.state = 'completed'`, published.Definition.Automation.ID).Scan(&completed))
+	require.Equal(t, 1, completed, "only observed human merge completion may reach the terminal Outcome")
+}
+
 func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskChain(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -582,7 +783,7 @@ func TestAutomationPublicationPlanGoldenRevisionExcludesLayoutAndMessages(t *tes
 	planner := NewAutomationPublicationPlanner(automationRepo, repository.NewTaskRepo(db, nil), repository.NewScheduleRepo(db), registry, drafts)
 	first, err := planner.Plan(context.Background(), project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "d8e499a753cb4a29a55c6446648a4845a983444a0f3d31af6ff4979b43f631ca", first.PlanRevision)
+	require.Equal(t, "2bf7c50c453ce25490fb3665413c427a645ac25b3693cb8fe2bdc84623f113a1", first.PlanRevision)
 
 	candidate.Assumptions = []string{"Layout-only author note"}
 	candidate.Warnings = []string{"Operational observation"}
@@ -621,7 +822,7 @@ func TestAutomationPublicationPlanGoldenGitHubDependenciesAndConfigurationChange
 	planner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	first, err := planner.Plan(ctx, project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "9ffe54519fb72be9ab264b1ae0d090801ab3fff8848f7adab049e32112e12152", first.PlanRevision)
+	require.Equal(t, "197a51c3d970917300152c8e365b6fd821756031dbf6753b2a15636e853a0ee7", first.PlanRevision)
 
 	inbox.Enabled = false
 	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))

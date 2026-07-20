@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-Phase 5 is active after direct product feedback showed the completed first-release Blank flow was still a preset-topology assembler rather than a custom Automation builder. Blank now uses the registered `custom` capability adapter. User-defined Schedule, Agent task, Create notification, Human approval, and Outcome nodes can be freely added, positioned, connected, and configured; supported task chains publish real visible tasks and schedules, and supported Native Alert paths create real pending notifications only when their connected task runs.
+Phase 5 is active after direct product feedback showed the completed first-release Blank flow was still a preset-topology assembler rather than a custom Automation builder. Blank now uses the registered `custom` capability adapter. User-defined Schedule, Agent task, Native Alert, GitHub issue/assignment/inbox/implementation/PR/review, and Outcome nodes can be freely added, positioned, connected, and configured; supported task, approval, and GitHub lifecycle graphs publish real visible resources through existing services and project exact runtime state onto the user-owned topology.
 
 ## Status
 
-Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 now has a validated custom foundation, deterministic multi-task execution, and native human approval: Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are inserted, unsupported capability handoffs remain fail-closed draft errors, and publication derives real task/schedule effects plus explicit Alert/human-gate configuration from user-owned nodes and edges. Runtime notification creation and human decisions use the existing Alert service and exact immutable Automation-version provenance. Remaining Phase 5 work is GitHub actions/gates, existing Workflow capability execution/linkage, Describe It/Chat parity, managed-memory reconciliation, and final validation/audit/checkpoint completion.
+Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 now has a validated custom foundation, deterministic multi-task execution, Native human approval, and configurable GitHub lifecycle capabilities. Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are inserted, unsupported capability handoffs remain fail-closed draft errors, and publication derives only real task/schedule effects plus explicit Alert/GitHub/human-gate configuration from user-owned nodes and edges. Runtime Alert and GitHub activity uses existing services and exact immutable Automation-version provenance. Remaining Phase 5 work is existing Workflow capability execution/linkage, Describe It/Chat parity, managed-memory reconciliation, and final validation/audit/checkpoint completion.
 
 ## Phase 5 Custom Builder Checklist
 
@@ -26,11 +26,39 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
   - [x] Transition a completed terminal custom task to its connected Outcome using persisted Automation provenance.
   - [x] Add regression-first validation, publication, runtime projection, idempotency, and analogous unsupported-topology coverage; run the slice validation and fresh audit.
 - [x] Add native approval/notification capability nodes through the existing Alert service.
-- [ ] Add GitHub issue/assignment/PR/review capability nodes through the existing GitHub services and human boundaries.
+- [x] Add GitHub issue/assignment/PR/review capability nodes through the existing GitHub services and human boundaries.
 - [ ] Add existing Workflow capability selection/execution without copying Workflow steps or creating a second engine.
 - [ ] Extend Describe It and Chat schemas/capability snapshots to generate the same custom graph contract.
 - [ ] Add focused and real-browser coverage for every custom capability and supported/unsupported analogous handoff class.
 - [ ] Run generation, build, focused Automation, internal, and full validation; update managed memory; create a clean checkpoint; perform a fresh edit-free Phase 5/full-objective audit.
+
+## Phase 5 Custom GitHub Checkpoint
+
+### Completed Requirements
+
+- Blank users can add and configure `Create GitHub issue`, `Human assignment`, `GitHub inbox`, issue-specific `Implementation task`, `Open pull request`, and `Human review` nodes. The supported topology mirrors the real lifecycle: a producer Schedule/task creates an issue, a separate inbox Schedule polls assigned issues, assignment is the only approval edge into the inbox, implementation tasks are created per issue, and linked PRs wait for human review before an observed merge reaches the Outcome.
+- Review and apply creates only the configured producer/inbox tasks and their schedules. GitHub issue, assignment, implementation-template, PR, and review effects are shown explicitly but create no external object during publication. Issues, implementation tasks, and PRs arise only through the existing GitHub runtime, task creation, task-PR, queue, and worker services.
+- Runtime provenance resolves connected roles through exact project/Automation/immutable-version edges rather than preset node keys. Real issue creation/retry, assignment discovery, implementation creation, PR linkage, review waiting, and merge completion project onto the exact user-named nodes and edges.
+- Automation-bound issue actions always use the selected project's repository, override model-provided labels with the immutable node configuration, and reject assignees before calling GitHub. Human GitHub assignment therefore remains authoritative.
+- The existing `create_task` action receives the immutable connected implementation template before task creation, including category, priority, configured instructions/source context, optional Agent selection, and PR guidance. The real implementation task remains issue-specific and carries the source issue and Automation work-item provenance.
+- The existing `github_open_pull_request` action uses the immutable configured base/draft values for Automation-bound implementation tasks. It opens or reuses a linked PR but cannot approve, merge, release, or deploy. Existing cached PR reconciliation observes open/closed/merged state; only observed merge completion reaches the configured terminal Outcome.
+- Custom publication now requires the same usable GitHub authentication, explicit project repository, and enabled project approval inbox as the maintained GitHub adapter. Missing capabilities produce no publication effects.
+- No generic edge interpreter, parallel GitHub/task runtime, automatic assignment, PR approval, merge, release, deployment, Register Existing, legacy inference, migration, or backfill path was added.
+
+### Regression And Validation Evidence
+
+- `TestCustomAutomationValidatesGitHubHandoffsAndRejectsHumanBoundaryBypasses` covers the valid two-schedule lifecycle plus assignment/review bypasses, wrong gate conditions, and forbidden issue-assignee configuration.
+- `TestCustomAutomationPublicationConfiguresGitHubRuntimeWithoutCrossingHumanGates` covers fail-closed integration readiness, exact publication effects, no shared implementation task, deterministic prompts, immutable issue repository/labels, assignment enforcement, issue retry, assigned discovery, server-applied implementation configuration, PR base/draft enforcement, exact runtime transitions, waiting review, and observed merge outcome.
+- `TestAutomationBlankBuildsCustomRunnableTaskAndSchedule` covers every GitHub node purpose/control and the public connect-then-select `Assigned in GitHub` flow. The production Chrome Automation graph test asserts the full Blank node palette through the visible Add first node dialog.
+- The maintained GitHub adapter regressions `TestAutomationRuntimeGitHubIssueInboxAndPRProvenance` and `TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjection` pass with the connected-role runtime resolver.
+- `templ generate`, `gofmt`, `git diff --check`, and `go build ./...` pass; desktop emits only the documented non-failing newer-SDK linker warnings.
+- `go test ./internal/... -count=1 -timeout 120s` passes.
+- `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passes every package, including production real-Chrome Automation graph coverage.
+
+### Remaining Work
+
+- Add existing Workflow selection/execution linkage without copying Workflow steps or adding another engine, then extend Describe It/Chat parity for the complete custom contract.
+- Reconcile the authoritative `automation_graphs.md` managed topic when a scoped mutation path is available, then perform the fresh full-objective audit after all remaining custom capabilities are implemented.
 
 ## Phase 5 Native Alert Approval Checkpoint
 
@@ -56,7 +84,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ### Remaining Work
 
-- Add GitHub issue/assignment/PR/review nodes and human gates, then existing Workflow selection/execution linkage and Describe It/Chat parity.
+- GitHub lifecycle capability nodes are completed by the later Phase 5 checkpoint above. Add existing Workflow selection/execution linkage and Describe It/Chat parity.
 - Reconcile the authoritative `automation_graphs.md` managed topic when a scoped mutation path is available, then perform the fresh full-objective audit after all remaining custom capabilities are implemented.
 
 ## Phase 5 Agent-Task Handoff Checkpoint
@@ -88,8 +116,8 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ### Remaining Work
 
-- Native approval/notification is completed by the later Phase 5 checkpoint above. Remaining follow-on work is GitHub action/gate nodes, existing Workflow nodes, described/Chat parity, managed-memory reconciliation, and the final full-objective audit.
-- The authoritative `automation_graphs.md` managed view now records checkpoint `1ab1278` and correctly names native approval as the next gap, but it does not yet include this approval slice. This runtime exposes `memory_view` but no scoped memory mutation action, and the previously verified curator fallback has the same read-only limitation. Per the managed-memory runbook, do not delegate or edit an untracked copy; reconcile the authoritative topic once a scoped writer is available and before the qualifying final audit.
+- Native approval and configurable GitHub lifecycle nodes are completed by the later Phase 5 checkpoints above. Remaining follow-on work is existing Workflow nodes, described/Chat parity, managed-memory reconciliation, and the final full-objective audit.
+- The authoritative `automation_graphs.md` managed view records checkpoint `2010127` and correctly includes the Native approval slice, but it still names configurable GitHub capabilities as remaining work. This runtime exposes `memory_view` but no scoped memory mutation action. Per the managed-memory runbook and explicit user direction, do not delegate or edit an untracked copy; reconcile the authoritative topic once a scoped writer is available and before the qualifying final audit.
 
 ## Phase 4 Checklist
 
@@ -737,7 +765,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ## Exact Next Action
 
-Add regression-first custom GitHub issue/assignment/PR/review capability nodes through the existing GitHub services, including exact repository/project provenance and unchanged assignment, review, merge, release, and deployment authority; then continue to existing-Workflow capability nodes and Describe It/Chat parity.
+Add regression-first existing Workflow capability nodes that select a real same-project Workflow and invoke it through the existing Workflow engine with immutable Automation execution linkage; do not copy Workflow steps or add another executor. Then extend Describe It/Chat parity for the complete custom schema.
 
 ## Update Contract
 

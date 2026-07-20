@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -361,6 +362,9 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		TaskSvc:       s.taskSvc,
 		SwarmSvc:      nil,
 		LLMConfigRepo: s.llmConfigRepo,
+		PrepareTaskCreation: func(ctx context.Context, request *TaskCreationRequest) error {
+			return s.prepareAutomationTaskCreation(ctx, task.ProjectID, request)
+		},
 		OnTasksCreated: func(ctx context.Context, requests []TaskCreationRequest, tasks []models.Task) error {
 			return s.recordAutomationTasksCreated(ctx, task.ProjectID, requests, tasks)
 		},
@@ -389,6 +393,90 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		Definitions: filtered,
 		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers, allowed),
 	}
+}
+
+func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectID string, request *TaskCreationRequest) error {
+	if s == nil || s.automationRepo == nil || request == nil {
+		return nil
+	}
+	automationContext, ok := AutomationContextFromContext(ctx)
+	if !ok || automationContext.ProjectID != projectID {
+		return nil
+	}
+	var selectedNode *models.AutomationNode
+	for _, binding := range automationContext.Bindings {
+		node, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, binding.VersionID, binding.NodeID, "implementation", true)
+		if err != nil {
+			return err
+		}
+		if node == nil {
+			continue
+		}
+		if selectedNode != nil && selectedNode.ConfigJSON != node.ConfigJSON {
+			return errors.New("Automation bindings have conflicting implementation task templates")
+		}
+		selectedNode = node
+	}
+	if selectedNode == nil {
+		return nil
+	}
+	var config map[string]any
+	if err := json.Unmarshal([]byte(selectedNode.ConfigJSON), &config); err != nil {
+		return fmt.Errorf("decoding implementation task template: %w", err)
+	}
+	prompt, _ := config["prompt"].(string)
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return errors.New("published implementation task template has no prompt")
+	}
+	if modelContext := strings.TrimSpace(request.Prompt); modelContext != "" && modelContext != prompt {
+		prompt += "\n\nIssue-specific context:\n" + modelContext
+	}
+	skills, _ := draftStringSlice(config["skills"])
+	if len(skills) > 0 {
+		prompt += "\n\nConfigured Agent skills:\n- " + strings.Join(automationSkillNames(normalizeDraftReferences(skills)), "\n- ")
+	}
+	sourceFiles, _ := draftStringSlice(config["source_files"])
+	if len(sourceFiles) > 0 {
+		prompt += "\n\nFocus source files:\n- " + strings.Join(normalizeDraftReferences(sourceFiles), "\n- ")
+	}
+	for _, binding := range automationContext.Bindings {
+		if binding.VersionID != selectedNode.VersionID || binding.AutomationID != selectedNode.AutomationID {
+			continue
+		}
+		pullRequest, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, binding.VersionID, selectedNode.ID, "open_pull_request", true)
+		if err != nil {
+			return err
+		}
+		if pullRequest != nil {
+			var prConfig map[string]any
+			if err := json.Unmarshal([]byte(pullRequest.ConfigJSON), &prConfig); err != nil {
+				return fmt.Errorf("decoding pull request node configuration: %w", err)
+			}
+			instructions, _ := prConfig["instructions"].(string)
+			base, _ := prConfig["base"].(string)
+			draft, _ := prConfig["draft"].(bool)
+			prompt += "\n\nPull request handoff:\n" + strings.TrimSpace(instructions) + "\nAfter implementation and validation, call github_open_pull_request for this task and source issue using base \"" + strings.TrimSpace(base) + "\" and draft=" + fmt.Sprintf("%t", draft) + ". Human review and merge remain authoritative."
+		}
+		break
+	}
+	request.Prompt = prompt
+	category, _ := config["category"].(string)
+	request.Category = category
+	priority, _ := draftInt(config["priority"])
+	request.Priority = priority
+	if ref, _ := config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
+		agent, err := resolveAutomationAgent(ctx, s.agentRepo, projectID, ref)
+		if err != nil {
+			return err
+		}
+		if agent == nil {
+			return fmt.Errorf("implementation Agent %q is unavailable in this project", ref)
+		}
+		request.AgentDefinitionID = agent.ID
+		request.Agent = ""
+	}
+	return nil
 }
 
 func (s *LLMService) recordAutomationTasksCreated(ctx context.Context, projectID string, requests []TaskCreationRequest, tasks []models.Task) error {
@@ -437,7 +525,7 @@ func (s *LLMService) recordAutomationTasksCreated(ctx context.Context, projectID
 				Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: created.ID, Relation: "child"}},
 			}
 			if sourceIssueResource != "" && binding.WorkItemID != "" {
-				implementationNode, err := s.automationRepo.GetNodeByKey(ctx, projectID, binding.AutomationID, binding.VersionID, "implementation")
+				implementationNode, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, binding.VersionID, binding.NodeID, "implementation", true)
 				if err != nil || implementationNode == nil {
 					applog.Infof("[agent-svc] automation implementation node lookup failed task=%s: %v", created.ID, err)
 					continue
