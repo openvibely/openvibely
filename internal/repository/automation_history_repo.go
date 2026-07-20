@@ -575,13 +575,20 @@ func (r *AutomationRepo) RecomputeAutomationHealth(ctx context.Context, projectI
 		ORDER BY COALESCE(completed_at, updated_at) DESC, id DESC LIMIT 3)`, projectID, automationID).Scan(&recentCount, &recentFailures); err != nil {
 		return health, err
 	}
+	externalState, err := r.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-AutomationExternalStaleAfter))
+	if err != nil {
+		return health, err
+	}
 	switch {
 	case recentCount == 3 && recentFailures == 3:
 		health.State = models.AutomationHealthUnhealthy
 		health.Reason = "Three consecutive trigger or dispatch failures"
-	case recentFailures > 0 || blocked > 0:
+	case recentFailures > 0 || blocked > 0 || externalState.Stale:
 		health.State = models.AutomationHealthDegraded
 		health.Reason = fmt.Sprintf("%d recent failed invocation(s), %d blocked or failed position(s)", recentFailures, blocked)
+		if externalState.Stale {
+			health.Reason += ", external GitHub state is stale"
+		}
 	case recentCount > 0:
 		health.State = models.AutomationHealthHealthy
 		health.Reason = "Recent triggers and dispatches completed without systemic errors"

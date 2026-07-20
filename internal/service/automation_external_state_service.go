@@ -95,7 +95,14 @@ func (s *AutomationExternalStateService) Refresh(ctx context.Context, projectID,
 			return models.AutomationExternalState{}, err
 		}
 	}
-	return s.automations.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-automationExternalStaleAfter))
+	state, err := s.automations.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-repository.AutomationExternalStaleAfter))
+	if err != nil {
+		return models.AutomationExternalState{}, err
+	}
+	if _, err := s.automations.RecomputeAutomationHealth(ctx, projectID, automationID, now); err != nil {
+		return models.AutomationExternalState{}, err
+	}
+	return state, nil
 }
 
 func (s *AutomationExternalStateService) reconcilePullRequestState(ctx context.Context, projectID, automationID, taskID, resourceID, state string) error {

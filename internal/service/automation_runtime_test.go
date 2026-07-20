@@ -1133,6 +1133,16 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 
 	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 7, URL: record.PRURL, State: "closed", Merged: true}}
 	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
+	visionTrigger := automationNodeByKey(t, fixture.definition, "vision_trigger")
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_invocations
+		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at, completed_at)
+		VALUES (?, ?, ?, ?, 'schedule', ?, 'external-health', 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, visionTrigger.ID, fixture.schedule.ID)
+	require.NoError(t, err)
+	health, err := fixture.repo.RecomputeAutomationHealth(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
+	require.NoError(t, err)
+	require.Equal(t, models.AutomationHealthDegraded, health.State)
+	require.Contains(t, health.Reason, "stale")
 	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
 	require.NoError(t, err)
 	require.Equal(t, 0, provider.calls, "ordinary graph reads must never call GitHub")
@@ -1146,6 +1156,12 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	stored, err := pullRequests.GetByTaskID(ctx, fixture.task.ID)
 	require.NoError(t, err)
 	require.Equal(t, "merged", stored.PRState)
+	var storedHealth, storedHealthReason string
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT health_state, health_reason FROM automations WHERE id = ?`, fixture.definition.Automation.ID).Scan(&storedHealth, &storedHealthReason))
+	require.Equal(t, string(models.AutomationHealthHealthy), storedHealth, "successful refresh must persistently clear stale external degradation")
+	var lifecycle string
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT lifecycle_state FROM automations WHERE id = ?`, fixture.definition.Automation.ID).Scan(&lifecycle))
+	require.Equal(t, "active", lifecycle, "external health evaluation must never change lifecycle")
 	var completed int
 	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND status = 'completed'`, fixture.definition.Automation.ID).Scan(&completed))
 	require.Equal(t, 1, completed, "merged PR state must advance the persisted Automation projection")

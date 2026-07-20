@@ -587,7 +587,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 ### Contract Checklist
 
 - [x] Deduplicate Live and portfolio running, waiting-human, blocked, failed, and recently-completed counters by work-item identity across activities, positions, and transitions while retaining invocation-only activity identity; select exactly one state per identity using failed, blocked, waiting, running, then recent precedence.
-- [x] Add an explicit bounded GitHub PR refresh service with a persisted one-minute cache, 20-resource limit, no retry on provider/rate-limit errors, local freshness/staleness, merged and closed projection reconciliation, and no GitHub calls from ordinary graph reads.
+- [x] Add an explicit bounded GitHub PR refresh service with a persisted one-minute cache, 20-resource limit, no retry on provider/rate-limit errors, local freshness/staleness, merged and closed projection reconciliation, persisted degraded health for stale external state, and no GitHub calls from ordinary graph reads.
 - [x] Resolve task, execution, Alert, goal, Workflow execution, GitHub issue, PR, and review resources to actual native detail destinations with project-scoped Alert and goal navigation.
 - [x] Emit safe exact-once process-local Automation lifecycle events/counters after successful pause, resume, archive, and delete commits, with no success event on failed mutation.
 - [x] Refresh tracked external state through the explicit cached POST endpoint when a hidden Live tab becomes visible; retain the local GET fallback for graphs without tracked external resources.
@@ -605,6 +605,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 - Regression-first destination and visible-tab tests failed against the pre-repair implementation on missing project/goal destinations and missing explicit visibility reconciliation, then passed after the focused repairs.
 - The first strict audit of repair checkpoint `8601d36` found that same-state UNION deduplication still allowed one work-item identity to appear in multiple state counters. A cross-state regression failed with `running=3` instead of `2`; Live and portfolio now group each identity through one precedence-selected state, and the focused regression, build, and uncached full suite pass.
+- The next strict audit of checkpoint `c48f7c8` found that displayed stale GitHub state did not enter the persisted health projection required by the Phase 2 health model. The regression failed with `healthy` instead of `degraded`; `RecomputeAutomationHealth` now consumes the local persisted freshness threshold, explicit refresh recomputes health, stale state persists a concise degraded reason, successful refresh restores healthy state, and lifecycle remains unchanged.
 - Focused service and handler regressions pass for exact operational counts, explicit cached/rate-limit refresh, merged-state parsing and projection, every supported resource destination, visible-tab refresh, and exact lifecycle observability.
 - `templ generate`, `gofmt`, `git diff --check`, and `go build ./...` pass. Desktop build emits only the known non-failing newer-macOS-SDK linker warnings.
 - `go test ./internal/... -count=1 -timeout 120s` passes.

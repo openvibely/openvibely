@@ -25,6 +25,8 @@ var (
 	githubResourceNamePattern           = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 )
 
+const AutomationExternalStaleAfter = 15 * time.Minute
+
 type AutomationProjectionEvent struct {
 	Context        models.AutomationContext
 	Binding        models.AutomationBinding

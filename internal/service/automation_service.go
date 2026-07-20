@@ -132,10 +132,7 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 	return definition, created, returnErr
 }
 
-const (
-	automationExternalRefreshCache = time.Minute
-	automationExternalStaleAfter   = 15 * time.Minute
-)
+const automationExternalRefreshCache = time.Minute
 
 type AutomationGraphService struct{ repo *repository.AutomationRepo }
 
@@ -227,7 +224,7 @@ func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automat
 	if err != nil {
 		return nil, err
 	}
-	externalState, err := s.repo.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-automationExternalStaleAfter))
+	externalState, err := s.repo.AutomationExternalState(ctx, projectID, automationID, now.UTC().Add(-repository.AutomationExternalStaleAfter))
 	if err != nil {
 		return nil, err
 	}
