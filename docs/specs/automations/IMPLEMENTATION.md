@@ -750,9 +750,9 @@ CREATE TABLE automation_trigger_owners (
 );
 ```
 
-Repository methods validate that local resources belong to the project. External identities are canonical and repository-qualified. `automation_trigger_owners.schedule_id` is the database-enforced exclusive current owner; the definition-resource table remains versioned history. Publishing claims the owner row in the same `BEGIN IMMEDIATE` transaction that activates the version. A primary-key conflict rejects concurrent ownership. Pausing retains the row with `ownership_state='paused'`; superseding or archiving disables the schedule before releasing or replacing its owner. Shared worker/inbox tasks remain allowed.
+Repository methods validate that local resources belong to the project. External identities are canonical and repository-qualified. `automation_trigger_owners.schedule_id` is the database-enforced exclusive current owner; the definition-resource table remains versioned history. Publishing claims the owner row in the same `BEGIN IMMEDIATE` transaction that activates the version. A primary-key conflict rejects concurrent ownership. Pausing retains the row with `ownership_state='paused'`; archiving disables the schedule before releasing its owner, while replacement deletes Scheduler rows that are no longer present in the active graph. Shared worker/inbox tasks remain allowed.
 
-Do not mutate an old version's trigger schedule in place when cadence/topology changes. Publication creates a new exclusive schedule for the new version, atomically switches `published_version_id`, and disables the superseded owned trigger after the new resources are ready. Reusable worker/inbox tasks may remain linked to several versions. Publication preview must show every trigger created, enabled, or disabled.
+Do not mutate an old version's trigger schedule in place when cadence/topology changes. Publication creates a new exclusive schedule for the new version when needed, atomically switches `published_version_id`, and deletes the superseded Scheduler row after the new resources are ready. Removing a Schedule node likewise deletes its Scheduler row instead of retaining a disabled entry on the Schedules page. Reusable worker/inbox tasks may remain linked to several versions. Publication preview must show every trigger created, enabled, or deleted.
 
 ### Publication Journal
 

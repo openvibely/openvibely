@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	automationAdapterContractVersion  = 7
-	automationCompilerContractVersion = 7
+	automationAdapterContractVersion  = 8
+	automationCompilerContractVersion = 8
 )
 
 type automationGitHubConnectionProvider interface {
@@ -242,8 +242,48 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 			dependencies = append(dependencies, dependency)
 		}
 		if changed && dependency.ID != "" {
-			plan.Effects = append(plan.Effects, models.AutomationPublicationEffect{StepKey: "disable:schedule:" + node.Key, Operation: "disable", TargetKey: "schedule:" + node.Key + ":previous", ResourceType: "schedule", Name: node.Name, ResourceID: dependency.ID})
+			plan.Effects = append(plan.Effects, models.AutomationPublicationEffect{StepKey: "delete:schedule:" + node.Key, Operation: "delete", TargetKey: "schedule:" + node.Key + ":previous", ResourceType: "schedule", Name: node.Name, ResourceID: dependency.ID})
 		}
+	}
+	var publishedScheduleKeys []string
+	for key, resource := range publishedResources {
+		if resource.ResourceType == "schedule" {
+			publishedScheduleKeys = append(publishedScheduleKeys, key)
+		}
+	}
+	sort.Strings(publishedScheduleKeys)
+	for _, key := range publishedScheduleKeys {
+		resource := publishedResources[key]
+		nodeKey := strings.SplitN(key, "\x00", 2)[0]
+		if _, retained := candidateNodes[nodeKey]; retained {
+			continue
+		}
+		if p.scheduleRepo == nil {
+			return nil, errors.New("schedule repository is unavailable")
+		}
+		schedule, scheduleErr := p.scheduleRepo.GetByID(ctx, resource.ResourceID)
+		if scheduleErr != nil {
+			return nil, scheduleErr
+		}
+		if schedule == nil {
+			return nil, fmt.Errorf("published schedule resource %q is unavailable", resource.ResourceID)
+		}
+		name := nodeKey
+		for _, oldNode := range published.Nodes {
+			if oldNode.NodeKey == nodeKey {
+				name = oldNode.Name
+				break
+			}
+		}
+		plan.Effects = append(plan.Effects, models.AutomationPublicationEffect{
+			StepKey: "delete:schedule:" + nodeKey, Operation: "delete", TargetKey: "schedule:" + nodeKey + ":previous",
+			ResourceType: "schedule", Name: name, ResourceID: schedule.ID,
+		})
+		dependencies = append(dependencies, automationPlanDependency{Type: "schedule", ID: schedule.ID,
+			ProjectID: definition.Automation.ProjectID, NodeKey: nodeKey, Configured: map[string]any{
+				"task_id": schedule.TaskID, "run_at": schedule.RunAt.Format("15:04"), "repeat_type": schedule.RepeatType,
+				"repeat_interval": schedule.RepeatInterval, "enabled": schedule.Enabled,
+			}})
 	}
 	sort.SliceStable(dependencies, func(i, j int) bool {
 		if dependencies[i].Type != dependencies[j].Type {

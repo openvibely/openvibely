@@ -162,7 +162,6 @@ type AutomationChatConfirmationReceipt struct {
 type AutomationBuilderPage struct {
 	Result            AutomationDraftResult        `json:"result"`
 	AutomationID      string                       `json:"automation_id,omitempty"`
-	BaseVersionID     string                       `json:"base_version_id,omitempty"`
 	RetryAutomationID string                       `json:"retry_automation_id,omitempty"`
 	RetryVersionID    string                       `json:"retry_version_id,omitempty"`
 	RetryPlanRevision string                       `json:"retry_plan_revision,omitempty"`

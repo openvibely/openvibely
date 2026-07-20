@@ -111,7 +111,6 @@ func (h *Handler) CloneAutomationDraftWeb(c echo.Context) error {
 	candidate := published.Candidate
 	hasPostedCandidate := strings.TrimSpace(c.FormValue("candidate_json")) != ""
 	retryPending := automationBuilderRetryPending(c)
-	submittedBaseVersionID := strings.TrimSpace(c.FormValue("base_version_id"))
 	if hasPostedCandidate {
 		candidate, err = service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
 		if err != nil {
@@ -128,12 +127,8 @@ func (h *Handler) CloneAutomationDraftWeb(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	baseVersionID := published.Definition.Version.ID
-	if hasPostedCandidate {
-		baseVersionID = submittedBaseVersionID
-	}
 	page := models.AutomationBuilderPage{
-		Result: *result, AutomationID: automationID, BaseVersionID: baseVersionID,
+		Result: *result, AutomationID: automationID,
 		Source: published.Definition.Version.Source,
 	}
 	applyAutomationBuilderRetryForm(c, &page)
@@ -145,10 +140,6 @@ func (h *Handler) CloneAutomationDraftWeb(c echo.Context) error {
 		return h.renderAutomationBuilder(c, page)
 	}
 	if !automationBuilderSaveRequested(c) {
-		return h.renderAutomationBuilder(c, page)
-	}
-	if submittedBaseVersionID == "" || submittedBaseVersionID != published.Definition.Version.ID {
-		page.Error = "This Automation changed after you opened it. Reopen the editor before saving."
 		return h.renderAutomationBuilder(c, page)
 	}
 	return h.publishAutomationBuilderCandidate(c, projectID, page)

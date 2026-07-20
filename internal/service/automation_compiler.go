@@ -396,7 +396,7 @@ func publishResult(definition *models.AutomationDefinition, snapshot *repository
 	}
 	result.Attempt = snapshot.Attempt
 	for _, step := range snapshot.Steps {
-		if step.ResourceID != "" && step.Operation != "disable" {
+		if step.ResourceID != "" && step.Operation != "delete" {
 			result.Resources = append(result.Resources, step)
 		}
 	}

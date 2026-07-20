@@ -202,6 +202,51 @@ func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *test
 	require.Equal(t, 1, completed, "a single terminal custom task must project its real completion onto the connected Outcome")
 }
 
+func TestCustomAutomationReplacementDeletesRemovedSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Remove custom schedule")
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	candidate, err := drafts.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Replace schedule graph"
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "schedule", Name: "Daily", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run daily.", "category": "scheduled", "priority": 2, "run_at": "08:30", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review work.", "category": "backlog", "priority": 2}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{{Key: "schedule_review", From: "schedule", To: "review", Condition: map[string]any{}}}
+	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
+	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	first, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+	require.NoError(t, err)
+	removedScheduleID := publishedScheduleID(t, first)
+	require.Equal(t, 1, tableCount(t, db, "schedules"))
+
+	replacement := candidate
+	replacement.Nodes = replacement.Nodes[1:]
+	replacement.Edges = []models.AutomationDraftEdge{}
+	staged, err := drafts.CreateVersionForSave(ctx, project.ID, created.Definition.Automation.ID, "manual", replacement)
+	require.NoError(t, err)
+	replacementPlan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, staged.Definition.Version.ID)
+	require.NoError(t, err)
+	require.True(t, publicationPlanHasEffect(replacementPlan, "schedule", removedScheduleID, "delete"), "the replacement plan must report removal of the deleted Schedule node's Scheduler row")
+	_, err = compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: staged.Definition.Version.ID, PlanRevision: replacementPlan.PlanRevision})
+	require.NoError(t, err)
+
+	removedSchedule, err := scheduleRepo.GetByID(ctx, removedScheduleID)
+	require.NoError(t, err)
+	require.Nil(t, removedSchedule, "removing a Schedule node must delete its Scheduler row instead of leaving a disabled entry")
+	require.Zero(t, tableCount(t, db, "schedules"))
+}
+
 func TestCustomAutomationPublicationRunsNativeAlertApprovalOnExactUserNodes(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -955,7 +1000,7 @@ func TestAutomationPublicationPlanGoldenRevisionExcludesLayoutAndMessages(t *tes
 	planner := NewAutomationPublicationPlanner(automationRepo, repository.NewTaskRepo(db, nil), repository.NewScheduleRepo(db), registry, drafts)
 	first, err := planner.Plan(context.Background(), project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "388eb2fec010a8d4ea8596f8f342a704868ed018baa5af600a66b266054cc01b", first.PlanRevision)
+	require.Equal(t, "dcc18caa006c5763aac375e2ecf74efcc442cf1e0bdbb10ab5c7aaa3607c046b", first.PlanRevision)
 
 	candidate.Assumptions = []string{"Layout-only author note"}
 	candidate.Warnings = []string{"Operational observation"}
@@ -994,7 +1039,7 @@ func TestAutomationPublicationPlanGoldenGitHubDependenciesAndConfigurationChange
 	planner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	first, err := planner.Plan(ctx, project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "6e109ad92cf315fcc005bf1122133ce6a07a0f60ef56b912e336c192a59f3b21", first.PlanRevision)
+	require.Equal(t, "58d08936344222476688a88d0447df06f6ef6d80986cf2478a228f23a65d6860", first.PlanRevision)
 
 	inbox.Enabled = false
 	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
@@ -1368,10 +1413,10 @@ func TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwi
 	require.Equal(t, secondAgent.ID, *updatedTask.AgentDefinitionID, "successful replacement must atomically switch the task Agent")
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM automation_publication_steps WHERE attempt_id = ? AND step_key LIKE 'task:%'`, second.Attempt.ID).Scan(&stagedTaskStatus))
 	require.Equal(t, "completed", stagedTaskStatus)
-	require.Equal(t, 2, tableCount(t, db, "schedules"), "cadence changes create a new exclusive trigger")
+	require.Equal(t, 1, tableCount(t, db, "schedules"), "replacement removes the superseded Scheduler row")
 	firstSchedule, err = scheduleRepo.GetByID(ctx, firstScheduleID)
 	require.NoError(t, err)
-	require.False(t, firstSchedule.Enabled)
+	require.Nil(t, firstSchedule)
 	newScheduleID := publishedScheduleID(t, second)
 	require.NotEqual(t, firstScheduleID, newScheduleID)
 	owner, err := automationRepo.GetTriggerOwner(ctx, newScheduleID)

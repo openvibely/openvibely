@@ -184,7 +184,7 @@ func (r *AutomationRepo) ConsumeAutomationConfirmationAndReserve(ctx context.Con
 		}
 		for order, effect := range input.Effects {
 			status := "pending"
-			if effect.Operation == "reuse" || effect.Operation == "unchanged" || effect.Operation == "disable" {
+			if effect.Operation == "reuse" || effect.Operation == "unchanged" || effect.Operation == "delete" {
 				status = "completed"
 			}
 			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_publication_steps

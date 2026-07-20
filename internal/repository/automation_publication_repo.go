@@ -103,7 +103,7 @@ func (r *AutomationRepo) ReservePublicationAttempt(ctx context.Context, projectI
 		}
 		for order, effect := range effects {
 			status := "pending"
-			if effect.Operation == "reuse" || effect.Operation == "unchanged" || effect.Operation == "disable" {
+			if effect.Operation == "reuse" || effect.Operation == "unchanged" || effect.Operation == "delete" {
 				status = "completed"
 			}
 			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_publication_steps
@@ -344,7 +344,7 @@ func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID stri
 	}
 	newSchedules := map[string]bool{}
 	for _, step := range snapshot.Steps {
-		if step.ResourceID == "" || (step.ResourceType != "task" && step.ResourceType != "schedule") || step.Operation == "disable" {
+		if step.ResourceID == "" || (step.ResourceType != "task" && step.ResourceType != "schedule") || step.Operation == "delete" {
 			continue
 		}
 		nodeKey := strings.TrimPrefix(step.TargetKey, step.ResourceType+":")
@@ -416,10 +416,7 @@ func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID stri
 	}
 	oldRows.Close()
 	for _, id := range oldSchedules {
-		if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id); err != nil {
-			return nil, err
-		}
-		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_trigger_owners WHERE schedule_id = ? AND automation_id = ?`, id, snapshot.Attempt.AutomationID); err != nil {
+		if _, err := conn.ExecContext(ctx, `DELETE FROM schedules WHERE id = ?`, id); err != nil {
 			return nil, err
 		}
 	}

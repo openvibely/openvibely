@@ -470,8 +470,8 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
 	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
 	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"))
-	var automationID, publishedVersionID string
-	require.NoError(t, tc.db.QueryRow(`SELECT id, published_version_id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &publishedVersionID))
+	var automationID string
+	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
 
 	edited := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, http.StatusOK, edited.Code, edited.Body.String())
@@ -497,38 +497,15 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	require.Contains(t, refreshed.Body.String(), "Saved task automation")
 	require.NotContains(t, refreshed.Body.String(), "Unsaved browser name", "refresh/re-entry must restore the published graph")
 
-	valid.Name = "Stale save without base"
-	rawMissingBase, err := json.Marshal(valid)
+	valid.Name = "Saved replacement without version token"
+	rawReplacement, err := json.Marshal(valid)
 	require.NoError(t, err)
-	missingBaseSave := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(rawMissingBase)}, "save_changes": {"true"},
+	savedEdit := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(rawReplacement)}, "save_changes": {"true"},
 	}).Execute()
-	require.Equal(t, http.StatusOK, missingBaseSave.Code, missingBaseSave.Body.String())
-	require.Empty(t, missingBaseSave.Header().Get("HX-Redirect"))
-	require.Contains(t, missingBaseSave.Body.String(), "This Automation changed after you opened it. Reopen the editor before saving.")
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "a Save without its exact base version must not change immutable history")
-	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
-	require.Zero(t, draftCount, "a rejected stale Save must not stage a persisted draft")
-
-	missingBaseCandidate := automationCandidateFromResponse(t, missingBaseSave)
-	require.Empty(t, automationHiddenValueFromResponse(t, missingBaseSave, "base_version_id"), "a rejected missing base must not receive a fresh concurrency token")
-	rawMissingBaseCandidate, err := json.Marshal(missingBaseCandidate)
-	require.NoError(t, err)
-	repeatedMissingBaseSave := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(rawMissingBaseCandidate)}, "save_changes": {"true"},
-	}).Execute()
-	require.Equal(t, http.StatusOK, repeatedMissingBaseSave.Code, repeatedMissingBaseSave.Body.String())
-	require.Empty(t, repeatedMissingBaseSave.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "resubmitting the rejected candidate must remain stale")
-
-	mismatchedBaseSave := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(rawMissingBase)}, "save_changes": {"true"}, "base_version_id": {"superseded-version"},
-	}).Execute()
-	require.Equal(t, http.StatusOK, mismatchedBaseSave.Code, mismatchedBaseSave.Body.String())
-	require.Empty(t, mismatchedBaseSave.Header().Get("HX-Redirect"))
-	require.Contains(t, mismatchedBaseSave.Body.String(), "This Automation changed after you opened it. Reopen the editor before saving.")
-	require.Equal(t, "superseded-version", automationHiddenValueFromResponse(t, mismatchedBaseSave, "base_version_id"), "a stale candidate must retain its stale token")
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "a Save against a stale base version must not change immutable history")
+	require.Equal(t, http.StatusNoContent, savedEdit.Code, savedEdit.Body.String())
+	require.NotEmpty(t, savedEdit.Header().Get("HX-Redirect"))
+	require.Equal(t, 2, tableCountHandler(t, tc, "automation_versions"), "Save replaces the active publication without a web version token while retaining immutable history")
 
 	invalidEdit := valid
 	invalidEdit.Nodes = nil
@@ -536,21 +513,12 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	rawInvalidEdit, err := json.Marshal(invalidEdit)
 	require.NoError(t, err)
 	failedEditSave := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(rawInvalidEdit)}, "save_changes": {"true"}, "base_version_id": {publishedVersionID},
+		"project_id": {project.ID}, "candidate_json": {string(rawInvalidEdit)}, "save_changes": {"true"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, failedEditSave.Code, failedEditSave.Body.String())
 	require.Empty(t, failedEditSave.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "an invalid edit Save must leave immutable history unchanged")
+	require.Equal(t, 2, tableCountHandler(t, tc, "automation_versions"), "an invalid replacement must leave immutable history unchanged")
 
-	valid.Name = "Saved successor"
-	rawSuccessor, err := json.Marshal(valid)
-	require.NoError(t, err)
-	savedEdit := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(rawSuccessor)}, "save_changes": {"true"}, "base_version_id": {publishedVersionID},
-	}).Execute()
-	require.Equal(t, http.StatusNoContent, savedEdit.Code, savedEdit.Body.String())
-	require.NotEmpty(t, savedEdit.Header().Get("HX-Redirect"))
-	require.Equal(t, 2, tableCountHandler(t, tc, "automation_versions"))
 	var publishedCount, supersededCount int
 	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'published'`, automationID).Scan(&publishedCount))
 	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'superseded'`, automationID).Scan(&supersededCount))
@@ -560,7 +528,7 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	require.Zero(t, draftCount)
 	var savedName string
 	require.NoError(t, tc.db.QueryRow(`SELECT name FROM automations WHERE id = ?`, automationID).Scan(&savedName))
-	require.Equal(t, "Saved successor", savedName)
+	require.Equal(t, "Saved replacement without version token", savedName)
 }
 
 func TestAutomationWebSaveRetriesExactFailedPublicationJournal(t *testing.T) {

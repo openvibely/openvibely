@@ -118,7 +118,7 @@ func TestAutomationGraphThemeAndHistoryNavigationInChrome(t *testing.T) {
 		result := models.AutomationDraftNode{Key: "result", Name: "Result", Type: models.AutomationNodeOutcome, Role: "custom_outcome", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 480, Y: 160}}
 		edge := models.AutomationDraftEdge{Key: "trigger_to_driver", From: "vision_trigger", To: "vision_driver"}
 		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Visual Draft", AutomationType: "vision_driver", AdapterKey: "vision_driver", Nodes: []models.AutomationDraftNode{trigger, driver, result}}
-		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, AutomationID: "automation-visual", BaseVersionID: "version-visual", NodePalette: []models.AutomationDraftNode{trigger, driver}, EdgePalette: []models.AutomationDraftEdge{edge}}
+		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, AutomationID: "automation-visual", NodePalette: []models.AutomationDraftNode{trigger, driver}, EdgePalette: []models.AutomationDraftEdge{edge}}
 		var out bytes.Buffer
 		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Automation builder: %v", err)
