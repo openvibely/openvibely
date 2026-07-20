@@ -1416,23 +1416,26 @@ func (r *AutomationRepo) GetConnectedNodeByRole(ctx context.Context, projectID, 
 	return &node, err
 }
 
-func (r *AutomationRepo) GetCustomTaskHandoff(ctx context.Context, projectID, automationID, versionID, sourceNodeID string) (bool, *models.AutomationNode, string, error) {
+type CustomAutomationTaskHandoff struct {
+	Node   models.AutomationNode
+	TaskID string
+}
+
+func (r *AutomationRepo) ListCustomTaskHandoffs(ctx context.Context, projectID, automationID, versionID, sourceNodeID string) (bool, []CustomAutomationTaskHandoff, error) {
 	var adapterKey string
 	err := r.db.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
 		WHERE project_id = ? AND automation_id = ? AND id = ? AND state IN ('published','superseded')`,
 		projectID, automationID, versionID).Scan(&adapterKey)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil, "", nil
+		return false, nil, nil
 	}
 	if err != nil {
-		return false, nil, "", err
+		return false, nil, err
 	}
 	if adapterKey != "custom" {
-		return false, nil, "", nil
+		return false, nil, nil
 	}
-	var node models.AutomationNode
-	var taskID string
-	err = r.db.QueryRowContext(ctx, `SELECT target.id, target.project_id, target.automation_id, target.version_id,
+	rows, err := r.db.QueryContext(ctx, `SELECT target.id, target.project_id, target.automation_id, target.version_id,
 		target.node_key, target.name, target.node_type, target.role, target.config_json, target.position_x, target.position_y,
 		target.created_at, target.updated_at, resource.resource_id
 		FROM automation_edges edge
@@ -1446,16 +1449,34 @@ func (r *AutomationRepo) GetCustomTaskHandoff(ctx context.Context, projectID, au
 			AND resource.automation_id = edge.automation_id AND resource.version_id = edge.version_id AND resource.node_id = target.id
 			AND resource.resource_type = 'task'
 		WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ? AND edge.source_node_id = ?
-		ORDER BY edge.display_order, edge.id LIMIT 1`, projectID, automationID, versionID, sourceNodeID).
-		Scan(&node.ID, &node.ProjectID, &node.AutomationID, &node.VersionID, &node.NodeKey, &node.Name, &node.NodeType,
-			&node.Role, &node.ConfigJSON, &node.PositionX, &node.PositionY, &node.CreatedAt, &node.UpdatedAt, &taskID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil, "", nil
-	}
+		ORDER BY edge.display_order, edge.id LIMIT 100`, projectID, automationID, versionID, sourceNodeID)
 	if err != nil {
-		return true, nil, "", err
+		return true, nil, err
 	}
-	return true, &node, taskID, nil
+	defer rows.Close()
+	handoffs := make([]CustomAutomationTaskHandoff, 0)
+	for rows.Next() {
+		var handoff CustomAutomationTaskHandoff
+		node := &handoff.Node
+		if err := rows.Scan(&node.ID, &node.ProjectID, &node.AutomationID, &node.VersionID, &node.NodeKey, &node.Name,
+			&node.NodeType, &node.Role, &node.ConfigJSON, &node.PositionX, &node.PositionY, &node.CreatedAt, &node.UpdatedAt,
+			&handoff.TaskID); err != nil {
+			return true, nil, err
+		}
+		handoffs = append(handoffs, handoff)
+	}
+	if err := rows.Err(); err != nil {
+		return true, nil, err
+	}
+	return true, handoffs, nil
+}
+
+func (r *AutomationRepo) GetCustomTaskHandoff(ctx context.Context, projectID, automationID, versionID, sourceNodeID string) (bool, *models.AutomationNode, string, error) {
+	custom, handoffs, err := r.ListCustomTaskHandoffs(ctx, projectID, automationID, versionID, sourceNodeID)
+	if err != nil || !custom || len(handoffs) == 0 {
+		return custom, nil, "", err
+	}
+	return true, &handoffs[0].Node, handoffs[0].TaskID, nil
 }
 
 func (r *AutomationRepo) GetCustomNotificationHandoff(ctx context.Context, projectID, automationID, versionID, sourceNodeID string) (*models.AutomationNode, error) {

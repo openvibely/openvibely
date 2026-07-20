@@ -56,7 +56,7 @@ func TestAutomationBlankDraftStartsEmptyAndPersistsUserLayout(t *testing.T) {
 	require.Equal(t, &models.AutomationDraftPoint{X: 37, Y: 83}, updated.Candidate.Nodes[0].Position, "normalization must preserve user-positioned nodes")
 }
 
-func TestCustomAutomationValidatesLinearTaskHandoffsAndRejectsAnalogousUnsupportedTopologies(t *testing.T) {
+func TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoinsOrCycles(t *testing.T) {
 	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	candidate, err := svc.BlankCandidate(AutomationAdapterCustom)
 	require.NoError(t, err)
@@ -105,7 +105,21 @@ func TestCustomAutomationValidatesLinearTaskHandoffsAndRejectsAnalogousUnsupport
 	branch.Edges = append(append([]models.AutomationDraftEdge(nil), candidate.Edges...), models.AutomationDraftEdge{
 		Key: "research_review", From: "research", To: "review", Condition: map[string]any{},
 	})
-	require.Contains(t, issueCodes(svc.ValidateCandidate(branch)), "task_branching")
+	require.Empty(t, svc.ValidateCandidate(branch), "one completed task may fan out to multiple ordinary tasks through the existing task-chain machinery")
+
+	ambiguousOutcome := candidate
+	ambiguousOutcome.Nodes = append(append([]models.AutomationDraftNode(nil), candidate.Nodes...), models.AutomationDraftNode{
+		Key: "also_done", Name: "Also done", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{},
+	})
+	ambiguousOutcome.Edges = append(append([]models.AutomationDraftEdge(nil), candidate.Edges...), models.AutomationDraftEdge{
+		Key: "implement_also_done", From: "implement", To: "also_done", Condition: map[string]any{},
+	})
+	require.Contains(t, issueCodes(svc.ValidateCandidate(ambiguousOutcome)), "ambiguous_handoff", "a task must not publish duplicate same-kind targets that the existing runtime cannot distinguish")
+
+	standaloneTask := candidate
+	standaloneTask.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes[1:2]...)
+	standaloneTask.Edges = nil
+	require.Empty(t, svc.ValidateCandidate(standaloneTask), "an ordinary task is a valid independently runnable Automation resource")
 
 	cycle := candidate
 	cycle.Edges = []models.AutomationDraftEdge{
@@ -166,7 +180,23 @@ func TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogous
 
 	missingRejected := candidate
 	missingRejected.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges[:len(candidate.Edges)-1]...)
-	require.Contains(t, issueCodes(svc.ValidateCandidate(missingRejected)), "approval_branches")
+	require.Empty(t, svc.ValidateCandidate(missingRejected), "users may observe only the approval result they care about")
+
+	terminalGate := missingRejected
+	terminalGate.Nodes = []models.AutomationDraftNode{candidate.Nodes[0], candidate.Nodes[2], candidate.Nodes[3]}
+	terminalGate.Edges = []models.AutomationDraftEdge{
+		{Key: "schedule_request", From: "schedule", To: "request", Condition: map[string]any{}},
+		{Key: "request_human", From: "request", To: "human", Condition: map[string]any{}},
+	}
+	require.Empty(t, svc.ValidateCandidate(terminalGate), "a Schedule is a task and may create a notification whose approval gate is terminal")
+
+	sharedAction := terminalGate
+	sharedAction.Nodes = append(sharedAction.Nodes, models.AutomationDraftNode{
+		Key: "manual_review", Name: "Manual review", Type: models.AutomationNodeAgentTask, Role: "task",
+		Config: map[string]any{"prompt": "Review on demand.", "category": "active", "priority": 2},
+	})
+	sharedAction.Edges = append(sharedAction.Edges, models.AutomationDraftEdge{Key: "manual_request", From: "manual_review", To: "request", Condition: map[string]any{}})
+	require.Empty(t, svc.ValidateCandidate(sharedAction), "a real action capability may be reused by multiple valid task producers")
 
 	duplicateApproved := candidate
 	duplicateApproved.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)

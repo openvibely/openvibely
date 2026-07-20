@@ -70,7 +70,10 @@ func TestAutomationDescriptionGenerationSupportsExpandedCustomBuilderContract(t 
 
 	preview, err := svc.PreviewDescription(context.Background(), "Every morning review a change and ask me to approve or reject it", models.AutomationCapabilitySnapshot{}, func(_ context.Context, prompt string) (string, error) {
 		require.Contains(t, prompt, "adapter_key custom")
-		require.Contains(t, prompt, "Schedule -> Agent task")
+		require.Contains(t, prompt, "A Schedule or Agent task may connect")
+		require.Contains(t, prompt, "standalone ordinary task")
+		require.Contains(t, prompt, "fan out")
+		require.NotContains(t, prompt, "Do not branch Agent tasks")
 		require.Contains(t, prompt, "create_notification")
 		require.Contains(t, prompt, "native_approval")
 		require.Contains(t, prompt, "create_github_issue")

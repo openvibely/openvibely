@@ -496,7 +496,7 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testi
 	require.NotContains(t, created.Body.String(), "Save draft")
 	require.NotContains(t, created.Body.String(), "Suggested nodes", "blank drafts must not show a template-derived node list")
 	require.Contains(t, created.Body.String(), `data-automation-create-node`, "blank drafts must create named nodes directly")
-	require.Contains(t, created.Body.String(), "Add a Schedule")
+	require.Contains(t, created.Body.String(), "Add a capability node")
 	require.NotContains(t, created.Body.String(), "required nodes remain")
 	require.NotContains(t, created.Body.String(), "required connections remain")
 	require.NotContains(t, created.Body.String(), "Add transitions")

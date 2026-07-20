@@ -249,46 +249,49 @@ func (s *LLMService) activatePublishedCustomAutomationChild(ctx context.Context,
 		if sourceNode == nil || sourceNode.ID != binding.NodeID {
 			return true, errors.New("custom Automation task source does not match its immutable version")
 		}
-		custom, targetNode, childTaskID, err := s.automationRepo.GetCustomTaskHandoff(ctx, parentTask.ProjectID, automationID, binding.VersionID, sourceNode.ID)
+		custom, handoffs, err := s.automationRepo.ListCustomTaskHandoffs(ctx, parentTask.ProjectID, automationID, binding.VersionID, sourceNode.ID)
 		if err != nil {
 			return true, err
 		}
 		if !custom {
 			return false, nil
 		}
-		if targetNode == nil || childTaskID == "" {
-			return true, nil
-		}
-		var config map[string]any
-		if err := json.Unmarshal([]byte(targetNode.ConfigJSON), &config); err != nil {
-			return true, fmt.Errorf("decoding custom Automation task configuration: %w", err)
-		}
-		targetDraft := models.AutomationDraftNode{Key: targetNode.NodeKey, Name: targetNode.Name, Type: targetNode.NodeType, Role: targetNode.Role, Config: config}
-		promptCandidate := models.AutomationDraftCandidate{AdapterKey: AutomationAdapterCustom, Nodes: []models.AutomationDraftNode{targetDraft}}
-		notificationNode, err := s.automationRepo.GetCustomNotificationHandoff(ctx, parentTask.ProjectID, automationID, binding.VersionID, targetNode.ID)
-		if err != nil {
-			return true, err
-		}
-		if notificationNode != nil {
-			var notificationConfig map[string]any
-			if err := json.Unmarshal([]byte(notificationNode.ConfigJSON), &notificationConfig); err != nil {
-				return true, fmt.Errorf("decoding custom Automation notification configuration: %w", err)
+		for _, handoff := range handoffs {
+			targetNode := &handoff.Node
+			var config map[string]any
+			if err := json.Unmarshal([]byte(targetNode.ConfigJSON), &config); err != nil {
+				return true, fmt.Errorf("decoding custom Automation task configuration: %w", err)
 			}
-			promptCandidate.Nodes = append(promptCandidate.Nodes, models.AutomationDraftNode{
-				Key: notificationNode.NodeKey, Name: notificationNode.Name, Type: notificationNode.NodeType,
-				Role: notificationNode.Role, Config: notificationConfig,
-			})
-			promptCandidate.Edges = append(promptCandidate.Edges, models.AutomationDraftEdge{From: targetNode.NodeKey, To: notificationNode.NodeKey})
+			targetDraft := models.AutomationDraftNode{Key: targetNode.NodeKey, Name: targetNode.Name, Type: targetNode.NodeType, Role: targetNode.Role, Config: config}
+			promptCandidate := models.AutomationDraftCandidate{AdapterKey: AutomationAdapterCustom, Nodes: []models.AutomationDraftNode{targetDraft}}
+			notificationNode, err := s.automationRepo.GetCustomNotificationHandoff(ctx, parentTask.ProjectID, automationID, binding.VersionID, targetNode.ID)
+			if err != nil {
+				return true, err
+			}
+			if notificationNode != nil {
+				var notificationConfig map[string]any
+				if err := json.Unmarshal([]byte(notificationNode.ConfigJSON), &notificationConfig); err != nil {
+					return true, fmt.Errorf("decoding custom Automation notification configuration: %w", err)
+				}
+				promptCandidate.Nodes = append(promptCandidate.Nodes, models.AutomationDraftNode{
+					Key: notificationNode.NodeKey, Name: notificationNode.Name, Type: notificationNode.NodeType,
+					Role: notificationNode.Role, Config: notificationConfig,
+				})
+				promptCandidate.Edges = append(promptCandidate.Edges, models.AutomationDraftEdge{From: targetNode.NodeKey, To: notificationNode.NodeKey})
+			}
+			category, _ := config["category"].(string)
+			if sourceNode.NodeType == models.AutomationNodeTrigger {
+				category = string(models.CategoryActive)
+			}
+			chain := &models.ChainConfiguration{
+				Enabled: true, Trigger: "on_completion", ChildTaskID: handoff.TaskID, ChildAutomationNodeKey: targetNode.NodeKey,
+				ChildCategory: category, ChildPromptPrefix: automationCompiledTaskPrompt(promptCandidate, targetDraft),
+			}
+			if err := s.activateCompiledAutomationChild(ctx, parentTask, parentOutput, chain); err != nil {
+				return true, err
+			}
 		}
-		category, _ := config["category"].(string)
-		if sourceNode.NodeType == models.AutomationNodeTrigger {
-			category = string(models.CategoryActive)
-		}
-		chain := &models.ChainConfiguration{
-			Enabled: true, Trigger: "on_completion", ChildTaskID: childTaskID, ChildAutomationNodeKey: targetNode.NodeKey,
-			ChildCategory: category, ChildPromptPrefix: automationCompiledTaskPrompt(promptCandidate, targetDraft),
-		}
-		return true, s.activateCompiledAutomationChild(ctx, parentTask, parentOutput, chain)
+		return true, nil
 	}
 	return false, nil
 }

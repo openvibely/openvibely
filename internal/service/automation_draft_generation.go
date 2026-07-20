@@ -21,8 +21,8 @@ Choose the registered adapter that represents the user's request:
 - Use adapter_key custom and automation_type custom for a user-defined graph assembled from the surfaced capabilities below. Node keys and names are user-owned.
 
 Supported custom nodes and configuration:
-- Schedule: type trigger, role fixed_schedule; this is the scheduled task, with config prompt, category scheduled, priority, optional agent_ref, target_node_key when connected, run_at in HH:MM, repeat_type, repeat_interval, enabled. It may run by itself or hand off to one Agent task.
-- Agent task: type agent_task, role task; this is an ordinary task, with config prompt, category, priority, and optional agent_ref selected only from the project capability snapshot. Never add skills or source_files to task config. An Agent task connected after a Schedule remains backlog until the Schedule task completes; a task started by another task uses active. Scheduling belongs only to the Schedule node.
+- Schedule: type trigger, role fixed_schedule; this is the scheduled task, with config prompt, category scheduled, priority, optional agent_ref, target_node_key when connected, run_at in HH:MM, repeat_type, repeat_interval, enabled. It may run by itself and may connect to supported task, action, or Outcome capabilities.
+- Agent task: type agent_task, role task; this is an ordinary task, with config prompt, category, priority, and optional agent_ref selected only from the project capability snapshot. Never add skills or source_files to task config. It may be a standalone ordinary task or connect to supported task, action, or Outcome capabilities. Scheduling belongs only to the Schedule node.
 - Create notification: type action, role create_notification; config notification_type and instructions.
 - Human approval: type human_gate, role native_approval; config approval_method native_alert.
 - Create GitHub issue: type action, role create_github_issue; config instructions and labels. Never configure assignees.
@@ -33,11 +33,12 @@ Supported custom nodes and configuration:
 - Human review: type human_gate, role pull_request_review; config approval_method pull_request_review.
 - Outcome: type outcome, role completed; empty config.
 
-Supported custom handoffs are deterministic:
-- A Schedule may run as a standalone scheduled task, or use Schedule -> Agent task -> zero or more linear Agent tasks -> Outcome.
-- A terminal Agent task may instead use Agent task -> Create notification -> Human approval -> one approved Outcome and one rejected Outcome. Those two gate edges use condition state approved and rejected.
-- The GitHub lifecycle uses producer Schedule -> Agent task -> Create GitHub issue -> Human assignment, plus inbox Schedule -> GitHub inbox. Human assignment -> GitHub inbox uses condition state assigned. Continue GitHub inbox -> Implementation task template -> Open pull request -> Human review -> Outcome.
-- Do not branch Agent tasks, add multiple task parents, create cycles, bypass a human assignment/review gate, or attach conditions to other edges.
+Supported custom handoffs are deterministic capability connections, not fixed workflow recipes:
+- A Schedule or Agent task may connect to ordinary Agent tasks, Create notification, Create GitHub issue, or an Outcome. A task may fan out to several different supported targets. An ordinary Agent task may also stand alone.
+- Each ordinary Agent task may have at most one task or Schedule parent because a persisted task has one parent. Schedule and task categories remain the user's normal task settings; a Schedule-triggered child becomes runnable when its Schedule task completes.
+- Create notification connects to Human approval. Human approval may be terminal or connect either or both approved/rejected results to Outcomes. Result edges use condition state approved or rejected, with at most one Outcome for each state. Multiple valid task producers may share one Create notification action.
+- The human-gated GitHub lifecycle uses Create GitHub issue -> Human assignment and a separately scheduled GitHub inbox. Human assignment -> GitHub inbox uses condition state assigned. Continue GitHub inbox -> Implementation task template -> Open pull request -> Human review -> Outcome.
+- Do not add multiple task parents, create cycles, bypass a human assignment/review gate, or attach conditions to non-gate edges.
 
 Only generate GitHub capability nodes when the supplied snapshot says GitHub is configured. Preserve human assignment, approval, pull request review, merge, release, and deployment boundaries. Do not emit database IDs, project IDs, URLs, arbitrary tools, executable code, SQL, credentials, hidden/internal capabilities, or unknown configuration fields.
 

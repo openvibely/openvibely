@@ -8,6 +8,29 @@ Phase 5 is active after direct product feedback showed the completed first-relea
 
 Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, pagination, accessibility, and observability repairs remain complete through `d2512dd`. Phase 5 now has a validated custom foundation, deterministic multi-task execution, Native human approval, configurable GitHub lifecycle capabilities, Describe It/Chat parity for the surfaced custom schema, and repaired Blank connector and schedule resource ownership. Blank starts with `adapter_key=custom`, the node dialog uses one `Node purpose` field with no runtime/design-only split, no preset nodes or transitions are inserted, and its empty supported-edge palette is serialized as `[]` rather than `null`, so direct node-to-node drags cannot fail in the browser before creating an edge. Visible lines and arrows render fully opaque in a final pointer-transparent foreground above nodes and connector circles, while selection hit areas remain behind nodes and captured pointer releases resolve the real connector under the release coordinates. Applying a custom Schedule → Agent task graph creates a dedicated scheduled task and Scheduler row for the Schedule node plus a separate ordinary Backlog Agent Task. A due occurrence dispatches the Schedule node's own task through the existing Automation machinery; successful completion follows the exact immutable Schedule-to-Agent edge through the existing task-chain path and activates the Agent Task without repointing the Scheduler row. The Schedules calendar therefore shows every applied Schedule node as its own scheduled task using the immutable schedule-node name. Unsupported capability handoffs remain fail-closed draft errors, and publication derives only real task/schedule effects plus explicit Alert/GitHub/human-gate configuration from user-owned nodes and edges. Runtime Alert and GitHub activity uses existing services and exact immutable Automation-version provenance. Per the user's correction, the old JSON-only hidden Workflow subsystem is not an Automation builder capability and will be removed separately rather than exposed here. Remaining Phase 5 work is managed-memory reconciliation, a clean checkpoint, and the fresh edit-free full-objective audit.
 
+## Phase 5 Composable Capability Follow-up
+
+### Completed Requirements
+
+- Custom publication no longer requires a Schedule. A graph containing one standalone ordinary task publishes that task as a normal Automation-owned resource; maintained registration adapters retain their existing trigger requirement.
+- Schedule and ordinary task nodes may connect to supported tasks, actions, or Outcomes. One task may fan out to multiple ordinary child tasks, and each child is activated through the existing task transition and worker path using an ordered, bounded lookup of immutable published edges and resource memberships.
+- A Schedule may directly drive Create notification or Create GitHub issue because the Schedule node is itself the scheduled task. Multiple valid Schedule/task producers may share one Create notification action.
+- Native approval may be terminal or expose either or both approved/rejected Outcomes. If a real human decision has no configured result edge, runtime records terminal completion at the approval gate instead of failing or inventing a handoff.
+- Fixed workflow recipes, exact task-source counts, task category rules derived from graph position, mandatory paired approval Outcomes, and inert disconnected-Outcome errors were removed. The remaining publication blockers represent actual unsupported semantics: unknown capabilities/handoffs, more than one persisted task parent, cycles, invalid gate conditions, duplicate same-kind external action/Outcome targets that the role-based runtime cannot distinguish, GitHub assignment/review bypasses, and incomplete executable action paths.
+- Describe It and Chat use the same composable custom contract. The model prompt now describes standalone tasks, task fan-out, direct Schedule actions, shared notification actions, and optional approval outcomes instead of instructing the model to generate only linear mini-workflows.
+
+### Regression And Validation Evidence
+
+- `TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoinsOrCycles` and the Native Alert topology regression failed first under the recipe validator, then proved standalone tasks, fan-out, Schedule-to-action, shared notification actions, optional outcomes, and explicit duplicate same-kind target rejection while retaining task-parent, cycle, condition, and human-boundary rejection.
+- `TestCustomAutomationPublicationSupportsStandaloneTaskFanout` failed first on the global Schedule requirement. It now publishes three ordinary tasks with no Scheduler row, persists both child-parent relationships, and proves one parent completion activates both children and records two exact immutable transitions.
+- `TestCustomAutomationPublicationRunsNativeAlertApprovalOnExactUserNodes` failed first with `sql: no rows in result set` for an omitted rejected branch. It now proves the configured approved branch reaches its Outcome and the unconfigured rejected result terminates safely at the approval gate.
+- `TestAutomationDescriptionGenerationSupportsExpandedCustomBuilderContract` failed first on the old linear-only prompt and now proves Describe It/Chat receive the expanded composition contract.
+- The compiler/adapter contract version is `7`; both publication-plan goldens were deliberately refreshed so stale version-6 confirmations cannot apply the changed semantics.
+- The Automation-focused repository/service/handler/Chat suite passes after the regression repairs.
+- `templ generate` completed with zero generated updates; `gofmt`, `git diff --check`, and `go build ./...` passed with only the documented non-failing macOS SDK linker warnings.
+- `go test ./web/templates/pages -count=1 -timeout 180s` and `go test ./internal/... -count=1 -timeout 180s` passed every package.
+- The first `TMPDIR=/private/tmp go test ./... -count=1 -timeout 180s` run had one unrelated Task Thread browser scroll-position timing failure. The exact test passed immediately in isolation, and a fresh complete rerun passed every package, classifying the first failure as transient.
+
 ## Phase 5 Task Parity And Edge Controls Follow-up
 
 ### Completed Requirements
@@ -24,7 +47,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 - `TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskChain` failed first because the transactional handoff guard accepted only Agent-task sources. It now proves exact Schedule-task completion activates the connected Agent Task as Active/Pending while preserving the complete immutable causal lineage.
 - `templ generate` completed with zero pending generated updates; `gofmt`, `git diff --check`, and `go build ./...` pass. Desktop build/test emits only the documented non-failing newer-SDK linker warnings.
 - The focused Automation database/repository/service/handler/Chat/observability/page suite, `go test ./web/templates/pages -count=1 -timeout 120s`, `go test ./internal/... -count=1 -timeout 120s`, and `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` all pass.
-- Direct managed-memory mutation remains unavailable in this task runtime. The selected `automation_graphs.md` topic still contains the superseded direct Schedule-to-Agent dispatch wording and requires reconciliation by an authorized memory writer before a final qualifying full-objective audit.
+- Direct managed-memory mutation remains unavailable in this task runtime. The selected `automation_graphs.md` topic reflects the corrected Schedule/task ownership and edge controls, but still says executable task branching is unsupported and records checkpoint `30a7ad4`; it requires reconciliation with the composable capability checkpoint before a qualifying full-objective audit.
 
 ## Phase 5 Blank Connector Regression Checkpoint
 
@@ -80,7 +103,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 - `templ generate` completes with zero pending generated updates; `gofmt`, `git diff --check`, and `go build ./...` pass. Desktop build/test emits only the documented non-failing newer-SDK linker warnings.
 - `go test ./internal/... -count=1 -timeout 120s` passes every internal package.
 - `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passes every package, including production real-Chrome Automation graph coverage.
-- Direct managed-memory mutation remains unavailable in this task runtime. The authoritative `automation_graphs.md` topic still describes the Schedule page in terms of an attached Agent Task and must be reconciled through an authorized writer before the final qualifying audit.
+- Direct managed-memory mutation remains unavailable in this task runtime. The authoritative `automation_graphs.md` topic correctly reflects Schedule resource ownership but must be reconciled with the later composable task fan-out and optional approval-result contract through an authorized writer before the final qualifying audit.
 
 ## Phase 5 Custom Builder Checklist
 
@@ -92,10 +115,10 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 - [x] Validate the initial Schedule → Agent task → Outcome capability handoff and fail closed for unsupported capabilities, handoffs, conditions, and invalid targets.
 - [x] Plan and compile a user-named, user-configured custom Agent task and Schedule into real existing-domain resources.
 - [x] Preserve draft-only geometry, project isolation, explicit Automation identity, confirmation, idempotency, trigger ownership, lifecycle, and no-inference boundaries.
-- [x] Compile Agent task → Agent task handoffs through existing task/Workflow machinery with exact Automation provenance and Live projection.
-  - [x] Accept only deterministic linear task-chain handoffs rooted at a Schedule; reject task branching, multiple parents, cycles, and unscheduled roots.
-  - [x] Publish every configured Agent task as a visible OpenVibely task and atomically configure existing task chaining only after the version is ready.
-  - [x] Reuse a connected child task across scheduled invocations while preserving task status, category, Agent definition, prompt handoff, and project ownership.
+- [x] Compile Agent task → Agent task handoffs through existing task machinery with exact Automation provenance and Live projection.
+  - [x] Accept standalone ordinary tasks and deterministic task fan-out; reject only multiple task parents, cycles, and unsupported handoffs.
+  - [x] Publish every configured Agent task as a visible OpenVibely task and atomically configure existing task relationships only after the version is ready.
+  - [x] Reuse connected child tasks across executions while preserving task status, category, Agent definition, prompt handoff, and project ownership.
   - [x] Persist one idempotent work item/activity/transition for each task handoff and project the child execution on the exact connected node.
   - [x] Transition a completed terminal custom task to its connected Outcome using persisted Automation provenance.
   - [x] Add regression-first validation, publication, runtime projection, idempotency, and analogous unsupported-topology coverage; run the slice validation and fresh audit.
@@ -111,7 +134,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 ### Completed Requirements
 
 - Describe It now treats `custom` as a first-class generated adapter instead of forcing every request into Native SDLC, GitHub SDLC, or Vision Driver. Its model-facing schema enumerates the same surfaced Schedule, Agent task, Native Alert approval, GitHub lifecycle, and Outcome node configuration available in Blank.
-- The generation contract documents only deterministic supported custom handoffs: linear task chains, Native approved/rejected branches, and the existing human-gated GitHub lifecycle. It rejects task branching, multiple parents, cycles, unsupported conditions, human-gate bypasses, automatic issue assignment, hidden/internal capabilities, and merge/release/deployment authority.
+- The generation contract documents deterministic capability composition: standalone tasks, task fan-out, Schedule/task actions and Outcomes, optional Native approval results, and the existing human-gated GitHub lifecycle. It rejects multiple task parents, cycles, unsupported conditions, human-gate bypasses, automatic issue assignment, hidden/internal capabilities, and merge/release/deployment authority.
 - The bounded project capability snapshot now advertises the custom `task` role alongside all surfaced Alert/GitHub roles. Agent, skill, source-file, GitHub readiness, secret exclusion, deterministic ordering, and collection bounds remain unchanged.
 - The one bounded repair prompt preserves valid custom intent and no longer replaces a requested custom graph with an unrelated preset.
 - The Automations page and canonical Chat actions use the same capability snapshot, no-tools model generation, decode, normalization, validation, persistence, planning, confirmation, and compiler path. A fixed custom approval candidate now proves identical web/Chat persistence and confirmed Chat publication into the expected visible task and schedule.
@@ -160,14 +183,14 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 ### Remaining Work
 
 - Describe It/Chat parity is completed by the later Phase 5 checkpoint above. The old hidden Workflow subsystem is intentionally excluded per direct user correction.
-- Reconcile the authoritative `automation_graphs.md` managed topic when a scoped mutation path is available, then perform the fresh full-objective audit after final validation.
+- Reconcile the authoritative `automation_graphs.md` managed topic when a scoped mutation path is available, then perform the fresh full-objective audit.
 
 ## Phase 5 Native Alert Approval Checkpoint
 
 ### Completed Requirements
 
 - Blank users can add and configure `Create notification` and `Human approval` nodes alongside Schedule, Agent task, and Outcome nodes. Nothing is preassembled; incomplete connections remain editable draft setup items, including a newly connected approval edge before its Approved/Rejected result is selected.
-- Publishable Native Alert paths compose with existing linear task chains: `Schedule → Agent task… → Create notification → Human approval → approved/rejected Outcomes`. Conditions are restricted to the exact gate branches, and missing, duplicate, cyclic, branching, wrong-role, or unsafe analogous topologies fail closed.
+- Publishable Native Alert paths compose with standalone, chained, or fan-out task graphs: `Schedule/task → Create notification → Human approval → optional approved/rejected Outcomes`. Conditions remain restricted to exact gate results; duplicate result edges, cycles, wrong-role connections, and unsafe analogous topologies fail closed.
 - Review and apply distinguishes visible task/schedule resource effects from notification-handoff and human-gate configuration. Publication creates no Alert; the compiled Agent task uses the existing `create_notification` runtime capability, and the real pending project Alert is created only when that task runs.
 - Alert creation resolves the exact user-owned action and gate through immutable version nodes/edges rather than preset keys. Human approve, reject, and dismiss decisions remain authoritative in the existing Alert service and append exact configured Automation transitions transactionally.
 - Runtime state projects the real pending Alert as waiting on the selected gate and the real decision on the selected Outcome. Alert/task links continue to use native drill-down resources rather than graph-only records.
@@ -177,8 +200,8 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ### Regression And Validation Evidence
 
-- `TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogousUnsafeBranches` covers valid single/multi-task composition plus missing/duplicate branches, wrong targets, and unsupported conditions.
-- `TestCustomAutomationPublicationRunsNativeAlertApprovalOnExactUserNodes` covers planning, real resource publication, immutable prompt compilation, mutable-state tampering, idempotency collision isolation, pending Live state, both human decisions, exact custom edges, and terminal outcome projection.
+- `TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogousUnsafeBranches` covers task-chain composition, direct Schedule-to-notification composition, shared valid producers, optional/terminal result branches, duplicate result states, wrong targets, and unsupported conditions.
+- `TestCustomAutomationPublicationRunsNativeAlertApprovalOnExactUserNodes` covers planning, real resource publication, immutable prompt compilation, mutable-state tampering, idempotency collision isolation, pending Live state, a configured approved Outcome, and safe terminal projection at the gate when the rejected Outcome is omitted.
 - `TestAutomationBlankBuildsCustomRunnableTaskAndSchedule` covers the visible node purposes, configuration controls, save-before-result selection, and Approved/Rejected edge persistence through the web builder.
 - `templ generate`, `gofmt`, `git diff --check`, and `go build ./...` pass; desktop emits only the documented non-failing newer-SDK linker warnings.
 - `go test ./internal/... -count=1 -timeout 120s` passes.
@@ -187,13 +210,13 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 ### Remaining Work
 
 - GitHub lifecycle capability nodes and Describe It/Chat parity are completed by the later Phase 5 checkpoints above. The hidden Workflow subsystem is excluded per direct user correction.
-- Reconcile the authoritative `automation_graphs.md` managed topic when a scoped mutation path is available, then perform the fresh full-objective audit after final validation.
+- Reconcile the authoritative `automation_graphs.md` managed topic when a scoped mutation path is available, then perform the fresh full-objective audit.
 
 ## Phase 5 Agent-Task Handoff Checkpoint
 
 ### Completed Requirements
 
-- Custom graphs now accept deterministic linear `Schedule → Agent task → Agent task… → Outcome` paths. Graph normalization derives Scheduled root-task and Active follow-up behavior from the connected parent capability; branching, multiple parents, cycles, unsupported capability edges, and cross-project/version/resource targets fail closed.
+- Custom graphs accept standalone ordinary tasks, deterministic task chains, and task fan-out rooted either at a Schedule or an ordinary task. Categories remain normal task settings; multiple task parents, cycles, unsupported capability edges, and cross-project/version/resource targets fail closed.
 - Confirmed publication creates every configured node as a visible normal OpenVibely task. Downstream tasks remain blocked during compilation, and the existing publication transaction atomically installs parent IDs, chain configuration, Agent definitions, prompts, categories, priorities, and statuses with the immutable version switch.
 - Runtime handoff uses the existing task-chain and Worker paths. It reactivates the published child task, carries parent output into the configured child prompt, preserves lineage, reloads Automation context through the child task activity, and creates one work item/activity/edge transition at the exact connected node.
 - Causal runtime behavior resolves the source version's persisted custom edge and task membership rather than trusting the task's latest mutable chain JSON. Old invocations therefore retain their immutable graph-version semantics after later task configuration changes.
@@ -210,7 +233,7 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ### Validation And Audit
 
-- Regression-first focused tests initially failed because chain configuration had no server-owned target task/node identity. The implemented regressions cover valid linear handoffs, branching, multiple parents, cycles, visible task creation, blocked-before-publication safety, atomic chain setup, publication retry, mutable-chain tampering, exact target-node context, idempotent retry/resubmission, busy-child blocking, connected Outcome completion, and the original single-task custom path.
+- Regression-first focused tests initially failed because chain configuration had no server-owned target task/node identity. The current regressions cover standalone tasks, task chains and fan-out, multiple-parent and cycle rejection, visible task creation, blocked-before-publication safety, atomic topology setup, publication retry, mutable-chain tampering, exact target-node context, idempotent retry/resubmission, busy-child blocking, connected Outcome completion, and the original single-task custom path.
 - `templ generate`, `gofmt`, `git diff --check`, and `go build ./...` pass; desktop emits only the documented non-failing newer-SDK linker warnings.
 - `go test ./internal/... -count=1 -timeout 120s` passes.
 - `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passes every package, including production Chrome Automation graph coverage.
@@ -218,8 +241,8 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ### Remaining Work
 
-- Native approval, configurable GitHub lifecycle nodes, and described/Chat parity are completed by the later Phase 5 checkpoints above. The hidden Workflow subsystem is excluded per direct user correction. Remaining work is managed-memory reconciliation, final validation, and the fresh full-objective audit.
-- The authoritative `automation_graphs.md` managed view records checkpoint `2010127` and correctly includes the Native approval slice, but it still names configurable GitHub capabilities as remaining work. This runtime exposes `memory_view` but no scoped memory mutation action. Per the managed-memory runbook and explicit user direction, do not delegate or edit an untracked copy; reconcile the authoritative topic once a scoped writer is available and before the qualifying final audit.
+- Native approval, configurable GitHub lifecycle nodes, and described/Chat parity are completed by the later Phase 5 checkpoints above. The hidden Workflow subsystem is excluded per direct user correction. Remaining work is managed-memory reconciliation and the fresh full-objective audit.
+- The authoritative `automation_graphs.md` managed view now reflects the surfaced custom GitHub and Schedule/task parity checkpoints, but it still records task branching as unsupported and must be updated with the later composable fan-out and optional approval-result contract. This runtime exposes `memory_view` but no scoped memory mutation action. Per the managed-memory runbook and explicit user direction, do not delegate or edit an untracked copy; reconcile the authoritative topic once a scoped writer is available and before the qualifying final audit.
 
 ## Phase 4 Checklist
 

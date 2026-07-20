@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -172,15 +173,18 @@ func recordAlertDecisionProjection(ctx context.Context, exec SQLExecutor, projec
 				branchState = "rejected"
 			}
 			var targetType models.AutomationNodeType
-			if err := exec.QueryRowContext(ctx, `SELECT target.id, target.node_type FROM automation_edges edge
-				JOIN automation_nodes target ON target.id = edge.target_node_id AND target.project_id = edge.project_id
-					AND target.automation_id = edge.automation_id AND target.version_id = edge.version_id
-				WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ?
-					AND edge.source_node_id = ? AND json_extract(edge.condition_json, '$.state') = ?`,
-				projectID, value.automationID, value.versionID, approvalNode, branchState).Scan(&targetNode, &targetType); err != nil {
-				return err
-			}
-			if targetType == models.AutomationNodeOutcome {
+			branchErr := exec.QueryRowContext(ctx, `SELECT target.id, target.node_type FROM automation_edges edge
+					JOIN automation_nodes target ON target.id = edge.target_node_id AND target.project_id = edge.project_id
+						AND target.automation_id = edge.automation_id AND target.version_id = edge.version_id
+					WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ?
+						AND edge.source_node_id = ? AND json_extract(edge.condition_json, '$.state') = ?`,
+				projectID, value.automationID, value.versionID, approvalNode, branchState).Scan(&targetNode, &targetType)
+			if errors.Is(branchErr, sql.ErrNoRows) {
+				targetNode = approvalNode
+				transition = models.AutomationTransitionCompleted
+			} else if branchErr != nil {
+				return branchErr
+			} else if targetType == models.AutomationNodeOutcome {
 				transition = models.AutomationTransitionCompleted
 			}
 		} else {

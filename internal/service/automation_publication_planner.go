@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	automationAdapterContractVersion  = 6
-	automationCompilerContractVersion = 6
+	automationAdapterContractVersion  = 7
+	automationCompilerContractVersion = 7
 )
 
 type automationGitHubConnectionProvider interface {

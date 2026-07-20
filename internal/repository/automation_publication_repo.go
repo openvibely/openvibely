@@ -389,7 +389,15 @@ func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID stri
 		}
 	}
 	if len(newSchedules) == 0 {
-		return nil, errors.New("published automation requires at least one trigger schedule")
+		var adapterKey string
+		if err := conn.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
+			WHERE project_id = ? AND automation_id = ? AND id = ?`, snapshot.Attempt.ProjectID,
+			snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID).Scan(&adapterKey); err != nil {
+			return nil, err
+		}
+		if adapterKey != "custom" {
+			return nil, errors.New("published automation requires at least one trigger schedule")
+		}
 	}
 	oldRows, err := conn.QueryContext(ctx, `SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ? AND version_id <> ?`, snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID)
 	if err != nil {
