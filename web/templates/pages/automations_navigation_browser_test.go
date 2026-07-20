@@ -239,15 +239,15 @@ window.addEventListener('DOMContentLoaded', function() {
 	      var targetRect = targetHandle.getBoundingClientRect();
 	      sourceHandle.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:sourceRect.left+sourceRect.width/2, clientY:sourceRect.top+sourceRect.height/2}));
 	      targetHandle.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
-	      var preview = document.querySelector('[data-automation-edge-preview]');
-	      if (!preview || preview.hidden) fail('connector preview is not visible while dragging');
-	      if (preview.getAttribute('x1') === preview.getAttribute('x2') && preview.getAttribute('y1') === preview.getAttribute('y2')) fail('connector preview did not follow the pointer');
-	      var previewStyle = getComputedStyle(preview);
-	      if (previewStyle.stroke === 'none' || previewStyle.stroke === 'transparent' || previewStyle.opacity === '0') fail('connector preview has no visible stroke');
-	      if (parseFloat(previewStyle.strokeWidth) < 3) fail('connector preview is too thin to see while dragging');
-	      if (previewStyle.pointerEvents !== 'none') fail('connector preview can block the destination port');
-	      targetHandle.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));
-	    }
+		      var preview = document.querySelector('[data-automation-edge-preview]');
+		      if (!preview) fail('connector preview is missing while dragging');
+		      if (preview.getAttribute('x1') === preview.getAttribute('x2') && preview.getAttribute('y1') === preview.getAttribute('y2')) fail('connector preview did not follow the pointer');
+		      var previewStyle = getComputedStyle(preview);
+		      if (preview.hasAttribute('hidden') || previewStyle.display === 'none' || preview.getClientRects().length === 0) fail('connector preview remains hidden while dragging');
+		      if (previewStyle.stroke === 'none' || previewStyle.stroke === 'transparent' || previewStyle.opacity === '0') fail('connector preview has no visible stroke');
+		      if (parseFloat(previewStyle.strokeWidth) < 3) fail('connector preview is too thin to see while dragging');
+		      if (previewStyle.pointerEvents !== 'none') fail('connector preview can block the destination port');
+		      targetHandle.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:pointerId, clientX:targetRect.left+targetRect.width/2, clientY:targetRect.top+targetRect.height/2}));	    }
 		    dragConnection('vision_trigger', 'left', 'vision_driver', 'right', 11);
 		    dragConnection('vision_driver', 'right', 'result', 'left', 12);
 		    dragConnection('result', 'left', 'vision_trigger', 'right', 13);	    var candidateInput = document.querySelector('[data-automation-draft-form] [data-candidate-json]');
@@ -258,11 +258,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		    ['vision_trigger>vision_driver', 'vision_driver>result', 'result>vision_trigger'].forEach(function(pair) { if (!pairs.includes(pair)) fail('missing cyclic connection ' + pair); });
 		    var twoSidedEdge = connectedCandidate.edges.find(function(edge) { return edge.from === 'vision_trigger' && edge.to === 'vision_driver'; });
 		    if (!twoSidedEdge || twoSidedEdge.from_port !== 'left' || twoSidedEdge.to_port !== 'right') fail('chosen left/right connection sides were not retained');
-		    click('[data-edge-key][data-from="result"][data-to="vision_trigger"] [data-edge-hit]', 'selectable connection');
-		    var reconnectHandle = document.querySelector('[data-edge-key][data-from="result"][data-to="vision_trigger"] [data-reconnect-edge][data-edge-endpoint="to"]');
-		    var reconnectTarget = port('vision_driver', 'left');
-		    if (!reconnectHandle || !reconnectTarget) fail('selected connection did not expose a draggable endpoint');
-		    var reconnectRect = reconnectHandle.getBoundingClientRect();
+			    click('[data-edge-key][data-from="result"][data-to="vision_trigger"] [data-edge-hit]', 'selectable connection');
+			    var selectedEdge = document.querySelector('[data-edge-key][data-from="result"][data-to="vision_trigger"]');
+			    if (!selectedEdge) fail('selected connection group is missing');
+			    selectedEdge.focus();
+			    if (getComputedStyle(selectedEdge).outlineStyle !== 'none') fail('selected connection shows an unnecessary bounding outline');
+			    var reconnectHandle = document.querySelector('[data-edge-key][data-from="result"][data-to="vision_trigger"] [data-reconnect-edge][data-edge-endpoint="to"]');
+			    var reconnectTarget = port('vision_driver', 'left');
+			    if (!reconnectHandle || !reconnectTarget) fail('selected connection did not expose a draggable endpoint');		    var reconnectRect = reconnectHandle.getBoundingClientRect();
 		    var reconnectTargetRect = reconnectTarget.getBoundingClientRect();
 		    reconnectHandle.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:14, clientX:reconnectRect.left+reconnectRect.width/2, clientY:reconnectRect.top+reconnectRect.height/2}));
 		    reconnectTarget.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:14, clientX:reconnectTargetRect.left+reconnectTargetRect.width/2, clientY:reconnectTargetRect.top+reconnectTargetRect.height/2}));

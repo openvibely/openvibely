@@ -965,7 +965,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					}
 					function beginReconnect(group, handle, event) {
 						if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection(); var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!points) return;
-						var endpoint = handle.dataset.edgeEndpoint, start = endpoint === 'from' ? points.start : points.finish; activeConnection = {reconnectKey: edge.key, endpoint: endpoint, pointerId: event.pointerId}; preview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.hidden = false;
+						var endpoint = handle.dataset.edgeEndpoint, start = endpoint === 'from' ? points.start : points.finish; activeConnection = {reconnectKey: edge.key, endpoint: endpoint, pointerId: event.pointerId}; preview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.removeAttribute('hidden');
 						svg.querySelectorAll('[data-connect-port]').forEach(function(port) { port.classList.add('automation-connect-handle--eligible'); }); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);
 					}
 					function bindEdgeGroup(group) {
@@ -989,7 +989,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					window.removeEventListener('pointercancel', cancelConnection);
 				}
 				function clearActiveConnection() {
-					activeConnection = null; keyboardSource = null; preview.hidden = true; clearConnectionHandles(); removeConnectionListeners();
+					activeConnection = null; keyboardSource = null; preview.setAttribute('hidden', ''); clearConnectionHandles(); removeConnectionListeners();
 				}
 				function moveConnection(event) {
 					if (!activeConnection || event.pointerId !== activeConnection.pointerId) return;
@@ -1010,7 +1010,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection();
 						var start = nodePortPoint(handle.dataset.connectPort, handle.dataset.portSide); if (!start) return;
 						activeConnection = {from: handle.dataset.connectPort, fromSide: handle.dataset.portSide, pointerId: event.pointerId};
-						preview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.hidden = false;
+						preview.setAttribute('x1', start.x); preview.setAttribute('y1', start.y); preview.setAttribute('x2', start.x); preview.setAttribute('y2', start.y); preview.removeAttribute('hidden');
 						showConnectionTargets(activeConnection.from, activeConnection.fromSide); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);
 					}
 					svg.querySelectorAll('.automation-draft-edge').forEach(bindEdgeGroup);
@@ -1215,10 +1215,10 @@ templ automationGraphThemeStyles() {
 			.automation-connect-handle--eligible { fill: oklch(var(--su)); stroke: oklch(var(--su)); opacity: 1; stroke-width: 4; }
 			.automation-connect-handle:focus-visible { outline: none; stroke: oklch(var(--p)); stroke-width: 5; }
 			.automation-edge-hit { fill: none; stroke: transparent; stroke-width: 16; vector-effect: non-scaling-stroke; cursor: pointer; }
+			.automation-draft-edge:focus { outline: none; }
 			.automation-draft-edge [data-edge-line] { pointer-events: none; }
 			.automation-edge-endpoint, .automation-edge-delete { opacity: 0; pointer-events: none; }
-			.automation-draft-edge--selected .automation-graph-edge { stroke: oklch(var(--p)); stroke-width: 3; }
-			.automation-draft-edge--selected .automation-edge-endpoint, .automation-draft-edge--selected .automation-edge-delete, .automation-draft-edge:focus-within .automation-edge-endpoint, .automation-draft-edge:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }
+			.automation-draft-edge--selected .automation-graph-edge { stroke: oklch(var(--p)); stroke-width: 3; }			.automation-draft-edge--selected .automation-edge-endpoint, .automation-draft-edge--selected .automation-edge-delete, .automation-draft-edge:focus-within .automation-edge-endpoint, .automation-draft-edge:focus-within .automation-edge-delete { opacity: 1; pointer-events: auto; }
 			.automation-edge-endpoint { fill: oklch(var(--p)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: crosshair; }
 			.automation-edge-delete circle, .automation-node-delete circle { fill: oklch(var(--er)); stroke: oklch(var(--b1)); stroke-width: 2; vector-effect: non-scaling-stroke; }
 			.automation-edge-delete text, .automation-node-delete text { fill: oklch(var(--b1)); font-size: 15px; font-weight: 700; pointer-events: none; }

@@ -2,11 +2,11 @@
 
 ## Current Phase
 
-The strict-audit repair is implemented and fully validated at checkpoint `d023f0e`. Phases 1-4 and prior safety/UX repairs remain checkpointed through `4c72be8`; the five findings from the strict audit of that checkpoint are repaired. The separate qualifying read-only full-objective audit must wait until authoritative managed memory is reconciled through an authorized mutation path.
+The strict-audit repair is implemented and fully validated at checkpoint `d023f0e`, with status reconciliation at `8dad69b`. The authoritative managed memory is semantically current. A follow-up graph interaction repair now makes the SVG drag preview actually render in Chrome and removes the selected-edge bounding outline while preserving deletion and reconnection; it is fully validated and awaiting its clean checkpoint before the separate qualifying read-only full-objective audit.
 
 ## Status
 
-Phases 1-4, graph-editor UX repairs, Definition of Done safety repairs, connector preview, Blank publication semantics, public Chat identity, node-resource pagination, and Automation observability are checkpointed through `4c72be8`. Checkpoint `d023f0e` preserves strict draft schema identity, adds project-scoped Agent/skill/source-file task configuration through validation/builder/planning/compilation, adds set-based portfolio operational summaries and health reasons, makes described-draft GitHub readiness connection-accurate, and adds reduced-motion-safe running-node animation. Full validation passes; managed-memory reconciliation and the separate strict audit remain.
+Phases 1-4, graph-editor UX repairs, Definition of Done safety repairs, connector preview, Blank publication semantics, public Chat identity, node-resource pagination, and Automation observability are checkpointed through `8dad69b`. Checkpoint `d023f0e` preserves strict draft schema identity, adds project-scoped Agent/skill/source-file task configuration through validation/builder/planning/compilation, adds set-based portfolio operational summaries and health reasons, makes described-draft GitHub readiness connection-accurate, and adds reduced-motion-safe running-node animation. The follow-up connector visibility and selected-edge presentation repair passes focused Chrome, Automation-wide, build, and full repository validation; its checkpoint and the separate strict audit remain.
 
 ## Phase 4 Checklist
 
@@ -547,22 +547,48 @@ Phases 1-4, graph-editor UX repairs, Definition of Done safety repairs, connecto
 - Fresh implementation audit traced decode/normalize/validate/persist/load/clone/plan, page/Chat shared capability validation, create/replacement task configuration, project isolation, plan dependency/effect hashing, portfolio provenance identity, GitHub readiness, and rendered motion policy. It repaired handler Agent-repository overwrite and unresolved-reference draft behavior before the final validation chain.
 - Identity/exclusion search found no Register Existing, legacy detection, heuristic inference, confidence scoring, resource migration/backfill, arbitrary topology execution, or parallel task/worker/Workflow/Alert/GitHub runtime.
 
-### Managed Memory Gate
+### Managed Memory State
 
-- The authoritative `automation_graphs.md` managed view still records these five findings as open and names this repair as the next action instead of checkpoint `d023f0e`. No tracked `.openvibely/memories/` counterpart exists.
-- This turn exposes `memory_view` but no authorized managed-memory mutation tool. Per the runbook/audit workflow, do not begin the qualifying strict read-only audit until an authorized mutation path updates that view to the new checkpoint and a subsequent `memory_view` confirms semantic agreement.
+- The authoritative `automation_graphs.md` managed view records checkpoint `d023f0e`, status reconciliation `8dad69b`, all five completed strict-audit repairs, passing full validation, explicit Automation identity, and every exclusion.
+- No tracked `.openvibely/memories/automation_graphs.md` counterpart exists. The managed view is semantically current and no longer blocks the qualifying read-only audit.
 
 ### Identity And Scope Guard
 
 - Supported Automation identity remains only Template, Describe It, Blank, and maintained Native/GitHub setup registration. This pass must not add Register Existing, legacy detection, heuristic inference, migration or graph backfill, confidence scoring, arbitrary graph execution, or a parallel runtime engine.
 
+## Follow-Up Connector Rendering Repair
+
+### Contract Checklist
+
+- [x] Reproduce the production SVG drag path in real Chrome and require the preview to have no `hidden` attribute, non-`none` display, rendered client geometry, visible primary stroke, nonzero endpoints, and non-interactive hit behavior before drop.
+- [x] Remove and restore the SVG `hidden` attribute explicitly during create and reconnect drags instead of assigning an unsupported `SVGLineElement.hidden` expando.
+- [x] Suppress the selected edge group’s browser bounding-box outline while preserving selected-line emphasis, draggable endpoints, the red midpoint delete control, the visible Delete connection action, and keyboard deletion.
+- [x] Preserve connector layering, two-sided geometry, consecutive edges/cycles, reconnection, deletion, pointer cancellation, ordinary-wheel pass-through, pinch zoom, explicit Automation identity, and every exclusion.
+
+### Requirements And Files
+
+- Live preview visibility and selected-edge focus presentation are implemented in `web/templates/pages/automations.templ` with synchronized generated output in `web/templates/pages/automations_templ.go`.
+- The production Chrome regression in `web/templates/pages/automations_navigation_browser_test.go` now rejects an SVG preview that still has `hidden`, computes to `display: none`, has no rendered client rect, or gives the selected edge group a browser outline.
+
+### Regression, Validation, And Audit Evidence
+
+- Regression-first `go test ./web/templates/pages -run TestAutomationGraphThemeAndHistoryNavigationInChrome -count=1 -timeout 60s` failed against `8dad69b` with `connector preview remains hidden while dragging`, proving that `preview.hidden = false` did not remove the SVG `hidden` attribute.
+- After repair, `templ generate`, `gofmt`, `git diff --check`, `go build ./cmd/server`, and the focused production Chrome regression passed.
+- Automation-wide validation passed: `go test ./internal/database ./internal/repository ./internal/service ./internal/handler ./internal/chatcontrol ./internal/automationobs ./web/templates/pages -run 'TestMigration11[3-6]|TestAutomation|TestRegistry_Automation' -count=1 -timeout 180s`.
+- Full repository validation passed: `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s`; every package passed and desktop emitted only the documented non-failing newer-SDK linker warnings.
+- The implementation changes only SVG visibility and focus presentation. It adds no persistence or runtime semantics, Register Existing, legacy detection, heuristic inference, migration/backfill, confidence scoring, arbitrary graph execution, or parallel runtime engine.
+
+### Remaining Work
+
+- Create the clean connector-rendering checkpoint, then perform the separate qualifying strict read-only audit from that immutable state.
+
 ## Remaining Phases
 
-- Reconcile authoritative managed memory through an authorized mutation path, verify it with `memory_view`, create/use the clean implementation checkpoint, and perform the separate qualifying strict read-only full-objective audit.
+- Create the clean connector-rendering checkpoint, then perform the separate qualifying strict read-only full-objective audit against the immutable checkpoint.
 
 ## Exact Next Action
 
-Update authoritative `automation_graphs.md` to record the completed five-finding repair and passing validation at the new checkpoint, verify no tracked counterpart exists and the managed view is semantically current, then begin a separate edit-free audit of all four phases, all 17 Definition of Done items, explicit Automation identity, and every exclusion.
+Create the clean connector-rendering checkpoint, then begin a separate edit-free audit of all four phases, all 17 Definition of Done items, explicit Automation identity, and every exclusion.
 
 ## Update Contract
 
