@@ -2,7 +2,7 @@
 
 ## Current Phase
 
-The qualifying strict read-only audit of checkpoint `f3d0524` failed on four material contracts: work-item counter deduplication, cached/rate-limited GitHub reconciliation and freshness, complete native node-resource destinations, and pause/resume/archive/delete observability. Regression-first repairs for all four are implemented and fully validated; the repair checkpoint and a separate fresh edit-free full-objective audit remain.
+The Automation implementation is fully validated through checkpoint `4e971f0`. A fresh separate edit-free full-objective audit of that immutable checkpoint passes all four phases, all 17 Definition of Done items, explicit Automation identity, and every exclusion. Completion remains blocked only by the unavailable authoritative managed-memory mutation capability needed to reconcile the stale checkpoint wording in `automation_graphs.md`.
 
 ## Status
 
@@ -482,8 +482,8 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 
 ## Open Findings Or Blockers
 
-- No known code, test, build, managed-memory semantic, identity, or exclusion blocker remains after the current strict-audit repair.
-- The required separate edit-free full-objective audit remains and must run from the clean repair checkpoint before completion is claimed.
+- No known code, test, build, identity, exclusion, phase, or Definition of Done blocker remains after the edit-free audit of `4e971f0`.
+- The authoritative `automation_graphs.md` managed view still names an older checkpoint for the current repairs. This thread exposes only read-only `memory_view`; a dedicated active reconciliation task also failed with the exact same missing mutation capability and changed no repository code. Completion cannot be claimed until an authorized managed-memory mutation path updates and reload-verifies that topic.
 
 ## Reopened Full-Objective Audit Repair
 
@@ -612,13 +612,49 @@ Phases 1-4 and the prior graph/editor, publication, runtime, identity, safety, p
 - `TMPDIR=/private/tmp go test ./... -count=1 -timeout 120s` passes every package, including the production Chrome graph regression.
 - The authoritative `automation_graphs.md` managed view records the four repaired audit contracts, explicit persisted Automation identity, exclusions, and the separate audit as the only remaining action. No tracked `.openvibely/memories/automation_graphs.md` counterpart exists.
 
+## Final Edit-Free Full-Objective Audit Of `4e971f0`
+
+### Four Phases
+
+- Phase 1 passes: migration `113`, explicit project-scoped Native/GitHub registration, immutable definitions, actual-ID resource binding, exclusive triggers, maintained-bootstrap restrictions, portfolio/detail UI, no-inference tests, project cascade, and isolation are present and mapped to repository/service/handler coverage.
+- Phase 2 passes: migration `114`, atomic schedule claims, leased outbox/reservations, prepared execution identity, existing Worker/ThreadInput/Alert/GitHub paths, explicit causal projections, SSE invalidation, restart recovery, one-state-per-work-item counters, bounded native drill-down, cached external reconciliation/freshness, stale external health, and lifecycle observability are present and tested.
+- Phase 3 passes: immutable invocation/work-item history, bounded collection-scoped cursors, cross-invocation lifetime, persisted-transition replay, funnel/duration/failure/bottleneck summaries, independently persisted health, Chart.js lifecycle, compact payloads, empty/partial states, and project isolation are present and tested.
+- Phase 4 passes: migration `115`, strict schema/capability resolution, inert drafts, Template/Describe It/Blank, constrained visual builder, deterministic plans, idempotent compilation into real tasks/schedules, immutable replacement publication, page/Chat parity, later-turn confirmation, lifecycle/delete safety, direct/HTMX/browser behavior, accessibility, and generated templ output are present and tested.
+
+### Definition Of Done
+
+1. Multiple project graphs are proven by explicit registration and portfolio tests.
+2. Native/GitHub setup uses actual IDs and rejects title-derived or unsupported registration.
+3. Live/portfolio counters choose one precedence-selected state per work-item identity and retain distinct invocation-only activity.
+4. Every supported task, execution, Alert, goal, Workflow execution, issue, PR, and review drill-down resolves its native project-scoped destination.
+5. Atomic dispatch and reconciler tests preserve state across reload/restart.
+6. History, clone, replay, and lifetime tests retain immutable version identity.
+7. Shared inbox, child, queued-input, and multi-binding tests preserve causal provenance.
+8. Composite constraints plus definition/live/history/draft/plan/publish/resource tests enforce project isolation.
+9. Native approval, GitHub assignment/review, merge, release, and deployment boundaries remain unchanged.
+10. Publication and runtime use existing Task, Schedule, Worker, ThreadInput, Alert, Goal, Workflow, GitHub, execution, lineage, and broadcaster boundaries; no hidden engine exists.
+11. Templates and builder publication persist the same definition/version/node/edge model used by Live and History.
+12. Public creation remains Template, Describe It, and Blank; maintained registration remains Native/GitHub-only.
+13. Canonical Chat tests prove persisted draft, visible exact plan, later explicit confirmation, and durable activation.
+14. Page and Chat share draft normalization, validation, planning, compilation, and publication services.
+15. Every publishable topology is accepted by one registered adapter; custom graphs remain inert drafts and edges are never generically executed.
+16. Confirmation, publication journal, trigger ownership, dispatch, execution, work-item, activity, and transition identities are retry/crash/concurrency-safe.
+17. Migration, repository, service, handler, Chat, runtime, SSE, UI, accessibility, browser-navigation, restart, build, internal, and uncached full repository validation pass.
+
+### Identity, Exclusions, And Outcome
+
+- Supported identity remains explicit persisted Automation identity through Template, Describe It, Blank, and maintained Native/GitHub setup registration. No Register Existing, legacy detection, heuristic inference, confidence scoring, migration/backfill of prior resources, or prompt/title/URL identity inference exists.
+- No generic edge interpreter, parallel worker/executor/queue, duplicate Workflow/Alert/GitHub subsystem, auto-merge, release, deployment, arbitrary executable node, or silent schema coercion was introduced.
+- Confirmed publication creates/reuses fixed visible adapter tasks and schedules through existing services. Dynamic Implementation nodes represent ordinary Alert/GitHub-linked OpenVibely tasks created after existing approval/assignment gates and projected through explicit provenance.
+- Audit outcome: no material code/spec/test finding remains at `4e971f0`. The worktree was clean throughout the audit. The only remaining blocker is authoritative managed-memory mutation capability.
+
 ## Remaining Phases
 
-- Create the clean `f3d0524` strict-audit repair checkpoint, then perform the separate qualifying strict read-only full-objective audit against that immutable checkpoint.
+- No implementation phase or code audit remains. Reconcile the authoritative managed memory through an authorized mutation path, reload-verify it, and verify the final worktree is clean.
 
 ## Exact Next Action
 
-Create the clean `f3d0524` strict-audit repair checkpoint, then begin a separate edit-free audit of all four phases, all 17 Definition of Done items, explicit Automation identity, and every exclusion.
+Expose an authorized managed-memory mutation path, update `automation_graphs.md` with checkpoints `8601d36`, `c48f7c8`, and `4e971f0` plus the passing full-objective audit, reload-verify the topic, and verify the final clean repository state before claiming completion.
 
 ## Update Contract
 
