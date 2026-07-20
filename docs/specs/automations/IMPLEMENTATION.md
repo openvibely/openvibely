@@ -128,7 +128,7 @@ Expand at most one or a small bounded number of automations at a time. A fully e
 Keep definition authoring separate from runtime state:
 
 - `Definition`: the published topology and configuration;
-- `Edit draft`: a mutable unpublished version;
+- `Edit`: browser-local changes to the published definition until Save;
 - `Live`: runtime overlays for the published version;
 - `History`: immutable invocations and transitions.
 
@@ -136,22 +136,24 @@ The initial release may render only registered definitions. Later releases can l
 
 ## Creating An Automation
 
-The Automations page and Chat must use the same draft-generation, validation, publication-plan, and compilation services. They are two entry points into one automation-definition system, not separate implementations.
+The Automations page and Chat must use the same graph-generation, validation, publication-plan, and compilation services. They are two entry points into one automation-definition system, not separate implementations.
 
-Creating an automation uses one shared draft, plan, and compiler pipeline with surface-appropriate publication intent:
+Creating an automation uses one shared candidate, plan, and compiler pipeline with surface-appropriate publication intent:
 
 ```text
 Describe/select template
-  -> generate draft
+  -> generate graph candidate
   -> inspect/edit graph
+  -> web: keep changes in browser memory until Save changes
+     Chat: persist the displayed candidate for later confirmation
   -> validate and compute the concrete resource plan
-  -> web: Save changes and publish immediately
+  -> web: publish immediately from Save changes
      Chat: show the plan, then require a later explicit confirmation
   -> create/reuse resources and activate
   -> observe in Live view
 ```
 
-Generating a draft and changing canvas geometry must not create tasks, schedules, alerts, issues, executions, or PRs. On the Automations page, the visible `Save changes` action is the explicit request to validate and publish the saved draft immediately. In Chat, runtime resources change only after the separately displayed plan is confirmed by a later user-authored input.
+Generating a candidate and changing canvas geometry must not create definitions, versions, tasks, schedules, alerts, issues, executions, or PRs on the Automations page. Refresh or navigation discards unsaved page edits. The visible `Save changes` action submits the complete candidate once and is the explicit request to validate and publish immediately. A short-lived unpublished version may be used internally during atomic publication, but it is not editable product state. In Chat, the displayed candidate remains persisted so a later user-authored input can confirm its exact publication plan; runtime resources change only after that confirmation.
 
 ### Automations Page Entry Point
 
@@ -162,8 +164,8 @@ It offers three paths:
 | Path | Behavior |
 | --- | --- |
 | Use a template | Starts from a maintained Native SDLC, GitHub SDLC, Vision Driver, finder, audit, or documentation template. |
-| Describe it | Accepts natural language and generates a constrained draft graph. |
-| Start blank | Creates an empty draft with the visual node palette. |
+| Describe it | Accepts natural language and generates a constrained browser-local graph candidate. |
+| Start blank | Opens an empty browser-local graph with the visual node palette. |
 
 Recommend `Use a template` for common flows and make `Describe it` the primary flexible option. Starting blank is an advanced path, not a prerequisite for using automation.
 
@@ -181,7 +183,7 @@ Implementation agent: Coding Agent
 Open PR when complete: Yes
 ```
 
-Generate a draft from the template and project capabilities. Missing integrations remain validation errors or clearly marked unresolved configuration; do not silently substitute a different approval mechanism.
+Generate a graph candidate from the template and project capabilities. Missing integrations remain validation errors or clearly marked unresolved configuration; do not silently substitute a different approval mechanism.
 
 ### Describe It Flow
 
@@ -206,8 +208,9 @@ Natural-language description
   -> decode structured graph candidate
   -> normalize IDs, roles, configuration, and layout
   -> deterministically validate topology and project references
-  -> persist automation + draft version + nodes + edges
-  -> return summary, assumptions, warnings, errors, and graph URL
+  -> page: return an ephemeral browser-local candidate
+     Chat: persist automation + unpublished version + nodes + edges
+  -> return summary, assumptions, warnings, errors, and the surface-appropriate graph destination
 ```
 
 The internal model call proposes a definition only. It receives no mutation tools and cannot create tasks, schedules, alerts, issues, executions, goals, or PRs.
@@ -387,7 +390,7 @@ Example generated draft:
 
 ### Blank Builder Flow
 
-`Start blank` creates one unpublished version with the registered `custom` compiler adapter and opens the advanced builder. The user adds configurable OpenVibely capability nodes, connects them, and configures each selected node in a side panel. Preset adapters remain optional starting points, not required node lists for a blank graph. The custom adapter publishes only explicitly supported capability handoffs through existing OpenVibely services; unsupported node types, edges, cycles, and conditions may remain visible as draft validation errors but never execute.
+`Start blank` opens an empty browser-local candidate using the registered `custom` compiler adapter. The user adds configurable OpenVibely capability nodes, connects them, and configures each selected node in a side panel. Preset adapters remain optional starting points, not required node lists for a blank graph. The custom adapter publishes only explicitly supported capability handoffs through existing OpenVibely services; unsupported node types, edges, cycles, and conditions may remain visible as unsaved validation errors but never execute or persist.
 
 Example Agent Task panel:
 
@@ -429,13 +432,13 @@ The builder must continuously show the selected compiler adapter and reject topo
 
 Show validation failures on the affected nodes and in a summary panel.
 
-After validation, the publication planner computes the concrete create/reuse/update plan before any resource mutation. The Automations page does not require a separate review/apply screen: `Save changes` persists the latest candidate, computes that plan, and immediately invokes the compiler when validation succeeds. Chat displays the same plan before accepting its later explicit confirmation.
+After validation, the publication planner computes the concrete create/reuse/update plan before any resource mutation. The Automations page does not require a separate review/apply screen: `Save changes` submits the complete candidate, computes that plan, and immediately invokes the compiler when validation succeeds. Chat displays the same plan before accepting its later explicit confirmation.
 
-On a successful web Save, navigate to the automation's `Live` view. If validation fails, keep the saved draft in the editor, display its setup errors, and create no runtime resources. On partial compilation failure, keep the draft unpublished, retain the prior published version, and report created/reused resources so an idempotent retry can reconcile them. Web Save and confirmed Chat publication both preserve stale-plan checks, immutable versions, and the same compiler journal.
+On a successful web Save, navigate to the automation's `Live` view. If validation fails, return the submitted browser-local candidate with setup errors and create no Automation, version, or runtime resources. On partial compilation failure, retain the short-lived unpublished version and publication journal only as internal retry/reconciliation state, retain the prior published version, and report created/reused resources so an idempotent retry can reconcile them. Web Save and confirmed Chat publication both preserve stale-plan checks, immutable versions, and the same compiler journal.
 
 ### Editing An Active Automation
 
-Editing an active automation clones the published version into a new draft. Existing invocations, activities, and work items retain their original immutable version references. Newly triggered invocations use the new version only after publication succeeds.
+Editing an active automation reconstructs the published immutable version into browser-local state without cloning or writing a version. Existing invocations, activities, and work items retain their original immutable version references. Save validates the complete edited candidate, stages one internal version, and switches newly triggered invocations to it only after publication succeeds.
 
 Do not mutate an active topology in place.
 
@@ -1421,7 +1424,7 @@ Supported node types should be constrained and validated:
 | Open PR | Existing task PR operation. |
 | Outcome | Graph-only terminal classification backed by resource state. |
 
-The Automations-page builder keeps canvas/node/edge mutations draft-only until the user selects `Save changes`. That one action persists the latest graph, computes the deterministic publication plan, and immediately creates or updates resources and publishes the version when validation succeeds. There is no separate web confirmation plan or Apply step. Chat continues to display its confirmation plan before compilation.
+The Automations-page builder keeps canvas/node/edge mutations in browser memory until the user selects `Save changes`; refresh or navigation discards them. That one action submits the complete graph, computes the deterministic publication plan, and immediately creates or updates resources and publishes one immutable version when validation succeeds. There is no persisted editable web draft, separate web confirmation plan, or Apply step. Chat continues to persist its displayed candidate and confirmation plan before compilation.
 
 If resource creation partially fails, keep the draft unpublished and report exact created/reused resources; use idempotency keys to make retry safe.
 
@@ -1615,7 +1618,8 @@ Acceptance:
 
 - users can create multiple automations from templates;
 - users can describe an automation on the Automations page or in Chat through the same normalized schema and generation service;
-- canvas editing and draft generation cause no runtime mutation;
+- page canvas editing and generation persist no Automation/version and cause no runtime mutation;
+- refresh or navigation discards unsaved page edits, while Save submits the complete candidate once;
 - the Automations-page `Save changes` action validates and publishes immediately without a second Review/Apply step;
 - Chat does not publish an unseen plan and requires explicit confirmation after preview;
 - publishing creates/reuses visible tasks and schedules;
@@ -1681,8 +1685,9 @@ Acceptance:
 - model-generated database IDs, arbitrary tools, executable code, SQL, URLs, and unknown configuration fields are rejected;
 - described generation uses only supported node/configuration types;
 - missing or ambiguous agents, skills, integrations, and source files are reported rather than guessed;
-- draft creation creates no runtime task, schedule, alert, issue, execution, or PR;
-- draft creation and publication planning never invoke ordinary task, schedule, notification, issue, or PR mutation actions;
+- page graph generation and canvas mutation create no persisted Automation/version or runtime task, schedule, alert, issue, execution, or PR;
+- Chat draft creation creates no runtime task, schedule, alert, issue, execution, or PR;
+- Chat draft creation and publication planning never invoke ordinary task, schedule, notification, issue, or PR mutation actions;
 - Chat derives the project from current context and rejects cross-project IDs;
 - Chat draft results include persisted automation/version IDs and a working graph URL;
 - publication planning is read-only and reports exact create/reuse/update effects;
@@ -1727,9 +1732,11 @@ Acceptance:
 - multiple automation cards render and filter correctly;
 - New Automation exposes Template, Describe It, and Blank paths;
 - described generation displays progress, assumptions, warnings, and validation failures;
-- node configuration uses the same schema and validation as template/Chat drafts;
+- node configuration uses the same schema and validation as template/Chat candidates;
+- page edits remain browser-local and are discarded by refresh/navigation until Save;
+- opening Edit automation does not clone or create a persisted version;
 - the Automations-page `Save changes` action validates and immediately publishes through the shared planner/compiler, with no separate Review/Apply controls;
-- successful web Save or confirmed Chat publication navigates to Live view while failed publication preserves the draft;
+- successful web Save or confirmed Chat publication navigates to Live view while failed web validation returns the submitted browser-local candidate;
 - graph initializes after direct load and HTMX navigation;
 - renderer is destroyed when navigating away;
 - live events debounce and update node state;

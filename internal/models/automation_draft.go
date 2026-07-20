@@ -161,6 +161,9 @@ type AutomationChatConfirmationReceipt struct {
 
 type AutomationBuilderPage struct {
 	Result           AutomationDraftResult        `json:"result"`
+	AutomationID     string                       `json:"automation_id,omitempty"`
+	BaseVersionID    string                       `json:"base_version_id,omitempty"`
+	Source           string                       `json:"source,omitempty"`
 	PublicationSteps []AutomationPublicationStep  `json:"publication_steps,omitempty"`
 	NodePalette      []AutomationDraftNode        `json:"node_palette,omitempty"`
 	EdgePalette      []AutomationDraftEdge        `json:"edge_palette,omitempty"`

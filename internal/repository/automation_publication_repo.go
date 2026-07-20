@@ -429,7 +429,9 @@ func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID stri
 	if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET state = 'published', published_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'draft'`, snapshot.Attempt.VersionID); err != nil {
 		return nil, err
 	}
-	if _, err := conn.ExecContext(ctx, `UPDATE automations SET lifecycle_state = 'active', published_version_id = ?, archived_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`, snapshot.Attempt.VersionID, snapshot.Attempt.AutomationID, snapshot.Attempt.ProjectID); err != nil {
+	if _, err := conn.ExecContext(ctx, `UPDATE automations SET name = ?, description = ?, automation_type = ?, lifecycle_state = 'active',
+		published_version_id = ?, archived_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`,
+		candidate.Name, candidate.Description, candidate.AutomationType, snapshot.Attempt.VersionID, snapshot.Attempt.AutomationID, snapshot.Attempt.ProjectID); err != nil {
 		return nil, err
 	}
 	if _, err := conn.ExecContext(ctx, `UPDATE automation_publication_attempts SET status = 'completed', error_message = '', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, attemptID); err != nil {

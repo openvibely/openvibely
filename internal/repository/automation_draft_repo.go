@@ -247,6 +247,46 @@ func replaceAutomationDraftGraph(ctx context.Context, conn *sql.Conn, in Automat
 	return err
 }
 
+func (r *AutomationRepo) DiscardAutomationDraft(ctx context.Context, projectID, automationID, versionID string) error {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	result, err := conn.ExecContext(ctx, `DELETE FROM automation_versions
+		WHERE project_id = ? AND automation_id = ? AND id = ? AND state = 'draft'`, projectID, automationID, versionID)
+	if err != nil {
+		return err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if deleted == 0 {
+		return errors.New("automation draft not found")
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM automations
+		WHERE project_id = ? AND id = ? AND published_version_id IS NULL
+		AND NOT EXISTS (SELECT 1 FROM automation_versions WHERE project_id = ? AND automation_id = ?)`,
+		projectID, automationID, projectID, automationID); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
 func (r *AutomationRepo) GetLatestAutomationDraftMetadata(ctx context.Context, projectID, automationID string) (*models.AutomationDraftMetadata, error) {
 	var metadata models.AutomationDraftMetadata
 	var assumptionsJSON, warningsJSON, validationJSON string

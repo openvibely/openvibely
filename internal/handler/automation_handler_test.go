@@ -395,6 +395,141 @@ func TestAutomationNodeResourcesUseStableBoundedPagination(t *testing.T) {
 	require.Equal(t, 404, foreign.Code)
 }
 
+func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Browser Local Builder Project").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	opened := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"blank"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, opened.Code, opened.Body.String())
+	require.Zero(t, tableCountHandler(t, tc, "automations"), "opening a new builder must not persist an Automation")
+	require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "opening a new builder must not persist a draft version")
+	require.NotContains(t, opened.Body.String(), `data-delete-automation-open`, "an unsaved Automation does not exist yet")
+
+	candidate, err := drafts.BlankCandidate("")
+	require.NoError(t, err)
+	rawCandidate, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	added := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(rawCandidate)}, "builder_action": {"create_node"},
+		"node_kind": {"agent_task"}, "node_name": {"Review support queue"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, added.Code, added.Body.String())
+	require.Contains(t, added.Body.String(), `data-node-key="review_support_queue"`)
+	require.Zero(t, tableCountHandler(t, tc, "automations"), "adding a node must remain browser-local")
+	require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "adding a node must not create an editable draft")
+
+	invalid := candidate
+	invalid.Nodes = []models.AutomationDraftNode{{Key: "bad", Name: "Bad", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "approval_request", "instructions": "Review"}}}
+	rawInvalid, err := json.Marshal(invalid)
+	require.NoError(t, err)
+	failedSave := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(rawInvalid)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, failedSave.Code, failedSave.Body.String())
+	require.Empty(t, failedSave.Header().Get("HX-Redirect"))
+	require.Zero(t, tableCountHandler(t, tc, "automations"), "invalid Save must not persist an Automation")
+	require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "invalid Save must not persist a draft version")
+
+	plannerInvalid := candidate
+	plannerInvalid.Name = "Unavailable GitHub automation"
+	plannerInvalid.Nodes = []models.AutomationDraftNode{
+		{Key: "schedule", Name: "Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Inspect the project.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "issue", Name: "Create issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Open one focused issue.", "labels": []string{}}},
+	}
+	plannerInvalid.Edges = []models.AutomationDraftEdge{{Key: "schedule_issue", From: "schedule", To: "issue", Condition: map[string]any{}}}
+	rawPlannerInvalid, err := json.Marshal(plannerInvalid)
+	require.NoError(t, err)
+	failedPlan := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"save"}, "candidate_json": {string(rawPlannerInvalid)}, "save_changes": {"true"},
+		"node_schedule_enabled": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, failedPlan.Code, failedPlan.Body.String())
+	require.Empty(t, failedPlan.Header().Get("HX-Redirect"))
+	require.Contains(t, failedPlan.Body.String(), "GitHub")
+	require.Zero(t, tableCountHandler(t, tc, "automations"), "planner rejection must discard its temporary Automation")
+	require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "planner rejection must discard its temporary version")
+
+	valid := candidate
+	valid.Name = "Saved task automation"
+	valid.Nodes = []models.AutomationDraftNode{{Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review one request.", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}}}
+	rawValid, err := json.Marshal(valid)
+	require.NoError(t, err)
+	saved := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(rawValid)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
+	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
+	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
+	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"))
+	var automationID, publishedVersionID string
+	require.NoError(t, tc.db.QueryRow(`SELECT id, published_version_id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &publishedVersionID))
+
+	edited := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	require.Equal(t, http.StatusOK, edited.Code, edited.Body.String())
+	require.Contains(t, edited.Body.String(), "Saved task automation")
+	var draftCount int
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
+	require.Zero(t, draftCount, "opening Edit automation must not clone a persisted draft")
+
+	valid.Name = "Unsaved browser name"
+	rawEdited, err := json.Marshal(valid)
+	require.NoError(t, err)
+	mutated := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(rawEdited)}, "builder_action": {"create_node"},
+		"node_kind": {"outcome"}, "node_name": {"Reviewed"}, "base_version_id": {publishedVersionID},
+	}).Execute()
+	require.Equal(t, http.StatusOK, mutated.Code, mutated.Body.String())
+	require.Contains(t, mutated.Body.String(), "Unsaved browser name")
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
+	require.Zero(t, draftCount, "builder mutations must not persist a draft")
+
+	refreshed := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	require.Equal(t, http.StatusOK, refreshed.Code, refreshed.Body.String())
+	require.Contains(t, refreshed.Body.String(), "Saved task automation")
+	require.NotContains(t, refreshed.Body.String(), "Unsaved browser name", "refresh/re-entry must restore the published graph")
+
+	invalidEdit := valid
+	invalidEdit.Nodes = nil
+	invalidEdit.Edges = nil
+	rawInvalidEdit, err := json.Marshal(invalidEdit)
+	require.NoError(t, err)
+	failedEditSave := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(rawInvalidEdit)}, "save_changes": {"true"}, "base_version_id": {publishedVersionID},
+	}).Execute()
+	require.Equal(t, http.StatusOK, failedEditSave.Code, failedEditSave.Body.String())
+	require.Empty(t, failedEditSave.Header().Get("HX-Redirect"))
+	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "an invalid edit Save must leave immutable history unchanged")
+
+	valid.Name = "Saved successor"
+	rawSuccessor, err := json.Marshal(valid)
+	require.NoError(t, err)
+	savedEdit := tc.HTMX().Post("/automations/" + automationID + "/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {string(rawSuccessor)}, "save_changes": {"true"}, "base_version_id": {publishedVersionID},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, savedEdit.Code, savedEdit.Body.String())
+	require.NotEmpty(t, savedEdit.Header().Get("HX-Redirect"))
+	require.Equal(t, 2, tableCountHandler(t, tc, "automation_versions"))
+	var publishedCount, supersededCount int
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'published'`, automationID).Scan(&publishedCount))
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'superseded'`, automationID).Scan(&supersededCount))
+	require.Equal(t, 1, publishedCount)
+	require.Equal(t, 1, supersededCount)
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
+	require.Zero(t, draftCount)
+	var savedName string
+	require.NoError(t, tc.db.QueryRow(`SELECT name FROM automations WHERE id = ?`, automationID).Scan(&savedName))
+	require.Equal(t, "Saved successor", savedName)
+}
+
 func TestAutomationDraftPortfolioSelectionOpensBuilderAndNamePersists(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Draft Selection Project").Build()
@@ -454,158 +589,78 @@ func TestAutomationDraftPortfolioSelectionOpensBuilderAndNamePersists(t *testing
 	require.Len(t, saved.Edges, 1, "renaming must preserve the graph")
 }
 
-func TestAutomationBlankBuilderIsEmptyInteractiveAndPersistsNodeActions(t *testing.T) {
+func TestAutomationBlankBuilderIsEmptyInteractiveAndKeepsNodeActionsTransient(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Blank Builder Project").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
-	registry := service.NewAutomationAdapterRegistry()
-	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	drafts := service.NewAutomationDraftService(automationRepo, service.NewAutomationAdapterRegistry())
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
 	newPage := tc.HTTP().Get("/automations/new?project_id=" + project.ID).Execute()
-	require.Equal(t, 200, newPage.Code)
-	require.NotContains(t, newPage.Body.String(), `aria-label="Blank topology"`)
-	require.NotContains(t, newPage.Body.String(), `<option value="vision_driver">Vision Driver</option><option value="native_sdlc">Native SDLC</option>`)
+	require.Equal(t, http.StatusOK, newPage.Code)
 	require.Contains(t, newPage.Body.String(), "Build your own runnable Automation")
 	require.Contains(t, newPage.Body.String(), "Open custom builder")
-	created := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+	opened := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
-	require.Equal(t, 200, created.Code)
-	require.Contains(t, created.Body.String(), `data-automation-draft-canvas`)
-	require.Contains(t, created.Body.String(), `data-automation-node-tool`)
-	require.Contains(t, created.Body.String(), `data-automation-add-node-open`, "blank canvas must expose an obvious add-node action")
-	require.Contains(t, created.Body.String(), `data-automation-add-first-node`, "empty canvas must expose an in-canvas first-node action")
-	require.Contains(t, created.Body.String(), `data-automation-node-dialog`, "node creation must use a reliable native dialog")
-	require.Contains(t, created.Body.String(), `data-automation-disconnect-edge`, "canvas toolbar must expose connection removal")
-	require.Contains(t, created.Body.String(), `data-automation-fit`)
-	require.Contains(t, created.Body.String(), `data-automation-reset`)
-	require.Contains(t, created.Body.String(), `name="candidate_json"`)
-	require.Contains(t, created.Body.String(), "Add node")
-	require.Contains(t, created.Body.String(), "Connect from either side")
-	require.Contains(t, created.Body.String(), `data-automation-validation-summary`)
-	require.NotContains(t, created.Body.String(), "Draft needs attention")
-	require.NotContains(t, created.Body.String(), `alert alert-warning`, "incomplete graph guidance must not dominate the workspace")
-	require.Contains(t, created.Body.String(), `min-h-[calc(100dvh-15rem)]`, "builder canvas must use the available viewport")
-	require.NotContains(t, created.Body.String(), `xl:grid-cols-[minmax(0,1fr)_18rem]`, "node creation must not permanently narrow the canvas")
-	require.Contains(t, created.Body.String(), "Save changes")
-	require.Contains(t, created.Body.String(), `name="save_changes" value="true"`, "the visible Save action must explicitly apply the draft")
-	require.NotContains(t, created.Body.String(), "Review and apply")
-	require.NotContains(t, created.Body.String(), "Apply changes")
-	require.Contains(t, created.Body.String(), `data-delete-automation-open`, "unpublished builders must expose Automation deletion")
-	require.Contains(t, created.Body.String(), `id="delete-automation-modal"`)
-	require.Contains(t, created.Body.String(), `/automations/`, "delete confirmation must submit through the project-scoped lifecycle route")
-	require.NotContains(t, created.Body.String(), "Save draft")
-	require.NotContains(t, created.Body.String(), "Suggested nodes", "blank drafts must not show a template-derived node list")
-	require.Contains(t, created.Body.String(), `data-automation-create-node`, "blank drafts must create named nodes directly")
-	require.Contains(t, created.Body.String(), "Add a capability node")
-	require.NotContains(t, created.Body.String(), "required nodes remain")
-	require.NotContains(t, created.Body.String(), "required connections remain")
-	require.NotContains(t, created.Body.String(), "Add transitions")
-	require.NotContains(t, created.Body.String(), `class="automation-draft-node"`, "blank canvas must not start with template nodes")
+	require.Equal(t, http.StatusOK, opened.Code)
+	for _, marker := range []string{`data-automation-draft-canvas`, `data-automation-node-tool`, `data-automation-add-node-open`, `data-automation-add-first-node`, `data-automation-node-dialog`, `data-automation-disconnect-edge`, `data-automation-fit`, `data-automation-reset`, `name="candidate_json"`, "Connect from either side", "Save changes"} {
+		require.Contains(t, opened.Body.String(), marker)
+	}
+	require.Contains(t, opened.Body.String(), `name="save_changes" value="true"`)
+	require.NotContains(t, opened.Body.String(), "Review and apply")
+	require.NotContains(t, opened.Body.String(), "Apply changes")
+	require.NotContains(t, opened.Body.String(), `data-delete-automation-open`, "an unsaved browser design is not an Automation yet")
+	require.NotContains(t, opened.Body.String(), "Suggested nodes")
+	require.NotContains(t, opened.Body.String(), `class="automation-draft-node"`)
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
 
-	var automationID, versionID string
-	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
-	require.Contains(t, created.Body.String(), fmt.Sprintf(`/automations/%s/delete?project_id=%s`, automationID, project.ID))
-	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	candidate, err := metadata.Candidate()
-	require.NoError(t, err)
-	candidateJSON, err := json.Marshal(candidate)
-	require.NoError(t, err)
+	candidate := automationCandidateFromResponse(t, opened)
+	post := func(values url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, err := json.Marshal(candidate)
+		require.NoError(t, err)
+		values.Set("project_id", project.ID)
+		values.Set("builder_source", "blank")
+		values.Set("candidate_json", string(raw))
+		response := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(values).Execute()
+		if response.Code == http.StatusOK {
+			candidate = automationCandidateFromResponse(t, response)
+		}
+		return response
+	}
 
-	added := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Schedule"},
-	}).Execute()
-	require.Equal(t, 200, added.Code)
-	require.Contains(t, added.Body.String(), `data-node-key="schedule"`)
-	require.Contains(t, added.Body.String(), `name="node_schedule_prompt"`, "a Schedule node is a scheduled task and must expose its task prompt")
-	require.Contains(t, added.Body.String(), `name="node_schedule_priority"`)
-	require.Contains(t, added.Body.String(), `Scheduled task`, "the Schedule task category must be fixed and explicit")
-	require.NotContains(t, added.Body.String(), `name="node_schedule_category"`, "a Schedule node must not offer a category that can stop it being scheduled")
-	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	candidate, err = metadata.Candidate()
-	require.NoError(t, err)
+	added := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Schedule"}})
+	require.Equal(t, http.StatusOK, added.Code)
+	require.Contains(t, added.Body.String(), `name="node_schedule_prompt"`)
+	require.Contains(t, added.Body.String(), `Scheduled task`)
+	require.NotContains(t, added.Body.String(), `name="node_schedule_category"`)
 	require.Len(t, candidate.Nodes, 1)
-	require.Equal(t, "Describe the scheduled work this node should perform.", candidate.Nodes[0].Config["prompt"])
-
-	candidateJSON, err = json.Marshal(candidate)
-	require.NoError(t, err)
-	added = tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"create_node"}, "node_kind": {"agent_task"}, "node_name": {"Task"},
-	}).Execute()
-	require.Equal(t, 200, added.Code)
-	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	candidate, err = metadata.Candidate()
-	require.NoError(t, err)
+	added = post(url.Values{"builder_action": {"create_node"}, "node_kind": {"agent_task"}, "node_name": {"Task"}})
+	require.Equal(t, http.StatusOK, added.Code)
 	require.Contains(t, added.Body.String(), `data-connect-port="schedule"`)
 	require.Contains(t, added.Body.String(), `data-connect-port="task"`)
-	require.NotContains(t, added.Body.String(), `<option value="scheduled"`, "an Agent Task is an ordinary task and must never offer the scheduled category")
-	require.NotContains(t, added.Body.String(), `>Skills</span>`, "ordinary tasks do not have per-task Skill selection")
-	require.NotContains(t, added.Body.String(), `>Source files</span>`, "ordinary tasks do not have per-task Source file selection")
-	require.Equal(t, 4, strings.Count(added.Body.String(), `class="automation-connect-handle" data-connect-port=`), "each node must connect from either side")
-	require.Contains(t, added.Body.String(), `data-delete-node`, "nodes must be deletable on the canvas")
-	candidateJSON, err = json.Marshal(candidate)
-	require.NoError(t, err)
-	invalidConnection := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"connect_nodes"}, "from_key": {"schedule"}, "to_key": {"schedule"},
-	}).Execute()
-	require.Equal(t, 400, invalidConnection.Code)
-	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	candidate, err = metadata.Candidate()
-	require.NoError(t, err)
-	require.Empty(t, candidate.Edges, "invalid endpoint pairs must not persist arbitrary transitions")
-	candidateJSON, err = json.Marshal(candidate)
-	require.NoError(t, err)
-	connected := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "builder_action": {"connect_nodes"}, "from_key": {"schedule"}, "to_key": {"task"},
-	}).Execute()
-	require.Equal(t, 200, connected.Code)
-	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	candidate, err = metadata.Candidate()
-	require.NoError(t, err)
-	require.Len(t, candidate.Nodes, 2)
-	require.Len(t, candidate.Edges, 1)
-	require.Contains(t, connected.Body.String(), `data-delete-edge`, "connections must be deletable on the canvas")
-	require.Contains(t, connected.Body.String(), `data-reconnect-edge`, "connections must expose draggable endpoints")
+	require.NotContains(t, added.Body.String(), `<option value="scheduled"`)
+	require.NotContains(t, added.Body.String(), `>Skills</span>`)
+	require.Equal(t, 4, strings.Count(added.Body.String(), `class="automation-connect-handle" data-connect-port=`))
 
-	candidate.Edges[0].Label = "Keep this transition label"
-	candidateJSON, err = json.Marshal(candidate)
-	require.NoError(t, err)
-	unchanged := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)},
-	}).Execute()
-	require.Equal(t, 200, unchanged.Code)
-	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	candidate, err = metadata.Candidate()
-	require.NoError(t, err)
-	require.Equal(t, "Keep this transition label", candidate.Edges[0].Label, "palette actions must preserve fields absent from their submitted form")
-
-	removedEdge := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(candidateJSON)}, "save_changes": {"true"}, "remove_edge": {candidate.Edges[0].Key},
-	}).Execute()
-	require.Equal(t, 200, removedEdge.Code, "a settings-panel delete is a draft mutation, not a publication request: %s", removedEdge.Body.String())
-	require.Empty(t, removedEdge.Header().Get("HX-Redirect"))
-	metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	candidate, err = metadata.Candidate()
-	require.NoError(t, err)
+	invalid := post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {"schedule"}, "to_key": {"schedule"}})
+	require.Equal(t, http.StatusBadRequest, invalid.Code)
 	require.Empty(t, candidate.Edges)
+	connected := post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {"schedule"}, "to_key": {"task"}})
+	require.Equal(t, http.StatusOK, connected.Code)
+	require.Len(t, candidate.Edges, 1)
+	require.Contains(t, connected.Body.String(), `data-delete-edge`)
+	require.Contains(t, connected.Body.String(), `data-reconnect-edge`)
+
+	removed := post(url.Values{"save_changes": {"true"}, "remove_edge": {candidate.Edges[0].Key}})
+	require.Equal(t, http.StatusOK, removed.Code)
+	require.Empty(t, removed.Header().Get("HX-Redirect"))
+	require.Empty(t, candidate.Edges)
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
 	require.Zero(t, tableCountHandler(t, tc, "tasks"))
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
-
-	deleted := tc.HTMX().Post(fmt.Sprintf("/automations/%s/delete?project_id=%s", automationID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
-	require.Equal(t, 204, deleted.Code)
-	require.Equal(t, "/automations?project_id="+project.ID, deleted.Header().Get("HX-Redirect"))
-	gone, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
-	require.NoError(t, err)
-	require.Nil(t, gone)
 }
 
 func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
@@ -642,25 +697,18 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	require.NotContains(t, created.Body.String(), "Vision Schedule")
 	require.NotContains(t, created.Body.String(), "Suggested nodes")
 
-	var automationID, versionID string
-	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
-	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	candidate, err := metadata.Candidate()
-	require.NoError(t, err)
+	candidate := automationCandidateFromResponse(t, created)
 	require.Equal(t, service.AutomationAdapterCustom, candidate.AdapterKey)
 	post := func(values url.Values) string {
 		t.Helper()
 		raw, marshalErr := json.Marshal(candidate)
 		require.NoError(t, marshalErr)
 		values.Set("project_id", project.ID)
+		values.Set("builder_source", "blank")
 		values.Set("candidate_json", string(raw))
-		response := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(values).Execute()
-		require.Equal(t, 200, response.Code, response.Body.String())
-		metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-		require.NoError(t, err)
-		candidate, err = metadata.Candidate()
-		require.NoError(t, err)
+		response := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(values).Execute()
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		candidate = automationCandidateFromResponse(t, response)
 		return response.Body.String()
 	}
 
@@ -674,7 +722,11 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	require.Len(t, candidate.Edges, 1)
 	require.Equal(t, candidate.Nodes[1].Key, candidate.Nodes[0].Config["target_node_key"])
 	require.Empty(t, drafts.ValidateCandidate(candidate), "a user-defined Schedule → Agent task graph must be publishable")
-	plan, err := planner.Plan(context.Background(), project.ID, automationID, versionID)
+	staged, err := drafts.CreateDraft(context.Background(), service.AutomationDraftCreateRequest{
+		ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+	})
+	require.NoError(t, err)
+	plan, err := planner.Plan(context.Background(), project.ID, staged.Definition.Automation.ID, staged.Definition.Version.ID)
 	require.NoError(t, err)
 	require.Empty(t, plan.Validation)
 	require.Len(t, plan.Effects, 3)
@@ -743,24 +795,17 @@ func TestAutomationBlankAppliedStandaloneScheduleUsesScheduleNodeNameOnScheduleP
 	}).Execute()
 	require.Equal(t, 200, created.Code, created.Body.String())
 
-	var automationID, versionID string
-	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
-	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	candidate, err := metadata.Candidate()
-	require.NoError(t, err)
+	candidate := automationCandidateFromResponse(t, created)
 	post := func(values url.Values) {
 		t.Helper()
 		raw, marshalErr := json.Marshal(candidate)
 		require.NoError(t, marshalErr)
 		values.Set("project_id", project.ID)
+		values.Set("builder_source", "blank")
 		values.Set("candidate_json", string(raw))
-		response := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(values).Execute()
-		require.Equal(t, 200, response.Code, response.Body.String())
-		metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-		require.NoError(t, err)
-		candidate, err = metadata.Candidate()
-		require.NoError(t, err)
+		response := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(values).Execute()
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		candidate = automationCandidateFromResponse(t, response)
 	}
 	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Weekday review"}})
 	require.Zero(t, tableCountHandler(t, tc, "tasks"), "canvas edits must remain resource-free until Save")
@@ -768,11 +813,13 @@ func TestAutomationBlankAppliedStandaloneScheduleUsesScheduleNodeNameOnScheduleP
 
 	rawCandidate, err := json.Marshal(candidate)
 	require.NoError(t, err)
-	published := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(rawCandidate)}, "save_changes": {"true"},
+	published := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"blank"}, "candidate_json": {string(rawCandidate)}, "save_changes": {"true"},
 		"node_" + candidate.Nodes[0].Key + "_enabled": {"true"},
 	}).Execute()
-	require.Equal(t, 204, published.Code, published.Body.String())
+	require.Equal(t, http.StatusNoContent, published.Code, published.Body.String())
+	var automationID, versionID string
+	require.NoError(t, tc.db.QueryRow(`SELECT a.id, a.published_version_id FROM automations a WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
 	require.Equal(t, fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID), published.Header().Get("HX-Redirect"))
 	require.Equal(t, 1, tableCountHandler(t, tc, "tasks"), "Save must immediately create the Schedule node's task")
 	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"), "Save must immediately create the Scheduler entry")
@@ -811,25 +858,17 @@ func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
 	require.Equal(t, 200, created.Code)
-	var automationID, versionID string
-	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
-
-	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	candidate, err := metadata.Candidate()
-	require.NoError(t, err)
+	candidate := automationCandidateFromResponse(t, created)
 	post := func(values url.Values) *httptest.ResponseRecorder {
 		t.Helper()
 		raw, marshalErr := json.Marshal(candidate)
 		require.NoError(t, marshalErr)
 		values.Set("project_id", project.ID)
+		values.Set("builder_source", "blank")
 		values.Set("candidate_json", string(raw))
-		response := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(values).Execute()
-		if response.Code == 200 {
-			metadata, err = automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-			require.NoError(t, err)
-			candidate, err = metadata.Candidate()
-			require.NoError(t, err)
+		response := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(values).Execute()
+		if response.Code == http.StatusOK {
+			candidate = automationCandidateFromResponse(t, response)
 		}
 		return response
 	}
@@ -848,8 +887,8 @@ func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(
 	require.Contains(t, issueCodesHandler(candidate, drafts), "unsupported_handoff", "unsupported custom handoffs may be saved but must not publish")
 	rawCandidate, err := json.Marshal(candidate)
 	require.NoError(t, err)
-	saved := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(rawCandidate)}, "save_changes": {"true"},
+	saved := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"blank"}, "candidate_json": {string(rawCandidate)}, "save_changes": {"true"},
 		"node_" + candidate.Nodes[0].Key + "_enabled": {"true"},
 	}).Execute()
 	require.Equal(t, 200, saved.Code, saved.Body.String())
@@ -857,6 +896,15 @@ func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(
 	require.Contains(t, saved.Body.String(), "setup items before this design can run")
 	require.Zero(t, tableCountHandler(t, tc, "tasks"), "invalid Save must not create partial task resources")
 	require.Zero(t, tableCountHandler(t, tc, "schedules"), "invalid Save must not create partial schedule resources")
+}
+
+func automationCandidateFromResponse(t *testing.T, response *httptest.ResponseRecorder) models.AutomationDraftCandidate {
+	t.Helper()
+	match := regexp.MustCompile(`name="candidate_json" value="([^"]+)"`).FindStringSubmatch(response.Body.String())
+	require.Len(t, match, 2, response.Body.String())
+	candidate, err := service.DecodeAutomationDraftCandidate([]byte(html.UnescapeString(match[1])))
+	require.NoError(t, err)
+	return candidate
 }
 
 func issueCodesHandler(candidate models.AutomationDraftCandidate, drafts *service.AutomationDraftService) []string {
@@ -923,32 +971,22 @@ func TestAutomationBuilderWebSavePublishesImmediatelyAndIsProjectScoped(t *testi
 	require.Zero(t, tableCountHandler(t, tc, "tasks"))
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 
-	var automationID, versionID string
-	require.NoError(t, tc.db.QueryRow(`SELECT a.id, v.id FROM automations a JOIN automation_versions v ON v.automation_id = a.id WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
-	require.Equal(t, fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID), created.Header().Get("HX-Push-Url"), "draft creation must give HTMX history the canonical builder URL")
-	configured := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "node_vision_driver_agent_ref": {"builder_architect"},
-		"node_vision_driver_skills": {"builder_architect:project-guidance"}, "node_vision_driver_source_files": {},
-	}).Execute()
-	require.Equal(t, 200, configured.Code)
-	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	configuredCandidate, err := metadata.Candidate()
-	require.NoError(t, err)
+	require.Zero(t, tableCountHandler(t, tc, "automations"), "opening a template must not persist an editable draft")
+	configuredCandidate := automationCandidateFromResponse(t, created)
+	configuredCandidate.Nodes[1].Config["agent_ref"] = "builder_architect"
+	configuredCandidate.Nodes[1].Config["skills"] = []string{"builder_architect:project-guidance"}
 	require.Equal(t, "builder_architect", configuredCandidate.Nodes[1].Config["agent_ref"])
-	require.Equal(t, []any{"builder_architect:project-guidance"}, configuredCandidate.Nodes[1].Config["skills"])
-	directPlan, err := planner.Plan(context.Background(), project.ID, automationID, versionID)
-	require.NoError(t, err)
-	require.Empty(t, directPlan.Validation, "configured builder references must remain publishable: %+v", directPlan.Validation)
 	require.Zero(t, tableCountHandler(t, tc, "tasks"), "editing the canvas must remain resource-free before Save")
 	configuredJSON, err := json.Marshal(configuredCandidate)
 	require.NoError(t, err)
-	published := tc.HTMX().Post(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, project.ID)).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {string(configuredJSON)}, "save_changes": {"true"},
+	published := tc.HTMX().Post("/automations/drafts?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"}, "candidate_json": {string(configuredJSON)}, "save_changes": {"true"},
 		"node_vision_driver_agent_ref": {"builder_architect"}, "node_vision_driver_skills": {"builder_architect:project-guidance"},
 		"node_vision_schedule_enabled": {"true"},
 	}).Execute()
-	require.Equal(t, 204, published.Code, published.Body.String())
+	require.Equal(t, http.StatusNoContent, published.Code, published.Body.String())
+	var automationID, versionID string
+	require.NoError(t, tc.db.QueryRow(`SELECT id, published_version_id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &versionID))
 	require.Equal(t, fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID), published.Header().Get("HX-Redirect"))
 	require.NotZero(t, tableCountHandler(t, tc, "tasks"))
 	require.NotZero(t, tableCountHandler(t, tc, "schedules"))
@@ -971,19 +1009,12 @@ func TestAutomationBuilderWebSavePublishesImmediatelyAndIsProjectScoped(t *testi
 	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'published'`, automationID).Scan(&publishedCount))
 	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&draftCount))
 	require.Equal(t, 1, publishedCount)
-	require.Equal(t, 1, draftCount)
-	var clonedVersionID string
-	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, automationID).Scan(&clonedVersionID))
-	require.Equal(t, fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, clonedVersionID, project.ID), cloned.Header().Get("HX-Push-Url"), "cloning must not cache draft DOM under the published automation URL")
+	require.Zero(t, draftCount, "opening Edit automation must not clone a persisted draft")
 
 	foreign := tc.HTTP().Post("/automations/" + automationID + "/drafts?project_id=" + other.ID).WithForm(url.Values{"project_id": {other.ID}}).Execute()
-	require.Equal(t, 404, foreign.Code)
-	foreignDraft := tc.HTTP().Get(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, clonedVersionID, other.ID)).Execute()
-	require.Equal(t, 404, foreignDraft.Code)
-	foreignPlan := tc.HTTP().Post(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", automationID, clonedVersionID, other.ID)).WithForm(url.Values{"project_id": {other.ID}}).Execute()
-	require.Equal(t, 404, foreignPlan.Code)
-	foreignPublish := tc.HTTP().Post(fmt.Sprintf("/automations/%s/drafts/%s/publish?project_id=%s", automationID, clonedVersionID, other.ID)).WithForm(url.Values{"project_id": {other.ID}, "plan_revision": {"foreign"}, "confirmation_token": {"foreign"}}).Execute()
-	require.Equal(t, 404, foreignPublish.Code)
+	require.Equal(t, http.StatusNotFound, foreign.Code)
+	foreignDraft := tc.HTTP().Get(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, other.ID)).Execute()
+	require.Equal(t, http.StatusNotFound, foreignDraft.Code)
 
 	var ownedScheduleID string
 	require.NoError(t, tc.db.QueryRow(`SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?`, automationID).Scan(&ownedScheduleID))
@@ -1085,10 +1116,10 @@ func TestAutomationChatActionsUseCanonicalPipelineAndDeferConfirmationReceipt(t 
 		"project_id": {project.ID}, "source": {"describe"}, "description": {"Review a proposed change and ask for approval"},
 	}).Execute()
 	require.Equal(t, 200, webCreated.Code, webCreated.Body.String())
-	var webCandidateJSON string
-	require.NoError(t, tc.db.QueryRow(`SELECT metadata.candidate_json FROM automation_draft_metadata metadata
-		JOIN automations automation ON automation.id = metadata.automation_id
-		WHERE metadata.project_id = ? AND automation.created_via = 'web' ORDER BY automation.created_at DESC LIMIT 1`, project.ID).Scan(&webCandidateJSON))
+	webCandidate := automationCandidateFromResponse(t, webCreated)
+	webCandidateJSON, err := json.Marshal(webCandidate)
+	require.NoError(t, err)
+	require.Zero(t, tableCountHandler(t, tc, "automations"), "web Describe It remains browser-local until Save")
 	createdJSON, err := tc.handler.executeAutomationCreateDraftAction(ctx, streamingResponseParams{ProjectID: project.ID}, json.RawMessage(`{"source":"describe","description":"Review vision daily"}`))
 	require.NoError(t, err)
 	var created struct {
@@ -1101,7 +1132,7 @@ func TestAutomationChatActionsUseCanonicalPipelineAndDeferConfirmationReceipt(t 
 	actualCandidateJSON, err := json.Marshal(created.Candidate)
 	require.NoError(t, err)
 	require.JSONEq(t, string(candidateJSON), string(actualCandidateJSON), "page and Chat fixed custom candidates must normalize identically")
-	require.JSONEq(t, string(candidateJSON), webCandidateJSON, "Describe It on the page and Chat must use the same expanded custom contract")
+	require.JSONEq(t, string(candidateJSON), string(webCandidateJSON), "Describe It on the page and Chat must use the same expanded custom contract")
 	require.Equal(t, service.AutomationAdapterCustom, created.Candidate.AdapterKey)
 	require.Equal(t, 2, mock.CallCount())
 	require.False(t, created.Active)

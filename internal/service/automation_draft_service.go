@@ -1064,6 +1064,20 @@ func defaultAutomationNodePrompt(adapterKey, role string) string {
 	return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " "))
 }
 
+func (s *AutomationDraftService) PreviewCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {
+	candidate, err := s.NormalizeCandidate(candidate)
+	if err != nil {
+		return nil, err
+	}
+	issues, err := s.validateCandidateForProject(ctx, projectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	result := draftPreviewResult(candidate, definition)
+	result.ValidationErrors = issues
+	return result, nil
+}
+
 func (s *AutomationDraftService) CreateDraft(ctx context.Context, request AutomationDraftCreateRequest) (*models.AutomationDraftResult, error) {
 	if s.repo == nil {
 		return nil, errors.New("automation repository is unavailable")
@@ -1195,6 +1209,91 @@ func automationDraftIssuePreventsPersistence(code string) bool {
 	default:
 		return false
 	}
+}
+
+func (s *AutomationDraftService) CreateVersionForSave(ctx context.Context, projectID, automationID, source string, candidate models.AutomationDraftCandidate) (*models.AutomationDraftResult, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("automation repository is unavailable")
+	}
+	preview, err := s.PreviewCandidate(ctx, projectID, candidate, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(preview.ValidationErrors) > 0 {
+		return preview, nil
+	}
+	definition, err := s.repo.CreateAutomationDraftVersion(ctx, repository.AutomationDraftWrite{
+		ProjectID: projectID, AutomationID: automationID, Source: source,
+		Candidate: preview.Candidate, ValidationErrors: preview.ValidationErrors,
+	})
+	if err != nil {
+		return nil, err
+	}
+	preview.Definition = definition
+	preview.URL = fmt.Sprintf("/automations/%s?project_id=%s&view=definition&version=%s", automationID, projectID, definition.Version.ID)
+	return preview, nil
+}
+
+func (s *AutomationDraftService) DiscardStagedVersion(ctx context.Context, projectID, automationID, versionID string) error {
+	if s == nil || s.repo == nil {
+		return errors.New("automation repository is unavailable")
+	}
+	return s.repo.DiscardAutomationDraft(ctx, projectID, automationID, versionID)
+}
+
+func (s *AutomationDraftService) PublishedCandidate(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("automation repository is unavailable")
+	}
+	published, err := s.repo.GetDefinition(ctx, projectID, automationID)
+	if err != nil {
+		return nil, err
+	}
+	if published == nil || published.Version.State != models.AutomationVersionPublished {
+		return nil, errors.New("published automation not found")
+	}
+	candidate, err := s.candidateFromDefinition(ctx, projectID, automationID, published)
+	if err != nil {
+		return nil, err
+	}
+	return s.PreviewCandidate(ctx, projectID, candidate, published)
+}
+
+func (s *AutomationDraftService) candidateFromDefinition(ctx context.Context, projectID, automationID string, published *models.AutomationDefinition) (models.AutomationDraftCandidate, error) {
+	var candidate models.AutomationDraftCandidate
+	publishedMetadata, err := s.repo.GetAutomationDraftMetadata(ctx, projectID, automationID, published.Version.ID)
+	if err != nil {
+		return candidate, err
+	}
+	if publishedMetadata != nil {
+		return publishedMetadata.Candidate()
+	}
+	candidate = models.AutomationDraftCandidate{SchemaVersion: automationDraftSchemaVersion,
+		Name: published.Automation.Name, Description: published.Automation.Description,
+		AutomationType: published.Automation.AutomationType, AdapterKey: published.Version.AdapterKey}
+	nodeKeys := make(map[string]string, len(published.Nodes))
+	for _, node := range published.Nodes {
+		var config map[string]any
+		if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
+			return candidate, err
+		}
+		if config == nil {
+			config = map[string]any{}
+		}
+		nodeKeys[node.ID] = node.NodeKey
+		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: node.NodeKey, Name: node.Name,
+			Type: node.NodeType, Role: node.Role, Config: config,
+			Position: &models.AutomationDraftPoint{X: node.PositionX, Y: node.PositionY}})
+	}
+	for _, edge := range published.Edges {
+		var condition map[string]any
+		if err := json.Unmarshal([]byte(edge.ConditionJSON), &condition); err != nil {
+			return candidate, err
+		}
+		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: edge.EdgeKey,
+			From: nodeKeys[edge.SourceNodeID], To: nodeKeys[edge.TargetNodeID], Label: edge.Label, Condition: condition})
+	}
+	return candidate, nil
 }
 
 func (s *AutomationDraftService) ClonePublishedVersion(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {

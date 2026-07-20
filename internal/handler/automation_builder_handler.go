@@ -32,22 +32,29 @@ func (h *Handler) CreateAutomationDraftWeb(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	source := strings.TrimSpace(c.FormValue("source"))
-	templateKey := strings.TrimSpace(c.FormValue("template_key"))
+	source := strings.TrimSpace(c.FormValue("builder_source"))
+	if source == "" {
+		source = strings.TrimSpace(c.FormValue("source"))
+	}
 	var candidate models.AutomationDraftCandidate
-	switch source {
-	case "template":
-		candidate, err = h.automationDraftSvc.TemplateCandidate(templateKey)
-	case "blank":
-		candidate, err = h.automationDraftSvc.BlankCandidate("")
-	case "describe":
-		var preview *models.AutomationDraftResult
-		preview, err = h.previewAutomationDescription(ctx, projectID, c.FormValue("description"))
-		if err == nil {
-			candidate = preview.Candidate
+	hasPostedCandidate := strings.TrimSpace(c.FormValue("candidate_json")) != ""
+	if hasPostedCandidate {
+		candidate, err = service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
+	} else {
+		switch source {
+		case "template":
+			candidate, err = h.automationDraftSvc.TemplateCandidate(strings.TrimSpace(c.FormValue("template_key")))
+		case "blank":
+			candidate, err = h.automationDraftSvc.BlankCandidate("")
+		case "describe":
+			var preview *models.AutomationDraftResult
+			preview, err = h.previewAutomationDescription(ctx, projectID, c.FormValue("description"))
+			if err == nil {
+				candidate = preview.Candidate
+			}
+		default:
+			err = echo.NewHTTPError(http.StatusBadRequest, "source must be template, describe, or blank")
 		}
-	default:
-		err = echo.NewHTTPError(http.StatusBadRequest, "source must be template, describe, or blank")
 	}
 	if err != nil {
 		if source == "describe" {
@@ -59,35 +66,134 @@ func (h *Handler) CreateAutomationDraftWeb(c echo.Context) error {
 		}
 		return err
 	}
-	draftSource := "manual"
-	if source == "template" {
-		draftSource = "template"
+	if hasPostedCandidate {
+		applyAutomationDraftFormValues(c, &candidate)
+		if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 	}
-	result, err := h.automationDraftSvc.CreateDraft(ctx, service.AutomationDraftCreateRequest{ProjectID: projectID, Source: draftSource, CreatedVia: "web", Candidate: candidate})
+	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, candidate, nil)
 	if err != nil {
 		return err
 	}
-	h.setAutomationDraftPushURL(c, result, projectID)
-	return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *result})
+	page := models.AutomationBuilderPage{Result: *result, Source: source}
+	if !automationBuilderSaveRequested(c) {
+		return h.renderAutomationBuilder(c, page)
+	}
+	return h.publishAutomationBuilderCandidate(c, projectID, page)
 }
 
 func (h *Handler) CloneAutomationDraftWeb(c echo.Context) error {
 	if h.automationDraftSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation builder unavailable")
 	}
+	ctx := c.Request().Context()
 	projectID, err := h.getCurrentProjectID(c)
 	if err != nil {
 		return err
 	}
-	result, err := h.automationDraftSvc.ClonePublishedVersion(c.Request().Context(), projectID, c.Param("automationId"))
+	automationID := c.Param("automationId")
+	published, err := h.automationDraftSvc.PublishedCandidate(ctx, projectID, automationID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	h.setAutomationDraftPushURL(c, result, projectID)
-	return h.renderAutomationBuilder(c, models.AutomationBuilderPage{Result: *result})
+	candidate := published.Candidate
+	hasPostedCandidate := strings.TrimSpace(c.FormValue("candidate_json")) != ""
+	if hasPostedCandidate {
+		candidate, err = service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		applyAutomationDraftFormValues(c, &candidate)
+		if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+	}
+	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, candidate, published.Definition)
+	if err != nil {
+		return err
+	}
+	page := models.AutomationBuilderPage{
+		Result: *result, AutomationID: automationID, BaseVersionID: published.Definition.Version.ID,
+		Source: published.Definition.Version.Source,
+	}
+	if isHTMX(c) {
+		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"?project_id="+projectID+"&view=definition")
+	}
+	if !automationBuilderSaveRequested(c) {
+		return h.renderAutomationBuilder(c, page)
+	}
+	if baseVersionID := strings.TrimSpace(c.FormValue("base_version_id")); baseVersionID != "" && baseVersionID != published.Definition.Version.ID {
+		page.Error = "This Automation changed after you opened it. Reopen the editor before saving."
+		return h.renderAutomationBuilder(c, page)
+	}
+	return h.publishAutomationBuilderCandidate(c, projectID, page)
+}
+
+func automationBuilderSaveRequested(c echo.Context) bool {
+	return c.FormValue("save_changes") == "true" && strings.TrimSpace(c.FormValue("builder_action")) == "" &&
+		strings.TrimSpace(c.FormValue("remove_node")) == "" && strings.TrimSpace(c.FormValue("remove_edge")) == ""
+}
+
+func (h *Handler) publishAutomationBuilderCandidate(c echo.Context, projectID string, page models.AutomationBuilderPage) error {
+	if h.automationPlanner == nil || h.automationCompiler == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation publication unavailable")
+	}
+	if len(page.Result.ValidationErrors) > 0 {
+		return h.renderAutomationBuilder(c, page)
+	}
+	ctx := c.Request().Context()
+	source := "manual"
+	if page.Source == "template" {
+		source = "template"
+	}
+	var staged *models.AutomationDraftResult
+	var err error
+	if page.AutomationID == "" {
+		staged, err = h.automationDraftSvc.CreateDraft(ctx, service.AutomationDraftCreateRequest{
+			ProjectID: projectID, Source: source, CreatedVia: "web", Candidate: page.Result.Candidate,
+		})
+	} else {
+		staged, err = h.automationDraftSvc.CreateVersionForSave(ctx, projectID, page.AutomationID, source, page.Result.Candidate)
+	}
+	if err != nil {
+		return err
+	}
+	if staged == nil || staged.Definition == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "automation save could not be staged")
+	}
+	automationID := staged.Definition.Automation.ID
+	versionID := staged.Definition.Version.ID
+	plan, err := h.automationPlanner.Plan(ctx, projectID, automationID, versionID)
+	if err != nil {
+		return err
+	}
+	if len(plan.Validation) > 0 {
+		if discardErr := h.automationDraftSvc.DiscardStagedVersion(ctx, projectID, automationID, versionID); discardErr != nil {
+			return discardErr
+		}
+		page.Result.ValidationErrors = plan.Validation
+		return h.renderAutomationBuilder(c, page)
+	}
+	published, publishErr := h.automationCompiler.Publish(ctx, service.AutomationPublishRequest{
+		ProjectID: projectID, AutomationID: automationID, VersionID: versionID, PlanRevision: plan.PlanRevision,
+	})
+	if publishErr != nil {
+		page.Error = publishErr.Error()
+		if published != nil {
+			page.PublicationSteps = published.Resources
+		}
+		return h.renderAutomationBuilder(c, page)
+	}
+	url := "/automations/" + automationID + "?project_id=" + projectID
+	if isHTMX(c) {
+		c.Response().Header().Set("HX-Redirect", url)
+		return c.NoContent(http.StatusNoContent)
+	}
+	return c.Redirect(http.StatusSeeOther, url)
 }
 
 func (h *Handler) GetAutomationDraftWeb(c echo.Context) error {
@@ -589,18 +695,6 @@ func (h *Handler) loadAutomationDraftWeb(c echo.Context) (*models.AutomationDraf
 		return nil, echo.NewHTTPError(http.StatusNotFound, "automation draft not found")
 	}
 	return result, nil
-}
-
-func (h *Handler) setAutomationDraftPushURL(c echo.Context, result *models.AutomationDraftResult, projectID string) {
-	if !isHTMX(c) || result == nil || result.Definition == nil {
-		return
-	}
-	automationID := strings.TrimSpace(result.Definition.Automation.ID)
-	versionID := strings.TrimSpace(result.Definition.Version.ID)
-	if automationID == "" || versionID == "" {
-		return
-	}
-	c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"/drafts/"+versionID+"?project_id="+projectID)
 }
 
 func (h *Handler) renderAutomationBuilder(c echo.Context, page models.AutomationBuilderPage) error {
