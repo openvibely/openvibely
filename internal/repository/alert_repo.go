@@ -124,6 +124,7 @@ func (r *AlertRepo) CreateIdempotent(ctx context.Context, a *models.Alert) (*mod
 			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
 		}
 	}()
+	createdNew := true
 	created, err := scanAlert(conn.QueryRowContext(ctx, `INSERT INTO alerts (
 		project_id, scope, task_id, execution_id, source_task_id, type, severity, title, message, body,
 		source, metadata_json, idempotency_key, decision_state, processing_state)
@@ -133,6 +134,7 @@ func (r *AlertRepo) CreateIdempotent(ctx context.Context, a *models.Alert) (*mod
 		a.ProjectID, a.Scope, a.TaskID, a.ExecutionID, a.SourceTaskID, a.Type, a.Severity, a.Title,
 		a.Message, a.Body, a.Source, string(metadata), strings.TrimSpace(a.IdempotencyKey), a.DecisionState, a.ProcessingState))
 	if errors.Is(err, sql.ErrNoRows) && strings.TrimSpace(a.IdempotencyKey) != "" {
+		createdNew = false
 		created, err = scanAlert(conn.QueryRowContext(ctx, `SELECT `+alertSelectColumns+` FROM alerts
 			WHERE project_id = ? AND idempotency_key = ?`, a.ProjectID, strings.TrimSpace(a.IdempotencyKey)))
 	}
@@ -140,6 +142,19 @@ func (r *AlertRepo) CreateIdempotent(ctx context.Context, a *models.Alert) (*mod
 		return nil, fmt.Errorf("creating alert: %w", err)
 	}
 	if hasAutomationContext {
+		if !createdNew {
+			for _, binding := range automationContext.Bindings {
+				var exists bool
+				if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM automation_transitions
+					WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND event_key = ?)`,
+					a.ProjectID, binding.AutomationID, binding.VersionID, binding.NodeID, "alert:"+created.ID+":created:notification").Scan(&exists); err != nil {
+					return nil, err
+				}
+				if !exists {
+					return nil, fmt.Errorf("alert idempotency key is already bound outside this Automation source")
+				}
+			}
+		}
 		if err := recordAlertCreatedProjection(ctx, conn, created, automationContext); err != nil {
 			return nil, err
 		}

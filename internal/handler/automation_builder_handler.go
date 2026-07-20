@@ -174,11 +174,28 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 				node.Config["enabled"] = c.FormValue(prefix+"enabled") == "true"
 			}
 		}
+		if _, ok := node.Config["notification_type"]; ok {
+			if value, exists := automationDraftFormValue(c, prefix+"notification_type"); exists {
+				node.Config["notification_type"] = strings.TrimSpace(value)
+			}
+			if value, exists := automationDraftFormValue(c, prefix+"instructions"); exists {
+				node.Config["instructions"] = value
+			}
+		}
 	}
 	for i := range candidate.Edges {
 		key := "edge_" + candidate.Edges[i].Key + "_label"
 		if value, exists := automationDraftFormValue(c, key); exists {
 			candidate.Edges[i].Label = strings.TrimSpace(value)
+		}
+		conditionKey := "edge_" + candidate.Edges[i].Key + "_state"
+		if value, exists := automationDraftFormValue(c, conditionKey); exists {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				candidate.Edges[i].Condition = map[string]any{}
+			} else {
+				candidate.Edges[i].Condition = map[string]any{"state": value}
+			}
 		}
 	}
 }
@@ -263,6 +280,12 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		case "agent_task":
 			nodeType, role = models.AutomationNodeAgentTask, "task"
 			config = map[string]any{"prompt": "Describe the work this node should perform.", "category": string(models.CategoryScheduled), "priority": 2}
+		case "create_notification":
+			nodeType, role = models.AutomationNodeAction, "create_notification"
+			config = map[string]any{"notification_type": "approval_request", "instructions": "Summarize the proposal that needs a human decision."}
+		case "human_approval":
+			nodeType, role = models.AutomationNodeHumanGate, "native_approval"
+			config = map[string]any{"approval_method": "native_alert"}
 		case "outcome":
 			nodeType, role = models.AutomationNodeOutcome, "completed"
 		default:

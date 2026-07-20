@@ -205,7 +205,7 @@ func (c *AutomationCompiler) compileTask(ctx context.Context, request Automation
 			return "", err
 		}
 	}
-	prompt := automationCompiledTaskPrompt(node)
+	prompt := automationCompiledTaskPrompt(candidate, node)
 	category, _ := node.Config["category"].(string)
 	priority, _ := draftInt(node.Config["priority"])
 	agent, err := c.resolveNodeAgent(ctx, request.ProjectID, node)
@@ -276,7 +276,7 @@ func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definit
 		if taskID == "" {
 			return nil, fmt.Errorf("publication task update %q has no reconciled resource", stepKey)
 		}
-		prompt := automationCompiledTaskPrompt(node)
+		prompt := automationCompiledTaskPrompt(candidate, node)
 		category, _ := node.Config["category"].(string)
 		priority, _ := draftInt(node.Config["priority"])
 		agent, err := c.resolveNodeAgent(ctx, definition.Automation.ProjectID, node)
@@ -308,7 +308,7 @@ func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definit
 				if childID == "" {
 					return nil, fmt.Errorf("custom task node %q has no compiled child task", node.Key)
 				}
-				update.ChainConfig, err = customAutomationTaskChainConfig(definition.Automation, *childNode, childID)
+				update.ChainConfig, err = customAutomationTaskChainConfig(definition.Automation, candidate, *childNode, childID)
 				if err != nil {
 					return nil, err
 				}

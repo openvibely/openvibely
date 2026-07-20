@@ -264,10 +264,26 @@ func (s *LLMService) activatePublishedCustomAutomationChild(ctx context.Context,
 			return true, fmt.Errorf("decoding custom Automation task configuration: %w", err)
 		}
 		targetDraft := models.AutomationDraftNode{Key: targetNode.NodeKey, Name: targetNode.Name, Type: targetNode.NodeType, Role: targetNode.Role, Config: config}
+		promptCandidate := models.AutomationDraftCandidate{AdapterKey: AutomationAdapterCustom, Nodes: []models.AutomationDraftNode{targetDraft}}
+		notificationNode, err := s.automationRepo.GetCustomNotificationHandoff(ctx, parentTask.ProjectID, automationID, binding.VersionID, targetNode.ID)
+		if err != nil {
+			return true, err
+		}
+		if notificationNode != nil {
+			var notificationConfig map[string]any
+			if err := json.Unmarshal([]byte(notificationNode.ConfigJSON), &notificationConfig); err != nil {
+				return true, fmt.Errorf("decoding custom Automation notification configuration: %w", err)
+			}
+			promptCandidate.Nodes = append(promptCandidate.Nodes, models.AutomationDraftNode{
+				Key: notificationNode.NodeKey, Name: notificationNode.Name, Type: notificationNode.NodeType,
+				Role: notificationNode.Role, Config: notificationConfig,
+			})
+			promptCandidate.Edges = append(promptCandidate.Edges, models.AutomationDraftEdge{From: targetNode.NodeKey, To: notificationNode.NodeKey})
+		}
 		category, _ := config["category"].(string)
 		chain := &models.ChainConfiguration{
 			Enabled: true, Trigger: "on_completion", ChildTaskID: childTaskID, ChildAutomationNodeKey: targetNode.NodeKey,
-			ChildCategory: category, ChildPromptPrefix: automationCompiledTaskPrompt(targetDraft),
+			ChildCategory: category, ChildPromptPrefix: automationCompiledTaskPrompt(promptCandidate, targetDraft),
 		}
 		return true, s.activateCompiledAutomationChild(ctx, parentTask, parentOutput, chain)
 	}

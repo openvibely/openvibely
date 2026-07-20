@@ -1398,6 +1398,25 @@ func (r *AutomationRepo) GetCustomTaskHandoff(ctx context.Context, projectID, au
 	return true, &node, taskID, nil
 }
 
+func (r *AutomationRepo) GetCustomNotificationHandoff(ctx context.Context, projectID, automationID, versionID, sourceNodeID string) (*models.AutomationNode, error) {
+	var node models.AutomationNode
+	err := r.db.QueryRowContext(ctx, `SELECT target.id, target.project_id, target.automation_id, target.version_id,
+		target.node_key, target.name, target.node_type, target.role, target.config_json, target.position_x, target.position_y,
+		target.created_at, target.updated_at
+		FROM automation_edges edge
+		JOIN automation_nodes target ON target.id = edge.target_node_id AND target.project_id = edge.project_id
+			AND target.automation_id = edge.automation_id AND target.version_id = edge.version_id
+		WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ? AND edge.source_node_id = ?
+			AND target.node_type = 'action' AND target.role = 'create_notification'
+		ORDER BY edge.display_order, edge.id LIMIT 1`, projectID, automationID, versionID, sourceNodeID).
+		Scan(&node.ID, &node.ProjectID, &node.AutomationID, &node.VersionID, &node.NodeKey, &node.Name, &node.NodeType,
+			&node.Role, &node.ConfigJSON, &node.PositionX, &node.PositionY, &node.CreatedAt, &node.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &node, err
+}
+
 func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID string, binding models.AutomationBinding, activityKey, activityType, resourceType string) (string, error) {
 	if projectID == "" || binding.AutomationID == "" || binding.VersionID == "" || binding.NodeID == "" || binding.InvocationID == "" || strings.TrimSpace(activityKey) == "" {
 		return "", errors.New("complete invocation binding is required for an external mutation")

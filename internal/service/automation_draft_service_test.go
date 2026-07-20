@@ -103,6 +103,64 @@ func TestCustomAutomationValidatesLinearTaskHandoffsAndRejectsAnalogousUnsupport
 	require.Contains(t, issueCodes(svc.ValidateCandidate(multipleParents)), "task_parents")
 }
 
+func TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogousUnsafeBranches(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := svc.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "schedule", Name: "Daily review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "review", Name: "Review changes", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review likely changes.", "category": "scheduled", "priority": 2}},
+		{Key: "request", Name: "Request approval", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "change_proposal", "instructions": "Summarize the proposed change for a human reviewer."}},
+		{Key: "human", Name: "Human approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{"approval_method": "native_alert"}},
+		{Key: "accepted", Name: "Accepted", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+		{Key: "declined", Name: "Declined", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{
+		{Key: "schedule_review", From: "schedule", To: "review", Condition: map[string]any{}},
+		{Key: "review_request", From: "review", To: "request", Condition: map[string]any{}},
+		{Key: "request_human", From: "request", To: "human", Condition: map[string]any{}},
+		{Key: "human_accepted", From: "human", To: "accepted", Label: "approved", Condition: map[string]any{"state": "approved"}},
+		{Key: "human_declined", From: "human", To: "declined", Label: "rejected", Condition: map[string]any{"state": "rejected"}},
+	}
+
+	require.Empty(t, svc.ValidateCandidate(candidate), "a custom native Alert approval path must be publishable")
+
+	multiTask := candidate
+	multiTask.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
+	multiTask.Nodes = append(multiTask.Nodes, models.AutomationDraftNode{
+		Key: "research", Name: "Research first", Type: models.AutomationNodeAgentTask, Role: "task",
+		Config: map[string]any{"prompt": "Research likely changes.", "category": "scheduled", "priority": 2},
+	})
+	for i := range multiTask.Nodes {
+		if multiTask.Nodes[i].Key == "review" {
+			multiTask.Nodes[i].Config = map[string]any{"prompt": "Review likely changes.", "category": "active", "priority": 2}
+		}
+	}
+	multiTask.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+	multiTask.Edges[0].To = "research"
+	multiTask.Edges = append(multiTask.Edges, models.AutomationDraftEdge{Key: "research_review", From: "research", To: "review", Condition: map[string]any{}})
+	require.Empty(t, svc.ValidateCandidate(multiTask), "native approval must compose after an existing task-to-task handoff")
+
+	missingRejected := candidate
+	missingRejected.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges[:len(candidate.Edges)-1]...)
+	require.Contains(t, issueCodes(svc.ValidateCandidate(missingRejected)), "approval_branches")
+
+	duplicateApproved := candidate
+	duplicateApproved.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+	duplicateApproved.Edges[len(duplicateApproved.Edges)-1].Condition = map[string]any{"state": "approved"}
+	require.Contains(t, issueCodes(svc.ValidateCandidate(duplicateApproved)), "approval_branches")
+
+	unsafeTarget := candidate
+	unsafeTarget.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+	unsafeTarget.Edges[len(unsafeTarget.Edges)-1].To = "review"
+	require.Contains(t, issueCodes(svc.ValidateCandidate(unsafeTarget)), "unsupported_handoff")
+
+	unsupportedCondition := candidate
+	unsupportedCondition.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+	unsupportedCondition.Edges[1].Condition = map[string]any{"state": "approved"}
+	require.Contains(t, issueCodes(svc.ValidateCandidate(unsupportedCondition)), "unsupported_condition")
+}
+
 func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Freeform draft")

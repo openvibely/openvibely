@@ -322,6 +322,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		canonicalNodes[node.Key] = node
 	}
 	seenNodes := map[string]bool{}
+	draftNodes := map[string]models.AutomationDraftNode{}
 	validNodeTypes := map[models.AutomationNodeType]bool{
 		models.AutomationNodeTrigger: true, models.AutomationNodeAgentTask: true,
 		models.AutomationNodeHumanGate: true, models.AutomationNodeAction: true,
@@ -333,6 +334,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			continue
 		}
 		seenNodes[node.Key] = true
+		draftNodes[node.Key] = node
 		if node.Name == "" || len(node.Name) > 200 {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "node_name", Message: "Node name must be between 1 and 200 characters."})
 		}
@@ -386,8 +388,16 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			continue
 		}
 		if adapter.DynamicTopology {
-			if len(edge.Condition) != 0 {
-				issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Custom connection conditions are not supported yet."})
+			conditionState, hasCondition := customAutomationEdgeConditionState(edge.Condition)
+			fromNode := draftNodes[edge.From]
+			if fromNode.Role == "native_approval" {
+				if len(edge.Condition) == 0 {
+					issues = append(issues, models.AutomationValidationIssue{Code: "missing_condition", Message: "Choose whether this Human approval connection is the approved or rejected result."})
+				} else if !hasCondition || (conditionState != "approved" && conditionState != "rejected") {
+					issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Human approval connections must select the approved or rejected result."})
+				}
+			} else if len(edge.Condition) != 0 {
+				issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Only Human approval connections may have a result condition."})
 			}
 			continue
 		}
@@ -426,6 +436,14 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 	return issues
 }
 
+func customAutomationEdgeConditionState(condition map[string]any) (string, bool) {
+	if len(condition) != 1 {
+		return "", false
+	}
+	state, ok := condition["state"].(string)
+	return state, ok
+}
+
 func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate) []models.AutomationValidationIssue {
 	if len(candidate.Nodes) == 0 {
 		return []models.AutomationValidationIssue{{Code: "empty_graph", Message: "Add a Schedule and an Agent task to make this custom automation runnable."}}
@@ -442,6 +460,14 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 			triggerCount++
 		case models.AutomationNodeAgentTask:
 			taskCount++
+		case models.AutomationNodeAction:
+			if node.Role != "create_notification" {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This action is not executable in custom automations yet."})
+			}
+		case models.AutomationNodeHumanGate:
+			if node.Role != "native_approval" {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This human gate is not executable in custom automations yet."})
+			}
 		case models.AutomationNodeOutcome:
 		default:
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This capability is not executable in custom automations yet."})
@@ -456,9 +482,11 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 		outgoing[edge.From] = append(outgoing[edge.From], edge)
 		incoming[edge.To] = append(incoming[edge.To], edge)
 		valid := from.Type == models.AutomationNodeTrigger && to.Type == models.AutomationNodeAgentTask ||
-			from.Type == models.AutomationNodeAgentTask && (to.Type == models.AutomationNodeAgentTask || to.Type == models.AutomationNodeOutcome)
+			from.Type == models.AutomationNodeAgentTask && (to.Type == models.AutomationNodeAgentTask || to.Type == models.AutomationNodeOutcome || to.Type == models.AutomationNodeAction && to.Role == "create_notification") ||
+			from.Type == models.AutomationNodeAction && from.Role == "create_notification" && to.Type == models.AutomationNodeHumanGate && to.Role == "native_approval" ||
+			from.Type == models.AutomationNodeHumanGate && from.Role == "native_approval" && to.Type == models.AutomationNodeOutcome
 		if !valid {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: from.Key, Code: "unsupported_handoff", Message: "Connect Schedules to Agent tasks, Agent tasks to one next Agent task, or Agent tasks to an Outcome."})
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: from.Key, Code: "unsupported_handoff", Message: "This connection does not map to a supported OpenVibely capability handoff."})
 		}
 	}
 	if triggerCount == 0 {
@@ -490,11 +518,38 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 				}
 			}
 			if len(outgoing[node.Key]) > 1 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_branching", Message: "An Agent task can connect to only one next Agent task or Outcome."})
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_branching", Message: "An Agent task can connect to only one next capability."})
+			}
+		case models.AutomationNodeAction:
+			if node.Role != "create_notification" {
+				continue
+			}
+			if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Type != models.AutomationNodeAgentTask {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_source", Message: "Connect exactly one Agent task to this Create notification action."})
+			}
+			if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "native_approval" {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_target", Message: "Connect this Create notification action to exactly one Human approval node."})
+			}
+		case models.AutomationNodeHumanGate:
+			if node.Role != "native_approval" {
+				continue
+			}
+			if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Role != "create_notification" {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_source", Message: "Connect exactly one Create notification action to this Human approval node."})
+			}
+			states := map[string]int{}
+			for _, edge := range outgoing[node.Key] {
+				state, ok := customAutomationEdgeConditionState(edge.Condition)
+				if ok && nodes[edge.To].Type == models.AutomationNodeOutcome {
+					states[state]++
+				}
+			}
+			if len(outgoing[node.Key]) != 2 || states["approved"] != 1 || states["rejected"] != 1 {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_branches", Message: "Connect Human approval to one approved Outcome and one rejected Outcome."})
 			}
 		case models.AutomationNodeOutcome:
 			if len(incoming[node.Key]) == 0 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "outcome_parent", Message: "Connect an Agent task to this Outcome."})
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "outcome_parent", Message: "Connect an Agent task or Human approval result to this Outcome."})
 			}
 			if len(outgoing[node.Key]) != 0 {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "outcome_terminal", Message: "An Outcome must be the end of a path."})
@@ -541,8 +596,22 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "skills": true, "source_files": true}
 	case models.AutomationNodeTrigger:
 		allowed = map[string]bool{"target_node_key": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
+	case models.AutomationNodeAction:
+		allowed = map[string]bool{"notification_type": true, "instructions": true}
+	case models.AutomationNodeHumanGate:
+		allowed = map[string]bool{"approval_method": true}
+	case models.AutomationNodeOutcome:
+		allowed = map[string]bool{}
 	}
 	var issues []models.AutomationValidationIssue
+	expectedRole := map[models.AutomationNodeType]string{
+		models.AutomationNodeTrigger: "fixed_schedule", models.AutomationNodeAgentTask: "task",
+		models.AutomationNodeAction: "create_notification", models.AutomationNodeHumanGate: "native_approval",
+		models.AutomationNodeOutcome: "completed",
+	}[node.Type]
+	if expectedRole != "" && node.Role != expectedRole {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This node purpose is not an allowlisted custom Automation capability."})
+	}
 	for key, value := range node.Config {
 		if !allowed[key] {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unknown_config", Message: fmt.Sprintf("Configuration field %q is not supported for this node.", key)})
@@ -584,6 +653,25 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 		}
 		if _, enabledOK := node.Config["enabled"].(bool); !enabledOK {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Trigger enabled state must be true or false."})
+		}
+	}
+	if node.Type == models.AutomationNodeAction {
+		if node.Role != "create_notification" {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "Only the Create notification action is supported here."})
+		}
+		notificationType, typeOK := node.Config["notification_type"].(string)
+		if !typeOK || strings.TrimSpace(notificationType) == "" || len(notificationType) > 100 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_type", Message: "Create notification requires a notification type of at most 100 characters."})
+		}
+		instructions, instructionsOK := node.Config["instructions"].(string)
+		if !instructionsOK || strings.TrimSpace(instructions) == "" || len(instructions) > 2000 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_instructions", Message: "Create notification requires reviewer instructions of at most 2000 characters."})
+		}
+	}
+	if node.Type == models.AutomationNodeHumanGate {
+		method, methodOK := node.Config["approval_method"].(string)
+		if node.Role != "native_approval" || !methodOK || method != "native_alert" {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_method", Message: "This Human approval node must use Native Alert approval."})
 		}
 	}
 	return issues

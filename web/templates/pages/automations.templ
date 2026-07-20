@@ -749,7 +749,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
 						<label class="form-control"><span class="label-text">Node purpose</span><select class="select select-bordered" name="node_kind" required>
 							if page.Result.Candidate.AdapterKey == "custom" {
-								<option value="schedule">Schedule</option><option value="agent_task">Agent task</option><option value="outcome">Outcome</option>
+								<option value="schedule">Schedule</option><option value="agent_task">Agent task</option><option value="create_notification">Create notification</option><option value="human_approval">Human approval</option><option value="outcome">Outcome</option>
 							} else {
 								for _, node := range page.NodePalette {
 									if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
@@ -757,7 +757,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 									}
 								}
 							}
-						</select><span class="label-text-alt mt-1">Schedules start real Agent tasks. Outcomes mark the end of a path.</span></label>
+						</select><span class="label-text-alt mt-1">Add real schedules, Agent tasks, Native Alert approvals, and outcomes. Connect them to define the handoff.</span></label>
 						<label class="form-control"><span class="label-text">Name</span><input class="input input-bordered" name="node_name" maxlength="200" placeholder="Review result" required autofocus/></label>
 						<div class="modal-action"><button class="btn btn-ghost" type="button" onclick="document.getElementById('automation-node-dialog').close()">Cancel</button><button class="btn btn-primary" type="submit" data-automation-create-node>Add node</button></div>
 					</form>
@@ -854,13 +854,22 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								}
 							</select></label><label class="form-control"><span class="label-text">Interval</span><input type="number" min="1" max="365" class="input input-bordered" name={ "node_" + node.Key + "_repeat_interval" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "repeat_interval")) }/></label><label class="label cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox" name={ "node_" + node.Key + "_enabled" } value="true" checked?={ automationDraftBoolConfig(node, "enabled") }/><span class="label-text">Enabled when applied</span></label></div>
 						}
+						if automationDraftHasConfig(node, "notification_type") {
+							<div class="mt-3 grid grid-cols-1 gap-3"><label class="form-control"><span class="label-text">Notification type</span><input class="input input-bordered" name={ "node_" + node.Key + "_notification_type" } value={ automationDraftStringConfig(node, "notification_type") } maxlength="100"/></label><label class="form-control"><span class="label-text">What needs review</span><textarea class="textarea textarea-bordered h-24" name={ "node_" + node.Key + "_instructions" } maxlength="2000">{ automationDraftStringConfig(node, "instructions") }</textarea><span class="label-text-alt mt-1">The connected Agent task is configured to create the notification. The Alert is created only when that task runs.</span></label></div>
+						}
+						if automationDraftHasConfig(node, "approval_method") {
+							<div class="alert mt-3 text-sm"><span>Native Alert approval. A human approves or rejects the real notification from Alerts; this graph cannot decide for them.</span></div>
+						}
 					</section>
 				}
 			</div>
 			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
 				for _, edge := range page.Result.Candidate.Edges {
-					<div class="rounded-box bg-base-200/40 p-3"><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Delete connection</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label></div>
-				}
+						<div class="rounded-box bg-base-200/40 p-3"><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Delete connection</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label>
+							if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "native_approval" {
+								<label class="form-control mt-2"><span class="label-text">Human result</span><select class="select select-bordered" name={ "edge_" + edge.Key + "_state" }><option value="">Choose result</option><option value="approved" selected?={ automationDraftEdgeConditionState(edge) == "approved" }>Approved</option><option value="rejected" selected?={ automationDraftEdgeConditionState(edge) == "rejected" }>Rejected</option></select></label>
+							}
+						</div>				}
 			</div></div>
 				<div class="flex flex-wrap gap-3"><button class="btn btn-primary" type="submit">Save changes</button><button class="btn btn-outline" type="submit" formaction={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts/%s/plan?project_id=%s", page.Result.Definition.Automation.ID, page.Result.Definition.Version.ID, currentProjectID) }>Review and apply</button></div>
 				</form>
@@ -921,10 +930,18 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							if (interval) node.config.repeat_interval = Number(interval.value);
 							if (enabled) node.config.enabled = enabled.checked;
 						}
+						if (node.config && Object.prototype.hasOwnProperty.call(node.config, 'notification_type')) {
+							var notificationType = builder.querySelector('[name="' + prefix + 'notification_type"]');
+							var instructions = builder.querySelector('[name="' + prefix + 'instructions"]');
+							if (notificationType) node.config.notification_type = notificationType.value;
+							if (instructions) node.config.instructions = instructions.value;
+						}
 					});
 					(candidate.edges || []).forEach(function(edge) {
 						var label = builder.querySelector('[name="edge_' + edge.key + '_label"]');
+						var state = builder.querySelector('[name="edge_' + edge.key + '_state"]');
 						if (label) edge.label = label.value;
+						if (state) edge.condition = state.value ? {state: state.value} : {};
 					});
 					builder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });
 				}
@@ -1141,7 +1158,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 		if page.Plan != nil {
 			<section class="mt-5 rounded-box border border-primary/30 bg-base-100 p-5"><h3 class="text-lg font-semibold">Review changes</h3><p class="mt-1 text-sm text-base-content/65">Review every effect before applying this design. Nothing has changed in the runtime yet.</p><div class="mt-4 space-y-2">
 				for _, effect := range page.Plan.Effects {
-					<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-base-200/60 px-3 py-2"><span class="text-sm">{ effect.Name }</span><span class="badge badge-outline">{ effect.Operation } { effect.ResourceType }</span></div>
+					<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-base-200/60 px-3 py-2"><span class="text-sm">{ effect.Name }</span><span class="badge badge-outline">{ automationPublicationEffectBadge(effect) }</span></div>
 				}
 			</div>
 				if len(page.Plan.Validation) > 0 {
@@ -1161,6 +1178,7 @@ const (
 )
 
 func automationDraftCandidateJSON(candidate models.AutomationDraftCandidate) string { value, _ := json.Marshal(candidate); return string(value) }
+func automationPublicationEffectBadge(effect models.AutomationPublicationEffect) string { switch effect.ResourceType { case "alert_configuration": return "Configure notification handoff"; case "human_approval": return "Configure human approval" }; return effect.Operation+" "+effect.ResourceType }
 func automationDraftEdgesJSON(edges []models.AutomationDraftEdge) string { value, _ := json.Marshal(edges); return string(value) }
 func automationValidationMessages(issues []models.AutomationValidationIssue, palette []models.AutomationDraftNode) []string {
 	missingNodes := []string{}
@@ -1188,6 +1206,8 @@ func automationDraftIntConfig(node models.AutomationDraftNode, key string) int {
 func automationDraftBoolConfig(node models.AutomationDraftNode, key string) bool { value, _ := node.Config[key].(bool); return value }
 func automationDraftHasNode(nodes []models.AutomationDraftNode, key string) bool { for _, node := range nodes { if node.Key == key { return true } }; return false }
 func automationDraftNodeName(nodes []models.AutomationDraftNode, key string) string { for _, node := range nodes { if node.Key == key { return node.Name } }; return key }
+func automationDraftNodeRole(nodes []models.AutomationDraftNode, key string) string { for _, node := range nodes { if node.Key == key { return node.Role } }; return "" }
+func automationDraftEdgeConditionState(edge models.AutomationDraftEdge) string { value, _ := edge.Condition["state"].(string); return value }
 func automationDraftDefaultX(nodes []models.AutomationDraftNode, key string) float64 { for _, node := range nodes { if node.Key == key && node.Position != nil { return node.Position.X } }; return 0 }
 func automationDraftDefaultY(nodes []models.AutomationDraftNode, key string) float64 { for _, node := range nodes { if node.Key == key && node.Position != nil { return node.Position.Y } }; return 0 }
 func automationDraftGraphViewBox(nodes []models.AutomationDraftNode) string { var first *models.AutomationDraftPoint; for _, node := range nodes { if node.Position != nil { first = node.Position; break } }; if first == nil { return "-60 -60 900 540" }; minX, minY, maxX, maxY := first.X, first.Y, first.X+automationGraphNodeWidth, first.Y+automationGraphNodeHeight; for _, node := range nodes { if node.Position == nil { continue }; if node.Position.X < minX { minX = node.Position.X }; if node.Position.Y < minY { minY = node.Position.Y }; if node.Position.X+automationGraphNodeWidth > maxX { maxX = node.Position.X+automationGraphNodeWidth }; if node.Position.Y+automationGraphNodeHeight > maxY { maxY = node.Position.Y+automationGraphNodeHeight } }; return fmt.Sprintf("%.0f %.0f %.0f %.0f", minX-automationGraphPadding, minY-automationGraphPadding, maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding) }

@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	automationAdapterContractVersion  = 2
-	automationCompilerContractVersion = 2
+	automationAdapterContractVersion  = 3
+	automationCompilerContractVersion = 3
 )
 
 type automationGitHubConnectionProvider interface {
@@ -197,6 +197,22 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 			plan.Effects = append(plan.Effects, effect)
 			if dependency.ID != "" {
 				dependencies = append(dependencies, dependency)
+			}
+		}
+	}
+	if candidate.AdapterKey == AutomationAdapterCustom {
+		for _, node := range candidate.Nodes {
+			switch {
+			case node.Type == models.AutomationNodeAction && node.Role == "create_notification":
+				plan.Effects = append(plan.Effects, models.AutomationPublicationEffect{
+					StepKey: "alert_configuration:" + node.Key, Operation: "configure", TargetKey: "alert_configuration:" + node.Key,
+					ResourceType: "alert_configuration", Name: node.Name,
+				})
+			case node.Type == models.AutomationNodeHumanGate && node.Role == "native_approval":
+				plan.Effects = append(plan.Effects, models.AutomationPublicationEffect{
+					StepKey: "human_approval:" + node.Key, Operation: "configure", TargetKey: "human_approval:" + node.Key,
+					ResourceType: "human_approval", Name: node.Name,
+				})
 			}
 		}
 	}
@@ -450,7 +466,7 @@ func (p *AutomationPublicationPlanner) planTask(ctx context.Context, definition 
 	effect.ResourceID = task.ID
 	desiredPriority, _ := draftInt(node.Config["priority"])
 	desiredCategory, _ := node.Config["category"].(string)
-	desiredPrompt := automationCompiledTaskPrompt(node)
+	desiredPrompt := automationCompiledTaskPrompt(candidate, node)
 	desiredAgent, err := p.resolveNodeAgent(ctx, definition.Automation.ProjectID, node)
 	if err != nil {
 		return effect, dependency, err
@@ -477,7 +493,7 @@ func (p *AutomationPublicationPlanner) planTask(ctx context.Context, definition 
 			if childResource.ResourceID == "" {
 				topologyComplete = false
 			}
-			desiredChainConfig, err = customAutomationTaskChainConfig(definition.Automation, *childNode, childResource.ResourceID)
+			desiredChainConfig, err = customAutomationTaskChainConfig(definition.Automation, candidate, *childNode, childResource.ResourceID)
 			if err != nil {
 				return effect, dependency, err
 			}
@@ -539,10 +555,10 @@ func customAutomationTaskNeighbors(candidate models.AutomationDraftCandidate, no
 	return parentKey, child
 }
 
-func customAutomationTaskChainConfig(automation models.Automation, child models.AutomationDraftNode, childTaskID string) (string, error) {
+func customAutomationTaskChainConfig(automation models.Automation, candidate models.AutomationDraftCandidate, child models.AutomationDraftNode, childTaskID string) (string, error) {
 	config := models.ChainConfiguration{
 		Enabled: true, Trigger: "on_completion", ChildTaskID: childTaskID, ChildAutomationNodeKey: child.Key,
-		ChildTitle: automationTaskTitle(automation, child), ChildPromptPrefix: automationCompiledTaskPrompt(child),
+		ChildTitle: automationTaskTitle(automation, child), ChildPromptPrefix: automationCompiledTaskPrompt(candidate, child),
 	}
 	category, _ := child.Config["category"].(string)
 	config.ChildCategory = category
@@ -553,7 +569,7 @@ func customAutomationTaskChainConfig(automation models.Automation, child models.
 	return string(encoded), nil
 }
 
-func automationCompiledTaskPrompt(node models.AutomationDraftNode) string {
+func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) string {
 	prompt, _ := node.Config["prompt"].(string)
 	prompt = strings.TrimSpace(prompt)
 	skills, _ := draftStringSlice(node.Config["skills"])
@@ -566,7 +582,31 @@ func automationCompiledTaskPrompt(node models.AutomationDraftNode) string {
 	if len(sourceFiles) > 0 {
 		prompt += "\n\nFocus source files:\n- " + strings.Join(sourceFiles, "\n- ")
 	}
+	if notification := customAutomationNotificationTarget(candidate, node.Key); notification != nil {
+		notificationType, _ := notification.Config["notification_type"].(string)
+		instructions, _ := notification.Config["instructions"].(string)
+		prompt += "\n\nHuman approval handoff:\n" + strings.TrimSpace(instructions) +
+			"\nWhen you have prepared the proposal, call create_notification exactly once with type \"" + strings.TrimSpace(notificationType) +
+			"\" and include the proposal in its body. Creating the notification requests review; it does not approve, merge, release, or deploy anything."
+	}
 	return prompt
+}
+
+func customAutomationNotificationTarget(candidate models.AutomationDraftCandidate, taskNodeKey string) *models.AutomationDraftNode {
+	if candidate.AdapterKey != AutomationAdapterCustom {
+		return nil
+	}
+	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		nodes[node.Key] = node
+	}
+	for _, edge := range candidate.Edges {
+		target := nodes[edge.To]
+		if edge.From == taskNodeKey && target.Type == models.AutomationNodeAction && target.Role == "create_notification" {
+			return &target
+		}
+	}
+	return nil
 }
 
 func automationSkillNames(refs []string) []string {

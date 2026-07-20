@@ -602,6 +602,8 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	require.Contains(t, created.Body.String(), "Node purpose")
 	require.Contains(t, created.Body.String(), `value="schedule"`)
 	require.Contains(t, created.Body.String(), `value="agent_task"`)
+	require.Contains(t, created.Body.String(), `value="create_notification"`)
+	require.Contains(t, created.Body.String(), `value="human_approval"`)
 	require.Contains(t, created.Body.String(), `value="outcome"`)
 	require.Contains(t, created.Body.String(), "Custom")
 	require.NotContains(t, created.Body.String(), "Runtime behavior")
@@ -617,7 +619,7 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	candidate, err := metadata.Candidate()
 	require.NoError(t, err)
 	require.Equal(t, service.AutomationAdapterCustom, candidate.AdapterKey)
-	post := func(values url.Values) {
+	post := func(values url.Values) string {
 		t.Helper()
 		raw, marshalErr := json.Marshal(candidate)
 		require.NoError(t, marshalErr)
@@ -629,6 +631,7 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 		require.NoError(t, err)
 		candidate, err = metadata.Candidate()
 		require.NoError(t, err)
+		return response.Body.String()
 	}
 
 	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Weekday review"}})
@@ -646,6 +649,20 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	require.Empty(t, plan.Validation)
 	require.Len(t, plan.Effects, 2)
 	require.ElementsMatch(t, []string{"task", "schedule"}, []string{plan.Effects[0].ResourceType, plan.Effects[1].ResourceType})
+
+	notificationHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"create_notification"}, "node_name": {"Request approval"}})
+	require.Contains(t, notificationHTML, `name="node_request_approval_notification_type"`)
+	require.Contains(t, notificationHTML, "The Alert is created only when that task runs")
+	require.Equal(t, "create_notification", candidate.Nodes[2].Role)
+	approvalHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"human_approval"}, "node_name": {"Human decision"}})
+	require.Contains(t, approvalHTML, "Native Alert approval")
+	require.Equal(t, "native_approval", candidate.Nodes[3].Role)
+	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"outcome"}, "node_name": {"Approved"}})
+	post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {candidate.Nodes[3].Key}, "to_key": {candidate.Nodes[4].Key}})
+	edge := candidate.Edges[len(candidate.Edges)-1]
+	conditionHTML := post(url.Values{"edge_" + edge.Key + "_state": {"approved"}})
+	require.Contains(t, conditionHTML, "Human result")
+	require.Equal(t, map[string]any{"state": "approved"}, candidate.Edges[len(candidate.Edges)-1].Condition)
 }
 
 func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(t *testing.T) {
