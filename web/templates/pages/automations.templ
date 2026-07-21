@@ -87,12 +87,13 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 		<div id="automation-live" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
 			data-external-refresh-url={ fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", graph.Automation.ID, currentProjectID) }
 			hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }		hx-trigger="every 20s [document.visibilityState === 'visible'], automation-visible" hx-target="this" hx-swap="outerHTML">
-		@layout.PageTitle(graph.Automation.Name)
-		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
-		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
-			<div class="min-w-0"><h2 class="break-words text-2xl font-bold">{ graph.Automation.Name }</h2><p class="mt-1 max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p></div>
-			<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" onsubmit="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelySubmitNavigate(this); return false;"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-outline btn-sm" type="submit">Edit automation</button></form>
-				if graph.Automation.LifecycleState == models.AutomationActive {
+			@layout.PageTitle(graph.Automation.Name)
+			@automationBreadcrumb(currentProjectID, graph.Automation.ID, graph.Automation.Name, "")
+			<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+				<div class="min-w-0">
+					<p class="max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p>
+				</div>
+				<div class="flex flex-wrap items-center gap-2"><span class="badge badge-primary badge-outline">{ string(graph.Automation.LifecycleState) }</span><span class="badge badge-ghost">{ string(graph.Automation.HealthState) }</span><form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/drafts?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" onsubmit="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelySubmitNavigate(this); return false;"><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-outline btn-sm" type="submit">Edit automation</button></form>				if graph.Automation.LifecycleState == models.AutomationActive {
 					<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-sm" type="submit">Pause</button></form>
 				}
 				if graph.Automation.LifecycleState == models.AutomationPaused {
@@ -281,11 +282,10 @@ templ AutomationDefinitionContent(definition models.AutomationDefinition, resour
 templ automationDefinitionContent(definition models.AutomationDefinition, resources []models.AutomationResourceSummary, currentProjectID string) {
 	<div id="automation-definition" class="h-full overflow-y-auto min-w-0 max-w-full">
 		@layout.PageTitle(definition.Automation.Name)
-		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
+		@automationBreadcrumb(currentProjectID, definition.Automation.ID, definition.Automation.Name, "")
 		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
 			<div class="min-w-0">
-				<h2 class="break-words text-2xl font-bold">{ definition.Automation.Name }</h2>
-				<p class="mt-1 max-w-3xl text-sm text-base-content/65">{ definition.Automation.Description }</p>
+				<p class="max-w-3xl text-sm text-base-content/65">{ definition.Automation.Description }</p>
 			</div>
 				<div class="flex flex-wrap gap-2">
 					<span class="badge badge-primary badge-outline">{ string(definition.Automation.LifecycleState) }</span>
@@ -346,12 +346,12 @@ templ AutomationHistoryContent(dashboard models.AutomationHistoryDashboard, curr
 templ automationHistoryContent(dashboard models.AutomationHistoryDashboard, currentProjectID string, workItemStatus string) {
 	<div id="automation-history" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-metrics={ templ.JSONString(automationMetricsJSON(dashboard.Metrics)) }>
 		@layout.PageTitle(dashboard.Automation.Name + " History")
-		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
-			<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
-				<div><h2 class="text-2xl font-bold">{ dashboard.Automation.Name }</h2><p class="mt-1 text-sm text-base-content/65">Persisted invocation and work-item history.</p></div>
-				<span class={ automationHealthBadgeClass(dashboard.Health.State) }>{ string(dashboard.Health.State) }</span>
-			</div>
-			@automationViewTabs(dashboard.Automation.ID, currentProjectID, "history")
+		@automationBreadcrumb(currentProjectID, dashboard.Automation.ID, dashboard.Automation.Name, "")
+		<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+			<div><p class="text-sm text-base-content/65">Persisted invocation and work-item history.</p></div>
+			<span class={ automationHealthBadgeClass(dashboard.Health.State) }>{ string(dashboard.Health.State) }</span>
+		</div>
+		@automationViewTabs(dashboard.Automation.ID, currentProjectID, "history")
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 			<div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">Automation health</h3><p class="mt-1 text-sm text-base-content/65">{ dashboard.Health.Reason }</p></div><span class="text-xs text-base-content/55">Evaluated { dashboard.Health.EvaluatedAt.Local().Format("Jan 2, 3:04 PM") }</span></div>
 		</div>
@@ -485,8 +485,8 @@ templ AutomationInvocationHistoryContent(history models.AutomationInvocationHist
 templ automationInvocationHistoryContent(history models.AutomationInvocationHistory, currentProjectID string) {
 	<div id="automation-invocation-history" class="h-full overflow-y-auto min-w-0 max-w-full">
 		@layout.PageTitle(history.Definition.Automation.Name + " Invocation")
-		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← History</a>
-		<div class="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 class="text-2xl font-bold">Invocation</h2><p class="mt-1 text-sm text-base-content/60">{ automationInvocationLabel(history.Invocation) } · topology v{ fmt.Sprintf("%d", history.Definition.Version.Version) }</p></div><span class="badge">{ string(history.Invocation.Status) }</span></div>
+		@automationBreadcrumb(currentProjectID, history.Definition.Automation.ID, history.Definition.Automation.Name, "Invocation")
+		<div class="mb-5 flex flex-wrap items-start justify-between gap-3"><div><p class="text-sm text-base-content/60">{ automationInvocationLabel(history.Invocation) } · topology v{ fmt.Sprintf("%d", history.Definition.Version.Version) }</p></div><span class="badge">{ string(history.Invocation.Status) }</span></div>
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 			<h3 class="font-semibold">Invocation graph</h3><p class="mt-1 text-xs text-base-content/55">Immutable topology with nodes touched only by this occurrence highlighted.</p>
 			<div class="mt-3 automation-canvas-shell h-[30rem] w-full overflow-hidden rounded-box border border-base-300 bg-base-200/20">
@@ -543,8 +543,8 @@ templ AutomationWorkItemHistoryContent(history models.AutomationWorkItemHistory,
 templ automationWorkItemHistoryContent(history models.AutomationWorkItemHistory, currentProjectID string) {
 	<div id="automation-work-item-history" class="h-full overflow-y-auto min-w-0 max-w-full" data-replay={ templ.JSONString(automationReplayJSON(history.Replay)) }>
 		@layout.PageTitle(history.Definition.Automation.Name + " Work Item")
-		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", history.Definition.Automation.ID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← History</a>
-		<div class="mb-5 flex flex-wrap items-start justify-between gap-3"><div><h2 class="break-words text-2xl font-bold">{ automationWorkItemLabel(history.WorkItem) }</h2><p class="mt-1 text-sm text-base-content/60">Cross-invocation lifetime · topology v{ fmt.Sprintf("%d", history.Definition.Version.Version) }</p></div><span class="badge">{ string(history.WorkItem.Status) }</span></div>
+		@automationBreadcrumb(currentProjectID, history.Definition.Automation.ID, history.Definition.Automation.Name, automationWorkItemLabel(history.WorkItem))
+		<div class="mb-5 flex flex-wrap items-start justify-between gap-3"><div><p class="text-sm text-base-content/60">Cross-invocation lifetime · topology v{ fmt.Sprintf("%d", history.Definition.Version.Version) }</p></div><span class="badge">{ string(history.WorkItem.Status) }</span></div>
 		<div class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 			<div class="flex flex-wrap items-center justify-between gap-3">
 				<div><h3 class="font-semibold">Transition replay</h3><p class="mt-1 text-xs text-base-content/55">Frames come only from append-only persisted transitions.</p></div>
@@ -636,8 +636,8 @@ templ AutomationNewFailureContent(currentProjectID string, description string, e
 templ automationNewContent(currentProjectID string, description string, errorMessage string) {
 	<div id="automation-new" class="h-full overflow-y-auto min-w-0 max-w-full">
 		@layout.PageTitle("New Automation")
-		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
-		<div class="mb-6"><h2 class="text-2xl font-bold">New Automation</h2><p class="mt-1 text-sm text-base-content/65">Choose one explicit creation path. Existing tasks and schedules are never discovered or registered from this page.</p></div>
+		@automationBreadcrumb(currentProjectID, "", "", "New Automation")
+		<div class="mb-6"><p class="text-sm text-base-content/65">Choose one explicit creation path. Existing tasks and schedules are never discovered or registered from this page.</p></div>
 		if errorMessage != "" {
 			<div class="alert alert-error mb-4" role="alert"><span>{ errorMessage }</span></div>
 		}
@@ -658,7 +658,11 @@ templ AutomationBuilder(projects []models.Project, currentProjectID string, page
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
 	<div id="automation-builder" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-draft>
 		@layout.PageTitle(page.Result.Candidate.Name)
-		<a class="btn btn-ghost btn-sm mb-3" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">← Automations</a>
+		if page.AutomationID != "" {
+			@automationBreadcrumb(currentProjectID, page.AutomationID, page.Result.Candidate.Name, "Edit automation")
+		} else {
+			@automationBreadcrumb(currentProjectID, "", "", "New Automation")
+		}
 		<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
 			<div class="min-w-0 flex-1">
 				<label class="form-control max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
@@ -729,12 +733,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			}
 			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 				<div class="flex flex-wrap items-start justify-between gap-3">
-					<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">{ automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect from either side:</span> drag either dot on one node to either dot on another. Select a line, then use Delete connection or drag an endpoint to reconnect it.</p></div>
+					<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">{ automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect from either side:</span> drag either dot on one node to either dot on another. Select a line, then use its × control to delete it or drag an endpoint to reconnect it.</p></div>
 					<div class="flex flex-wrap items-center gap-2" aria-label="Canvas controls">
 						<div data-automation-node-tool>
 							<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
 						</div>
-						<button class="btn btn-outline btn-sm" type="button" data-automation-disconnect-edge disabled title="Select a connection line first">Delete connection</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button><button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button><button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button><button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button>
 					</div>
 				</div>
@@ -925,7 +928,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				var edgePalette = [];
 				try { edgePalette = JSON.parse(root.dataset.edgePalette || '[]'); } catch (_) { return; }
 				var connectStatus = root.querySelector('[data-automation-connect-status]');
-				var disconnectEdge = root.querySelector('[data-automation-disconnect-edge]');
 				var preview = svg.querySelector('[data-automation-edge-preview]');
 					var selectedEdgeKey = '';
 					var keyboardSource = null;
@@ -1082,8 +1084,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						selectedEdgeKey = group ? group.dataset.edgeKey : '';
 							svg.querySelectorAll('.automation-draft-edge').forEach(function(edge) { edge.classList.toggle('automation-draft-edge--selected', edge === group); });
 							svg.querySelectorAll('[data-edge-foreground]').forEach(function(edge) { edge.classList.toggle('automation-edge-foreground--selected', !!group && edge.dataset.edgeKey === selectedEdgeKey); });
-							svg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { controls.classList.toggle('automation-edge-controls--selected', !!group && controls.dataset.edgeKey === selectedEdgeKey); });						if (disconnectEdge) disconnectEdge.disabled = !selectedEdgeKey;
-						if (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or choose Delete connection.';
+							svg.querySelectorAll('[data-edge-controls]').forEach(function(controls) { controls.classList.toggle('automation-edge-controls--selected', !!group && controls.dataset.edgeKey === selectedEdgeKey); });
+						if (group && connectStatus) connectStatus.textContent = 'Connection selected. Drag either endpoint to reconnect it, or use the × control to delete it.';
 					}
 					function beginReconnect(group, handle, event) {
 						if (event.button !== 0) return; event.preventDefault(); event.stopPropagation(); clearActiveConnection(); var edge = edgeCandidate(group.dataset.edgeKey), points = edge && edgePoints(edge); if (!points) return;
@@ -1138,7 +1140,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						showConnectionTargets(activeConnection.from, activeConnection.fromSide); window.addEventListener('pointermove', moveConnection); window.addEventListener('pointerup', finishConnection); window.addEventListener('pointercancel', cancelConnection);
 					}
 					svg.querySelectorAll('.automation-draft-edge').forEach(bindEdgeGroup);
-					if (disconnectEdge) disconnectEdge.addEventListener('click', function() { if (selectedEdgeKey) removeEdge(selectedEdgeKey); });
 					svg.querySelectorAll('[data-connect-port]').forEach(function(handle) {
 						handle.addEventListener('pointerdown', function(event) { beginConnection(handle, event); });
 						handle.addEventListener('click', function(event) { event.preventDefault(); event.stopPropagation(); });
@@ -1360,5 +1361,23 @@ templ automationViewTabs(automationID string, currentProjectID string, active st
 		<a role="tab" class={ "tab min-h-11 px-5", templ.KV("tab-active", active == "live") } aria-selected={ fmt.Sprintf("%t", active == "live") } data-automation-view="live" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Live</a>
 		<a role="tab" class={ "tab min-h-11 px-5", templ.KV("tab-active", active == "history") } aria-selected={ fmt.Sprintf("%t", active == "history") } data-automation-view="history" href={ templ.URL(fmt.Sprintf("/automations/%s/history?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/history?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">History</a>
 		<a role="tab" class={ "tab min-h-11 px-5", templ.KV("tab-active", active == "definition") } aria-selected={ fmt.Sprintf("%t", active == "definition") } data-automation-view="definition" href={ templ.URL(fmt.Sprintf("/automations/%s/definition?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s/definition?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Definition</a>
+	</nav>
+}
+
+templ automationBreadcrumb(currentProjectID string, automationID string, automationName string, currentLabel string) {
+	<nav class="mb-6 flex min-w-0 flex-shrink-0 items-center gap-2" aria-label="Breadcrumb" data-automation-breadcrumb>
+		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
+		if automationName != "" {
+			<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
+			if currentLabel != "" && automationID != "" {
+				<a class="min-w-0 truncate text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", automationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">{ automationName }</a>
+			} else {
+				<h2 class="min-w-0 truncate text-2xl font-bold">{ automationName }</h2>
+			}
+		}
+		if currentLabel != "" {
+			<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
+			<h2 class="min-w-0 truncate text-2xl font-bold">{ currentLabel }</h2>
+		}
 	</nav>
 }

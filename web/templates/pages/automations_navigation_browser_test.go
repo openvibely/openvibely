@@ -157,6 +157,15 @@ window.addEventListener('DOMContentLoaded', function() {
   function historyReady() { return !!document.getElementById('automation-history'); }
   function definitionReady() { return !!document.getElementById('automation-definition'); }
   function portfolioReady() { return !!document.getElementById('automations-container'); }
+  function assertAutomationBreadcrumb(rootSelector, name, finalLabel) {
+    var breadcrumb = document.querySelector(rootSelector + ' [data-automation-breadcrumb]');
+    if (!breadcrumb) fail(rootSelector + ' is missing Automation breadcrumb navigation');
+    var links = breadcrumb.querySelectorAll('a');
+    if (!links.length || links[0].textContent.trim() !== 'Automations') fail(rootSelector + ' breadcrumb does not start with Automations');
+    if (!breadcrumb.textContent.includes(name)) fail(rootSelector + ' breadcrumb is missing Automation name ' + name);
+    if (finalLabel && !breadcrumb.textContent.includes(finalLabel)) fail(rootSelector + ' breadcrumb is missing current page ' + finalLabel);
+    if (breadcrumb.textContent.includes('←')) fail(rootSelector + ' still renders back-button navigation');
+  }
   function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method: 'POST'}); }
   function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message || 'window error')); });
@@ -169,6 +178,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await report('progress', 'automation-a-clicked');
     await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A');
     await report('progress', 'automation-a-loaded');
+    assertAutomationBreadcrumb('#automation-live', 'Automation A', '');
 	    var node = document.querySelector('.automation-graph-node');
 	    var label = document.querySelector('.automation-node-content strong');
 	    var nodeFill = getComputedStyle(node).fill;
@@ -184,11 +194,13 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (!document.body.textContent.includes('No active work')) fail('zero counters did not collapse to a readable summary');
     click('[data-automation-view="history"]', 'History tab from Live');
     await waitFor(historyReady, 'History from Live');
+    assertAutomationBreadcrumb('#automation-history', 'Automation A', '');
     await report('progress', 'history-loaded');
     click('[data-automation-view="live"]', 'Live tab from History');
     await waitFor(function() { return liveID() === 'automation-a'; }, 'Live from History');
     click('[data-automation-view="definition"]', 'Definition tab from Live');
     await waitFor(definitionReady, 'Definition from Live');
+    assertAutomationBreadcrumb('#automation-definition', 'Automation A', '');
     await report('progress', 'definition-loaded');
     click('[data-automation-view="live"]', 'Live tab from Definition');
     await waitFor(function() { return liveID() === 'automation-a'; }, 'Live from Definition');
@@ -199,14 +211,14 @@ window.addEventListener('DOMContentLoaded', function() {
     await report('progress', 'history-browser-back-restored');
     click('[data-automation-view="history"]', 'History tab after browser Back');
     await waitFor(historyReady, 'History after browser Back');
-    click('#automation-history > a[href^="/automations?"]', 'in-page Automations back link from History');
+    click('#automation-history [data-automation-breadcrumb] a[href^="/automations?"]', 'Automations breadcrumb from History');
     await waitFor(portfolioReady, 'portfolio after History back link');
     await report('progress', 'history-in-page-back-restored');
     click('a[href^="/automations/automation-b?"]', 'Automation B card after History return');
     await waitFor(function() { return liveID() === 'automation-b'; }, 'Automation B after History return');
     await report('progress', 'automation-b-clicked');
 
-    click('#automation-live > a[href^="/automations?"]', 'in-page Automations back link');
+    click('#automation-live [data-automation-breadcrumb] a[href^="/automations?"]', 'Automations breadcrumb');
     await report('progress', 'in-page-back-clicked');
     await waitFor(portfolioReady, 'portfolio after in-page back link');
     await report('progress', 'in-page-back-restored');
@@ -291,7 +303,8 @@ window.addEventListener('DOMContentLoaded', function() {
 		    var blankDeleteHit = document.elementFromPoint(blankDeleteRect.left + blankDeleteRect.width / 2, blankDeleteRect.top + blankDeleteRect.height / 2);
 		    if (!blankDeleteHit || !blankDeleteHit.closest('[data-delete-edge]')) fail('connection delete control is not the topmost interactive element at its center');
 
-		    click('#automation-builder > a[href^="/automations?"]', 'Automations back link from blank builder');	    await waitFor(portfolioReady, 'portfolio before published Automation selection');
+		    click('#automation-builder [data-automation-breadcrumb] a[href^="/automations?"]', 'Automations breadcrumb from blank builder');
+		    await waitFor(portfolioReady, 'portfolio before published Automation selection');
 	    click('a[href^="/automations/automation-visual?"]', 'published visual Automation card');
 	    await waitFor(function() { return liveID() === 'automation-visual'; }, 'published visual Automation');
 	    click('#automation-live form[hx-post*="/drafts"] button[type="submit"]', 'Edit published visual Automation');
@@ -367,13 +380,13 @@ window.addEventListener('DOMContentLoaded', function() {
 		    reconnectTarget.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:14, clientX:reconnectTargetRect.left+reconnectTargetRect.width/2, clientY:reconnectTargetRect.top+reconnectTargetRect.height/2}));
 		    connectedCandidate = JSON.parse(candidateInput.value);
 		    if (!connectedCandidate.edges.some(function(edge) { return edge.from === 'result' && edge.to === 'vision_driver'; })) fail('dragging an existing endpoint did not reconnect the edge');
-			    click('[data-edge-key][data-from="vision_trigger"][data-to="vision_driver"] [data-edge-hit]', 'connection to disconnect');
-			    var disconnect = document.querySelector('[data-automation-disconnect-edge]');
-			    if (!disconnect || disconnect.disabled) fail('selected connection did not enable the visible delete action');
-			    if (!disconnect.textContent.includes('Delete connection')) fail('selected connection action is not clearly labeled');
-			    disconnect.click();
+			    if (document.querySelector('[data-automation-disconnect-edge]')) fail('canvas still renders a dedicated Delete connection toolbar button');
+			    click('[data-edge-key][data-from="vision_trigger"][data-to="vision_driver"] [data-edge-hit]', 'connection to delete with midpoint control');
+			    var selectedDelete = document.querySelector('[data-edge-controls][data-edge-key="trigger_to_driver"] [data-delete-edge]');
+			    if (!selectedDelete) fail('selected connection did not expose its midpoint delete control');
+			    selectedDelete.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
 			    connectedCandidate = JSON.parse(candidateInput.value);
-			    if (connectedCandidate.edges.some(function(edge) { return edge.from === 'vision_trigger' && edge.to === 'vision_driver'; })) fail('visible delete action did not update the design');
+			    if (connectedCandidate.edges.some(function(edge) { return edge.from === 'vision_trigger' && edge.to === 'vision_driver'; })) fail('midpoint delete control did not update the design');
 			    var draftNode = document.querySelector('[data-node-key="vision_trigger"]');
 		    var beforeX = JSON.parse(candidateInput.value).nodes[0].position.x;
 		    draftNode.dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true}));

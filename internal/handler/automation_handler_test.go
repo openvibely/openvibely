@@ -669,9 +669,10 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndKeepsNodeActionsTransient(t 
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, opened.Code)
-	for _, marker := range []string{`data-automation-draft-canvas`, `data-automation-node-tool`, `data-automation-add-node-open`, `data-automation-add-first-node`, `data-automation-node-dialog`, `data-automation-disconnect-edge`, `data-automation-fit`, `data-automation-reset`, `name="candidate_json"`, "Connect from either side", "Save changes"} {
+	for _, marker := range []string{`data-automation-draft-canvas`, `data-automation-node-tool`, `data-automation-add-node-open`, `data-automation-add-first-node`, `data-automation-node-dialog`, `data-automation-fit`, `data-automation-reset`, `name="candidate_json"`, "Connect from either side", "Save changes"} {
 		require.Contains(t, opened.Body.String(), marker)
 	}
+	require.NotContains(t, opened.Body.String(), `data-automation-disconnect-edge`, "the midpoint edge control is the only visible connection delete action on the canvas")
 	require.Contains(t, opened.Body.String(), `name="save_changes" value="true"`)
 	require.NotContains(t, opened.Body.String(), "Review and apply")
 	require.NotContains(t, opened.Body.String(), "Apply changes")
