@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
+	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
@@ -61,13 +63,12 @@ func (s *Service) CallAgentForWorkflow(ctx context.Context, prompt string, agent
 // CleanOutputForChain strips internal markers from task output so the child task
 // receives only meaningful response text.
 func CleanOutputForChain(output string) string {
-	output = reThinkingBlock.ReplaceAllString(output, "")
-	output = reToolMarker.ReplaceAllString(output, "")
-	output = reToolResultBlock.ReplaceAllString(output, "")
-	output = reToolResultLegacy.ReplaceAllString(output, "")
-	if idx := strings.Index(output, "[STATUS:"); idx != -1 {
-		output = output[:idx]
-	}
+	output = llmtranscript.NormalizeMarkers(output)
+	output = llmoutput.StripFinalStatusControl(output)
+	output = llmoutput.ReplaceOutsideMarkdownCode(output, reThinkingBlock, "")
+	output = llmoutput.ReplaceOutsideMarkdownCode(output, reToolMarker, "")
+	output = llmoutput.ReplaceOutsideMarkdownCode(output, reToolResultBlock, "")
+	output = llmoutput.ReplaceOutsideMarkdownCode(output, reToolResultLegacy, "")
 	return strings.TrimSpace(output)
 }
 
@@ -224,7 +225,7 @@ func BuildBlockedChild(parentTask models.Task, config *models.ChainConfiguration
 	return childTask
 }
 
-var reThinkingBlock = regexp.MustCompile(`(?s)\[Thinking\]\n.*?\[/Thinking\]\n?`)
-var reToolMarker = regexp.MustCompile(`\[Using tool: [^\]]+\]\n?`)
-var reToolResultBlock = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\]\n.*?\[/Tool\]\n?`)
-var reToolResultLegacy = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\n]*\]\n?`)
+var reThinkingBlock = regexp.MustCompile(`(?s)\[Thinking\](?:\r\n|\r|\n).*?\[/Thinking\](?:\r\n|\r|\n)?`)
+var reToolMarker = regexp.MustCompile(`\[Using tool: [^\]]+\](?:\r\n|\r|\n)?`)
+var reToolResultBlock = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\](?:\r\n|\r|\n)?.*?(?:\r\n|\r|\n)?\[/Tool\](?:\r\n|\r|\n)?`)
+var reToolResultLegacy = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]\r\n]*\](?:\r\n|\r|\n)?`)

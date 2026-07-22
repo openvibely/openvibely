@@ -307,25 +307,48 @@ templ TaskThreadEarlierMessages(task *models.Task, executions []models.Execution
 	@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
 }
 
-// TaskThreadView renders the unified thread interface for a task.
-// Uses shared chat components for message bubbles and input form.
-// Accepts agents list to show model selector matching /chat page behavior.
-// chatAttachments map is optional - when nil, no attachment indicators are shown on messages.
 templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int) {
+	@taskThreadView(task, executions, agents, agentDef, chatAttachments, pendingInputs, hasEarlier, windowLimit, nil)
+}
+
+// TaskThreadPollView omits terminal transcript bodies the browser reports as
+// already preserved, keeping the recurring polling response small.
+templ TaskThreadPollView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int, preservedExecIDs map[string]bool) {
+	@taskThreadView(task, executions, agents, agentDef, chatAttachments, pendingInputs, hasEarlier, windowLimit, preservedExecIDs)
+}
+
+// taskThreadView renders the unified thread interface for a task.
+// Uses shared chat components for message bubbles and input form.
+// chatAttachments map is optional - when nil, no attachment indicators are shown on messages.
+templ taskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int, preservedExecIDs map[string]bool) {
 	<div
 		id="task-thread-view"
 		class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full"
 			if task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) {
-			hx-get={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }
+			hx-get={ fmt.Sprintf("/tasks/%s/thread?poll=1&limit=%d", task.ID, windowLimit) }
 			hx-trigger="every 3s"
 			hx-target="#task-thread-view"
 			hx-swap="morph:outerHTML"
+			hx-on::config-request="if (event.target === this) event.detail.parameters.preserved_exec_ids = window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : ''"
 		}
-			data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) }
+		data-task-active={ boolStr(task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) }
 		data-task-id={ task.ID }
+		data-task-status={ string(task.Status) }
+		data-task-category={ string(task.Category) }
+		data-task-agent={ derefString(task.AgentID) }
+		data-thread-revision={ ChatTranscriptRevision(executions, nil, fmt.Sprintf("%s|%s|%s", task.Status, task.Category, derefString(task.AgentID))) }
 	>
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
-		<div id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }>
+			<div
+				id="task-thread-messages"
+				class="flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0"
+				if preservedExecIDs == nil {
+					style="visibility: hidden;"
+					data-transcript-hydrating="true"
+				}
+				data-window-limit={ fmt.Sprintf("%d", windowLimit) }
+				data-earlier-url-base={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }
+			>
 			@TaskPrimaryAgentBanner(agentDef)
 			if hasEarlier && len(executions) > 0 {
 				@ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit)
@@ -333,7 +356,11 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 			if len(executions) == 0 && len(pendingInputs) == 0 {
 				@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
 			} else {
-				@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
+				if preservedExecIDs != nil {
+					@ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, preservedExecIDs)
+				} else {
+					@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
+				}
 				@PendingThreadInputRows(pendingInputs, taskQueuedSteerEndpoint)
 				@TaskThreadStatusIndicator(task, executions)
 			}
@@ -354,11 +381,15 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 			PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
 		})
-		<!-- Shared auto-scroll and marker cleaning utilities -->
-		@ChatAutoScrollScript()
-		@_initThreadStreamingScript()
-		@TaskThreadLiveEventsScript(task.ID)
-		<script>
+		if preservedExecIDs != nil {
+			<div id={ "task-thread-runtime-" + task.ID } class="contents" hx-preserve="true"></div>
+		} else {
+			<div id={ "task-thread-runtime-" + task.ID } class="contents">
+			<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
+			@ChatAutoScrollScript()
+			@ChatStreamingResumeInitScript()
+			@TaskThreadLiveEventsScript(task.ID)
+			<script>
 			function _taskThreadTaskId() {
 				var threadContent = document.getElementById('thread-content');
 				if (threadContent && threadContent.dataset.taskId) return threadContent.dataset.taskId;
@@ -387,10 +418,12 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 				var messages = document.getElementById('task-thread-messages');
 				if (!key || !messages || !window.chatAutoScroll) return;
 				var tracker = window._taskThreadPageTracker;
-				var nearBottom = window.chatAutoScroll.isNearBottom(messages);
+				var userScrolledUp = tracker
+					? !!tracker.userScrolledUp
+					: !!window._taskThreadUserScrolledUp;
 				var snapshot = tracker && typeof tracker.snapshot === 'function'
 					? tracker.snapshot()
-					: { scrollTop: messages.scrollTop || 0, userScrolledUp: !nearBottom, pinned: nearBottom };
+					: { scrollTop: messages.scrollTop || 0, userScrolledUp: userScrolledUp, pinned: !userScrolledUp };
 				window._taskThreadScrollStates = window._taskThreadScrollStates || {};
 				window._taskThreadScrollStates[key] = snapshot;
 				window._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;
@@ -398,9 +431,44 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 
 			function _restoreTaskThreadScrollState(messages, state) {
 				if (!messages || !state) return false;
-				messages.scrollTop = state.pinned ? messages.scrollHeight : (state.scrollTop || 0);
+				messages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : messages.scrollHeight;
 				return true;
 			}
+
+			function _consumeTaskThreadSendScrollIntent() {
+				var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;
+				if (!sentByUser) return false;
+				if (window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {
+					window._taskThreadPageTracker.resetOnUserSend();
+				}
+				window._taskThreadUserScrolledUp = false;
+				window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+				var key = _taskThreadScrollStateKey(_taskThreadTaskId());
+				if (key) delete window._taskThreadScrollStates[key];
+				return true;
+			}
+
+				function _finishTaskThreadRenderScroll(messages, renderPromise) {
+					if (!messages) return Promise.resolve(false);
+					var taskId = _taskThreadTaskId();
+					var stateKey = _taskThreadScrollStateKey(taskId);
+					var state = _getTaskThreadScrollState(taskId);
+					var tracker = window._taskThreadPageTracker;
+					var userScrolledUp = tracker ? !!tracker.userScrolledUp : !!window._taskThreadUserScrolledUp;
+					if (!window.restoreChatTranscriptScroll) return Promise.resolve(renderPromise);
+					return window.restoreChatTranscriptScroll({
+						messages: messages,
+						tracker: tracker,
+						getTracker: function() { return window._taskThreadPageTracker; },
+						stateKey: stateKey,
+						state: state,
+						defaultPinned: !userScrolledUp,
+						renderPromise: renderPromise
+					}).then(function(restored) {
+						_saveTaskThreadScrollState();
+						return restored;
+					});
+				}
 
 			function _syncTaskThreadDraftFromTextarea() {
 				window._taskThreadDrafts = window._taskThreadDrafts || {};
@@ -441,11 +509,104 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 				window._taskThreadSavedInput = '';
 			}
 
+				window.taskThreadPreservedExecutionIDs = function() {
+					var view = document.getElementById('task-thread-view');
+					if (!view) return '';
+					return Array.prototype.map.call(
+						view.querySelectorAll('#task-thread-messages > [data-execution-pair="true"][hx-preserve]'),
+						function(pair) { return pair.getAttribute('data-exec-id') || ''; }
+					).filter(function(id) { return id !== ''; }).join(',');
+				};
+
+				window.syncTaskThreadTranscriptRevision = function(expectedExecID) {
+					var view = document.getElementById('task-thread-view');
+					var taskID = view ? (view.getAttribute('data-task-id') || '') : '';
+					if (!view || !taskID || typeof fetch === 'undefined') return Promise.resolve(false);
+					window._taskThreadRevisionSyncGeneration = (window._taskThreadRevisionSyncGeneration || 0) + 1;
+					var generation = window._taskThreadRevisionSyncGeneration;
+					var messages = document.getElementById('task-thread-messages');
+					var limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';
+					var url = '/tasks/' + encodeURIComponent(taskID) + '/thread?poll=1&limit=' + encodeURIComponent(limit);
+					view.dataset.revisionSyncPending = 'true';
+					return fetch(url, {headers: {'HX-Request': 'true'}}).then(function(response) {
+						if (!response.ok) throw new Error('HTTP ' + response.status);
+						return response.text();
+					}).then(function(html) {
+						if (generation !== window._taskThreadRevisionSyncGeneration) return false;
+						var currentView = document.getElementById('task-thread-view');
+						if (!currentView || currentView.getAttribute('data-task-id') !== taskID) return false;
+						var detached = document.createElement('template');
+						detached.innerHTML = html;
+						var nextView = detached.content.querySelector('#task-thread-view');
+						if (!nextView || currentView.getAttribute('data-task-agent') !== nextView.getAttribute('data-task-agent')) return false;
+						if (!window.chatTranscriptSnapshotMatches || !window.chatTranscriptSnapshotMatches(currentView, nextView, 'task-thread-messages', expectedExecID || '')) return false;
+						window.applyChatTranscriptSnapshotRevision(currentView, nextView, 'task-thread-messages', 'data-thread-revision');
+						['data-task-active', 'data-task-status', 'data-task-category'].forEach(function(attribute) {
+							currentView.setAttribute(attribute, nextView.getAttribute(attribute) || '');
+						});
+						var catchupTimers = window._taskThreadReconnectCatchupTimers || {};
+						if (catchupTimers[taskID]) {
+							clearTimeout(catchupTimers[taskID]);
+							delete catchupTimers[taskID];
+						}
+						return true;
+					}).catch(function(err) {
+						console.error('[task-thread] transcript revision sync failed:', err);
+						return false;
+					}).finally(function() {
+						if (generation !== window._taskThreadRevisionSyncGeneration) return;
+						var currentView = document.getElementById('task-thread-view');
+						if (currentView && currentView.getAttribute('data-task-id') === taskID) delete currentView.dataset.revisionSyncPending;
+					});
+				};
+
+				window.reconcileTaskThreadState = function(reconnectTaskId) {
+					var view = document.getElementById('task-thread-view');
+					if (!view || !reconnectTaskId || view.getAttribute('data-task-id') !== reconnectTaskId) return Promise.resolve(false);
+					var attachmentSession = document.getElementById('task-thread-form-session-id');
+					if (attachmentSession && attachmentSession.value) return Promise.resolve(true);
+					// A tracked per-execution stream owns durable offset catch-up. Do not
+					// replace its active bubble merely because the shared live SSE reconnected.
+					if (window._taskThreadStreamingActive) {
+						if (window._initThreadStreaming) window._initThreadStreaming();
+						window._taskThreadReconnectCatchupTimers = window._taskThreadReconnectCatchupTimers || {};
+						if (!window._taskThreadReconnectCatchupTimers[reconnectTaskId]) {
+							window._taskThreadReconnectCatchupTimers[reconnectTaskId] = setTimeout(function waitForActiveCatchup() {
+								var currentView = document.getElementById('task-thread-view');
+								if (!currentView || currentView.getAttribute('data-task-id') !== reconnectTaskId) {
+									delete window._taskThreadReconnectCatchupTimers[reconnectTaskId];
+									return;
+								}
+								if (window._taskThreadStreamingActive) {
+									window._taskThreadReconnectCatchupTimers[reconnectTaskId] = setTimeout(waitForActiveCatchup, 500);
+									return;
+								}
+								delete window._taskThreadReconnectCatchupTimers[reconnectTaskId];
+								window.reconcileTaskThreadState(reconnectTaskId);
+							}, 500);
+						}
+						return Promise.resolve(true);
+					}
+					if (view.dataset.reconcilePending === 'true' || typeof htmx === 'undefined') return Promise.resolve(false);
+					var messages = document.getElementById('task-thread-messages');
+					var limit = messages ? (messages.getAttribute('data-window-limit') || '30') : '30';
+					var url = view.getAttribute('hx-get') || ('/tasks/' + encodeURIComponent(reconnectTaskId) + '/thread?poll=1&limit=' + encodeURIComponent(limit));
+					var preserved = window.taskThreadPreservedExecutionIDs ? window.taskThreadPreservedExecutionIDs() : '';
+					url += (url.indexOf('?') === -1 ? '?' : '&') + 'preserved_exec_ids=' + encodeURIComponent(preserved);
+					view.dataset.reconcilePending = 'true';
+					return htmx.ajax('GET', url, {target: '#task-thread-view', swap: 'morph:outerHTML'}).finally(function() {
+						var current = document.getElementById('task-thread-view');
+						if (current && current.getAttribute('data-task-id') === reconnectTaskId) delete current.dataset.reconcilePending;
+					});
+				};
+
 				// Apply cleaning and scroll on load
 				(function() {
 					var chatMessages = document.getElementById('task-thread-messages');
+					var cleanPromise = null;
+					var resumeRenderPromises = [];
 					if (chatMessages) {
-						if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
+						cleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 						var taskId = _taskThreadTaskId();
@@ -468,15 +629,30 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 						// Keep global flag as fallback source of truth across partial re-inits.
 						window._taskThreadUserScrolledUp = preservedUserScrolledUp;
 					}
-					// Render streaming content markers and initialize SSE for any running executions.
+					// Render tool/thinking transcript controls and initialize SSE for any running executions.
 					// Content is in data-raw-content attribute (not textContent) to prevent raw text flash.
 					var resumeContainers = document.querySelectorAll('[data-streaming-resume="true"]');
-					resumeContainers.forEach(function(c) {
-						var raw = c.getAttribute('data-raw-content') || '';
-						if (raw.trim() && window.renderStreamingContent) {
-							window.renderStreamingContent(c, raw);
-						}
+						resumeContainers.forEach(function(c) {
+							var raw = c.getAttribute('data-raw-content') || '';
+							var revision = c.getAttribute('data-raw-revision') || raw;
+							var hasRenderedContent = !!(c.textContent && c.textContent.trim()) || !!c.querySelector('*');
+							var hasCurrentRenderedContent = hasRenderedContent && c._renderedRevision === revision;
+							var renderPromise = c._activeLiveChatRender && c._activeLiveChatRender.promise;
+							if (raw.trim() && !hasCurrentRenderedContent && !c._activeLiveChatRender && window.renderStreamingContent) {
+								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+								var renderPromise = liveRenderer(c, raw);
+							}
+							if (renderPromise && typeof renderPromise.then === 'function') {
+								resumeRenderPromises.push(Promise.resolve(renderPromise).catch(function() {
+									c.textContent = raw;
+									return false;
+								}));
+							}
 					});
+					var initialRenderPromises = [];
+					if (cleanPromise && typeof cleanPromise.then === 'function') initialRenderPromises.push(cleanPromise);
+					initialRenderPromises = initialRenderPromises.concat(resumeRenderPromises);
+					if (chatMessages) _finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises));
 					if (window._initThreadStreaming) window._initThreadStreaming();
 					_restoreTaskThreadDraftToTextarea();
 				})();
@@ -515,7 +691,8 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					// Block polling requests to task-thread-view while SSE streaming
 					// is active or sidebar navigation is in progress
 					if (triggerEl && triggerEl.id === 'task-thread-view') {
-						if (window._taskThreadStreamingActive || window._sidebarNavigating) {
+						var attachmentSession = document.getElementById('task-thread-form-session-id');
+						if ((attachmentSession && attachmentSession.value) || triggerEl.dataset.revisionSyncPending === 'true' || window._taskThreadStreamingActive || window._sidebarNavigating) {
 							event.preventDefault();
 						}
 					}
@@ -548,10 +725,35 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 						window._threadEventSources = [];
 					}
 
-					// Before swaps, capture scroll state and preserve textarea input
-					document.body.addEventListener('htmx:beforeSwap', function(event) {
-						var target = event.detail.target;
-						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content')) {
+					function _taskThreadResponseRevision(html) {
+						if (!html) return '';
+						var detached = document.createElement('template');
+						detached.innerHTML = html;
+						var nextView = detached.content.querySelector('#task-thread-view');
+						return nextView ? (nextView.getAttribute('data-thread-revision') || '') : '';
+					}
+
+					// Before swaps, reject unchanged authoritative snapshots before capturing
+					// state or closing streams, then preserve state for a real replacement.
+				document.body.addEventListener('htmx:beforeSwap', function(event) {
+					var target = event.detail.target;
+					if (target && target.id === 'task-thread-view') {
+						var attachmentSession = document.getElementById('task-thread-form-session-id');
+						if (attachmentSession && attachmentSession.value) {
+							event.detail.shouldSwap = false;
+							delete target.dataset.reconcilePending;
+							return;
+						}
+						var currentRevision = target.getAttribute('data-thread-revision') || '';
+							var revisionXHR = event.detail.xhr;
+							var nextRevision = _taskThreadResponseRevision(revisionXHR ? (revisionXHR.responseText || '') : '');
+							if (currentRevision && nextRevision && currentRevision === nextRevision) {
+								event.detail.shouldSwap = false;
+								delete target.dataset.reconcilePending;
+								return;
+							}
+						}
+						if (target && (target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content' || target.id === 'main-content')) {
 							var requestConfig = event.detail.requestConfig || {};
 						var requestPath = typeof requestConfig.path === 'string' ? requestConfig.path : '';
 						var requestMethod = typeof requestConfig.verb === 'string' ? requestConfig.verb.toUpperCase() : '';
@@ -582,17 +784,17 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 							window._taskThreadStreamingActive = false;
 						}
 
-						// Clean up thread state when navigating away via sidebar
-						// (sidebar replaces main-content, removing the thread view)
-						if (target && target.id === 'main-content') {
-							_saveTaskThreadScrollState();
-							window._taskThreadSavedInput = '';
-							if (window._taskThreadPageTracker) {
-								window._taskThreadPageTracker.destroy();
-								window._taskThreadPageTracker = null;
+							// Release detached task-thread runtime owners when navigating away. The
+							// task-keyed scroll snapshot and pin intent were captured above and must
+							// survive direct HTMX return and browser Back/Forward restoration.
+							if (target && target.id === 'main-content') {
+								window._taskThreadSavedInput = '';
+								if (window._taskThreadPageTracker) {
+									window._taskThreadPageTracker.destroy();
+									window._taskThreadPageTracker = null;
+								}
 							}
-						}
-				});
+					});
 
 						document.body.addEventListener('htmx:afterSwap', function(event) {
 							var target = event.detail.target;
@@ -608,24 +810,13 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 										_saveTaskThreadScrollState();
 									}
 								}
-								if (window.cleanAssistantMessages) window.cleanAssistantMessages(target);
-								if (window.initChatEarlierLoader) window.initChatEarlierLoader(target);
-								if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(target);
-								if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
-								// Auto-scroll on deliberate sends even when attachments change layout;
-								// otherwise respect explicit user scroll-up intent.
-								var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;
-								if (sentByUser || !window._taskThreadUserScrolledUp) {
-									if (window.scrollChatToBottomAfterLayout) {
-										window.scrollChatToBottomAfterLayout(target, true);
-									} else {
-										requestAnimationFrame(function() {
-											if (target && window.chatAutoScroll) {
-												window.chatAutoScroll.scrollToBottom(target, true);
-											}
-										});
-									}
-								}
+									var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(target) : Promise.resolve([]);
+									if (window.initChatEarlierLoader) window.initChatEarlierLoader(target);
+									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(target);
+									if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(target, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
+								// A deliberate send resets both the live tracker and stale saved reading state.
+								_consumeTaskThreadSendScrollIntent();
+								_finishTaskThreadRenderScroll(target, renderPromise);
 							}
 							// Handle polling updates to task-thread-view (e.g., task completion status)
 							else if (target && target.id === 'task-thread-view') {
@@ -642,27 +833,14 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 											_saveTaskThreadScrollState();
 										}
 									}
-									if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
-								if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
-								if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
-									if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
-									// Auto-scroll on deliberate sends even when attachments change layout;
-									// otherwise respect explicit user scroll-up intent.
-									var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;
-									if (sentByUser || !window._taskThreadUserScrolledUp) {
-										if (window.scrollChatToBottomAfterLayout) {
-											window.scrollChatToBottomAfterLayout(chatMessages, true);
-										} else {
-											requestAnimationFrame(function() {
-												if (chatMessages && window.chatAutoScroll) {
-													window.chatAutoScroll.scrollToBottom(chatMessages, true);
-												}
-											});
-										}
+										var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);
+										if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
+										if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
+										if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
+										_consumeTaskThreadSendScrollIntent();
+										_finishTaskThreadRenderScroll(chatMessages, renderPromise);
 									}
-								}
-								if (window.cleanAssistantMessages) window.cleanAssistantMessages(document.getElementById('task-thread-messages'));
-								if (window._initThreadStreaming) window._initThreadStreaming();
+									if (window._initThreadStreaming) window._initThreadStreaming();
 							}
 						// Also handle full page refreshes on task-detail-content
 						else if (target && target.id === 'task-detail-content') {
@@ -677,24 +855,12 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 										_saveTaskThreadScrollState();
 									}
 								}
-								if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
-								if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
-								if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
-								if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
-								// Auto-scroll on deliberate sends even when attachments change layout;
-								// otherwise respect explicit user scroll-up intent.
-								var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;
-								if (sentByUser || !window._taskThreadUserScrolledUp) {
-									if (window.scrollChatToBottomAfterLayout) {
-										window.scrollChatToBottomAfterLayout(chatMessages, true);
-									} else {
-										requestAnimationFrame(function() {
-											if (chatMessages && window.chatAutoScroll) {
-												window.chatAutoScroll.scrollToBottom(chatMessages, true);
-											}
-										});
-									}
-								}
+									var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);
+									if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
+									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
+									if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
+									_consumeTaskThreadSendScrollIntent();
+									_finishTaskThreadRenderScroll(chatMessages, renderPromise);
 							}
 						}
 						// Restore textarea value after morph polling or full page refresh
@@ -702,6 +868,8 @@ templ TaskThreadView(task *models.Task, executions []models.Execution, agents []
 					});
 			}
 			</script>
+			</div>
+		}
 	</div>
 }
 
@@ -788,36 +956,60 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							wrap.appendChild(inner);
 							messages.appendChild(wrap);
 						}
-						function syncCompletedThreadOutput(execId, completedOutput, status) {
-							if (!currentTaskThreadView() || !execId || typeof completedOutput !== 'string' || completedOutput === '') return;
-							var streamContainer = document.getElementById('streaming-message-' + execId);
-							if (!streamContainer) return;
-							streamContainer.setAttribute('data-raw-content', completedOutput);
-							if (window.renderStreamingContent) {
-								window.renderStreamingContent(streamContainer, completedOutput);
-							} else {
-								streamContainer.textContent = completedOutput;
-							}
-							streamContainer.classList.remove('hidden');
-							var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
-							if (bubble) {
-								var thinkingWrap = document.getElementById('streaming-thinking-' + execId) || document.getElementById('streaming-thinking-resume-' + execId);
-								if (thinkingWrap) {
-									thinkingWrap.classList.add('hidden');
-								} else {
-									var thinking = bubble.querySelector('.ov-loading-dots');
-									if (thinking) thinking.classList.add('hidden');
+							function syncCompletedThreadOutput(execId, completedOutput, status) {
+								if (!currentTaskThreadView() || !execId) return;
+								var terminalStatus = status === 'failed' || status === 'cancelled' || status === 'completed' ? status : '';
+								var completedPair = document.getElementById('chat-execution-' + execId);
+								if (window.applyChatExecutionTerminalStatus) terminalStatus = window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);
+								else if (completedPair) {
+									var currentStatus = completedPair.getAttribute('data-exec-status') || '';
+									if (!terminalStatus) terminalStatus = currentStatus === 'failed' || currentStatus === 'cancelled' || currentStatus === 'completed' ? currentStatus : 'completed';
+									completedPair.setAttribute('data-exec-status', terminalStatus);
+									completedPair.setAttribute('hx-preserve', 'true');
 								}
-								var loading = bubble.querySelector('.loading-dots, [id^="streaming-dots-"]');
-								if (loading) loading.classList.add('hidden');
-								if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
-								if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-								if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+								if (!terminalStatus) terminalStatus = 'completed';
+								var streamContainer = document.getElementById('streaming-message-' + execId);
+								if (streamContainer && typeof completedOutput === 'string') {
+									if (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);
+									else streamContainer.setAttribute('data-raw-content', completedOutput);
+									if (window._taskThreadStreamingActive) {
+										streamContainer._authoritativeTerminalContent = completedOutput;
+										streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
+									}
+								}
+								if (streamContainer && typeof completedOutput === 'string' && completedOutput !== '') {
+									if (window.renderStreamingContent) {
+										var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+										var renderPromise = liveRenderer(streamContainer, completedOutput);
+										if (renderPromise && typeof renderPromise.catch === 'function') {
+											renderPromise.catch(function() { streamContainer.textContent = completedOutput; });
+										}
+									} else {
+										streamContainer.textContent = completedOutput;
+									}
+								}
+								if (streamContainer) {
+									streamContainer.classList.remove('hidden');
+									var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
+									if (bubble) {
+										var thinkingWrap = document.getElementById('streaming-thinking-' + execId) || document.getElementById('streaming-thinking-resume-' + execId);
+										if (thinkingWrap) {
+											thinkingWrap.classList.add('hidden');
+										} else {
+											var thinking = bubble.querySelector('.ov-loading-dots');
+											if (thinking) thinking.classList.add('hidden');
+										}
+										var loading = bubble.querySelector('.loading-dots, [id^="streaming-dots-"]');
+										if (loading) loading.classList.add('hidden');
+										if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+										if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+										if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+									}
+								}
+								window._taskThreadStreamingActive = false;
+								showCompletedThreadTerminalStatus(terminalStatus);
 							}
-							window._taskThreadStreamingActive = false;
-							showCompletedThreadTerminalStatus(status || 'completed');
-						}
-						function renderQueuedRow(data) {
+							function renderQueuedRow(data) {
 							if (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;
 							if (document.querySelector('[data-thread-input-id="' + data.pending_input_id + '"][data-task-id="' + taskId + '"]')) return;
 							var pendingContainer = ensureComposerPendingContainer();						if (!pendingContainer) return;
@@ -868,51 +1060,60 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							delete window._pendingTaskThreadLiveEvents[taskId];
 							ensureStreamingFragment(data);
 						}
-							function ensureStreamingFragment(data, attempt) {
-								attempt = attempt || 0;
-								if (!currentTaskThreadView()) return;
-								var messages = document.getElementById('task-thread-messages');
-								if (!data || data.task_id !== taskId || !data.exec_id) return;							if (!messages) {
+						function ensureStreamingFragment(data, attempt) {
+							attempt = attempt || 0;
+							if (!currentTaskThreadView()) return;
+							var messages = document.getElementById('task-thread-messages');
+							if (!data || data.task_id !== taskId || !data.exec_id) return;
+							if (!messages) {
 								rememberPendingExecutionEvent(data);
 								return;
 							}
 							if (document.querySelector('[data-exec-id="' + data.exec_id + '"]')) {
-							delete pendingFragmentExecs[data.exec_id];
-							if (window._initThreadStreaming) window._initThreadStreaming();
-							return;
+								delete pendingFragmentExecs[data.exec_id];
+								if (window._initThreadStreaming) window._initThreadStreaming();
+								refreshThreadComposerAction();
+								return;
+							}
+							removePendingRow(data.pending_input_id);
+							var terminal = document.getElementById('task-thread-terminal-status');
+							if (terminal) terminal.remove();
+							if (typeof htmx === 'undefined') return;
+							if (pendingFragmentExecs[data.exec_id] && attempt === 0) return;
+							pendingFragmentExecs[data.exec_id] = true;
+							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/executions/' + encodeURIComponent(data.exec_id) + '/fragment', {
+								target: '#task-thread-messages',
+								swap: 'beforeend'
+							}).then(function() {
+								delete pendingFragmentExecs[data.exec_id];
+								var view = document.getElementById('task-thread-view');
+								if (view) view.setAttribute('data-task-active', 'true');
+								if (window._initThreadStreaming) window._initThreadStreaming();
+								refreshThreadComposerAction();
+								if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);
+								if (window.htmx) htmx.process(messages);
+								var tracker = window._taskThreadPageTracker;
+								if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
+									window.chatAutoScroll.scrollToBottom(messages, true);
+								}
+							}).catch(function() {
+								delete pendingFragmentExecs[data.exec_id];
+								if (attempt < 5) {
+									setTimeout(function() { ensureStreamingFragment(data, attempt + 1); }, 150 * (attempt + 1));
+								}
+							});
 						}
-						removePendingRow(data.pending_input_id);
-						var terminal = document.getElementById('task-thread-terminal-status');
-						if (terminal) terminal.remove();
-						if (typeof htmx === 'undefined') return;
-						if (pendingFragmentExecs[data.exec_id] && attempt === 0) return;
-						pendingFragmentExecs[data.exec_id] = true;
-						htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/executions/' + encodeURIComponent(data.exec_id) + '/fragment', {
-							target: '#task-thread-messages',
-							swap: 'beforeend'
-						}).then(function() {
-							delete pendingFragmentExecs[data.exec_id];
-							var view = document.getElementById('task-thread-view');
-							if (view) view.setAttribute('data-task-active', 'true');
-							if (window._initThreadStreaming) window._initThreadStreaming();
-							if (window.htmx) htmx.process(messages);
-							var tracker = window._taskThreadPageTracker;
-							if (window.chatAutoScroll && (!tracker || tracker.shouldAutoScroll())) {
-								window.chatAutoScroll.scrollToBottom(messages, true);
+						var chatHandler = function(event) {
+							var data = event.detail || {};
+							if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;
+							try {
+								syncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || '');
+							} catch (err) {
+								console.error('[task-thread] completed-output reconciliation failed:', err);
 							}
-						}).catch(function() {
-							delete pendingFragmentExecs[data.exec_id];
-							if (attempt < 5) {
-								setTimeout(function() { ensureStreamingFragment(data, attempt + 1); }, 150 * (attempt + 1));
-							}
-						});
-					}
-					var chatHandler = function(event) {
-						var data = event.detail || {};
-						if (data.type !== 'chat_response_done' || data.task_id !== taskId || !data.exec_id) return;
-						syncCompletedThreadOutput(data.exec_id, data.completed_output, data.status || 'completed');
-					};
-					var handler = function(event) {
+							if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(data.exec_id);
+						};
+						var handler = function(event) {
 						var data = event.detail || {};
 						if (data.type !== 'mixture_progress' && data.task_id !== taskId) return;
 						if (data.type === 'mixture_progress') {
@@ -957,6 +1158,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						if (pendingContainer && typeof htmx !== 'undefined') {
 							htmx.ajax('GET', '/tasks/' + encodeURIComponent(taskId) + '/thread/pending-inputs', {target: scopedPendingContainerSelector(), swap: 'outerHTML'});
 						}
+						if (window.reconcileTaskThreadState) window.reconcileTaskThreadState(taskId);
 					};				window._taskThreadReconnectHandlers = window._taskThreadReconnectHandlers || {};
 				if (window._taskThreadReconnectHandlers[taskId]) {
 					window.removeEventListener('sse-live-connected', window._taskThreadReconnectHandlers[taskId]);
@@ -964,16 +1166,19 @@ templ TaskThreadLiveEventsScript(taskID string) {
 				window._taskThreadReconnectHandlers[taskId] = reconnectHandler;
 				window.addEventListener('sse-live-connected', reconnectHandler);
 
-					document.body.addEventListener('htmx:beforeSwap', function(event) {
+					var cleanupTaskThreadLiveHandlers = function(event) {
 						var target = event.detail && event.detail.target;
-						if (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content' || target.id === 'task-thread-view')) {
+						if (target && (target.id === 'main-content' || target.id === 'task-detail-content' || target.id === 'thread-content')) {
 							window.removeEventListener('sse-task-event', handler);
 							window.removeEventListener('sse-chat-live-event', chatHandler);
 							delete window._taskThreadLiveHandlers[taskId];
 							window.removeEventListener('sse-live-connected', reconnectHandler);
 							delete window._taskThreadReconnectHandlers[taskId];
+							document.body.removeEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);
 						}
-					}, { once: true });			})();
+					};
+					document.body.addEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);
+			})();
 		</script>
 }
 

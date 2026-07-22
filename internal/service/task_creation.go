@@ -2,13 +2,11 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -18,7 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
-// TaskCreationRequest represents a task creation request parsed from AI output.
+// TaskCreationRequest represents a typed task creation action request.
 type TaskCreationRequest struct {
 	Title             string                     `json:"title"`
 	Prompt            string                     `json:"prompt"`
@@ -29,44 +27,6 @@ type TaskCreationRequest struct {
 	AgentDefinitionID string                     `json:"agent_definition_id"` // Optional: known agent definition ID
 	Agent             string                     `json:"agent"`               // Optional: agent definition name (resolved to AgentDefinitionID)
 	Chain             *models.ChainConfiguration `json:"chain,omitempty"`     // Optional: chain config for sequential task execution
-}
-
-// createTaskMarkerRe matches [CREATE_TASK]{...}[/CREATE_TASK] blocks in agent output.
-var createTaskMarkerRe = regexp.MustCompile(`(?s)\[CREATE_TASK\]\s*(.*?)\s*\[/CREATE_TASK\]`)
-
-// ParseTaskCreations extracts task creation requests from AI output.
-func ParseTaskCreations(output string) []TaskCreationRequest {
-	// Strip [Thinking]...[/Thinking] blocks first — the model may reference
-	// marker names inside its thinking (e.g. "I need to output [CREATE_TASK]"),
-	// which would cause the regex to match thinking content as JSON.
-	output = reThinkingBlock.ReplaceAllString(output, "")
-	matches := createTaskMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var tasks []TaskCreationRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req TaskCreationRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[task-creation] error parsing task JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.Title == "" {
-			applog.Infof("[task-creation] skipping task with empty title")
-			continue
-		}
-		// Apply priority default only (category defaulting happens in ExecuteTaskCreationsWithReturn)
-		if req.Priority == 0 {
-			req.Priority = 2
-		}
-		tasks = append(tasks, req)
-	}
-	return tasks
 }
 
 // EffectiveTaskCreationCategory resolves the category a task creation request would
@@ -109,7 +69,7 @@ func resolveTaskCreationCategory(req TaskCreationRequest, selectedAgentID string
 	return models.CategoryBacklog
 }
 
-// ExecuteTaskCreations creates tasks from parsed requests and returns a summary.
+// ExecuteTaskCreations creates tasks from typed action requests and returns a summary.
 // The summary includes task IDs in the format [TASK_ID:id] so the frontend can
 // convert them to clickable links.
 // If agents is non-empty, auto-selects an agent for each task based on prompt complexity.
@@ -125,7 +85,7 @@ type TaskCreationResult struct {
 	Task         models.Task
 }
 
-// ExecuteTaskCreationsWithReturn creates tasks from parsed requests and returns both the created tasks and a summary.
+// ExecuteTaskCreationsWithReturn creates tasks from typed action requests and returns both the created tasks and a summary.
 // This variant is used when the caller needs access to the created task objects.
 func ExecuteTaskCreationsWithReturn(ctx context.Context, requests []TaskCreationRequest, projectID string, taskSvc *TaskService, agents ...[]models.LLMConfig) ([]models.Task, string) {
 	results, summary := ExecuteTaskCreationsWithIndexedReturn(ctx, requests, projectID, taskSvc, agents...)
@@ -185,40 +145,17 @@ func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskC
 			task.AgentID = &selectedAgentID
 		}
 
-		// Set agent definition ID if provided. The agent field resolves an exact,
-		// unique enabled/selectable Agent definition name; agent_definition_id remains
-		// an explicit ID escape hatch for callers that already know the database ID.
-		if req.AgentDefinitionID != "" {
-			task.AgentDefinitionID = &req.AgentDefinitionID
+		// Explicit Agent assignments are all-or-nothing. Silently dropping an
+		// invalid or non-selectable Agent would run the task with a different tool
+		// policy and worktree mode than the caller requested.
+		agentDefinitionID, err := resolveTaskCreationAgentDefinition(ctx, req, projectID, taskSvc)
+		if err != nil {
+			applog.Infof("[task-creation] refusing invalid agent assignment for task %q: %v", req.Title, err)
+			failed = append(failed, fmt.Sprintf("- \"%s\": %v", req.Title, err))
+			continue
 		}
-		if req.Agent != "" {
-			if taskSvc != nil && taskSvc.agentRepo != nil {
-				if ad, err := taskSvc.agentRepo.GetUniqueSelectableByName(ctx, req.Agent); err != nil {
-					applog.Infof("[task-creation] could not resolve agent %q for task %q: %v", req.Agent, req.Title, err)
-				} else if ad != nil {
-					task.AgentDefinitionID = &ad.ID
-					applog.Infof("[task-creation] resolved agent %q → %s for task %q", req.Agent, ad.ID, req.Title)
-				} else {
-					applog.Infof("[task-creation] agent %q did not exactly match one unique enabled/selectable Agent definition for task %q", req.Agent, req.Title)
-					if req.AgentDefinitionID == req.Agent {
-						task.AgentDefinitionID = nil
-					}
-				}
-			} else if req.AgentDefinitionID == req.Agent {
-				task.AgentDefinitionID = nil
-				applog.Infof("[task-creation] cannot resolve agent %q for task %q without an Agent repository", req.Agent, req.Title)
-			}
-		} else if req.AgentDefinitionID != "" && taskSvc != nil && taskSvc.agentRepo != nil {
-			if existing, err := taskSvc.agentRepo.GetByID(ctx, req.AgentDefinitionID); err != nil {
-				applog.Infof("[task-creation] could not validate agent_definition_id %q for task %q: %v", req.AgentDefinitionID, req.Title, err)
-			} else if existing == nil {
-				if ad, err := taskSvc.agentRepo.GetUniqueSelectableByName(ctx, req.AgentDefinitionID); err != nil {
-					applog.Infof("[task-creation] could not resolve agent_definition_id name %q for task %q: %v", req.AgentDefinitionID, req.Title, err)
-				} else if ad != nil {
-					task.AgentDefinitionID = &ad.ID
-					applog.Infof("[task-creation] resolved agent_definition_id name %q → %s for task %q", req.AgentDefinitionID, ad.ID, req.Title)
-				}
-			}
+		if agentDefinitionID != "" {
+			task.AgentDefinitionID = &agentDefinitionID
 		}
 
 		if err := taskSvc.CreateWithGoal(ctx, task, req.Goal); err != nil {
@@ -273,7 +210,49 @@ func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskC
 	return createdResults, summary.String()
 }
 
-// TaskEditRequest represents a task edit request parsed from AI output.
+func resolveTaskCreationAgentDefinition(ctx context.Context, req TaskCreationRequest, projectID string, taskSvc *TaskService) (string, error) {
+	requestedName := strings.TrimSpace(req.Agent)
+	requestedID := strings.TrimSpace(req.AgentDefinitionID)
+	if requestedName == "" && requestedID == "" {
+		return "", nil
+	}
+	if taskSvc == nil || taskSvc.agentRepo == nil {
+		return "", fmt.Errorf("cannot validate explicit Agent assignment because the Agent repository is unavailable")
+	}
+
+	var agent *models.Agent
+	var err error
+	if requestedName != "" {
+		agent, err = taskSvc.agentRepo.GetUniqueSelectableByName(ctx, requestedName)
+		if err != nil {
+			return "", fmt.Errorf("resolve Agent %q: %w", requestedName, err)
+		}
+		if agent == nil {
+			return "", fmt.Errorf("Agent %q is not one unique enabled, selectable primary Agent definition", requestedName)
+		}
+		if requestedID != "" && requestedID != agent.ID {
+			return "", fmt.Errorf("Agent %q does not match agent_definition_id %q", requestedName, requestedID)
+		}
+	} else {
+		agent, err = taskSvc.agentRepo.GetByID(ctx, requestedID)
+		if err != nil {
+			return "", fmt.Errorf("validate agent_definition_id %q: %w", requestedID, err)
+		}
+		if agent == nil {
+			return "", fmt.Errorf("agent_definition_id %q does not exist", requestedID)
+		}
+	}
+	if !isChatAssignableAgentDefinition(*agent) {
+		return "", fmt.Errorf("Agent %q is not assignable as a primary task Agent", agent.Name)
+	}
+
+	if agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) != strings.TrimSpace(projectID) {
+		return "", fmt.Errorf("Agent %q belongs to a different project", agent.Name)
+	}
+	return agent.ID, nil
+}
+
+// TaskEditRequest represents a typed task edit action request.
 type TaskEditRequest struct {
 	ID            string                     `json:"id"`                        // Required: task ID to edit
 	Title         string                     `json:"title,omitempty"`           // Optional: new title
@@ -285,37 +264,6 @@ type TaskEditRequest struct {
 	AgentConfigID string                     `json:"agent_config_id,omitempty"` // Optional: alias for agent_id (for compatibility)
 	Chain         *models.ChainConfiguration `json:"chain,omitempty"`           // Optional: chain config for sequential task execution
 	Attachments   []string                   `json:"attachments,omitempty"`     // Optional: file paths to attach to the task
-}
-
-// editTaskMarkerRe matches [EDIT_TASK]{...}[/EDIT_TASK] blocks in agent output.
-var editTaskMarkerRe = regexp.MustCompile(`(?s)\[EDIT_TASK\]\s*(.*?)\s*\[/EDIT_TASK\]`)
-
-// ParseTaskEdits extracts task edit requests from AI output.
-func ParseTaskEdits(output string) []TaskEditRequest {
-	output = reThinkingBlock.ReplaceAllString(output, "")
-	matches := editTaskMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var edits []TaskEditRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req TaskEditRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[task-edit] error parsing edit JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.ID == "" {
-			applog.Infof("[task-edit] skipping edit with empty task ID")
-			continue
-		}
-		edits = append(edits, req)
-	}
-	return edits
 }
 
 // ExecuteTaskEdits applies edits to existing tasks and returns a summary.
@@ -570,7 +518,7 @@ func copyAttachmentFiles(ctx context.Context, filePaths []string, taskID string,
 }
 
 // BuildTaskContextString creates a summary of existing tasks for system prompts.
-// Includes task IDs so the AI can reference them in [EDIT_TASK] blocks.
+// Includes task IDs so runtime task tools can target exact tasks.
 func BuildTaskContextString(tasks []models.Task) string {
 	if len(tasks) == 0 {
 		return "No tasks exist in this project yet."
@@ -603,7 +551,7 @@ func BuildModelContextString(configs []models.LLMConfig) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Available models (use the ID in the agent_id field of [CREATE_TASK] or [EDIT_TASK] to select an internal model config; this is not an Agent definition assignment):\n")
+	sb.WriteString("Available models (use the ID in the agent_id runtime-tool field to select an internal model config; this is not an Agent definition assignment):\n")
 	for _, c := range configs {
 		defaultMark := ""
 		if c.IsDefault {
@@ -623,7 +571,7 @@ func BuildAgentDefinitionContextString(agents []models.Agent) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Available Agent definitions (from the Agents page; use the exact Name in the agent field of [CREATE_TASK] to assign one as the task's primary Agent definition):\n")
+	sb.WriteString("Available Agent definitions (from the Agents page; use the exact Name in the create_task tool's agent field to assign one as the task's primary Agent definition):\n")
 	for _, a := range assignable {
 		description := sanitizeAgentContextField(a.Description, 160)
 		parts := []string{fmt.Sprintf("- Name: %q", sanitizeAgentContextField(a.Name, 120))}
@@ -658,7 +606,7 @@ func UniqueChatAssignableAgentDefinitions(agents []models.Agent) []models.Agent 
 }
 
 func isChatAssignableAgentDefinition(a models.Agent) bool {
-	return strings.TrimSpace(a.Name) != "" && a.Enabled && a.SelectableAsPrimary && a.GeneratedStatus != models.AgentStatusArchived && a.ArchivedAt == nil
+	return strings.TrimSpace(a.Name) != "" && strings.TrimSpace(a.SystemKind) == "" && a.Enabled && a.SelectableAsPrimary && a.GeneratedStatus != models.AgentStatusArchived && a.ArchivedAt == nil
 }
 
 func sanitizeAgentContextField(value string, limit int) string {
@@ -821,7 +769,7 @@ func FormatRepeatPattern(repeatType models.RepeatType, interval int) string {
 	}
 }
 
-// TaskExecutionRequest represents a filter-based execution request parsed from AI output.
+// TaskExecutionRequest represents a typed filter-based task execution request.
 type TaskExecutionRequest struct {
 	TaskID           string   `json:"task_id"`           // Optional: exact task ID to execute.
 	Title            string   `json:"title"`             // Optional: task title query to execute (first match in project).
@@ -830,37 +778,7 @@ type TaskExecutionRequest struct {
 	IncludeCompleted bool     `json:"include_completed"` // Optional: include completed-status tasks in bulk matching results (default: false).
 }
 
-// executeTasksMarkerRe matches [EXECUTE_TASKS]{...}[/EXECUTE_TASKS] blocks in agent output.
-var executeTasksMarkerRe = regexp.MustCompile(`(?s)\[EXECUTE_TASKS\]\s*(.*?)\s*\[/EXECUTE_TASKS\]`)
-
-// ParseTaskExecutions extracts task execution requests from AI output.
-func ParseTaskExecutions(output string) []TaskExecutionRequest {
-	matches := executeTasksMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []TaskExecutionRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req TaskExecutionRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[task-execution] error parsing execution JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" && len(req.Tags) == 0 && req.MinPriority == 0 {
-			applog.Infof("[task-execution] skipping execution request with no task_id/title/tags/priority filter")
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
-}
-
-// ExecuteTaskExecutions executes tasks matching the parsed requests and returns a summary.
+// ExecuteTaskExecutions executes tasks matching typed action requests and returns a summary.
 func ExecuteTaskExecutions(ctx context.Context, requests []TaskExecutionRequest, projectID string, taskSvc *TaskService) string {
 	if len(requests) == 0 {
 		return ""
@@ -1026,36 +944,6 @@ type ViewThreadRequest struct {
 	Limit  int    `json:"limit"`   // Optional: max executions to return (0 = all that fit)
 }
 
-// viewThreadMarkerRe matches [VIEW_TASK_CHAT]{...}[/VIEW_TASK_CHAT] blocks in agent output.
-var viewThreadMarkerRe = regexp.MustCompile(`(?s)\[VIEW_TASK_CHAT\]\s*(.*?)\s*\[/VIEW_TASK_CHAT\]`)
-
-// ParseViewThread extracts view thread requests from AI output.
-func ParseViewThread(output string) []ViewThreadRequest {
-	matches := viewThreadMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []ViewThreadRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req ViewThreadRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[thread-view] error parsing view request JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.TaskID == "" && req.Title == "" {
-			applog.Infof("[thread-view] skipping view request with no task_id or title")
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
-}
-
 // SendToTaskRequest represents a request to send a message to a task's thread.
 type SendToTaskRequest struct {
 	TaskID  string `json:"task_id"` // Required: task ID to send to
@@ -1063,41 +951,7 @@ type SendToTaskRequest struct {
 	Message string `json:"message"` // Required: message to send
 }
 
-// sendToTaskMarkerRe matches [SEND_TO_TASK]{...}[/SEND_TO_TASK] blocks in agent output.
-var sendToTaskMarkerRe = regexp.MustCompile(`(?s)\[SEND_TO_TASK\]\s*(.*?)\s*\[/SEND_TO_TASK\]`)
-
-// ParseSendToTask extracts send-to-task requests from AI output.
-func ParseSendToTask(output string) []SendToTaskRequest {
-	matches := sendToTaskMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []SendToTaskRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req SendToTaskRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[thread-send] error parsing send request JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.TaskID == "" && req.Title == "" {
-			applog.Infof("[thread-send] skipping send request with no task_id or title")
-			continue
-		}
-		if req.Message == "" {
-			applog.Infof("[thread-send] skipping send request with no message")
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
-}
-
-// ScheduleTaskRequest represents a request to schedule a task parsed from AI output.
+// ScheduleTaskRequest represents a typed request to schedule a task.
 type ScheduleTaskRequest struct {
 	TaskID   string   `json:"task_id"`  // Task ID to schedule
 	Title    string   `json:"title"`    // Optional: task title for fuzzy search
@@ -1107,78 +961,14 @@ type ScheduleTaskRequest struct {
 	Days     []string `json:"days"`     // Optional: day abbreviations for weekly (mon,tue,wed,thu,fri,sat,sun)
 }
 
-// scheduleTaskMarkerRe matches [SCHEDULE_TASK]{...}[/SCHEDULE_TASK] blocks in agent output.
-var scheduleTaskMarkerRe = regexp.MustCompile(`(?s)\[SCHEDULE_TASK\]\s*(.*?)\s*\[/SCHEDULE_TASK\]`)
-
-// ParseScheduleTask extracts schedule task requests from AI output.
-func ParseScheduleTask(output string) []ScheduleTaskRequest {
-	matches := scheduleTaskMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []ScheduleTaskRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req ScheduleTaskRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[schedule-task] error parsing schedule request JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.TaskID == "" && req.Title == "" {
-			applog.Infof("[schedule-task] skipping schedule request with no task_id or title")
-			continue
-		}
-		if req.Time == "" {
-			applog.Infof("[schedule-task] skipping schedule request with no time")
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
-}
-
-// DeleteScheduleRequest represents a request to delete a schedule entry parsed from AI output.
+// DeleteScheduleRequest represents a typed request to delete a schedule entry.
 type DeleteScheduleRequest struct {
 	ScheduleID string `json:"schedule_id"` // Direct schedule ID
 	TaskID     string `json:"task_id"`     // Task ID to find schedule for
 	Title      string `json:"title"`       // Optional: task title for fuzzy search
 }
 
-// deleteScheduleMarkerRe matches [DELETE_SCHEDULE]{...}[/DELETE_SCHEDULE] blocks in agent output.
-var deleteScheduleMarkerRe = regexp.MustCompile(`(?s)\[DELETE_SCHEDULE\]\s*(.*?)\s*\[/DELETE_SCHEDULE\]`)
-
-// ParseDeleteSchedule extracts delete schedule requests from AI output.
-func ParseDeleteSchedule(output string) []DeleteScheduleRequest {
-	matches := deleteScheduleMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []DeleteScheduleRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req DeleteScheduleRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[delete-schedule] error parsing JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.ScheduleID == "" && req.TaskID == "" && req.Title == "" {
-			applog.Infof("[delete-schedule] skipping request with no schedule_id, task_id, or title")
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
-}
-
-// ModifyScheduleRequest represents a request to modify a schedule entry parsed from AI output.
+// ModifyScheduleRequest represents a typed request to modify a schedule entry.
 type ModifyScheduleRequest struct {
 	ScheduleID string   `json:"schedule_id"` // Direct schedule ID
 	TaskID     string   `json:"task_id"`     // Task ID to find schedule for
@@ -1188,36 +978,6 @@ type ModifyScheduleRequest struct {
 	Interval   *int     `json:"interval"`    // New interval (optional, pointer to distinguish 0 from unset)
 	Days       []string `json:"days"`        // New days for weekly (optional)
 	Enabled    *bool    `json:"enabled"`     // Enable/disable (optional, pointer to distinguish false from unset)
-}
-
-// modifyScheduleMarkerRe matches [MODIFY_SCHEDULE]{...}[/MODIFY_SCHEDULE] blocks in agent output.
-var modifyScheduleMarkerRe = regexp.MustCompile(`(?s)\[MODIFY_SCHEDULE\]\s*(.*?)\s*\[/MODIFY_SCHEDULE\]`)
-
-// ParseModifySchedule extracts modify schedule requests from AI output.
-func ParseModifySchedule(output string) []ModifyScheduleRequest {
-	matches := modifyScheduleMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []ModifyScheduleRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req ModifyScheduleRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[modify-schedule] error parsing JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.ScheduleID == "" && req.TaskID == "" && req.Title == "" {
-			applog.Infof("[modify-schedule] skipping request with no schedule_id, task_id, or title")
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
 }
 
 // CreateAlertRequest represents a request to create an alert from chat.
@@ -1239,469 +999,14 @@ type ToggleAlertRequest struct {
 	AlertID string `json:"alert_id"` // Alert ID to toggle
 }
 
-// createAlertMarkerRe matches [CREATE_ALERT]{...}[/CREATE_ALERT] blocks.
-var createAlertMarkerRe = regexp.MustCompile(`(?s)\[CREATE_ALERT\]\s*(.*?)\s*\[/CREATE_ALERT\]`)
-
-// deleteAlertMarkerRe matches [DELETE_ALERT]{...}[/DELETE_ALERT] blocks.
-var deleteAlertMarkerRe = regexp.MustCompile(`(?s)\[DELETE_ALERT\]\s*(.*?)\s*\[/DELETE_ALERT\]`)
-
-// toggleAlertMarkerRe matches [TOGGLE_ALERT]{...}[/TOGGLE_ALERT] blocks.
-var toggleAlertMarkerRe = regexp.MustCompile(`(?s)\[TOGGLE_ALERT\]\s*(.*?)\s*\[/TOGGLE_ALERT\]`)
-
-// listAlertsMarkerRe matches [LIST_ALERTS] markers (no JSON body needed).
-var listAlertsMarkerRe = regexp.MustCompile(`\[LIST_ALERTS\]`)
-
-// ParseCreateAlert extracts create alert requests from AI output.
-func ParseCreateAlert(output string) []CreateAlertRequest {
-	matches := createAlertMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []CreateAlertRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req CreateAlertRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[create-alert] error parsing JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.Title == "" {
-			applog.Infof("[create-alert] skipping request with no title")
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
-}
-
-// ParseDeleteAlert extracts delete alert requests from AI output.
-func ParseDeleteAlert(output string) []DeleteAlertRequest {
-	matches := deleteAlertMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []DeleteAlertRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req DeleteAlertRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[delete-alert] error parsing JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.AlertID == "" {
-			applog.Infof("[delete-alert] skipping request with no alert_id")
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
-}
-
-// ParseToggleAlert extracts toggle alert requests from AI output.
-func ParseToggleAlert(output string) []ToggleAlertRequest {
-	matches := toggleAlertMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []ToggleAlertRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req ToggleAlertRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[toggle-alert] error parsing JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.AlertID == "" {
-			applog.Infof("[toggle-alert] skipping request with no alert_id")
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
-}
-
-// HasListAlerts checks if the output contains a [LIST_ALERTS] marker.
-func HasListAlerts(output string) bool {
-	return listAlertsMarkerRe.MatchString(output)
-}
-
 // SetPersonalityRequest represents a request to change the global personality setting.
 type SetPersonalityRequest struct {
 	Personality string `json:"personality"` // Personality key to set
 }
 
-// setPersonalityMarkerRe matches [SET_PERSONALITY]{...}[/SET_PERSONALITY] blocks in agent output.
-var setPersonalityMarkerRe = regexp.MustCompile(`(?s)\[SET_PERSONALITY\]\s*(.*?)\s*\[/SET_PERSONALITY\]`)
-
-// listPersonalitiesMarkerRe matches [LIST_PERSONALITIES] markers (no JSON body needed).
-var listPersonalitiesMarkerRe = regexp.MustCompile(`\[LIST_PERSONALITIES\]`)
-
-// listModelsMarkerRe matches [LIST_MODELS] markers.
-var listModelsMarkerRe = regexp.MustCompile(`\[LIST_MODELS\]`)
-
-// viewSettingsMarkerRe matches [VIEW_SETTINGS] markers.
-var viewSettingsMarkerRe = regexp.MustCompile(`\[VIEW_SETTINGS\]`)
-
-// projectInfoMarkerRe matches [PROJECT_INFO] markers.
-var projectInfoMarkerRe = regexp.MustCompile(`\[PROJECT_INFO\]`)
-
-// listAgentsMarkerRe matches [LIST_AGENTS] markers.
-var listAgentsMarkerRe = regexp.MustCompile(`\[LIST_AGENTS\]`)
-
-// listProjectsMarkerRe matches [LIST_PROJECTS] markers.
-var listProjectsMarkerRe = regexp.MustCompile(`\[LIST_PROJECTS\]`)
-
-// switchProjectMarkerRe matches [SWITCH_PROJECT]{...}[/SWITCH_PROJECT] blocks.
-var switchProjectMarkerRe = regexp.MustCompile(`(?s)\[SWITCH_PROJECT\]\s*(.*?)\s*\[/SWITCH_PROJECT\]`)
-
 // SwitchProjectRequest represents a request to switch the active project.
 type SwitchProjectRequest struct {
 	Project string `json:"project"` // Project name or ID to switch to
-}
-
-// HasListProjects checks if the output contains a [LIST_PROJECTS] marker.
-func HasListProjects(output string) bool {
-	return listProjectsMarkerRe.MatchString(output)
-}
-
-// ParseSwitchProject extracts switch project requests from AI output.
-func ParseSwitchProject(output string) []SwitchProjectRequest {
-	matches := switchProjectMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []SwitchProjectRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req SwitchProjectRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[switch-project] error parsing JSON %q: %v", jsonStr, err)
-			continue
-		}
-		if req.Project == "" {
-			applog.Infof("[switch-project] skipping request with empty project name")
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
-}
-
-// ParseSetPersonality extracts set personality requests from AI output.
-func ParseSetPersonality(output string) []SetPersonalityRequest {
-	matches := setPersonalityMarkerRe.FindAllStringSubmatch(output, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var requests []SetPersonalityRequest
-	for _, match := range matches {
-		if len(match) < 2 {
-			continue
-		}
-		jsonStr := strings.TrimSpace(match[1])
-		var req SetPersonalityRequest
-		if err := json.Unmarshal([]byte(jsonStr), &req); err != nil {
-			applog.Infof("[set-personality] error parsing JSON %q: %v", jsonStr, err)
-			continue
-		}
-		requests = append(requests, req)
-	}
-	return requests
-}
-
-// HasListPersonalities checks if the output contains a [LIST_PERSONALITIES] marker.
-func HasListPersonalities(output string) bool {
-	return listPersonalitiesMarkerRe.MatchString(output)
-}
-
-// HasListModels checks if the output contains a [LIST_MODELS] marker.
-func HasListModels(output string) bool {
-	return listModelsMarkerRe.MatchString(output)
-}
-
-// HasViewSettings checks if the output contains a [VIEW_SETTINGS] marker.
-func HasViewSettings(output string) bool {
-	return viewSettingsMarkerRe.MatchString(output)
-}
-
-// HasListAgents checks if the output contains a [LIST_AGENTS] marker.
-func HasListAgents(output string) bool {
-	return listAgentsMarkerRe.MatchString(output)
-}
-
-// HasProjectInfo checks if the output contains a [PROJECT_INFO] marker.
-func HasProjectInfo(output string) bool {
-	return projectInfoMarkerRe.MatchString(output)
-}
-
-// MissingMarkerWarning describes a case where the LLM response appears to promise
-// an action but doesn't contain the corresponding marker block.
-type MissingMarkerWarning struct {
-	Action      string // e.g., "view_thread", "send_to_task"
-	MarkerName  string // e.g., "[VIEW_TASK_CHAT]", "[SEND_TO_TASK]"
-	MatchedHint string // the phrase that triggered the detection
-}
-
-// intentPhrases maps marker types to phrases that indicate the LLM intended to
-// perform an action. Each entry is a list of lowercase phrases to match against
-// the lowercased output.
-var intentPhrases = map[string]struct {
-	MarkerName string
-	Phrases    []string
-}{
-	"view_thread": {
-		MarkerName: "[VIEW_TASK_CHAT]",
-		Phrases: []string{
-			"let me retrieve the thread",
-			"let me fetch the thread",
-			"let me get the thread history",
-			"let me pull up the thread",
-			"i'll retrieve the thread",
-			"i'll fetch the thread",
-			"i'll get the thread history",
-			"i'll pull up the thread",
-			"i'll show you the thread",
-			"i'll view the task",
-			"let me check the task output",
-			"let me get the output",
-			"let me retrieve the execution",
-			"i'll retrieve the execution",
-			"i'll get the execution",
-			"i'll check the output",
-			"let me view the task",
-			"retrieving the thread history",
-			"fetching the execution history",
-		},
-	},
-	"send_to_task": {
-		MarkerName: "[SEND_TO_TASK]",
-		Phrases: []string{
-			"i'll send that to the task",
-			"i'll send that instruction",
-			"i'll send that message",
-			"i'll tell the task",
-			"i'll forward that to",
-			"let me send that to",
-			"let me tell the task",
-			"sending that to the task",
-			"sending the message to",
-			"i'll pass that along to",
-			"i'll relay that to",
-			"i'll communicate that to",
-			"let me send a message to",
-			"i'll send a follow-up",
-			"let me send a follow-up",
-		},
-	},
-	"create_task": {
-		MarkerName: "[CREATE_TASK]",
-		Phrases: []string{
-			"i'll create that task",
-			"i'll create a task for",
-			"let me create that task",
-			"let me create a task for",
-			"creating that task now",
-			"i'll add that as a task",
-		},
-	},
-	"schedule_task": {
-		MarkerName: "[SCHEDULE_TASK]",
-		Phrases: []string{
-			"i'll schedule that task",
-			"i'll schedule the task",
-			"let me schedule that",
-			"let me schedule the task",
-			"i'll set up a schedule",
-			"i'll set that up to run",
-			"scheduling that task",
-			"i'll configure the schedule",
-			"let me set up the schedule",
-		},
-	},
-	"delete_schedule": {
-		MarkerName: "[DELETE_SCHEDULE]",
-		Phrases: []string{
-			"i'll delete that schedule",
-			"i'll remove that schedule",
-			"let me delete the schedule",
-			"let me remove the schedule",
-			"deleting that schedule",
-			"removing that schedule",
-			"i'll cancel that schedule",
-			"let me cancel the schedule",
-			"i'll unschedule that task",
-			"let me unschedule that",
-		},
-	},
-	"modify_schedule": {
-		MarkerName: "[MODIFY_SCHEDULE]",
-		Phrases: []string{
-			"i'll modify that schedule",
-			"i'll update the schedule",
-			"let me modify the schedule",
-			"let me update the schedule",
-			"i'll change the schedule",
-			"let me change the schedule",
-			"modifying the schedule",
-			"updating the schedule",
-			"i'll adjust the schedule",
-			"let me adjust the schedule",
-		},
-	},
-	"list_personalities": {
-		MarkerName: "[LIST_PERSONALITIES]",
-		Phrases: []string{
-			"let me list the personalities",
-			"i'll show you the available personalities",
-			"here are the personalities",
-			"let me show you the personality options",
-		},
-	},
-	"set_personality": {
-		MarkerName: "[SET_PERSONALITY]",
-		Phrases: []string{
-			"i'll change the personality",
-			"i'll set the personality",
-			"let me change the personality",
-			"let me update the personality",
-			"changing the personality",
-			"setting the personality to",
-		},
-	},
-	"list_models": {
-		MarkerName: "[LIST_MODELS]",
-		Phrases: []string{
-			"let me list the models",
-			"i'll show you the available models",
-			"here are the configured models",
-			"let me show you the models",
-		},
-	},
-	"view_settings": {
-		MarkerName: "[VIEW_SETTINGS]",
-		Phrases: []string{
-			"let me show you the settings",
-			"i'll retrieve the settings",
-			"let me get the current settings",
-			"here are the current settings",
-			"i'll show you the app settings",
-		},
-	},
-	"project_info": {
-		MarkerName: "[PROJECT_INFO]",
-		Phrases: []string{
-			"let me get the project info",
-			"i'll show you the project details",
-			"let me retrieve the project information",
-			"here's the project info",
-			"i'll look up the project details",
-		},
-	},
-	"list_agents": {
-		MarkerName: "[LIST_AGENTS]",
-		Phrases: []string{
-			"let me list the agents",
-			"i'll show you the agents",
-			"here are the configured agents",
-			"let me show you the available agents",
-			"here are your agents",
-		},
-	},
-	"list_alerts": {
-		MarkerName: "[LIST_ALERTS]",
-		Phrases: []string{
-			"let me list the alerts",
-			"i'll show you the alerts",
-			"here are the alerts",
-			"let me check the alerts",
-			"i'll retrieve the alerts",
-			"let me show you the current alerts",
-		},
-	},
-	"create_alert": {
-		MarkerName: "[CREATE_ALERT]",
-		Phrases: []string{
-			"i'll create that alert",
-			"i'll create an alert",
-			"let me create that alert",
-			"let me create an alert",
-			"creating that alert",
-			"i'll set up an alert",
-			"let me set up an alert",
-		},
-	},
-	"delete_alert": {
-		MarkerName: "[DELETE_ALERT]",
-		Phrases: []string{
-			"i'll delete that alert",
-			"i'll remove that alert",
-			"let me delete the alert",
-			"let me remove the alert",
-			"deleting that alert",
-			"removing that alert",
-		},
-	},
-	"toggle_alert": {
-		MarkerName: "[TOGGLE_ALERT]",
-		Phrases: []string{
-			"i'll mark that alert",
-			"i'll toggle that alert",
-			"let me mark the alert",
-			"let me toggle the alert",
-			"marking that alert",
-			"toggling that alert",
-		},
-	},
-}
-
-// DetectMissingMarkers checks if the LLM output contains phrases that suggest
-// it intended to perform an action but did not include the corresponding marker.
-// Returns a list of warnings for each detected case.
-func DetectMissingMarkers(output string) []MissingMarkerWarning {
-	if output == "" {
-		return nil
-	}
-
-	lower := strings.ToLower(output)
-	var warnings []MissingMarkerWarning
-
-	for action, config := range intentPhrases {
-		// Skip if the marker is actually present in the output
-		if strings.Contains(output, config.MarkerName) {
-			continue
-		}
-
-		// Check if any intent phrase matches
-		for _, phrase := range config.Phrases {
-			if strings.Contains(lower, phrase) {
-				warnings = append(warnings, MissingMarkerWarning{
-					Action:      action,
-					MarkerName:  config.MarkerName,
-					MatchedHint: phrase,
-				})
-				break // One match per action type is enough
-			}
-		}
-	}
-
-	return warnings
 }
 
 // BuildChatContext builds the full context string for chat prompts, including task,

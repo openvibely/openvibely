@@ -1071,6 +1071,331 @@ func TestAccountViewFromSnapshotRepairsStoredAnthropicSnakeCaseRawJSON(t *testin
 	}
 }
 
+func TestOpenAIWindowClassificationAndDurationAliases(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		minutes int
+		kind    string
+		label   string
+	}{
+		{name: "five hour", minutes: 300, kind: openAIWindowFiveHour, label: "5-hour session"},
+		{name: "daily", minutes: 1440, kind: openAIWindowDaily, label: "daily limit"},
+		{name: "weekly", minutes: 10080, kind: openAIWindowWeekly, label: "weekly limit"},
+		{name: "monthly", minutes: 43200, kind: openAIWindowMonthly, label: "monthly limit"},
+		{name: "annual", minutes: 525600, kind: openAIWindowAnnual, label: "annual limit"},
+		{name: "five percent tolerance", minutes: 285, kind: openAIWindowFiveHour, label: "5-hour session"},
+		{name: "unknown", minutes: 600, kind: openAIWindowUnknown, label: "usage limit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kind := classifyOpenAIWindow(tc.minutes)
+			if kind != tc.kind {
+				t.Fatalf("classifyOpenAIWindow(%d) = %q, want %q", tc.minutes, kind, tc.kind)
+			}
+			if label := openAIWindowDisplayLabel(kind); label != tc.label {
+				t.Fatalf("label = %q, want %q", label, tc.label)
+			}
+		})
+	}
+
+	cfg := models.LLMConfig{ID: "cfg-openai", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, OAuthAccountID: "acct-openai"}
+	snapshot, err := normalizeOpenAIAccountUsage(cfg, map[string]any{
+		"rate_limit": map[string]any{
+			"primary_window":   map[string]any{"used_percent": 2.0, "window_duration_mins": 300.0},
+			"secondary_window": map[string]any{"used_percent": 3.0, "limitWindowSeconds": 604801.0},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeOpenAIAccountUsage: %v", err)
+	}
+	if snapshot.PrimaryWindowMinutes == nil || *snapshot.PrimaryWindowMinutes != 300 {
+		t.Fatalf("window_duration_mins was not parsed: %+v", snapshot.PrimaryWindowMinutes)
+	}
+	if snapshot.SecondaryWindowMinutes == nil || *snapshot.SecondaryWindowMinutes != 10081 {
+		t.Fatalf("partial seconds were not rounded upward: %+v", snapshot.SecondaryWindowMinutes)
+	}
+}
+
+func TestNormalizeOpenAIAccountUsageSwappedWindowsHaveStableIdentityAndOrder(t *testing.T) {
+	cfg := models.LLMConfig{ID: "cfg-openai", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, OAuthAccountID: "acct-openai"}
+	snapshot, err := normalizeOpenAIAccountUsage(cfg, map[string]any{
+		"rate_limit": map[string]any{
+			"primary_window":   map[string]any{"used_percent": 8.0, "window_minutes": 10080.0},
+			"secondary_window": map[string]any{"used_percent": 4.0, "windowDurationMins": 300.0},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeOpenAIAccountUsage: %v", err)
+	}
+	view := accountViewFromSnapshot(*snapshot)
+	if len(view.Limits) != 2 {
+		t.Fatalf("limits = %+v, want two", view.Limits)
+	}
+	if view.Limits[0].LimitKey != openAIWindowFiveHour || view.Limits[0].Label != "5-hour session" || !usageFloatPtrClose(view.Limits[0].UsedPercent, 4) {
+		t.Fatalf("first limit = %+v, want stable five-hour identity", view.Limits[0])
+	}
+	if view.Limits[1].LimitKey != openAIWindowWeekly || view.Limits[1].Label != "weekly limit" || !usageFloatPtrClose(view.Limits[1].UsedPercent, 8) {
+		t.Fatalf("second limit = %+v, want stable weekly identity", view.Limits[1])
+	}
+
+	unknown, err := normalizeOpenAIAccountUsage(cfg, map[string]any{
+		"rate_limit": map[string]any{
+			"primary_window":   map[string]any{"used_percent": 1.0, "window_minutes": 600.0},
+			"secondary_window": map[string]any{"used_percent": 2.0, "window_minutes": 700.0},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalize unknown windows: %v", err)
+	}
+	unknownView := accountViewFromSnapshot(*unknown)
+	if len(unknownView.Limits) != 2 || unknownView.Limits[0].LimitKey != "primary" || unknownView.Limits[1].LimitKey != "secondary" {
+		t.Fatalf("unknown windows did not preserve stable provider order: %+v", unknownView.Limits)
+	}
+	if unknownView.Limits[0].Label != "usage limit" || unknownView.Limits[1].Label != "usage limit" {
+		t.Fatalf("unknown windows should use neutral labels: %+v", unknownView.Limits)
+	}
+}
+
+func TestNormalizeOpenAIAccountUsageDuplicateSemanticWindowsRenderOnce(t *testing.T) {
+	cfg := models.LLMConfig{ID: "cfg-openai", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, OAuthAccountID: "acct-openai"}
+	snapshot, err := normalizeOpenAIAccountUsage(cfg, map[string]any{
+		"rate_limit": map[string]any{
+			"primary_window":   map[string]any{"used_percent": 4.0, "window_minutes": 10080.0},
+			"secondary_window": map[string]any{"used_percent": 5.0, "limit_window_seconds": 604800.0},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeOpenAIAccountUsage: %v", err)
+	}
+	view := accountViewFromSnapshot(*snapshot)
+	if len(view.Limits) != 1 || view.Limits[0].LimitKey != openAIWindowWeekly || !usageFloatPtrClose(view.Limits[0].UsedPercent, 4) {
+		t.Fatalf("duplicate semantic windows were not deterministically deduplicated in provider order: %+v", view.Limits)
+	}
+}
+
+func TestNormalizeOpenAIAdditionalPrimaryWindowPersistsCurrentLimit(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	configRepo := repository.NewLLMConfigRepo(db)
+	cfg := models.LLMConfig{Name: "OpenAI OAuth", Provider: models.ProviderOpenAI, Model: "gpt-5.3-codex", AuthMethod: models.AuthMethodOAuth, OAuthAccessToken: "test-token", OAuthAccountID: "acct-openai"}
+	if err := configRepo.Create(ctx, &cfg); err != nil {
+		t.Fatalf("create config: %v", err)
+	}
+	snapshot, err := normalizeOpenAIAccountUsage(cfg, map[string]any{
+		"additional_rate_limits": []any{
+			map[string]any{
+				"metered_feature": "codex_bengalfox",
+				"limit_name":      "GPT-5.3-Codex-Spark",
+				"account_id":      "raw-provider-account-must-be-redacted",
+				"rate_limit": map[string]any{
+					"primary_window": map[string]any{
+						"used_percent":         0.0,
+						"limit_window_seconds": 604800.0,
+						"reset_at":             1784692110.0,
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeOpenAIAccountUsage: %v", err)
+	}
+	if len(snapshot.ExtraLimits) != 1 {
+		t.Fatalf("extra limits = %+v, want one", snapshot.ExtraLimits)
+	}
+	limit := snapshot.ExtraLimits[0]
+	if limit.LimitKey != "codex_bengalfox" || limit.Label != "GPT-5.3-Codex-Spark" || !usageFloatPtrClose(limit.UsedPercent, 0) {
+		t.Fatalf("unexpected normalized extra limit: %+v", limit)
+	}
+	if limit.WindowMinutes == nil || *limit.WindowMinutes != 10080 || limit.ResetAt == nil || *limit.ResetAt != "2026-07-22T03:48:30Z" {
+		t.Fatalf("unexpected normalized window/reset: %+v", limit)
+	}
+	if strings.Contains(limit.RawJSON, "raw-provider-account-must-be-redacted") {
+		t.Fatalf("extra-limit raw JSON exposed provider identity: %s", limit.RawJSON)
+	}
+
+	repo := repository.NewUsageRepo(db)
+	if err := repo.CreateAccountUsageSnapshot(ctx, snapshot); err != nil {
+		t.Fatalf("persist snapshot: %v", err)
+	}
+	stored, err := repo.GetLatestAccountUsageSnapshots(ctx, "openai")
+	if err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	if len(stored) != 1 || len(stored[0].ExtraLimits) != 1 {
+		t.Fatalf("persisted snapshots = %+v", stored)
+	}
+	persisted := stored[0].ExtraLimits[0]
+	if persisted.LimitKey != limit.LimitKey || !usageFloatPtrClose(persisted.UsedPercent, 0) || persisted.ResetAt == nil || *persisted.ResetAt != *limit.ResetAt {
+		t.Fatalf("persisted extra limit changed identity/current values: %+v", persisted)
+	}
+}
+
+func TestNormalizeOpenAIAccountUsageWeeklyPrimaryWindowIsNotFiveHour(t *testing.T) {
+	cfg := models.LLMConfig{ID: "cfg-openai", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, OAuthAccountID: "acct-openai"}
+	snapshot, err := normalizeOpenAIAccountUsage(cfg, map[string]any{
+		"rate_limit": map[string]any{
+			"primary_window": map[string]any{
+				"used_percent":         6.0,
+				"limit_window_seconds": 604800.0,
+				"reset_at":             1784667607.0,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeOpenAIAccountUsage: %v", err)
+	}
+	view := accountViewFromSnapshot(*snapshot)
+	if len(view.Limits) != 1 {
+		t.Fatalf("limits = %+v, want one weekly-only limit", view.Limits)
+	}
+	if view.Limits[0].Label != "weekly limit" {
+		t.Fatalf("label = %q, want weekly limit", view.Limits[0].Label)
+	}
+	if view.Limits[0].WindowMinutes == nil || *view.Limits[0].WindowMinutes != 10080 {
+		t.Fatalf("window = %v, want 10080 minutes", view.Limits[0].WindowMinutes)
+	}
+	if view.Limits[0].ResetsAt == nil || *view.Limits[0].ResetsAt != "2026-07-21T21:00:07Z" {
+		t.Fatalf("reset = %v, want absolute RFC3339 timestamp", view.Limits[0].ResetsAt)
+	}
+}
+
+func TestPreferAccountUsageViewDoesNotMergeOlderDynamicLimits(t *testing.T) {
+	currentPercent := 6.0
+	stalePercent := 14.0
+	currentReset := "2026-07-21T21:00:07Z"
+	staleReset := "2025-01-01T00:00:00Z"
+
+	for _, tc := range []struct {
+		name     string
+		provider string
+		newer    models.AccountUsageView
+		older    models.AccountUsageView
+	}{
+		{
+			name:     "openai",
+			provider: "openai",
+			newer: models.AccountUsageView{
+				Provider:     "openai",
+				PlanType:     "",
+				UpdatedAt:    time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC),
+				PrimaryLimit: &models.AccountLimitView{LimitKey: "weekly", Label: "weekly limit", UsedPercent: &currentPercent, ResetsAt: &currentReset},
+				Limits:       []models.AccountLimitView{{LimitKey: "weekly", Label: "weekly limit", UsedPercent: &currentPercent, ResetsAt: &currentReset}},
+			},
+			older: models.AccountUsageView{
+				Provider:       "openai",
+				PlanType:       "ChatGPT Pro",
+				UpdatedAt:      time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC),
+				SecondaryLimit: &models.AccountLimitView{LimitKey: "weekly", Label: "weekly limit", UsedPercent: &stalePercent, ResetsAt: &staleReset},
+				ExtraLimits:    []models.AccountLimitView{{LimitKey: "codex_bengalfox", Label: "GPT-5.3-Codex-Spark", UsedPercent: &stalePercent, ResetsAt: &staleReset}},
+				Limits: []models.AccountLimitView{
+					{LimitKey: "weekly", Label: "weekly limit", UsedPercent: &stalePercent, ResetsAt: &staleReset},
+					{LimitKey: "codex_bengalfox", Label: "GPT-5.3-Codex-Spark", UsedPercent: &stalePercent, ResetsAt: &staleReset},
+				},
+			},
+		},
+		{
+			name:     "anthropic",
+			provider: "anthropic",
+			newer: models.AccountUsageView{
+				Provider:     "anthropic",
+				PlanType:     "",
+				UpdatedAt:    time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC),
+				PrimaryLimit: &models.AccountLimitView{LimitKey: "five_hour", Label: "5-hour session", UsedPercent: &currentPercent, ResetsAt: &currentReset},
+				Limits:       []models.AccountLimitView{{LimitKey: "five_hour", Label: "5-hour session", UsedPercent: &currentPercent, ResetsAt: &currentReset}},
+			},
+			older: models.AccountUsageView{
+				Provider:       "anthropic",
+				PlanType:       "Claude Max (20x)",
+				UpdatedAt:      time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC),
+				SecondaryLimit: &models.AccountLimitView{LimitKey: "seven_day", Label: "weekly limit", UsedPercent: &stalePercent, ResetsAt: &staleReset},
+				ExtraLimits: []models.AccountLimitView{
+					{LimitKey: "seven_day_opus", Label: "Opus weekly limit", UsedPercent: &stalePercent, ResetsAt: &staleReset},
+					{LimitKey: "seven_day_sonnet", Label: "Sonnet weekly limit", UsedPercent: &stalePercent, ResetsAt: &staleReset},
+				},
+				Limits: []models.AccountLimitView{
+					{LimitKey: "seven_day", Label: "weekly limit", UsedPercent: &stalePercent, ResetsAt: &staleReset},
+					{LimitKey: "seven_day_opus", Label: "Opus weekly limit", UsedPercent: &stalePercent, ResetsAt: &staleReset},
+					{LimitKey: "seven_day_sonnet", Label: "Sonnet weekly limit", UsedPercent: &stalePercent, ResetsAt: &staleReset},
+				},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			merged := preferAccountUsageView(tc.newer, tc.older)
+			if merged.PlanType != tc.older.PlanType {
+				t.Fatalf("stable plan metadata was not backfilled: %+v", merged)
+			}
+			if len(merged.Limits) != 1 || merged.Limits[0].Label != tc.newer.Limits[0].Label || merged.Limits[0].UsedPercent == nil || *merged.Limits[0].UsedPercent != currentPercent {
+				t.Fatalf("newest dynamic limit set was not authoritative: %+v", merged.Limits)
+			}
+			if merged.SecondaryLimit != nil || len(merged.ExtraLimits) != 0 {
+				t.Fatalf("older %s dynamic limits were resurrected: secondary=%+v extras=%+v", tc.provider, merged.SecondaryLimit, merged.ExtraLimits)
+			}
+		})
+	}
+}
+
+func TestPreferAccountUsageViewDoesNotMergeOlderUsageCreditState(t *testing.T) {
+	currentPercent := 6.0
+	currentReset := "2026-07-21T21:00:07Z"
+	newerUpdatedAt := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
+	olderUpdatedAt := newerUpdatedAt.Add(-24 * time.Hour)
+	staleMonthlyUSD := 100.0
+	staleUsedUSD := 42.0
+
+	for _, tc := range []struct {
+		provider string
+		planType string
+	}{
+		{provider: "openai", planType: "ChatGPT Pro"},
+		{provider: "anthropic", planType: "Claude Max (20x)"},
+	} {
+		t.Run(tc.provider, func(t *testing.T) {
+			accountID := "acct-" + tc.provider
+			newer := models.AccountUsageView{
+				Provider:  tc.provider,
+				AccountID: accountID,
+				UpdatedAt: newerUpdatedAt,
+				Limits: []models.AccountLimitView{{
+					LimitKey:    "current",
+					Label:       "current limit",
+					UsedPercent: &currentPercent,
+					ResetsAt:    &currentReset,
+				}},
+				Error: "current refresh error",
+			}
+			older := models.AccountUsageView{
+				Provider:             tc.provider,
+				AccountID:            accountID,
+				PlanType:             tc.planType,
+				ExtraUsageLabel:      "stale usage credits",
+				ExtraUsageMonthlyUSD: &staleMonthlyUSD,
+				ExtraUsageUsedUSD:    &staleUsedUSD,
+				UpdatedAt:            olderUpdatedAt,
+				Error:                "stale refresh error",
+			}
+
+			accounts := dedupeAccountUsageViews([]models.AccountUsageView{older, newer}, nil)
+			if len(accounts) != 1 {
+				t.Fatalf("deduped account count = %d, want 1: %+v", len(accounts), accounts)
+			}
+			merged := accounts[0]
+			if merged.PlanType != tc.planType {
+				t.Fatalf("safe plan metadata was not backfilled: %+v", merged)
+			}
+			if merged.ExtraUsageLabel != "" || merged.ExtraUsageMonthlyUSD != nil || merged.ExtraUsageUsedUSD != nil {
+				t.Fatalf("older usage-credit state was resurrected: label=%q monthly=%v used=%v", merged.ExtraUsageLabel, merged.ExtraUsageMonthlyUSD, merged.ExtraUsageUsedUSD)
+			}
+			if !merged.UpdatedAt.Equal(newerUpdatedAt) || merged.Error != newer.Error {
+				t.Fatalf("older dynamic timestamp/error replaced winner state: updated_at=%s error=%q", merged.UpdatedAt, merged.Error)
+			}
+			if len(merged.Limits) != 1 || merged.Limits[0].LimitKey != "current" {
+				t.Fatalf("winner limit state changed: %+v", merged.Limits)
+			}
+		})
+	}
+}
+
 func TestNormalizeOpenAIAccountUsagePlanLabels(t *testing.T) {
 	cfg := models.LLMConfig{ID: "cfg-openai", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth, OAuthAccountID: "acct-openai"}
 	tests := []struct {

@@ -13,12 +13,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-
-	"github.com/openvibely/openvibely/internal/applog"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 const (
@@ -265,7 +266,7 @@ func (c *Client) doWithOAuthRecovery(ctx context.Context, endpoint string, isOAu
 	if c.auth != nil {
 		tokenUsed = c.auth.Token
 	}
-	resp, err := doWithRetry(ctx, c.httpClient, buildReq)
+	resp, err := c.doRequestWithRetry(ctx, buildReq)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +283,21 @@ func (c *Client) doWithOAuthRecovery(ctx context.Context, endpoint string, isOAu
 		return nil, fmt.Errorf("POST %q: 401 Unauthorized: OAuth unauthorized recovery did not refresh token", endpoint)
 	}
 	c.applyOAuthTokens(tokens)
-	return doWithRetry(ctx, c.httpClient, buildReq)
+	return c.doRequestWithRetry(ctx, buildReq)
+}
+
+func (c *Client) doRequestWithRetry(ctx context.Context, buildReq func() (*http.Request, error)) (*http.Response, error) {
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	policy.WrapNetworkError = wrapNetworkError
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		if event.Err != nil {
+			applog.Infof("[openai-client] network error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+			return
+		}
+		applog.Infof("[openai-client] received HTTP %d, retry attempt %d/%d in %v", event.StatusCode, event.Attempt, event.MaxRetries, event.Delay)
+	}
+	return httpretry.Do(ctx, c.httpClient, buildReq, policy)
 }
 
 // EnsureValidToken refreshes the OAuth token if it is expiring within 1 hour.
@@ -435,43 +450,44 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 	if isResponsesLiteWebsocketModel(opts.Model) {
 		payload["stream"] = true
 		wsPayload := buildResponsesLiteWebsocketPayload(payload, system, c.sessionID)
-		openStream := func(useWebsocket bool) (io.ReadCloser, error) {
-			if useWebsocket {
-				return c.openResponsesWebsocketStream(ctx, wsPayload, isChatGPTOAuth)
+		policy := httpretry.DefaultPolicy()
+		policy.AllowReplay = true
+		policy.RetryableError = isRetryableResponsesTransportError
+		result, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*Response, bool, error) {
+			openStream := func(useWebsocket bool) (io.ReadCloser, error) {
+				if useWebsocket {
+					return c.openResponsesWebsocketStream(attemptCtx, wsPayload, isChatGPTOAuth)
+				}
+				return c.openResponsesLiteHTTPStream(attemptCtx, wsPayload, isChatGPTOAuth)
 			}
-			return c.openResponsesLiteHTTPStream(ctx, wsPayload, isChatGPTOAuth)
-		}
-		useWebsocket := !c.responsesTransportState.websocketDisabled.Load()
-		body, wsErr := openStream(useWebsocket)
-		if useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
-			c.responsesTransportState.disableWebsocket()
-			useWebsocket = false
-			body, wsErr = openStream(false)
-		}
-		if wsErr != nil {
-			return nil, wsErr
-		}
-		sawOutput := false
-		onDelta := func(text string) {
-			sawOutput = true
-			if opts.OnDelta != nil {
-				opts.OnDelta(text)
+			useWebsocket := !c.responsesTransportState.websocketDisabled.Load()
+			body, wsErr := openStream(useWebsocket)
+			if useWebsocket && shouldFallbackResponsesWebsocket(attemptCtx, wsErr) {
+				c.responsesTransportState.disableWebsocket()
+				return nil, false, wsErr
 			}
-		}
-		result, wsErr := parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
-		body.Close()
-		if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
-			c.responsesTransportState.disableWebsocket()
-			if !sawOutput {
-				body, wsErr = openStream(false)
-				if wsErr == nil {
-					result, wsErr = parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
-					body.Close()
+			if wsErr != nil {
+				return nil, false, wsErr
+			}
+			sawOutput := false
+			onDelta := func(text string) {
+				sawOutput = true
+				if opts.OnDelta != nil {
+					opts.OnDelta(text)
 				}
 			}
-		}
-		if wsErr != nil {
-			return nil, wsErr
+			result, wsErr := parseStreamingResponse(body, onDelta, opts.SuppressToolMarkers)
+			body.Close()
+			if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(attemptCtx, wsErr) {
+				c.responsesTransportState.disableWebsocket()
+			}
+			if wsErr != nil {
+				return result, sawOutput, httpretry.NewStreamError(wsErr)
+			}
+			return result, sawOutput, nil
+		})
+		if err != nil {
+			return nil, err
 		}
 		c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
 		return result, nil
@@ -487,44 +503,55 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		return nil, err
 	}
 
-	buildReq := func() (*http.Request, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	result, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*Response, bool, error) {
+		buildReq := func() (*http.Request, error) {
+			req, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, endpoint, bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			c.applyAuthHeaders(req, isChatGPTOAuth)
+			req.Header.Set("Content-Type", "application/json")
+			if stream {
+				req.Header.Set("Accept", "text/event-stream")
+			}
+			return req, nil
+		}
+		resp, err := c.doWithOAuthRecovery(attemptCtx, endpoint, isChatGPTOAuth, buildReq)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		c.applyAuthHeaders(req, isChatGPTOAuth)
-		req.Header.Set("Content-Type", "application/json")
+		defer resp.Body.Close()
+		for k, v := range resp.Header {
+			kl := strings.ToLower(k)
+			if strings.Contains(kl, "ratelimit") || strings.Contains(kl, "rate-limit") || strings.Contains(kl, "retry") || strings.Contains(kl, "x-openai") || strings.Contains(kl, "x-request") {
+				applog.Debugf("[openai-headers] %s: %v", k, v)
+			}
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			errBody, _ := io.ReadAll(resp.Body)
+			apiErr := parseAPIError(resp.StatusCode, errBody)
+			return nil, false, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %w", endpoint, apiErr))
+		}
+		observed := false
+		onDelta := func(text string) {
+			observed = true
+			if opts.OnDelta != nil {
+				opts.OnDelta(text)
+			}
+		}
+		var result *Response
 		if stream {
-			req.Header.Set("Accept", "text/event-stream")
+			result, err = parseStreamingResponse(resp.Body, onDelta, opts.SuppressToolMarkers)
+		} else {
+			result, err = parseResponse(resp.Body)
 		}
-		return req, nil
-	}
-
-	resp, err := c.doWithOAuthRecovery(ctx, endpoint, isChatGPTOAuth, buildReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	for k, v := range resp.Header {
-		kl := strings.ToLower(k)
-		if strings.Contains(kl, "ratelimit") || strings.Contains(kl, "rate-limit") || strings.Contains(kl, "retry") || strings.Contains(kl, "x-openai") || strings.Contains(kl, "x-request") {
-			applog.Debugf("[openai-headers] %s: %v", k, v)
+		if err != nil {
+			return result, observed, httpretry.NewStreamError(err)
 		}
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		errBody, _ := io.ReadAll(resp.Body)
-		apiErr := parseAPIError(resp.StatusCode, errBody)
-		return nil, fmt.Errorf("POST %q: %w", endpoint, apiErr)
-	}
-
-	var result *Response
-	if stream {
-		result, err = parseStreamingResponse(resp.Body, opts.OnDelta, opts.SuppressToolMarkers)
-	} else {
-		result, err = parseResponse(resp.Body)
-	}
+		return result, observed, nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -735,6 +762,9 @@ func parseStreamingResponse(body io.Reader, onDelta func(string), suppressToolMa
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	if completed == nil {
+		return nil, io.ErrUnexpectedEOF
 	}
 
 	if emitter != nil {

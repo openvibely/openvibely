@@ -2,12 +2,80 @@ package components
 
 import (
 	"fmt"
+	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
 	"regexp"
 	"strings"
 	"time"
 )
+
+// chatContentRevision returns a compact fingerprint for comparing rendered
+// transcript snapshots without repeatedly comparing the full response text.
+func chatContentRevision(content string) string {
+	const offset64 = uint64(14695981039346656037)
+	const prime64 = uint64(1099511628211)
+	hash := offset64
+	for i := 0; i < len(content); i++ {
+		hash ^= uint64(content[i])
+		hash *= prime64
+	}
+	return fmt.Sprintf("%x-%016x", len(content), hash)
+}
+
+// ChatExecutionRevision fingerprints the server-rendered state for one execution.
+// Browsers use it to prove unchanged pairs still match an authoritative snapshot
+// before advancing the root transcript revision after live DOM reconciliation.
+func ChatExecutionRevision(exec models.Execution) string {
+	const offset64 = uint64(14695981039346656037)
+	const prime64 = uint64(1099511628211)
+	hash := offset64
+	write := func(value string) {
+		for i := 0; i < len(value); i++ {
+			hash ^= uint64(value[i])
+			hash *= prime64
+		}
+		hash ^= 0xff
+		hash *= prime64
+	}
+	write(exec.ID)
+	write(string(exec.Status))
+	write(exec.PromptSent)
+	write(exec.Output)
+	write(exec.ErrorMessage)
+	write(fmt.Sprintf("%t", exec.IsFollowup))
+	return fmt.Sprintf("%016x", hash)
+}
+
+// ChatTranscriptRevision fingerprints the server-rendered transcript and pending-input
+// state so polling/reconnect paths can reject authoritative no-op responses before
+// touching the live DOM.
+func ChatTranscriptRevision(executions []models.Execution, pendingInputs []models.ThreadInput, extra string) string {
+	const offset64 = uint64(14695981039346656037)
+	const prime64 = uint64(1099511628211)
+	hash := offset64
+	write := func(value string) {
+		for i := 0; i < len(value); i++ {
+			hash ^= uint64(value[i])
+			hash *= prime64
+		}
+		hash ^= 0xff
+		hash *= prime64
+	}
+	write(extra)
+	for _, exec := range executions {
+		write(ChatExecutionRevision(exec))
+	}
+	for _, input := range pendingInputs {
+		write(input.ID)
+		write(string(input.InputMode))
+		write(string(input.InputStatus))
+		write(input.ExpectedTurnID)
+		write(input.Content)
+		write(input.AttachmentSessionID)
+	}
+	return fmt.Sprintf("%x-%016x", len(executions)+len(pendingInputs), hash)
+}
 
 // jsStringLength returns the JavaScript string.length for a Go string.
 // JS uses UTF-16 encoding, so characters outside the BMP (U+10000+) count as
@@ -55,6 +123,15 @@ func chatMessageHistoryStorageKey(config ChatInputFormConfig) string {
 		return "openvibely-task-thread-message-history-" + config.TaskID
 	}
 	return "openvibely-chat-message-history"
+}
+func chatAttachmentStateKey(config ChatInputFormConfig) string {
+	if config.TaskID != "" {
+		return "openvibely-task-thread-attachments-" + config.TaskID
+	}
+	if config.ProjectID != "" {
+		return "openvibely-chat-attachments-" + config.ProjectID
+	}
+	return "openvibely-chat-attachments-" + config.FormID
 }
 func selectedAgentOrAuto(agentID string) string {
 	if agentID == "" {
@@ -127,13 +204,18 @@ templ ChatBubble(role, content string) {
 			if role == "User" {
 				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
 			} else {
-				<div class="chat-stream-content" data-raw-content={ NormalizeDisplayMarkers(content) }></div>
+				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(content) } data-raw-content={ NormalizeDisplayMarkers(content) }></div>
 				<script>
 					(function() {
 						var el = document.currentScript.previousElementSibling;
+						var renderStarted = false;
 						function render() {
+							if (renderStarted) return;
+							renderStarted = true;
 							var raw = el.getAttribute('data-raw-content');
-							if (window.renderStreamingContent && raw) {
+							if (window.scheduleChatElementRender && raw) {
+								window.scheduleChatElementRender(el, raw);
+							} else if (window.renderStreamingContent && raw) {
 								window.renderStreamingContent(el, raw);
 							} else if (window.renderChatMarkdown && raw) {
 								el.classList.add('chat-markdown');
@@ -143,7 +225,7 @@ templ ChatBubble(role, content string) {
 								el.textContent = raw;
 								el.classList.add('whitespace-pre-wrap');
 							}
-						// After rendering, process task links and clean markers
+						// After rendering, convert task-result metadata and clean transcript controls
 						var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
 						if (bubble) {
 							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
@@ -178,13 +260,18 @@ templ ChatBubbleError(role, errorMsg, output string) {
 				<div class="text-error/80 text-sm font-medium mb-2">{ "Error: " + errorMsg }</div>
 			}
 			if output != "" {
-				<div class="chat-stream-content" data-raw-content={ NormalizeDisplayMarkers(output) }></div>
+				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(output) } data-raw-content={ NormalizeDisplayMarkers(output) }></div>
 				<script>
 					(function() {
 						var el = document.currentScript.previousElementSibling;
+						var renderStarted = false;
 						function render() {
+							if (renderStarted) return;
+							renderStarted = true;
 							var raw = el.getAttribute('data-raw-content');
-							if (window.renderStreamingContent && raw) {
+							if (window.scheduleChatElementRender && raw) {
+								window.scheduleChatElementRender(el, raw);
+							} else if (window.renderStreamingContent && raw) {
 								window.renderStreamingContent(el, raw);
 							} else if (window.renderChatMarkdown && raw) {
 								el.classList.add('chat-markdown');
@@ -307,7 +394,7 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 // ChatBubbleStreaming renders a streaming SSE message bubble for new messages.
 // messagesContainerID: the ID of the scrollable messages container (e.g. "chat-messages" or "task-thread-messages")
 // pausePollingTargetID: if non-empty, pauses HTMX polling on this element during streaming (thread uses "task-thread-view")
-// isThread: true uses thread behavior (refresh on done); false uses main-chat behavior (link conversion + marker cleaning)
+// isThread: true uses thread behavior (refresh on done); false uses main-chat behavior (result-link conversion + transcript-control cleaning)
 templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetID string, isThread bool) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2">
@@ -437,9 +524,13 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						var textBuffer = '';
 						var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
 						function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
-						var renderScheduled = false;
-					var lastRenderedLength = 0;
-						function renderBufferedOutput(force) {
+							var renderScheduled = false;
+							var renderDelayTimer = null;
+							var lastRenderFinishedAt = 0;
+							var lastRenderedSourceLength = 0;
+							var largeStreamRenderThreshold = 100 * 1024;
+							var largeStreamRenderInterval = 250;
+							function renderBufferedOutput(force, yieldLarge) {
 							if (!window.renderStreamingContent) {
 							container.classList.remove('text-error/80', 'font-medium');
 								container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
@@ -447,9 +538,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							}
 							if (!force && renderScheduled) return;
 							var runRender = function() {
-						renderScheduled = false;
-						var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer;
-						if (!force && renderText.length === lastRenderedLength) return;
+							var sourceLength = textBuffer.length;
+							var renderText = textBuffer;
+							if (!force && sourceLength === lastRenderedSourceLength) return;
 						// Refresh tracker against the live messages element. If a morph
 						// swap replaced the container mid-stream, the old tracker would
 						// be holding a detached element and isNearBottom() would always
@@ -460,26 +551,69 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
 					container.classList.remove('text-error/80', 'font-medium');
-						container.setAttribute('data-raw-content', renderText);
-						window.renderStreamingContent(container, renderText);
-						lastRenderedLength = renderText.length;
-						// Auto-scroll only if the viewport was pinned before this render grew the DOM.
-						if (shouldScroll) {
+							function finishScheduledRender(committed) {
+								if (committed === false) {
+									renderScheduled = false;
+									if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
+									return;
+								}
+								renderScheduled = false;
+								lastRenderedSourceLength = sourceLength;
+								lastRenderFinishedAt = Date.now();
+								// Auto-scroll only if the viewport was pinned before this render grew the DOM.
+								if (shouldScroll) {
 							requestAnimationFrame(function() {
 								var chatMessages = document.getElementById(messagesId);
 								if (chatMessages) {
 									window.chatAutoScroll.scrollToBottom(chatMessages, false);
 								}
 							});
-						}
-						};
-						if (force) {
-							runRender();
-							return;
-						}
-						renderScheduled = true;
-						requestAnimationFrame(runRender);
+								}
+								if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
+							}
+							var shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;
+							var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+							var renderPromise = liveRenderer(container, renderText, shouldYield);
+							if (renderPromise && typeof renderPromise.then === 'function') {
+					return renderPromise.then(finishScheduledRender).catch(function(err) {
+						renderScheduled = false;
+						console.error('[chat] streaming render failed:', err);
+						// Preserve the complete response even if the styled renderer fails.
+							container.textContent = renderText;
+							if (window.setChatRawContent) window.setChatRawContent(container, renderText);
+							else container.setAttribute('data-raw-content', renderText);
+						lastRenderedSourceLength = sourceLength;
+						lastRenderFinishedAt = Date.now();
+						if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
+						return true;
+								});
+							}
+							finishScheduledRender(true);
+							};
+							if (force) {
+								if (renderDelayTimer !== null) {
+									clearTimeout(renderDelayTimer);
+									renderDelayTimer = null;
+								}
+								renderScheduled = false;
+								return runRender();
+							}
+							renderScheduled = true;
+							if (textBuffer.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {
+								var delay = Math.max(0, largeStreamRenderInterval - (Date.now() - lastRenderFinishedAt));
+								renderDelayTimer = setTimeout(function() {
+									renderDelayTimer = null;
+									requestAnimationFrame(runRender);
+								}, delay);
+							} else {
+								requestAnimationFrame(runRender);
+							}
 					}
+						function flushBufferedOutput() {
+							if (renderScheduled || lastRenderedSourceLength !== textBuffer.length) {
+								return renderBufferedOutput(true, false);
+							}
+						}
 						function finalizeEmptyTerminalBubble(status) {
 							if (textBuffer !== '') return;
 							if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
@@ -487,12 +621,26 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							if (status === 'cancelled') {
 								container.classList.add('text-error/80', 'font-medium');
 								container.textContent = 'Error: Cancelled';
-								container.setAttribute('data-raw-content', 'Error: Cancelled');
+								if (window.setChatRawContent) window.setChatRawContent(container, 'Error: Cancelled');
+								else container.setAttribute('data-raw-content', 'Error: Cancelled');
 							}
 						}
 
 						var streamRetryCount = 0;
+						var streamRetryScheduled = false;
+						var streamTerminalHandled = false;
 						var eventSource = null;
+				function scheduleExecutionStreamRetry() {
+					if (streamRetryScheduled) return true;
+					if (streamRetryCount >= 5) return false;
+					streamRetryScheduled = true;
+					streamRetryCount++;
+							setTimeout(function() {
+								streamRetryScheduled = false;
+						connectExecutionStream();
+					}, 150 * streamRetryCount);
+					return true;
+						}
 						function connectExecutionStream() {
 							var streamOffset = utf8ByteLength(textBuffer);
 							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
@@ -525,17 +673,28 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 
 							// Append to buffer and re-render
 						textBuffer += event.data;
-						// Persist normalized render content for completion fallback logic
-						container.setAttribute('data-raw-content', window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(textBuffer) : textBuffer);
 						renderBufferedOutput(false);
 					};
 
 							eventSource.addEventListener('done', function(event) {
+								if (streamTerminalHandled) return;
+								streamTerminalHandled = true;
+								if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+									textBuffer = String(container._authoritativeTerminalContent || '');
+									delete container._authoritativeTerminalContent;
+									container.removeAttribute('data-authoritative-terminal-content');
+								}
 								var terminalStatus = event && event.data ? event.data : 'completed';
 								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-								renderBufferedOutput(true);
-							finalizeEmptyTerminalBubble(terminalStatus);
-							// Hide streaming dots
+							function finishTerminalRender() {
+								finalizeEmptyTerminalBubble(terminalStatus);
+									var completedPair = container.closest('[data-execution-pair="true"]');
+									if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);
+									else if (completedPair) {
+										completedPair.setAttribute('data-exec-status', terminalStatus);
+										completedPair.setAttribute('hx-preserve', 'true');
+									}
+									// Hide streaming dots
 							if (streamingDots) streamingDots.classList.add('hidden');
 							eventSource.close();
 						removeThreadEventSource(eventSource);
@@ -543,13 +702,17 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						window._taskThreadStreamingActive = false;
 							if (isThread) {
 								showThreadTerminalStatus(terminalStatus);
-						} else {
-							// Always evaluate plan-completion first so prompt visibility updates
-							// even if post-render transforms throw.
+									if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
+								} else {
+									window._chatStreamInProgress = false;
+									if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+									if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
+									// Always evaluate plan-completion first so prompt visibility updates
+									// even if post-render transforms throw.
 							if (window.handlePlanModeCompletion) {
 								window.handlePlanModeCompletion(textBuffer);
 							}
-							// Convert task links BEFORE cleaning markers
+							// Convert task-result metadata before cleaning transcript controls
 							var bubble = container.closest('.chat-bubble-assistant-msg');
 							try {
 								if (bubble && window.convertTaskLinksInMessage) {
@@ -573,50 +736,70 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 									}
 								});
 							}
-						}
+								}
+								}
+									var finalRender = renderBufferedOutput(true, true);
+								if (finalRender && typeof finalRender.then === 'function') finalRender.then(finishTerminalRender);
+								else finishTerminalRender();
 					});
 
 						eventSource.addEventListener('error', function(event) {
-							var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
+					var retryableEarlyError = textBuffer === '' && event.data === 'execution not found';
 							if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
 						eventSource.close();
 						removeThreadEventSource(eventSource);
 						removeChatEventSource(execId, eventSource);
-						if (retryableEarlyError) {
-							streamRetryCount++;
-							setTimeout(connectExecutionStream, 150 * streamRetryCount);
+						if (retryableEarlyError && scheduleExecutionStreamRetry()) {
 							return;
-						}
-						// Hide thinking indicator and streaming dots, ensure content shows
+							}
+							if (streamTerminalHandled) return;
+							streamTerminalHandled = true;
+							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+								textBuffer = String(container._authoritativeTerminalContent || '');
+								delete container._authoritativeTerminalContent;
+								container.removeAttribute('data-authoritative-terminal-content');
+							}
+							flushBufferedOutput();
+							// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
 					container.classList.remove('hidden');
 						if (event.data) {
 							container.appendChild(document.createTextNode('\n\nError: ' + event.data));
 						}
-						window._taskThreadStreamingActive = false;
-						if (isThread) {
-							showThreadTerminalStatus('failed');
-						} else {
-							// Clear streaming flag and re-evaluate plan prompt on error.
-							// The evaluator scans DOM for latest completed bubble; an error
-							// bubble without <proposed_plan> correctly hides the prompt.
-							window._chatStreamInProgress = false;
-							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-						}
-					});
+							window._taskThreadStreamingActive = false;
+							var failedPair = container.closest('[data-execution-pair="true"]');
+							if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
+							else if (failedPair) {
+								failedPair.setAttribute('data-exec-status', 'failed');
+								failedPair.setAttribute('hx-preserve', 'true');
+							}
+							if (isThread) {
+								showThreadTerminalStatus('failed');
+								if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
+							} else {
+								// Clear streaming flag and re-evaluate plan prompt on error.
+								// The evaluator scans DOM for latest completed bubble; an error
+								// bubble without <proposed_plan> correctly hides the prompt.
+									window._chatStreamInProgress = false;
+									if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+									if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+									if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
+							}
+						});
 
 						eventSource.onerror = function(error) {
 							console.error('EventSource failed:', error);
 							eventSource.close();
 							removeThreadEventSource(eventSource);
 							removeChatEventSource(execId, eventSource);
-							if (textBuffer === '' && streamRetryCount < 5) {
-								streamRetryCount++;
-								setTimeout(connectExecutionStream, 150 * streamRetryCount);
-								return;
-							}
-							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+				if (textBuffer === '' && scheduleExecutionStreamRetry()) {
+					return;
+						}
+						if (streamTerminalHandled) return;
+						streamTerminalHandled = true;
+						flushBufferedOutput();
+						if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							// Hide thinking indicator and streaming dots, ensure content shows
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 						if (streamingDots) streamingDots.classList.add('hidden');
@@ -638,8 +821,8 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 }
 
 // ChatBubbleStreamingResume renders a chat message that reconnects to an in-progress SSE stream.
-// The EventSource is initialized by _initThreadStreaming() (called from TaskThreadView's
-// afterSwap handler) since inline scripts don't re-execute after morph:outerHTML swaps.
+// The EventSource is initialized by _initThreadStreaming() after initial hydration or an
+// authoritative Chat/Task Thread morph, since inline scripts do not re-execute after morph swaps.
 // Content is stored in data-raw-content (not as text content) so it renders formatted
 // immediately via the inline script, matching ChatBubble's pattern. This prevents
 // raw/unformatted text flash on hard refresh.
@@ -656,15 +839,22 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 					</div>
 				}
 				<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
-				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", len(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
+				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", len(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
+					var renderStarted = false;
 					function render() {
+						if (renderStarted) return;
+						renderStarted = true;
 						var raw = el.getAttribute('data-raw-content');
 						if (!raw) return;
 						if (window.renderStreamingContent) {
-							window.renderStreamingContent(el, raw);
+							var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+							var renderPromise = liveRenderer(el, raw);
+							if (renderPromise && typeof renderPromise.catch === 'function') {
+								renderPromise.catch(function() { el.textContent = raw; });
+							}
 						} else if (window.renderChatMarkdown) {
 							el.className = el.className.replace('whitespace-pre-wrap', '').trim();
 							var div = document.createElement('div');
@@ -694,11 +884,11 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 	</div>
 }
 
-// _initThreadStreamingScript emits the global _initThreadStreaming function.
+// ChatStreamingResumeInitScript installs the shared resume-stream initializer.
 // It finds [data-streaming-resume] containers without an active EventSource
 // and connects them to the SSE endpoint. Called on initial page load and
-// after each morph:outerHTML swap from TaskThreadView's afterSwap handler.
-templ _initThreadStreamingScript() {
+// after each authoritative transcript morph.
+templ ChatStreamingResumeInitScript() {
 	<script type="text/javascript">
 		window._initThreadStreaming = function() {
 			var containers = document.querySelectorAll('[data-streaming-resume="true"]');
@@ -707,13 +897,22 @@ templ _initThreadStreamingScript() {
 				if (container._sseConnected) return;
 				container._sseConnected = true;
 
-				var execId = container.getAttribute('data-exec-id');
-				var messagesId = container.getAttribute('data-messages-container');
+					var execId = container.getAttribute('data-exec-id');
+					var messagesId = container.getAttribute('data-messages-container');
 					var pauseTarget = container.getAttribute('data-pause-polling-target');
 					var cumulativeContent = container.getAttribute('data-raw-content') || '';
 					var streamOffset = parseInt(container.getAttribute('data-initial-byte-length') || '0', 10) || 0;
 					var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
 					function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
+					function persistResumeStreamState(active) {
+						container.setAttribute('data-raw-content', cumulativeContent);
+						container.setAttribute('data-initial-byte-length', String(streamOffset));
+						if (active) container.setAttribute('data-streaming-resume', 'true');
+						else {
+							container.removeAttribute('data-streaming-resume');
+							delete container._sseConnected;
+						}
+					}
 
 				// Find streaming dots by ID (reliable across morph swaps and inline script siblings)
 				var streamingDots = document.getElementById('streaming-dots-resume-' + execId);
@@ -812,21 +1011,26 @@ templ _initThreadStreamingScript() {
 					}
 				}
 
-				var eventSource = null;
-				var streamRetryCount = 0;
-				var renderScheduled = false;
-				var lastRenderedLength = 0;
-				function renderCumulativeContent(force) {
+					var eventSource = null;
+						var streamRetryCount = 0;
+						var streamRetryScheduled = false;
+					var renderScheduled = false;
+					var renderDelayTimer = null;
+					var lastRenderFinishedAt = Date.now();
+					var lastRenderedSourceLength = cumulativeContent.length;
+					var largeStreamRenderThreshold = 100 * 1024;
+					var largeStreamRenderInterval = 250;
+					function renderCumulativeContent(force, yieldLarge) {
 					if (!window.renderStreamingContent) {
 					container.classList.remove('text-error/80', 'font-medium');
 						container.textContent = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
 						return;
 					}
 					if (!force && renderScheduled) return;
-					var runRender = function() {
-						renderScheduled = false;
-						var renderText = window.normalizeTranscriptMarkers ? window.normalizeTranscriptMarkers(cumulativeContent) : cumulativeContent;
-						if (!force && renderText.length === lastRenderedLength) return;
+						var runRender = function() {
+							var sourceLength = cumulativeContent.length;
+							var renderText = cumulativeContent;
+							if (!force && sourceLength === lastRenderedSourceLength) return;
 						// Refresh tracker against the live messages element in case a
 						// morph swap replaced the container while streaming.
 						var liveMessages = document.getElementById(messagesId);
@@ -835,23 +1039,65 @@ templ _initThreadStreamingScript() {
 						}
 						var shouldScroll = !tracker || tracker.shouldAutoScroll();
 					container.classList.remove('text-error/80', 'font-medium');
-						container.setAttribute('data-raw-content', renderText);
-						window.renderStreamingContent(container, renderText);
-						lastRenderedLength = renderText.length;
-						if (shouldScroll) {
+						function finishScheduledRender(committed) {
+							if (committed === false) {
+								renderScheduled = false;
+								if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
+								return;
+							}
+							renderScheduled = false;
+							lastRenderedSourceLength = sourceLength;
+							lastRenderFinishedAt = Date.now();
+							if (shouldScroll) {
 							requestAnimationFrame(function() {
 								var cm = document.getElementById(messagesId);
 								if (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, false);
 							});
+							}
+							if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
 						}
+						var shouldYield = renderText.length >= largeStreamRenderThreshold && yieldLarge !== false;
+						var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+						var renderPromise = liveRenderer(container, renderText, shouldYield);
+						if (renderPromise && typeof renderPromise.then === 'function') {
+				return renderPromise.then(finishScheduledRender).catch(function(err) {
+					renderScheduled = false;
+					console.error('[thread] streaming render failed:', err);
+						container.textContent = renderText;
+						if (window.setChatRawContent) window.setChatRawContent(container, renderText);
+						else container.setAttribute('data-raw-content', renderText);
+					lastRenderedSourceLength = sourceLength;
+					lastRenderFinishedAt = Date.now();
+					if (cumulativeContent.length !== sourceLength) renderCumulativeContent(false);
+					return true;
+							});
+						}
+						finishScheduledRender(true);
 					};
 					if (force) {
-						runRender();
-						return;
+						if (renderDelayTimer !== null) {
+							clearTimeout(renderDelayTimer);
+							renderDelayTimer = null;
+						}
+						renderScheduled = false;
+						return runRender();
 					}
 					renderScheduled = true;
-					requestAnimationFrame(runRender);
+					if (cumulativeContent.length >= largeStreamRenderThreshold && lastRenderFinishedAt > 0) {
+						var delay = Math.max(0, largeStreamRenderInterval - (Date.now() - lastRenderFinishedAt));
+						renderDelayTimer = setTimeout(function() {
+							renderDelayTimer = null;
+							requestAnimationFrame(runRender);
+						}, delay);
+					} else {
+						requestAnimationFrame(runRender);
+					}
 				}
+					function flushCumulativeContent() {
+						if (renderScheduled || lastRenderedSourceLength !== cumulativeContent.length) {
+							return renderCumulativeContent(true, false);
+						}
+					}
 					function finalizeEmptyTerminalBubble(status) {
 						if (cumulativeContent !== '') return;
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
@@ -859,7 +1105,8 @@ templ _initThreadStreamingScript() {
 						if (status === 'cancelled') {
 							container.classList.add('text-error/80', 'font-medium');
 							container.textContent = 'Error: Cancelled';
-							container.setAttribute('data-raw-content', 'Error: Cancelled');
+							if (window.setChatRawContent) window.setChatRawContent(container, 'Error: Cancelled');
+							else container.setAttribute('data-raw-content', 'Error: Cancelled');
 						}
 					}
 					function removeThreadEventSource(es) {
@@ -867,15 +1114,41 @@ templ _initThreadStreamingScript() {
 						var idx = window._threadEventSources.indexOf(es);
 						if (idx >= 0) window._threadEventSources.splice(idx, 1);
 					}
-						function connectResumeExecutionStream() {
-							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
-						// Track EventSource globally so sidebar navigation can close it
-						if (!window._threadEventSources) window._threadEventSources = [];
-					window._threadEventSources.push(eventSource);
+					function registerResumeEventSource(es) {
+						if (!es) return;
+						if (pauseTarget) {
+							if (!window._threadEventSources) window._threadEventSources = [];
+							window._threadEventSources.push(es);
+						} else {
+							window._chatStreamInProgress = true;
+							if (window.registerChatStreamEventSource) window.registerChatStreamEventSource(execId, es);
+						}
+					}
+					function removeResumeEventSource(es) {
+						if (pauseTarget) removeThreadEventSource(es);
+						else if (window.unregisterChatStreamEventSource) window.unregisterChatStreamEventSource(execId, es);
+					}
+					function scheduleResumeExecutionStreamRetry() {
+						if (streamRetryScheduled) return true;
+						if (streamRetryCount >= 5) return false;
+						streamRetryScheduled = true;
+						streamRetryCount++;
+						setTimeout(function() {
+							streamRetryScheduled = false;
+							connectResumeExecutionStream();
+						}, 150 * streamRetryCount);
+						return true;
+					}
 
-						eventSource.onmessage = function(event) {
-							cumulativeContent += event.data;
-							streamOffset += utf8ByteLength(event.data);
+					var streamTerminalHandled = false;
+					function connectResumeExecutionStream() {
+							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
+							registerResumeEventSource(eventSource);
+
+							eventSource.onmessage = function(event) {
+								cumulativeContent += event.data;
+								streamOffset += utf8ByteLength(event.data);
+								persistResumeStreamState(true);
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 							if (thinkingIndicator && !thinkingIndicator.classList.contains('hidden')) {
 								thinkingIndicator.classList.add('hidden');
@@ -885,62 +1158,104 @@ templ _initThreadStreamingScript() {
 							renderCumulativeContent(false);
 					};
 
-						eventSource.addEventListener('done', function(event) {
-							var terminalStatus = event && event.data ? event.data : 'completed';
+							eventSource.addEventListener('done', function(event) {
+								if (streamTerminalHandled) return;
+								streamTerminalHandled = true;
+								if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+									cumulativeContent = String(container._authoritativeTerminalContent || '');
+									delete container._authoritativeTerminalContent;
+									container.removeAttribute('data-authoritative-terminal-content');
+								}
+								persistResumeStreamState(false);
+								var terminalStatus = event && event.data ? event.data : 'completed';
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-							renderCumulativeContent(true);
-						finalizeEmptyTerminalBubble(terminalStatus);
-					if (streamingDots) streamingDots.classList.add('hidden');
-					eventSource.close();
-					removeThreadEventSource(eventSource);
-					window._taskThreadStreamingActive = false;
-						if (pauseTarget) {
+							function finishTerminalRender() {
+								finalizeEmptyTerminalBubble(terminalStatus);
+									var completedPair = container.closest('[data-execution-pair="true"]');
+									if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, terminalStatus);
+									else if (completedPair) {
+										completedPair.setAttribute('data-exec-status', terminalStatus);
+										completedPair.setAttribute('hx-preserve', 'true');
+									}
+									if (streamingDots) streamingDots.classList.add('hidden');
+									eventSource.close();
+									removeResumeEventSource(eventSource);
+									window._taskThreadStreamingActive = false;
+									if (pauseTarget) {
 							showThreadTerminalStatus(terminalStatus);
+									if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
 					} else {
 						var bubble = container.closest('.chat-bubble-assistant-msg');
 						if (bubble && window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
 						if (bubble && window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
 						if (bubble && window.cleanBubbleContent) window.cleanBubbleContent(bubble);
 						if (window.handlePlanModeCompletion) window.handlePlanModeCompletion(cumulativeContent);
+						window._chatStreamInProgress = false;
+						if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+						if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
 						if (!tracker || tracker.shouldAutoScroll()) {
 							requestAnimationFrame(function() {
 								var cm = document.getElementById(messagesId);
 								if (cm && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(cm, true);
 							});
 						}
-					}
+							}
+							}
+								var finalRender = renderCumulativeContent(true, true);
+							if (finalRender && typeof finalRender.then === 'function') finalRender.then(finishTerminalRender);
+							else finishTerminalRender();
 				});
 
 					eventSource.addEventListener('error', function(event) {
-						var retryableEarlyError = cumulativeContent === '' && event.data === 'execution not found' && streamRetryCount < 5;
+					var retryableEarlyError = cumulativeContent === '' && event.data === 'execution not found';
 						if (!retryableEarlyError && window.hideMixtureProgress) window.hideMixtureProgress(execId);
-					eventSource.close();
-					removeThreadEventSource(eventSource);
-					if (retryableEarlyError) {
-						streamRetryCount++;
-						setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
-						return;
-					}
-					if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
+							eventSource.close();
+							removeResumeEventSource(eventSource);
+							if (retryableEarlyError && scheduleResumeExecutionStreamRetry()) {
+								return;
+							}
+							if (streamTerminalHandled) return;
+						streamTerminalHandled = true;
+							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent')) {
+								cumulativeContent = String(container._authoritativeTerminalContent || '');
+								delete container._authoritativeTerminalContent;
+								container.removeAttribute('data-authoritative-terminal-content');
+							}
+							persistResumeStreamState(false);
+							flushCumulativeContent();
+						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
 				container.classList.remove('hidden');
 					if (event.data) container.appendChild(document.createTextNode('\n\nError: ' + event.data));
 					window._taskThreadStreamingActive = false;
+					var failedPair = container.closest('[data-execution-pair="true"]');
+					if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
+					else if (failedPair) {
+						failedPair.setAttribute('data-exec-status', 'failed');
+						failedPair.setAttribute('hx-preserve', 'true');
+					}
 					if (pauseTarget) {
 						showThreadTerminalStatus('failed');
+						if (window.syncTaskThreadTranscriptRevision) window.syncTaskThreadTranscriptRevision(execId);
+					} else {
+						window._chatStreamInProgress = false;
+						if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+						if (window.syncChatTranscriptRevision) window.syncChatTranscriptRevision(execId);
 					}
 				});
 
 					eventSource.onerror = function(error) {
 						console.error('EventSource failed:', error);
-						eventSource.close();
-						removeThreadEventSource(eventSource);
-						if (cumulativeContent === '' && streamRetryCount < 5) {
-							streamRetryCount++;
-							setTimeout(connectResumeExecutionStream, 150 * streamRetryCount);
-							return;
-						}
-						if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+							eventSource.close();
+							removeResumeEventSource(eventSource);
+							if (cumulativeContent === '' && scheduleResumeExecutionStreamRetry()) {
+								return;
+							}
+					if (streamTerminalHandled) return;
+					streamTerminalHandled = true;
+					flushCumulativeContent();
+					if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
 						if (thinkingIndicator) thinkingIndicator.classList.add('hidden');
 					if (streamingDots) streamingDots.classList.add('hidden');
 				container.classList.remove('hidden');
@@ -1056,8 +1371,11 @@ templ ChatEarlierMessagesLoader(containerID, url string, limit int) {
 	</div>
 }
 
-templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
-	<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+func chatExecutionIsTerminal(exec models.Execution) bool {
+	return exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled
+}
+
+templ chatExecutionPairContent(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
 		<!-- User message: show for followups and first non-followup only -->
 		if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
 			if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
@@ -1076,13 +1394,32 @@ templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []m
 		} else if exec.Status == models.ExecRunning {
 			@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
 		}
-	</div>
+}
+
+templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
+	if chatExecutionIsTerminal(exec) {
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true">
+			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+		</div>
+	} else {
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+		</div>
+	}
+}
+
+templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, preservedExecIDs map[string]bool) {
+	if chatExecutionIsTerminal(exec) && preservedExecIDs[exec.ID] {
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true"></div>
+	} else {
+		@ChatExecutionPair(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+	}
 }
 
 // ChatFollowupResponse renders user message + streaming assistant for a follow-up.
 // Used by both ChatSend (main chat) and TaskThreadSend (task thread).
 templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment) {
-	<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID }>
+	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID } data-exec-status="running">
 		if len(attachments) > 0 {
 			@ChatBubbleWithAttachments("User", message, attachments)
 		} else {
@@ -1099,6 +1436,12 @@ templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTar
 templ ChatMessages(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool) {
 	for i, exec := range executions {
 		@ChatExecutionPair(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+	}
+}
+
+templ ChatMessagesPoll(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool, preservedExecIDs map[string]bool) {
+	for i, exec := range executions {
+		@ChatExecutionPairPoll(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, preservedExecIDs)
 	}
 }
 
@@ -1153,6 +1496,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-input-id={ config.InputID }
 			data-clear-func-name={ config.FormID + "ClearAttachments" }
 			data-message-history-key={ chatMessageHistoryStorageKey(config) }
+			data-attachment-state-key={ chatAttachmentStateKey(config) }
 			class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"
 		>
 			<!-- Drop zone overlay -->
@@ -1582,15 +1926,119 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 			var attachmentUploadQueue = Promise.resolve();
 			var attachmentUploadGeneration = 0;
+			var attachmentStateKey = form.getAttribute('data-attachment-state-key') || '';
+			window._chatPendingAttachmentStates = window._chatPendingAttachmentStates || {};
+
+			function appendPendingAttachmentRow(targetList, attachment) {
+				if (!targetList || !attachment) return;
+				var filename = String(attachment.filename || '');
+				var size = parseInt(attachment.size || '0', 10) || 0;
+				var div = document.createElement('div');
+				div.className = 'flex items-center gap-2 text-sm';
+				div.setAttribute('data-pending-attachment', 'true');
+				div.setAttribute('data-pending-attachment-filename', filename);
+				div.setAttribute('data-pending-attachment-size', String(size));
+				div.innerHTML = '<svg class="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>';
+				var name = document.createElement('span');
+				name.className = 'font-medium';
+				name.textContent = filename;
+				div.appendChild(name);
+				var sizeLabel = document.createElement('span');
+				sizeLabel.className = 'text-xs opacity-60';
+				sizeLabel.textContent = formatBytes(size);
+				div.appendChild(sizeLabel);
+				targetList.appendChild(div);
+			}
+
+				function readPendingAttachmentState(targetForm) {
+					if (!targetForm) return null;
+					var targetSession = targetForm.querySelector('input[name="attachment_session_id"]');
+					var targetList = targetForm.querySelector('[id$="-attachments-list"]');
+					var sessionID = targetSession ? (targetSession.value || targetSession.getAttribute('value') || '') : '';
+					if (!sessionID) return null;
+					var attachments = [];
+					if (targetList) {
+						targetList.querySelectorAll('[data-pending-attachment="true"]').forEach(function(row) {
+							attachments.push({
+								filename: row.getAttribute('data-pending-attachment-filename') || '',
+								size: parseInt(row.getAttribute('data-pending-attachment-size') || '0', 10) || 0
+							});
+						});
+					}
+					return { sessionID: sessionID, attachments: attachments };
+				}
+
+				window.saveChatPendingAttachmentState = function(formOrID) {
+					var targetForm = typeof formOrID === 'string' ? document.getElementById(formOrID) : formOrID;
+					if (!targetForm) return null;
+					var key = targetForm.getAttribute('data-attachment-state-key') || '';
+					if (!key) return null;
+					var state = readPendingAttachmentState(targetForm);
+					if (!state) return null;
+					var targetSession = targetForm.querySelector('input[name="attachment_session_id"]');
+					if (targetSession) targetSession.setAttribute('value', state.sessionID);
+					window._chatPendingAttachmentStates[key] = state;
+					try { sessionStorage.setItem(key, JSON.stringify(state)); } catch (_) {}
+					return state;
+				};
+
+				window.restoreChatPendingAttachmentState = function(formOrID) {
+					var targetForm = typeof formOrID === 'string' ? document.getElementById(formOrID) : formOrID;
+					if (!targetForm) return false;
+					var key = targetForm.getAttribute('data-attachment-state-key') || '';
+					if (!key) return false;
+					var state = window._chatPendingAttachmentStates[key] || null;
+					if (!state) {
+						try {
+							var stored = sessionStorage.getItem(key);
+							state = stored ? JSON.parse(stored) : null;
+						} catch (_) { state = null; }
+					}
+					if (!state || !state.sessionID) return false;
+					var targetSession = targetForm.querySelector('input[name="attachment_session_id"]');
+					var targetPreview = targetForm.querySelector('[id$="-attachments-preview"]');
+					var targetList = targetForm.querySelector('[id$="-attachments-list"]');
+					if (!targetSession || !targetList) return false;
+					targetSession.value = state.sessionID;
+					targetSession.setAttribute('value', state.sessionID);
+					targetList.innerHTML = '';
+					(state.attachments || []).forEach(function(attachment) { appendPendingAttachmentRow(targetList, attachment); });
+					if (targetPreview) targetPreview.classList.toggle('hidden', (state.attachments || []).length === 0);
+					window._chatPendingAttachmentStates[key] = state;
+					return true;
+				};
 
 			// Clear attachments function (registered on window for onclick handlers)
-			window[clearFuncName] = function() {
-				attachmentUploadGeneration++;
-				if (preview) preview.classList.add('hidden');
-				if (listContainer) listContainer.innerHTML = '';
-				if (sessionInput) sessionInput.value = '';
-				if (fileInput) fileInput.value = '';
-			};
+				window[clearFuncName] = function() {
+					attachmentUploadGeneration++;
+					if (preview) preview.classList.add('hidden');
+					if (listContainer) listContainer.innerHTML = '';
+					if (sessionInput) {
+						sessionInput.value = '';
+						sessionInput.setAttribute('value', '');
+					}
+					if (fileInput) fileInput.value = '';
+					if (attachmentStateKey) {
+						delete window._chatPendingAttachmentStates[attachmentStateKey];
+						try { sessionStorage.removeItem(attachmentStateKey); } catch (_) {}
+					}
+				};
+				window.restoreChatPendingAttachmentState(form);
+				if (!window._chatPendingAttachmentHistoryBound) {
+					window._chatPendingAttachmentHistoryBound = true;
+					document.body.addEventListener('htmx:beforeHistorySave', function() {
+						document.querySelectorAll('form[data-attachment-state-key]').forEach(function(historyForm) {
+							if (window.saveChatPendingAttachmentState) window.saveChatPendingAttachmentState(historyForm);
+						});
+					});
+					document.body.addEventListener('htmx:historyRestore', function() {
+						setTimeout(function() {
+							document.querySelectorAll('form[data-attachment-state-key]').forEach(function(restoredForm) {
+								if (window.restoreChatPendingAttachmentState) window.restoreChatPendingAttachmentState(restoredForm);
+							});
+						}, 0);
+					});
+				}
 			// Wire up the Clear All button
 			if (clearBtn) {
 				clearBtn.onclick = function() { window[clearFuncName](); };
@@ -1743,12 +2191,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						if (sessionInput) sessionInput.value = result.session_id;
 						if (preview) preview.classList.remove('hidden');
 						result.attachments.forEach(function(att) {
-							var div = document.createElement('div');
-							div.className = 'flex items-center gap-2 text-sm';
-							div.setAttribute('data-pending-attachment', 'true');
-							div.innerHTML = '<svg class="w-4 h-4 text-base-content/70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg><span class="font-medium">' + att.filename + '</span><span class="text-xs opacity-60">' + formatBytes(att.size) + '</span>';
-							if (listContainer) listContainer.appendChild(div);
+							appendPendingAttachmentRow(listContainer, att);
 						});
+						window.saveChatPendingAttachmentState(form);
 						// Auto-scroll to show the attachment preview after upload
 						requestAnimationFrame(function() {
 							// Find the chat messages container (works for both /chat and task thread)
@@ -2137,7 +2582,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 	</script>
 }
 
-// ChatAutoScrollScript emits the shared auto-scroll utility and marker cleaning JS.
+// ChatAutoScrollScript emits shared auto-scroll and transcript rendering/cleaning JS.
 // Should be included once per page that uses chat components.
 templ ChatAutoScrollScript() {
 	<script>
@@ -2163,6 +2608,222 @@ templ ChatAutoScrollScript() {
 		};
 			// Alias for backward compatibility (task thread used a separate namespace)
 			window.threadAutoScroll = window.chatAutoScroll;
+
+			// Large raw tool outputs are inserted cooperatively as adjacent text nodes.
+			// Join those nodes before conversion so line matching and Markdown code
+			// ranges are evaluated against the complete OUT text across chunk boundaries.
+			window.normalizeTaskResultToolOutputTextNodes = function(messageElement) {
+				if (!messageElement || !messageElement.querySelectorAll) return;
+				var selector = messageElement.matches && messageElement.matches('.stream-tool-body-content')
+					? 'pre'
+					: '.stream-tool-body-content pre';
+				messageElement.querySelectorAll(selector).forEach(function(pre) {
+					if (pre.childNodes && pre.childNodes.length > 1 && pre.normalize) pre.normalize();
+				});
+			};
+
+			// Convert task-creation result metadata to clickable links
+			window.convertTaskLinksInMessage = function(messageElement) {
+				window.normalizeTaskResultToolOutputTextNodes(messageElement);
+				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
+				var nodesToProcess = [];
+				var node;
+				while (node = walker.nextNode()) {
+					var parent = node.parentElement;
+					var inCode = !!(parent && parent.closest && parent.closest('code, pre'));
+					var inToolOutput = !!(parent && parent.closest && parent.closest('.stream-tool-body-content'));
+					if (inCode && !inToolOutput) continue;
+					if (node.textContent.includes('[TASK_ID:')) {
+						nodesToProcess.push(node);
+					}
+				}
+
+				nodesToProcess.forEach(function(textNode) {
+						var regex = /(?:-[ \t]*)?"([^"\r\n]+)"[ \t]*(?:\(([^)\r\n]+)\)[ \t]*)?\[TASK_ID:([^\]\r\n]+)\]/g;
+						var text = textNode.textContent;
+						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
+						var inMarkdownFallback = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('[data-chat-markdown-fallback="true"]'));
+						var matches = [];
+						var m;
+						while ((m = regex.exec(text)) !== null) {
+							if (!m[3] || !m[3].trim()) continue;
+							if ((inToolOutput || inMarkdownFallback) && window.isInsideCode && window.isInsideCode(text, m.index, m.index + m[0].length)) continue;
+							matches.push(m);
+						}
+						if (matches.length === 0) return;
+
+					var fragment = document.createDocumentFragment();
+					var lastIndex = 0;
+
+					matches.forEach(function(match) {
+						var fullMatch = match[0], taskTitle = match[1], category = match[2], taskId = match[3];
+						var encodedTaskId = encodeURIComponent(taskId.trim());
+						var matchStart = match.index;
+						if (matchStart > lastIndex) {
+							var beforeText = text.substring(lastIndex, matchStart);
+							// Strip trailing newline before the task item since the div provides its own line break
+							beforeText = beforeText.replace(/\n$/, '');
+							if (beforeText) {
+								fragment.appendChild(document.createTextNode(beforeText));
+							}
+						}
+						var linkWrapper = document.createElement('div');
+						linkWrapper.style.cssText = 'display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.25rem 0;';
+						// Only add bullet if not already inside a list item (markdown renders - as <li>)
+						var insideLi = textNode.parentNode && textNode.parentNode.nodeName === 'LI';
+						if (!insideLi) {
+							var bullet = document.createElement('span');
+							bullet.textContent = '\u2022';
+							bullet.style.opacity = '0.5';
+							linkWrapper.appendChild(bullet);
+						}
+							var link = document.createElement('a');
+							link.href = '/tasks/' + encodedTaskId;
+							link.className = inToolOutput
+								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
+								: 'ov-task-result-link cursor-pointer';
+							link.textContent = taskTitle;
+						link.onclick = function(e) {
+							e.preventDefault();
+							e.stopPropagation();
+							window.openVibelyNavigate('/tasks/' + encodedTaskId + '?from=chat').catch(function(err) { console.error('[chat] Failed to load task detail:', err); });
+						};
+						linkWrapper.appendChild(link);
+						if (category) {
+							var catBadge = document.createElement('span');
+							catBadge.className = 'badge badge-sm badge-ghost';
+							catBadge.textContent = category;
+							linkWrapper.appendChild(catBadge);
+						}
+						if (category && (category === 'backlog' || category === 'pending')) {
+							var startBtn = document.createElement('button');
+							startBtn.className = 'btn btn-xs ov-task-result-start-btn gap-1';
+							startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><polygon points="6,4 16,10 6,16"/></svg> Start Task';
+							startBtn.onclick = function(e) {
+								e.preventDefault();
+								e.stopPropagation();
+								startBtn.disabled = true;
+								startBtn.classList.add('btn-disabled');
+								startBtn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> Starting...';
+								var formData = new URLSearchParams();
+								formData.set('category', 'active');
+								fetch('/tasks/' + encodedTaskId + '/category', {
+									method: 'PATCH',
+									headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+									body: formData.toString()
+								}).then(function(resp) {
+									if (resp.ok) {
+										startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Started';
+										startBtn.classList.remove('ov-task-result-start-btn');
+										startBtn.classList.add('btn-success');
+									} else {
+										startBtn.innerHTML = 'Failed';
+										startBtn.classList.remove('ov-task-result-start-btn');
+										startBtn.classList.add('btn-error');
+									}
+								}).catch(function() {
+									startBtn.innerHTML = 'Failed';
+									startBtn.disabled = false;
+									startBtn.classList.remove('btn-disabled', 'ov-task-result-start-btn');
+									startBtn.classList.add('btn-error');
+								});
+							};
+							linkWrapper.appendChild(startBtn);
+						}
+						fragment.appendChild(linkWrapper);
+						lastIndex = matchStart + fullMatch.length;
+					});
+
+					if (lastIndex < text.length) {
+						var remaining = text.substring(lastIndex);
+						// Style "Attachments copied to tasks:" as a muted info line
+						var attMatch = remaining.match(/\n*Attachments copied to tasks:\s*(.*)/);
+						if (attMatch) {
+							var beforeAtt = remaining.substring(0, remaining.indexOf('Attachments copied to tasks:'));
+							if (beforeAtt.trim()) {
+								fragment.appendChild(document.createTextNode(beforeAtt));
+							}
+							var attDiv = document.createElement('div');
+							attDiv.className = 'text-xs opacity-60 mt-1';
+							attDiv.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>';
+							attDiv.appendChild(document.createTextNode('Attachments copied: ' + attMatch[1]));
+							fragment.appendChild(attDiv);
+						} else {
+							// Strip leading newline since divs provide their own line breaks
+							remaining = remaining.replace(/^\n/, '');
+							if (remaining) {
+								fragment.appendChild(document.createTextNode(remaining));
+							}
+						}
+					}
+					textNode.parentNode.replaceChild(fragment, textNode);
+				});
+			};
+
+			// Convert task-edit result metadata to clickable links
+			window.convertTaskEditLinksInMessage = function(messageElement) {
+				window.normalizeTaskResultToolOutputTextNodes(messageElement);
+				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
+				var nodesToProcess = [];
+				var node;
+				while (node = walker.nextNode()) {
+					var parent = node.parentElement;
+					var inCode = !!(parent && parent.closest && parent.closest('code, pre'));
+					var inToolOutput = !!(parent && parent.closest && parent.closest('.stream-tool-body-content'));
+					if (inCode && !inToolOutput) continue;
+					if (node.textContent.includes('[TASK_EDITED:')) {
+						nodesToProcess.push(node);
+					}
+				}
+
+				nodesToProcess.forEach(function(textNode) {
+						var regex = /(?:-[ \t]*)?"([^"\r\n]+)"[ \t]*\(updated:[ \t]*([^)\r\n]+)\)[ \t]*\[TASK_EDITED:([^\]\r\n]+)\]/g;
+						var text = textNode.textContent;
+						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
+						var inMarkdownFallback = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('[data-chat-markdown-fallback="true"]'));
+						var matches = [];
+						var m;
+						while ((m = regex.exec(text)) !== null) {
+							if (!m[3] || !m[3].trim()) continue;
+							if ((inToolOutput || inMarkdownFallback) && window.isInsideCode && window.isInsideCode(text, m.index, m.index + m[0].length)) continue;
+							matches.push(m);
+						}
+						if (matches.length === 0) return;
+
+					var fragment = document.createDocumentFragment();
+					var lastIndex = 0;
+
+					matches.forEach(function(match) {
+						var fullMatch = match[0], taskTitle = match[1], updatedFields = match[2], taskId = match[3];
+						var encodedTaskId = encodeURIComponent(taskId.trim());
+						var matchStart = match.index;
+						if (matchStart > lastIndex) {
+							fragment.appendChild(document.createTextNode(text.substring(lastIndex, matchStart)));
+						}
+						var linkWrapper = document.createElement('span');
+						linkWrapper.innerHTML = '- ';
+							var link = document.createElement('a');
+							link.href = '/tasks/' + encodedTaskId;
+							link.className = inToolOutput
+								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
+								: 'ov-task-result-link cursor-pointer';
+							link.textContent = '"' + taskTitle + '"';
+						link.onclick = function(e) {
+							e.preventDefault();
+							window.openVibelyNavigate('/tasks/' + encodedTaskId + '?from=chat');
+						};
+						linkWrapper.appendChild(link);
+						linkWrapper.appendChild(document.createTextNode(' (updated: ' + updatedFields + ')'));
+						fragment.appendChild(linkWrapper);
+						lastIndex = matchStart + fullMatch.length;
+					});
+
+					if (lastIndex < text.length) {
+						fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
+					}
+					textNode.parentNode.replaceChild(fragment, textNode);
+				});
+			};
 
 			window.hideMixtureProgress = function(execId) {
 				if (!execId) return;
@@ -2194,8 +2855,8 @@ templ ChatAutoScrollScript() {
 			// ChatScrollTracker tracks whether the user has scrolled away from the bottom
 		// using REAL user-interaction signals (wheel/touchmove/keydown/pointerdown).
 		// This is critical for very large conversations during streaming because:
-		//   - renderStreamingContent() does `container.innerHTML = ''` on every chunk.
-		//     That temporarily shrinks scrollHeight; the browser clamps scrollTop and
+		//   - renderStreamingContent() replaces the response DOM as streaming grows.
+		//     That can change scrollHeight; the browser clamps scrollTop and
 		//     fires a scroll event. A naive "userScrolledUp = !isNearBottom" handler
 		//     would interpret the clamp as the user being at the bottom and clear the
 		//     scrolled-up flag, undoing the user's scroll-up on every chunk.
@@ -2215,28 +2876,29 @@ templ ChatAutoScrollScript() {
 		//   - shouldAutoScroll() returns !userScrolledUp. Do NOT AND with
 		//     isNearBottom — during innerHTML refresh that creates a clamp-driven
 		//     "yes auto-scroll" pulse that yanks the user back down.
-		window.ChatScrollTracker = function(element) {
-			this.element = element;
-			this.userScrolledUp = false;
-			this._userInteracting = false;
-			this._pointerInteracting = false;
-			this._userInteractTimeout = null;
-			this._handlers = {};
-			this._init();
-		};
+			window.ChatScrollTracker = function(element) {
+				this.element = element;
+				this.userScrolledUp = false;
+				this.intentRevision = 0;
+				this._userInteracting = false;
+				this._pointerInteracting = false;
+				this._userInteractTimeout = null;
+				this._handlers = {};
+				this._init();
+			};
 
 		window.ChatScrollTracker.prototype = {
-			_init: function() {
-				var self = this;
-				if (!this.element) return;
+				_init: function() {
+					var self = this;
+					if (!this.element) return;
 
-				function markInteracting() {
-					self._userInteracting = true;
-					if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
-					self._userInteractTimeout = setTimeout(function() {
-						if (!self._pointerInteracting) self._userInteracting = false;
-					}, 250);
-				}
+					function markInteracting() {
+						self._userInteracting = true;
+						if (self._userInteractTimeout) clearTimeout(self._userInteractTimeout);
+						self._userInteractTimeout = setTimeout(function() {
+							if (!self._pointerInteracting) self._userInteracting = false;
+						}, 250);
+					}
 
 				function endPointerInteraction() {
 					self._pointerInteracting = false;
@@ -2246,12 +2908,12 @@ templ ChatAutoScrollScript() {
 					}, 250);
 				}
 
-				this._handlers.wheel = function() { markInteracting(); };
-				this._handlers.touchmove = function() { markInteracting(); };
-				this._handlers.pointerdown = function() {
-					self._pointerInteracting = true;
-					markInteracting();
-				};
+					this._handlers.wheel = function(event) { markInteracting(event); };
+					this._handlers.touchmove = function(event) { markInteracting(event); };
+					this._handlers.pointerdown = function(event) {
+						self._pointerInteracting = true;
+						markInteracting(event);
+					};
 				this._handlers.pointerup = endPointerInteraction;
 				this._handlers.pointercancel = endPointerInteraction;
 				this._handlers.blur = endPointerInteraction;
@@ -2264,17 +2926,20 @@ templ ChatAutoScrollScript() {
 						k === 'ArrowUp' || k === 'ArrowDown' || k === ' ' || k === 'Spacebar') {
 						var t = e.target;
 						if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-						markInteracting();
+						markInteracting(e);
 					}
 				};
 
-				this._handlers.scroll = function() {
-					if (!self.element) return;
-					var isNear = window.chatAutoScroll.isNearBottom(self.element);
-					if (self._userInteracting) {
-						self.userScrolledUp = !isNear;
-					}
-					// Programmatic / clamp scrolls: PRESERVE the flag. Do not clear it
+					this._handlers.scroll = function() {
+						if (!self.element || !self.element.isConnected) return;
+						var isNear = window.chatAutoScroll.isNearBottom(self.element);
+						if (self._userInteracting) {
+							window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
+							self.userScrolledUp = !isNear;
+							self.intentRevision = window._chatScrollIntentRevision;
+							if (typeof self.onIntentChange === 'function') self.onIntentChange();
+						}
+						// Programmatic / clamp scrolls: PRESERVE the flag. Do not clear it
 					// just because the viewport happens to be near the bottom after a
 					// DOM refresh — that would defeat user scroll-up during streaming.
 				};
@@ -2298,12 +2963,12 @@ templ ChatAutoScrollScript() {
 
 			// shouldAutoScroll: only the persisted flag governs auto-scroll. Once the
 			// user scrolls up they stay parked there until they themselves scroll back.
-			shouldAutoScroll: function() {
-				if (!this.element) return true;
-				return !this.userScrolledUp;
-			},
+				shouldAutoScroll: function() {
+					if (!this.element) return true;
+					return !this.userScrolledUp;
+				},
 
-			// Re-bind to a new element (e.g. after morph swap replaced #task-thread-messages
+				// Re-bind to a new element (e.g. after morph swap replaced #task-thread-messages
 			// or #chat-messages). Without this the tracker would hold a detached element
 			// whose scrollHeight is 0 -> isNearBottom is always true -> auto-scroll forever.
 			rebind: function(newElement) {
@@ -2325,11 +2990,13 @@ templ ChatAutoScrollScript() {
 				this.userScrolledUp = prevUserScrolledUp;
 			},
 
-			resetOnUserSend: function() {
-				this.userScrolledUp = false;
-				this._userInteracting = false;
-				this._pointerInteracting = false;
-				if (this._userInteractTimeout) clearTimeout(this._userInteractTimeout);
+				resetOnUserSend: function() {
+					this.userScrolledUp = false;
+					window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
+					this.intentRevision = window._chatScrollIntentRevision;
+					this._userInteracting = false;
+					this._pointerInteracting = false;
+					if (this._userInteractTimeout) clearTimeout(this._userInteractTimeout);
 				if (this.element) {
 					window.chatAutoScroll.scrollToBottom(this.element, false);
 				}
@@ -2337,11 +3004,10 @@ templ ChatAutoScrollScript() {
 
 			snapshot: function() {
 				if (!this.element) return { scrollTop: 0, userScrolledUp: false, pinned: true };
-				var nearBottom = window.chatAutoScroll.isNearBottom(this.element);
 				return {
 					scrollTop: this.element.scrollTop || 0,
-					userScrolledUp: this.userScrolledUp || !nearBottom,
-					pinned: !this.userScrolledUp && nearBottom
+					userScrolledUp: this.userScrolledUp,
+					pinned: !this.userScrolledUp
 				};
 			},
 
@@ -2368,7 +3034,127 @@ templ ChatAutoScrollScript() {
 			}
 		};
 
-		window.initChatEarlierLoader = function(containerOrID) {
+			window._chatTranscriptScrollStates = window._chatTranscriptScrollStates || {};
+
+			window.saveChatTranscriptScrollState = function(stateKey, messages, tracker) {
+				if (!stateKey || !messages) return null;
+				var userScrolledUp = tracker ? !!tracker.userScrolledUp : !window.chatAutoScroll.isNearBottom(messages);
+				var intentRevision = tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0);
+				var previous = window._chatTranscriptScrollStates[stateKey] || null;
+				if (previous && previous.userScrolledUp && !userScrolledUp && intentRevision <= (previous.intentRevision || 0)) {
+					if (tracker) tracker.userScrolledUp = true;
+					if (messages.isConnected) messages.scrollTop = Math.max(0, previous.scrollTop || 0);
+					return previous;
+				}
+				var state = tracker && typeof tracker.snapshot === 'function'
+					? tracker.snapshot()
+					: { scrollTop: messages.scrollTop || 0, userScrolledUp: userScrolledUp, pinned: !userScrolledUp };
+				state.intentRevision = intentRevision;
+				state.bottomDistance = Math.max(0, (messages.scrollHeight || 0) - (messages.scrollTop || 0) - (messages.clientHeight || 0));
+				window._chatTranscriptScrollStates[stateKey] = state;
+				return state;
+			};
+
+			window.getChatTranscriptScrollState = function(stateKey) {
+				return stateKey && window._chatTranscriptScrollStates ? window._chatTranscriptScrollStates[stateKey] || null : null;
+			};
+
+			window.observeChatTranscriptLayout = function(options) {
+				options = options || {};
+				var messages = options.messages;
+				if (!messages) return;
+				if (messages._chatTranscriptResizeObserver) messages._chatTranscriptResizeObserver.disconnect();
+				if (messages._chatTranscriptMutationObserver) messages._chatTranscriptMutationObserver.disconnect();
+				var reconcileFrame = null;
+				function currentTracker() {
+					return typeof options.getTracker === 'function' ? options.getTracker() : options.tracker;
+				}
+				function reconcilePinnedLayout() {
+					if (reconcileFrame !== null) return;
+					reconcileFrame = requestAnimationFrame(function() {
+						reconcileFrame = null;
+						if (!messages.isConnected) return;
+						var tracker = currentTracker();
+						if (!tracker || !tracker.shouldAutoScroll()) return;
+						messages.scrollTop = messages.scrollHeight;
+						if (options.stateKey) window.saveChatTranscriptScrollState(options.stateKey, messages, tracker);
+					});
+				}
+				function observeTranscriptChildren(observer) {
+					messages.querySelectorAll(':scope > [data-execution-pair="true"], :scope > [data-transcript-layout-root="true"]').forEach(function(child) {
+						observer.observe(child);
+					});
+				}
+				if (window.ResizeObserver) {
+					var resizeObserver = new ResizeObserver(reconcilePinnedLayout);
+					resizeObserver.observe(messages);
+					observeTranscriptChildren(resizeObserver);
+					messages._chatTranscriptResizeObserver = resizeObserver;
+				}
+				if (window.MutationObserver) {
+					var mutationObserver = new MutationObserver(function() {
+						if (messages._chatTranscriptResizeObserver) observeTranscriptChildren(messages._chatTranscriptResizeObserver);
+						reconcilePinnedLayout();
+					});
+					mutationObserver.observe(messages, { childList: true, subtree: true });
+					messages._chatTranscriptMutationObserver = mutationObserver;
+				}
+				var tracker = currentTracker();
+				if (tracker) {
+					tracker.onIntentChange = function() {
+						if (options.stateKey) window.saveChatTranscriptScrollState(options.stateKey, messages, tracker);
+					};
+				}
+				if (document.fonts && document.fonts.ready) {
+					document.fonts.ready.then(reconcilePinnedLayout, reconcilePinnedLayout);
+				}
+			};
+
+			window.restoreChatTranscriptScroll = function(options) {
+				options = options || {};
+				var messages = options.messages;
+				if (!messages) return Promise.resolve(false);
+				var tracker = typeof options.getTracker === 'function' ? options.getTracker() : options.tracker;
+				var state = options.state || window.getChatTranscriptScrollState(options.stateKey);
+				var pinned = state ? state.pinned !== false && !state.userScrolledUp : options.defaultPinned !== false;
+				var initialIntentRevision = tracker ? tracker.intentRevision : 0;
+				if (tracker) tracker.userScrolledUp = !pinned;
+				if (messages.getAttribute('data-transcript-hydrating') === 'true') messages.style.visibility = 'hidden';
+
+				function waitForFonts() {
+					if (!document.fonts || !document.fonts.ready) return Promise.resolve();
+					return Promise.race([
+						Promise.resolve(document.fonts.ready).catch(function() {}),
+						new Promise(function(resolve) { setTimeout(resolve, 1000); })
+					]);
+				}
+				function waitForLayout() {
+					return new Promise(function(resolve) {
+						requestAnimationFrame(function() { requestAnimationFrame(resolve); });
+					});
+				}
+				return Promise.resolve(options.renderPromise).catch(function() { return false; }).then(waitForFonts).then(waitForLayout).then(function() {
+					if (!messages.isConnected) return false;
+					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
+					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
+					if (intentChanged) pinned = !tracker.userScrolledUp;
+					if (pinned) messages.scrollTop = messages.scrollHeight;
+					else if (state && !intentChanged) messages.scrollTop = Math.max(0, state.scrollTop || 0);
+					if (tracker && !intentChanged) tracker.userScrolledUp = !pinned;
+					messages.style.visibility = '';
+					messages.removeAttribute('data-transcript-hydrating');
+					window.observeChatTranscriptLayout({
+						messages: messages,
+						tracker: tracker,
+						getTracker: options.getTracker,
+						stateKey: options.stateKey
+					});
+					if (options.stateKey) window.saveChatTranscriptScrollState(options.stateKey, messages, tracker);
+					return true;
+				});
+			};
+
+			window.initChatEarlierLoader = function(containerOrID) {
 			var container = typeof containerOrID === 'string' ? document.getElementById(containerOrID) : containerOrID;
 			if (!container) return;
 			if (container.dataset.earlierLoaderBound === 'true') return;
@@ -2527,8 +3313,10 @@ templ ChatAutoScrollScript() {
 				if (!container) return;
 				setAllEarlierLoadersIdle(container);
 				if (window.htmx) htmx.process(container);
-				if (window.cleanAssistantMessages) window.cleanAssistantMessages(container);
-				if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(container);
+					var hydrationPromise = null;
+					if (window.applyChatBubbleTransforms) hydrationPromise = window.applyChatBubbleTransforms(container);
+					else if (window.cleanAssistantMessages) hydrationPromise = window.cleanAssistantMessages(container);
+					container._chatEarlierHydrationPromise = Promise.resolve(hydrationPromise).catch(function() { return false; });
 				if (window._initThreadStreaming) window._initThreadStreaming();
 			};
 
@@ -2565,8 +3353,11 @@ templ ChatAutoScrollScript() {
 					delete container.dataset.earlierSwapPrepared;
 					return;
 				}
-				container.dataset.earlierAnchorRestoring = 'true';
-				requestAnimationFrame(function() {
+					container.dataset.earlierAnchorRestoring = 'true';
+					var hydrationPromise = container._chatEarlierHydrationPromise || Promise.resolve();
+					Promise.resolve(hydrationPromise).then(function() {
+						delete container._chatEarlierHydrationPromise;
+						requestAnimationFrame(function() {
 					var restored = false;
 					if (prevBottomDistance > 0) {
 						container.scrollTop = Math.max(0, (container.scrollHeight || 0) - prevBottomDistance);
@@ -2594,10 +3385,11 @@ templ ChatAutoScrollScript() {
 						container.dataset.earlierAnchorRestoring = 'false';
 						container.dataset.earlierRequestLoading = 'false';
 					});
-				});
-			};
+						});
+					});
+				};
 
-			window.pruneChatExecutionWindow = function(containerOrID) {
+				window.pruneChatExecutionWindow = function(containerOrID) {
 				var container = typeof containerOrID === 'string' ? document.getElementById(containerOrID) : containerOrID;
 				if (!container) return;
 				var limit = parseInt(container.getAttribute('data-window-limit') || '0', 10) || 0;
@@ -2749,13 +3541,178 @@ templ ChatAutoScrollScript() {
 					});
 				};
 
-			// Persistent store for thinking section open states (survives DOM replacement by morph:outerHTML)
+			// Persistent stores survive streaming rerenders and HTMX morph replacement.
 			if (!window._thinkingOpenStates) window._thinkingOpenStates = {};
+			if (!window._toolOutputRowStates) window._toolOutputRowStates = {};
+			window.invalidateToolOutputLineCapacity = function() {
+				window._toolOutputCapacityCache = null;
+			};
+			if (!window._toolOutputCapacityInvalidationBound) {
+				window._toolOutputCapacityInvalidationBound = true;
+				window.addEventListener('resize', window.invalidateToolOutputLineCapacity, { passive: true });
+				if (window.visualViewport) window.visualViewport.addEventListener('resize', window.invalidateToolOutputLineCapacity, { passive: true });
+				if (window.MutationObserver && document.documentElement) {
+					var toolOutputThemeObserver = new MutationObserver(window.invalidateToolOutputLineCapacity);
+					toolOutputThemeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+					if (document.body) toolOutputThemeObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
+				}
+				if (document.fonts) {
+					if (document.fonts.addEventListener) {
+						document.fonts.addEventListener('loadingdone', window.invalidateToolOutputLineCapacity);
+						document.fonts.addEventListener('loadingerror', window.invalidateToolOutputLineCapacity);
+					}
+					document.fonts.ready.then(window.invalidateToolOutputLineCapacity);
+				}
+			}
+			function toolOutputCapacitySignature() {
+				var root = document.documentElement;
+				var body = document.body;
+				return [
+					window.innerWidth || 0,
+					window.innerHeight || 0,
+					window.devicePixelRatio || 1,
+					root ? root.getAttribute('data-theme') || '' : '',
+					root ? root.className || '' : '',
+					root ? root.getAttribute('style') || '' : '',
+					body ? body.className || '' : '',
+					body ? body.getAttribute('style') || '' : '',
+					document.fonts ? document.fonts.status : ''
+				].join('|');
+			}
+			function toolOutputLineCount(text) {
+				var matches = text.match(/\r\n|\r|\n/g);
+				return (matches ? matches.length : 0) + 1;
+			}
+			function toolOutputPreview(text) {
+				var maxLines = 6;
+				var maxChars = 4096;
+				var offset = 0;
+				var lines = 1;
+				while (offset < text.length && offset < maxChars) {
+					var code = text.charCodeAt(offset);
+					if (code === 13 || code === 10) {
+						if (lines >= maxLines) break;
+						lines++;
+						if (code === 13 && text.charCodeAt(offset + 1) === 10) offset++;
+					}
+					offset++;
+				}
+				if (offset > 0 && offset < text.length && text.charCodeAt(offset - 1) >= 0xD800 && text.charCodeAt(offset - 1) <= 0xDBFF && text.charCodeAt(offset) >= 0xDC00 && text.charCodeAt(offset) <= 0xDFFF) offset--;
+				return text.substring(0, offset) + (offset < text.length ? '\n…' : '');
+			}
+			function resolveToolOutputLineCapacity() {
+				var signature = toolOutputCapacitySignature();
+				var cached = window._toolOutputCapacityCache;
+				if (cached && cached.signature === signature) return cached.capacity;
 
-		// Generate a stable key for a container to persist thinking states across morph swaps.
-		// Uses container ID (streaming-message-{execID}) or data-raw-content fingerprint.
+				// Measure in the exact production OUT-row hierarchy so inherited font,
+				// line-height, theme, viewport max-height, and padding all participate.
+				var probe = document.createElement('div');
+				probe.className = 'stream-tool';
+				probe.style.cssText = 'position:fixed;left:-100000px;top:0;width:min(40rem,90vw);visibility:hidden;pointer-events:none;contain:layout style paint;';
+				var probeBody = document.createElement('div');
+				probeBody.className = 'stream-tool-body';
+				var probeGrid = document.createElement('div');
+				probeGrid.className = 'stream-tool-body-grid';
+				var probeRow = document.createElement('div');
+				probeRow.className = 'stream-tool-body-row';
+				var probeLabel = document.createElement('div');
+				probeLabel.className = 'stream-tool-body-label';
+				probeLabel.textContent = 'OUT';
+				var probeContent = document.createElement('div');
+				probeContent.className = 'stream-tool-body-content';
+				var probeScroll = document.createElement('div');
+				probeScroll.className = 'stream-tool-body-scroll';
+				var probePre = document.createElement('pre');
+				probePre.textContent = 'M\nM';
+				probeScroll.appendChild(probePre);
+				probeContent.appendChild(probeScroll);
+				probeRow.appendChild(probeLabel);
+				probeRow.appendChild(probeContent);
+				probeGrid.appendChild(probeRow);
+				probeBody.appendChild(probeGrid);
+				probe.appendChild(probeBody);
+				document.body.appendChild(probe);
+
+				var preStyle = window.getComputedStyle(probePre);
+				var lineHeight = parseFloat(preStyle.lineHeight);
+				if (!lineHeight || !isFinite(lineHeight)) lineHeight = probePre.getBoundingClientRect().height / 2;
+				if (!lineHeight || !isFinite(lineHeight)) lineHeight = 16;
+				var fontSignature = [preStyle.fontFamily, preStyle.fontSize, preStyle.fontWeight, preStyle.lineHeight, preStyle.letterSpacing].join('|');
+				probePre.textContent = '';
+				probePre.style.height = '100000px';
+				var resolvedMaxHeight = probeScroll.clientHeight;
+				if (!resolvedMaxHeight || !isFinite(resolvedMaxHeight)) resolvedMaxHeight = lineHeight;
+				probe.remove();
+
+				var capacity = Math.max(1, Math.floor(resolvedMaxHeight / lineHeight));
+				window._toolOutputCapacityCache = { signature: signature, fontSignature: fontSignature, capacity: capacity };
+				return capacity;
+			}
+			if (typeof window._chatRawRevisionCounter !== 'number') window._chatRawRevisionCounter = 0;
+			window.setChatRawContent = function(container, raw) {
+				raw = raw || '';
+				var currentRaw = container.getAttribute('data-raw-content');
+				var currentRevision = container.getAttribute('data-raw-revision');
+				if (currentRevision && currentRaw === raw) return currentRevision;
+				var revision = 'runtime-' + (++window._chatRawRevisionCounter);
+				container.setAttribute('data-raw-content', raw);
+				container.setAttribute('data-raw-revision', revision);
+				return revision;
+			};
+			window.chatTranscriptSnapshotMatches = function(currentRoot, nextRoot, messagesID, expectedExecID) {
+				if (!currentRoot || !nextRoot) return false;
+				var currentMessages = currentRoot.querySelector('#' + messagesID);
+				var nextMessages = nextRoot.querySelector('#' + messagesID);
+				if (!currentMessages || !nextMessages) return false;
+				var selector = ':scope > [data-execution-pair="true"][data-exec-id]';
+				var currentPairs = currentMessages.querySelectorAll(selector);
+				var nextPairs = nextMessages.querySelectorAll(selector);
+				if (currentPairs.length !== nextPairs.length) return false;
+				for (var i = 0; i < currentPairs.length; i++) {
+					var currentPair = currentPairs[i];
+					var nextPair = nextPairs[i];
+					var execID = currentPair.getAttribute('data-exec-id') || '';
+					if (!execID || execID !== (nextPair.getAttribute('data-exec-id') || '')) return false;
+					var currentRevision = currentPair.getAttribute('data-execution-revision') || '';
+					var nextRevision = nextPair.getAttribute('data-execution-revision') || '';
+					if (currentRevision && nextRevision && currentRevision === nextRevision) continue;
+					if (!expectedExecID || execID !== expectedExecID) return false;
+					if ((currentPair.getAttribute('data-exec-status') || '') !== (nextPair.getAttribute('data-exec-status') || '')) return false;
+					var currentOutput = currentPair.querySelector('[data-raw-content]');
+					var nextOutput = nextPair.querySelector('[data-raw-content]');
+					if ((currentOutput ? currentOutput.getAttribute('data-raw-content') || '' : '') !== (nextOutput ? nextOutput.getAttribute('data-raw-content') || '' : '')) return false;
+				}
+				return true;
+			};
+			window.applyChatTranscriptSnapshotRevision = function(currentRoot, nextRoot, messagesID, rootRevisionAttribute) {
+				var currentMessages = currentRoot.querySelector('#' + messagesID);
+				var nextMessages = nextRoot.querySelector('#' + messagesID);
+				var selector = ':scope > [data-execution-pair="true"][data-exec-id]';
+				var currentPairs = currentMessages.querySelectorAll(selector);
+				var nextPairs = nextMessages.querySelectorAll(selector);
+				for (var i = 0; i < currentPairs.length; i++) {
+					currentPairs[i].setAttribute('data-exec-status', nextPairs[i].getAttribute('data-exec-status') || '');
+					currentPairs[i].setAttribute('data-execution-revision', nextPairs[i].getAttribute('data-execution-revision') || '');
+				}
+				currentRoot.setAttribute(rootRevisionAttribute, nextRoot.getAttribute(rootRevisionAttribute) || '');
+			};
+			window.applyChatExecutionTerminalStatus = function(pair, authoritativeStatus) {
+				if (!pair) return '';
+				var terminalStatuses = { completed: true, failed: true, cancelled: true };
+				var currentStatus = pair.getAttribute('data-exec-status') || '';
+				var terminalStatus = terminalStatuses[authoritativeStatus] ? authoritativeStatus : (terminalStatuses[currentStatus] ? currentStatus : 'completed');
+				pair.setAttribute('data-exec-status', terminalStatus);
+				pair.setAttribute('hx-preserve', 'true');
+				return terminalStatus;
+			};
+		// Generate a stable key for a container to persist thinking and tool-row
+		// states across rerenders and morph replacement. Prefer execution identity.
 		function _thinkingStateKey(container) {
 			if (container.id) return container.id;
+			var executionPair = container.closest && container.closest('[data-execution-pair="true"][data-exec-id]');
+			var executionID = executionPair && executionPair.getAttribute('data-exec-id');
+			if (executionID) return 'exec:' + executionID;
 			var raw = container.getAttribute('data-raw-content');
 			if (raw) return 'raw:' + raw.substring(0, 200);
 			// Fallback: use position among chat-stream-content siblings
@@ -2773,8 +3730,236 @@ templ ChatAutoScrollScript() {
 		// into styled DOM elements matching Claude Code VSCode extension style.
 		// Tools: flat row with bold name + checkmark (completed) or spinner (active).
 		// Thinking: collapsible <details> with italic label and markdown content.
-			window.renderStreamingContent = function(container, textBuffer) {
-				if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer || '');
+			if (!window._chatContentRenderQueue) window._chatContentRenderQueue = [];
+			if (typeof window._chatContentRenderActive !== 'number') window._chatContentRenderActive = 0;
+			window.scheduleChatContentRender = function(container, textBuffer, yieldBetweenBatches) {
+				if (!container) return Promise.resolve(false);
+				var activeRequest = window._activeChatContentRender;
+				if (activeRequest && !activeRequest.container.isConnected && activeRequest.finish) activeRequest.finish(false, false, true);
+				var request = { container: container, text: textBuffer || '', yield: yieldBetweenBatches, resolve: null, finished: false, timeout: null, enqueuedAt: Date.now() };
+				container._scheduledChatRender = request;
+				var promise = new Promise(function(resolve) { request.resolve = resolve; });
+					window._chatContentRenderQueue.push(request);
+					function drain() {
+						if (window._chatContentRenderActive >= 1) return;
+						while (window._chatContentRenderQueue.length > 0) {
+							var queuedRequest = window._chatContentRenderQueue[0];
+							if (queuedRequest.container._scheduledChatRender === queuedRequest && queuedRequest.container.isConnected) break;
+							window._chatContentRenderQueue.shift();
+							queuedRequest.finished = true;
+							queuedRequest.resolve(false);
+						}
+						if (window._chatContentRenderQueue.length === 0) return;
+						var now = Date.now();
+					var oldestRequest = window._chatContentRenderQueue[0];
+					var maxDeferralRemaining = oldestRequest ? (window._chatRenderMaxLiveDeferralMS || 1000) - (now - oldestRequest.enqueuedAt) : 0;
+					if ((window._liveChatRenderActive || 0) > 0) {
+						if (maxDeferralRemaining > 0) {
+							clearTimeout(window._chatRenderResumeTimer);
+							window._chatRenderResumeTimer = setTimeout(drain, maxDeferralRemaining);
+							return;
+						}
+						if (window.cancelLiveChatRenders) window.cancelLiveChatRenders();
+					}
+					var quietRemaining = (window._chatLiveRenderQuietUntil || 0) - now;
+					if (quietRemaining > 0 && maxDeferralRemaining > 0) {
+						clearTimeout(window._chatRenderResumeTimer);
+						window._chatRenderResumeTimer = setTimeout(drain, Math.min(quietRemaining, maxDeferralRemaining));
+						return;
+					}
+					var next = window._chatContentRenderQueue.shift();
+					while (next && (next.container._scheduledChatRender !== next || !next.container.isConnected)) {
+						next.finished = true;
+						next.resolve(false);
+						next = window._chatContentRenderQueue.shift();
+					}
+					if (!next) return;
+					window._chatContentRenderActive++;
+					next.container._scheduledChatRender = null;
+					next.container._activeScheduledChatRender = next;
+					window._activeChatContentRender = next;
+					function finish(result, showFallback, cancelRender) {
+						if (next.finished) return;
+						next.finished = true;
+						if (next.timeout) clearTimeout(next.timeout);
+						if (next.container._activeScheduledChatRender === next) {
+							if (cancelRender) {
+								next.container._streamRenderVersion = (next.container._streamRenderVersion || 0) + 1;
+								if (next.container._codeRangeWorkerState && next.container._codeRangeWorkerState.finish) next.container._codeRangeWorkerState.finish(null);
+								if (next.container._markdownWorkerState) {
+									var markdownState = next.container._markdownWorkerState;
+									markdownState.cancelled = true;
+									if (markdownState.fallbackTimer) clearTimeout(markdownState.fallbackTimer);
+									markdownState.worker.terminate();
+									markdownState.resolve(null);
+									next.container._markdownWorkerState = null;
+								}
+							}
+							if (showFallback && next.container.isConnected) {
+								try {
+									var fallback = window.renderChatMarkdownLargeFallback ? window.renderChatMarkdownLargeFallback(next.text) : null;
+									next.container.replaceChildren(fallback || document.createTextNode(next.text));
+								} catch (ignored) {
+									try { next.container.textContent = next.text; } catch (ignoredAgain) {}
+								}
+							}
+							next.container._activeScheduledChatRender = null;
+						}
+						if (window._activeChatContentRender === next) window._activeChatContentRender = null;
+						next.resolve(result);
+						window._chatContentRenderActive--;
+						setTimeout(drain, 0);
+					}
+					next.finish = finish;
+					var renderPromise;
+					try {
+						renderPromise = window.renderStreamingContent(next.container, next.text, next.yield);
+					} catch (err) {
+						finish(false, true, true);
+						return;
+					}
+					Promise.resolve(renderPromise).then(function(result) {
+						finish(result !== false, false, false);
+					}, function() {
+						finish(false, true, true);
+					});
+					next.timeout = setTimeout(function() { finish(false, true, true); }, window._chatContentRenderTimeoutMS || 30000);
+				}
+				window._drainChatContentRenderQueue = drain;
+				setTimeout(drain, 0);
+				return promise;
+			};
+			window.cancelChatContentRenders = function() {
+				var activeRequest = window._activeChatContentRender;
+				if (activeRequest && activeRequest.finish) activeRequest.finish(false, false, true);
+				var queued = window._chatContentRenderQueue.splice(0);
+				queued.forEach(function(request) {
+					if (request.finished) return;
+					request.finished = true;
+					if (request.container._scheduledChatRender === request) request.container._scheduledChatRender = null;
+					request.resolve(false);
+				});
+				if (window.cancelLiveChatRenders) window.cancelLiveChatRenders();
+			};
+			function cancelOwnedLiveRenderWork(liveRequest) {
+				var container = liveRequest && liveRequest.container;
+				if (!container || container._activeLiveChatRender !== liveRequest) return;
+				container._activeLiveChatRender = null;
+				container._streamRenderVersion = (container._streamRenderVersion || 0) + 1;
+				if (container._codeRangeWorkerState && container._codeRangeWorkerState.finish) container._codeRangeWorkerState.finish(null);
+				if (container._markdownWorkerState) {
+					var markdownState = container._markdownWorkerState;
+					markdownState.cancelled = true;
+					markdownState.finished = true;
+					if (markdownState.fallbackTimer) clearTimeout(markdownState.fallbackTimer);
+					markdownState.worker.terminate();
+					markdownState.resolve(null);
+					container._markdownWorkerState = null;
+				}
+			}
+			window.cancelLiveChatRenders = function() {
+				if (window._liveChatRenderRequests) {
+					window._liveChatRenderRequests.forEach(function(liveRequest) {
+						liveRequest.cancel();
+					});
+				}
+			};
+			window.renderLiveChatContent = function(container, textBuffer, yieldBetweenBatches) {
+				var renderRevision = window.setChatRawContent ? window.setChatRawContent(container, textBuffer || '') : (textBuffer || '');
+				window._liveChatRenderActive = (window._liveChatRenderActive || 0) + 1;
+				if (!window._liveChatRenderRequests) window._liveChatRenderRequests = new Set();
+				var liveRequest = { container: container, finished: false, cancel: null, timeout: null };
+				var outerResolve;
+				var outerReject;
+				var outerPromise = new Promise(function(resolve, reject) { outerResolve = resolve; outerReject = reject; });
+				liveRequest.promise = outerPromise;
+				var activeRequest = window._activeChatContentRender;
+				if (activeRequest && activeRequest.finish) {
+					var interruptedRequest = activeRequest;
+					activeRequest.finish(false, false, true);
+					setTimeout(function() {
+						if (!interruptedRequest.container.isConnected) return;
+						var newerRequest = interruptedRequest.container._scheduledChatRender;
+						if (newerRequest && newerRequest !== interruptedRequest) return;
+						var hasRaw = interruptedRequest.container.hasAttribute && interruptedRequest.container.hasAttribute('data-raw-content');
+						var raw = hasRaw ? interruptedRequest.container.getAttribute('data-raw-content') : null;
+						if (hasRaw && raw !== interruptedRequest.text) return;
+						if (hasRaw && window.scheduleChatElementRender) {
+							window.scheduleChatElementRender(interruptedRequest.container, interruptedRequest.text, interruptedRequest.yield);
+						} else if (window.scheduleChatContentRender) {
+							window.scheduleChatContentRender(interruptedRequest.container, interruptedRequest.text, interruptedRequest.yield);
+						}
+					}, 0);
+				}
+				function finishLiveRender(result, err) {
+					if (liveRequest.finished) return;
+					liveRequest.finished = true;
+					if (liveRequest.timeout) clearTimeout(liveRequest.timeout);
+					if (!err && result !== false) {
+						container._renderedRevision = renderRevision;
+						if (container.getAttribute('data-raw-revision')) container.setAttribute('data-rendered-revision', renderRevision);
+					}
+					if (container._activeLiveChatRender === liveRequest) container._activeLiveChatRender = null;
+					window._liveChatRenderActive = Math.max(0, (window._liveChatRenderActive || 1) - 1);
+					window._liveChatRenderRequests.delete(liveRequest);
+					var quietMS = window._chatLiveRenderQuietMS || 300;
+					window._chatLiveRenderQuietUntil = Date.now() + quietMS;
+					clearTimeout(window._chatRenderResumeTimer);
+					window._chatRenderResumeTimer = setTimeout(function() {
+						if (window._drainChatContentRenderQueue) window._drainChatContentRenderQueue();
+					}, quietMS);
+					if (err) outerReject(err);
+					else outerResolve(result);
+				}
+				liveRequest.cancel = function() {
+					cancelOwnedLiveRenderWork(liveRequest);
+					finishLiveRender(false, null);
+				};
+				var previousLiveRequest = container._activeLiveChatRender;
+				if (previousLiveRequest && previousLiveRequest.cancel) previousLiveRequest.cancel();
+				container._activeLiveChatRender = liveRequest;
+				window._liveChatRenderRequests.add(liveRequest);
+				var renderPromise;
+				try {
+					renderPromise = window.renderStreamingContent(container, textBuffer, yieldBetweenBatches);
+				} catch (err) {
+					finishLiveRender(false, err);
+					return outerPromise;
+				}
+				Promise.resolve(renderPromise).then(function(result) {
+					finishLiveRender(result, null);
+				}, function(err) {
+					finishLiveRender(false, err);
+				});
+				liveRequest.timeout = setTimeout(liveRequest.cancel, window._chatLiveRenderTimeoutMS || 30000);
+				return outerPromise;
+			};
+			window.scheduleChatElementRender = function(container, raw, yieldBetweenBatches) {
+				if (!container || !raw) return Promise.resolve(false);
+				var renderRevision = container.getAttribute('data-raw-revision') || raw || '';
+				if (container._renderingRevision === renderRevision && container._chatElementRenderPromise) return container._chatElementRenderPromise;
+				container._renderingRevision = renderRevision;
+				var promise = window.scheduleChatContentRender(container, raw, yieldBetweenBatches).then(function(rendered) {
+					if (container._renderingRevision !== renderRevision) return rendered;
+					delete container._renderingRevision;
+					if (rendered && (container.getAttribute('data-raw-revision') || raw || '') === renderRevision) {
+						container._renderedRevision = renderRevision;
+						if (container.getAttribute('data-raw-revision')) container.setAttribute('data-rendered-revision', renderRevision);
+					} else if (container._renderedRevision === renderRevision || container.getAttribute('data-rendered-revision') === renderRevision) {
+						delete container._renderedRevision;
+						container.removeAttribute('data-rendered-revision');
+					}
+					return rendered;
+				});
+				container._chatElementRenderPromise = promise;
+				return promise;
+			};
+
+			window.renderStreamingContent = function(container, textBuffer, yieldBetweenBatches) {
+				var renderVersion = (container._streamRenderVersion || 0) + 1;
+				container._streamRenderVersion = renderVersion;
+				textBuffer = textBuffer || '';
+				var shouldYieldPreparation = yieldBetweenBatches !== false && textBuffer.length >= 64 * 1024;
 				// Display name mapping: raw tool names → friendly names (matching Claude Code VSCode)
 			var displayNames = {
 				'read_file': 'Read', 'write_file': 'Write', 'edit_file': 'Edit',
@@ -2810,62 +3995,272 @@ templ ChatAutoScrollScript() {
 				return displayNames[normalized] || displayNames[raw] || raw;
 			}
 
-			var thinkingPattern = /\[Thinking\]([\s\S]*?)(?:\[\/Thinking\]|$)/g;
-			var toolUsingPattern = /\[Using tool:\s*([^\]]+)\]/g;
-			var toolResultBlockPattern = /\[Tool\s+(\S+)\s+(done|error)\]\n([\s\S]*?)\n\[\/Tool\]\n?/g;
-			var toolResultLegacyPattern = /\[Tool\s+(\S+)\s+(done|error):\s*([^\n]*)\]\n?/g;
+			var thinkingPattern = /^[\t ]*\[Thinking\][\t ]*(?:\r\n|\r|\n)?([\s\S]*?)(?:\[\/Thinking\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?|(?![\s\S]))/gm;
+			var toolUsingPattern = /^[\t ]*\[Using tool:\s*([^\]\r\n]+)\][\t ]*(?=\r?$)/gm;
+				var toolResultBlockPattern = /^[\t ]*\[Tool\s+(\S+)\s+(done|error)\][\t ]*(?:\r\n|\r|\n)?([\s\S]*?)\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
+				var toolResultLegacyPattern = /^[\t ]*\[Tool\s+(\S+)\s+(done|error):\s*([^\]\r\n]*)\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
 
-			// Pre-strip protocol artifact lines (e.g. multi_tool_use.parallel fragments)
-			// before segment parsing so they don't appear as leaked text between tool cards
-			textBuffer = textBuffer.replace(/^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$/gm, '');
-
-			var allMatches = [];
-			var match;
-
-			while ((match = thinkingPattern.exec(textBuffer)) !== null) {
-					allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
-				}
-			while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
+					var allMatches = [];
+					var match;
+					var rawCodeRanges = [];
+					var codeRanges = [];
+					var transcriptToolRanges = [];
+					var segments = [];
+					var preparationFailed = false;
+					function toolBlockRanges(text) {
+						var ranges = [];
+						var pattern = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?[\s\S]*?\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
+						var block;
+						while ((block = pattern.exec(text)) !== null) ranges.push({ start: block.index, end: block.index + block[0].length });
+						return ranges;
+					}
+					function protectInitialToolBlocks() {
+						rawCodeRanges = rawCodeRanges.concat(toolBlockRanges(textBuffer));
+						rawCodeRanges.sort(function(a, b) { return a.start - b.start; });
+						var mergedRanges = [];
+						rawCodeRanges.forEach(function(range) {
+							var previous = mergedRanges[mergedRanges.length - 1];
+							if (!previous || range.start > previous.end) {
+								mergedRanges.push({ start: range.start, end: range.end });
+								return;
+							}
+							previous.end = Math.max(previous.end, range.end);
+						});
+						rawCodeRanges = mergedRanges;
+						return true;
+					}
+					function normalizePreparedText() {
+						if (window.normalizeTranscriptMarkers) textBuffer = window.normalizeTranscriptMarkers(textBuffer, rawCodeRanges);
+						return true;
+					}
+					function stripPreparedStatus() {
+						if (window.stripFinalStatusControl) textBuffer = window.stripFinalStatusControl(textBuffer, rawCodeRanges);
+						return true;
+					}
+					function stripPreparedArtifacts() {
+						textBuffer = textBuffer.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
+						return true;
+					}
+					function prepareToolBlockRanges() {
+						transcriptToolRanges = toolBlockRanges(textBuffer);
+						return true;
+					}
+					function excludeToolBlockCodeRanges(ranges) {
+						if (!ranges.length || !transcriptToolRanges.length) return ranges;
+						var filtered = [];
+						var toolIndex = 0;
+						function isFencedCodeRange(range) {
+							if (range.start > 0 && textBuffer.charAt(range.start - 1) !== '\n' && textBuffer.charAt(range.start - 1) !== '\r') return false;
+							var offset = range.start;
+							var spaces = 0;
+							while (spaces < 3 && textBuffer.charAt(offset + spaces) === ' ') spaces++;
+							var marker = textBuffer.charAt(offset + spaces);
+							if (marker !== '`' && marker !== '~') return false;
+							var runEnd = offset + spaces;
+							while (textBuffer.charAt(runEnd) === marker) runEnd++;
+							if (runEnd - offset - spaces < 3) return false;
+							var lineEnd = textBuffer.length;
+							var lfEnd = textBuffer.indexOf('\n', runEnd);
+							var crEnd = textBuffer.indexOf('\r', runEnd);
+							if (lfEnd !== -1) lineEnd = lfEnd;
+							if (crEnd !== -1) lineEnd = Math.min(lineEnd, crEnd);
+							return marker !== '`' || textBuffer.substring(runEnd, lineEnd).indexOf('`') === -1;
+						}
+						ranges.forEach(function(range) {
+							while (toolIndex < transcriptToolRanges.length && transcriptToolRanges[toolIndex].end <= range.start) toolIndex++;
+							var overlapsTool = false;
+							var crossesToolBoundary = false;
+							for (var index = toolIndex; index < transcriptToolRanges.length && transcriptToolRanges[index].start < range.end; index++) {
+								var toolRange = transcriptToolRanges[index];
+								overlapsTool = true;
+								var startsInsideTool = range.start >= toolRange.start && range.start < toolRange.end;
+								var endsInsideTool = range.end > toolRange.start && range.end <= toolRange.end;
+								if (startsInsideTool || endsInsideTool) { crossesToolBoundary = true; break; }
+							}
+							if (crossesToolBoundary || (overlapsTool && !isFencedCodeRange(range))) return;
+							filtered.push(range);
+						});
+						return filtered;
+					}
+					function prepareInitialCodeRanges() {
+						if (shouldYieldPreparation && window.codeRangesAsync) {
+							return window.codeRangesAsync(textBuffer, container).then(function(result) {
+								if (result !== null) rawCodeRanges = result;
+								else preparationFailed = true;
+								return true;
+							});
+						}
+						rawCodeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
+						return true;
+					}
+					function prepareCodeRanges() {
+						if (shouldYieldPreparation && window.codeRangesAsync) {
+							return window.codeRangesAsync(textBuffer, container).then(function(result) {
+								if (result !== null) codeRanges = excludeToolBlockCodeRanges(result);
+								else preparationFailed = true;
+								return true;
+							});
+						}
+						codeRanges = excludeToolBlockCodeRanges(window.codeRanges ? window.codeRanges(textBuffer) : []);
+						return true;
+					}
+					function preparationBudgetExpired(startedAt, processed) {
+						return processed >= 64 || ((window.performance && performance.now ? performance.now() : Date.now()) - startedAt) >= 8;
+					}
+					function collectThinkingMatches() {
+						var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+						var processed = 0;
+						while ((match = thinkingPattern.exec(textBuffer)) !== null) {
+							processed++;
+							if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
+								thinkingPattern.lastIndex = match.index + 1;
+								if (preparationBudgetExpired(startedAt, processed)) return false;
+								continue;
+							}
+							allMatches.push({ index: match.index, length: match[0].length, type: 'thinking', content: match[1] });
+							if (preparationBudgetExpired(startedAt, processed)) return false;
+						}
+						return true;
+					}
+					function collectToolUsingMatches() {
+						var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+						var processed = 0;
+						while ((match = toolUsingPattern.exec(textBuffer)) !== null) {
+							processed++;
+							if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
+								toolUsingPattern.lastIndex = match.index + 1;
+								if (preparationBudgetExpired(startedAt, processed)) return false;
+							continue;
+					}
 					var raw = match[1].trim();
 					var pipeIdx = raw.indexOf(' | ');
 					var toolName = pipeIdx >= 0 ? raw.substring(0, pipeIdx) : raw;
-					var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
-					allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
-				}
-			while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
-					allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
-				}
-			while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
+							var toolSecondary = pipeIdx >= 0 ? raw.substring(pipeIdx + 3) : '';
+							allMatches.push({ index: match.index, length: match[0].length, type: 'using', name: toolName, normalizedName: normalizeToolName(toolName), secondary: toolSecondary });
+							if (preparationBudgetExpired(startedAt, processed)) return false;
+						}
+						return true;
+					}
+					function collectToolResultBlockMatches() {
+						var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+						var processed = 0;
+						while ((match = toolResultBlockPattern.exec(textBuffer)) !== null) {
+							processed++;
+							if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
+								toolResultBlockPattern.lastIndex = match.index + 1;
+								if (preparationBudgetExpired(startedAt, processed)) return false;
+							continue;
+							}
+							allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+							if (preparationBudgetExpired(startedAt, processed)) return false;
+						}
+						return true;
+					}
+					function collectLegacyToolResultMatches() {
+						var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+						var processed = 0;
+						while ((match = toolResultLegacyPattern.exec(textBuffer)) !== null) {
+							processed++;
+							if (window.isInsideCodeRanges && window.isInsideCodeRanges(codeRanges, match.index, match.index + match[0].length)) {
+								toolResultLegacyPattern.lastIndex = match.index + 1;
+								if (preparationBudgetExpired(startedAt, processed)) return false;
+							continue;
+					}
 					var dominated = allMatches.some(function(m) { return m.index <= match.index && m.index + m.length >= match.index + match[0].length; });
 					if (!dominated) {
-						allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+								allMatches.push({ index: match.index, length: match[0].length, type: 'tool_result', name: match[1], normalizedName: normalizeToolName(match[1]), status: match[2], output: match[3] });
+							}
+							if (preparationBudgetExpired(startedAt, processed)) return false;
+						}
+						return true;
 					}
-				}
-
-			allMatches.sort(function(a, b) { return a.index - b.index; });
-
-			var segments = [];
-			var lastIndex = 0;
-			allMatches.forEach(function(m) {
-					if (m.index < lastIndex) return;
-					if (m.index > lastIndex) {
-						segments.push({ type: 'text', content: textBuffer.substring(lastIndex, m.index) });
+					function buildSegments() {
+						allMatches.sort(function(a, b) { return a.index - b.index; });
+					var lastIndex = 0;
+					allMatches.forEach(function(m) {
+						if (m.index < lastIndex) return;
+						if (m.index > lastIndex) {
+								segments.push({ type: 'text', content: textBuffer.substring(lastIndex, m.index), index: lastIndex });
+						}
+						segments.push(m);
+						lastIndex = m.index + m.length;
+					});
+					if (lastIndex < textBuffer.length) {
+							segments.push({ type: 'text', content: textBuffer.substring(lastIndex), index: lastIndex });
+						}
+						return true;
 					}
-					segments.push(m);
-					lastIndex = m.index + m.length;
-				});
-			if (lastIndex < textBuffer.length) {
-					segments.push({ type: 'text', content: textBuffer.substring(lastIndex) });
-				}
-
-			// Assign stable per-render IDs and link each tool_result to the oldest
-			// unmatched preceding [Using tool:] of the same normalized name. Multiple
-			// adjacent Bash/tool calls of the same type must not pair by latest name
-			// match, or replay/live renders can swap their OUT blocks.
-			var toolUseQueues = {};
-			var toolRenderOrdinal = 0;
-			for (var si = 0; si < segments.length; si++) {
-					if (segments[si].type === 'using') {
+					var markdownPreparationIndex = 0;
+					function cleanPreparedText(text) {
+						if (!text) return text;
+						// Tool/thinking/status controls were already normalized, scoped, and
+						// extracted above. Do not run the general cleaner's code-range scans
+						// again for every visible Markdown segment.
+						text = text.replace(/<\/?\s*proposed_plan\s*>/gi, '');
+						text = text.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
+						if (window.dedupTaskSummaries && (text.indexOf('Created ') !== -1 || text.indexOf('Edited ') !== -1)) text = window.dedupTaskSummaries(text);
+						return text.replace(/\n{3,}/g, '\n\n').trim();
+					}
+					function prepareLargeMarkdownSegments() {
+						if (!shouldYieldPreparation) return true;
+						while (markdownPreparationIndex < segments.length) {
+							var segment = segments[markdownPreparationIndex];
+							var source = '';
+							var targetProperty = '';
+							if (segment.type === 'text') {
+								markdownPreparationIndex++;
+								if (segment.content.length < 64 * 1024) continue;
+								source = cleanPreparedText(segment.content);
+								targetProperty = 'renderedContent';
+							} else if (segment.type === 'thinking') {
+								var thinkingParts = [];
+								var thinkingTarget = null;
+								var groupEnd = markdownPreparationIndex;
+								while (groupEnd < segments.length) {
+									var groupSegment = segments[groupEnd];
+									if (groupSegment.type === 'thinking') {
+										var thinkingText = groupSegment.content.trim();
+										if (thinkingText) {
+											if (!thinkingTarget) thinkingTarget = groupSegment;
+											thinkingParts.push(thinkingText);
+										}
+										groupEnd++;
+										continue;
+									}
+									if (groupSegment.type !== 'text' || groupSegment.content.trim().length >= 100) break;
+									var nextThinking = false;
+									for (var groupLookahead = groupEnd + 1; groupLookahead < segments.length; groupLookahead++) {
+										if (segments[groupLookahead].type === 'thinking') { nextThinking = true; break; }
+										if (segments[groupLookahead].type !== 'text') break;
+									}
+									if (!nextThinking) break;
+									var interstitial = groupSegment.content.trim();
+									if (interstitial) thinkingParts.push(interstitial);
+									groupEnd++;
+								}
+								markdownPreparationIndex = Math.max(groupEnd, markdownPreparationIndex + 1);
+								if (thinkingTarget) segment = thinkingTarget;
+								source = thinkingParts.join('\n\n');
+								targetProperty = 'thinkingRenderedContent';
+							} else {
+								markdownPreparationIndex++;
+								continue;
+							}
+							if (source.length < 64 * 1024 || !window.renderChatMarkdownAsync) continue;
+							if (!source) { segment[targetProperty] = ''; continue; }
+							return window.renderChatMarkdownAsync(source, container).then(function(content) {
+								if (content !== null) segment[targetProperty] = content;
+								return markdownPreparationIndex >= segments.length ? true : false;
+							});
+						}
+						return true;
+					}
+					function linkToolResults() {
+					// Assign stable IDs and link each result to the oldest unmatched use.
+					var toolUseQueues = {};
+					var toolRenderOrdinal = 0;
+					for (var si = 0; si < segments.length; si++) {
+						if (segments[si].type === 'using') {
 						var usingName = segments[si].normalizedName || segments[si].name;
 						segments[si].toolRenderID = 'tool-' + segments[si].index + '-' + toolRenderOrdinal++;
 						if (!toolUseQueues[usingName]) toolUseQueues[usingName] = [];
@@ -2881,20 +4276,40 @@ templ ChatAutoScrollScript() {
 							queue[sk].resultStatus = segments[si].status;
 							queue[sk].resultOutput = segments[si].output || '';
 							break;
+							}
 						}
 					}
-				}
-			// Mark tools as completed if anything follows them
-			for (var si = 0; si < segments.length; si++) {
-					if (segments[si].type !== 'using') continue;
+					// Mark tools as completed if anything follows them.
+					for (var si = 0; si < segments.length; si++) {
+						if (segments[si].type !== 'using') continue;
 					if (segments[si].resultLinked) { segments[si].completed = true; continue; }
 					for (var sj = si + 1; sj < segments.length; sj++) {
 						if (segments[sj].type !== 'text' || segments[sj].content.trim()) {
 							segments[si].completed = true;
 							break;
+							}
 						}
+						}
+						return true;
 					}
-				}
+				var preparationPhases = [
+						prepareInitialCodeRanges,
+						protectInitialToolBlocks,
+						stripPreparedStatus,
+						normalizePreparedText,
+						stripPreparedArtifacts,
+						prepareToolBlockRanges,
+						prepareCodeRanges,
+					collectThinkingMatches,
+					collectToolUsingMatches,
+					collectToolResultBlockMatches,
+						collectLegacyToolResultMatches,
+						buildSegments,
+						linkToolResults,
+						prepareLargeMarkdownSegments
+				];
+
+				function renderPreparedSegments() {
 
 			// Save open state of existing thinking sections before clearing.
 			// Uses both a local array (fast path for same-call re-renders) and a
@@ -2910,13 +4325,18 @@ templ ChatAutoScrollScript() {
 			// block must independently remember whether it was pinned to bottom.
 			var prevToolBodyScrollStates = {};
 			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
-					var toolID = el.getAttribute('data-tool-render-id') || '';
-					var rowKind = el.getAttribute('data-tool-row') || '';
-					if (!toolID || !rowKind) return;
-					var scrollableY = el.getAttribute('data-scrollable-y') === 'true' || el.scrollHeight > el.clientHeight + 1;
-					var pinned = !scrollableY || (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
-					prevToolBodyScrollStates[toolID + ':' + rowKind] = { scrollTop: el.scrollTop || 0, pinned: pinned, scrollableY: scrollableY };
-				});
+				var toolID = el.getAttribute('data-tool-render-id') || '';
+				var rowKind = el.getAttribute('data-tool-row') || '';
+				if (!toolID || !rowKind) return;
+				var pinned = el.getAttribute('data-scroll-pinned') !== 'false';
+				var scrollState = { scrollTop: el.scrollTop || 0, pinned: pinned };
+				prevToolBodyScrollStates[toolID + ':' + rowKind] = scrollState;
+				var persistentStateKey = (containerKey || 'chat') + ':' + toolID + ':' + rowKind;
+				var persistentState = window._toolOutputRowStates[persistentStateKey] || {};
+				persistentState.scrollTop = scrollState.scrollTop;
+				persistentState.pinned = scrollState.pinned;
+				window._toolOutputRowStates[persistentStateKey] = persistentState;
+			});
 			if (containerKey && prevThinkingStates.length > 0) {
 					window._thinkingOpenStates[containerKey] = prevThinkingStates.slice();
 				}
@@ -2925,11 +4345,10 @@ templ ChatAutoScrollScript() {
 					prevThinkingStates = window._thinkingOpenStates[containerKey];
 				}
 
-			container.innerHTML = '';
 			// Remove pre-wrap styling from streaming container since we're creating
 			// properly-styled .chat-markdown children (pre-wrap leaks via inheritance
 			// and causes extra spacing in markdown/task-link elements)
-			container.classList.remove('whitespace-pre-wrap');
+			var renderFragment = document.createDocumentFragment();
 
 			var chevronSvg = '<svg class="thinking-toggle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>';
 			var checkSvg = '<svg class="tool-status-icon tool-status-done" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>';
@@ -2937,6 +4356,8 @@ templ ChatAutoScrollScript() {
 
 			var pendingText = '';
 			var pendingThinking = []; // accumulate consecutive thinking blocks
+			var pendingThinkingRenderedContent = null;
+			var pendingLargeToolOutputs = [];
 			function flushThinking() {
 				if (pendingThinking.length === 0) return;
 				// Merge all consecutive thinking blocks into one collapsible element
@@ -2957,7 +4378,11 @@ templ ChatAutoScrollScript() {
 				summary.innerHTML = chevronSvg + '<span>Thinking\u2026</span>';
 				var body = document.createElement('div');
 				body.className = 'stream-thinking-body';
-				if (window.renderChatMarkdown) {
+				if (pendingThinkingRenderedContent !== null) {
+					if (typeof pendingThinkingRenderedContent === 'string') body.innerHTML = pendingThinkingRenderedContent;
+					else body.appendChild(pendingThinkingRenderedContent);
+					pendingThinkingRenderedContent = null;
+				} else if (window.renderChatMarkdown) {
 					body.innerHTML = window.renderChatMarkdown(merged);
 				} else {
 					body.textContent = merged;
@@ -2965,14 +4390,11 @@ templ ChatAutoScrollScript() {
 				}
 				details.appendChild(summary);
 				details.appendChild(body);
-				container.appendChild(details);
+				renderFragment.appendChild(details);
 			}
 			function flushText() {
 				if (!pendingText) return;
-				// Strip action markers ([CREATE_TASK], [EDIT_TASK], etc.) before rendering
-				var t = pendingText;
-				if (window.cleanActionMarkers) t = window.cleanActionMarkers(t);
-				else t = t.trim();
+					var t = cleanPreparedText(pendingText);
 				if (!t) { pendingText = ''; return; }
 				var div = document.createElement('div');
 				div.className = 'chat-markdown';
@@ -2983,7 +4405,7 @@ templ ChatAutoScrollScript() {
 					div.textContent = t;
 					div.classList.add('whitespace-pre-wrap');
 				}
-				container.appendChild(div);
+				renderFragment.appendChild(div);
 				pendingText = '';
 			}
 
@@ -2993,6 +4415,20 @@ templ ChatAutoScrollScript() {
 				var inLabel = '';
 				var inContent = '';
 				var dn = toolDisplayName(seg.name);
+				function rowStateKey(rowKind) {
+					return (containerKey || 'chat') + ':' + (seg.toolRenderID || '') + ':' + rowKind;
+				}
+				function trackScrollPin(el, stateKey) {
+					el.setAttribute('data-scroll-pinned', 'true');
+					el.addEventListener('scroll', function() {
+						var pinned = (el.scrollHeight - el.scrollTop - el.clientHeight) <= 2;
+						el.setAttribute('data-scroll-pinned', pinned ? 'true' : 'false');
+						var state = window._toolOutputRowStates[stateKey] || {};
+						state.scrollTop = el.scrollTop || 0;
+						state.pinned = pinned;
+						window._toolOutputRowStates[stateKey] = state;
+					}, { passive: true });
+				}
 
 				// Extract IN content based on tool type
 				if (dn === 'Bash' && seg.secondary) {
@@ -3005,8 +4441,8 @@ templ ChatAutoScrollScript() {
 					inContent = seg.secondary;
 				}
 
-				var hasOut = seg.resultOutput && seg.resultOutput.trim();
-
+				var outputText = seg.resultOutput ? seg.resultOutput.trim() : '';
+				var hasOut = outputText !== '';
 				if (!hasIn && !hasOut) return null;
 
 				var body = document.createElement('div');
@@ -3026,7 +4462,9 @@ templ ChatAutoScrollScript() {
 					inScroll.className = 'stream-tool-body-scroll';
 					inScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
 					inScroll.setAttribute('data-tool-row', 'in');
+					trackScrollPin(inScroll, rowStateKey('in'));
 					var inPre = document.createElement('pre');
+					inPre.className = 'stream-tool-output-text';
 					inPre.textContent = inContent;
 					inScroll.appendChild(inPre);
 					inVal.appendChild(inScroll);
@@ -3043,14 +4481,100 @@ templ ChatAutoScrollScript() {
 					outLbl.textContent = 'OUT';
 					var outVal = document.createElement('div');
 					outVal.className = 'stream-tool-body-content';
-					var outScroll = document.createElement('div');
-					outScroll.className = 'stream-tool-body-scroll';
-					outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
-					outScroll.setAttribute('data-tool-row', 'out');
-					var outPre = document.createElement('pre');
-					outPre.textContent = seg.resultOutput.trim();
-					outScroll.appendChild(outPre);
-					outVal.appendChild(outScroll);
+					var lineCount = toolOutputLineCount(outputText);
+					var shouldCollapse = lineCount > 1 && lineCount > resolveToolOutputLineCapacity();
+					var stateKey = rowStateKey('out');
+					var rowState = window._toolOutputRowStates[stateKey] || {};
+					var expanded = shouldCollapse ? rowState.expanded === true : true;
+					var outScroll = null;
+					var preview = null;
+					var toggle = null;
+					var materializationVersion = 0;
+
+					function hydrateOutputLinks() {
+						if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(outVal);
+						if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(outVal);
+					}
+					function restoreOutputScroll() {
+						if (!outScroll) return;
+						if (rowState.pinned === false) {
+							outScroll.scrollTop = rowState.scrollTop || 0;
+							outScroll.setAttribute('data-scroll-pinned', 'false');
+						} else {
+							outScroll.scrollTop = Number.MAX_SAFE_INTEGER;
+							outScroll.setAttribute('data-scroll-pinned', 'true');
+						}
+					}
+					function materializeOutput(useInitialChunkQueue) {
+						if (outScroll) return;
+						var version = ++materializationVersion;
+						outScroll = document.createElement('div');
+						outScroll.className = 'stream-tool-body-scroll';
+						outScroll.setAttribute('data-tool-render-id', seg.toolRenderID || '');
+						outScroll.setAttribute('data-tool-row', 'out');
+						trackScrollPin(outScroll, stateKey);
+						var outPre = document.createElement('pre');
+						outPre.className = 'stream-tool-output-text';
+						outScroll.appendChild(outPre);
+						if (toggle && toggle.parentNode === outVal) outVal.insertBefore(outScroll, toggle); else outVal.appendChild(outScroll);
+						if (useInitialChunkQueue && shouldYieldPreparation && outputText.length > 64 * 1024) {
+							pendingLargeToolOutputs.push({ node: outPre, text: outputText, offset: 0 });
+							return;
+						}
+						if (outputText.length <= 64 * 1024) {
+							outPre.textContent = outputText;
+							restoreOutputScroll();
+							hydrateOutputLinks();
+							return;
+						}
+						var offset = 0;
+						function appendOutputChunk() {
+							if (!outScroll || version !== materializationVersion) return;
+							var end = Math.min(offset + 64 * 1024, outputText.length);
+							outPre.appendChild(document.createTextNode(outputText.substring(offset, end)));
+							offset = end;
+							if (offset < outputText.length) {
+								setTimeout(appendOutputChunk, 0);
+								return;
+							}
+							restoreOutputScroll();
+							hydrateOutputLinks();
+						}
+						appendOutputChunk();
+					}
+					function collapseOutput() {
+						materializationVersion++;
+						if (outScroll && outScroll.parentNode === outVal) outVal.removeChild(outScroll);
+						outScroll = null;
+					}
+					function updateToggle() {
+						if (preview) preview.hidden = expanded;
+						if (!toggle) return;
+						toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+						toggle.textContent = (expanded ? 'Hide output (' : 'Show output (') + lineCount + ' lines)';
+					}
+
+					if (shouldCollapse) {
+						preview = document.createElement('pre');
+						preview.className = 'stream-tool-output-preview stream-tool-output-text';
+						preview.textContent = toolOutputPreview(outputText);
+						outVal.appendChild(preview);
+						toggle = document.createElement('button');
+						toggle.type = 'button';
+						toggle.className = 'stream-tool-output-toggle';
+						updateToggle();
+						toggle.addEventListener('click', function() {
+							expanded = !expanded;
+							rowState.expanded = expanded;
+							window._toolOutputRowStates[stateKey] = rowState;
+							updateToggle();
+							if (expanded) materializeOutput(false);
+							else collapseOutput();
+						});
+						outVal.appendChild(toggle);
+					}
+					if (expanded) materializeOutput(true);
+
 					outRow.appendChild(outLbl);
 					outRow.appendChild(outVal);
 					grid.appendChild(outRow);
@@ -3060,8 +4584,20 @@ templ ChatAutoScrollScript() {
 				return body;
 			}
 
-			segments.forEach(function(seg, idx) {
+			function renderSegment(seg, idx) {
 				if (seg.type === 'text') {
+					if (Object.prototype.hasOwnProperty.call(seg, 'renderedContent')) {
+						flushThinking();
+						flushText();
+						if (!seg.renderedContent) return;
+						var rendered = document.createElement('div');
+						rendered.className = 'chat-markdown';
+						if (typeof seg.renderedContent === 'string') rendered.innerHTML = seg.renderedContent;
+						else rendered.appendChild(seg.renderedContent);
+						if (window.addCodeCopyButtons) window.addCodeCopyButtons(rendered);
+						renderFragment.appendChild(rendered);
+						return;
+					}
 					// If we're accumulating thinking and this text is a short fragment
 					// between thinking blocks, absorb it into thinking instead of
 					// rendering it as visible text (these are typically tool output
@@ -3092,6 +4628,7 @@ templ ChatAutoScrollScript() {
 							flushThinking();
 							flushText();
 						}
+						if (Object.prototype.hasOwnProperty.call(seg, 'thinkingRenderedContent')) pendingThinkingRenderedContent = seg.thinkingRenderedContent;
 						pendingThinking.push(c);
 					}
 					return;
@@ -3139,11 +4676,15 @@ templ ChatAutoScrollScript() {
 					var toolBody = buildToolBody(seg);
 					if (toolBody) wrap.appendChild(toolBody);
 
-					container.appendChild(wrap);
+					renderFragment.appendChild(wrap);
 				}
-			});
-			flushThinking();
-			flushText();
+			}
+			function finishRender() {
+				flushThinking();
+				flushText();
+				container.classList.remove('whitespace-pre-wrap');
+				window.setChatRawContent(container, textBuffer);
+				container.replaceChildren(renderFragment);
 
 			// Restore open state of thinking sections from before re-render
 			if (prevThinkingStates.length > 0) {
@@ -3165,27 +4706,20 @@ templ ChatAutoScrollScript() {
 				}
 			}
 
-			// Restore per-tool output scroll positions. Only genuinely overflowing
-			// blocks become vertical scroll targets; boundary wheel/touch events then
-			// chain naturally to the chat/task thread scroller.
+			// Restore per-tool output scroll positions without synchronously measuring
+			// every tool body. CSS overflow:auto handles non-overflowing bodies.
 			container.querySelectorAll('.stream-tool-body-scroll').forEach(function(el) {
-					var scrollableY = el.scrollHeight > el.clientHeight + 1;
-					if (scrollableY) {
-						el.setAttribute('data-scrollable-y', 'true');
-					} else {
-						el.removeAttribute('data-scrollable-y');
-						el.scrollTop = 0;
-						return;
-					}
-					var toolID = el.getAttribute('data-tool-render-id') || '';
-					var rowKind = el.getAttribute('data-tool-row') || '';
-					var state = prevToolBodyScrollStates[toolID + ':' + rowKind];
-					if (!state || state.pinned) {
-						el.scrollTop = el.scrollHeight;
-					} else {
-						el.scrollTop = state.scrollTop;
-					}
-				});
+				var toolID = el.getAttribute('data-tool-render-id') || '';
+				var rowKind = el.getAttribute('data-tool-row') || '';
+				var state = prevToolBodyScrollStates[toolID + ':' + rowKind] || window._toolOutputRowStates[(containerKey || 'chat') + ':' + toolID + ':' + rowKind];
+				if (!state || state.pinned) {
+					el.scrollTop = Number.MAX_SAFE_INTEGER;
+					el.setAttribute('data-scroll-pinned', 'true');
+				} else {
+					el.scrollTop = state.scrollTop;
+					el.setAttribute('data-scroll-pinned', 'false');
+				}
+			});
 			// Convert [TASK_ID:xxx] references to clickable links after rendering
 			if (window.convertTaskLinksInMessage) {
 				window.convertTaskLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);
@@ -3193,55 +4727,248 @@ templ ChatAutoScrollScript() {
 			if (window.convertTaskEditLinksInMessage) {
 				window.convertTaskEditLinksInMessage(container.closest('.chat-bubble-assistant-msg') || container);
 			}
+			}
+				function fillLargeToolOutputChunks(done, fail) {
+					var outputIndex = 0;
+					function fillNextChunk() {
+						try {
+							if (container._streamRenderVersion !== renderVersion) { done(false); return; }
+							while (outputIndex < pendingLargeToolOutputs.length) {
+								var output = pendingLargeToolOutputs[outputIndex];
+								var end = Math.min(output.offset + 64 * 1024, output.text.length);
+								output.node.appendChild(document.createTextNode(output.text.substring(output.offset, end)));
+								output.offset = end;
+								if (output.offset >= output.text.length) outputIndex++;
+								if (outputIndex < pendingLargeToolOutputs.length || output.offset < output.text.length) {
+									setTimeout(fillNextChunk, 0);
+									return;
+								}
+							}
+							done(true);
+						} catch (err) {
+							fail(err);
+						}
+					}
+					fillNextChunk();
+				}
+				if (shouldYieldPreparation) {
+					return new Promise(function(resolve, reject) {
+						var segmentIndex = 0;
+						function renderBatch() {
+							try {
+								if (container._streamRenderVersion !== renderVersion) { resolve(false); return; }
+								var batchStartedAt = window.performance && performance.now ? performance.now() : Date.now();
+								var batchBytes = 0;
+								var batchSegments = 0;
+								while (segmentIndex < segments.length) {
+									var segment = segments[segmentIndex];
+									var segmentBytes = (segment.content || '').length + (segment.resultOutput || '').length + (segment.secondary || '').length;
+									if (batchSegments > 0 && (batchSegments >= 12 || batchBytes + segmentBytes > 64 * 1024 ||
+										((window.performance && performance.now ? performance.now() : Date.now()) - batchStartedAt) >= 8)) break;
+									renderSegment(segment, segmentIndex);
+									segmentIndex++;
+									batchSegments++;
+									batchBytes += segmentBytes;
+								}
+								if (segmentIndex < segments.length) { setTimeout(renderBatch, 0); return; }
+								fillLargeToolOutputChunks(function(committed) {
+									try {
+										if (!committed) { resolve(false); return; }
+										finishRender();
+										resolve(true);
+									} catch (err) { reject(err); }
+								}, reject);
+							} catch (err) {
+								reject(err);
+							}
+						}
+					renderBatch();
+				});
+			}
+			for (var renderIndex = 0; renderIndex < segments.length; renderIndex++) {
+				renderSegment(segments[renderIndex], renderIndex);
+			}
+			finishRender();
+			}
+			if (shouldYieldPreparation) {
+				return new Promise(function(resolve, reject) {
+					var preparationIndex = 0;
+					function runPreparationPhase() {
+						if (container._streamRenderVersion !== renderVersion) { resolve(false); return; }
+							try {
+								if (preparationIndex < preparationPhases.length) {
+									var phaseResult = preparationPhases[preparationIndex]();
+									if (phaseResult && typeof phaseResult.then === 'function') {
+										phaseResult.then(function(completed) {
+											if (completed !== false) preparationIndex++;
+											setTimeout(runPreparationPhase, 0);
+										}, reject);
+										return;
+									}
+									if (phaseResult !== false) preparationIndex++;
+									setTimeout(runPreparationPhase, 0);
+								return;
+							}
+							if (preparationFailed) {
+								var fallback = window.renderChatMarkdownLargeFallback ? window.renderChatMarkdownLargeFallback(textBuffer) : null;
+								container.replaceChildren(fallback || document.createTextNode(textBuffer));
+								resolve(true);
+								return;
+							}
+							var rendered = renderPreparedSegments();
+							if (rendered && typeof rendered.then === 'function') rendered.then(resolve, reject);
+							else resolve(rendered !== false);
+						} catch (err) {
+							reject(err);
+						}
+					}
+					setTimeout(runPreparationPhase, 0);
+				});
+				}
+				for (var preparationIndex = 0; preparationIndex < preparationPhases.length; preparationIndex++) {
+					while (preparationPhases[preparationIndex]() === false) {}
+				}
+			return renderPreparedSegments();
 		};
 
-		// Clean action markers from chat message content (shared between chat and task thread)
-			window.normalizeTranscriptMarkers = function(text) {
-				if (!text) return text;
-				text = text.replace(/\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">([\s\S]*?)<\/parameter>\s*<\/invoke>\s*/g, function(_, tool, command) {
-					command = command.replace(/\]/g, ')').replace(/[\r\n]+/g, ' ').trim();
-					return '\n[Using tool: ' + tool + (command ? ' | ' + command : '') + ']\n';
-				});
-				text = text.replace(/<\s*thinking\s*>/gi, '\n[Thinking]\n');
-				text = text.replace(/<\/\s*thinking\s*>/gi, '\n[/Thinking]\n');
-				return text;
-			};
+						// window.codeRanges and window.isInsideCode are installed by the base layout
+						// before Chat/task-thread content renders. All transcript transforms and
+						// Markdown rendering share those helpers.
 
-			window.cleanActionMarkers = function(text, noTrim) {
+						window.replaceOutsideCode = function(text, pattern, replacement, ranges) {
+							var result = '';
+							var previous = 0;
+							var match;
+							var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
+							pattern.lastIndex = 0;
+							while ((match = pattern.exec(text)) !== null) {
+								if (window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, match.index, match.index + match[0].length)) {
+								// A protected partial alias can make one regex span a later real
+								// alias. Resume just after its start so the real alias is found.
+								pattern.lastIndex = match.index + 1;
+								continue;
+							}
+							result += text.substring(previous, match.index);
+							result += typeof replacement === 'function' ? replacement.apply(null, match) : replacement;
+							previous = match.index + match[0].length;
+							if (match[0].length === 0) pattern.lastIndex++;
+						}
+						return result + text.substring(previous);
+					};
+
+						window.stripOutsideCode = function(text, pattern, ranges) {
+							var result = '';
+							var previous = 0;
+							var match;
+							var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
+						pattern.lastIndex = 0;
+						while ((match = pattern.exec(text)) !== null) {
+							var markerOffset = match[0].indexOf('[');
+							var markerStart = markerOffset >= 0 ? match.index + markerOffset : match.index;
+								if (window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, markerStart, match.index + match[0].length)) {
+								pattern.lastIndex = markerStart + 1;
+								continue;
+							}
+							result += text.substring(previous, match.index);
+								if (markerOffset > 0 && window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, match.index, markerStart)) {
+								result += match[0].substring(0, markerOffset);
+							}
+							previous = match.index + match[0].length;
+							if (match[0].length === 0) pattern.lastIndex++;
+						}
+						return result + text.substring(previous);
+					};
+						window.dedupTaskSummaries = function(text) {
+						['Created ', 'Edited '].forEach(function(prefix) {
+							var protectedRanges = window.codeRanges ? window.codeRanges(text) : [];
+							var lines = window.markdownLineRanges(text);
+							var blocks = [];
+							for (var i = 0; i + 1 < lines.length; i++) {
+								var delimiter = lines[i];
+								var header = lines[i + 1];
+								if (text.substring(delimiter.start, delimiter.end) !== '---' ||
+									text.substring(header.start, header.end).indexOf(prefix) !== 0 ||
+										(window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, delimiter.start, delimiter.end))) continue;
+								var start = i > 0 ? lines[i - 1].end : delimiter.start;
+								var end = Math.min(header.next, text.length);
+								for (var j = i + 2; j < lines.length; j++) {
+									var line = lines[j];
+									if (text.substring(line.start, line.end).indexOf('- ') !== 0) break;
+									end = Math.min(line.next, text.length);
+								}
+								blocks.push({ start: start, end: end });
+							}
+							for (var blockIndex = blocks.length - 2; blockIndex >= 0; blockIndex--) {
+								text = text.substring(0, blocks[blockIndex].start) + text.substring(blocks[blockIndex].end);
+							}
+						});
+						return text;
+					};
+
+						window.stripFinalStatusControl = function(text, ranges) {
+						if (!text) return text;
+						var lines = window.markdownLineRanges(text);
+						var lastNonEmpty = -1;
+						for (var i = lines.length - 1; i >= 0; i--) {
+							if (text.substring(lines[i].start, lines[i].end).trim()) { lastNonEmpty = i; break; }
+						}
+						if (lastNonEmpty === -1) return text;
+						var sourceLine = lines[lastNonEmpty];
+						var rawLine = text.substring(sourceLine.start, sourceLine.end);
+						var markerOffset = rawLine.search(/\S/);
+						var markerStart = sourceLine.start + markerOffset;
+							var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
+							if (window.isInsideCodeRanges && window.isInsideCodeRanges(protectedRanges, markerStart, sourceLine.end)) return text;
+						var line = rawLine.trim();
+						if (!/^\[STATUS: (?:SUCCESS|(?:FAILED|NEEDS_FOLLOWUP) \|\s*[^\s\]|][^|\]]*)\]$/.test(line)) return text;
+						var removeStart = sourceLine.start;
+						var removeEnd = Math.min(sourceLine.next, text.length);
+						if (sourceLine.end === text.length && lastNonEmpty > 0) removeStart = lines[lastNonEmpty - 1].end;
+						return text.substring(0, removeStart) + text.substring(removeEnd);
+					};
+				window.stripFinalStatusControlFromElement = function(element) {
+					if (!element || !document.createTreeWalker) return;
+					var walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, null);
+					var textNodes = [];
+					var node;
+					while (node = walker.nextNode()) textNodes.push(node);
+					for (var i = textNodes.length - 1; i >= 0; i--) {
+						var textNode = textNodes[i];
+						if (!textNode.textContent || !textNode.textContent.trim()) continue;
+						if (textNode.parentElement && textNode.parentElement.closest('code, pre, blockquote, li, strong, em, del, a, h1, h2, h3, h4, h5, h6, table')) return;
+						textNode.textContent = window.stripFinalStatusControl(textNode.textContent);
+						return;
+					}
+				};
+
+				// Clean transcript control artifacts from chat message content.
+					window.normalizeTranscriptMarkers = function(text, ranges) {
+						if (!text) return text;
+						var protectedRanges = ranges || (window.codeRanges ? window.codeRanges(text) : []);
+						return window.replaceOutsideCode(text, /\[Using tool:\s*([A-Za-z0-9_.-]+)"(?:\]|>)\s*<parameter\s+name="command">([\s\S]*?)<\/parameter>\s*<\/invoke>\s*|<\s*(\/?)\s*thinking\s*>/gi, function(raw, tool, command, closing) {
+							if (!tool) return closing ? '\n[/Thinking]\n' : '\n[Thinking]\n';
+							command = command.replace(/\]/g, ')').replace(/[\r\n]+/g, ' ').trim();
+							return '\n[Using tool: ' + tool + (command ? ' | ' + command : '') + ']\n';
+						}, protectedRanges);
+				};
+			window.cleanTranscriptControls = function(text, noTrim, statusAlreadyScoped) {
 				if (!text) return text;
 				text = window.normalizeTranscriptMarkers(text);
-			text = text.replace(/\[CREATE_TASK\][\s\S]*?\[\/CREATE_TASK\]/g, '');
-			text = text.replace(/\[EDIT_TASK\][\s\S]*?\[\/EDIT_TASK\]/g, '');
-			text = text.replace(/\[EXECUTE_TASKS\][\s\S]*?\[\/EXECUTE_TASKS\]/g, '');
-			text = text.replace(/\[VIEW_TASK_CHAT\][\s\S]*?\[\/VIEW_TASK_CHAT\]/g, '');
-			text = text.replace(/\[SEND_TO_TASK\][\s\S]*?\[\/SEND_TO_TASK\]/g, '');
-			text = text.replace(/\[SCHEDULE_TASK\][\s\S]*?\[\/SCHEDULE_TASK\]/g, '');
-			text = text.replace(/\[DELETE_SCHEDULE\][\s\S]*?\[\/DELETE_SCHEDULE\]/g, '');
-			text = text.replace(/\[MODIFY_SCHEDULE\][\s\S]*?\[\/MODIFY_SCHEDULE\]/g, '');
-			text = text.replace(/\[LIST_PERSONALITIES\]/g, '');
-			text = text.replace(/\[SET_PERSONALITY\][\s\S]*?\[\/SET_PERSONALITY\]/g, '');
-			text = text.replace(/\[LIST_MODELS\]/g, '');
-			text = text.replace(/\[VIEW_SETTINGS\]/g, '');
-			text = text.replace(/\[PROJECT_INFO\]/g, '');
-			text = text.replace(/\[LIST_AGENTS\]/g, '');
-			text = text.replace(/\[LIST_ALERTS\]/g, '');
-			text = text.replace(/\[CREATE_ALERT\][\s\S]*?\[\/CREATE_ALERT\]/g, '');
-			text = text.replace(/\[DELETE_ALERT\][\s\S]*?\[\/DELETE_ALERT\]/g, '');
-			text = text.replace(/\[TOGGLE_ALERT\][\s\S]*?\[\/TOGGLE_ALERT\]/g, '');
-			text = text.replace(/\[LIST_PROJECTS\]/g, '');
-			text = text.replace(/\[SWITCH_PROJECT\][\s\S]*?\[\/SWITCH_PROJECT\]/g, '');
-			text = text.replace(/\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*?)?\]/g, '');
-			text = text.replace(/\[Using tool:\s*[^\]]+\]/g, '');
-			text = text.replace(/<\/?\s*proposed_plan\s*>/gi, '');
-			text = text.replace(/\[Tool\s+\S+\s+(?:done|error)\]\n[\s\S]*?\n\[\/Tool\]\n?/g, '');
-			text = text.replace(/\[Tool\s+\S+\s+(?:done|error):[^\n]*\]\n?/g, '');
-			// Strip protocol artifact lines (e.g. multi_tool_use.parallel fragments
-			// that leak between tool calls when the LLM narrates malformed tool attempts)
-			text = text.replace(/^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$/gm, '');
-			var beforeThinking = text;
-			text = text.replace(/\n?\[Thinking\][\s\S]*?(?:\[\/Thinking\]\n?|$)/g, '');
-			// If stripping thinking left us empty but there was content, extract thinking text
-			if (text.trim() === '' && beforeThinking.trim() !== '') {
+				if (!statusAlreadyScoped) text = window.stripFinalStatusControl(text);
+				text = window.stripOutsideCode(text, /\[Using tool:\s*[^\]]+\]/g);
+				text = text.replace(/<\/?\s*proposed_plan\s*>/gi, '');
+				text = window.stripOutsideCode(text, /\[Tool\s+\S+\s+(?:done|error)\](?:\r\n|\r|\n)?[\s\S]*?(?:\r\n|\r|\n)?\[\/Tool\](?:\r\n|\r|\n)?/g);
+				text = window.stripOutsideCode(text, /\[Tool\s+\S+\s+(?:done|error):[^\]\r\n]*\](?:\r\n|\r|\n)?/g);
+				// Strip protocol artifact lines (e.g. multi_tool_use.parallel fragments
+				// that leak between tool calls when the LLM narrates malformed tool attempts)
+				text = text.replace(/(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)/g, '$1$2');
+				var beforeThinking = text;
+				text = window.stripOutsideCode(text, /\[Thinking\][\s\S]*?(?:\[\/Thinking\](?:\r\n|\r|\n)?|$)/g);
+				if (text !== beforeThinking && /(?:\r\n|\r|\n)$/.test(text) && /\[Thinking\][\s\S]*?(?:\[\/Thinking\]\s*)?$/.test(beforeThinking)) {
+					text = text.replace(/(?:\r\n|\r|\n)$/, '');
+				}
+				// If stripping thinking left us empty but there was content, extract thinking text
+				if (text.trim() === '' && beforeThinking.trim() !== '') {
 				var extracted = [];
 				var re = /\[Thinking\]([\s\S]*?)(?:\[\/Thinking\]|$)/g;
 				var m;
@@ -3257,29 +4984,21 @@ templ ChatAutoScrollScript() {
 					text = text.replace(/\[Thinking\]/g, '').replace(/\[\/Thinking\]/g, '');
 				}
 			}
-			['Created ', 'Edited '].forEach(function(keyword) {
-				var marker = '\n---\n' + keyword;
-				var firstIdx = text.indexOf(marker);
-				var lastIdx = text.lastIndexOf(marker);
-				if (firstIdx !== -1 && firstIdx !== lastIdx) {
-					text = text.substring(0, firstIdx) + text.substring(lastIdx);
-				}
-			});
+			text = window.dedupTaskSummaries(text);
 			// Note: [TASK_ID:xxx] and [TASK_EDITED:xxx] are NOT stripped here.
 			// convertTaskLinksInMessage / convertTaskEditLinksInMessage convert them
 			// to clickable links. They get cleaned up after link conversion.
 			text = text.replace(/\n{3,}/g, '\n\n');
 			return noTrim ? text : text.trim();
 		};
-		// Alias for backward compatibility
-		window.cleanThreadMarkers = window.cleanActionMarkers;
 
-		// Apply action marker cleaning to a chat bubble element (walks text nodes, preserves DOM elements)
+			// Apply transcript control-artifact cleaning to a chat bubble element.
 		// Uses noTrim=true to preserve leading/trailing whitespace in individual text nodes,
 		// which is needed for whitespace-pre-wrap to render line breaks between DOM elements.
 		window.cleanBubbleContent = function(bubble) {
 			var contentDivs = bubble.querySelectorAll('.whitespace-pre-wrap');
 			contentDivs.forEach(function(div) {
+				if (window.stripFinalStatusControlFromElement) window.stripFinalStatusControlFromElement(div);
 				var walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null);
 				var textNodes = [];
 				var node;
@@ -3287,8 +5006,9 @@ templ ChatAutoScrollScript() {
 					textNodes.push(node);
 				}
 				textNodes.forEach(function(textNode) {
+					if (textNode.parentElement && textNode.parentElement.closest('code, pre')) return;
 					var original = textNode.textContent;
-					var cleaned = window.cleanActionMarkers(original, true);
+					var cleaned = window.cleanTranscriptControls(original, true, true);
 					if (cleaned !== original) {
 						textNode.textContent = cleaned;
 					}
@@ -3299,24 +5019,51 @@ templ ChatAutoScrollScript() {
 			// Clean all assistant messages in a container.
 			// Uses content signatures to avoid re-processing unchanged bubbles on each poll/morph swap.
 			window.cleanAssistantMessages = function(container) {
-				if (!container) return;
+				if (!container) return Promise.resolve([]);
+				var renderPromises = [];
 				// Handle chat-stream-content elements with data-raw-content (rendered by ChatBubble for completed assistant messages).
 				// After morph:outerHTML replaces JS-formatted content with server-rendered empty divs,
 				// these need to be re-rendered using the raw content stored in the data attribute.
 				container.querySelectorAll('.chat-stream-content[data-raw-content]').forEach(function(el) {
 					var raw = el.getAttribute('data-raw-content') || '';
+					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					if (el.dataset.cleanedRaw === raw && hasRenderedContent) return;
-					if (raw && window.renderStreamingContent) {
-						window.renderStreamingContent(el, raw);
-						el.dataset.cleanedRaw = raw;
+					var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';
+					if (renderedRevision === revision && hasRenderedContent) return;
+					if (el._renderingRevision === revision) {
+						if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);
+						return;
+					}
+					if (raw && window.scheduleChatElementRender) {
+						var scheduledRender = window.scheduleChatElementRender(el, raw);
+						renderPromises.push(scheduledRender);
+					} else if (raw && window.renderStreamingContent) {
+						el._renderingRevision = revision;
+						var renderPromise;
+						try { renderPromise = window.renderStreamingContent(el, raw); }
+						catch (err) { renderPromise = Promise.reject(err); }
+						var renderCompletion = Promise.resolve(renderPromise).then(function(rendered) {
+							if (el._renderingRevision === revision) delete el._renderingRevision;
+							if (rendered !== false && (el.getAttribute('data-raw-revision') || raw) === revision) {
+								el._renderedRevision = revision;
+								if (el.getAttribute('data-raw-revision')) el.setAttribute('data-rendered-revision', revision);
+							}
+						}, function() {
+							if (el._renderingRevision === revision) delete el._renderingRevision;
+							if (el._renderedRevision === revision || el.getAttribute('data-rendered-revision') === revision) {
+								delete el._renderedRevision;
+								el.removeAttribute('data-rendered-revision');
+							}
+						});
+						renderPromises.push(renderCompletion);
 					} else if (raw && window.renderChatMarkdown) {
 						el.classList.add('chat-markdown');
 						el.innerHTML = window.renderChatMarkdown(raw);
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
-						delete el.dataset.cleanedRaw;
+						el._renderedRevision = revision;
+						if (el.getAttribute('data-raw-revision')) el.setAttribute('data-rendered-revision', revision);
 					}
-					// After rendering, process task links and clean markers
+					// After rendering, convert task-result metadata and clean transcript controls
 					var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
 					if (bubble) {
 						if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
@@ -3329,11 +5076,36 @@ templ ChatAutoScrollScript() {
 				// to be re-rendered using the raw content stored in the data attribute.
 				container.querySelectorAll('[data-streaming-resume][data-raw-content]').forEach(function(el) {
 					var raw = el.getAttribute('data-raw-content') || '';
+					var revision = el.getAttribute('data-raw-revision') || raw;
 					var hasRenderedContent = !!(el.textContent && el.textContent.trim()) || !!el.querySelector('*');
-					if (el.dataset.cleanedRaw === raw && hasRenderedContent) return;
-					if (raw && window.renderStreamingContent) {
-						window.renderStreamingContent(el, raw);
-						el.dataset.cleanedRaw = raw;
+					var renderedRevision = el._renderedRevision || el.getAttribute('data-rendered-revision') || '';
+					if (renderedRevision === revision && hasRenderedContent) return;
+					if (el._renderingRevision === revision) {
+						if (el._chatElementRenderPromise) renderPromises.push(el._chatElementRenderPromise);
+						return;
+					}
+					if (raw && window.scheduleChatElementRender) {
+						var scheduledRender = window.scheduleChatElementRender(el, raw);
+						renderPromises.push(scheduledRender);
+					} else if (raw && window.renderStreamingContent) {
+						el._renderingRevision = revision;
+						var renderPromise;
+						try { renderPromise = window.renderStreamingContent(el, raw); }
+						catch (err) { renderPromise = Promise.reject(err); }
+						var renderCompletion = Promise.resolve(renderPromise).then(function(rendered) {
+							if (el._renderingRevision === revision) delete el._renderingRevision;
+							if (rendered !== false && (el.getAttribute('data-raw-revision') || raw) === revision) {
+								el._renderedRevision = revision;
+								if (el.getAttribute('data-raw-revision')) el.setAttribute('data-rendered-revision', revision);
+							}
+						}, function() {
+							if (el._renderingRevision === revision) delete el._renderingRevision;
+							if (el._renderedRevision === revision || el.getAttribute('data-rendered-revision') === revision) {
+								delete el._renderedRevision;
+								el.removeAttribute('data-rendered-revision');
+							}
+						});
+						renderPromises.push(renderCompletion);
 					} else if (raw && window.renderChatMarkdown) {
 						var div = document.createElement('div');
 						div.className = 'chat-markdown';
@@ -3341,21 +5113,33 @@ templ ChatAutoScrollScript() {
 						if (window.addCodeCopyButtons) window.addCodeCopyButtons(div);
 						el.innerHTML = '';
 						el.appendChild(div);
-						delete el.dataset.cleanedRaw;
+						el._renderedRevision = revision;
+						if (el.getAttribute('data-raw-revision')) el.setAttribute('data-rendered-revision', revision);
 					}
 				});
 				container.querySelectorAll('.chat-bubble-assistant-msg .whitespace-pre-wrap').forEach(function(div) {
 					var text = div.textContent || '';
-					if (div.dataset.cleanedText === text) return;
+					if (div.dataset.cleanedText === text || div.dataset.renderingText === text) return;
 					// Check if content has streaming markers that need rendering
 					if (text.indexOf('[Thinking]') >= 0 || text.indexOf('[Using tool:') >= 0) {
 						// Render streaming markers into styled DOM elements
-						if (window.renderStreamingContent) {
+						if (window.scheduleChatContentRender) {
+							div.dataset.renderingText = text;
+							var renderCompletion = window.scheduleChatContentRender(div, text).then(function(rendered) {
+								if (div.dataset.renderingText !== text) return;
+								delete div.dataset.renderingText;
+								if (rendered) div.dataset.cleanedText = div.textContent || '';
+								else delete div.dataset.cleanedText;
+							});
+							renderPromises.push(renderCompletion);
+							return;
+						} else if (window.renderStreamingContent) {
 							window.renderStreamingContent(div, text);
 							div.dataset.cleanedText = text;
 							return;
 						}
 					}
+					if (window.stripFinalStatusControlFromElement) window.stripFinalStatusControlFromElement(div);
 					var walker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null);
 					var textNodes = [];
 					var node;
@@ -3363,14 +5147,18 @@ templ ChatAutoScrollScript() {
 						textNodes.push(node);
 					}
 					textNodes.forEach(function(textNode) {
+						if (textNode.parentElement && textNode.parentElement.closest('code, pre')) return;
 						var original = textNode.textContent;
-						var cleaned = window.cleanActionMarkers(original);
+						var cleaned = window.cleanTranscriptControls(original, false, true);
 						if (cleaned !== original) {
 							textNode.textContent = cleaned;
 						}
 					});
 					div.dataset.cleanedText = div.textContent || '';
 				});
+				return Promise.all(renderPromises.map(function(promise) {
+					return Promise.resolve(promise).catch(function() { return false; });
+				}));
 			};
 	</script>
 }
@@ -3417,18 +5205,14 @@ func IsImageMediaType(mediaType string) bool {
 	return strings.HasPrefix(mediaType, "image/")
 }
 
-// Regex patterns for cleaning action markers from display content (server-side).
+// Regex patterns for cleaning transcript control artifacts from display content.
 var (
-	reCreateTask   = regexp.MustCompile(`(?s)\[CREATE_TASK\].*?\[/CREATE_TASK\]`)
-	reEditTask     = regexp.MustCompile(`(?s)\[EDIT_TASK\].*?\[/EDIT_TASK\]`)
-	reExecTasks    = regexp.MustCompile(`(?s)\[EXECUTE_TASKS\].*?\[/EXECUTE_TASKS\]`)
-	reStatus       = regexp.MustCompile(`\[STATUS:\s*(?:SUCCESS|FAILED|NEEDS_FOLLOWUP)(?:\s*\|[^\]]*?)?\]`)
 	reUsingTool    = regexp.MustCompile(`\[Using tool:\s*[^\]]+\]`)
 	reProposedPlan = regexp.MustCompile(`(?i)</?\s*proposed_plan\s*>`)
-	reToolBlock    = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\]\n?[\s\S]*?\n?\[/Tool\]\n?`)
-	reToolDone     = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]]*\](?:\n)?`)
-	reProtocolArt  = regexp.MustCompile(`(?m)^[}\s{]*(?:to=)?multi_tool_use\.\S+[^\n]*$`)
-	reThinking     = regexp.MustCompile(`(?s)\n?\[Thinking\][\s\S]*?(?:\[/Thinking\]\n?|$)`)
+	reToolBlock    = regexp.MustCompile(`(?s)\[Tool\s+\S+\s+(?:done|error)\](?:\r\n|\r|\n)?[\s\S]*?(?:\r\n|\r|\n)?\[/Tool\](?:\r\n|\r|\n)?`)
+	reToolDone     = regexp.MustCompile(`\[Tool\s+\S+\s+(?:done|error):[^\]\r\n]*\](?:\r\n|\r|\n)?`)
+	reProtocolArt  = regexp.MustCompile(`(?m)(^|(?:\r\n|\r|\n))[}\t {]*(?:to=)?multi_tool_use\.\S+[^\r\n]*(?:(\r\n|\r|\n)|$)`)
+	reThinking     = regexp.MustCompile(`(?s)\[Thinking\][\s\S]*?(?:\[/Thinking\](?:\r\n|\r|\n)?|$)`)
 	reExcessLines  = regexp.MustCompile(`\n{3,}`)
 )
 
@@ -3437,26 +5221,23 @@ func NormalizeDisplayMarkers(text string) string {
 	return llmtranscript.NormalizeMarkers(text)
 }
 
-// CleanDisplayContent strips action markers from chat content for display.
+// CleanDisplayContent strips transcript control artifacts from chat content for display.
 func CleanDisplayContent(text string) string {
 	if text == "" {
 		return text
 	}
 	text = NormalizeDisplayMarkers(text)
-	text = reCreateTask.ReplaceAllString(text, "")
-	text = reEditTask.ReplaceAllString(text, "")
-	text = reExecTasks.ReplaceAllString(text, "")
-	text = reStatus.ReplaceAllString(text, "")
-	text = reUsingTool.ReplaceAllString(text, "")
+	text = llmoutput.StripFinalStatusControl(text)
+	text = llmoutput.ReplaceOutsideMarkdownCode(text, reUsingTool, "")
 	text = reProposedPlan.ReplaceAllString(text, "")
-	text = reToolBlock.ReplaceAllString(text, "")
-	text = reToolDone.ReplaceAllString(text, "")
-	text = reProtocolArt.ReplaceAllString(text, "")
+	text = llmoutput.ReplaceOutsideMarkdownCode(text, reToolBlock, "")
+	text = llmoutput.ReplaceOutsideMarkdownCode(text, reToolDone, "")
+	text = reProtocolArt.ReplaceAllString(text, "$1$2")
 
 	// Strip thinking blocks, but if that would leave the text empty,
 	// extract the thinking content as the display text (the model put
 	// its entire response inside a thinking block).
-	cleaned := reThinking.ReplaceAllString(text, "")
+	cleaned := llmoutput.ReplaceOutsideMarkdownCode(text, reThinking, "")
 	if strings.TrimSpace(cleaned) == "" && strings.TrimSpace(text) != "" {
 		text = extractThinkingContent(text)
 	} else {
@@ -3506,14 +5287,7 @@ func extractThinkingContent(text string) string {
 	return strings.TrimSpace(result)
 }
 
-// DedupTaskSummaries removes duplicate task summary blocks.
+// DedupTaskSummaries removes duplicate task summary blocks outside Markdown code.
 func DedupTaskSummaries(text string) string {
-	for _, marker := range []string{"\n---\nCreated ", "\n---\nEdited "} {
-		firstIdx := strings.Index(text, marker)
-		lastIdx := strings.LastIndex(text, marker)
-		if firstIdx != -1 && firstIdx != lastIdx {
-			text = text[:firstIdx] + text[lastIdx:]
-		}
-	}
-	return text
+	return llmoutput.DeduplicateTaskSummaries(text)
 }

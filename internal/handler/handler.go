@@ -81,6 +81,12 @@ type Handler struct {
 	agentLibraryMaintenanceSvc *service.AgentLibraryMaintenanceService
 	agentSkillRoot             string
 	authCfg                    *auth.Config
+	authMode                   auth.AuthMode
+	hostedSSOClient            *auth.HostedSSOClient
+	hostedPendingStore         *auth.PendingStore
+	hostedSSOKey               []byte
+	hostedSSOInstanceID        string
+	appBaseURL                 string
 	desktopMode                bool
 
 	loginFailuresMu   sync.Mutex
@@ -476,9 +482,11 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	return "", nil
 }
 
-// isHTMX returns true if the request was initiated by HTMX.
+// isHTMX returns true for ordinary HTMX fragment requests. History cache misses
+// request a complete document so HTMX can restore the application shell and title.
 func isHTMX(c echo.Context) bool {
-	return c.Request().Header.Get("HX-Request") == "true"
+	return c.Request().Header.Get("HX-Request") == "true" &&
+		c.Request().Header.Get("HX-History-Restore-Request") != "true"
 }
 
 // parseIntClamped parses a form value as an integer and clamps it to [min, max].
@@ -509,6 +517,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/login", h.AuthLogin)
 	e.POST("/logout", h.AuthLogout)
 	e.GET("/auth/me", h.AuthMe)
+	e.GET("/auth/sso/start", h.HostedSSOStart)
+	e.GET("/auth/sso/callback", h.HostedSSOCallback)
+	e.GET("/logged-out", h.LoggedOut)
 
 	// Dashboard
 	e.GET("/", h.Home)
@@ -590,6 +601,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Schedules
 	e.POST("/tasks/:taskId/schedule", h.CreateSchedule)
+	e.POST("/schedules/:id", h.UpdateSchedule) // Native form fallback; HTMX uses PUT below.
 	e.PUT("/schedules/:id", h.UpdateSchedule)
 	e.DELETE("/schedules/:id", h.DeleteSchedule)
 	e.POST("/schedules/:id/toggle", h.ToggleScheduleEnabled)
@@ -791,6 +803,9 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Alerts
 	e.GET("/alerts", h.ListAlerts)
 	e.POST("/alerts/:id/read", h.MarkAlertRead)
+	e.POST("/alerts/:id/approve", h.ApproveAlert)
+	e.POST("/alerts/:id/reject", h.RejectAlert)
+	e.POST("/alerts/:id/dismiss", h.DismissAlert)
 	e.POST("/alerts/read-all", h.MarkAllAlertsRead)
 	e.DELETE("/alerts/:id", h.DeleteAlert)
 	e.DELETE("/alerts", h.DeleteAllAlerts)

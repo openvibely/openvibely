@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 // --- Analytics page ---
@@ -44,6 +48,63 @@ func TestGetAnalyticsUsage_Default(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/api/analytics/usage").Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
+}
+
+func TestGetAnalyticsUsage_AccountLimitsAreOrderedAndPrivate(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	cfg := &models.LLMConfig{
+		Name:              "OpenAI OAuth",
+		Provider:          models.ProviderOpenAI,
+		Model:             "gpt-5.3-codex",
+		AuthMethod:        models.AuthMethodOAuth,
+		OAuthAccessToken:  "oauth-secret-token",
+		OAuthRefreshToken: "refresh-secret-token",
+		OAuthAccountID:    "account-secret-id",
+	}
+	if err := tc.llmConfigRepo.Create(ctx, cfg); err != nil {
+		t.Fatalf("create oauth config: %v", err)
+	}
+	weeklyPercent := 8.0
+	fiveHourPercent := 4.0
+	weeklyMinutes := 10080
+	fiveHourMinutes := 300
+	if err := tc.usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+		Provider:               "openai",
+		AccountID:              cfg.OAuthAccountID,
+		AgentConfigID:          cfg.ID,
+		PlanType:               "ChatGPT Pro",
+		PrimaryLabel:           "5-hour session",
+		PrimaryUsedPercent:     &weeklyPercent,
+		PrimaryWindowMinutes:   &weeklyMinutes,
+		SecondaryLabel:         "weekly limit",
+		SecondaryUsedPercent:   &fiveHourPercent,
+		SecondaryWindowMinutes: &fiveHourMinutes,
+		RawJSON:                `{"account_id":"raw-provider-account","authorization":"Bearer raw-secret"}`,
+		FetchedAt:              time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create account snapshot: %v", err)
+	}
+
+	rec := tc.HTTP().Get("/api/analytics/usage?provider=openai&range=all").Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	var view models.AnalyticsUsageViewModel
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode usage API: %v", err)
+	}
+	if len(view.AccountLimits) != 1 || len(view.AccountLimits[0].Limits) != 2 {
+		t.Fatalf("account limits = %+v", view.AccountLimits)
+	}
+	limits := view.AccountLimits[0].Limits
+	if limits[0].LimitKey != "five_hour" || limits[0].Label != "5-hour session" || limits[1].LimitKey != "weekly" || limits[1].Label != "weekly limit" {
+		t.Fatalf("public limits are not stable/canonical: %+v", limits)
+	}
+	body := rec.Body.String()
+	for _, secret := range []string{cfg.ID, cfg.OAuthAccountID, cfg.OAuthAccessToken, cfg.OAuthRefreshToken, "raw-provider-account", "Bearer raw-secret"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("usage API exposed private account/config data %q: %s", secret, body)
+		}
+	}
 }
 
 func TestGetAnalyticsUsage_Range7d(t *testing.T) {

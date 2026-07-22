@@ -60,6 +60,14 @@ func TestNew_InMemory(t *testing.T) {
 		t.Error("expected at least 1 default project")
 	}
 
+	var maxWorkers int
+	if err := db.QueryRow("SELECT max_workers FROM worker_settings WHERE id='singleton'").Scan(&maxWorkers); err != nil {
+		t.Fatalf("reading fresh global worker limit: %v", err)
+	}
+	if maxWorkers != 0 {
+		t.Errorf("expected fresh global worker limit to be unlimited (0), got %d", maxWorkers)
+	}
+
 	// Fresh baseline should not seed a default agent config.
 	if err := db.QueryRow("SELECT COUNT(*) FROM agent_configs WHERE is_default=1").Scan(&count); err != nil {
 		t.Fatalf("counting default agents: %v", err)
@@ -71,6 +79,36 @@ func TestNew_InMemory(t *testing.T) {
 	// Verify max open connections is 1
 	if db.Stats().MaxOpenConnections != 1 {
 		t.Errorf("expected MaxOpenConnections=1, got %d", db.Stats().MaxOpenConnections)
+	}
+}
+
+func TestNew_PreservesExplicitGlobalWorkerLimit(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "worker-limit.db")
+
+	db, err := New(dbPath)
+	if err != nil {
+		t.Fatalf("New(%q) failed: %v", dbPath, err)
+	}
+	if _, err := db.Exec(`UPDATE worker_settings SET max_workers=1 WHERE id='singleton'`); err != nil {
+		db.Close()
+		t.Fatalf("setting explicit global worker limit: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("closing initial database: %v", err)
+	}
+
+	db, err = New(dbPath)
+	if err != nil {
+		t.Fatalf("reopening %q failed: %v", dbPath, err)
+	}
+	defer db.Close()
+
+	var maxWorkers int
+	if err := db.QueryRow("SELECT max_workers FROM worker_settings WHERE id='singleton'").Scan(&maxWorkers); err != nil {
+		t.Fatalf("reading persisted global worker limit: %v", err)
+	}
+	if maxWorkers != 1 {
+		t.Fatalf("expected explicit global worker limit 1 to be preserved, got %d", maxWorkers)
 	}
 }
 

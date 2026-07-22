@@ -11,6 +11,48 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+func TestHandler_GetTask_HTMXHistoryCacheMissReturnsFullTitledDocument(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).
+		WithTitle("Restore <task> & title").
+		WithCategory(models.CategoryBacklog).
+		Build()
+	path := "/tasks/" + task.ID + "?tab=details&project_id=" + project.ID
+
+	partialReq := httptest.NewRequest(http.MethodGet, path, nil)
+	partialReq.Header.Set("HX-Request", "true")
+	partialReq.Header.Set("HX-Target", "main-content")
+	partialRec := httptest.NewRecorder()
+	tc.echo.ServeHTTP(partialRec, partialReq)
+	if partialRec.Code != http.StatusOK {
+		t.Fatalf("ordinary HTMX request: expected 200, got %d body=%s", partialRec.Code, partialRec.Body.String())
+	}
+	partialBody := partialRec.Body.String()
+	if strings.Contains(partialBody, "<!doctype html>") {
+		t.Fatal("ordinary HTMX navigation must remain a content fragment")
+	}
+	if !strings.Contains(partialBody, `data-openvibely-page-title="Restore &lt;task&gt; &amp; title - OpenVibely"`) {
+		t.Fatal("ordinary HTMX navigation fragment is missing its authoritative title marker")
+	}
+
+	restoreReq := httptest.NewRequest(http.MethodGet, path, nil)
+	restoreReq.Header.Set("HX-Request", "true")
+	restoreReq.Header.Set("HX-History-Restore-Request", "true")
+	restoreRec := httptest.NewRecorder()
+	tc.echo.ServeHTTP(restoreRec, restoreReq)
+	if restoreRec.Code != http.StatusOK {
+		t.Fatalf("HTMX history cache miss: expected 200, got %d body=%s", restoreRec.Code, restoreRec.Body.String())
+	}
+	restoreBody := restoreRec.Body.String()
+	if !strings.Contains(restoreBody, "<!doctype html>") || !strings.Contains(restoreBody, `id="main-content"`) {
+		t.Fatal("HTMX history cache miss must return the complete application document")
+	}
+	if !strings.Contains(restoreBody, `<title>Restore &lt;task&gt; &amp; title - OpenVibely</title>`) {
+		t.Fatal("HTMX history cache miss document is missing its authoritative escaped title")
+	}
+}
+
 func TestHandler_ListTasks_HTMXNavigation(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

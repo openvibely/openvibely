@@ -653,9 +653,9 @@ func TestBuildTaskOccurrenceMap_SubDailyWithLastRun(t *testing.T) {
 
 	// Hourly schedule that has been running — RunAt is when it was originally created,
 	// NextRun is somewhere mid-week, LastRun is set (schedule has been active)
-	runAt := time.Date(2026, 2, 24, 10, 0, 0, 0, time.UTC)     // Originally created Tue
-	nextRun := time.Date(2026, 2, 26, 15, 0, 0, 0, time.UTC)   // NextRun is Thu afternoon
-	lastRun := time.Date(2026, 2, 26, 14, 0, 0, 0, time.UTC)   // Last ran Thu 2 PM
+	runAt := time.Date(2026, 2, 24, 10, 0, 0, 0, time.UTC)   // Originally created Tue
+	nextRun := time.Date(2026, 2, 26, 15, 0, 0, 0, time.UTC) // NextRun is Thu afternoon
+	lastRun := time.Date(2026, 2, 26, 14, 0, 0, 0, time.UTC) // Last ran Thu 2 PM
 
 	task := repository.TaskWithSchedule{
 		Task: models.Task{
@@ -734,7 +734,7 @@ func TestBuildTaskOccurrenceMap_SubDailyWithoutLastRun(t *testing.T) {
 	startOfWeek := time.Date(2026, 2, 22, 0, 0, 0, 0, time.Local)
 
 	// New hourly schedule created on Thu — no LastRun yet
-	runAt := time.Date(2026, 2, 26, 21, 5, 0, 0, time.Local)   // Thu 9:05 PM local
+	runAt := time.Date(2026, 2, 26, 21, 5, 0, 0, time.Local) // Thu 9:05 PM local
 	runAtUTC := runAt.UTC()
 	nextRun := runAtUTC
 
@@ -1178,7 +1178,7 @@ func TestScheduleContent_RunAtFieldClickablePickerAffordance(t *testing.T) {
 	currentProject := &models.Project{ID: "project-1", Name: "Project 1"}
 
 	var buf bytes.Buffer
-	err := ScheduleContent(currentProject, nil, 0, nil).Render(context.Background(), &buf)
+	err := ScheduleContent(currentProject, nil, 0, nil, nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -1213,7 +1213,7 @@ func TestScheduleContent_ConsistentBorderStyling(t *testing.T) {
 	currentProject := &models.Project{ID: "project-1", Name: "Project 1"}
 
 	var buf bytes.Buffer
-	err := ScheduleContent(currentProject, nil, 0, nil).Render(context.Background(), &buf)
+	err := ScheduleContent(currentProject, nil, 0, nil, nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -1294,7 +1294,7 @@ func TestScheduleContent_DisabledScheduleRenderedWithGreyedStyle(t *testing.T) {
 	currentProject := &models.Project{ID: "p1", Name: "P1"}
 	var buf bytes.Buffer
 	// weekOffset=1 targets next week where our Wednesday occurrence lives.
-	err := ScheduleContent(currentProject, []repository.TaskWithSchedule{disabledTask}, 1, nil).Render(context.Background(), &buf)
+	err := ScheduleContent(currentProject, []repository.TaskWithSchedule{disabledTask}, 1, nil, nil).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}

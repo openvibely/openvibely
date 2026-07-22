@@ -3,6 +3,7 @@ package openaiclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -413,12 +414,9 @@ func TestParseAgenticStream_MultipleToolCalls(t *testing.T) {
 
 func TestParseAgenticStream_EmptyStream(t *testing.T) {
 	client := &Client{auth: &StoredAuth{APIKey: "test"}}
-	result, err := client.parseAgenticStream(strings.NewReader(""), nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.toolCalls) != 0 {
-		t.Errorf("expected 0 tool calls, got %d", len(result.toolCalls))
+	_, err := client.parseAgenticStream(strings.NewReader(""), nil, nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want unexpected EOF", err)
 	}
 }
 

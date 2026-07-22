@@ -29,6 +29,116 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestProcessStreamingResponse_TaskFollowupRespectsGlobalWorkerLimit(t *testing.T) {
+	setup := func(t *testing.T, maxWorkers int) (*Handler, *models.Project, *models.Task, *models.Execution, *models.LLMConfig, <-chan struct{}) {
+		t.Helper()
+		h, _, llmConfigRepo := setupTestHandler(t)
+		h.workerSvc.Resize(maxWorkers)
+
+		providerCalled := make(chan struct{}, 1)
+		mock := testutil.NewMockLLMCaller()
+		mock.Response = "follow-up complete"
+		mock.TextOnly = "follow-up complete"
+		mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+			providerCalled <- struct{}{}
+		}
+		h.llmSvc.SetLLMCaller(mock)
+
+		agent := createAgent(t, llmConfigRepo)
+		project := createProject(t, h, "Global Follow-up Capacity Project")
+		task := createTask(t, h, project.ID, "Global Follow-up Capacity Task", func(tk *models.Task) {
+			tk.Category = models.CategoryActive
+			tk.Status = models.StatusQueued
+			tk.AgentID = &agent.ID
+		})
+		exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+			ex.Status = models.ExecRunning
+			ex.PromptSent = "follow-up prompt"
+			ex.IsFollowup = true
+		})
+		return h, project, task, exec, agent, providerCalled
+	}
+
+	runFollowup := func(h *Handler, project *models.Project, task *models.Task, exec *models.Execution, agent *models.LLMConfig) <-chan struct{} {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			h.processStreamingResponse(streamingResponseParams{
+				ExecID:         exec.ID,
+				TaskID:         task.ID,
+				Message:        "follow-up prompt",
+				Agent:          *agent,
+				ProjectID:      project.ID,
+				IsTaskFollowup: true,
+			})
+		}()
+		return done
+	}
+
+	t.Run("finite limit blocks provider until a global slot is released", func(t *testing.T) {
+		h, project, task, exec, agent, providerCalled := setup(t, 1)
+		require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+
+		done := runFollowup(h, project, task, exec, agent)
+		startedEarly := false
+		select {
+		case <-providerCalled:
+			startedEarly = true
+		case <-time.After(150 * time.Millisecond):
+		}
+
+		h.workerSvc.ReleaseProjectSlot(project.ID)
+		if !startedEarly {
+			select {
+			case <-providerCalled:
+			case <-time.After(3 * time.Second):
+				t.Fatal("timed out waiting for task follow-up after releasing global capacity")
+			}
+		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for task follow-up completion")
+		}
+
+		if startedEarly {
+			t.Fatal("task follow-up reached provider while finite global worker limit was full")
+		}
+		require.Equal(t, 0, h.workerSvc.TotalRunning())
+		require.Equal(t, 0, h.workerSvc.ProjectRunning(project.ID))
+	})
+
+	t.Run("unlimited permits provider while another worker is active", func(t *testing.T) {
+		h, project, task, exec, agent, providerCalled := setup(t, 0)
+		require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID))
+		existingSlotHeld := true
+		defer func() {
+			if existingSlotHeld {
+				h.workerSvc.ReleaseProjectSlot(project.ID)
+			}
+		}()
+
+		done := runFollowup(h, project, task, exec, agent)
+		select {
+		case <-providerCalled:
+		case <-time.After(3 * time.Second):
+			t.Fatal("unlimited global worker limit blocked task follow-up provider call")
+		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for unlimited task follow-up completion")
+		}
+
+		require.Equal(t, 1, h.workerSvc.TotalRunning())
+		require.Equal(t, 1, h.workerSvc.ProjectRunning(project.ID))
+		h.workerSvc.ReleaseProjectSlot(project.ID)
+		existingSlotHeld = false
+		require.Equal(t, 0, h.workerSvc.TotalRunning())
+		require.Equal(t, 0, h.workerSvc.ProjectRunning(project.ID))
+	})
+}
+
 func TestStreamingTransportScope(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -238,6 +348,39 @@ func TestFinalizeStreamingTurn_BroadcastsTaskFollowupResponseDone(t *testing.T) 
 		require.True(t, evt.IsTaskFollowup)
 	case <-time.After(time.Second):
 		t.Fatal("expected task follow-up completion to broadcast chat_response_done with completed output")
+	}
+}
+
+func TestFinalizeStreamingTurn_BroadcastsPersistedTerminalStatus(t *testing.T) {
+	for _, status := range []models.ExecutionStatus{models.ExecFailed, models.ExecCancelled} {
+		t.Run(string(status), func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			task := tc.CreateTask(project.ID).WithCategory(models.CategoryBacklog).Build()
+			exec := &models.Execution{TaskID: task.ID, Status: status, PromptSent: "terminal status"}
+			require.NoError(t, tc.execRepo.Create(context.Background(), exec))
+
+			chatBroadcaster := events.NewChatBroadcaster()
+			tc.handler.SetChatBroadcaster(chatBroadcaster)
+			sub, err := chatBroadcaster.Subscribe()
+			require.NoError(t, err)
+			defer chatBroadcaster.Unsubscribe(sub)
+
+			tc.handler.finalizeStreamingTurn(streamingResponseParams{
+				ProjectID:      project.ID,
+				TaskID:         task.ID,
+				ExecID:         exec.ID,
+				IsTaskFollowup: true,
+			}, "partial output")
+
+			select {
+			case evt := <-sub:
+				require.Equal(t, string(status), evt.Status)
+				require.Equal(t, "partial output", evt.CompletedOutput)
+			case <-time.After(time.Second):
+				t.Fatal("expected terminal chat_response_done event")
+			}
+		})
 	}
 }
 
@@ -512,7 +655,6 @@ func TestProcessStreamingResponse_InteractiveChatAlreadyCancelledBeforeCallbackD
 		ProjectID:      project.ID,
 		SystemContext:  "task list context",
 		IsTaskFollowup: false,
-		ProcessMarkers: false,
 		ChatMode:       models.ChatModeOrchestrate,
 	})
 
@@ -569,7 +711,6 @@ func TestProcessStreamingResponse_InteractiveChatRunsMemoryRecallOnly(t *testing
 		ProjectID:      project.ID,
 		SystemContext:  "task list context",
 		IsTaskFollowup: false,
-		ProcessMarkers: false,
 		ChatMode:       models.ChatModeOrchestrate,
 	})
 
@@ -637,7 +778,6 @@ func TestProcessStreamingResponse_InteractiveChatPlanModeRunsMemoryRecallOnly(t 
 		ProjectID:      project.ID,
 		SystemContext:  "task list context",
 		IsTaskFollowup: false,
-		ProcessMarkers: false,
 		ChatMode:       models.ChatModePlan,
 	})
 
@@ -719,7 +859,6 @@ func TestProcessStreamingResponse_InteractiveChatExplicitMemoryViewRequestAuthor
 				ProjectID:      project.ID,
 				SystemContext:  "task list context",
 				IsTaskFollowup: false,
-				ProcessMarkers: false,
 				ChatMode:       mode,
 			})
 
@@ -2282,7 +2421,7 @@ func TestStartQueuedChatInputProcessesSavedAttachmentSession(t *testing.T) {
 	require.Len(t, attachments[request.ExecID], 2)
 }
 
-func TestStartQueuedEmailChatInputPropagatesReplyContextToCreatedTasks(t *testing.T) {
+func TestStartQueuedEmailChatInputLeavesActionMarkerTextInert(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -2327,30 +2466,16 @@ func TestStartQueuedEmailChatInputPropagatesReplyContextToCreatedTasks(t *testin
 	h.startQueuedChatInput(ctx, *input)
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 
-	var createdTask *models.Task
+	promotedExecID := mock.LastAgentRequest().ExecID
 	require.Eventually(t, func() bool {
-		tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
-		if err != nil {
-			return false
-		}
-		for i := range tasks {
-			if tasks[i].Title == "Task From Queued Email" {
-				createdTask = &tasks[i]
-				return true
-			}
-		}
-		return false
+		promotedExec, err := h.execRepo.GetByID(ctx, promotedExecID)
+		return err == nil && promotedExec != nil && strings.Contains(promotedExec.Output, "[CREATE_TASK]")
 	}, 2*time.Second, 25*time.Millisecond)
-	require.NotNil(t, createdTask)
-	require.Equal(t, models.TaskOriginEmail, createdTask.CreatedVia)
-	etc, err := h.emailTaskContextRepo.GetByTaskID(ctx, createdTask.ID)
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
-	require.NotNil(t, etc)
-	require.Equal(t, "alice@example.com", etc.EmailFrom)
-	require.Equal(t, "<msg-queued@example.com>", etc.EmailMessageID)
-	require.Equal(t, "<root@example.com>", etc.EmailReferences)
-	require.Equal(t, "Queued email", etc.EmailSubject)
-	require.Equal(t, "email:alice@example.com:<root@example.com>", etc.EmailSessionKey)
+	require.False(t, slices.ContainsFunc(tasks, func(task models.Task) bool {
+		return task.Title == "Task From Queued Email"
+	}), "queued Email marker-looking prose must not create a task")
 }
 
 func TestStartQueuedEmailChatInputUsesSessionScopedHistory(t *testing.T) {
@@ -2707,43 +2832,6 @@ func TestStartQueuedTaskThreadInputUsesQueuedChannelReplyContext(t *testing.T) {
 	require.NotEqual(t, models.TaskOriginSlack, updatedTask.CreatedVia)
 }
 
-func TestEmailChannelChatCreateTaskPersistsReplyContext(t *testing.T) {
-	h, _, llmConfigRepo := setupTestHandler(t)
-	ctx := context.Background()
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Email Create Task Project")
-	execTask := createTask(t, h, project.ID, "Email Chat Task", func(tk *models.Task) {
-		tk.Category = models.CategoryChat
-		tk.Status = models.StatusRunning
-		tk.AgentID = &agent.ID
-		tk.CreatedVia = models.TaskOriginEmail
-	})
-	exec := createExec(t, h, execTask.ID, agent.ID, func(ex *models.Execution) {
-		ex.Status = models.ExecRunning
-		ex.PromptSent = "email chat"
-	})
-	output := `[CREATE_TASK]
-{"title":"Email Follow-up Task","prompt":"Investigate the email request","category":"backlog"}
-[/CREATE_TASK]`
-	reply := service.ChannelReplyContext{Source: models.TaskOriginEmail, EmailFrom: "alice@example.com", EmailMessageID: "<msg-1@example.com>", EmailReferences: "<root@example.com>", EmailSubject: "Deploy question", EmailSessionKey: "email:alice@example.com:<root@example.com>"}
-
-	newOutput, _ := h.processChatTaskCreations(ctx, exec.ID, project.ID, output, []models.LLMConfig{*agent}, reply)
-	createdIDs := extractTaskIDsFromOutput(newOutput)
-	require.Len(t, createdIDs, 1)
-	created, err := h.taskRepo.GetByID(ctx, createdIDs[0])
-	require.NoError(t, err)
-	require.NotNil(t, created)
-	require.Equal(t, models.TaskOriginEmail, created.CreatedVia)
-	etc, err := h.emailTaskContextRepo.GetByTaskID(ctx, created.ID)
-	require.NoError(t, err)
-	require.NotNil(t, etc)
-	require.Equal(t, "alice@example.com", etc.EmailFrom)
-	require.Equal(t, "<msg-1@example.com>", etc.EmailMessageID)
-	require.Equal(t, "<root@example.com>", etc.EmailReferences)
-	require.Equal(t, "Deploy question", etc.EmailSubject)
-	require.Equal(t, "email:alice@example.com:<root@example.com>", etc.EmailSessionKey)
-}
-
 func TestEmailChannelSendToTaskQueuesReplyContext(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -2966,25 +3054,25 @@ func TestStartChannelTaskRun_AppliesSwarmChildFollowupRouting(t *testing.T) {
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Channel Swarm Child Direct Followup Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "Channel worker", Prompt: "Update from channel", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "Channel worker", Prompt: "Update from channel", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3038,25 +3126,25 @@ func TestStartChannelTaskRun_RoutesSwarmChildBeforeSetupFailure(t *testing.T) {
 	project := &models.Project{Name: "Channel Swarm Setup Failure Project", RepoPath: repoDir}
 	require.NoError(t, h.projectSvc.Create(ctx, project))
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "Channel worker", Prompt: "Update from channel", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "Channel worker", Prompt: "Update from channel", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3394,6 +3482,9 @@ func TestProcessStreamingResponse_AppliesPendingSteeringBeforeModelCall(t *testi
 	}
 	if strings.Contains(request.Message, "latest user instruction") || strings.Contains(request.Message, "Start the next visible assistant text") {
 		t.Fatalf("expected steering without wrapper text, got %q", request.Message)
+	}
+	if got, ok := llmcontracts.LifecycleCompletionUserMessageFromContext(request.Ctx); !ok || got != "do not change the public API" {
+		t.Fatalf("lifecycle completion user message = %q, %v; want latest steering", got, ok)
 	}
 	for _, turn := range request.ChatHistory {
 		if turn.PromptSent == "do not change the public API" {
@@ -4244,6 +4335,108 @@ func TestProcessStreamingResponse_TaskFollowupIgnoresStatusMarkerMentionInProse(
 	}
 	if updatedExec.Status != models.ExecCompleted || updatedExec.ErrorMessage != "" {
 		t.Fatalf("expected completed execution without failure metadata, got status=%s error=%q", updatedExec.Status, updatedExec.ErrorMessage)
+	}
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.Status != models.StatusCompleted {
+		t.Fatalf("expected task completed, got %s", updatedTask.Status)
+	}
+}
+
+func TestProcessStreamingResponse_TaskFollowupIgnoresIncompleteStatusControl(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "Follow-up completed.\n[STATUS: NEEDS_FOLLOWUP | incomplete control"
+	mock.TextOnly = mock.Response
+	mock.Tokens = 24
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Incomplete Followup Status Project")
+	task := createTask(t, h, project.ID, "Incomplete Followup Status Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Please continue"
+		ex.IsFollowup = true
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "Please continue",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		SystemContext:  "continue from where you left off",
+		WorkDir:        "",
+		IsTaskFollowup: true,
+	})
+
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if updatedExec.Status != models.ExecCompleted || updatedExec.ErrorMessage != "" || !strings.Contains(updatedExec.Output, "[STATUS: NEEDS_FOLLOWUP | incomplete control") {
+		t.Fatalf("expected completed execution preserving incomplete control, got status=%s error=%q output=%q", updatedExec.Status, updatedExec.ErrorMessage, updatedExec.Output)
+	}
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updatedTask.Status != models.StatusCompleted {
+		t.Fatalf("expected task completed, got %s", updatedTask.Status)
+	}
+}
+
+func TestProcessStreamingResponse_TaskFollowupIgnoresExtraStatusReasonDelimiter(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "Follow-up completed.\n[STATUS: NEEDS_FOLLOWUP | reason | extra]"
+	mock.TextOnly = mock.Response
+	mock.Tokens = 24
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Extra Delimiter Followup Status Project")
+	task := createTask(t, h, project.ID, "Extra Delimiter Followup Status Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "Please continue"
+		ex.IsFollowup = true
+	})
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "Please continue",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		SystemContext:  "continue from where you left off",
+		WorkDir:        "",
+		IsTaskFollowup: true,
+	})
+
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if updatedExec.Status != models.ExecCompleted || updatedExec.ErrorMessage != "" || !strings.Contains(updatedExec.Output, mock.Response) {
+		t.Fatalf("expected completed execution preserving malformed control, got status=%s error=%q output=%q", updatedExec.Status, updatedExec.ErrorMessage, updatedExec.Output)
 	}
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	if err != nil {
@@ -5418,25 +5611,25 @@ func TestRetryLatestFailedTaskThreadFollowup_RoutesUnroutedSwarmChildRetry(t *te
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Retry Unrouted Swarm Followup Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "Retry worker", Prompt: "Update retry path", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "Retry worker", Prompt: "Update retry path", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -5484,25 +5677,25 @@ func TestRetryLatestFailedTaskThreadFollowup_ReactivatesParentForAlreadyRoutedSw
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Retry Routed Swarm Followup Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "Retry worker", Prompt: "Update retry path", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "Retry worker", Prompt: "Update retry path", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -6036,27 +6229,6 @@ func TestFormatThreadTranscript_LargeMessageTruncation(t *testing.T) {
 	}
 }
 
-func TestViewThreadRequest_OffsetLimit(t *testing.T) {
-	// Verify ViewThreadRequest parses offset/limit from JSON
-	output := `[VIEW_TASK_CHAT]
-{"task_id": "abc123", "offset": 5, "limit": 3}
-[/VIEW_TASK_CHAT]`
-
-	requests := service.ParseViewThread(output)
-	if len(requests) != 1 {
-		t.Fatalf("expected 1 request, got %d", len(requests))
-	}
-	if requests[0].TaskID != "abc123" {
-		t.Errorf("expected task_id abc123, got %q", requests[0].TaskID)
-	}
-	if requests[0].Offset != 5 {
-		t.Errorf("expected offset 5, got %d", requests[0].Offset)
-	}
-	if requests[0].Limit != 3 {
-		t.Errorf("expected limit 3, got %d", requests[0].Limit)
-	}
-}
-
 func TestProcessStreamingResponse_MixtureSupportedAggregatorInjectsCreateTask(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
@@ -6100,7 +6272,7 @@ func TestProcessStreamingResponse_MixtureSupportedAggregatorInjectsCreateTask(t 
 
 	h.processStreamingResponse(streamingResponseParams{
 		ExecID: exec.ID, TaskID: chatHostTask.ID, Message: exec.PromptSent, Agent: *mixture,
-		ProjectID: project.ID, ProcessMarkers: false,
+		ProjectID: project.ID,
 	})
 
 	require.Equal(t, 2, providerCalls)
@@ -6115,7 +6287,7 @@ func TestProcessStreamingResponse_MixtureSupportedAggregatorInjectsCreateTask(t 
 	require.True(t, slices.ContainsFunc(tasks, func(task models.Task) bool { return task.Title == "Mixture runtime investigation" }))
 }
 
-func TestProcessStreamingResponse_MixtureUnsupportedAggregatorUsesMarkerFallback(t *testing.T) {
+func TestProcessStreamingResponse_MixtureUnsupportedAggregatorLeavesMarkerTextInert(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -6139,30 +6311,24 @@ func TestProcessStreamingResponse_MixtureUnsupportedAggregatorUsesMarkerFallback
 		ex.PromptSent = "Create an investigation task"
 	})
 	mock := testutil.NewMockLLMCaller()
-	mock.Response = "[CREATE_TASK]\n" + `{"title":"Mixture marker investigation","prompt":"Investigate the marker fallback path."}` + "\n[/CREATE_TASK]"
+	mock.Response = "[CREATE_TASK]\n" + `{"title":"Mixture marker investigation","prompt":"Verify marker-looking text remains inert."}` + "\n[/CREATE_TASK]"
 	mock.TextOnly = mock.Response
 	h.llmSvc.SetLLMCaller(mock)
 
 	h.processStreamingResponse(streamingResponseParams{
 		ExecID: exec.ID, TaskID: chatHostTask.ID, Message: exec.PromptSent, Agent: *mixture,
-		ProjectID: project.ID, ProcessMarkers: false,
+		ProjectID: project.ID,
 	})
 
 	require.Nil(t, llmcontracts.RuntimeToolsFromContext(mock.LastAgentRequest().Ctx))
 	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
-	require.True(t, slices.ContainsFunc(tasks, func(task models.Task) bool { return task.Title == "Mixture marker investigation" }))
+	require.False(t, slices.ContainsFunc(tasks, func(task models.Task) bool { return task.Title == "Mixture marker investigation" }))
 }
 
-// TestProcessStreamingResponse_PhantomCreateTaskRegression verifies the fix for
-// the phantom-create_task bug: when the caller (e.g. ChatSend) passes
-// ProcessMarkers=false and the agent's provider/auth does NOT support runtime
-// action tools (Claude CLI, Codex CLI, Ollama, test), processStreamingResponse
-// must fall back to marker processing so [CREATE_TASK] blocks emitted by the
-// model are actually executed. Without the fallback, the assistant transcript
-// would show a "create_task" action that the backend never executed — leaving
-// the task absent from the project task list.
-func TestProcessStreamingResponse_PhantomCreateTaskRegression(t *testing.T) {
+// TestProcessStreamingResponse_ActionMarkerTextIsInert verifies that a provider
+// without runtime action tools cannot mutate state by emitting marker-looking prose.
+func TestProcessStreamingResponse_ActionMarkerTextIsInert(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -6172,8 +6338,8 @@ func TestProcessStreamingResponse_PhantomCreateTaskRegression(t *testing.T) {
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Phantom Task Project")
 
-	// Mock the model's response: a normal chat turn that emits a CREATE_TASK
-	// marker, as a CLI-backed model would.
+	// Mock a normal chat turn that emits an inert [CREATE_TASK] block, as a
+	// CLI-backed model might.
 	mock := testutil.NewMockLLMCaller()
 	mock.Response = "I'll create that task for you.\n\n[CREATE_TASK]\n" +
 		`{"title": "Fix overlapping thinking and non-thinking content in task thread view", "prompt": "Investigate and fix the overlapping rendering."}` +
@@ -6195,7 +6361,6 @@ func TestProcessStreamingResponse_PhantomCreateTaskRegression(t *testing.T) {
 	})
 
 	// Simulate the call pattern used by ChatSend / APIChatMessage: a chat turn
-	// (not a task follow-up) with ProcessMarkers explicitly set to false.
 	h.processStreamingResponse(streamingResponseParams{
 		ExecID:         exec.ID,
 		TaskID:         chatHostTask.ID,
@@ -6205,33 +6370,24 @@ func TestProcessStreamingResponse_PhantomCreateTaskRegression(t *testing.T) {
 		SystemContext:  "",
 		WorkDir:        "",
 		IsTaskFollowup: false,
-		ProcessMarkers: false,
 	})
 
 	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
-	// Expect the marker-created task in addition to the CategoryChat host task.
-	var created *models.Task
-	for i := range tasks {
-		if strings.Contains(tasks[i].Title, "overlapping thinking") {
-			created = &tasks[i]
-			break
+	for _, task := range tasks {
+		if strings.Contains(task.Title, "overlapping thinking") {
+			t.Fatalf("marker-looking model prose created a task: %+v", tasks)
 		}
 	}
-	if created == nil {
-		t.Fatalf("expected a task created from the [CREATE_TASK] marker to be present in the project task list, got %+v", tasks)
-	}
 
-	// The execution output should also be rewritten to include the canonical
-	// [TASK_ID:...] confirmation marker that proves the task was persisted.
 	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
 	if err != nil {
 		t.Fatalf("get execution: %v", err)
 	}
-	if !strings.Contains(updatedExec.Output, "[TASK_ID:") {
-		t.Errorf("expected execution output to contain [TASK_ID:...] confirmation marker after marker processing, got: %s", updatedExec.Output)
+	if !strings.Contains(updatedExec.Output, "[CREATE_TASK]") || strings.Contains(updatedExec.Output, "[TASK_ID:") {
+		t.Errorf("marker-looking prose should be preserved as inert output without a persistence summary, got: %s", updatedExec.Output)
 	}
 }
 

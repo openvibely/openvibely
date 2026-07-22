@@ -22,6 +22,13 @@ type ModelWorkerStats struct {
 	MaxWorkers int
 }
 
+func workerLimitLabel(maxWorkers int) string {
+	if maxWorkers == 0 {
+		return "Unlimited"
+	}
+	return fmt.Sprintf("%d", maxWorkers)
+}
+
 templ WorkerSettings(projects []models.Project, currentProjectID string, maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
 	@layout.Base("Workers", projects, currentProjectID) {
 		@workerSettingsContent(maxWorkers, runningWorkers, totalRunning, queueSize, projectStats, modelStats)
@@ -35,6 +42,7 @@ templ WorkerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 
 templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int, queueSize int, projectStats []ProjectWorkerStats, modelStats []ModelWorkerStats) {
 	<div id="worker-settings-content">
+		@layout.PageTitle("Workers")
 		<h2 class="text-2xl font-bold mb-6">Workers</h2>
 
 		<div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
@@ -217,11 +225,11 @@ templ workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int
 }
 
 // Fragment template for global worker stats (used for polling)
-templ GlobalWorkerStats(runningWorkers int, totalRunning int, queueSize int) {
-	@globalWorkerStats(runningWorkers, totalRunning, queueSize)
+templ GlobalWorkerStats(maxWorkers int, totalRunning int, queueSize int) {
+	@globalWorkerStats(maxWorkers, totalRunning, queueSize)
 }
 
-templ globalWorkerStats(runningWorkers int, totalRunning int, queueSize int) {
+templ globalWorkerStats(maxWorkers int, totalRunning int, queueSize int) {
 	<div
 		id="global-worker-stats"
 		class="mb-4 flex gap-6 flex-wrap"
@@ -231,12 +239,12 @@ templ globalWorkerStats(runningWorkers int, totalRunning int, queueSize int) {
 	>
 		<div>
 			<span class="text-sm opacity-60">Worker Pool Size:</span>
-			<span class="ml-2 badge badge-primary">{ fmt.Sprintf("%d", runningWorkers) }</span>
+			<span class="ml-2 badge badge-primary">{ workerLimitLabel(maxWorkers) }</span>
 		</div>
 		<div>
 			<span class="text-sm opacity-60">Tasks Running:</span>
 			<span class={ "ml-2 badge", templ.KV("badge-success", totalRunning > 0), templ.KV("badge-ghost", totalRunning == 0) }>
-				{ fmt.Sprintf("%d / %d", totalRunning, runningWorkers) }
+				{ fmt.Sprintf("%d / %s", totalRunning, workerLimitLabel(maxWorkers)) }
 			</span>
 		</div>
 		<div>
@@ -266,8 +274,8 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 			</td>
 			<td class="font-medium">All Projects</td>
 			<td>
-				<span class={ "badge badge-sm", templ.KV("badge-warning", totalRunning >= runningWorkers), templ.KV("badge-success", totalRunning > 0 && totalRunning < runningWorkers), templ.KV("badge-ghost", totalRunning == 0) }>
-					{ fmt.Sprintf("%d / %d", totalRunning, runningWorkers) }
+				<span class={ "badge badge-sm", templ.KV("badge-warning", maxWorkers > 0 && totalRunning >= maxWorkers), templ.KV("badge-success", totalRunning > 0 && (maxWorkers == 0 || totalRunning < maxWorkers)), templ.KV("badge-ghost", totalRunning == 0) }>
+					{ fmt.Sprintf("%d / %s", totalRunning, workerLimitLabel(maxWorkers)) }
 				</span>
 			</td>
 			<td>
@@ -290,17 +298,20 @@ templ projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int
 						name="max_workers"
 						id="limit-input-global"
 						value={ fmt.Sprintf("%d", maxWorkers) }
-						min="1"
+						min="0"
 						max="10"
 						class="input input-bordered input-xs w-20 worker-limit-input"
-						title="1-10 = Max concurrent workers across all projects"
+						title="0 = Unlimited, 1-10 = Max concurrent workers across all projects"
 						data-project-id="global"
 					/>
 					<button type="submit" class="btn btn-xs btn-primary">Set</button>
 				</form>
+				if maxWorkers == 0 {
+					<span class="text-xs opacity-60 mt-1 block">Unlimited</span>
+				}
 			</td>
 			<td>
-				if totalRunning >= runningWorkers {
+				if maxWorkers > 0 && totalRunning >= maxWorkers {
 					<span class="badge badge-warning badge-sm">At capacity</span>
 				} else if totalRunning > 0 {
 					<span class="badge badge-success badge-sm">Active</span>

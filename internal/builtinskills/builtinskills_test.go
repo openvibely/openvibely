@@ -27,6 +27,7 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 		filepath.Join(root, "agents", "memory_curator", "skills", "recall_memory", "SKILL.md"),
 		filepath.Join(root, "skills", "SKILLS.md"),
 		filepath.Join(root, "skills", "openvibely_github_autonomous_sdlc_bootstrap", "SKILL.md"),
+		filepath.Join(root, "skills", "openvibely_native_autonomous_sdlc_bootstrap", "SKILL.md"),
 	}
 	for _, p := range mustExist {
 		if _, err := os.Stat(p); err != nil {
@@ -322,6 +323,8 @@ func TestSyncTo_MergesStandaloneSkillsIndexWithoutClobberingUserEntries(t *testi
 		"User-managed entry.",
 		"## openvibely_github_autonomous_sdlc_bootstrap",
 		"OpenVibely GitHub Autonomous SDLC Bootstrap",
+		"## openvibely_native_autonomous_sdlc_bootstrap",
+		"OpenVibely Native Autonomous SDLC Bootstrap",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("merged SKILLS.md missing %q:\n%s", want, got)
@@ -335,8 +338,8 @@ func TestSyncTo_MergesStandaloneSkillsIndexWithoutClobberingUserEntries(t *testi
 	if err != nil {
 		t.Fatalf("read merged SKILLS.md after second sync: %v", err)
 	}
-	if strings.Count(string(gotAgainBytes), "## openvibely_github_autonomous_sdlc_bootstrap") != 1 {
-		t.Fatalf("built-in bootstrap entry should be merged idempotently:\n%s", string(gotAgainBytes))
+	if strings.Count(string(gotAgainBytes), "## openvibely_github_autonomous_sdlc_bootstrap") != 1 || strings.Count(string(gotAgainBytes), "## openvibely_native_autonomous_sdlc_bootstrap") != 1 {
+		t.Fatalf("built-in bootstrap entries should be merged idempotently:\n%s", string(gotAgainBytes))
 	}
 }
 
@@ -357,12 +360,22 @@ func TestSyncTo_InstallsSystemHookSkillsButKeepsLifecycleHookSkillsOutOfRoutable
 		t.Fatalf("BuildCatalog: %v", err)
 	}
 	entries := cat.Entries()
-	if len(entries) != 1 || entries[0].Handle != "openvibely_github_autonomous_sdlc_bootstrap" || entries[0].Source != agentskills.SourceGlobal {
-		t.Fatalf("expected only reusable global bootstrap skill in standalone catalog, got: %+v", entries)
+	if len(entries) != 2 {
+		t.Fatalf("expected two reusable global bootstrap skills, got: %+v", entries)
+	}
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		if entry.Source != agentskills.SourceGlobal {
+			t.Fatalf("bootstrap skill must be global: %+v", entry)
+		}
+		seen[entry.Handle] = true
+	}
+	if !seen["openvibely_github_autonomous_sdlc_bootstrap"] || !seen["openvibely_native_autonomous_sdlc_bootstrap"] {
+		t.Fatalf("expected GitHub and native bootstrap skills, got: %+v", entries)
 	}
 
 	block := agentskills.RenderAvailableSkillsMarkdown(root, "")
-	if !strings.Contains(block, "openvibely_github_autonomous_sdlc_bootstrap") || strings.Contains(block, "skill_curator/route_task") {
+	if !strings.Contains(block, "openvibely_github_autonomous_sdlc_bootstrap") || !strings.Contains(block, "openvibely_native_autonomous_sdlc_bootstrap") || strings.Contains(block, "skill_curator/route_task") {
 		t.Fatalf("RenderAvailableSkillsMarkdown should show reusable standalone skill but not lifecycle hook skills:\n%s", block)
 	}
 

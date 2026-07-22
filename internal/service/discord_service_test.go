@@ -36,6 +36,36 @@ func newDiscordServiceForTest(t *testing.T) (*DiscordService, *sql.DB, *reposito
 	return svc, db, settingsRepo, projectRepo, taskRepo, discordAuthRepo, discordTaskContextRepo
 }
 
+func TestDiscordService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
+	svc, db, _, projectRepo, taskRepo, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Discord Notification Lifecycle"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	caller := &models.Task{ProjectID: project.ID, Title: "Discord chat", Prompt: "process", Category: models.CategoryChat, Status: models.StatusPending, Priority: 2}
+	if err := taskRepo.Create(ctx, caller); err != nil {
+		t.Fatal(err)
+	}
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	svc.SetAlertService(alertSvc)
+	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Discord suggestion", Severity: models.SeverityInfo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := alertSvc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatal(err)
+	}
+	rt := svc.buildDiscordActionToolRuntimeForTask(project.ID, caller.ID, discordActionContext{ChannelID: "channel", UserID: "user"}, nil)
+	output, handled, isErr, err := rt.Executor(ctx, "claim_alert", json.RawMessage(`{"alert_id":"`+alert.ID+`"}`))
+	if err != nil || !handled || isErr {
+		t.Fatalf("claim_alert failed: output=%s handled=%v isErr=%v err=%v", output, handled, isErr, err)
+	}
+	if !strings.Contains(output, caller.ID) {
+		t.Fatalf("claim output %q does not contain persisted caller task %s", output, caller.ID)
+	}
+}
+
 func TestDiscordService_GetConnectionStatusRequiresRunningGateway(t *testing.T) {
 	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
@@ -138,7 +168,7 @@ func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
 	svc.SetAgentRepo(repository.NewAgentRepo(db))
 	svc.SetAlertService(NewAlertService(repository.NewAlertRepo(db), nil))
 
-	rt := svc.buildDiscordActionToolRuntime(project.ID, discordMarkerContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}, nil)
+	rt := svc.buildDiscordActionToolRuntime(project.ID, discordActionContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}, nil)
 	if rt == nil {
 		t.Fatal("expected runtime tools")
 	}
@@ -153,8 +183,8 @@ func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
 		}
 	}
 
-	markerCtx := discordMarkerContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}
-	handlers := svc.discordActionHandlers(project.ID, markerCtx, nil)
+	actionCtx := discordActionContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}
+	handlers := svc.discordActionHandlers(project.ID, actionCtx, nil)
 	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord, true, handlers); err != nil {
 		t.Fatalf("discord handler coverage: %v", err)
 	}
@@ -209,7 +239,7 @@ func TestDiscordActionHandlersSendMessageUsesChannelRouter(t *testing.T) {
 		return "discord-msg-2", nil
 	}
 
-	handlers := svc.discordActionHandlers(project.ID, discordMarkerContext{UserID: "discord-user"}, nil)
+	handlers := svc.discordActionHandlers(project.ID, discordActionContext{UserID: "discord-user"}, nil)
 	out, err := handlers["send_message"](ctx, []byte(`{"target":"discord:#ops","message":"hello ops"}`))
 	if err != nil {
 		t.Fatalf("send_message handler failed: %v", err)
@@ -344,7 +374,7 @@ func TestDiscordSendToTaskUsesConfiguredChannelTaskRunner(t *testing.T) {
 		gotReq = req
 	})
 
-	handlers := svc.discordActionHandlers(project.ID, discordMarkerContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}, nil)
+	handlers := svc.discordActionHandlers(project.ID, discordActionContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}, nil)
 	result, err := handlers["send_to_task"](ctx, []byte(`{"task_id":"`+task.ID+`","message":"continue from discord"}`))
 	if err != nil {
 		t.Fatalf("send_to_task: %v", err)
@@ -396,7 +426,7 @@ func TestDiscordSwitchProjectPersistsForSubsequentMessages(t *testing.T) {
 	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, repository.NewAttachmentRepo(db))
 	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
 
-	handlers := svc.discordActionHandlers(defaultProject.ID, discordMarkerContext{ChannelID: "chan-1", MessageID: "msg-1", UserID: "1518288288572641398"}, nil)
+	handlers := svc.discordActionHandlers(defaultProject.ID, discordActionContext{ChannelID: "chan-1", MessageID: "msg-1", UserID: "1518288288572641398"}, nil)
 	result, err := handlers["switch_project"](ctx, []byte(`{"project":"openvibely"}`))
 	if err != nil {
 		t.Fatalf("switch project: %v", err)

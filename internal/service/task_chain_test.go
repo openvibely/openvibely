@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -671,6 +672,51 @@ func TestCleanOutputForChain(t *testing.T) {
 			expected: "Feature proposals",
 		},
 		{
+			name:     "preserves status prose",
+			input:    "Explain [STATUS: SUCCESS] as literal syntax before continuing.",
+			expected: "Explain [STATUS: SUCCESS] as literal syntax before continuing.",
+		},
+		{
+			name:     "preserves non-final standalone status line",
+			input:    "[STATUS: SUCCESS]\nMore child context follows.",
+			expected: "[STATUS: SUCCESS]\nMore child context follows.",
+		},
+		{
+			name:     "preserves status followed by thinking",
+			input:    "[STATUS: SUCCESS]\n[Thinking]\nLater internal text\n[/Thinking]",
+			expected: "[STATUS: SUCCESS]",
+		},
+		{
+			name:     "strips only final status marker",
+			input:    "[STATUS: SUCCESS]\nMore child context follows.\n[STATUS: FAILED | actual failure]",
+			expected: "[STATUS: SUCCESS]\nMore child context follows.",
+		},
+		{
+			name:     "preserves failed status with extra pipe delimiter",
+			input:    "Child context.\n[STATUS: FAILED | reason | extra]",
+			expected: "Child context.\n[STATUS: FAILED | reason | extra]",
+		},
+		{
+			name:     "preserves followup status with extra pipe delimiter",
+			input:    "Child context.\n[STATUS: NEEDS_FOLLOWUP | reason | extra]",
+			expected: "Child context.\n[STATUS: NEEDS_FOLLOWUP | reason | extra]",
+		},
+		{
+			name:     "preserves status behind mismatched fence character",
+			input:    "Example:\n```text\n~~~\n[STATUS: FAILED | still fenced]",
+			expected: "Example:\n```text\n~~~\n[STATUS: FAILED | still fenced]",
+		},
+		{
+			name:     "preserves status behind shorter fence delimiter",
+			input:    "Example:\n`````text\n```\n[STATUS: NEEDS_FOLLOWUP | still fenced]",
+			expected: "Example:\n`````text\n```\n[STATUS: NEEDS_FOLLOWUP | still fenced]",
+		},
+		{
+			name:     "strips real status after matching long fence delimiter",
+			input:    "Example:\n`````text\n```\n`````\n[STATUS: FAILED | real failure]",
+			expected: "Example:\n`````text\n```\n`````",
+		},
+		{
 			name:     "strips thinking block",
 			input:    "\n[Thinking]\nI need to analyze the project...\n[/Thinking]\nHere are the features: A, B, C",
 			expected: "Here are the features: A, B, C",
@@ -679,6 +725,56 @@ func TestCleanOutputForChain(t *testing.T) {
 			name:     "strips multiple thinking blocks",
 			input:    "\n[Thinking]\nFirst thought\n[/Thinking]\nSome text\n[Thinking]\nSecond thought\n[/Thinking]\nFinal output",
 			expected: "Some text\nFinal output",
+		},
+		{
+			name:     "preserves inline thinking example",
+			input:    "Literal `[Thinking]example[/Thinking]`.\n[Thinking]\nreal thought\n[/Thinking]\nChild context.",
+			expected: "Literal `[Thinking]example[/Thinking]`.\nChild context.",
+		},
+		{
+			name:     "preserves fenced thinking example",
+			input:    "Example:\n```text\n[Thinking]\nfenced thought\n[/Thinking]\n```\n[Thinking]\nreal thought\n[/Thinking]\nChild context.",
+			expected: "Example:\n```text\n[Thinking]\nfenced thought\n[/Thinking]\n```\nChild context.",
+		},
+		{
+			name:     "preserves coded tool examples and strips real controls",
+			input:    "Examples: `[Using tool: bash]` and `[Tool bash done: output]`.\n```text\n[Tool read_file error]\nmissing\n[/Tool]\n```\n[Using tool: bash]\n[Tool bash done: actual]\nChild context.",
+			expected: "Examples: `[Using tool: bash]` and `[Tool bash done: output]`.\n```text\n[Tool read_file error]\nmissing\n[/Tool]\n```\nChild context.",
+		},
+		{
+			name:     "preserves coded same-line tool result and strips later real blocks",
+			input:    "Example `[Tool grep_search done]coded[/Tool]`.\n```text\n[Tool bash error]fenced[/Tool]\n```\n[Tool grep_search done]actual match[/Tool]\n[Tool bash error]command failed[/Tool]\nChild context.",
+			expected: "Example `[Tool grep_search done]coded[/Tool]`.\n```text\n[Tool bash error]fenced[/Tool]\n```\nChild context.",
+		},
+		{
+			name:     "protected partial same-line tool result cannot mask later real block",
+			input:    "Partial `[Tool grep_search done]coded`.\n[Tool grep_search done]actual match[/Tool]\nChild context.",
+			expected: "Partial `[Tool grep_search done]coded`.\nChild context.",
+		},
+		{
+			name:     "preserves task result metadata for child context",
+			input:    "Actual [TASK_ID:real-create] and [TASK_EDITED:real-edit].\nExamples: `[TASK_ID:inline]` and `[TASK_EDITED:inline-edit]`.\n```text\n[TASK_ID:fenced]\n[TASK_EDITED:fenced-edit]\n```",
+			expected: "Actual [TASK_ID:real-create] and [TASK_EDITED:real-edit].\nExamples: `[TASK_ID:inline]` and `[TASK_EDITED:inline-edit]`.\n```text\n[TASK_ID:fenced]\n[TASK_EDITED:fenced-edit]\n```",
+		},
+		{
+			name:     "preserves multiline inline code and strips later real controls",
+			input:    "`[Thinking]coded\n[/Thinking]\n[Using tool: bash]\n[Tool bash done: coded]\n[TASK_ID:coded]`\n[Thinking]\nreal\n[/Thinking]\n[Using tool: bash]\n[Tool bash done: real]\nVisible child context.\n[STATUS: SUCCESS]",
+			expected: "`[Thinking]coded\n[/Thinking]\n[Using tool: bash]\n[Tool bash done: coded]\n[TASK_ID:coded]`\nVisible child context.",
+		},
+		{
+			name:     "preserves later multiline span after unmatched delimiter",
+			input:    "Unmatched `` prefix; `[Thinking]coded\n[/Thinking]\n[Using tool: bash]\n[Tool bash done: coded]\n[TASK_ID:coded]`\n[Thinking]\nreal\n[/Thinking]\n[Using tool: bash]\n[Tool bash done: real]\nVisible child context.\n[STATUS: SUCCESS]",
+			expected: "Unmatched `` prefix; `[Thinking]coded\n[/Thinking]\n[Using tool: bash]\n[Tool bash done: coded]\n[TASK_ID:coded]`\nVisible child context.",
+		},
+		{
+			name:     "escaped backticks do not protect real controls",
+			input:    `Escaped \` + "`" + `[Using tool: bash] escaped \` + "`" + "\nVisible child context.\n[STATUS: SUCCESS]",
+			expected: "Escaped \\` escaped \\`\nVisible child context.",
+		},
+		{
+			name:     "strips bare CR controls after valid long fence closer",
+			input:    "`````text\r[Thinking]coded[/Thinking]\r```\r``````\t \r[Thinking]\rreal thought\r[/Thinking]\r[Using tool: bash]\r[Tool bash done]\ractual\r[/Tool]\rVisible child context.\r[STATUS: SUCCESS]",
+			expected: "`````text\r[Thinking]coded[/Thinking]\r```\r``````\t \rVisible child context.",
 		},
 		{
 			name:     "strips tool markers",
@@ -704,6 +800,34 @@ func TestCleanOutputForChain(t *testing.T) {
 				t.Errorf("cleanOutputForChain()\ngot:  %q\nwant: %q", got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestCleanOutputForChain_PreservesCodedAliasesAndCleansRealAliases(t *testing.T) {
+	codedTool := `[Using tool: bash"> <parameter name="command">echo coded</parameter> </invoke>`
+	multilineThinking := "`<thinking>multiline\nthought</thinking>`"
+	multilineTool := "``[Using tool: bash\">\n<parameter name=\"command\">echo multiline</parameter>\n</invoke>``"
+	input := "Inline `<thinking>coded</thinking>` and `" + codedTool + "`.\n" + multilineThinking + "\n" + multilineTool + "\n" +
+		"```text\n<thinking>fenced</thinking>\n" + codedTool + "\n```\n" +
+		"~~~text\r<thinking>bare CR fenced</thinking>\r~~~\r" +
+		"<thinking>real internal</thinking>\nVisible child context.\n" +
+		`[Using tool: bash">` + "\n" + `<parameter name="command">echo real</parameter>` + "\n" + `</invoke>`
+
+	got := cleanOutputForChain(input)
+	for _, literal := range []string{
+		"`<thinking>coded</thinking>`",
+		"`" + codedTool + "`",
+		multilineThinking,
+		multilineTool,
+		"```text\n<thinking>fenced</thinking>\n" + codedTool + "\n```",
+		"~~~text\r<thinking>bare CR fenced</thinking>\r~~~",
+	} {
+		if !strings.Contains(got, literal) {
+			t.Fatalf("coded alias changed in workflow handoff %q:\n%q", literal, got)
+		}
+	}
+	if strings.Contains(got, "real internal") || strings.Contains(got, "echo real") || !strings.Contains(got, "Visible child context.") {
+		t.Fatalf("real aliases were not cleaned in workflow handoff:\n%q", got)
 	}
 }
 

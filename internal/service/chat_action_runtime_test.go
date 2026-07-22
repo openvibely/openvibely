@@ -6,11 +6,272 @@ import (
 	"strings"
 	"testing"
 
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Native SDLC"}
+	foreign := &models.Project{Name: "Foreign SDLC"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	caller := &models.Task{ProjectID: project.ID, Title: "Scheduled notification inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+
+	createInput := json.RawMessage(`{"project_id":"` + project.ID + `","type":"product_suggestion","title":"Add approval inbox","message":"Review this","body":"Detailed implementation context","metadata":{"component":"alerts"},"idempotency_key":"suggestion:approval-inbox"}`)
+	createdJSON, err := handlers["create_notification"](ctx, createInput)
+	require.NoError(t, err)
+	var created struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+	require.NotEmpty(t, created.Notification.ID)
+	require.Equal(t, project.ID, created.Notification.ProjectID)
+	require.Equal(t, models.AlertDecisionPending, created.Notification.DecisionState)
+	require.Equal(t, caller.ID, *created.Notification.SourceTaskID)
+
+	duplicateJSON, err := handlers["create_notification"](ctx, createInput)
+	require.NoError(t, err)
+	var duplicate struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(duplicateJSON), &duplicate))
+	require.Equal(t, created.Notification.ID, duplicate.Notification.ID)
+
+	_, err = handlers["list_alerts"](ctx, json.RawMessage(`{"project_id":"`+foreign.ID+`"}`))
+	require.ErrorContains(t, err, "outside the caller's authorized project")
+	listJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"pending","limit":1,"offset":0}`))
+	require.NoError(t, err)
+	require.Contains(t, listJSON, created.Notification.ID)
+	require.Contains(t, listJSON, `"next_offset":1`)
+	detailJSON, err := handlers["get_alert"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, detailJSON, "Detailed implementation context")
+
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
+	approvedJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"approved","processing_state":"unclaimed"}`))
+	require.NoError(t, err)
+	require.Contains(t, approvedJSON, created.Notification.ID)
+	claimJSON, err := handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`","lease_seconds":300}`))
+	require.NoError(t, err)
+	require.Contains(t, claimJSON, `"processing_state":"claimed"`)
+
+	createTaskInput := json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","title":"Implement approval inbox","prompt":"Implement the approved suggestion and leave merge/release to human review.","priority":3,"tag":"feature"}`)
+	taskJSON, err := handlers["create_alert_implementation_task"](ctx, createTaskInput)
+	require.NoError(t, err)
+	var linked struct {
+		ImplementationTaskID string `json:"implementation_task_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(taskJSON), &linked))
+	require.NotEmpty(t, linked.ImplementationTaskID)
+	secondTaskJSON, err := handlers["create_alert_implementation_task"](ctx, createTaskInput)
+	require.NoError(t, err)
+	var linkedAgain struct {
+		ImplementationTaskID string `json:"implementation_task_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(secondTaskJSON), &linkedAgain))
+	require.Equal(t, linked.ImplementationTaskID, linkedAgain.ImplementationTaskID)
+
+	completeJSON, err := handlers["complete_alert_processing"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, completeJSON, `"processing_state":"completed"`)
+	final, err := alertSvc.GetByID(ctx, project.ID, created.Notification.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertProcessingCompleted, final.ProcessingState)
+	require.Equal(t, linked.ImplementationTaskID, *final.ImplementationTaskID)
+}
+
+func TestAlertRuntimeCreateAlertPreservesOperationalContract(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Operational Alerts"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Source task", Prompt: "run", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: task.ID, AlertSvc: alertSvc, TaskRepo: taskRepo})
+
+	result, err := handlers["create_alert"](ctx, json.RawMessage(`{"title":"Legacy operational alert","task_id":"`+task.ID+`"}`))
+	require.NoError(t, err)
+	var payload struct {
+		Alert models.Alert `json:"alert"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(result), &payload))
+	require.NotEmpty(t, payload.Alert.ID)
+	require.Equal(t, models.AlertCustom, payload.Alert.Type)
+	require.Equal(t, models.AlertDecisionNotRequired, payload.Alert.DecisionState)
+	require.Equal(t, models.AlertProcessingNotApplicable, payload.Alert.ProcessingState)
+	require.NotNil(t, payload.Alert.TaskID)
+	require.Equal(t, task.ID, *payload.Alert.TaskID)
+
+	foreignProject := &models.Project{Name: "Foreign Operational Alerts"}
+	require.NoError(t, projectRepo.Create(ctx, foreignProject))
+	foreignTask := &models.Task{ProjectID: foreignProject.ID, Title: "Foreign source", Prompt: "run", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, foreignTask))
+	_, err = handlers["create_alert"](ctx, json.RawMessage(`{"title":"Cross-project reference","task_id":"`+foreignTask.ID+`"}`))
+	require.ErrorContains(t, err, "outside the caller's authorized project context")
+}
+
+func TestAlertRuntimeFiltersPaginationAuthorizationAndRecovery(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Runtime Project"}
+	foreign := &models.Project{Name: "Foreign Runtime Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	caller := &models.Task{ProjectID: project.ID, Title: "Scanner", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	foreignCaller := &models.Task{ProjectID: foreign.ID, Title: "Foreign scanner", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	require.NoError(t, taskRepo.Create(ctx, foreignCaller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+	foreignHandlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: foreign.ID, CallerTaskID: foreignCaller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+
+	create := func(title, notificationType, source string) models.Alert {
+		out, err := handlers["create_notification"](ctx, json.RawMessage(`{"type":"`+notificationType+`","title":"`+title+`","source":"`+source+`"}`))
+		require.NoError(t, err)
+		var payload struct {
+			Notification models.Alert `json:"notification"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &payload))
+		return payload.Notification
+	}
+	first := create("First", "product", "agent-a")
+	second := create("Second", "security", "agent-b")
+	third := create("Third", "product", "agent-a")
+	require.NoError(t, alertSvc.MarkRead(ctx, project.ID, first.ID))
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, second.ID, models.AlertDecisionRejected))
+
+	pageOne, err := handlers["list_alerts"](ctx, json.RawMessage(`{"limit":2,"offset":0}`))
+	require.NoError(t, err)
+	pageTwo, err := handlers["list_alerts"](ctx, json.RawMessage(`{"limit":2,"offset":2}`))
+	require.NoError(t, err)
+	require.NotEqual(t, pageOne, pageTwo)
+	for _, id := range []string{first.ID, second.ID, third.ID} {
+		require.Equal(t, 1, strings.Count(pageOne+pageTwo, id), "notification %s should appear in exactly one stable page", id)
+	}
+	repeated, err := handlers["list_alerts"](ctx, json.RawMessage(`{"limit":2,"offset":0}`))
+	require.NoError(t, err)
+	require.Equal(t, pageOne, repeated)
+
+	filtered, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"pending","processing_state":"unclaimed","type":"product","source":"agent-a","read":false,"implementation_task_linked":false}`))
+	require.NoError(t, err)
+	require.Contains(t, filtered, third.ID)
+	require.NotContains(t, filtered, first.ID)
+	require.NotContains(t, filtered, second.ID)
+
+	for name, input := range map[string]json.RawMessage{
+		"get_alert":                        json.RawMessage(`{"alert_id":"` + third.ID + `"}`),
+		"claim_alert":                      json.RawMessage(`{"alert_id":"` + third.ID + `"}`),
+		"create_alert_implementation_task": json.RawMessage(`{"alert_id":"` + third.ID + `","title":"x","prompt":"y"}`),
+		"link_alert_implementation_task":   json.RawMessage(`{"alert_id":"` + third.ID + `","task_id":"` + foreignCaller.ID + `"}`),
+		"complete_alert_processing":        json.RawMessage(`{"alert_id":"` + third.ID + `"}`),
+		"fail_alert_processing":            json.RawMessage(`{"alert_id":"` + third.ID + `","message":"failed"}`),
+		"release_alert_claim":              json.RawMessage(`{"alert_id":"` + third.ID + `"}`),
+	} {
+		_, err := foreignHandlers[name](ctx, input)
+		require.Error(t, err, "%s must reject a foreign-project notification", name)
+	}
+
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, third.ID, models.AlertDecisionApproved))
+	_, err = handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+third.ID+`"}`))
+	require.NoError(t, err)
+	_, err = handlers["fail_alert_processing"](ctx, json.RawMessage(`{"alert_id":"`+third.ID+`","message":"temporary"}`))
+	require.NoError(t, err)
+	_, err = handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+third.ID+`"}`))
+	require.NoError(t, err)
+	_, err = handlers["release_alert_claim"](ctx, json.RawMessage(`{"alert_id":"`+third.ID+`"}`))
+	require.NoError(t, err)
+
+	_, err = handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+third.ID+`"}`))
+	require.NoError(t, err)
+	implementation := &models.Task{ProjectID: project.ID, Title: "Existing implementation", Prompt: "implement", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, implementation))
+	_, err = handlers["link_alert_implementation_task"](ctx, json.RawMessage(`{"alert_id":"`+third.ID+`","task_id":"`+implementation.ID+`"}`))
+	require.NoError(t, err)
+	_, err = handlers["complete_alert_processing"](ctx, json.RawMessage(`{"alert_id":"`+third.ID+`"}`))
+	require.NoError(t, err)
+	final, err := alertSvc.GetByID(ctx, project.ID, third.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertProcessingCompleted, final.ProcessingState)
+	require.Equal(t, implementation.ID, *final.ImplementationTaskID)
+}
+
+func TestRunChannelChatFirstTurnBuildsRuntimeAfterPersistingCallerTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	project := &models.Project{Name: "Channel Runtime Identity"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent := &models.LLMConfig{Name: "Channel Agent", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{Title: "Channel chat"}
+	var factoryTaskID string
+	var runReq ChannelChatRunRequest
+
+	handled, _ := runChannelChatFirstTurn(ctx, channelChatIngressFirstTurnOptions{
+		Platform:  "test",
+		ProjectID: project.ID,
+		Message:   "review alerts",
+		Source:    models.TaskOriginTelegram,
+		Task:      task,
+		Agent:     agent,
+		TaskRepo:  taskRepo,
+		ExecRepo:  execRepo,
+		RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
+			factoryTaskID = taskID
+			return &llmcontracts.RuntimeTools{}
+		},
+		ChannelChatRunner: func(_ context.Context, req ChannelChatRunRequest) { runReq = req },
+	})
+	require.True(t, handled)
+	require.NotEmpty(t, task.ID)
+	require.Equal(t, task.ID, factoryTaskID)
+	require.Equal(t, task.ID, runReq.TaskID)
+	require.NotNil(t, runReq.RuntimeTools)
+}
+
+func TestTaskControlRuntimeExposesCreateNotificationForScheduledTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Scheduled Notification Runtime"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Suggestion producer", Prompt: "inspect", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	svc := &LLMService{taskRepo: taskRepo, alertSvc: alertSvc}
+
+	runtime := svc.taskControlRuntimeTools(*task)
+	require.NotNil(t, runtime)
+	require.True(t, runtime.HasDefinition("create_notification"))
+	output, handled, isErr, err := runtime.Executor(ctx, "create_notification", json.RawMessage(`{"type":"maintenance_suggestion","title":"Review maintenance"}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, task.ID)
+	alerts, err := alertSvc.ListFiltered(ctx, project.ID, models.AlertListFilter{DecisionState: models.AlertDecisionPending})
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	require.Equal(t, task.ID, *alerts[0].SourceTaskID)
+}
 
 func TestRunChannelTaskThreadSendStartsDirectFollowupWithReplyContext(t *testing.T) {
 	db := testutil.NewTestDB(t)

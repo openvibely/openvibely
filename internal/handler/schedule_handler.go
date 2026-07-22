@@ -15,6 +15,27 @@ import (
 // GlobalCapacityResponse contains global worker capacity information.
 // swagger:model
 
+func (h *Handler) scheduleAgentAssignmentFromForm(c echo.Context, taskID string) (bool, *string, error) {
+	if c.FormValue("schedule_agent_definition_present") == "" {
+		return false, nil, nil
+	}
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		return false, nil, err
+	}
+	if task == nil {
+		return false, nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if projectID := c.QueryParam("project_id"); projectID != "" && projectID != task.ProjectID {
+		return false, nil, echo.NewHTTPError(http.StatusBadRequest, "task does not belong to the active project")
+	}
+	agentDefinitionID, err := h.resolvePrimaryAgentDefinition(c.Request().Context(), task.ProjectID, c.FormValue("agent_definition_id"))
+	if err != nil {
+		return false, nil, err
+	}
+	return true, agentDefinitionID, nil
+}
+
 func (h *Handler) CreateSchedule(c echo.Context) error {
 	taskID := c.Param("taskId")
 	isHTMX := isHTMX(c)
@@ -48,6 +69,11 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 		s.RepeatType = models.RepeatOnce
 	}
 
+	agentAssignmentPresent, agentDefinitionID, err := h.scheduleAgentAssignmentFromForm(c, taskID)
+	if err != nil {
+		return err
+	}
+
 	// For recurring schedules with a past RunAt, keep NextRun = RunAt so the
 	// scheduler picks it up immediately on its next tick (within 5 seconds).
 	// The scheduler will execute the task once for the missed occurrence and
@@ -59,6 +85,12 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	if err := h.scheduleRepo.Create(c.Request().Context(), s); err != nil {
 		applog.Infof("[handler] CreateSchedule error: %v", err)
 		return err
+	}
+	if agentAssignmentPresent {
+		if err := h.taskRepo.UpdateAgentDefinition(c.Request().Context(), taskID, agentDefinitionID); err != nil {
+			applog.Infof("[handler] CreateSchedule primary agent update error: %v", err)
+			return err
+		}
 	}
 	applog.Infof("[handler] CreateSchedule success id=%s next_run=%v", s.ID, s.NextRun)
 
@@ -77,10 +109,7 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		var adefs []models.Agent
-		if h.agentRepo != nil {
-			adefs, _ = h.agentRepo.List(c.Request().Context())
-		}
+		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 		var rc []models.ReviewComment
 		if h.reviewCommentRepo != nil {
 			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
@@ -89,7 +118,17 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "schedules", rc))
 	}
 
-	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
+	projectID := c.QueryParam("project_id")
+	if projectID == "" && h.taskSvc != nil {
+		if task, _ := h.taskSvc.GetByID(c.Request().Context(), taskID); task != nil {
+			projectID = task.ProjectID
+		}
+	}
+	redirectURL := "/tasks/" + taskID + "?tab=schedules"
+	if projectID != "" {
+		redirectURL += "&project_id=" + projectID
+	}
+	return c.Redirect(http.StatusSeeOther, redirectURL)
 }
 
 func (h *Handler) UpdateSchedule(c echo.Context) error {
@@ -109,6 +148,11 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	if schedule == nil {
 		applog.Infof("[handler] UpdateSchedule schedule not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
+	}
+
+	agentAssignmentPresent, agentDefinitionID, err := h.scheduleAgentAssignmentFromForm(c, schedule.TaskID)
+	if err != nil {
+		return err
 	}
 
 	// Parse the time in local timezone since the browser sends datetime-local values,
@@ -146,6 +190,12 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 		applog.Infof("[handler] UpdateSchedule error: %v", err)
 		return err
 	}
+	if agentAssignmentPresent {
+		if err := h.taskRepo.UpdateAgentDefinition(c.Request().Context(), schedule.TaskID, agentDefinitionID); err != nil {
+			applog.Infof("[handler] UpdateSchedule primary agent update error: %v", err)
+			return err
+		}
+	}
 	applog.Infof("[handler] UpdateSchedule success id=%s next_run=%v", schedule.ID, schedule.NextRun)
 
 	// Reset task status to pending so the scheduler can pick it up.
@@ -176,10 +226,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), schedule.TaskID)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), schedule.TaskID)
-		var adefs []models.Agent
-		if h.agentRepo != nil {
-			adefs, _ = h.agentRepo.List(c.Request().Context())
-		}
+		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 		var rc []models.ReviewComment
 		if h.reviewCommentRepo != nil {
 			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), schedule.TaskID)
@@ -188,7 +235,17 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), schedule.TaskID), executions, schedules, agents, adefs, attachments, "schedules", rc))
 	}
 
-	return c.Redirect(http.StatusSeeOther, "/")
+	projectID := c.QueryParam("project_id")
+	if projectID == "" && h.taskSvc != nil {
+		if task, _ := h.taskSvc.GetByID(c.Request().Context(), schedule.TaskID); task != nil {
+			projectID = task.ProjectID
+		}
+	}
+	redirectURL := "/tasks/" + schedule.TaskID + "?tab=schedules"
+	if projectID != "" {
+		redirectURL += "&project_id=" + projectID
+	}
+	return c.Redirect(http.StatusSeeOther, redirectURL)
 }
 
 // ToggleScheduleEnabled pauses or resumes a schedule.
@@ -244,10 +301,7 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 		schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
 		agents, _ := h.llmConfigRepo.List(ctx)
 		attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
-		var adefs []models.Agent
-		if h.agentRepo != nil {
-			adefs, _ = h.agentRepo.List(ctx)
-		}
+		adefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
 		var rc []models.ReviewComment
 		if h.reviewCommentRepo != nil {
 			rc, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
@@ -390,8 +444,8 @@ func (h *Handler) WorkerSettings(c echo.Context) error {
 
 func (h *Handler) UpdateWorkerSettings(c echo.Context) error {
 	maxWorkers, err := strconv.Atoi(c.FormValue("max_workers"))
-	if err != nil || maxWorkers < 1 {
-		maxWorkers = 1
+	if err != nil || maxWorkers < 0 {
+		maxWorkers = 0
 	}
 	if maxWorkers > 10 {
 		maxWorkers = 10
@@ -699,10 +753,13 @@ func (h *Handler) GetGlobalCapacity(c echo.Context) error {
 	maxWorkers := h.workerSvc.NumWorkers()
 	totalRunning := h.workerSvc.TotalRunning()
 	queueSize := h.workerSvc.QueueSize()
-	hasCapacity := totalRunning < maxWorkers
-	availableSlots := maxWorkers - totalRunning
-	if availableSlots < 0 {
-		availableSlots = 0
+	hasCapacity := maxWorkers <= 0 || totalRunning < maxWorkers
+	availableSlots := 0
+	if maxWorkers > 0 {
+		availableSlots = maxWorkers - totalRunning
+		if availableSlots < 0 {
+			availableSlots = 0
+		}
 	}
 
 	resp := GlobalCapacityResponse{

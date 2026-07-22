@@ -535,6 +535,93 @@ func (r *TaskRepo) SearchByTitle(ctx context.Context, projectID string, titleQue
 	return tasks, rows.Err()
 }
 
+// TaskDiscoveryFilter bounds a read-only, current-project task discovery query.
+type TaskDiscoveryFilter struct {
+	// Query is an optional partial (case-insensitive substring) title match.
+	Query string
+	// Category optionally restricts results to a single non-chat category.
+	Category string
+	// Status optionally restricts results to a single task status.
+	Status string
+	// Limit caps the number of returned rows. Callers should clamp before use.
+	Limit int
+	// Offset skips the first N rows for pagination.
+	Offset int
+}
+
+// ListTasksForDiscovery returns a bounded, deterministic page of non-chat tasks for
+// a single project, plus the total number of matching rows for pagination. It never
+// crosses project boundaries and always excludes internal chat rows (CategoryChat).
+//
+// Ordering is deterministic: when a title query is supplied, results are ranked by
+// relevance (exact, then prefix, then contains) and then by updated_at DESC with a
+// task id tiebreaker; without a query, results are ordered by updated_at DESC, id ASC.
+func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, filter TaskDiscoveryFilter) ([]models.Task, int, error) {
+	where := `project_id = ? AND category != 'chat'`
+	args := []any{projectID}
+
+	query := strings.TrimSpace(filter.Query)
+	if query != "" {
+		where += ` AND title LIKE ?`
+		args = append(args, "%"+query+"%")
+	}
+	if cat := strings.TrimSpace(filter.Category); cat != "" {
+		where += ` AND category = ?`
+		args = append(args, cat)
+	}
+	if status := strings.TrimSpace(filter.Status); status != "" {
+		where += ` AND status = ?`
+		args = append(args, status)
+	}
+
+	var total int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting tasks for discovery: %w", err)
+	}
+
+	orderClause := ` ORDER BY updated_at DESC, id ASC`
+	selectArgs := append([]any{}, args...)
+	if query != "" {
+		orderClause = ` ORDER BY
+			   CASE WHEN LOWER(title) = LOWER(?) THEN 0
+			        WHEN LOWER(title) LIKE LOWER(? || '%') THEN 1
+			        ELSE 2 END,
+			   updated_at DESC, id ASC`
+		selectArgs = append(selectArgs, query, query)
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	selectArgs = append(selectArgs, limit, offset)
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+taskSelectColumns+`
+		 FROM tasks WHERE `+where+orderClause+`
+		 LIMIT ? OFFSET ?`,
+		selectArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing tasks for discovery: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []models.Task
+	for rows.Next() {
+		var t models.Task
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			return nil, 0, fmt.Errorf("scanning task: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, total, rows.Err()
+}
+
 func (r *TaskRepo) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {

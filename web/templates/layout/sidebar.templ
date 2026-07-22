@@ -152,14 +152,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/tasks?project_id=' + newProjectId;
 						}
 
-						// HTMX swap for main content (no full page reload)
-						htmx.ajax('GET', newUrl, {
-							target: '#main-content',
-							swap: 'innerHTML'
-						});
-
-							// Update URL bar
-							history.pushState({}, '', newUrl);
+						// HTMX owns the content swap, URL update, and history cache.
+						window.openVibelyNavigate(newUrl);
 						});
 				})();
 
@@ -327,8 +321,9 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						// If a polling response arrives after we started navigating, skip its swap
 						// to avoid expensive DOM work that would block the page change.
 					document.body.addEventListener('htmx:beforeSwap', function(event) {
-						if (!window._sidebarNavigating) return;
 						var target = event.detail.target;
+						if (event.detail.shouldSwap !== false && target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders();
+						if (!window._sidebarNavigating) return;
 						if (!target) return;
 						if (target.id === 'main-content') {
 							// This is the sidebar navigation swap — allow it and clear flag
@@ -653,7 +648,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					<ul id="sidebar-user-menu" tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-44 z-[120] border border-base-300" role="menu" aria-label="User menu">
 						<li role="none">
 							<form method="POST" action="/logout" class="w-full" role="none">
-								<button type="submit" class="text-sm" role="menuitem">Logout</button>
+									<button id="sidebar-logout-label" type="submit" class="text-sm" role="menuitem">Logout</button>
 							</form>
 						</li>
 					</ul>
@@ -788,12 +783,14 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							var name = document.getElementById('sidebar-auth-name');
 							var avatar = document.getElementById('sidebar-auth-avatar');
 							var avatarCollapsed = document.getElementById('sidebar-auth-avatar-collapsed');
+							var logoutLabel = document.getElementById('sidebar-logout-label');
 							if (user) user.classList.remove('hidden');
 							if (userCollapsed) userCollapsed.classList.remove('hidden');
 							if (name) name.textContent = data.display || data.username;
 							var initial = ((data.display || data.username || 'U').trim().charAt(0) || 'U').toUpperCase();
 							if (avatar) avatar.textContent = initial;
 							if (avatarCollapsed) avatarCollapsed.textContent = initial;
+							if (logoutLabel && data.auth_source === 'hosted_sso') logoutLabel.textContent = 'Log out of this workspace';
 						})
 						.catch(function() {});
 				})();

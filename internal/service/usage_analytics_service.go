@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -192,11 +193,11 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 		if err != nil {
 			reason := accountRefreshFailureReason(err)
 			message := accountRefreshFailureMessage(reason)
-			applog.Infof("[usage] account usage refresh failed provider=%s agent=%s reason=%s: %v", cfg.Provider, cfg.ID, reason, sanitizeAccountUsageError(err))
+			applog.Infof("[usage] account usage refresh failed provider=%s reason=%s: %v", cfg.Provider, reason, sanitizeAccountUsageError(err))
 			errorsByKey[accountUsageKeyForConfig(cfg)] = message
 			failure := accountRefreshFailureSnapshot(cfg, latest, reason)
 			if storeErr := s.usageRepo.CreateAccountUsageSnapshot(ctx, &failure); storeErr != nil {
-				applog.Infof("[usage] storing account usage refresh failure failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, storeErr)
+				applog.Infof("[usage] storing account usage refresh failure failed provider=%s: %v", cfg.Provider, storeErr)
 				continue
 			}
 			snapshots = append(snapshots, failure)
@@ -215,7 +216,7 @@ func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, con
 			snapshot.AccountID = accountIDForConfig(cfg)
 		}
 		if err := s.usageRepo.CreateAccountUsageSnapshot(ctx, snapshot); err != nil {
-			applog.Infof("[usage] storing account usage snapshot failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
+			applog.Infof("[usage] storing account usage snapshot failed provider=%s: %v", cfg.Provider, err)
 			continue
 		}
 		s.syncOAuthAccountGroup(ctx, cfg, configs, key)
@@ -237,7 +238,7 @@ func (s *UsageAnalyticsService) syncOAuthAccountGroup(ctx context.Context, refre
 			continue
 		}
 		if err := s.llmConfigRepo.UpdateOAuthTokens(ctx, cfg.ID, latest.OAuthAccessToken, latest.OAuthRefreshToken, latest.OAuthExpiresAt, latest.OAuthAccountID); err != nil {
-			applog.Infof("[usage] syncing OAuth account tokens failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
+			applog.Infof("[usage] syncing OAuth account tokens failed provider=%s: %v", cfg.Provider, err)
 		}
 	}
 }
@@ -454,21 +455,13 @@ func preferAccountUsageView(existing, next models.AccountUsageView) models.Accou
 	winner := existing
 	other := next
 	if next.UpdatedAt.After(existing.UpdatedAt) {
-		if next.Error == "" && existing.Error != "" {
-			winner = next
-			other = existing
-		} else if len(next.Limits) > 0 || len(existing.Limits) == 0 {
-			winner = next
-			other = existing
-		}
+		winner = next
+		other = existing
 	}
 	return mergeAccountUsageViewMetadata(winner, other)
 }
 
 func mergeAccountUsageViewMetadata(existing, next models.AccountUsageView) models.AccountUsageView {
-	if existing.Error == "" && next.Error != "" && len(existing.Limits) == 0 {
-		existing.Error = next.Error
-	}
 	if existing.AccountID == "" && next.AccountID != "" {
 		existing.AccountID = next.AccountID
 	}
@@ -484,71 +477,53 @@ func mergeAccountUsageViewMetadata(existing, next models.AccountUsageView) model
 	if existing.StatusLabel == "" && next.StatusLabel != "" {
 		existing.StatusLabel = next.StatusLabel
 	}
-	if existing.ExtraUsageLabel == "" && next.ExtraUsageLabel != "" {
-		existing.ExtraUsageLabel = next.ExtraUsageLabel
-	}
-	if existing.ExtraUsageMonthlyUSD == nil && next.ExtraUsageMonthlyUSD != nil {
-		existing.ExtraUsageMonthlyUSD = next.ExtraUsageMonthlyUSD
-	}
-	if existing.ExtraUsageUsedUSD == nil && next.ExtraUsageUsedUSD != nil {
-		existing.ExtraUsageUsedUSD = next.ExtraUsageUsedUSD
-	}
-	if existing.PrimaryLimit == nil && next.PrimaryLimit != nil {
-		existing.PrimaryLimit = next.PrimaryLimit
-	}
-	if existing.SecondaryLimit == nil && next.SecondaryLimit != nil {
-		existing.SecondaryLimit = next.SecondaryLimit
-	}
-	existing.ExtraLimits = mergeAccountLimitViews(existing.ExtraLimits, next.ExtraLimits)
-	if len(existing.Limits) == 0 && len(next.Limits) > 0 {
-		existing.Limits = next.Limits
-	} else {
-		existing.Limits = composeAccountLimits(existing.PrimaryLimit, existing.SecondaryLimit, existing.ExtraLimits)
-	}
 	return existing
 }
 
 func composeAccountLimits(primary, secondary *models.AccountLimitView, extra []models.AccountLimitView) []models.AccountLimitView {
-	limits := make([]models.AccountLimitView, 0, 2+len(extra))
+	sourceLimits := make([]models.AccountLimitView, 0, 2)
 	if primary != nil {
-		limits = append(limits, *primary)
+		sourceLimits = append(sourceLimits, *primary)
 	}
 	if secondary != nil {
-		limits = append(limits, *secondary)
+		sourceLimits = append(sourceLimits, *secondary)
+	}
+	sort.SliceStable(sourceLimits, func(i, j int) bool {
+		return accountLimitWindowOrder(sourceLimits[i]) < accountLimitWindowOrder(sourceLimits[j])
+	})
+	limits := make([]models.AccountLimitView, 0, len(sourceLimits)+len(extra))
+	seen := make(map[string]bool, len(sourceLimits))
+	for _, limit := range sourceLimits {
+		if key := strings.TrimSpace(limit.LimitKey); key != "" {
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+		}
+		limits = append(limits, limit)
 	}
 	limits = append(limits, extra...)
 	return limits
 }
 
-func mergeAccountLimitViews(existing, next []models.AccountLimitView) []models.AccountLimitView {
-	if len(next) == 0 {
-		return existing
+func accountLimitWindowOrder(limit models.AccountLimitView) int {
+	if limit.WindowMinutes == nil {
+		return 5
 	}
-	merged := append([]models.AccountLimitView(nil), existing...)
-	index := make(map[string]int, len(merged))
-	for i, limit := range merged {
-		index[accountLimitViewKey(limit, i)] = i
+	switch classifyOpenAIWindow(*limit.WindowMinutes) {
+	case openAIWindowFiveHour:
+		return 0
+	case openAIWindowDaily:
+		return 1
+	case openAIWindowWeekly:
+		return 2
+	case openAIWindowMonthly:
+		return 3
+	case openAIWindowAnnual:
+		return 4
+	default:
+		return 5
 	}
-	for _, limit := range next {
-		key := accountLimitViewKey(limit, len(index))
-		if i, ok := index[key]; ok {
-			merged[i] = preferAccountLimitView(merged[i], limit)
-			continue
-		}
-		index[key] = len(merged)
-		merged = append(merged, limit)
-	}
-	return merged
-}
-
-func accountLimitViewKey(limit models.AccountLimitView, fallback int) string {
-	if strings.TrimSpace(limit.LimitKey) != "" {
-		return strings.TrimSpace(limit.LimitKey)
-	}
-	if strings.TrimSpace(limit.Label) != "" {
-		return strings.TrimSpace(limit.Label)
-	}
-	return fmt.Sprintf("limit_%d", fallback)
 }
 
 func accountUsageDisplayKey(account models.AccountUsageView, configsByID map[string]models.LLMConfig) string {
@@ -635,35 +610,30 @@ func accountViewFromSnapshot(snapshot models.AccountUsageSnapshot) models.Accoun
 
 	var primaryLimit *models.AccountLimitView
 	if snapshot.PrimaryLabel != "" || snapshot.PrimaryUsedPercent != nil {
-		primaryLimit = &models.AccountLimitView{
-			LimitKey:      "primary",
-			Label:         defaultLimitLabel(snapshot.PrimaryLabel, "5-hour session"),
-			UsedPercent:   snapshot.PrimaryUsedPercent,
-			WindowMinutes: snapshot.PrimaryWindowMinutes,
-			ResetsAt:      snapshot.PrimaryResetsAt,
-			Status:        limitStatus(snapshot.PrimaryUsedPercent),
-		}
+		primaryLimit = accountLimitViewFromSnapshotWindow(
+			snapshot.Provider,
+			"primary",
+			snapshot.PrimaryLabel,
+			"5-hour session",
+			snapshot.PrimaryUsedPercent,
+			snapshot.PrimaryWindowMinutes,
+			snapshot.PrimaryResetsAt,
+		)
 	}
 	var secondaryLimit *models.AccountLimitView
 	if snapshot.SecondaryLabel != "" || snapshot.SecondaryUsedPercent != nil {
-		secondaryLimit = &models.AccountLimitView{
-			LimitKey:      "secondary",
-			Label:         defaultLimitLabel(snapshot.SecondaryLabel, "weekly limit"),
-			UsedPercent:   snapshot.SecondaryUsedPercent,
-			WindowMinutes: snapshot.SecondaryWindowMinutes,
-			ResetsAt:      snapshot.SecondaryResetsAt,
-			Status:        limitStatus(snapshot.SecondaryUsedPercent),
-		}
+		secondaryLimit = accountLimitViewFromSnapshotWindow(
+			snapshot.Provider,
+			"secondary",
+			snapshot.SecondaryLabel,
+			"weekly limit",
+			snapshot.SecondaryUsedPercent,
+			snapshot.SecondaryWindowMinutes,
+			snapshot.SecondaryResetsAt,
+		)
 	}
 	extraLimits := accountExtraLimitViews(snapshot)
-	limits := make([]models.AccountLimitView, 0, 2+len(extraLimits))
-	if primaryLimit != nil {
-		limits = append(limits, *primaryLimit)
-	}
-	if secondaryLimit != nil {
-		limits = append(limits, *secondaryLimit)
-	}
-	limits = append(limits, extraLimits...)
+	limits := composeAccountLimits(primaryLimit, secondaryLimit, extraLimits)
 	view := models.AccountUsageView{
 		Provider:             snapshot.Provider,
 		AccountID:            snapshot.AccountID,
@@ -683,6 +653,35 @@ func accountViewFromSnapshot(snapshot models.AccountUsageSnapshot) models.Accoun
 		Error:                errorMessage,
 	}
 	return applyAccountUsageDisplayPolicy(view)
+}
+
+func accountLimitViewFromSnapshotWindow(provider, sourceKey, label, fallback string, used *float64, windowMinutes *int, resetsAt *string) *models.AccountLimitView {
+	limitKey := sourceKey
+	if models.LLMProvider(strings.ToLower(strings.TrimSpace(provider))) == models.ProviderOpenAI {
+		kind := openAIWindowUnknown
+		if windowMinutes != nil {
+			kind = classifyOpenAIWindow(*windowMinutes)
+		}
+		label = openAIWindowDisplayLabel(kind)
+		if kind != openAIWindowUnknown {
+			limitKey = kind
+		}
+	} else {
+		label = defaultLimitLabel(label, fallback)
+		if sourceKey == "primary" {
+			limitKey = "five_hour"
+		} else if sourceKey == "secondary" {
+			limitKey = "seven_day"
+		}
+	}
+	return &models.AccountLimitView{
+		LimitKey:      limitKey,
+		Label:         label,
+		UsedPercent:   used,
+		WindowMinutes: windowMinutes,
+		ResetsAt:      resetsAt,
+		Status:        limitStatus(used),
+	}
 }
 
 func applyAccountUsageDisplayPolicy(view models.AccountUsageView) models.AccountUsageView {
@@ -972,6 +971,56 @@ func humanizeUsageLabel(value string) string {
 	return strings.Join(parts, " ")
 }
 
+const (
+	openAIWindowFiveHour = "five_hour"
+	openAIWindowDaily    = "daily"
+	openAIWindowWeekly   = "weekly"
+	openAIWindowMonthly  = "monthly"
+	openAIWindowAnnual   = "annual"
+	openAIWindowUnknown  = "unknown"
+)
+
+var openAIWindowDurations = []struct {
+	kind    string
+	minutes int
+}{
+	{kind: openAIWindowFiveHour, minutes: 300},
+	{kind: openAIWindowDaily, minutes: 1440},
+	{kind: openAIWindowWeekly, minutes: 10080},
+	{kind: openAIWindowMonthly, minutes: 43200},
+	{kind: openAIWindowAnnual, minutes: 525600},
+}
+
+func classifyOpenAIWindow(minutes int) string {
+	if minutes <= 0 {
+		return openAIWindowUnknown
+	}
+	for _, candidate := range openAIWindowDurations {
+		tolerance := float64(candidate.minutes) * 0.05
+		if math.Abs(float64(minutes-candidate.minutes)) <= tolerance {
+			return candidate.kind
+		}
+	}
+	return openAIWindowUnknown
+}
+
+func openAIWindowDisplayLabel(kind string) string {
+	switch kind {
+	case openAIWindowFiveHour:
+		return "5-hour session"
+	case openAIWindowDaily:
+		return "daily limit"
+	case openAIWindowWeekly:
+		return "weekly limit"
+	case openAIWindowMonthly:
+		return "monthly limit"
+	case openAIWindowAnnual:
+		return "annual limit"
+	default:
+		return "usage limit"
+	}
+}
+
 func defaultLimitLabel(label, fallback string) string {
 	if strings.TrimSpace(label) != "" {
 		return label
@@ -1003,7 +1052,7 @@ func (s *UsageAnalyticsService) resolveAccountUsageOAuthAccountID(ctx context.Co
 	case models.ProviderAnthropic:
 		fresh, profile, err := s.resolveAnthropicOAuthProfile(ctx, cfg)
 		if err != nil {
-			applog.Infof("[usage] resolving Anthropic OAuth account profile failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, sanitizeAccountUsageError(err))
+			applog.Infof("[usage] resolving Anthropic OAuth account profile failed provider=%s: %v", cfg.Provider, sanitizeAccountUsageError(err))
 			return cfg
 		}
 		cfg = fresh
@@ -1017,7 +1066,7 @@ func (s *UsageAnalyticsService) resolveAccountUsageOAuthAccountID(ctx context.Co
 	cfg.OAuthAccountID = accountID
 	if s.llmConfigRepo != nil && strings.TrimSpace(cfg.ID) != "" {
 		if err := s.llmConfigRepo.UpdateOAuthTokens(ctx, cfg.ID, cfg.OAuthAccessToken, cfg.OAuthRefreshToken, cfg.OAuthExpiresAt, accountID); err != nil {
-			applog.Infof("[usage] persisting OAuth account id failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
+			applog.Infof("[usage] persisting OAuth account id failed provider=%s: %v", cfg.Provider, err)
 		}
 	}
 	return cfg
@@ -1111,12 +1160,12 @@ func (s *UsageAnalyticsService) fetchAnthropicOAuthUsage(ctx context.Context, cf
 			cfg.OAuthAccountID = profile.AccountID
 			if s.llmConfigRepo != nil && strings.TrimSpace(cfg.ID) != "" {
 				if err := s.llmConfigRepo.UpdateOAuthTokens(ctx, cfg.ID, cfg.OAuthAccessToken, cfg.OAuthRefreshToken, cfg.OAuthExpiresAt, cfg.OAuthAccountID); err != nil {
-					applog.Infof("[usage] persisting Anthropic OAuth profile account id failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, err)
+					applog.Infof("[usage] persisting Anthropic OAuth profile account id failed provider=%s: %v", cfg.Provider, err)
 				}
 			}
 		}
 	} else {
-		applog.Infof("[usage] resolving Anthropic OAuth account profile failed provider=%s agent=%s: %v", cfg.Provider, cfg.ID, sanitizeAccountUsageError(profileErr))
+		applog.Infof("[usage] resolving Anthropic OAuth account profile failed provider=%s: %v", cfg.Provider, sanitizeAccountUsageError(profileErr))
 	}
 	endpoint := strings.TrimRight(anthropicclient.AnthropicAPIHost, "/") + "/api/oauth/usage"
 	raw, err := s.doAccountUsageRequestWithOAuthRecovery(ctx, cfg, endpoint, buildAnthropicAccountUsageRequest, s.anthropicAccountUsageRefreshFunc())
@@ -1420,10 +1469,10 @@ func normalizeOpenAIAccountUsage(cfg models.LLMConfig, raw map[string]any) (*mod
 	}
 	if rateLimit, ok := rawMap(raw["rate_limit"]); ok {
 		if primary, ok := rawMap(rateLimit["primary_window"]); ok {
-			applyOpenAIWindow(snapshot, primary, true, "5-hour session")
+			applyOpenAIWindow(snapshot, primary, true)
 		}
 		if secondary, ok := rawMap(rateLimit["secondary_window"]); ok {
-			applyOpenAIWindow(snapshot, secondary, false, "weekly limit")
+			applyOpenAIWindow(snapshot, secondary, false)
 		}
 		if snapshot.RateLimitReachedType == "" {
 			snapshot.RateLimitReachedType = firstNonEmptyUsageString(stringValue(rateLimit["rate_limit_reached_type"]), stringValue(raw["rate_limit_reached_type"]))
@@ -1434,10 +1483,10 @@ func normalizeOpenAIAccountUsage(cfg models.LLMConfig, raw map[string]any) (*mod
 			snapshot.PlanType = openAIPlanLabel(firstNonEmptyUsageString(stringValue(rateLimits["plan_type"]), stringValue(rateLimits["planType"])))
 		}
 		if primary, ok := rawMap(rateLimits["primary"]); ok {
-			applyOpenAIWindow(snapshot, primary, true, "5-hour session")
+			applyOpenAIWindow(snapshot, primary, true)
 		}
 		if secondary, ok := rawMap(rateLimits["secondary"]); ok {
-			applyOpenAIWindow(snapshot, secondary, false, "weekly limit")
+			applyOpenAIWindow(snapshot, secondary, false)
 		}
 		if credits, ok := rawMap(rateLimits["credits"]); ok {
 			applyOpenAICredits(snapshot, credits)
@@ -1447,10 +1496,10 @@ func normalizeOpenAIAccountUsage(cfg models.LLMConfig, raw map[string]any) (*mod
 		}
 	}
 	if primary, ok := rawMap(raw["primary"]); ok {
-		applyOpenAIWindow(snapshot, primary, true, "5-hour session")
+		applyOpenAIWindow(snapshot, primary, true)
 	}
 	if secondary, ok := rawMap(raw["secondary"]); ok {
-		applyOpenAIWindow(snapshot, secondary, false, "weekly limit")
+		applyOpenAIWindow(snapshot, secondary, false)
 	}
 	if credits, ok := rawMap(raw["credits"]); ok {
 		applyOpenAICredits(snapshot, credits)
@@ -1498,7 +1547,7 @@ func applyOpenAIAdditionalRateLimits(snapshot *models.AccountUsageSnapshot, valu
 	if snapshot == nil {
 		return
 	}
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	for _, limit := range rateLimitWindows(value) {
 		window := limit
 		if nested, ok := rawMap(firstPresent(limit, "window", "limit", "primary", "secondary")); ok {
@@ -1509,21 +1558,21 @@ func applyOpenAIAdditionalRateLimits(snapshot *models.AccountUsageSnapshot, valu
 				window = nested
 			}
 		}
-		usedValue := firstPresent(window, "used_percent", "usedPercent", "utilization")
-		if _, ok := floatValue(usedValue); !ok {
-			continue
-		}
 		key := firstNonEmptyUsageString(stringValue(limit["metered_feature"]), stringValue(limit["limit_key"]), stringValue(limit["key"]), stringValue(limit["model"]), stringValue(limit["model_name"]))
 		if key == "" {
 			key = fmt.Sprintf("additional_rate_limit_%d", len(snapshot.ExtraLimits)+1)
 		}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
 		label := firstNonEmptyUsageString(stringValue(limit["limit_name"]), stringValue(limit["label"]), stringValue(limit["name"]), stringValue(limit["model"]), stringValue(limit["model_name"]), key)
 		extra := accountExtraLimitFromWindow(*snapshot, key, label, window, 0, false)
+		if extra.UsedPercent == nil && extra.WindowMinutes == nil && extra.ResetAt == nil {
+			continue
+		}
 		extra.RawJSON = marshalAccountUsageLimitRaw(limit, string(models.ProviderOpenAI))
+		if index, ok := seen[key]; ok {
+			snapshot.ExtraLimits[index] = extra
+			continue
+		}
+		seen[key] = len(snapshot.ExtraLimits)
 		snapshot.ExtraLimits = append(snapshot.ExtraLimits, extra)
 	}
 }
@@ -1545,11 +1594,8 @@ func accountExtraLimitFromWindow(snapshot models.AccountUsageSnapshot, key, labe
 		}
 		limit.UsedPercent = &v
 	}
-	if v, ok := intValue(firstPresent(window, "window_minutes", "windowDurationMins")); ok {
-		limit.WindowMinutes = &v
-	} else if seconds, ok := intValue(firstPresent(window, "limit_window_seconds", "limitWindowSeconds")); ok && seconds > 0 {
-		v := seconds / 60
-		limit.WindowMinutes = &v
+	if minutes := openAIWindowMinutes(window); minutes != nil {
+		limit.WindowMinutes = minutes
 	} else if defaultWindowMinutes > 0 {
 		v := defaultWindowMinutes
 		limit.WindowMinutes = &v
@@ -1584,9 +1630,17 @@ func rateLimitWindows(value any) []map[string]any {
 	case []map[string]any:
 		return v
 	case map[string]any:
+		if firstNonEmptyUsageString(stringValue(v["metered_feature"]), stringValue(v["limit_key"]), stringValue(v["key"]), stringValue(v["model"]), stringValue(v["model_name"])) != "" {
+			return []map[string]any{v}
+		}
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
 		windows := make([]map[string]any, 0, len(v))
-		for _, item := range v {
-			if m, ok := rawMap(item); ok {
+		for _, key := range keys {
+			if m, ok := rawMap(v[key]); ok {
 				windows = append(windows, m)
 			}
 		}
@@ -1599,7 +1653,22 @@ func rateLimitWindows(value any) []map[string]any {
 	}
 }
 
-func applyOpenAIWindow(snapshot *models.AccountUsageSnapshot, window map[string]any, primary bool, label string) {
+func openAIWindowMinutes(window map[string]any) *int {
+	if window == nil {
+		return nil
+	}
+	if value, ok := floatValue(firstPresent(window, "window_minutes", "windowDurationMins", "window_duration_mins")); ok && value > 0 {
+		minutes := int(math.Ceil(value))
+		return &minutes
+	}
+	if seconds, ok := floatValue(firstPresent(window, "limit_window_seconds", "limitWindowSeconds")); ok && seconds > 0 {
+		minutes := int(math.Ceil(seconds / 60))
+		return &minutes
+	}
+	return nil
+}
+
+func applyOpenAIWindow(snapshot *models.AccountUsageSnapshot, window map[string]any, primary bool) {
 	if snapshot == nil {
 		return
 	}
@@ -1607,13 +1676,12 @@ func applyOpenAIWindow(snapshot *models.AccountUsageSnapshot, window map[string]
 	if v, ok := floatValue(firstPresent(window, "used_percent", "usedPercent")); ok {
 		used = &v
 	}
-	var minutes *int
-	if v, ok := intValue(firstPresent(window, "window_minutes", "windowDurationMins")); ok {
-		minutes = &v
-	} else if seconds, ok := intValue(firstPresent(window, "limit_window_seconds", "limitWindowSeconds")); ok && seconds > 0 {
-		v := seconds / 60
-		minutes = &v
+	minutes := openAIWindowMinutes(window)
+	kind := openAIWindowUnknown
+	if minutes != nil {
+		kind = classifyOpenAIWindow(*minutes)
 	}
+	label := openAIWindowDisplayLabel(kind)
 	reset := normalizeResetTime(firstPresent(window, "reset_at", "resetsAt", "resets_at"))
 	if primary {
 		snapshot.PrimaryLabel = label

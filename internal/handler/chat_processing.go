@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	chatProcessingTimeout     = 30 * time.Minute // Timeout for LLM processing in background goroutines
+	chatProcessingTimeout     = 30 * time.Minute // Inactivity timeout for LLM processing in background goroutines
 	chatHistoryLimit          = 50               // Number of recent chat messages to load for conversation context
 	taskThreadHistoryLimit    = 21               // Load at most 20 prior turns plus the current execution for filtering
 	maxFileSize               = 10 << 20         // 10 MB per file
@@ -51,7 +51,6 @@ var (
 //   - WorkDir: Working directory for CLI agents (project repo path)
 //   - ImageAttachments: Image files for vision-capable models
 //   - IsTaskFollowup: true = coding agent prompt (executes code); false = orchestration prompt (creates tasks)
-//   - ProcessMarkers: true = process [CREATE_TASK]/[EDIT_TASK]/[EXECUTE_TASKS] markers in response
 //   - ChatMode: orchestration mode for interactive chat (orchestrate/plan)
 type streamingResponseParams struct {
 	ExecID                      string
@@ -65,7 +64,6 @@ type streamingResponseParams struct {
 	WorkDir                     string
 	ImageAttachments            []models.Attachment
 	IsTaskFollowup              bool // true = coding agent prompt; false = orchestration prompt
-	ProcessMarkers              bool // true = process [CREATE_TASK]/[EDIT_TASK]/[EXECUTE_TASKS] markers
 	ChatMode                    models.ChatMode
 	Surface                     chatcontrol.Surface // chat entry point (web/api/telegram/slack)
 	TelegramInitialAckMessageID int
@@ -97,6 +95,7 @@ type streamingResponseParams struct {
 
 	steeringHistoryStarted bool
 	steeringOutputCursor   string
+	lifecycleUserMessage   string
 }
 
 func streamingTransportScope(params streamingResponseParams) string {
@@ -117,14 +116,16 @@ func streamingTransportScope(params streamingResponseParams) string {
 // background goroutine, allowing the HTTP handler to return immediately.
 //
 // Process flow:
-// 1. Creates a timeout context and registers cancellation with worker service
-// 2. Calls the LLM service for streaming output (writes to DB in real-time)
-// 3. Optionally processes response markers (task creation/edit/execution)
-// 4. Completes the execution and updates task status
+//  1. Creates a timeout context and registers cancellation with worker service
+//  2. Attaches authorized runtime tools and calls the LLM service for streaming output
+//     (writes to DB in real-time)
+//  3. Evaluates final standalone task status markers
+//  4. Completes the execution and updates task status
 //
 // Uses context.Background() for the base context since this goroutine should
 // complete independently of the HTTP request (which may be canceled when the
-// client disconnects). The timeout ensures we don't run forever.
+// client disconnects). The inactivity timeout is reset by streamed model text,
+// thinking, tool starts, and tool results so active work can continue.
 //
 // Error handling: All errors in the completion path are logged but don't fail the
 // function since we're in a background goroutine. Failed completions leave tasks
@@ -174,7 +175,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if ctx != nil {
 			return
 		}
-		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		var resetInactivity func()
+		ctx, cancel, resetInactivity = withInactivityTimeout(context.Background(), timeout)
+		ctx = llmcontracts.WithActivityCallback(ctx, resetInactivity)
 		h.registerTaskCancellation(params.TaskID, cancel)
 		runtimeCancelRegistered = true
 		cancelWaitOnly()
@@ -214,7 +217,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		return false
 	}
 
-	// Enforce per-project and per-model worker constraints for task follow-ups only.
+	// Enforce global, per-project, and per-model worker constraints for task follow-ups only.
 	// Interactive chat (IsTaskFollowup=false) bypasses worker limits so the chat
 	// orchestrator stays responsive even when all task workers are busy.
 	// Task follow-ups (IsTaskFollowup=true) respect worker limits because they
@@ -227,8 +230,8 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		// pool needs to check if any queued tasks can now be dispatched.
 		defer h.workerSvc.DispatchNext()
 
-		// Block until a per-project slot is available (respects project max_workers limit).
-		// This queues the thread follow-up instead of rejecting it when workers are at capacity.
+		// Block until global and per-project slots are available. This queues the
+		// thread follow-up instead of rejecting it when either limit is at capacity.
 		if err := h.workerSvc.AcquireProjectSlot(waitCtx, params.ProjectID); err != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled waiting for project slot %s: %v",
 				params.ExecID, params.TaskID, params.ProjectID, err)
@@ -319,7 +322,8 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// Inject request-scoped action tools when the provider supports runtime tool
 	// calling. Tool definitions are derived from the canonical chatcontrol registry
 	// filtered by mode and surface. In plan mode only read actions are available.
-	// Runtime-tools and marker post-processing are mutually exclusive per request.
+	// Runtime action definitions are attached only when the concrete provider can
+	// invoke them. Model text is never parsed as an action fallback.
 	// Build these after lifecycle preparation so task follow-up capabilities see
 	// selected memory handles/tools from the router.
 	//
@@ -328,7 +332,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// Using it directly ensures switch_project and other channel-sensitive tools
 	// execute the channel service handler (with persistence) rather than the
 	// informational web/API handler.
-	runtimeToolsInjected := false
 	if h.supportsChatActionTools(ctx, params.Agent) {
 		surface := params.Surface
 		if surface == "" {
@@ -354,32 +357,15 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			genericRT := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
 			merged := llmcontracts.CompositeRuntimeTools(params.RuntimeTools, genericRT)
 			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), merged))
-			params.ProcessMarkers = false
-			runtimeToolsInjected = true
 			applog.Infof("[handler] processStreamingResponse exec=%s injected channel+generic runtime action tools surface=%s followup=%v channel_defs=%d generic_defs=%d",
 				params.ExecID, surface, params.IsTaskFollowup, len(params.RuntimeTools.Definitions), len(defs))
 		} else if len(defs) > 0 {
 			rt := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
 			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), rt))
-			params.ProcessMarkers = false
-			runtimeToolsInjected = true
 			applog.Infof("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
 				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
 		}
 	}
-	// Plan mode is read-only. Never execute action markers, even when a caller
-	// supplied ProcessMarkers or the provider cannot receive runtime tools.
-	// Other no-tool transports (e.g. Claude CLI, Codex CLI, Ollama) retain
-	// marker fallback so emitted action blocks are executable in Orchestrate
-	// and task-thread turns.
-	if chatMode == models.ChatModePlan {
-		params.ProcessMarkers = false
-	} else if !runtimeToolsInjected && !params.ProcessMarkers {
-		params.ProcessMarkers = true
-		applog.Infof("[handler] processStreamingResponse exec=%s no runtime tools (provider=%s auth=%s followup=%v); enabling marker processing fallback",
-			params.ExecID, params.Agent.Provider, params.Agent.AuthMethod, params.IsTaskFollowup)
-	}
-
 	// Lazy-load chat history, system context, and work dir for task-thread
 	// follow-ups that set DeferHistoryLoad. TaskThreadSend sets this flag so
 	// the HTTP handler can return immediately without blocking on a full
@@ -408,8 +394,8 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		params.WorkDir = workDir
 	}
 
-	applog.Infof("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v markers=%v history=%d",
-		params.ExecID, params.TaskID, params.Agent.Name, params.Agent.Model, params.IsTaskFollowup, params.ProcessMarkers, len(params.ChatHistory))
+	applog.Infof("[handler] processStreamingResponse exec=%s task=%s agent=%s model=%s followup=%v history=%d",
+		params.ExecID, params.TaskID, params.Agent.Name, params.Agent.Model, params.IsTaskFollowup, len(params.ChatHistory))
 
 	stopDiffBroadcast, diffBroadcastDone := h.startFollowupDiffSnapshotBroadcast(ctx, params.TaskID, params.ExecID, params.WorkDir, params.IsTaskFollowup)
 
@@ -481,6 +467,9 @@ modelLoop:
 			break
 		}
 		requestCtx := llmcontracts.WithTransportScope(ctx, streamingTransportScope(params))
+		if params.lifecycleUserMessage != "" {
+			requestCtx = llmcontracts.WithLifecycleCompletionUserMessage(requestCtx, params.lifecycleUserMessage)
+		}
 		result, err = h.llmSvc.CallAgentDirectStreamingDetailed(
 			requestCtx, params.Message, requestImageAttachments, params.Agent,
 			params.ExecID, params.ChatHistory, params.SystemContext,
@@ -546,24 +535,13 @@ modelLoop:
 		h.finalizeStreamingTurn(params, output)
 		return
 	}
-	// Check context before expensive marker processing
+	// Check context before final status processing.
 	if ctx.Err() != nil {
 		finalizeLifecycle(ctx.Err(), result.ChatContext)
-		applog.Infof("[handler] processStreamingResponse exec=%s task=%s context cancelled, skipping marker processing", params.ExecID, params.TaskID)
+		applog.Infof("[handler] processStreamingResponse exec=%s task=%s context cancelled, skipping final status processing", params.ExecID, params.TaskID)
 		h.completeWithCancellation(params.ExecID, params.TaskID, output, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		h.finalizeStreamingTurn(params, output)
 		return
-	}
-
-	// Marker fallback path for non-tool providers/transports.
-	if params.ProcessMarkers {
-		agents, err := h.llmConfigRepo.List(ctx)
-		if err != nil {
-			applog.Infof("[handler] processStreamingResponse error listing agents: %v", err)
-			// Continue without marker processing rather than failing the entire response
-			agents = []models.LLMConfig{}
-		}
-		output = h.processChatResponse(ctx, params.ExecID, params.ProjectID, output, agents, params.ChannelReply)
 	}
 
 	if params.IsTaskFollowup {
@@ -758,6 +736,7 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 	}
 	steeringMessage := combinedSteeringContent(batch.inputs)
 	steeringInstruction := formatSteeringInstruction(steeringMessage)
+	params.lifecycleUserMessage = steeringInstruction
 	if previousAssistantOutput != "" {
 		assistantDelta := previousAssistantOutput
 		if strings.HasPrefix(previousAssistantOutput, params.steeringOutputCursor) {
@@ -917,8 +896,16 @@ func combineActivePromptWithSteering(activePrompt, steeringInstruction string) s
 
 func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output string) {
 	// Broadcast response done for chat messages and task-thread follow-ups.
-	// Include completed output so live UI fallbacks can reconcile visible bubbles
-	// even when the per-execution token stream was missed or closed early.
+	// Include completed output and the persisted terminal status so live UI
+	// fallbacks converge even when the per-execution terminal event races or is missed.
+	terminalStatus := ""
+	if h.execRepo != nil && params.ExecID != "" {
+		if exec, err := h.execRepo.GetByID(context.Background(), params.ExecID); err == nil && exec != nil {
+			terminalStatus = string(exec.Status)
+		} else if err != nil {
+			applog.Infof("[handler] finalizeStreamingTurn exec=%s error loading terminal status: %v", params.ExecID, err)
+		}
+	}
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
 			Type:            events.ChatResponseDone,
@@ -926,6 +913,7 @@ func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output s
 			ExecID:          params.ExecID,
 			TaskID:          params.TaskID,
 			CompletedOutput: output,
+			Status:          terminalStatus,
 			IsTaskFollowup:  params.IsTaskFollowup,
 		})
 	}
@@ -1122,7 +1110,6 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   false,
-		ProcessMarkers:   false,
 		ChatMode:         chatMode,
 		Surface:          surfaceForThreadInput(input),
 		ChannelReply:     channelReplyFromThreadInput(input),
@@ -1320,7 +1307,6 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		SystemContext:   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
 		WorkDir:         workDir,
 		IsTaskFollowup:  true,
-		ProcessMarkers:  false,
 		InputOrigin:     models.TaskOriginWeb,
 	})
 	return nil
@@ -1447,7 +1433,6 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   true,
-		ProcessMarkers:   false,
 		ChannelReply:     channelReplyFromThreadInput(input),
 		InputOrigin:      string(input.Source),
 		InputOriginAgent: input.OriginAgent,
@@ -2091,22 +2076,19 @@ func (h *Handler) resolveWorktreeWorkDir(ctx context.Context, task *models.Task)
 	return wtPath, "", nil
 }
 
-// processChatTaskCreations handles task creation markers from AI responses.
-// It parses [CREATE_TASK] markers, creates tasks, copies attachments, and handles
-// deferred activation (when attachments need to be copied before auto-submission).
-// Returns the updated output with creation summaries and the count of attachments copied.
-func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectID, output string, agents []models.LLMConfig, channelReply ...service.ChannelReplyContext) (string, int) {
-	taskRequests := parseChatTaskCreations(output)
+// executeChatTaskCreationRequests creates tasks from typed runtime-tool requests,
+// copies Chat attachments, and defers activation until attachment publication succeeds.
+func (h *Handler) executeChatTaskCreationRequests(ctx context.Context, execID, projectID string, taskRequests []service.TaskCreationRequest, agents []models.LLMConfig, channelReply ...service.ChannelReplyContext) (string, int) {
 	if len(taskRequests) == 0 {
-		return output, 0
+		return "", 0
 	}
 
-	applog.Infof("[handler] processChatTaskCreations exec=%s found %d task creation requests", execID, len(taskRequests))
+	applog.Infof("[handler] executeChatTaskCreationRequests exec=%s found %d task creation requests", execID, len(taskRequests))
 
 	chatAtts, err := h.chatAttachmentRepo.ListByExecution(ctx, execID)
 	if err != nil {
 		applog.Infof("[handler] attachment lifecycle stage=metadata-load execution=%s destination_task=uncreated error=%v", execID, err)
-		return output + fmt.Sprintf("\n\n---\nFailed to create %d task(s): Chat attachments could not be loaded; no tasks were created.", len(taskRequests)), 0
+		return fmt.Sprintf("Failed to create %d task(s): Chat attachments could not be loaded; no tasks were created.", len(taskRequests)), 0
 	}
 	deferredRequestIndexes := h.deferActiveTasksWithAttachments(taskRequests, chatAtts, agents)
 
@@ -2122,7 +2104,7 @@ func (h *Handler) processChatTaskCreations(ctx context.Context, execID, projectI
 		summary += "\nAttachment conversion failed; affected tasks were left in Backlog without broken attachment records."
 	}
 
-	return h.appendCreationSummary(output, summary, totalAttachmentsCopied, chatAtts), totalAttachmentsCopied
+	return strings.TrimSpace(h.appendCreationSummary("", summary, totalAttachmentsCopied, chatAtts)), totalAttachmentsCopied
 }
 
 // deferActiveTasksWithAttachments resolves each request's effective category and
@@ -2264,18 +2246,15 @@ func (h *Handler) appendCreationSummary(output, summary string, totalAttachments
 	return output
 }
 
-// processChatTaskEdits handles task edit markers from AI responses.
-// It parses [EDIT_TASK] markers, applies the edits (including file attachments), and appends summaries to the output.
-// When an edit request includes "chat" in its attachments list, the current chat execution's
-// file attachments are copied to the target task (appearing in its Attachments tab).
-// Returns the updated output with edit summaries appended.
-func (h *Handler) processChatTaskEdits(ctx context.Context, execID, projectID, output string) string {
-	editRequests := parseChatTaskEdits(output)
+// executeChatTaskEditRequests applies typed runtime-tool task edits, including
+// copying current Chat attachments when requested.
+func (h *Handler) executeChatTaskEditRequests(ctx context.Context, execID, projectID string, editRequests []service.TaskEditRequest) string {
 	if len(editRequests) == 0 {
-		return output
+		return ""
 	}
 
-	applog.Infof("[handler] processChatTaskEdits exec=%s found %d task edit requests", execID, len(editRequests))
+	applog.Infof("[handler] executeChatTaskEditRequests exec=%s found %d task edit requests", execID, len(editRequests))
+	output := ""
 
 	// Handle "chat" attachment keyword: copy chat attachments to target tasks
 	chatAttCopied, chatOnlyTaskIDs := h.processChatAttachmentsForEdits(ctx, execID, editRequests)
@@ -2302,10 +2281,8 @@ func (h *Handler) processChatTaskEdits(ctx context.Context, execID, projectID, o
 	return output
 }
 
-// processChatAttachmentsForEdits processes the special "chat" keyword in edit request attachments.
-// When an [EDIT_TASK] includes "chat" in its attachments list, this copies the current chat
-// execution's file attachments to the target task's attachment tab. The "chat" keyword is
-// removed from the request so it doesn't get processed as a file path by copyAttachmentFiles.
+// processChatAttachmentsForEdits handles the special "chat" attachment value in
+// typed edit_task requests by copying the current execution's attachments.
 // Returns the total number of chat attachments copied and a set of task IDs that had the "chat" keyword.
 func (h *Handler) processChatAttachmentsForEdits(ctx context.Context, execID string, editRequests []service.TaskEditRequest) (int, map[string]bool) {
 	totalCopied := 0
@@ -2355,106 +2332,44 @@ func hasOtherEditFields(req service.TaskEditRequest) bool {
 		req.AgentConfigID != "" || req.Chain != nil || len(req.Attachments) > 0
 }
 
-// processChatTaskExecutions handles task execution markers from AI responses.
-// It parses [EXECUTE_TASKS] markers, triggers task execution, and appends summaries to the output.
-// Returns the updated output with execution summaries appended.
-func (h *Handler) processChatTaskExecutions(ctx context.Context, execID, projectID, output string) string {
-	execRequests := parseChatTaskExecutions(output)
+// executeChatTaskExecutionRequests executes tasks from typed runtime-tool requests.
+func (h *Handler) executeChatTaskExecutionRequests(ctx context.Context, execID, projectID string, execRequests []service.TaskExecutionRequest) string {
 	if len(execRequests) == 0 {
-		return output
+		return ""
 	}
 
-	applog.Infof("[handler] processChatTaskExecutions exec=%s found %d task execution requests", execID, len(execRequests))
-	execSummary := executeChatTaskExecutions(ctx, execRequests, projectID, h.taskSvc)
-	if execSummary != "" {
-		output += execSummary
-	}
-	return output
+	applog.Infof("[handler] executeChatTaskExecutionRequests exec=%s found %d task execution requests", execID, len(execRequests))
+	return executeChatTaskExecutions(ctx, execRequests, projectID, h.taskSvc)
 }
 
-// processViewThread handles [VIEW_TASK_CHAT] markers from AI responses.
-// It resolves the target task (by ID or title search), fetches the execution history,
-// formats it as a readable thread transcript, and replaces the marker with the transcript.
-func (h *Handler) processViewThread(ctx context.Context, execID, projectID, output string) string {
-	viewRequests := parseViewThread(output)
-	if len(viewRequests) == 0 {
-		return output
+// executeViewTaskThreadRequest resolves a typed runtime-tool task reference and
+// returns its execution history.
+func (h *Handler) executeViewTaskThreadRequest(ctx context.Context, projectID string, req service.ViewThreadRequest) (string, error) {
+	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
+		return "", fmt.Errorf("view_task_thread requires task_id or title")
 	}
-
-	applog.Infof("[handler] processViewThread exec=%s found %d view requests", execID, len(viewRequests))
-
-	for _, req := range viewRequests {
-		task, err := h.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-		if err != nil {
-			applog.Infof("[handler] processViewThread error resolving task: %v", err)
-			output += fmt.Sprintf("\n\n---\nCould not find task: %v", err)
-			continue
-		}
-
-		executions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
-		if err != nil {
-			applog.Infof("[handler] processViewThread error listing executions for task %s: %v", task.ID, err)
-			output += fmt.Sprintf("\n\n---\nError retrieving thread for task \"%s\": %v", task.Title, err)
-			continue
-		}
-
-		transcript := h.formatThreadTranscript(task, executions, req.Offset, req.Limit)
-		output += transcript
+	task, err := h.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
 	}
-
-	return output
+	executions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil {
+		return "", fmt.Errorf("retrieving thread for task %q: %w", task.Title, err)
+	}
+	return strings.TrimSpace(h.formatThreadTranscript(task, executions, req.Offset, req.Limit)), nil
 }
 
-// processChatSendToTask handles [SEND_TO_TASK] markers from AI responses.
-// It resolves the target task, validates its state, creates a follow-up execution,
-// and spawns a background goroutine to process the message with the task's AI agent.
-func (h *Handler) processChatSendToTask(ctx context.Context, execID, projectID, output string) string {
-	sendRequests := parseChatSendToTask(output)
-	if len(sendRequests) == 0 {
-		return output
-	}
-
-	applog.Infof("[handler] processChatSendToTask exec=%s found %d send requests", execID, len(sendRequests))
-
-	var results []string
-	for _, req := range sendRequests {
-		task, err := h.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
-		if err != nil {
-			applog.Infof("[handler] processChatSendToTask error resolving task: %v", err)
-			results = append(results, fmt.Sprintf("- Could not find task: %v", err))
-			continue
-		}
-		queued, err := h.enqueueTaskThreadInput(ctx, task.ID, req.Message, models.TaskOriginWeb, "")
-		if err != nil {
-			applog.Infof("[handler] processChatSendToTask task=%s error queueing input: %v", task.ID, err)
-			results = append(results, fmt.Sprintf("- Error queueing message for task \"%s\": %v", task.Title, err))
-			continue
-		}
-		results = append(results, fmt.Sprintf("- Queued message to task \"%s\" [TASK_ID:%s] [QUEUED_INPUT:%s] — it will run through the task-thread queue.", task.Title, task.ID, queued.ID))
-	}
-
-	if len(results) > 0 {
-		output += "\n\n---\nThread Messages:\n" + strings.Join(results, "\n")
-	}
-	return output
-}
-
-// processChatScheduleTask handles [SCHEDULE_TASK] markers from AI responses.
-// It resolves the target task (by ID or title search), creates a schedule entry,
-// moves the task to 'scheduled' category, and returns the updated output.
-func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID, output string) string {
-	scheduleRequests := parseChatScheduleTask(output)
+// executeChatScheduleRequests schedules tasks from typed runtime-tool requests.
+func (h *Handler) executeChatScheduleRequests(ctx context.Context, projectID string, scheduleRequests []service.ScheduleTaskRequest) string {
 	if len(scheduleRequests) == 0 {
-		return output
+		return ""
 	}
-
-	applog.Infof("[handler] processChatScheduleTask exec=%s found %d schedule requests", execID, len(scheduleRequests))
 
 	var results []string
 	for _, req := range scheduleRequests {
 		task, err := h.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
 		if err != nil {
-			applog.Infof("[handler] processChatScheduleTask error resolving task: %v", err)
+			applog.Infof("[handler] executeChatScheduleRequests error resolving task: %v", err)
 			results = append(results, fmt.Sprintf("- Could not find task: %v", err))
 			continue
 		}
@@ -2462,7 +2377,7 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 		// Parse time (HH:MM format)
 		var hourVal, minuteVal int
 		if _, err := fmt.Sscanf(req.Time, "%d:%d", &hourVal, &minuteVal); err != nil || hourVal < 0 || hourVal > 23 || minuteVal < 0 || minuteVal > 59 {
-			applog.Infof("[handler] processChatScheduleTask invalid time: %s", req.Time)
+			applog.Infof("[handler] executeChatScheduleRequests invalid time: %s", req.Time)
 			results = append(results, fmt.Sprintf("- Invalid time %q for task \"%s\" (expected HH:MM, 00:00-23:59)", req.Time, task.Title))
 			continue
 		}
@@ -2485,7 +2400,7 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 		case "seconds":
 			repeatType = models.RepeatSeconds
 		default:
-			applog.Infof("[handler] processChatScheduleTask unknown repeat type %q, defaulting to daily", req.Repeat)
+			applog.Infof("[handler] executeChatScheduleRequests unknown repeat type %q, defaulting to daily", req.Repeat)
 		}
 
 		// Determine repeat interval (default 1)
@@ -2540,7 +2455,7 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 		}
 
 		if err := h.scheduleRepo.Create(ctx, schedule); err != nil {
-			applog.Infof("[handler] processChatScheduleTask error creating schedule: %v", err)
+			applog.Infof("[handler] executeChatScheduleRequests error creating schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Error scheduling task \"%s\": %v", task.Title, err))
 			continue
 		}
@@ -2548,11 +2463,11 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 		// Move task to scheduled category if not already
 		if task.Category != models.CategoryScheduled {
 			if err := h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
-				applog.Infof("[handler] processChatScheduleTask error updating category: %v", err)
+				applog.Infof("[handler] executeChatScheduleRequests error updating category: %v", err)
 			}
 			if task.Status != models.StatusPending {
 				if err := h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
-					applog.Infof("[handler] processChatScheduleTask error updating status: %v", err)
+					applog.Infof("[handler] executeChatScheduleRequests error updating status: %v", err)
 				}
 			}
 		}
@@ -2565,39 +2480,33 @@ func (h *Handler) processChatScheduleTask(ctx context.Context, execID, projectID
 			}
 		}
 		results = append(results, fmt.Sprintf("- Scheduled task \"%s\" [TASK_ID:%s] at %s (%s)", task.Title, task.ID, req.Time, repeatDesc))
-		applog.Infof("[handler] processChatScheduleTask scheduled task=%s schedule=%s at %s repeat=%s", task.ID, schedule.ID, req.Time, repeatType)
+		applog.Infof("[handler] executeChatScheduleRequests scheduled task=%s schedule=%s at %s repeat=%s", task.ID, schedule.ID, req.Time, repeatType)
 	}
 
-	if len(results) > 0 {
-		output += "\n\n---\nSchedule Results:\n" + strings.Join(results, "\n")
+	if len(results) == 0 {
+		return ""
 	}
-
-	return output
+	return "Schedule Results:\n" + strings.Join(results, "\n")
 }
 
-// processChatDeleteSchedule handles [DELETE_SCHEDULE] markers from AI responses.
-// It resolves the target schedule (by schedule_id, task_id, or title), deletes it,
-// and returns the updated output.
-func (h *Handler) processChatDeleteSchedule(ctx context.Context, execID, projectID, output string) string {
-	deleteRequests := parseChatDeleteSchedule(output)
+// executeChatDeleteScheduleRequests deletes schedules from typed runtime-tool requests.
+func (h *Handler) executeChatDeleteScheduleRequests(ctx context.Context, projectID string, deleteRequests []service.DeleteScheduleRequest) string {
 	if len(deleteRequests) == 0 {
-		return output
+		return ""
 	}
-
-	applog.Infof("[handler] processChatDeleteSchedule exec=%s found %d delete requests", execID, len(deleteRequests))
 
 	var results []string
 	for _, req := range deleteRequests {
 		// Resolve the schedule to delete
 		schedule, task, err := h.resolveScheduleReference(ctx, projectID, req.ScheduleID, req.TaskID, req.Title)
 		if err != nil {
-			applog.Infof("[handler] processChatDeleteSchedule error resolving schedule: %v", err)
+			applog.Infof("[handler] executeChatDeleteScheduleRequests error resolving schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Could not find schedule: %v", err))
 			continue
 		}
 
 		if err := h.scheduleRepo.Delete(ctx, schedule.ID); err != nil {
-			applog.Infof("[handler] processChatDeleteSchedule error deleting schedule: %v", err)
+			applog.Infof("[handler] executeChatDeleteScheduleRequests error deleting schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Error deleting schedule for task \"%s\": %v", task.Title, err))
 			continue
 		}
@@ -2605,41 +2514,36 @@ func (h *Handler) processChatDeleteSchedule(ctx context.Context, execID, project
 		// Check if the task has any remaining schedules
 		remaining, err := h.scheduleRepo.ListByTask(ctx, task.ID)
 		if err != nil {
-			applog.Infof("[handler] processChatDeleteSchedule error checking remaining schedules: %v", err)
+			applog.Infof("[handler] executeChatDeleteScheduleRequests error checking remaining schedules: %v", err)
 		}
 		if len(remaining) == 0 && task.Category == models.CategoryScheduled {
 			// No more schedules — move task back to backlog
 			if err := h.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryBacklog); err != nil {
-				applog.Infof("[handler] processChatDeleteSchedule error updating category: %v", err)
+				applog.Infof("[handler] executeChatDeleteScheduleRequests error updating category: %v", err)
 			}
 		}
 
 		results = append(results, fmt.Sprintf("- Deleted schedule for task \"%s\" [TASK_ID:%s]", task.Title, task.ID))
-		applog.Infof("[handler] processChatDeleteSchedule deleted schedule=%s task=%s", schedule.ID, task.ID)
+		applog.Infof("[handler] executeChatDeleteScheduleRequests deleted schedule=%s task=%s", schedule.ID, task.ID)
 	}
 
-	if len(results) > 0 {
-		output += "\n\n---\nSchedule Delete Results:\n" + strings.Join(results, "\n")
+	if len(results) == 0 {
+		return ""
 	}
-
-	return output
+	return "Schedule Delete Results:\n" + strings.Join(results, "\n")
 }
 
-// processChatModifySchedule handles [MODIFY_SCHEDULE] markers from AI responses.
-// It resolves the target schedule, applies the requested modifications, and returns the updated output.
-func (h *Handler) processChatModifySchedule(ctx context.Context, execID, projectID, output string) string {
-	modifyRequests := parseChatModifySchedule(output)
+// executeChatModifyScheduleRequests modifies schedules from typed runtime-tool requests.
+func (h *Handler) executeChatModifyScheduleRequests(ctx context.Context, projectID string, modifyRequests []service.ModifyScheduleRequest) string {
 	if len(modifyRequests) == 0 {
-		return output
+		return ""
 	}
-
-	applog.Infof("[handler] processChatModifySchedule exec=%s found %d modify requests", execID, len(modifyRequests))
 
 	var results []string
 	for _, req := range modifyRequests {
 		schedule, task, err := h.resolveScheduleReference(ctx, projectID, req.ScheduleID, req.TaskID, req.Title)
 		if err != nil {
-			applog.Infof("[handler] processChatModifySchedule error resolving schedule: %v", err)
+			applog.Infof("[handler] executeChatModifyScheduleRequests error resolving schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Could not find schedule: %v", err))
 			continue
 		}
@@ -2650,7 +2554,7 @@ func (h *Handler) processChatModifySchedule(ctx context.Context, execID, project
 		if req.Time != "" {
 			var hourVal, minuteVal int
 			if _, err := fmt.Sscanf(req.Time, "%d:%d", &hourVal, &minuteVal); err != nil || hourVal < 0 || hourVal > 23 || minuteVal < 0 || minuteVal > 59 {
-				applog.Infof("[handler] processChatModifySchedule invalid time: %s", req.Time)
+				applog.Infof("[handler] executeChatModifyScheduleRequests invalid time: %s", req.Time)
 				results = append(results, fmt.Sprintf("- Invalid time %q for schedule on task \"%s\" (expected HH:MM, 00:00-23:59)", req.Time, task.Title))
 				continue
 			}
@@ -2679,7 +2583,7 @@ func (h *Handler) processChatModifySchedule(ctx context.Context, execID, project
 			case "seconds":
 				schedule.RepeatType = models.RepeatSeconds
 			default:
-				applog.Infof("[handler] processChatModifySchedule unknown repeat type %q", req.Repeat)
+				applog.Infof("[handler] executeChatModifyScheduleRequests unknown repeat type %q", req.Repeat)
 				results = append(results, fmt.Sprintf("- Unknown repeat type %q for schedule on task \"%s\"", req.Repeat, task.Title))
 				continue
 			}
@@ -2762,20 +2666,19 @@ func (h *Handler) processChatModifySchedule(ctx context.Context, execID, project
 		// Disabling with no time changes: preserve NextRun as-is.
 
 		if err := h.scheduleRepo.Update(ctx, schedule); err != nil {
-			applog.Infof("[handler] processChatModifySchedule error updating schedule: %v", err)
+			applog.Infof("[handler] executeChatModifyScheduleRequests error updating schedule: %v", err)
 			results = append(results, fmt.Sprintf("- Error updating schedule for task \"%s\": %v", task.Title, err))
 			continue
 		}
 
 		results = append(results, fmt.Sprintf("- Updated schedule for task \"%s\" [TASK_ID:%s]: %s", task.Title, task.ID, strings.Join(changes, ", ")))
-		applog.Infof("[handler] processChatModifySchedule updated schedule=%s task=%s changes=%s", schedule.ID, task.ID, strings.Join(changes, ", "))
+		applog.Infof("[handler] executeChatModifyScheduleRequests updated schedule=%s task=%s changes=%s", schedule.ID, task.ID, strings.Join(changes, ", "))
 	}
 
-	if len(results) > 0 {
-		output += "\n\n---\nSchedule Modify Results:\n" + strings.Join(results, "\n")
+	if len(results) == 0 {
+		return ""
 	}
-
-	return output
+	return "Schedule Modify Results:\n" + strings.Join(results, "\n")
 }
 
 // resolveScheduleReference finds a schedule by schedule_id, or by task_id/title (returning the first schedule).
@@ -2939,14 +2842,8 @@ func (h *Handler) formatThreadTranscript(task *models.Task, executions []models.
 	return sb.String()
 }
 
-// processChatListPersonalities handles [LIST_PERSONALITIES] markers by returning all available personality presets.
-func (h *Handler) processChatListPersonalities(ctx context.Context, execID, projectID, output string) string {
-	if !service.HasListPersonalities(output) {
-		return output
-	}
-
-	applog.Infof("[handler] processChatListPersonalities exec=%s", execID)
-
+// executeListPersonalities returns all available personality presets.
+func (h *Handler) executeListPersonalities(ctx context.Context) string {
 	personalities := service.AllPersonalitiesWithCustom(ctx, h.customPersonalityRepo)
 	var sb strings.Builder
 	sb.WriteString("\n\n---\nAvailable Personalities:\n")
@@ -2963,73 +2860,41 @@ func (h *Handler) processChatListPersonalities(ctx context.Context, execID, proj
 	// Also show current personality
 	current, err := h.settingsRepo.Get(ctx, "personality")
 	if err != nil {
-		applog.Infof("[handler] processChatListPersonalities error reading current personality: %v", err)
+		applog.Infof("[handler] executeListPersonalities error reading current personality: %v", err)
 	}
 	if current == "" {
 		current = "default"
 	}
 	sb.WriteString(fmt.Sprintf("\nCurrent personality: **%s**\n", current))
-
-	output += sb.String()
-	return output
+	return sb.String()
 }
 
-// processChatSetPersonality handles [SET_PERSONALITY] markers by changing the global personality setting.
-func (h *Handler) processChatSetPersonality(ctx context.Context, execID, projectID, output string) string {
-	requests := service.ParseSetPersonality(output)
-	if len(requests) == 0 {
-		return output
-	}
-
-	applog.Infof("[handler] processChatSetPersonality exec=%s found %d requests", execID, len(requests))
-
-	var results []string
-	for _, req := range requests {
-		// Validate personality key against presets + custom
-		valid := false
-		var matchedName string
-		for _, p := range service.AllPersonalitiesWithCustom(ctx, h.customPersonalityRepo) {
-			if p.Key == req.Personality {
-				valid = true
-				matchedName = p.Name
-				break
-			}
+// executeSetPersonality applies a typed set_personality runtime action.
+func (h *Handler) executeSetPersonality(ctx context.Context, req service.SetPersonalityRequest) string {
+	// Validate personality key against presets + custom
+	valid := false
+	var matchedName string
+	for _, personality := range service.AllPersonalitiesWithCustom(ctx, h.customPersonalityRepo) {
+		if personality.Key == req.Personality {
+			valid = true
+			matchedName = personality.Name
+			break
 		}
-		if !valid {
-			results = append(results, fmt.Sprintf("- Unknown personality %q. Use [LIST_PERSONALITIES] to see available options.", req.Personality))
-			continue
-		}
-
-		if err := h.settingsRepo.Set(ctx, "personality", req.Personality); err != nil {
-			applog.Infof("[handler] processChatSetPersonality error: %v", err)
-			results = append(results, fmt.Sprintf("- Error setting personality to %q: %v", req.Personality, err))
-			continue
-		}
-
-		results = append(results, fmt.Sprintf("- Personality changed to **%s** (`%s`)", matchedName, req.Personality))
-		applog.Infof("[handler] processChatSetPersonality set personality to %q", req.Personality)
 	}
-
-	if len(results) > 0 {
-		output += "\n\n---\nPersonality Settings:\n" + strings.Join(results, "\n")
+	if !valid {
+		return fmt.Sprintf("Unknown personality %q. Use list_personalities to see available options.", req.Personality)
 	}
-
-	return output
+	if err := h.settingsRepo.Set(ctx, "personality", req.Personality); err != nil {
+		return fmt.Sprintf("Error setting personality to %q: %v", req.Personality, err)
+	}
+	return fmt.Sprintf("Personality changed to **%s** (`%s`)", matchedName, req.Personality)
 }
 
-// processChatListModels handles [LIST_MODELS] markers by returning available AI model configurations.
-func (h *Handler) processChatListModels(ctx context.Context, execID, projectID, output string) string {
-	if !service.HasListModels(output) {
-		return output
-	}
-
-	applog.Infof("[handler] processChatListModels exec=%s", execID)
-
+// executeListModels returns available model configurations.
+func (h *Handler) executeListModels(ctx context.Context) string {
 	configs, err := h.llmConfigRepo.List(ctx)
 	if err != nil {
-		applog.Infof("[handler] processChatListModels error listing models: %v", err)
-		output += "\n\n---\nModel Settings:\n- Error retrieving model configurations: " + err.Error()
-		return output
+		return "Model Settings:\n- Error retrieving model configurations: " + err.Error()
 	}
 
 	var sb strings.Builder
@@ -3055,27 +2920,18 @@ func (h *Handler) processChatListModels(ctx context.Context, execID, projectID, 
 		}
 	}
 
-	output += sb.String()
-	return output
+	return sb.String()
 }
 
-// processChatListAgents handles [LIST_AGENTS] markers by returning available agent definitions.
-func (h *Handler) processChatListAgents(ctx context.Context, execID, projectID, output string) string {
-	if !service.HasListAgents(output) {
-		return output
-	}
-	applog.Infof("[handler] processChatListAgents exec=%s", execID)
-
+// executeListAgents returns available agent definitions.
+func (h *Handler) executeListAgents(ctx context.Context) string {
 	if h.agentRepo == nil {
-		output += "\n\n---\nConfigured Agents:\nAgent definitions not available.\n"
-		return output
+		return "Configured Agents:\nAgent definitions not available.\n"
 	}
 
 	agents, err := h.agentRepo.List(ctx)
 	if err != nil {
-		applog.Infof("[handler] processChatListAgents error: %v", err)
-		output += "\n\n---\nConfigured Agents:\n- Error: " + err.Error()
-		return output
+		return "Configured Agents:\n- Error: " + err.Error()
 	}
 
 	var sb strings.Builder
@@ -3092,25 +2948,18 @@ func (h *Handler) processChatListAgents(ctx context.Context, execID, projectID, 
 				a.Name, a.Description, modelStr, len(a.Skills), len(a.MCPServers)))
 		}
 	}
-	output += sb.String()
-	return output
+	return sb.String()
 }
 
-// processChatViewSettings handles [VIEW_SETTINGS] markers by returning current app settings.
-func (h *Handler) processChatViewSettings(ctx context.Context, execID, projectID, output string) string {
-	if !service.HasViewSettings(output) {
-		return output
-	}
-
-	applog.Infof("[handler] processChatViewSettings exec=%s", execID)
-
+// executeViewSettings returns current application settings.
+func (h *Handler) executeViewSettings(ctx context.Context) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n---\nApp Settings:\n")
 
 	// Personality
 	personality, err := h.settingsRepo.Get(ctx, "personality")
 	if err != nil {
-		applog.Infof("[handler] processChatViewSettings error reading personality: %v", err)
+		applog.Infof("[handler] executeViewSettings error reading personality: %v", err)
 	}
 	if personality == "" {
 		personality = "default (no personality)"
@@ -3120,7 +2969,7 @@ func (h *Handler) processChatViewSettings(ctx context.Context, execID, projectID
 	// Model count
 	configs, err := h.llmConfigRepo.List(ctx)
 	if err != nil {
-		applog.Infof("[handler] processChatViewSettings error listing models: %v", err)
+		applog.Infof("[handler] executeViewSettings error listing models: %v", err)
 	} else {
 		sb.WriteString(fmt.Sprintf("- **Configured models:** %d\n", len(configs)))
 		for _, c := range configs {
@@ -3136,8 +2985,10 @@ func (h *Handler) processChatViewSettings(ctx context.Context, execID, projectID
 	if h.workerRepo != nil {
 		globalMax, err := h.workerRepo.GetMaxWorkers(ctx)
 		if err != nil {
-			applog.Infof("[handler] processChatViewSettings error reading global workers: %v", err)
+			applog.Infof("[handler] executeViewSettings error reading global workers: %v", err)
 			sb.WriteString("- **Global max workers:** error reading\n")
+		} else if globalMax == 0 {
+			sb.WriteString("- **Global max workers:** unlimited\n")
 		} else {
 			sb.WriteString(fmt.Sprintf("- **Global max workers:** %d\n", globalMax))
 		}
@@ -3148,7 +2999,7 @@ func (h *Handler) processChatViewSettings(ctx context.Context, execID, projectID
 	// Per-project worker limits
 	projects, err := h.projectRepo.List(ctx)
 	if err != nil {
-		applog.Infof("[handler] processChatViewSettings error listing projects: %v", err)
+		applog.Infof("[handler] executeViewSettings error listing projects: %v", err)
 	} else {
 		hasProjectLimits := false
 		for _, p := range projects {
@@ -3186,28 +3037,20 @@ func (h *Handler) processChatViewSettings(ctx context.Context, execID, projectID
 		}
 	}
 
-	output += sb.String()
-	return output
+	return sb.String()
 }
 
-// processChatProjectInfo handles [PROJECT_INFO] markers by returning current project details and task counts.
-func (h *Handler) processChatProjectInfo(ctx context.Context, execID, projectID, output string) string {
-	if !service.HasProjectInfo(output) {
-		return output
-	}
-
-	applog.Infof("[handler] processChatProjectInfo exec=%s project=%s", execID, projectID)
-
+// executeProjectInfo returns current project details and task counts.
+func (h *Handler) executeProjectInfo(ctx context.Context, projectID string) string {
 	var sb strings.Builder
 	sb.WriteString("\n\n---\nProject Info:\n")
 
 	// Get project details
 	project, err := h.projectRepo.GetByID(ctx, projectID)
 	if err != nil || project == nil {
-		applog.Infof("[handler] processChatProjectInfo error getting project: %v", err)
+		applog.Infof("[handler] executeProjectInfo error getting project: %v", err)
 		sb.WriteString("- Error retrieving project details\n")
-		output += sb.String()
-		return output
+		return sb.String()
 	}
 
 	sb.WriteString(fmt.Sprintf("- **Name:** %s\n", project.Name))
@@ -3221,7 +3064,7 @@ func (h *Handler) processChatProjectInfo(ctx context.Context, execID, projectID,
 	// Task counts by category
 	categoryCounts, err := h.taskRepo.CountByProjectAndCategory(ctx, projectID)
 	if err != nil {
-		applog.Infof("[handler] processChatProjectInfo error counting tasks: %v", err)
+		applog.Infof("[handler] executeProjectInfo error counting tasks: %v", err)
 	} else {
 		total := 0
 		for _, count := range categoryCounts {
@@ -3234,23 +3077,14 @@ func (h *Handler) processChatProjectInfo(ctx context.Context, execID, projectID,
 		}
 	}
 
-	output += sb.String()
-	return output
+	return sb.String()
 }
 
-// processChatListProjects handles [LIST_PROJECTS] markers by returning all available projects.
-func (h *Handler) processChatListProjects(ctx context.Context, execID, projectID, output string) string {
-	if !service.HasListProjects(output) {
-		return output
-	}
-
-	applog.Infof("[handler] processChatListProjects exec=%s project=%s", execID, projectID)
-
+// executeListProjects returns all available projects.
+func (h *Handler) executeListProjects(ctx context.Context, projectID string) string {
 	projects, err := h.projectRepo.List(ctx)
 	if err != nil {
-		applog.Infof("[handler] processChatListProjects error listing projects: %v", err)
-		output += "\n\n---\nAvailable Projects:\n- Error retrieving projects: " + err.Error()
-		return output
+		return "Available Projects:\n- Error retrieving projects: " + err.Error()
 	}
 
 	var sb strings.Builder
@@ -3271,28 +3105,18 @@ func (h *Handler) processChatListProjects(ctx context.Context, execID, projectID
 		}
 	}
 
-	output += sb.String()
-	return output
+	return sb.String()
 }
 
-// processChatListAlerts handles [LIST_ALERTS] markers by returning alerts for the current project.
-func (h *Handler) processChatListAlerts(ctx context.Context, execID, projectID, output string) string {
-	if !service.HasListAlerts(output) {
-		return output
-	}
-
-	applog.Infof("[handler] processChatListAlerts exec=%s project=%s", execID, projectID)
-
+// executeListAlerts returns alerts for the current project.
+func (h *Handler) executeListAlerts(ctx context.Context, projectID string) string {
 	if h.alertSvc == nil {
-		output += "\n\n---\nAlert Results:\n- Alert service not available"
-		return output
+		return "Alert Results:\n- Alert service not available"
 	}
 
 	alerts, err := h.alertSvc.ListByProject(ctx, projectID, 50)
 	if err != nil {
-		applog.Infof("[handler] processChatListAlerts error listing alerts: %v", err)
-		output += "\n\n---\nAlert Results:\n- Error retrieving alerts: " + err.Error()
-		return output
+		return "Alert Results:\n- Error retrieving alerts: " + err.Error()
 	}
 
 	var sb strings.Builder
@@ -3319,22 +3143,16 @@ func (h *Handler) processChatListAlerts(ctx context.Context, execID, projectID, 
 		}
 	}
 
-	output += sb.String()
-	return output
+	return sb.String()
 }
 
-// processChatCreateAlert handles [CREATE_ALERT] markers by creating new alerts.
-func (h *Handler) processChatCreateAlert(ctx context.Context, execID, projectID, output string) string {
-	requests := parseChatCreateAlert(output)
+// executeCreateAlertRequests creates alerts from typed runtime-tool requests.
+func (h *Handler) executeCreateAlertRequests(ctx context.Context, projectID string, requests []service.CreateAlertRequest) string {
 	if len(requests) == 0 {
-		return output
+		return ""
 	}
-
-	applog.Infof("[handler] processChatCreateAlert exec=%s found %d requests", execID, len(requests))
-
 	if h.alertSvc == nil {
-		output += "\n\n---\nAlert Create Results:\n- Alert service not available"
-		return output
+		return "Alert Create Results:\n- Alert service not available"
 	}
 
 	var results []string
@@ -3379,7 +3197,7 @@ func (h *Handler) processChatCreateAlert(ctx context.Context, execID, projectID,
 		}
 
 		if err := h.alertSvc.Create(ctx, a); err != nil {
-			applog.Infof("[handler] processChatCreateAlert error: %v", err)
+			applog.Infof("[handler] executeCreateAlertRequests error: %v", err)
 			results = append(results, fmt.Sprintf("- Error creating alert %q: %v", req.Title, err))
 			continue
 		}
@@ -3387,209 +3205,60 @@ func (h *Handler) processChatCreateAlert(ctx context.Context, execID, projectID,
 		results = append(results, fmt.Sprintf("- Created alert %q (id: `%s`, severity: %s)", req.Title, a.ID, severity))
 	}
 
-	if len(results) > 0 {
-		output += "\n\n---\nAlert Create Results:\n" + strings.Join(results, "\n")
+	if len(results) == 0 {
+		return ""
 	}
-
-	return output
+	return "Alert Create Results:\n" + strings.Join(results, "\n")
 }
 
-// processChatDeleteAlert handles [DELETE_ALERT] markers by deleting alerts by ID.
-func (h *Handler) processChatDeleteAlert(ctx context.Context, execID, projectID, output string) string {
-	requests := parseChatDeleteAlert(output)
+// executeDeleteAlertRequests deletes alerts from typed runtime-tool requests.
+func (h *Handler) executeDeleteAlertRequests(ctx context.Context, projectID string, requests []service.DeleteAlertRequest) string {
 	if len(requests) == 0 {
-		return output
+		return ""
 	}
-
-	applog.Infof("[handler] processChatDeleteAlert exec=%s found %d requests", execID, len(requests))
-
 	if h.alertSvc == nil {
-		output += "\n\n---\nAlert Delete Results:\n- Alert service not available"
-		return output
+		return "Alert Delete Results:\n- Alert service not available"
 	}
 
 	var results []string
 	for _, req := range requests {
-		if err := h.alertSvc.Delete(ctx, req.AlertID); err != nil {
-			applog.Infof("[handler] processChatDeleteAlert error: %v", err)
+		if err := h.alertSvc.Delete(ctx, projectID, req.AlertID); err != nil {
+			applog.Infof("[handler] executeDeleteAlertRequests error: %v", err)
 			results = append(results, fmt.Sprintf("- Error deleting alert %q: %v", req.AlertID, err))
 			continue
 		}
 		results = append(results, fmt.Sprintf("- Deleted alert `%s`", req.AlertID))
 	}
 
-	if len(results) > 0 {
-		output += "\n\n---\nAlert Delete Results:\n" + strings.Join(results, "\n")
+	if len(results) == 0 {
+		return ""
 	}
-
-	return output
+	return "Alert Delete Results:\n" + strings.Join(results, "\n")
 }
 
-// processChatToggleAlert handles [TOGGLE_ALERT] markers by marking alerts as read.
-func (h *Handler) processChatToggleAlert(ctx context.Context, execID, projectID, output string) string {
-	requests := parseChatToggleAlert(output)
+// executeToggleAlertRequests marks alerts read from typed runtime-tool requests.
+func (h *Handler) executeToggleAlertRequests(ctx context.Context, projectID string, requests []service.ToggleAlertRequest) string {
 	if len(requests) == 0 {
-		return output
+		return ""
 	}
-
-	applog.Infof("[handler] processChatToggleAlert exec=%s found %d requests", execID, len(requests))
-
 	if h.alertSvc == nil {
-		output += "\n\n---\nAlert Toggle Results:\n- Alert service not available"
-		return output
+		return "Alert Toggle Results:\n- Alert service not available"
 	}
 
 	var results []string
 	for _, req := range requests {
-		if err := h.alertSvc.MarkRead(ctx, req.AlertID); err != nil {
-			applog.Infof("[handler] processChatToggleAlert error: %v", err)
+		if err := h.alertSvc.MarkRead(ctx, projectID, req.AlertID); err != nil {
+			applog.Infof("[handler] executeToggleAlertRequests error: %v", err)
 			results = append(results, fmt.Sprintf("- Error marking alert %q as read: %v", req.AlertID, err))
 			continue
 		}
 		results = append(results, fmt.Sprintf("- Marked alert `%s` as read", req.AlertID))
 	}
 
-	if len(results) > 0 {
-		output += "\n\n---\nAlert Toggle Results:\n" + strings.Join(results, "\n")
+	if len(results) == 0 {
+		return ""
 	}
-
-	return output
-}
-
-// processChatResponse handles all post-LLM processing for chat responses.
-// This includes task creation, editing, execution, chat viewing, and message sending.
-// It processes all marker types in sequence and updates the execution output in the database.
-// Returns the final output with any marker processing results appended.
-//
-// The agents parameter may be empty if agent listing failed; in that case task creation
-// will still proceed but without auto-assignment of agents.
-//
-// Early return: If output is empty, returns immediately without processing (no markers to parse).
-func (h *Handler) processChatResponse(ctx context.Context, execID, projectID, output string, agents []models.LLMConfig, channelReply ...service.ChannelReplyContext) string {
-	if output == "" {
-		return output // No content to process
-	}
-
-	originalOutput := output
-
-	// Process task creation markers
-	if newOutput, attachmentCount := h.processChatTaskCreations(ctx, execID, projectID, output, agents, channelReply...); newOutput != output {
-		output = newOutput
-		if attachmentCount > 0 {
-			applog.Infof("[handler] processChatResponse exec=%s copied %d attachments to created tasks", execID, attachmentCount)
-		}
-	}
-
-	// Process task edit markers
-	if newOutput := h.processChatTaskEdits(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process task execution markers
-	if newOutput := h.processChatTaskExecutions(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process thread view markers
-	if newOutput := h.processViewThread(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process send-to-task markers
-	if newOutput := h.processChatSendToTask(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process schedule task markers
-	if newOutput := h.processChatScheduleTask(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process delete schedule markers
-	if newOutput := h.processChatDeleteSchedule(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process modify schedule markers
-	if newOutput := h.processChatModifySchedule(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process list personalities markers
-	if newOutput := h.processChatListPersonalities(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process set personality markers
-	if newOutput := h.processChatSetPersonality(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process list models markers
-	if newOutput := h.processChatListModels(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process list agents markers
-	if newOutput := h.processChatListAgents(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process view settings markers
-	if newOutput := h.processChatViewSettings(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process project info markers
-	if newOutput := h.processChatProjectInfo(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process list projects markers
-	if newOutput := h.processChatListProjects(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Process alert markers
-	if newOutput := h.processChatListAlerts(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	if newOutput := h.processChatCreateAlert(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	if newOutput := h.processChatDeleteAlert(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	if newOutput := h.processChatToggleAlert(ctx, execID, projectID, output); newOutput != output {
-		output = newOutput
-	}
-
-	// Detect missing markers: warn when the LLM appears to promise an action
-	// but didn't actually output the corresponding marker block
-	if warnings := service.DetectMissingMarkers(originalOutput); len(warnings) > 0 {
-		for _, w := range warnings {
-			applog.Infof("[handler] processChatResponse exec=%s WARNING: LLM promised %s action (matched %q) but no %s marker found in output",
-				execID, w.Action, w.MatchedHint, w.MarkerName)
-		}
-		// Append a user-visible warning so the user knows the action didn't execute
-		output += "\n\n---\n**Warning:** The assistant appeared to promise an action but did not include the required marker. The following actions were NOT performed:\n"
-		for _, w := range warnings {
-			output += fmt.Sprintf("- %s (no %s marker found)\n", w.Action, w.MarkerName)
-		}
-		output += "\nPlease retry your request."
-	}
-
-	// Update execution output if modified
-	if output != originalOutput {
-		if updateErr := h.execRepo.UpdateOutput(ctx, execID, output); updateErr != nil {
-			applog.Infof("[handler] processChatResponse error updating output: %v", updateErr)
-		}
-	}
-
-	return output
+	return "Alert Toggle Results:\n" + strings.Join(results, "\n")
 }
 
 // buildChatContext builds the context string for chat prompts, including task, model, and schedule information.
@@ -3686,9 +3355,9 @@ func (h *Handler) getPersonalityContext(ctx context.Context, projectID string) s
 	return "\n# Communication Style\n\n" + prompt
 }
 
-// extractTaskIDsFromOutput parses [TASK_ID:xxx] markers from AI output and returns
-// a slice of task IDs. This is used to identify which tasks were created by a chat
-// execution without querying the database.
+// extractTaskIDsFromOutput reads [TASK_ID:xxx] result metadata emitted by
+// successful runtime task-creation actions. It identifies which tasks were created
+// during a chat execution without querying the database.
 //
 // The format is: [TASK_ID:abc123]
 // Returns task IDs in the order they appear in the output.

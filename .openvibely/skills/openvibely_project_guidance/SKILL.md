@@ -157,6 +157,6 @@ go test ./internal/... -count=1 -timeout 60s  # Focused/internal tests; use the 
 - Guard async refreshes against out-of-order responses.
 - Batch high-frequency streaming UI updates with `requestAnimationFrame` and flush on completion.
 - Preserve drafts during polling by keying them to entity identity and clearing only on successful intentional submits.
-- Escape raw HTML-like tags before markdown parsing while preserving code fences/spans.
+- Route Chat/task-thread Markdown through the base layout's shared code-range parser: escape raw tag openers outside valid escaped/unmatched/multiline inline and fenced code before Marked, then DOM-sanitize dangerous elements, event/style/srcdoc/srcset attributes, and unsafe URL schemes before assigning `innerHTML`.
 - Centralize shared link, badge, loader, chat bubble, and semantic component styling instead of one-off utility strings.
 - Chat bubbles and input containers should not use visible borders; use depth/drop shadow.

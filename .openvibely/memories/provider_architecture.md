@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-07-15
-source: task_completion
-source_id: 23cf372374af6884a59a03b1ff800c0d
+updated: 2026-07-18
+source: consolidation
+source_id: memory_consolidation_2026_07_17
 confidence: high
 title: Provider Architecture
 ---
@@ -16,7 +16,7 @@ Durable architecture direction:
 - Lifecycle preparation precedes provider request construction for turns that need it.
 - Selected memories, selected skills, task metadata, goals, follow-up metadata, attachments, and runtime tools are intended to become one normalized `AgentRequest`.
 - Provider adapters consume that normalized contract instead of reinterpreting task/chat/follow-up state in ways that can drop context or tools.
-- Provider routing should key off required request features such as chat history, `ChatSystemContext`, streaming, runtime tools, and task execution rather than ad hoc flags such as `!Followup`.
+- Provider routing must treat `AgentRequest.Followup=true` as authoritative even when chat history is nil or empty; concrete adapters must not reinterpret a zero-history follow-up as an initial task.
 
 Current model-call shape:
 - OpenVibely has a partial normalized `AgentRequest`, but some entry-specific code still decides where context lives before the request is built.
@@ -24,7 +24,7 @@ Current model-call shape:
 - Chat/API chat and task-thread follow-ups share `processStreamingResponse` and carry follow-up selected-memory context through `ChatSystemContext`.
 - Queued task-thread inputs promote back into the follow-up path.
 - Lifecycle-selected memories/skills and runtime tools are carried through `context.Context` and extra-instruction helpers before `LLMService.callLLMDetailed` or `CallAgentDirectStreamingDetailed` constructs an `AgentRequest`.
-- Provider adapters then make a second routing decision; this boundary previously allowed OpenAI task-thread follow-ups to drop `ChatSystemContext`.
+- Provider adapters make a second routing decision, so `AgentRequest.Followup=true` is authoritative at both the shared router and each concrete adapter. OpenAI, OpenAI-compatible, Anthropic, and Ollama route zero-history follow-ups through Chat streaming even when `ChatHistory` is nil or empty, preserving the task-follow-up prompt and `ChatSystemContext`; mixtures inherit this behavior from their concrete aggregator.
 - Direct utility services such as architect, backlog, collision, insights, trend, and upcoming use direct-style model calls and generally do not run task/chat lifecycle memory routing unless deliberately redesigned as user/task turns.
 
 Provider/model selection facts:
@@ -40,6 +40,7 @@ Provider/model selection facts:
 - Ollama uses `/api/chat`, `ollama_base_url` migration 056, defaulting to `http://localhost:11434`.
 - CLI-backed provider support for Anthropic and OpenAI/Codex remains a backend compatibility path, but CLI auth/options should not be exposed in the user-facing Models setup dialog.
 - Fine-grained mid-run steering is supported only where OpenVibely owns the provider/tool loop, including OpenAI Responses agentic and Anthropic API/OAuth agentic paths. CLI/fallback transports such as Anthropic CLI, Codex CLI, Ollama, and OpenAI fallback paths remain coarse-grained.
+- External HTTP retry policy is centralized in `internal/httpretry` and shared by OpenAI, OpenAI-compatible, Anthropic, and Ollama paths. The default permits three retries with exponential backoff capped at 30 seconds, honors `Retry-After`, retries transient network failures and HTTP 408/429/500/502/503/504/529 responses, and requires explicit replay permission for unsafe requests. Streaming calls retry only before any text, thinking, or tool activity is observed, and nested HTTP helpers do not multiply the stream-owned retry budget.
 - Provider adapter retries include a steering retry-reset hook so rows claimed during a failed retryable attempt are restored to guarded steering before the next attempt.
 - Default model request deadlines for the primary HTTP model clients are 10 minutes for Anthropic, OpenAI, and Ollama; lifecycle `after_complete` hook execution also uses a 10-minute deadline.
 - OpenAI and Anthropic task/chat requests use the shared base system prompt plus provider-neutral worktree/project/lifecycle instructions; removed OpenAI OAuth-specific `working_with_user` prompt files should not be reintroduced.
@@ -70,7 +71,7 @@ Mixture of Models provider facts:
 - Mixture reference requests use `llmcontracts.WithoutRuntimeTools(ctx)` before applying the per-reference timeout, masking inherited runtime tools while preserving cancellation/deadline behavior. Aggregator requests keep the original runtime-tool context.
 - Chat, task-thread, and initial autonomous-task runtime-tool capability checks for a mixture resolve its concrete aggregator config rather than treating the virtual `mixture` provider as inherently incapable. OpenAI API/OAuth, Anthropic API/OAuth, and OpenAI-compatible API-key aggregators can receive runtime tools; CLI/Ollama, malformed, missing, or unresolvable aggregators receive no native runtime definitions and no textual action fallback.
 - For capable initial-task aggregators, the final request receives the already-authorized and Agent-filtered grants plus the normal defaults for that execution path, including task controls such as `create_task`. Selecting a mixture does not independently grant tools or weaken the assigned Agent policy, and reference requests clear the Agent definition and mask runtime tools.
-- Runtime-incapable mixture aggregators such as Ollama receive no inherited or default native runtime definitions even when the assigned Agent allows tools. Their prompts state that runtime actions are unavailable, and bracket-based action-marker output remains inert model text in Orchestrate, Plan, task-thread, and initial-task paths.
+- Runtime-incapable mixture aggregators such as Ollama receive no inherited or default native runtime definitions even when the assigned Agent allows tools. Their prompts state that runtime actions are unavailable instead of advertising a textual action fallback, and marker-looking output remains inert model text in Orchestrate, Plan, task-thread, and initial-task paths.
 - OpenAI-compatible Chat requests with non-empty runtime action definitions use shared runtime-tool action-mode system guidance. Initial OpenAI API/OAuth, OpenAI-compatible, and Anthropic API/OAuth task requests with an attached `create_task` definition similarly direct the model to the executable runtime tool. These transformations list attached tools without changing Agent authorization; no-tool and runtime-incapable requests advertise neither tools they cannot invoke nor legacy textual controls.
 - Mixture reference ordering is a direct ordered selected-reference list in the Models dialog. Users add callable references from an available-model picker, select one ordered reference, and move it up/down relative to other selected references; create/edit hydration and submitted `mixture_config_json` preserve configured order. A hidden comma-ordered `mixture_reference_ids` fallback stays synchronized for native form fallback.
 - Mixture reference subrequests set `AgentRequest.RawDirectPrompt`. Anthropic API and OpenAI-compatible direct adapters honor this raw advisory mode by skipping normal OpenVibely task headers/system prompts; Anthropic raw reference calls also suppress provider-native web tools. Aggregator requests keep normal provider behavior.
@@ -89,6 +90,7 @@ OAuth and model-specific facts:
 - Provider 401 recovery reloads the model config from DB and may refresh/persist rotated tokens; it does not reread OAuth token material from disk, keychain, or environment variables.
 - Anthropic refresh-token expiry should be treated as opaque/server-controlled, not a fixed duration.
 - Anthropic OAuth refresh failures with provider `invalid_grant` are permanent reauthorization failures: mark model config `oauth_needs_reauth`, surface `needs_reauth`/“Re-auth Required,” and clear the flag after successful refresh.
+- Current incident (2026-07-18): configured Anthropic `Claude Opus 4.8` and `Claude Sonnet 5` model configs have each failed OAuth token refresh with HTTP 400 on repeated task-agent attempts, preventing repository work or validation. Pending task runs should use a working non-failing provider/model configuration or repair/re-authorize the affected Anthropic configurations rather than treating the blocked attempts as implementation evidence.
 - Claude Fable 5 (`claude-fable-5`) and Claude Mythos 5 (`claude-mythos-5`) are supported Anthropic model IDs and should remain selectable where Anthropic model options are listed. They should not be preselected, recommended, or first-position defaults for new Anthropic model configs; use a broadly stable Anthropic default. They default to a 1M context window, support up to 128k output tokens, require adaptive thinking without fixed `budget_tokens`, do not return raw thinking blocks, and can return HTTP 200 refusal responses that should surface as unsuccessful/refusal results.
 
 Provider-native tools and runtime tools:
@@ -99,7 +101,7 @@ Provider-native tools and runtime tools:
 - Anthropic `tool_use` and `server_tool_use` blocks must always carry object-valued `input`; missing/empty/invalid values serialize as `{}` and streaming history preserves start-block input when no JSON delta arrives.
 - OpenAI Responses `function_call.arguments` is a JSON string and is normalized to `"{}"` when missing/empty before local tool execution and replay.
 - Runtime tools are request-scoped, provider-generic, and carried through the LLM service/provider adapter path. Tool definitions carry read/write access classification.
-- Runtime-tool-capable chat-action providers currently include OpenAI API/OAuth, Anthropic API/OAuth, and OpenAI-compatible API-key Chat Completions configs. Default task runtime tools such as `send_message` should attach only for runtime-tool-capable provider/auth paths; unsupported providers/transports receive no unusable tool definitions and no legacy marker fallback.
+- Runtime-tool-capable chat-action providers currently include OpenAI API/OAuth, Anthropic API/OAuth, and OpenAI-compatible API-key Chat Completions configs. Default task runtime tools such as `send_message` attach only for runtime-tool-capable provider/auth paths; unsupported providers/transports receive no unusable tool definitions or legacy marker fallback and must surface the limitation without parsing model text as actions.
 - Anthropic `execBash` runtime-tool calls use a 10-minute default timeout only when no positive timeout is provided. Zero and negative requests normalize to 600 seconds; any positive explicit timeout, shorter or longer than 10 minutes, is preserved without a minimum or maximum cap.
 - Memory tool exposure is a request/tool-profile decision, not a global provider-adapter default. Route-phase Memory Curator recall stays sanitized/no-tools, while update/consolidation hooks may receive scoped memory file tools.
 - Anthropic has a provider-side name-combination collision when the exact wire names `skill_view`, `skills_list`, and `skill_manage` are sent together, which can surface a false “out of extra usage” error. The Anthropic adapter therefore aliases canonical internal `skills_list` to wire name `skill_list` and translates incoming calls back before filtering/execution; keep this workaround adapter-local.

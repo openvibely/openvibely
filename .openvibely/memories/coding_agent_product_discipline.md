@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-07-14
-source: task_conversation
-source_id: cb1d81f40983b9cf25134cddf1b8ecca:615219d36968b41d
+updated: 2026-07-17
+source: consolidation
+source_id: memory_consolidation_2026_07_17
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -15,6 +15,7 @@ User interaction preferences:
 - For design, behavior, or feasibility questions, answer directly without making implementation changes unless explicitly requested.
 - Do not describe unreleased feature contracts as legacy or preserve compatibility shims for unreleased API/UI shapes unless the user explicitly asks for migration compatibility.
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
+- Treat requests explicitly limited to memory or skill maintenance as a hard scope boundary: do not add implementation, generated-file, test, rebase, or other repository changes unless the user separately requests them; clearly distinguish any pre-existing or later-instructed code work when reporting the diff.
 - When diagnosing autonomous integration loops, do not manually forward, wake, or otherwise push one live message through as a substitute for fixing the product path. The user wants the implementation to work properly end-to-end; validation should prove the scheduled/tool/runtime behavior works without ad hoc live intervention unless the user explicitly asks for a one-off operational action.
 - When the user has already explicitly requested an outbound action such as sending an email/message, attempt the available configured/runtime mechanism instead of asking for redundant confirmation; if no viable send path exists, report the completed work and the send limitation clearly.
 - Prefer plain, direct explanations over jargon-heavy phrasing; if the user asks for “no word salad,” respond with a terse concrete summary rather than audit-style detail. For user-facing UI/docs copy, avoid internal tool-name or architecture jargon unless it is clearly marked as advanced/reference text.
@@ -57,8 +58,8 @@ Release-note preferences:
 - Release-note bullets should use bolded lead labels/sections, following `- **Feature or theme** — Details...`.
 
 Current release facts and boundaries:
-- Latest recorded public release is `v0.3.0` (2026-06-24): `https://github.com/openvibely/openvibely/releases/tag/v0.3.0`, whose canonical annotated tag targets `bfcc37d479e4f5f2c6784a900f5a6672ec754bdb`. Verify live release state before preparing or publishing a later release.
-- The `v0.4.0` release candidate is commit `a13ab410c84a9ff26128d72ff6165841bcabfbf7`, and `origin/main` was fast-forwarded to that exact commit on 2026-07-14. Its release themes are multi-agent swarms, Discord/Email and project-scoped outbound messaging, autonomous GitHub issue-to-PR workflows, and Mixture of Models. At the last recorded state, no `v0.4.0` tag or GitHub release had been created; GitHub CLI device authorization was awaiting user approval. Verify live refs and release state before resuming.
-- Candidate `a13ab41` passed all 55 release-tooling checks, `make build`, and `go test ./... -count=1 -timeout 120s`. Seven fresh server/macOS archives plus `SHA256SUMS` were verified, including both macOS archives with `OpenVibely.app` as the exact root. Windows desktop remained pending because `mingw-w64` was unavailable, Docker publishing remained pending for explicit credentials, and sibling `openvibely-docs` edits remained uncommitted.
+- Recorded release state: latest public release was `v0.3.0` (2026-06-24), whose canonical annotated tag targets `bfcc37d479e4f5f2c6784a900f5a6672ec754bdb`. `origin/main` was later fast-forwarded to the `v0.4.0` candidate `a13ab410c84a9ff26128d72ff6165841bcabfbf7`, but no `v0.4.0` tag or GitHub release had been created at the last recorded state. Verify live refs and GitHub release state before resuming release work.
+- The recorded `v0.4.0` themes are multi-agent swarms, Discord/Email and project-scoped outbound messaging, autonomous GitHub issue-to-PR workflows, and Mixture of Models.
 - Release artifacts normally cover macOS desktop bundles and darwin/linux/Windows server archives with checksums. Windows desktop packaging requires a MinGW cross-compiler; Docker publishing remains pending when credentials are unavailable.
+- Release version policy is centralized in `.openvibely/skills/openvibely_release_workflow/scripts/release-version.sh`: all release entrypoints and validation use the same side-effect-free `X.Y.Z`/optional-leading-`v` rules and reject invalid versions before performing release work.
 - Release-build invariants include preserving `OpenVibely.app` as the zip root, making dry runs fully non-writing, avoiding managed worktree cleanup paths for real builds, and using script-default or absolute dist paths.

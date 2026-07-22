@@ -348,15 +348,11 @@ func runtimeToolNames(rt *llmcontracts.RuntimeTools) []string {
 	return names
 }
 
-func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, isTaskFollowup bool, chatMode models.ChatMode) string {
-	if rt == nil || isTaskFollowup || chatMode != models.ChatModeOrchestrate {
+func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode) string {
+	if chatMode != models.ChatModeOrchestrate {
 		return base
 	}
-	names := runtimeToolNames(rt)
-	if len(names) == 0 {
-		return base
-	}
-	return llmprompt.ApplyChatActionToolMode(base, names)
+	return llmprompt.ApplyChatActionToolMode(base, runtimeToolNames(rt))
 }
 
 func shouldSkipDefaultToolsForChatMode(isTaskFollowup bool, chatMode models.ChatMode, rt *llmcontracts.RuntimeTools) bool {
@@ -464,7 +460,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		}, err
 
 	case llmcontracts.OperationStreaming:
-		if req.ChatHistory != nil {
+		if req.Followup || req.ChatHistory != nil || req.ChatMode == models.ChatModeOrchestrate || req.ChatMode == models.ChatModePlan {
 			output, usage, err := a.callChatStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, workDir, extraTools, toolExecutor, toolFilter, agentSkipDefaults)
 			return llmcontracts.AgentResult{
 				Output:     output,
@@ -570,7 +566,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
 	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
-	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, isTaskFollowup, chatMode)
+	systemPromptStr = appendToolModeSystemPrompt(systemPromptStr, rt, chatMode)
 	client.History = append(client.History, buildClientHistory(chatHistory)...)
 
 	mcAttachments, err := convertAttachments(attachments)

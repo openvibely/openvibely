@@ -144,6 +144,9 @@ func TestRequestUsesChatStreamingTreatsFirstTurnChatAsChat(t *testing.T) {
 	if !requestUsesChatStreaming(llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModePlan}) {
 		t.Fatal("expected first-turn plan chat with nil history to use chat streaming")
 	}
+	if !requestUsesChatStreaming(llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, Followup: true}) {
+		t.Fatal("expected task followup without prior history or selected context to use chat streaming")
+	}
 	if !requestUsesChatStreaming(llmcontracts.AgentRequest{Operation: llmcontracts.OperationStreaming, ChatMode: models.ChatModeOrchestrate, Followup: true, ChatHistory: []models.Execution{{PromptSent: "previous", Output: "done"}}}) {
 		t.Fatal("expected task followup with chat history to use chat streaming")
 	}

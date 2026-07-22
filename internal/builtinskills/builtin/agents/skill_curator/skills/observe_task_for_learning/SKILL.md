@@ -10,9 +10,9 @@ routing:
 
 # Observe Task For Learning
 
-Review the completed task conversation and decide whether durable skill configuration should change.
+Review the completed task turn and decide whether durable skill configuration should change.
 
-The hook input includes `extras.conversation_transcript`, the retained chat context for the task. Treat it as the source of truth. Review the original request, follow-up prompts, assistant outputs, tool/output transcript content, errors, validation commands, user corrections, selected skills, and repeated workflow patterns.
+The hook input includes `extras.conversation_transcript`, containing only the latest user input and the assistant response completed for that input. Treat that current-turn pair as the source of truth; do not assume earlier task-thread history is present. Use the learning snapshot and current response for selected skills, errors, validation commands, user corrections, and reusable workflow evidence available in this turn.
 
 Be active in preserving reusable learning. Strong signals include user corrections, repo-specific workflows, non-trivial debugging paths, repeated validation sequences, missing or stale skill guidance, missing skill coverage, or anything the next similar task should know before starting.
 

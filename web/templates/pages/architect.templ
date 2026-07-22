@@ -21,6 +21,7 @@ templ ArchitectMode(projects []models.Project, currentProject *models.Project, d
 
 templ ArchitectModeContent(currentProject *models.Project, data *models.ArchitectDashboardData) {
 	<div class="p-6">
+		@layout.PageTitle("Architect")
 		<div class="flex justify-between items-center mb-6">
 			<div>
 				<h2 class="text-2xl font-bold">Architect</h2>
@@ -233,6 +234,7 @@ templ ArchitectSessionPage(projects []models.Project, currentProject *models.Pro
 // ArchitectWizard is the main wizard view for an active session
 templ ArchitectWizard(detail *models.ArchitectSessionDetail) {
 	<div class="p-6">
+		@layout.PageTitle("Architect - " + detail.Session.Title)
 		<!-- Header -->
 		<div class="flex justify-between items-center mb-4">
 			<div>

@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-07-15
-source: task_implementation
-source_id: 8e78b32b6041b25fff4830ea3c073c05:54e8d34ca5f23f09
+updated: 2026-07-17
+source: consolidation
+source_id: memory_consolidation_2026_07_17
 confidence: high
 title: Worktree and Lineage
 ---
@@ -25,6 +25,7 @@ Durable worktree model:
 - Worktree setup fails closed: a repository with a local commit needs no Git remote, but an unborn repository has no commit/tree for `git worktree add`, so task execution and follow-ups must provide initial-commit guidance and never dispatch the coding model in the main checkout. Existing task worktrees or branches remain recoverable if their original base ref was renamed/deleted; operational `rev-parse` failures preserve their real error. Channel-origin and review-submission setup failures promote the next queued follow-up instead of parking it.
 - Task Changes has one explicit review semantic for managed active worktrees: the net reviewable output from the task's merge target to the current worktree state, not only pending changes since worktree `HEAD`. Full Changes, file summaries, lazy file cards, live fragments, periodic streaming snapshots, and follow-up completion persistence must all use this same base.
 - Active managed-worktree diffs run `git diff <target>` inside the worktree so committed, staged, and unstaged tracked changes collapse into one per-path result; file summaries derive from `git diff --name-status <target>`. Untracked files are appended from `git ls-files --others --exclude-standard` because Git cannot include them in the target comparison. Do not concatenate committed branch diff blocks with `git diff HEAD`.
+- Open security bug [GitHub #30](https://github.com/openvibely/openvibely/issues/30): untracked-file diff synthesis follows paths returned by Git with `os.Stat`/`os.ReadFile`, so an untracked symlink can expose target contents outside the repository in Task Changes. Diff capture must inspect paths without following symlinks, skip symlinks, and enforce resolved-worktree containment before reading.
 - `git diff HEAD` and stored execution diffs are restricted to non-worktree execution views or fallback when no live managed worktree exists. Managed-worktree live fragment routes resolve content server-side and do not trust a client-supplied diff that could bypass the selected base.
 - Streaming snapshot selection uses an explicit managed-worktree distinction established only after successful worktree setup. A non-worktree agent, including one with `DisableRuntimeWorktree`, must retain the `git diff HEAD` pending-change view even when `repoDir` and stale/non-empty task branch metadata are present; it must not persist unrelated committed feature-branch history from a target-relative diff.
 - Final diff capture and post-execution commit/merge/status handling use the same explicit managed-worktree distinction as streaming, established only after successful worktree setup. A `DisableRuntimeWorktree` direct-checkout execution with retained `task.WorktreePath` metadata must persist its `git diff HEAD` result and must not capture, commit, merge, or update the status of stale worktree lineage; scoped direct-checkout execution remains non-worktree even when its effective work directory changes.

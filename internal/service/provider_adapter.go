@@ -17,7 +17,7 @@ import (
 	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
-	llmretry "github.com/openvibely/openvibely/internal/llm/retry"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -57,11 +57,11 @@ func requestUsesChatStreaming(req llmcontracts.AgentRequest) bool {
 	if req.Operation != llmcontracts.OperationStreaming {
 		return false
 	}
-	mode := strings.TrimSpace(string(req.ChatMode))
-	if !req.Followup {
-		return mode == string(models.ChatModeOrchestrate) || mode == string(models.ChatModePlan)
+	if req.Followup {
+		return true
 	}
-	return len(req.ChatHistory) > 0 || strings.TrimSpace(req.ChatSystemContext) != ""
+	mode := strings.TrimSpace(string(req.ChatMode))
+	return mode == string(models.ChatModeOrchestrate) || mode == string(models.ChatModePlan)
 }
 
 func canonicalResult(output, textOnly string, usage llmcontracts.Usage, err error) (llmcontracts.AgentResult, error) {
@@ -81,24 +81,11 @@ func canonicalResult(output, textOnly string, usage llmcontracts.Usage, err erro
 	return res, err
 }
 
-func callWithRetry(req llmcontracts.AgentRequest, fn func() (llmcontracts.AgentResult, error)) (llmcontracts.AgentResult, error) {
-	policy := llmretry.DefaultPolicy()
-	ctx := req.Ctx
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return llmretry.DoWithBeforeRetry(ctx, policy, func() (llmcontracts.AgentResult, error) {
-		res, err := fn()
-		if err != nil && llmretry.IsRetryable(err) {
-			applog.Infof("[agent-svc] provider adapter retryable error operation=%s provider=%s model=%s err=%v", req.Operation, req.Agent.Provider, req.Agent.Model, err)
-		}
-		return res, err
-	}, func(retryCtx context.Context) error {
-		if reset := llmcontracts.SteeringRetryResetCallbackFromContext(retryCtx); reset != nil {
-			return reset(retryCtx)
-		}
-		return nil
-	})
+func callProviderOnce(fn func() (llmcontracts.AgentResult, error)) (llmcontracts.AgentResult, error) {
+	// Provider transports own retry decisions because they know whether a
+	// streamed attempt has emitted output. Replaying here could duplicate a
+	// partial turn and would multiply the provider's bounded retry budget.
+	return fn()
 }
 
 func resolveAgentRuntime(ctx context.Context, ad *models.Agent) (raw *models.Agent, merged *models.Agent, pluginDirs []string) {
@@ -134,7 +121,7 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 		req.AgentDefinition = runtimeAgentDef
 		req.PluginDirs = runtimePluginDirs
 	}
-	return callWithRetry(req, func() (llmcontracts.AgentResult, error) {
+	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		switch req.Operation {
 		case llmcontracts.OperationDirect:
 			if anthropicAdapterEnabled(req.Agent) {
@@ -166,7 +153,7 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 				output, tokens, err := a.svc.callAnthropicChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode)
 				return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
 			}
-			output, tokens, err := a.svc.callAnthropic(req.Ctx, req.Message, req.Attachments, req.Agent)
+			output, tokens, err := a.svc.callAnthropic(req.Ctx, llmprompt.ApplyTaskCreationToolMode(req.Message, nil), req.Attachments, req.Agent)
 			return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
 
 		case llmcontracts.OperationTask:
@@ -177,7 +164,7 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 				output, textOnly, tokens, err := a.svc.callClaudeCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.PluginDirs, rawAgentDef)
 				return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
 			}
-			output, tokens, err := a.svc.callAnthropic(req.Ctx, req.Message, req.Attachments, req.Agent)
+			output, tokens, err := a.svc.callAnthropic(req.Ctx, llmprompt.ApplyTaskCreationToolMode(req.Message, nil), req.Attachments, req.Agent)
 			return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
 		default:
 			return llmcontracts.AgentResult{}, fmt.Errorf("unsupported operation: %s", req.Operation)
@@ -203,7 +190,7 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 			req.Agent.Model = req.AgentDefinition.Model
 		}
 	}
-	return callWithRetry(req, func() (llmcontracts.AgentResult, error) {
+	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		switch req.Operation {
 		case llmcontracts.OperationDirect:
 			if openAIDirectClientEnabled(req.Agent) {
@@ -262,7 +249,7 @@ func (a *openAICompatibleProviderAdapter) Call(req llmcontracts.AgentRequest) (l
 			req.Agent.Model = req.AgentDefinition.Model
 		}
 	}
-	return callWithRetry(req, func() (llmcontracts.AgentResult, error) {
+	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		return a.adapter.Call(req.Ctx, req, req.WorkDir)
 	})
 }
@@ -282,7 +269,7 @@ func (a *ollamaProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 		req.ChatSystemContext = ApplyAgentToSystemPrompt(req.ChatSystemContext, req.AgentDefinition)
 		req.ProjectInstructions = ApplyAgentToSystemPrompt(req.ProjectInstructions, req.AgentDefinition)
 	}
-	return callWithRetry(req, func() (llmcontracts.AgentResult, error) {
+	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
 	})
 }

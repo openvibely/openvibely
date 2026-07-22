@@ -329,7 +329,7 @@ func TestSlackService_RuntimeCreateTaskTool_CreatedTasksGetSlackOriginAndContext
 	svc.SetAgentRepo(agentRepo)
 
 	collector := newChannelActionSummaryCollector()
-	rt := svc.buildSlackActionToolRuntime(project.ID, slackMarkerContext{
+	rt := svc.buildSlackActionToolRuntime(project.ID, slackActionContext{
 		TeamID:    "T1",
 		ChannelID: "C1",
 		ThreadTS:  "1710000000.100000",
@@ -418,14 +418,40 @@ func TestSlackService_RuntimeListAlertsTool_Handled(t *testing.T) {
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
 	svc.SetAlertService(NewAlertService(alertRepo, nil))
 
-	rt := svc.buildSlackActionToolRuntime(project.ID, slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}, nil)
+	rt := svc.buildSlackActionToolRuntime(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}, nil)
 	require.NotNil(t, rt)
 
 	output, handled, isErr, err := rt.Executor(ctx, "list_alerts", json.RawMessage(`{}`))
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.NoError(t, err)
-	require.Contains(t, output, "No alerts found")
+	require.Contains(t, output, `"notifications":[]`)
+}
+
+func TestSlackService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Slack Notification Lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Slack chat", Prompt: "process", Category: models.CategoryChat, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Slack suggestion", Severity: models.SeverityInfo})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved))
+
+	svc := &SlackService{taskRepo: taskRepo, alertSvc: alertSvc}
+	rt := svc.buildSlackActionToolRuntimeForTask(project.ID, caller.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", UserID: "U1"}, nil)
+	output, handled, isErr, err := rt.Executor(ctx, "claim_alert", json.RawMessage(`{"alert_id":"`+alert.ID+`"}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, caller.ID)
+	stored, err := alertSvc.GetByID(ctx, project.ID, alert.ID)
+	require.NoError(t, err)
+	require.Equal(t, caller.ID, stored.Claimant)
 }
 
 func TestSlackService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
@@ -454,7 +480,7 @@ func TestSlackService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
 	svc.SetAlertService(NewAlertService(alertRepo, nil))
 
-	rt := svc.buildSlackActionToolRuntime(project.ID, slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}, nil)
+	rt := svc.buildSlackActionToolRuntime(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}, nil)
 	require.NotNil(t, rt)
 
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceSlack, true)
@@ -465,7 +491,7 @@ func TestSlackService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 		require.Truef(t, handled, "tool should be handled by slack runtime executor: %s", d.Name)
 	}
 
-	handlers := svc.slackActionHandlers(project.ID, slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}, nil)
+	handlers := svc.slackActionHandlers(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}, nil)
 	require.NoError(t, chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceSlack, true, handlers))
 }
 
@@ -599,16 +625,27 @@ func TestSlackService_SendTaskCompletionNotification(t *testing.T) {
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingSendResponses, "true"))
 
 	called := false
+	var sentText string
 	svc.postMessageFn = func(channelID, threadTS, text string) (string, error) {
 		called = true
+		sentText = text
 		require.Equal(t, "C1", channelID)
 		require.Equal(t, "1710000000.100000", threadTS)
 		require.True(t, strings.Contains(text, "Task completed") || strings.Contains(text, "Task failed"))
 		return "", nil
 	}
 
-	svc.SendTaskCompletionNotification(ctx, *task, "completed output", "")
+	output := "Examples: `[TASK_ID:inline]` and `[TASK_EDITED:inline-edit]`.\n" +
+		"```text\n[TASK_ID:fenced]\n[TASK_EDITED:fenced-edit]\n```\n" +
+		"Actual [TASK_ID:real] [TASK_EDITED:real-edit]"
+	svc.SendTaskCompletionNotification(ctx, *task, output, "")
 	require.True(t, called)
+	require.Contains(t, sentText, "`[TASK_ID:inline]`")
+	require.Contains(t, sentText, "`[TASK_EDITED:inline-edit]`")
+	require.Contains(t, sentText, "[TASK_ID:fenced]")
+	require.Contains(t, sentText, "[TASK_EDITED:fenced-edit]")
+	require.NotContains(t, sentText, "[TASK_ID:real]")
+	require.NotContains(t, sentText, "[TASK_EDITED:real-edit]")
 
 	require.NoError(t, settingsRepo.Set(ctx, SlackSettingSendResponses, "false"))
 	called = false
@@ -763,8 +800,8 @@ func TestSlackService_SendToTaskUsesSharedRunnerAndQueuesActiveTask(t *testing.T
 		runnerReq = req
 	})
 	payload := []byte(fmt.Sprintf(`{"task_id":"%s","message":"do more"}`, task.ID))
-	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
-	handlers := svc.slackActionHandlers(project.ID, markerCtx, nil)
+	actionCtx := slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
+	handlers := svc.slackActionHandlers(project.ID, actionCtx, nil)
 	result, err := handlers["send_to_task"](ctx, payload)
 	require.NoError(t, err)
 	require.Contains(t, result, "Sent message to task")
@@ -827,8 +864,8 @@ func TestSlackService_SendToTask_QueuesDuringStartingFirstTurnBeforeExecutionExi
 	require.NoError(t, taskRepo.Create(ctx, task))
 
 	payload := []byte(fmt.Sprintf(`{"task_id":"%s","message":"1+1=?"}`, task.ID))
-	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
-	handlers := svc.slackActionHandlers(project.ID, markerCtx, nil)
+	actionCtx := slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
+	handlers := svc.slackActionHandlers(project.ID, actionCtx, nil)
 	result, err := handlers["send_to_task"](ctx, payload)
 	require.NoError(t, err)
 	require.Contains(t, result, "Queued message to task")
@@ -933,8 +970,8 @@ func TestSlackService_GoalTools_SetGetClearPauseResume(t *testing.T) {
 	svc := NewSlackService(settingsRepo, projectRepo, nil, taskRepo, nil, nil, taskSvc, nil, workerSvc, nil, nil, nil)
 	svc.taskGoalSvc = goalSvc
 
-	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
-	handlers := svc.slackActionHandlers(project.ID, markerCtx, nil)
+	actionCtx := slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
+	handlers := svc.slackActionHandlers(project.ID, actionCtx, nil)
 
 	taskIDJSON, err := json.Marshal(map[string]string{"task_id": task.ID, "goal": "All tests pass"})
 	require.NoError(t, err)
@@ -984,8 +1021,8 @@ func TestSlackService_GoalTools_UnavailableWithoutService(t *testing.T) {
 	svc := NewSlackService(settingsRepo, projectRepo, nil, taskRepo, nil, nil, nil, nil, nil, nil, nil, nil)
 	// taskGoalSvc intentionally not set
 
-	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1"}
-	handlers := svc.slackActionHandlers(project.ID, markerCtx, nil)
+	actionCtx := slackActionContext{TeamID: "T1", ChannelID: "C1"}
+	handlers := svc.slackActionHandlers(project.ID, actionCtx, nil)
 
 	input, _ := json.Marshal(map[string]string{"task_id": "any"})
 	for _, name := range []string{"set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked"} {
@@ -1029,8 +1066,8 @@ func TestSlackService_GoalTools_MarkAchievedReportBlocked(t *testing.T) {
 	svc := NewSlackService(settingsRepo, projectRepo, nil, taskRepo, nil, nil, taskSvc, nil, workerSvc, nil, nil, nil)
 	svc.taskGoalSvc = goalSvc
 
-	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
-	handlers := svc.slackActionHandlers(project.ID, markerCtx, nil)
+	actionCtx := slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
+	handlers := svc.slackActionHandlers(project.ID, actionCtx, nil)
 
 	achievedInput, _ := json.Marshal(map[string]string{
 		"task_id": task.ID,
@@ -2521,8 +2558,8 @@ func TestSlackService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
 	// nil slackAuthRepo means checkAuthorization always returns true.
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
 
-	markerCtx := slackMarkerContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
-	rt := svc.buildSlackActionToolRuntime(project1.ID, markerCtx, nil)
+	actionCtx := slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}
+	rt := svc.buildSlackActionToolRuntime(project1.ID, actionCtx, nil)
 	require.NotNil(t, rt)
 
 	// Execute switch_project via the runtime tool executor.

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -346,4 +347,225 @@ func TestHandleTelegramRemoveMissingSettingsRepoReturnsError(t *testing.T) {
 	httpErr, ok := err.(*echo.HTTPError)
 	require.True(t, ok)
 	assert.Equal(t, http.StatusInternalServerError, httpErr.Code)
+}
+
+func TestChannelRemovalResetsAllSettings(t *testing.T) {
+	tests := []struct {
+		name   string
+		path   string
+		resets map[string]string
+	}{
+		{
+			name: "telegram",
+			path: "/channels/telegram/remove",
+			resets: map[string]string{
+				service.TelegramSettingBotToken:       "",
+				service.TelegramSettingSendResponses:  "",
+				service.TelegramSettingRichMessagesV2: "",
+			},
+		},
+		{
+			name: "github",
+			path: "/channels/github/remove",
+			resets: map[string]string{
+				service.GitHubSettingAppID:         "",
+				service.GitHubSettingAppSlug:       "",
+				service.GitHubSettingAppPrivateKey: "",
+				service.GitHubSettingPAT:           "",
+				service.GitHubSettingPATUserLogin:  "",
+				service.GitHubSettingAuthMode:      "",
+			},
+		},
+		{
+			name: "slack",
+			path: "/channels/slack/remove",
+			resets: map[string]string{
+				service.SlackSettingClientID:         "",
+				service.SlackSettingClientSecret:     "",
+				service.SlackSettingAppToken:         "",
+				service.SlackSettingBotToken:         "",
+				service.SlackSettingBotTokenOverride: "",
+				service.SlackSettingBotTokenSource:   service.SlackBotTokenSourceOAuth,
+				service.SlackSettingBotUserID:        "",
+				service.SlackSettingTeamID:           "",
+				service.SlackSettingTeamName:         "",
+				service.SlackSettingConnectedAt:      "",
+				service.SlackSettingOAuthState:       "",
+				service.SlackSettingSendResponses:    "",
+			},
+		},
+		{
+			name: "discord service unavailable fallback",
+			path: "/channels/discord/remove",
+			resets: map[string]string{
+				service.DiscordSettingBotToken:      "",
+				service.DiscordSettingBotUserID:     "",
+				service.DiscordSettingSendResponses: "",
+			},
+		},
+		{
+			name: "email",
+			path: "/channels/email/remove",
+			resets: map[string]string{
+				service.EmailSettingProvider:                "",
+				service.EmailSettingAddress:                 "",
+				service.EmailSettingPassword:                "",
+				service.EmailSettingIMAPHost:                "",
+				service.EmailSettingIMAPPort:                "",
+				service.EmailSettingSMTPHost:                "",
+				service.EmailSettingSMTPPort:                "",
+				service.EmailSettingPollIntervalSeconds:     "",
+				service.EmailSettingSendResponses:           "",
+				service.EmailSettingSkipAttachments:         "",
+				service.EmailSettingMarkExistingSeenOnStart: "",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			for key := range tc.resets {
+				require.NoError(t, h.settingsRepo.Set(context.Background(), key, "configured"))
+			}
+
+			rec := htmxPost(e, tc.path, url.Values{})
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assertChannelsRefreshTrigger(t, rec)
+			for key, expected := range tc.resets {
+				actual, err := h.settingsRepo.Get(context.Background(), key)
+				require.NoError(t, err)
+				assert.Equal(t, expected, actual, key)
+			}
+		})
+	}
+}
+
+func TestChannelRemovalPreservesServiceLifecycleBehavior(t *testing.T) {
+	tests := []struct {
+		name  string
+		path  string
+		setup func(h *Handler) func() bool
+	}{
+		{
+			name: "github disconnect",
+			path: "/channels/github/remove",
+			setup: func(h *Handler) func() bool {
+				called := false
+				h.SetGitHubService(&fakeGitHubService{disconnectFn: func(context.Context) error {
+					called = true
+					return nil
+				}})
+				return func() bool { return called }
+			},
+		},
+		{
+			name: "slack disconnect",
+			path: "/channels/slack/remove",
+			setup: func(h *Handler) func() bool {
+				called := false
+				h.SetSlackService(&fakeSlackService{disconnectFn: func(context.Context) error {
+					called = true
+					return nil
+				}})
+				return func() bool { return called }
+			},
+		},
+		{
+			name: "discord disconnect",
+			path: "/channels/discord/remove",
+			setup: func(h *Handler) func() bool {
+				called := false
+				h.SetDiscordService(&fakeDiscordService{disconnectFn: func(context.Context) error {
+					called = true
+					return nil
+				}})
+				return func() bool { return called }
+			},
+		},
+		{
+			name: "email stop",
+			path: "/channels/email/remove",
+			setup: func(h *Handler) func() bool {
+				svc := &removalEmailService{}
+				h.SetEmailService(svc)
+				return func() bool { return svc.stopped }
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			wasCalled := tc.setup(h)
+			rec := htmxPost(e, tc.path, url.Values{})
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			assert.True(t, wasCalled())
+		})
+	}
+}
+
+type removalEmailService struct {
+	EmailServiceProvider
+	stopped bool
+}
+
+func (s *removalEmailService) Stop() {
+	s.stopped = true
+}
+
+func TestChannelRemovalSettingFailureDoesNotReportSuccess(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		firstKey string
+		failKey  string
+	}{
+		{name: "telegram", path: "/channels/telegram/remove", firstKey: service.TelegramSettingBotToken, failKey: service.TelegramSettingSendResponses},
+		{name: "github", path: "/channels/github/remove", firstKey: service.GitHubSettingAppID, failKey: service.GitHubSettingAppSlug},
+		{name: "slack", path: "/channels/slack/remove", firstKey: service.SlackSettingClientID, failKey: service.SlackSettingClientSecret},
+		{name: "discord fallback", path: "/channels/discord/remove", firstKey: service.DiscordSettingBotToken, failKey: service.DiscordSettingBotUserID},
+		{name: "email", path: "/channels/email/remove", firstKey: service.EmailSettingProvider, failKey: service.EmailSettingAddress},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, _, db := setupTestHandlerWithDB(t)
+			require.NoError(t, h.settingsRepo.Set(context.Background(), tc.firstKey, "configured"))
+			require.NoError(t, h.settingsRepo.Set(context.Background(), tc.failKey, "configured"))
+			trigger := fmt.Sprintf(`CREATE TRIGGER fail_channel_setting_reset
+				BEFORE UPDATE ON app_settings
+				WHEN NEW.key = '%s' AND NEW.value = ''
+				BEGIN SELECT RAISE(FAIL, 'injected settings write failure'); END`, tc.failKey)
+			require.NoError(t, func() error { _, err := db.Exec(trigger); return err }())
+
+			for _, htmx := range []bool{true, false} {
+				mode := "redirect"
+				if htmx {
+					mode = "htmx"
+				}
+				t.Run(mode, func(t *testing.T) {
+					require.NoError(t, h.settingsRepo.Set(context.Background(), tc.firstKey, "configured"))
+					require.NoError(t, h.settingsRepo.Set(context.Background(), tc.failKey, "configured"))
+
+					req := httptest.NewRequest(http.MethodPost, tc.path, nil)
+					if htmx {
+						req.Header.Set("HX-Request", "true")
+					}
+					rec := httptest.NewRecorder()
+					e.ServeHTTP(rec, req)
+
+					assert.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+					assert.Empty(t, rec.Header().Get("HX-Trigger"))
+					assert.Empty(t, rec.Header().Get("Location"))
+					firstValue, err := h.settingsRepo.Get(context.Background(), tc.firstKey)
+					require.NoError(t, err)
+					assert.Empty(t, firstValue, "the injected failure should happen after a partial cleanup")
+					failedValue, err := h.settingsRepo.Get(context.Background(), tc.failKey)
+					require.NoError(t, err)
+					assert.Equal(t, "configured", failedValue)
+				})
+			}
+		})
+	}
 }

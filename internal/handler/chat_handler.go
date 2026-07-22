@@ -318,7 +318,6 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   false,
-		ProcessMarkers:   false,
 		ChatMode:         chatMode,
 		Surface:          chatcontrol.SurfaceWeb,
 	})

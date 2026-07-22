@@ -119,7 +119,7 @@ always_use:
 
 ## openvibely_scheduled_tasks_workflow
 
-[OpenVibely Scheduled Tasks Workflow](openvibely_scheduled_tasks_workflow/SKILL.md) — Implement and audit scheduled task behavior, enabled state, next-run preservation, and schedule UI consistently.
+[OpenVibely Scheduled Tasks Workflow](openvibely_scheduled_tasks_workflow/SKILL.md) — Implement and audit scheduled task behavior, enabled state, next-run preservation, task-owned assignment, and schedule UI consistently.
 
 ## openvibely_anthropic_oauth_model_workflow
 
@@ -183,3 +183,7 @@ always_use:
 ## openvibely_github_finding_workflow
 
 [OpenVibely GitHub Finding Workflow](openvibely_github_finding_workflow/SKILL.md) — Run focused read-only OpenVibely repository scans and publish actionable findings as GitHub issues.
+
+## openvibely_managed_memory_maintenance
+
+[OpenVibely Managed Memory Maintenance](openvibely_managed_memory_maintenance/SKILL.md) — Apply narrow, idempotent corrections to authoritative OpenVibely managed-memory topics and verify the saved result.

@@ -18,6 +18,7 @@ templ AnalyticsContent(currentProject *models.Project) {
 
 templ analyticsContent(currentProject *models.Project) {
 	<div class="flex justify-between items-center mb-6">
+		@layout.PageTitle("Analytics Dashboard")
 			<h2 class="text-2xl font-bold">Analytics Dashboard</h2>
 			if currentProject != nil {
 				<div class="flex gap-2 items-center">
@@ -269,7 +270,9 @@ templ analyticsContent(currentProject *models.Project) {
 							if (!value) return '';
 							const resetAt = new Date(value);
 							if (Number.isNaN(resetAt.getTime())) return '';
-							const totalMinutes = Math.max(0, Math.ceil((resetAt.getTime() - Date.now()) / 60000));
+							const remainingMilliseconds = resetAt.getTime() - Date.now();
+							if (remainingMilliseconds <= 0) return 'Reset due';
+							const totalMinutes = Math.ceil(remainingMilliseconds / 60000);
 							const days = Math.floor(totalMinutes / 1440);
 							const hours = Math.floor((totalMinutes % 1440) / 60);
 							const minutes = totalMinutes % 60;
@@ -603,11 +606,12 @@ templ analyticsContent(currentProject *models.Project) {
 											accountContainer.innerHTML = '<p class="opacity-50 lg:col-span-2">No connected OAuth account snapshots yet.</p>';
 										} else {
 											accountContainer.innerHTML = accounts.map(account => {
-												let accountLimits = [];
-												if (account.primary_limit) accountLimits.push(account.primary_limit);
-												if (account.secondary_limit) accountLimits.push(account.secondary_limit);
-												accountLimits = accountLimits.concat(account.extra_limits || []);
-												if (accountLimits.length === 0) accountLimits = account.limits || [];
+												let accountLimits = account.limits || [];
+												if (accountLimits.length === 0) {
+													if (account.primary_limit) accountLimits.push(account.primary_limit);
+													if (account.secondary_limit) accountLimits.push(account.secondary_limit);
+													accountLimits = accountLimits.concat(account.extra_limits || []);
+												}
 												const limits = accountLimits.map(limit => {
 													const pct = limit.used_percent === null || limit.used_percent === undefined ? null : Number(limit.used_percent);
 													const width = pct === null ? 0 : Math.max(0, Math.min(100, pct));

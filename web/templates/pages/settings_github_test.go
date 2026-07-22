@@ -77,6 +77,9 @@ func TestSettingsContent_RendersGitHubStatusVariants(t *testing.T) {
 				t.Fatalf("render failed: %v", err)
 			}
 			out := buf.String()
+			if !strings.Contains(out, `data-openvibely-page-title="Channels - OpenVibely"`) {
+				t.Fatal("channels fragment missing authoritative title marker")
+			}
 			if tt.name == "not configured" {
 				if strings.Contains(out, "Not Configured") {
 					t.Fatal("did not expect GitHub status badge when channel is not added")

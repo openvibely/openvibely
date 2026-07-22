@@ -127,68 +127,68 @@ func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
 	}
 }
 
-func TestBuildToolMarker_WithBody(t *testing.T) {
-	input := json.RawMessage(`{"title":"Fix login","prompt":"Investigate auth flow"}`)
-	got, err := buildToolMarker("CREATE_TASK", input, true)
-	if err != nil {
-		t.Fatalf("buildToolMarker error: %v", err)
-	}
-	if !strings.Contains(got, "[CREATE_TASK]") || !strings.Contains(got, "[/CREATE_TASK]") {
-		t.Fatalf("expected create task marker wrapper, got %q", got)
-	}
-	if !strings.Contains(got, `"title":"Fix login"`) {
-		t.Fatalf("expected normalized JSON body, got %q", got)
-	}
+func TestCreateTaskRuntimeToolDecodesTypedChainConfigDirectly(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Typed Create Task Project")
+	handler := h.chatActionHandlers(
+		streamingResponseParams{ExecID: "typed-create-exec", ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)["create_task"]
+
+	out, err := handler(ctx, json.RawMessage(`{
+		"title":"Typed chained task",
+		"prompt":"Create the parent directly",
+		"category":"backlog",
+		"chain":{
+			"enabled":true,
+			"trigger":"on_completion",
+			"child_title":"Typed child",
+			"child_prompt_prefix":"Continue from the parent",
+			"child_category":"active"
+		}
+	}`))
+	require.NoError(t, err)
+	ids := extractTaskIDsFromOutput(out)
+	require.Len(t, ids, 1)
+
+	created, err := h.taskRepo.GetByID(ctx, ids[0])
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	chain, err := created.ParseChainConfig()
+	require.NoError(t, err)
+	require.True(t, chain.Enabled)
+	require.Equal(t, "on_completion", chain.Trigger)
+	require.Equal(t, "Typed child", chain.ChildTitle)
+	require.Equal(t, "Continue from the parent", chain.ChildPromptPrefix)
+	require.Equal(t, "active", chain.ChildCategory)
 }
 
-func TestBuildToolMarker_ChainConfigPreserved(t *testing.T) {
-	// Simulate the exact JSON a model sends when using create_task tool with chain config
-	input := json.RawMessage(`{"title":"Compute 1+1","prompt":"Compute 1+1 and save to file","category":"active","chain":{"enabled":true,"trigger":"on_completion","child_title":"Compute x+1 from parent output","child_prompt_prefix":"Read x from result.txt and compute x+1","child_category":"active"}}`)
+func TestScheduleTaskRuntimeToolExecutesTypedRequest(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Typed Schedule Project")
+	task := createTask(t, h, project.ID, "Schedule directly")
+	handler := h.chatActionHandlers(
+		streamingResponseParams{ExecID: "typed-schedule-exec", ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)["schedule_task"]
 
-	marker, err := buildToolMarker("CREATE_TASK", input, true)
-	if err != nil {
-		t.Fatalf("buildToolMarker error: %v", err)
-	}
+	out, err := handler(ctx, json.RawMessage(`{"task_id":"`+task.ID+`","time":"09:30","repeat":"weekly","days":["mon","wed"]}`))
+	require.NoError(t, err)
+	require.Contains(t, out, "Scheduled task")
 
-	// Verify marker wrapping
-	if !strings.Contains(marker, "[CREATE_TASK]") || !strings.Contains(marker, "[/CREATE_TASK]") {
-		t.Fatalf("missing marker wrapper: %q", marker)
-	}
-
-	// Parse it back via the same path as processChatTaskCreations
-	tasks := service.ParseTaskCreations(marker)
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task from roundtrip, got %d", len(tasks))
-	}
-
-	req := tasks[0]
-	if req.Chain == nil {
-		t.Fatal("chain config lost in buildToolMarker → ParseTaskCreations roundtrip")
-	}
-	if !req.Chain.Enabled {
-		t.Error("chain.enabled should be true after roundtrip")
-	}
-	if req.Chain.Trigger != "on_completion" {
-		t.Errorf("chain.trigger = %q after roundtrip", req.Chain.Trigger)
-	}
-	if req.Chain.ChildTitle != "Compute x+1 from parent output" {
-		t.Errorf("chain.child_title = %q after roundtrip", req.Chain.ChildTitle)
-	}
-	if req.Chain.ChildPromptPrefix != "Read x from result.txt and compute x+1" {
-		t.Errorf("chain.child_prompt_prefix lost in roundtrip")
-	}
-	if req.Chain.ChildCategory != "active" {
-		t.Errorf("chain.child_category = %q after roundtrip", req.Chain.ChildCategory)
-	}
-}
-
-func TestToolSummaryFromMarker(t *testing.T) {
-	marker := "[LIST_PROJECTS]"
-	updated := marker + "\n\n---\nAvailable Projects:\n- **Default**"
-	got := toolSummaryFromMarker(marker, updated)
-	if !strings.Contains(got, "Available Projects") {
-		t.Fatalf("expected tool summary to keep appended output, got %q", got)
-	}
+	schedules, err := h.scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+	require.Equal(t, models.RepeatWeekly, schedules[0].RepeatType)
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
 }
 
 func TestChatActionSummaryCollector_AppendsCreatedAndEdited(t *testing.T) {
@@ -223,6 +223,52 @@ func TestChatActionHandlers_CoverageWebAndAPI(t *testing.T) {
 	apiHandlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceAPI)
 	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceAPI, true, apiHandlers); err != nil {
 		t.Fatalf("api handler coverage mismatch: %v", err)
+	}
+}
+
+func TestListTasksRuntimeTool_WebAndAPIExecutableAndPlanExposed(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "List Tasks Handler Project")
+	target := createTask(t, h, project.ID, "Implement issue 25")
+	createTask(t, h, project.ID, "Unrelated handler task")
+
+	// Canonical registry exposes list_tasks read-only in both Plan and Orchestrate.
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
+			defs := chatcontrol.ToolDefsForContext(mode, surface, false)
+			found := false
+			for _, def := range defs {
+				if def.Name == "list_tasks" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected list_tasks definition for mode=%s surface=%s", mode, surface)
+			}
+		}
+	}
+
+	params := streamingResponseParams{ExecID: "exec-list-tasks", ProjectID: project.ID}
+	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
+		handlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, surface)
+		handler := handlers["list_tasks"]
+		if handler == nil {
+			t.Fatalf("list_tasks handler missing on surface=%s", surface)
+		}
+		out, err := handler(context.Background(), json.RawMessage(`{"query":"issue 25"}`))
+		if err != nil {
+			t.Fatalf("list_tasks handler failed on surface=%s: %v", surface, err)
+		}
+		if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, target.ID) {
+			t.Fatalf("expected list_tasks to return target id on surface=%s, got %s", surface, out)
+		}
+	}
+
+	// Plan-mode handler map still wires an executable handler (never handler_missing).
+	planHandlers := h.chatActionHandlers(params, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)
+	if planHandlers["list_tasks"] == nil {
+		t.Fatal("expected list_tasks handler in plan mode")
 	}
 }
 
@@ -407,7 +453,7 @@ func TestCreateTaskRuntimeTool_OmittedCategoryAutoStartActivatesAfterAttachmentC
 
 // TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure is the regression
 // test for the phantom create_task bug: the runtime tool handler used to
-// always return (summary, nil), so even if processChatTaskCreations failed to
+// always return (summary, nil), so even if the direct task creation action failed to
 // persist any task (empty project context, malformed input, or DB error) the
 // model would receive isError=false and report a fake successful create_task
 // to the user. The fix returns an error when no [TASK_ID:...] markers appear
@@ -427,6 +473,38 @@ func TestCreateTaskRuntimeTool_FailsLoudlyOnPersistenceFailure(t *testing.T) {
 		}
 		if _, err := createHandler(ctx, input); err == nil {
 			t.Fatal("expected create_task with empty project_id to return an error")
+		}
+	})
+
+	t.Run("system Memory Curator assignment", func(t *testing.T) {
+		agentRepo := repository.NewAgentRepo(db)
+		h.SetAgentRepo(agentRepo)
+		memoryCurator := &models.Agent{
+			Name:       "System: Memory Curator",
+			Key:        models.AgentSystemKindMemoryCurator,
+			SystemKind: models.AgentSystemKindMemoryCurator,
+			Enabled:    true,
+			// System identity must win even if persisted selectability drifts.
+			SelectableAsPrimary: true,
+			GeneratedStatus:     models.AgentStatusProtected,
+		}
+		if err := agentRepo.Create(ctx, memoryCurator); err != nil {
+			t.Fatalf("create Memory Curator: %v", err)
+		}
+		handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-memory-curator", ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+		output, err := handlers["create_task"](ctx, json.RawMessage(`{"title":"Reconcile memory","prompt":"Update managed memory","agent":"Memory Curator"}`))
+		if err == nil {
+			t.Fatalf("expected create_task to reject system Memory Curator, got output %q", output)
+		}
+		if !strings.Contains(output, `Agent "Memory Curator" is not one unique enabled, selectable primary Agent definition`) {
+			t.Fatalf("expected rejected Agent assignment in tool output, got %q", output)
+		}
+		tasks, listErr := h.taskRepo.ListByProject(ctx, project.ID, "")
+		if listErr != nil {
+			t.Fatalf("list project tasks: %v", listErr)
+		}
+		if len(tasks) != 0 {
+			t.Fatalf("rejected Memory Curator assignment created fallback tasks: %#v", tasks)
 		}
 	})
 

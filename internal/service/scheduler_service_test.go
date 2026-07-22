@@ -14,18 +14,25 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
+	agentRepo := repository.NewAgentRepo(db)
 	workerSvc := newTestWorkerService(t)
 	ctx := context.Background()
+
+	agent := &models.Agent{Name: "Scheduled Primary Agent", Key: "scheduled-primary-agent", SystemPrompt: "Run scheduled work", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true, GeneratedStatus: models.AgentStatusUserEdited}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create primary agent: %v", err)
+	}
 
 	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 
 	// Create a scheduled task with a past due schedule
 	task := &models.Task{
-		ProjectID: "default",
-		Title:     "Due Task",
-		Category:  models.CategoryScheduled,
-		Status:    models.StatusPending,
-		Prompt:    "test",
+		ProjectID:         "default",
+		Title:             "Due Task",
+		Category:          models.CategoryScheduled,
+		Status:            models.StatusPending,
+		Prompt:            "test",
+		AgentDefinitionID: &agent.ID,
 	}
 	taskRepo.Create(ctx, task)
 
@@ -47,6 +54,9 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 	case submitted := <-workerSvc.Submitted():
 		if submitted.ID != task.ID {
 			t.Errorf("expected submitted task ID=%s, got %s", task.ID, submitted.ID)
+		}
+		if submitted.AgentDefinitionID == nil || *submitted.AgentDefinitionID != agent.ID {
+			t.Errorf("expected submitted primary agent %s, got %v", agent.ID, submitted.AgentDefinitionID)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Error("expected due task to be submitted")

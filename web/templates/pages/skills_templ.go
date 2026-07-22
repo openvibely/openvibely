@@ -153,17 +153,25 @@ func skillsContent(skills []SkillCard, canManage bool) templ.Component {
 			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"skills-container\" data-search-container><div class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Skills</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-primary btn-sm\" onclick=\"handleDropdownToggle(event)\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"skills-container\" data-search-container>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = layout.PageTitle("Skills").Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<div class=\"flex items-center justify-between mb-6\"><h2 class=\"text-2xl font-bold\">Skills</h2><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-primary btn-sm\" onclick=\"handleDropdownToggle(event)\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if !canManage {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, " disabled")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, " disabled")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, ">+ Add Skill</label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-56 border border-base-300\"><li><button type=\"button\" onclick=\"openNewSkillModal()\">Create Skill</button></li><li><button type=\"button\" onclick=\"openImportSkillModal()\">Import Skill Package</button></li></ul></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, ">+ Add Skill</label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-56 border border-base-300\"><li><button type=\"button\" onclick=\"openNewSkillModal()\">Create Skill</button></li><li><button type=\"button\" onclick=\"openImportSkillModal()\">Import Skill Package</button></li></ul></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -172,118 +180,118 @@ func skillsContent(skills []SkillCard, canManage bool) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if len(skills) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"text-center py-12\"><p class=\"opacity-50 mb-4\">No standalone skills found yet.</p><button class=\"btn btn-primary\" onclick=\"openNewSkillModal()\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"text-center py-12\"><p class=\"opacity-50 mb-4\">No standalone skills found yet.</p><button class=\"btn btn-primary\" onclick=\"openNewSkillModal()\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if !canManage {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, " disabled")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, " disabled")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, ">Create Skill</button></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, ">Create Skill</button></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"grid gap-4\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"grid gap-4\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			for _, skill := range skills {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-skill-handle=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-skill-handle=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Handle)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 105, Col: 38}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 106, Col: 38}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" data-skill-name=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" data-skill-name=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 106, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 107, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" data-skill-description=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" data-skill-description=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Description)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 107, Col: 48}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 108, Col: 48}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\" data-skill-scope=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" data-skill-scope=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Scope)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 108, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 109, Col: 36}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" data-skill-source=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" data-skill-source=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Source)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 109, Col: 38}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 110, Col: 38}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" data-skill-content=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" data-skill-content=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var10 string
 				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Content)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 110, Col: 40}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 111, Col: 40}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" data-skill-files=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" data-skill-files=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var11 string
 				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(strings.Join(skill.Files, "\n"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 111, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 112, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" data-skill-enabled=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" data-skill-enabled=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -296,13 +304,13 @@ func skillsContent(skills []SkillCard, canManage bool) templ.Component {
 					}
 				}())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 112, Col: 105}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 113, Col: 105}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\" data-skill-always-use=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" data-skill-always-use=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -315,276 +323,276 @@ func skillsContent(skills []SkillCard, canManage bool) templ.Component {
 					}
 				}())
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 113, Col: 110}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 114, Col: 110}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" data-search-card data-search-text=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" data-search-card data-search-text=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue(skillSearchText(skill))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 115, Col: 47}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 116, Col: 47}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "\" onclick=\"editSkillFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-56 border border-base-300\"><li><button onclick=\"editSkillFromData(this.closest('[data-skill-handle]'))\">Edit</button></li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\" onclick=\"editSkillFromData(this)\"><div class=\"card-body relative\"><div class=\"absolute top-4 right-4\" onclick=\"event.stopPropagation()\"><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" onclick=\"handleDropdownToggle(event)\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z\"></path></svg></label><ul tabindex=\"0\" class=\"dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-56 border border-base-300\"><li><button onclick=\"editSkillFromData(this.closest('[data-skill-handle]'))\">Edit</button></li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if skill.Enabled {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<li><button data-skill-handle=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<li><button data-skill-handle=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var15 string
 					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Handle)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 132, Col: 52}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 133, Col: 52}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" data-skill-scope=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" data-skill-scope=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var16 string
 					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Scope)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 132, Col: 85}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 133, Col: 85}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" onclick=\"setSkillEnabled(this, false)\">Disable</button></li>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" onclick=\"setSkillEnabled(this, false)\">Disable</button></li>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<li><button data-skill-handle=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<li><button data-skill-handle=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var17 string
 					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Handle)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 136, Col: 52}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 137, Col: 52}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" data-skill-scope=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" data-skill-scope=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var18 string
 					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Scope)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 136, Col: 85}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 137, Col: 85}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" onclick=\"setSkillEnabled(this, true)\">Enable</button></li>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" onclick=\"setSkillEnabled(this, true)\">Enable</button></li>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 				if skill.AlwaysUse {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<li><button data-skill-handle=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<li><button data-skill-handle=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var19 string
 					templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Handle)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 141, Col: 52}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 142, Col: 52}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" data-skill-scope=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" data-skill-scope=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var20 string
 					templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Scope)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 141, Col: 85}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 142, Col: 85}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "\" onclick=\"setSkillAlwaysUse(this, false)\">Remove always use</button></li>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "\" onclick=\"setSkillAlwaysUse(this, false)\">Remove always use</button></li>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<li><button data-skill-handle=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<li><button data-skill-handle=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var21 string
 					templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Handle)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 145, Col: 52}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 146, Col: 52}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\" data-skill-scope=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" data-skill-scope=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var22 string
 					templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Scope)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 145, Col: 85}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 146, Col: 85}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" onclick=\"setSkillAlwaysUse(this, true)\">Set always use</button></li>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "\" onclick=\"setSkillAlwaysUse(this, true)\">Set always use</button></li>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<li><button class=\"text-error\" data-skill-handle=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<li><button class=\"text-error\" data-skill-handle=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var23 string
 				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Handle)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 149, Col: 70}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 150, Col: 70}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "\" data-skill-name=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\" data-skill-name=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var24 string
 				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(firstSkillNonEmpty(skill.Name, skill.Handle))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 149, Col: 135}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 150, Col: 135}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\" data-skill-scope=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" data-skill-scope=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var25 string
 				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(skill.Scope)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 149, Col: 168}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 150, Col: 168}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "\" onclick=\"deleteSkill(this)\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" onclick=\"deleteSkill(this)\">Delete</button></li></ul></div></div><div class=\"pr-12\"><h3 class=\"font-bold\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var26 string
 				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(firstSkillNonEmpty(skill.Name, skill.Handle))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 156, Col: 55}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 157, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</h3>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</h3>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if skill.Description != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<p class=\"text-sm opacity-60 mt-1 line-clamp-2\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<p class=\"text-sm opacity-60 mt-1 line-clamp-2\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var27 string
 					templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(skill.Description)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 159, Col: 76}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 160, Col: 76}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</p>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</p>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<div class=\"flex flex-wrap gap-2 mt-2\"><span class=\"badge badge-outline badge-sm\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<div class=\"flex flex-wrap gap-2 mt-2\"><span class=\"badge badge-outline badge-sm\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var28 string
 				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(skill.Scope)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 162, Col: 65}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 163, Col: 65}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</span> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if skill.AlwaysUse {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<span class=\"badge badge-primary badge-sm\">Always use</span> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<span class=\"badge badge-primary badge-sm\">Always use</span> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 				if !skill.Enabled {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<span class=\"badge badge-warning badge-sm\">Disabled</span> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<span class=\"badge badge-warning badge-sm\">Disabled</span> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 				if skill.Archived {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<span class=\"badge badge-outline badge-sm\">Archived</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<span class=\"badge badge-outline badge-sm\">Archived</span>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</div></div></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</div></div></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<dialog id=\"delete_skill_confirm_modal\" class=\"modal\"><div class=\"modal-box\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<dialog id=\"delete_skill_confirm_modal\" class=\"modal\"><div class=\"modal-box\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -592,7 +600,7 @@ func skillsContent(skills []SkillCard, canManage bool) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<h3 class=\"font-bold text-lg text-error pr-10\">Delete Skill</h3><p class=\"py-4\">Are you sure you want to delete <strong id=\"delete_skill_confirm_name\"></strong>? This action cannot be undone.</p><div class=\"text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4\">The skill package and its indexed registration will be removed from the selected scope.</div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"delete_skill_confirm_modal.close()\">Cancel</button> <button type=\"button\" class=\"btn btn-error\" onclick=\"confirmDeleteSkill()\">Delete Permanently</button></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"skill_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<h3 class=\"font-bold text-lg text-error pr-10\">Delete Skill</h3><p class=\"py-4\">Are you sure you want to delete <strong id=\"delete_skill_confirm_name\"></strong>? This action cannot be undone.</p><div class=\"text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4\">The skill package and its indexed registration will be removed from the selected scope.</div><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"delete_skill_confirm_modal.close()\">Cancel</button> <button type=\"button\" class=\"btn btn-error\" onclick=\"confirmDeleteSkill()\">Delete Permanently</button></div></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"skill_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -600,20 +608,20 @@ func skillsContent(skills []SkillCard, canManage bool) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<h3 id=\"skill_modal_title\" class=\"font-bold text-lg mb-4 pr-10\">New Skill</h3><form id=\"skill_form\" onsubmit=\"submitSkillForm(event)\"><div class=\"grid grid-cols-1 md:grid-cols-2 gap-3\"><label class=\"form-control\"><span class=\"label-text mb-1\">Skill key</span> <input id=\"skill_handle\" class=\"input input-bordered\" required placeholder=\"review_migrations\" oninput=\"syncNewSkillTemplate()\"></label> <label class=\"form-control\"><span class=\"label-text mb-1\">Scope</span> <select id=\"skill_scope\" class=\"select select-bordered\" onchange=\"syncNewSkillTemplate()\"><option value=\"project\">Project</option> <option value=\"global\">Global</option></select></label></div><label class=\"form-control mt-3\"><span class=\"label-text mb-1\">Name</span> <input id=\"skill_name\" class=\"input input-bordered\" placeholder=\"Review Migrations\" oninput=\"syncNewSkillTemplate()\"></label> <label class=\"form-control mt-3\"><span class=\"label-text mb-1\">Description</span> <input id=\"skill_description\" class=\"input input-bordered\" placeholder=\"When to use this skill\" oninput=\"syncNewSkillTemplate()\"></label><div class=\"form-control mt-3\"><label class=\"label cursor-pointer justify-start gap-3\"><input id=\"skill_enabled\" type=\"checkbox\" class=\"toggle toggle-primary toggle-sm\" checked> <span class=\"label-text\">Enabled</span></label></div><div class=\"form-control mt-1\"><label class=\"label cursor-pointer justify-start gap-3\"><input id=\"skill_always_use\" type=\"checkbox\" class=\"toggle toggle-secondary toggle-sm\"> <span class=\"label-text\">Always use</span></label></div><label class=\"form-control mt-3\"><span class=\"label-text mb-1\">Skill body</span> <textarea id=\"skill_body\" class=\"textarea textarea-bordered font-mono text-sm min-h-72\" required placeholder=\"Instructions for this skill...\" oninput=\"markSkillTemplateEdited()\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<h3 id=\"skill_modal_title\" class=\"font-bold text-lg mb-4 pr-10\">New Skill</h3><form id=\"skill_form\" onsubmit=\"submitSkillForm(event)\"><div class=\"grid grid-cols-1 md:grid-cols-2 gap-3\"><label class=\"form-control\"><span class=\"label-text mb-1\">Skill key</span> <input id=\"skill_handle\" class=\"input input-bordered\" required placeholder=\"review_migrations\" oninput=\"syncNewSkillTemplate()\"></label> <label class=\"form-control\"><span class=\"label-text mb-1\">Scope</span> <select id=\"skill_scope\" class=\"select select-bordered\" onchange=\"syncNewSkillTemplate()\"><option value=\"project\">Project</option> <option value=\"global\">Global</option></select></label></div><label class=\"form-control mt-3\"><span class=\"label-text mb-1\">Name</span> <input id=\"skill_name\" class=\"input input-bordered\" placeholder=\"Review Migrations\" oninput=\"syncNewSkillTemplate()\"></label> <label class=\"form-control mt-3\"><span class=\"label-text mb-1\">Description</span> <input id=\"skill_description\" class=\"input input-bordered\" placeholder=\"When to use this skill\" oninput=\"syncNewSkillTemplate()\"></label><div class=\"form-control mt-3\"><label class=\"label cursor-pointer justify-start gap-3\"><input id=\"skill_enabled\" type=\"checkbox\" class=\"toggle toggle-primary toggle-sm\" checked> <span class=\"label-text\">Enabled</span></label></div><div class=\"form-control mt-1\"><label class=\"label cursor-pointer justify-start gap-3\"><input id=\"skill_always_use\" type=\"checkbox\" class=\"toggle toggle-secondary toggle-sm\"> <span class=\"label-text\">Always use</span></label></div><label class=\"form-control mt-3\"><span class=\"label-text mb-1\">Skill body</span> <textarea id=\"skill_body\" class=\"textarea textarea-bordered font-mono text-sm min-h-72\" required placeholder=\"Instructions for this skill...\" oninput=\"markSkillTemplateEdited()\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(defaultSkillBodyTemplate())
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 231, Col: 266}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/skills.templ`, Line: 232, Col: 266}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</textarea></label><div id=\"skill_files_section\" class=\"hidden mt-3\"><div class=\"text-sm font-medium mb-2\">Package files</div><div id=\"skill_files\" class=\"border border-base-300 rounded-lg p-3 bg-base-200/30 text-xs font-mono space-y-1\"></div></div><p id=\"skill_error\" class=\"hidden text-error text-sm mt-3\"></p><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"skill_modal.close()\">Cancel</button> <button id=\"skill_submit_btn\" type=\"submit\" class=\"btn btn-primary\">Save</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"skill_import_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</textarea></label><div id=\"skill_files_section\" class=\"hidden mt-3\"><div class=\"text-sm font-medium mb-2\">Package files</div><div id=\"skill_files\" class=\"border border-base-300 rounded-lg p-3 bg-base-200/30 text-xs font-mono space-y-1\"></div></div><p id=\"skill_error\" class=\"hidden text-error text-sm mt-3\"></p><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"skill_modal.close()\">Cancel</button> <button id=\"skill_submit_btn\" type=\"submit\" class=\"btn btn-primary\">Save</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog> <dialog id=\"skill_import_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -621,7 +629,7 @@ func skillsContent(skills []SkillCard, canManage bool) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<h3 class=\"font-bold text-lg mb-4 pr-10\">Import Skill Package</h3><form id=\"skill_import_form\" onsubmit=\"submitSkillImportForm(event)\"><label class=\"form-control\"><span class=\"label-text mb-1\">Scope</span> <select id=\"skill_import_scope\" name=\"scope\" class=\"select select-bordered\"><option value=\"project\">Project</option> <option value=\"global\">Global</option></select></label> <label class=\"form-control mt-3\"><span class=\"label-text mb-1\">Skill package files</span> <input id=\"skill_import_files\" name=\"files\" type=\"file\" class=\"file-input file-input-bordered\" multiple webkitdirectory required> <span class=\"label-text-alt mt-1 opacity-70\">Select a skill package folder containing SKILL.md. Support files under references, templates, scripts, and assets will be imported.</span></label><p id=\"skill_import_error\" class=\"hidden text-error text-sm mt-3\"></p><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"skill_import_modal.close()\">Cancel</button> <button id=\"skill_import_submit_btn\" type=\"submit\" class=\"btn btn-primary\">Import</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><script>\n\t\t\t\tvar deleteSkillHandle = '';\n\t\t\t\tvar deleteSkillScope = 'project';\n\n\t\t\t\tfunction defaultSkillTemplate(handle, name, scope, description) {\t\t\t\thandle = (handle || 'openvibely_database_migration_workflow').trim();\n\t\t\t\tname = (name || 'OpenVibely Database Migration Workflow').trim();\n\t\t\t\tscope = (scope || 'project').trim();\n\t\t\t\tdescription = (description || 'Manage OpenVibely goose schema migrations, consolidation, and validation safely.').trim();\n\t\t\t\treturn '---\\n' +\n\t\t\t\t\t'kind: openvibely.agent_skill\\n' +\n\t\t\t\t\t'version: 1\\n' +\n\t\t\t\t\t'skill:\\n' +\n\t\t\t\t\t'    key: ' + handle + '\\n' +\n\t\t\t\t\t'    name: ' + name + '\\n' +\n\t\t\t\t\t'    scope: ' + scope + '\\n' +\n\t\t\t\t\t'    description: ' + description + '\\n' +\n\t\t\t\t\t'---\\n\\nDescribe when to use this skill and the workflow the agent should follow.\\n';\n\t\t\t}\n\n\t\t\tfunction currentSkillsProjectQuery() {\n\t\t\t\tvar selector = document.getElementById('project-selector');\n\t\t\t\tvar projectID = selector && selector.value ? selector.value : new URLSearchParams(window.location.search).get('project_id');\n\t\t\t\treturn projectID ? '?project_id=' + encodeURIComponent(projectID) : '';\n\t\t\t}\n\n\t\t\t\tfunction refreshSkillsContainerSearch() {\n\t\t\t\t\tif (typeof window.refreshCardSearches === 'function') {\n\t\t\t\t\t\twindow.refreshCardSearches(document.getElementById('skills-container'));\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction replaceSkillsContainer(html) {\n\t\t\t\t\tif (typeof window.replaceSearchableCardContainer === 'function') {\n\t\t\t\t\t\twindow.replaceSearchableCardContainer('#skills-container', html);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar container = document.getElementById('skills-container');\n\t\t\t\t\tif (!container) return;\n\t\t\t\t\tcontainer.outerHTML = html;\n\t\t\t\t\tvar nextContainer = document.getElementById('skills-container');\n\t\t\t\t\tif (window.htmx) htmx.process(nextContainer);\n\t\t\t\t\trefreshSkillsContainerSearch();\n\t\t\t\t}\n\n\t\t\t\tfunction setSkillModalError(message) {\n\t\t\t\t\tvar el = document.getElementById('skill_error');\n\t\t\t\t\tif (!el) return;\n\t\t\t\t\tel.textContent = message || '';\n\t\t\t\t\tel.classList.toggle('hidden', !message);\n\t\t\t\t}\n\n\t\t\tfunction setSkillImportError(message) {\n\t\t\t\tvar el = document.getElementById('skill_import_error');\n\t\t\t\tif (!el) return;\n\t\t\t\tel.textContent = message || '';\n\t\t\t\tel.classList.toggle('hidden', !message);\n\t\t\t}\n\n\t\t\tfunction renderSkillPackageFiles(filesText) {\n\t\t\t\tvar section = document.getElementById('skill_files_section');\n\t\t\t\tvar list = document.getElementById('skill_files');\n\t\t\t\tif (!section || !list) return;\n\t\t\t\tvar files = String(filesText || '').split('\\n').map(function(file) { return file.trim(); }).filter(Boolean);\n\t\t\t\tsection.classList.toggle('hidden', files.length === 0);\n\t\t\t\tlist.innerHTML = files.length ? files.map(function(file) { return '<div>' + escapeSkillHTML(file) + '</div>'; }).join('') : '';\n\t\t\t}\n\n\t\t\tfunction escapeSkillHTML(value) {\n\t\t\t\treturn String(value || '').replace(/[&<>\"']/g, function(ch) {\n\t\t\t\t\treturn {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[ch];\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction markSkillTemplateEdited() {\n\t\t\t\tvar form = document.getElementById('skill_form');\n\t\t\t\tif (form && form.dataset.mode === 'create') form.dataset.templateEdited = 'true';\n\t\t\t}\n\n\t\t\tfunction syncNewSkillTemplate() {\n\t\t\t\tvar form = document.getElementById('skill_form');\n\t\t\t\tvar body = document.getElementById('skill_body');\n\t\t\t\tif (!form || !body || form.dataset.mode !== 'create' || form.dataset.templateEdited === 'true') return;\n\t\t\t\tbody.value = defaultSkillTemplate(\n\t\t\t\t\tdocument.getElementById('skill_handle').value,\n\t\t\t\t\tdocument.getElementById('skill_name').value,\n\t\t\t\t\tdocument.getElementById('skill_scope').value,\n\t\t\t\t\tdocument.getElementById('skill_description').value\n\t\t\t\t);\n\t\t\t}\n\n\t\t\tfunction openNewSkillModal() {\n\t\t\t\tvar form = document.getElementById('skill_form');\n\t\t\t\tform.dataset.mode = 'create';\n\t\t\t\tform.dataset.originalHandle = '';\n\t\t\t\tform.dataset.templateEdited = '';\n\t\t\t\tform.dataset.originalAlwaysUse = 'false';\n\t\t\t\tdocument.getElementById('skill_modal_title').textContent = 'New Skill';\n\t\t\t\tdocument.getElementById('skill_handle').value = 'openvibely_database_migration_workflow';\n\t\t\t\tdocument.getElementById('skill_handle').disabled = false;\n\t\t\t\tdocument.getElementById('skill_scope').disabled = false;\n\t\t\t\tdocument.getElementById('skill_scope').value = 'project';\n\t\t\t\tdocument.getElementById('skill_name').value = 'OpenVibely Database Migration Workflow';\n\t\t\t\tdocument.getElementById('skill_description').value = 'Manage OpenVibely goose schema migrations, consolidation, and validation safely.';\n\t\t\t\tdocument.getElementById('skill_body').value = defaultSkillTemplate('', '', '', '');\n\t\t\t\tdocument.getElementById('skill_enabled').checked = true;\n\t\t\t\tdocument.getElementById('skill_always_use').checked = false;\n\t\t\t\trenderSkillPackageFiles('');\n\t\t\t\tsetSkillModalError('');\n\t\t\t\tskill_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction openImportSkillModal() {\n\t\t\t\tvar form = document.getElementById('skill_import_form');\n\t\t\t\tif (form) form.reset();\n\t\t\t\tdocument.getElementById('skill_import_scope').value = 'project';\n\t\t\t\tsetSkillImportError('');\n\t\t\t\tskill_import_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction editSkillFromData(card) {\n\t\t\t\tif (!card) return;\n\t\t\t\tvar form = document.getElementById('skill_form');\n\t\t\t\tform.dataset.mode = 'edit';\n\t\t\t\tform.dataset.originalHandle = card.dataset.skillHandle || '';\n\t\t\t\tform.dataset.templateEdited = 'true';\n\t\t\t\tvar alwaysUse = card.dataset.skillAlwaysUse === 'true';\n\t\t\t\tform.dataset.originalAlwaysUse = alwaysUse ? 'true' : 'false';\n\t\t\t\tdocument.getElementById('skill_modal_title').textContent = 'Edit Skill';\n\t\t\t\tdocument.getElementById('skill_handle').value = card.dataset.skillHandle || '';\n\t\t\t\tdocument.getElementById('skill_handle').disabled = true;\n\t\t\t\tdocument.getElementById('skill_scope').value = card.dataset.skillScope || 'project';\n\t\t\t\tdocument.getElementById('skill_scope').disabled = true;\n\t\t\t\tdocument.getElementById('skill_name').value = card.dataset.skillName || '';\n\t\t\t\tdocument.getElementById('skill_description').value = card.dataset.skillDescription || '';\n\t\t\t\tdocument.getElementById('skill_body').value = card.dataset.skillContent || '';\n\t\t\t\tdocument.getElementById('skill_enabled').checked = card.dataset.skillEnabled !== 'false';\n\t\t\t\tdocument.getElementById('skill_always_use').checked = alwaysUse;\n\t\t\t\trenderSkillPackageFiles(card.dataset.skillFiles || '');\n\t\t\t\tsetSkillModalError('');\n\t\t\t\tskill_modal.showModal();\n\t\t\t}\n\n\t\t\t\tfunction deleteSkill(button) {\n\t\t\t\t\tdeleteSkillHandle = button.dataset.skillHandle || '';\n\t\t\t\t\tdeleteSkillScope = button.dataset.skillScope || 'project';\n\t\t\t\t\tif (!deleteSkillHandle) return;\n\t\t\t\t\tvar nameEl = document.getElementById('delete_skill_confirm_name');\n\t\t\t\t\tif (nameEl) nameEl.textContent = button.dataset.skillName || deleteSkillHandle;\n\t\t\t\t\tvar modal = document.getElementById('delete_skill_confirm_modal');\n\t\t\t\t\tif (modal) modal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction confirmDeleteSkill() {\n\t\t\t\t\tif (!deleteSkillHandle) return;\n\t\t\t\t\tvar modal = document.getElementById('delete_skill_confirm_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t\thtmx.ajax('DELETE', '/skills/' + encodeURIComponent(deleteSkillHandle) + '?scope=' + encodeURIComponent(deleteSkillScope) + currentSkillsProjectQuery().replace(/^\\?/, '&'), {\n\t\t\t\t\t\ttarget: '#skills-container',\n\t\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t\t}).catch(function(xhr) {\n\t\t\t\t\t\talert((xhr && xhr.responseText) || 'Failed to delete skill.');\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\tfunction setSkillEnabled(button, enable) {\n\t\t\t\tvar handle = button.dataset.skillHandle || '';\n\t\t\t\tvar scope = button.dataset.skillScope || 'project';\n\t\t\t\tif (!handle) return;\n\t\t\t\tvar action = enable ? 'Enable' : 'Disable';\n\t\t\t\tif (!confirm(action + ' skill \"' + handle + '\"?')) return;\n\t\t\t\tfetch('/skills/' + encodeURIComponent(handle) + '/enabled' + currentSkillsProjectQuery(), {\n\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\theaders: {'Content-Type': 'application/json', 'HX-Request': 'true'},\n\t\t\t\t\tbody: JSON.stringify({enabled: enable, scope: scope})\n\t\t\t\t}).then(function(resp) {\n\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\treturn resp.text().then(function(text) { throw new Error(text || 'Failed to ' + action.toLowerCase() + ' skill.'); });\n\t\t\t\t\t}\n\t\t\t\t\treturn resp.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\treplaceSkillsContainer(html);\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\talert(err.message || 'Failed to ' + action.toLowerCase() + ' skill.');\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction setSkillAlwaysUse(button, alwaysUse) {\n\t\t\t\tvar handle = button.dataset.skillHandle || '';\n\t\t\t\tvar scope = button.dataset.skillScope || 'project';\n\t\t\t\tif (!handle) return;\n\t\t\t\tvar action = alwaysUse ? 'Set always use for' : 'Remove always use from';\n\t\t\t\tif (!confirm(action + ' skill \"' + handle + '\"?')) return;\n\t\t\t\tfetch('/skills/' + encodeURIComponent(handle) + '/always_use' + currentSkillsProjectQuery(), {\n\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\theaders: {'Content-Type': 'application/json', 'HX-Request': 'true'},\n\t\t\t\t\tbody: JSON.stringify({always_use: alwaysUse, scope: scope})\n\t\t\t\t}).then(function(resp) {\n\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\treturn resp.text().then(function(text) { throw new Error(text || 'Failed to update always use setting.'); });\n\t\t\t\t\t}\n\t\t\t\t\treturn resp.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\treplaceSkillsContainer(html);\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\talert(err.message || 'Failed to update always use setting.');\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction submitSkillImportForm(event) {\n\t\t\t\tevent.preventDefault();\n\t\t\t\tvar submit = document.getElementById('skill_import_submit_btn');\n\t\t\t\tvar input = document.getElementById('skill_import_files');\n\t\t\t\tvar data = new FormData();\n\t\t\t\tdata.append('scope', document.getElementById('skill_import_scope').value || 'project');\n\t\t\t\tArray.from((input && input.files) || []).forEach(function(file) {\n\t\t\t\t\tdata.append('files', file, file.name);\n\t\t\t\t\tdata.append('paths', file.webkitRelativePath || file.name);\n\t\t\t\t});\n\t\t\t\tsubmit.disabled = true;\n\t\t\t\tsubmit.textContent = 'Importing...';\n\t\t\t\tsetSkillImportError('');\n\t\t\t\tfetch('/skills/import' + currentSkillsProjectQuery(), {\n\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\theaders: {'HX-Request': 'true'},\n\t\t\t\t\tbody: data\n\t\t\t\t}).then(function(resp) {\n\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\treturn resp.text().then(function(text) { throw new Error(text || 'Failed to import skill package.'); });\n\t\t\t\t\t}\n\t\t\t\t\treturn resp.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\treplaceSkillsContainer(html);\n\t\t\t\t\tvar modal = document.getElementById('skill_import_modal');\n\t\t\t\t\tif (modal && modal.open) modal.close();\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\tsetSkillImportError(err.message || 'Failed to import skill package.');\n\t\t\t\t}).finally(function() {\n\t\t\t\t\tvar nextSubmit = document.getElementById('skill_import_submit_btn');\n\t\t\t\t\tif (nextSubmit) {\n\t\t\t\t\t\tnextSubmit.disabled = false;\n\t\t\t\t\t\tnextSubmit.textContent = 'Import';\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction submitSkillForm(event) {\n\t\t\t\tevent.preventDefault();\n\t\t\t\tvar form = document.getElementById('skill_form');\n\t\t\t\tvar handle = document.getElementById('skill_handle').value.trim();\n\t\t\t\tvar payload = {\n\t\t\t\t\thandle: handle,\n\t\t\t\t\tscope: document.getElementById('skill_scope').value,\n\t\t\t\t\tname: document.getElementById('skill_name').value.trim(),\n\t\t\t\t\tdescription: document.getElementById('skill_description').value.trim(),\n\t\t\t\t\tbody: document.getElementById('skill_body').value,\n\t\t\t\t\tenabled: document.getElementById('skill_enabled').checked\n\t\t\t\t};\n\t\t\t\tvar mode = form.dataset.mode || 'create';\n\t\t\t\tvar originalHandle = form.dataset.originalHandle || handle;\n\t\t\t\tvar url = '/skills';\n\t\t\t\tvar method = 'POST';\n\t\t\t\tif (mode === 'edit') {\n\t\t\t\t\turl = '/skills/' + encodeURIComponent(originalHandle);\n\t\t\t\t\tmethod = 'PUT';\n\t\t\t\t}\n\t\t\t\tvar submit = document.getElementById('skill_submit_btn');\n\t\t\t\tsubmit.disabled = true;\n\t\t\t\tsubmit.textContent = 'Saving...';\n\t\t\t\tsetSkillModalError('');\n\t\t\t\tfetch(url + currentSkillsProjectQuery(), {\n\t\t\t\t\tmethod: method,\n\t\t\t\t\theaders: {'Content-Type': 'application/json', 'HX-Request': 'true'},\n\t\t\t\t\tbody: JSON.stringify(payload)\n\t\t\t\t}).then(function(resp) {\n\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\treturn resp.text().then(function(text) { throw new Error(text || 'Failed to save skill.'); });\n\t\t\t\t\t}\n\t\t\t\t\treturn resp.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\tvar alwaysUse = document.getElementById('skill_always_use').checked;\n\t\t\t\t\tvar originalAlwaysUse = form.dataset.originalAlwaysUse === 'true';\n\t\t\t\t\tif (alwaysUse === originalAlwaysUse) return html;\n\t\t\t\t\tvar auHandle = form.dataset.originalHandle || handle;\n\t\t\t\t\tvar auScope = document.getElementById('skill_scope').value;\n\t\t\t\t\treturn fetch('/skills/' + encodeURIComponent(auHandle) + '/always_use' + currentSkillsProjectQuery(), {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {'Content-Type': 'application/json', 'HX-Request': 'true'},\n\t\t\t\t\t\tbody: JSON.stringify({always_use: alwaysUse, scope: auScope})\n\t\t\t\t\t}).then(function(resp2) {\n\t\t\t\t\t\tif (!resp2.ok) {\n\t\t\t\t\t\t\treturn resp2.text().then(function(t) { throw new Error(t || 'Saved but failed to update always use setting.'); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn resp2.text();\n\t\t\t\t\t});\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\treplaceSkillsContainer(html);\n\t\t\t\t\tvar modal = document.getElementById('skill_modal');\n\t\t\t\t\tif (modal && modal.open) modal.close();\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\tsetSkillModalError(err.message || 'Failed to save skill.');\n\t\t\t\t}).finally(function() {\n\t\t\t\t\tvar nextSubmit = document.getElementById('skill_submit_btn');\n\t\t\t\t\tif (nextSubmit) {\n\t\t\t\t\t\tnextSubmit.disabled = false;\n\t\t\t\t\t\tnextSubmit.textContent = 'Save';\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "<h3 class=\"font-bold text-lg mb-4 pr-10\">Import Skill Package</h3><form id=\"skill_import_form\" onsubmit=\"submitSkillImportForm(event)\"><label class=\"form-control\"><span class=\"label-text mb-1\">Scope</span> <select id=\"skill_import_scope\" name=\"scope\" class=\"select select-bordered\"><option value=\"project\">Project</option> <option value=\"global\">Global</option></select></label> <label class=\"form-control mt-3\"><span class=\"label-text mb-1\">Skill package files</span> <input id=\"skill_import_files\" name=\"files\" type=\"file\" class=\"file-input file-input-bordered\" multiple webkitdirectory required> <span class=\"label-text-alt mt-1 opacity-70\">Select a skill package folder containing SKILL.md. Support files under references, templates, scripts, and assets will be imported.</span></label><p id=\"skill_import_error\" class=\"hidden text-error text-sm mt-3\"></p><div class=\"modal-action\"><button type=\"button\" class=\"btn\" onclick=\"skill_import_modal.close()\">Cancel</button> <button id=\"skill_import_submit_btn\" type=\"submit\" class=\"btn btn-primary\">Import</button></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><script>\n\t\t\t\tvar deleteSkillHandle = '';\n\t\t\t\tvar deleteSkillScope = 'project';\n\n\t\t\t\tfunction defaultSkillTemplate(handle, name, scope, description) {\t\t\t\thandle = (handle || 'openvibely_database_migration_workflow').trim();\n\t\t\t\tname = (name || 'OpenVibely Database Migration Workflow').trim();\n\t\t\t\tscope = (scope || 'project').trim();\n\t\t\t\tdescription = (description || 'Manage OpenVibely goose schema migrations, consolidation, and validation safely.').trim();\n\t\t\t\treturn '---\\n' +\n\t\t\t\t\t'kind: openvibely.agent_skill\\n' +\n\t\t\t\t\t'version: 1\\n' +\n\t\t\t\t\t'skill:\\n' +\n\t\t\t\t\t'    key: ' + handle + '\\n' +\n\t\t\t\t\t'    name: ' + name + '\\n' +\n\t\t\t\t\t'    scope: ' + scope + '\\n' +\n\t\t\t\t\t'    description: ' + description + '\\n' +\n\t\t\t\t\t'---\\n\\nDescribe when to use this skill and the workflow the agent should follow.\\n';\n\t\t\t}\n\n\t\t\tfunction currentSkillsProjectQuery() {\n\t\t\t\tvar selector = document.getElementById('project-selector');\n\t\t\t\tvar projectID = selector && selector.value ? selector.value : new URLSearchParams(window.location.search).get('project_id');\n\t\t\t\treturn projectID ? '?project_id=' + encodeURIComponent(projectID) : '';\n\t\t\t}\n\n\t\t\t\tfunction refreshSkillsContainerSearch() {\n\t\t\t\t\tif (typeof window.refreshCardSearches === 'function') {\n\t\t\t\t\t\twindow.refreshCardSearches(document.getElementById('skills-container'));\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tfunction replaceSkillsContainer(html) {\n\t\t\t\t\tif (typeof window.replaceSearchableCardContainer === 'function') {\n\t\t\t\t\t\twindow.replaceSearchableCardContainer('#skills-container', html);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tvar container = document.getElementById('skills-container');\n\t\t\t\t\tif (!container) return;\n\t\t\t\t\tcontainer.outerHTML = html;\n\t\t\t\t\tvar nextContainer = document.getElementById('skills-container');\n\t\t\t\t\tif (window.htmx) htmx.process(nextContainer);\n\t\t\t\t\trefreshSkillsContainerSearch();\n\t\t\t\t}\n\n\t\t\t\tfunction setSkillModalError(message) {\n\t\t\t\t\tvar el = document.getElementById('skill_error');\n\t\t\t\t\tif (!el) return;\n\t\t\t\t\tel.textContent = message || '';\n\t\t\t\t\tel.classList.toggle('hidden', !message);\n\t\t\t\t}\n\n\t\t\tfunction setSkillImportError(message) {\n\t\t\t\tvar el = document.getElementById('skill_import_error');\n\t\t\t\tif (!el) return;\n\t\t\t\tel.textContent = message || '';\n\t\t\t\tel.classList.toggle('hidden', !message);\n\t\t\t}\n\n\t\t\tfunction renderSkillPackageFiles(filesText) {\n\t\t\t\tvar section = document.getElementById('skill_files_section');\n\t\t\t\tvar list = document.getElementById('skill_files');\n\t\t\t\tif (!section || !list) return;\n\t\t\t\tvar files = String(filesText || '').split('\\n').map(function(file) { return file.trim(); }).filter(Boolean);\n\t\t\t\tsection.classList.toggle('hidden', files.length === 0);\n\t\t\t\tlist.innerHTML = files.length ? files.map(function(file) { return '<div>' + escapeSkillHTML(file) + '</div>'; }).join('') : '';\n\t\t\t}\n\n\t\t\tfunction escapeSkillHTML(value) {\n\t\t\t\treturn String(value || '').replace(/[&<>\"']/g, function(ch) {\n\t\t\t\t\treturn {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[ch];\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction markSkillTemplateEdited() {\n\t\t\t\tvar form = document.getElementById('skill_form');\n\t\t\t\tif (form && form.dataset.mode === 'create') form.dataset.templateEdited = 'true';\n\t\t\t}\n\n\t\t\tfunction syncNewSkillTemplate() {\n\t\t\t\tvar form = document.getElementById('skill_form');\n\t\t\t\tvar body = document.getElementById('skill_body');\n\t\t\t\tif (!form || !body || form.dataset.mode !== 'create' || form.dataset.templateEdited === 'true') return;\n\t\t\t\tbody.value = defaultSkillTemplate(\n\t\t\t\t\tdocument.getElementById('skill_handle').value,\n\t\t\t\t\tdocument.getElementById('skill_name').value,\n\t\t\t\t\tdocument.getElementById('skill_scope').value,\n\t\t\t\t\tdocument.getElementById('skill_description').value\n\t\t\t\t);\n\t\t\t}\n\n\t\t\tfunction openNewSkillModal() {\n\t\t\t\tvar form = document.getElementById('skill_form');\n\t\t\t\tform.dataset.mode = 'create';\n\t\t\t\tform.dataset.originalHandle = '';\n\t\t\t\tform.dataset.templateEdited = '';\n\t\t\t\tform.dataset.originalAlwaysUse = 'false';\n\t\t\t\tdocument.getElementById('skill_modal_title').textContent = 'New Skill';\n\t\t\t\tdocument.getElementById('skill_handle').value = 'openvibely_database_migration_workflow';\n\t\t\t\tdocument.getElementById('skill_handle').disabled = false;\n\t\t\t\tdocument.getElementById('skill_scope').disabled = false;\n\t\t\t\tdocument.getElementById('skill_scope').value = 'project';\n\t\t\t\tdocument.getElementById('skill_name').value = 'OpenVibely Database Migration Workflow';\n\t\t\t\tdocument.getElementById('skill_description').value = 'Manage OpenVibely goose schema migrations, consolidation, and validation safely.';\n\t\t\t\tdocument.getElementById('skill_body').value = defaultSkillTemplate('', '', '', '');\n\t\t\t\tdocument.getElementById('skill_enabled').checked = true;\n\t\t\t\tdocument.getElementById('skill_always_use').checked = false;\n\t\t\t\trenderSkillPackageFiles('');\n\t\t\t\tsetSkillModalError('');\n\t\t\t\tskill_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction openImportSkillModal() {\n\t\t\t\tvar form = document.getElementById('skill_import_form');\n\t\t\t\tif (form) form.reset();\n\t\t\t\tdocument.getElementById('skill_import_scope').value = 'project';\n\t\t\t\tsetSkillImportError('');\n\t\t\t\tskill_import_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction editSkillFromData(card) {\n\t\t\t\tif (!card) return;\n\t\t\t\tvar form = document.getElementById('skill_form');\n\t\t\t\tform.dataset.mode = 'edit';\n\t\t\t\tform.dataset.originalHandle = card.dataset.skillHandle || '';\n\t\t\t\tform.dataset.templateEdited = 'true';\n\t\t\t\tvar alwaysUse = card.dataset.skillAlwaysUse === 'true';\n\t\t\t\tform.dataset.originalAlwaysUse = alwaysUse ? 'true' : 'false';\n\t\t\t\tdocument.getElementById('skill_modal_title').textContent = 'Edit Skill';\n\t\t\t\tdocument.getElementById('skill_handle').value = card.dataset.skillHandle || '';\n\t\t\t\tdocument.getElementById('skill_handle').disabled = true;\n\t\t\t\tdocument.getElementById('skill_scope').value = card.dataset.skillScope || 'project';\n\t\t\t\tdocument.getElementById('skill_scope').disabled = true;\n\t\t\t\tdocument.getElementById('skill_name').value = card.dataset.skillName || '';\n\t\t\t\tdocument.getElementById('skill_description').value = card.dataset.skillDescription || '';\n\t\t\t\tdocument.getElementById('skill_body').value = card.dataset.skillContent || '';\n\t\t\t\tdocument.getElementById('skill_enabled').checked = card.dataset.skillEnabled !== 'false';\n\t\t\t\tdocument.getElementById('skill_always_use').checked = alwaysUse;\n\t\t\t\trenderSkillPackageFiles(card.dataset.skillFiles || '');\n\t\t\t\tsetSkillModalError('');\n\t\t\t\tskill_modal.showModal();\n\t\t\t}\n\n\t\t\t\tfunction deleteSkill(button) {\n\t\t\t\t\tdeleteSkillHandle = button.dataset.skillHandle || '';\n\t\t\t\t\tdeleteSkillScope = button.dataset.skillScope || 'project';\n\t\t\t\t\tif (!deleteSkillHandle) return;\n\t\t\t\t\tvar nameEl = document.getElementById('delete_skill_confirm_name');\n\t\t\t\t\tif (nameEl) nameEl.textContent = button.dataset.skillName || deleteSkillHandle;\n\t\t\t\t\tvar modal = document.getElementById('delete_skill_confirm_modal');\n\t\t\t\t\tif (modal) modal.showModal();\n\t\t\t\t}\n\n\t\t\t\tfunction confirmDeleteSkill() {\n\t\t\t\t\tif (!deleteSkillHandle) return;\n\t\t\t\t\tvar modal = document.getElementById('delete_skill_confirm_modal');\n\t\t\t\t\tif (modal) modal.close();\n\t\t\t\t\thtmx.ajax('DELETE', '/skills/' + encodeURIComponent(deleteSkillHandle) + '?scope=' + encodeURIComponent(deleteSkillScope) + currentSkillsProjectQuery().replace(/^\\?/, '&'), {\n\t\t\t\t\t\ttarget: '#skills-container',\n\t\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t\t}).catch(function(xhr) {\n\t\t\t\t\t\talert((xhr && xhr.responseText) || 'Failed to delete skill.');\n\t\t\t\t\t});\n\t\t\t\t}\n\n\t\t\tfunction setSkillEnabled(button, enable) {\n\t\t\t\tvar handle = button.dataset.skillHandle || '';\n\t\t\t\tvar scope = button.dataset.skillScope || 'project';\n\t\t\t\tif (!handle) return;\n\t\t\t\tvar action = enable ? 'Enable' : 'Disable';\n\t\t\t\tif (!confirm(action + ' skill \"' + handle + '\"?')) return;\n\t\t\t\tfetch('/skills/' + encodeURIComponent(handle) + '/enabled' + currentSkillsProjectQuery(), {\n\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\theaders: {'Content-Type': 'application/json', 'HX-Request': 'true'},\n\t\t\t\t\tbody: JSON.stringify({enabled: enable, scope: scope})\n\t\t\t\t}).then(function(resp) {\n\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\treturn resp.text().then(function(text) { throw new Error(text || 'Failed to ' + action.toLowerCase() + ' skill.'); });\n\t\t\t\t\t}\n\t\t\t\t\treturn resp.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\treplaceSkillsContainer(html);\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\talert(err.message || 'Failed to ' + action.toLowerCase() + ' skill.');\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction setSkillAlwaysUse(button, alwaysUse) {\n\t\t\t\tvar handle = button.dataset.skillHandle || '';\n\t\t\t\tvar scope = button.dataset.skillScope || 'project';\n\t\t\t\tif (!handle) return;\n\t\t\t\tvar action = alwaysUse ? 'Set always use for' : 'Remove always use from';\n\t\t\t\tif (!confirm(action + ' skill \"' + handle + '\"?')) return;\n\t\t\t\tfetch('/skills/' + encodeURIComponent(handle) + '/always_use' + currentSkillsProjectQuery(), {\n\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\theaders: {'Content-Type': 'application/json', 'HX-Request': 'true'},\n\t\t\t\t\tbody: JSON.stringify({always_use: alwaysUse, scope: scope})\n\t\t\t\t}).then(function(resp) {\n\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\treturn resp.text().then(function(text) { throw new Error(text || 'Failed to update always use setting.'); });\n\t\t\t\t\t}\n\t\t\t\t\treturn resp.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\treplaceSkillsContainer(html);\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\talert(err.message || 'Failed to update always use setting.');\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction submitSkillImportForm(event) {\n\t\t\t\tevent.preventDefault();\n\t\t\t\tvar submit = document.getElementById('skill_import_submit_btn');\n\t\t\t\tvar input = document.getElementById('skill_import_files');\n\t\t\t\tvar data = new FormData();\n\t\t\t\tdata.append('scope', document.getElementById('skill_import_scope').value || 'project');\n\t\t\t\tArray.from((input && input.files) || []).forEach(function(file) {\n\t\t\t\t\tdata.append('files', file, file.name);\n\t\t\t\t\tdata.append('paths', file.webkitRelativePath || file.name);\n\t\t\t\t});\n\t\t\t\tsubmit.disabled = true;\n\t\t\t\tsubmit.textContent = 'Importing...';\n\t\t\t\tsetSkillImportError('');\n\t\t\t\tfetch('/skills/import' + currentSkillsProjectQuery(), {\n\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\theaders: {'HX-Request': 'true'},\n\t\t\t\t\tbody: data\n\t\t\t\t}).then(function(resp) {\n\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\treturn resp.text().then(function(text) { throw new Error(text || 'Failed to import skill package.'); });\n\t\t\t\t\t}\n\t\t\t\t\treturn resp.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\treplaceSkillsContainer(html);\n\t\t\t\t\tvar modal = document.getElementById('skill_import_modal');\n\t\t\t\t\tif (modal && modal.open) modal.close();\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\tsetSkillImportError(err.message || 'Failed to import skill package.');\n\t\t\t\t}).finally(function() {\n\t\t\t\t\tvar nextSubmit = document.getElementById('skill_import_submit_btn');\n\t\t\t\t\tif (nextSubmit) {\n\t\t\t\t\t\tnextSubmit.disabled = false;\n\t\t\t\t\t\tnextSubmit.textContent = 'Import';\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction submitSkillForm(event) {\n\t\t\t\tevent.preventDefault();\n\t\t\t\tvar form = document.getElementById('skill_form');\n\t\t\t\tvar handle = document.getElementById('skill_handle').value.trim();\n\t\t\t\tvar payload = {\n\t\t\t\t\thandle: handle,\n\t\t\t\t\tscope: document.getElementById('skill_scope').value,\n\t\t\t\t\tname: document.getElementById('skill_name').value.trim(),\n\t\t\t\t\tdescription: document.getElementById('skill_description').value.trim(),\n\t\t\t\t\tbody: document.getElementById('skill_body').value,\n\t\t\t\t\tenabled: document.getElementById('skill_enabled').checked\n\t\t\t\t};\n\t\t\t\tvar mode = form.dataset.mode || 'create';\n\t\t\t\tvar originalHandle = form.dataset.originalHandle || handle;\n\t\t\t\tvar url = '/skills';\n\t\t\t\tvar method = 'POST';\n\t\t\t\tif (mode === 'edit') {\n\t\t\t\t\turl = '/skills/' + encodeURIComponent(originalHandle);\n\t\t\t\t\tmethod = 'PUT';\n\t\t\t\t}\n\t\t\t\tvar submit = document.getElementById('skill_submit_btn');\n\t\t\t\tsubmit.disabled = true;\n\t\t\t\tsubmit.textContent = 'Saving...';\n\t\t\t\tsetSkillModalError('');\n\t\t\t\tfetch(url + currentSkillsProjectQuery(), {\n\t\t\t\t\tmethod: method,\n\t\t\t\t\theaders: {'Content-Type': 'application/json', 'HX-Request': 'true'},\n\t\t\t\t\tbody: JSON.stringify(payload)\n\t\t\t\t}).then(function(resp) {\n\t\t\t\t\tif (!resp.ok) {\n\t\t\t\t\t\treturn resp.text().then(function(text) { throw new Error(text || 'Failed to save skill.'); });\n\t\t\t\t\t}\n\t\t\t\t\treturn resp.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\tvar alwaysUse = document.getElementById('skill_always_use').checked;\n\t\t\t\t\tvar originalAlwaysUse = form.dataset.originalAlwaysUse === 'true';\n\t\t\t\t\tif (alwaysUse === originalAlwaysUse) return html;\n\t\t\t\t\tvar auHandle = form.dataset.originalHandle || handle;\n\t\t\t\t\tvar auScope = document.getElementById('skill_scope').value;\n\t\t\t\t\treturn fetch('/skills/' + encodeURIComponent(auHandle) + '/always_use' + currentSkillsProjectQuery(), {\n\t\t\t\t\t\tmethod: 'POST',\n\t\t\t\t\t\theaders: {'Content-Type': 'application/json', 'HX-Request': 'true'},\n\t\t\t\t\t\tbody: JSON.stringify({always_use: alwaysUse, scope: auScope})\n\t\t\t\t\t}).then(function(resp2) {\n\t\t\t\t\t\tif (!resp2.ok) {\n\t\t\t\t\t\t\treturn resp2.text().then(function(t) { throw new Error(t || 'Saved but failed to update always use setting.'); });\n\t\t\t\t\t\t}\n\t\t\t\t\t\treturn resp2.text();\n\t\t\t\t\t});\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\treplaceSkillsContainer(html);\n\t\t\t\t\tvar modal = document.getElementById('skill_modal');\n\t\t\t\t\tif (modal && modal.open) modal.close();\n\t\t\t\t}).catch(function(err) {\n\t\t\t\t\tsetSkillModalError(err.message || 'Failed to save skill.');\n\t\t\t\t}).finally(function() {\n\t\t\t\t\tvar nextSubmit = document.getElementById('skill_submit_btn');\n\t\t\t\t\tif (nextSubmit) {\n\t\t\t\t\t\tnextSubmit.disabled = false;\n\t\t\t\t\t\tnextSubmit.textContent = 'Save';\n\t\t\t\t\t}\n\t\t\t\t});\n\t\t\t}\n\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

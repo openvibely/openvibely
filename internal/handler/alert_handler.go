@@ -32,11 +32,41 @@ func (h *Handler) ListAlerts(c echo.Context) error {
 	return render(c, http.StatusOK, pages.Alerts(projects, currentProjectID, alerts, unreadCount))
 }
 
+func (h *Handler) setAlertDecision(c echo.Context, state models.AlertDecisionState) error {
+	ctx := c.Request().Context()
+	projectID, _ := h.getCurrentProjectID(c)
+	if err := h.alertSvc.SetDecision(ctx, projectID, c.Param("id"), state); err != nil {
+		applog.Infof("[handler] setAlertDecision project=%s alert=%s state=%s error=%v", projectID, c.Param("id"), state, err)
+		return echo.NewHTTPError(http.StatusNotFound, "notification not found or no longer pending")
+	}
+	alerts, err := h.alertSvc.ListByProject(ctx, projectID, 100)
+	if err != nil {
+		return err
+	}
+	unreadCount, _ := h.alertSvc.CountUnread(ctx, projectID)
+	c.Response().Header().Set("HX-Trigger", "alertUpdate")
+	return render(c, http.StatusOK, pages.AlertsContent(alerts, projectID, unreadCount))
+}
+
+func (h *Handler) ApproveAlert(c echo.Context) error {
+	return h.setAlertDecision(c, models.AlertDecisionApproved)
+}
+
+func (h *Handler) RejectAlert(c echo.Context) error {
+	return h.setAlertDecision(c, models.AlertDecisionRejected)
+}
+
+func (h *Handler) DismissAlert(c echo.Context) error {
+	return h.setAlertDecision(c, models.AlertDecisionDismissed)
+}
+
 func (h *Handler) MarkAlertRead(c echo.Context) error {
 	id := c.Param("id")
 	ctx := c.Request().Context()
 
-	if err := h.alertSvc.MarkRead(ctx, id); err != nil {
+	currentProjectID, _ := h.getCurrentProjectID(c)
+
+	if err := h.alertSvc.MarkRead(ctx, currentProjectID, id); err != nil {
 		applog.Infof("[handler] MarkAlertRead error: %v", err)
 		return err
 	}
@@ -44,8 +74,6 @@ func (h *Handler) MarkAlertRead(c echo.Context) error {
 	applog.Infof("[handler] MarkAlertRead id=%s", id)
 
 	// Return updated alerts list
-	currentProjectID, _ := h.getCurrentProjectID(c)
-
 	alerts, _ := h.alertSvc.ListByProject(ctx, currentProjectID, 100)
 	unreadCount, _ := h.alertSvc.CountUnread(ctx, currentProjectID)
 
@@ -79,7 +107,8 @@ func (h *Handler) DeleteAlert(c echo.Context) error {
 	id := c.Param("id")
 	ctx := c.Request().Context()
 
-	if err := h.alertSvc.Delete(ctx, id); err != nil {
+	currentProjectID, _ := h.getCurrentProjectID(c)
+	if err := h.alertSvc.Delete(ctx, currentProjectID, id); err != nil {
 		applog.Infof("[handler] DeleteAlert error: %v", err)
 		return err
 	}
@@ -88,8 +117,6 @@ func (h *Handler) DeleteAlert(c echo.Context) error {
 
 	if isHTMX(c) {
 		// Re-render alerts list with updated count
-		currentProjectID, _ := h.getCurrentProjectID(c)
-
 		alerts, _ := h.alertSvc.ListByProject(ctx, currentProjectID, 100)
 		unreadCount, _ := h.alertSvc.CountUnread(ctx, currentProjectID)
 

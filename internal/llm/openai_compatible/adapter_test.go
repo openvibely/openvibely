@@ -178,7 +178,7 @@ func TestAdapterChatWithRuntimeActionsUsesToolModeSystemPrompt(t *testing.T) {
 	require.NotContains(t, content, "The ONLY way to create a task is by outputting a [CREATE_TASK] block")
 }
 
-func TestAdapterChatWithoutRuntimeActionsKeepsMarkerSystemPrompt(t *testing.T) {
+func TestAdapterChatWithoutRuntimeActionsReportsCapabilityLimitation(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
@@ -206,7 +206,74 @@ func TestAdapterChatWithoutRuntimeActionsKeepsMarkerSystemPrompt(t *testing.T) {
 	system, ok := messages[0].(map[string]any)
 	require.True(t, ok)
 	content, _ := system["content"].(string)
-	require.Contains(t, content, "The ONLY way to create a task is by outputting a [CREATE_TASK] block")
+	require.Contains(t, content, llmprompt.ChatActionUnavailableInstructions)
+	require.NotContains(t, content, "[CREATE_TASK]")
+	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
+}
+
+func TestAdapterTaskFollowupWithoutRuntimeActionsReportsCapabilityLimitation(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil, nil)
+	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationStreaming, Message: "Create a follow-up task", Followup: true, ChatMode: models.ChatModeOrchestrate,
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+		},
+	}, ".")
+	require.NoError(t, err)
+
+	messages, ok := gotBody["messages"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, messages)
+	system, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	content, _ := system["content"].(string)
+	require.Contains(t, content, llmprompt.ChatActionUnavailableInstructions)
+	require.NotContains(t, content, "[CREATE_TASK]")
+	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
+}
+
+func TestAdapterPlanWithoutRuntimeActionsRemainsReadOnlyWithoutActionMode(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil, nil)
+	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationStreaming, Message: "Plan a task", ChatMode: models.ChatModePlan,
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+			Model: "provider/model", APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/", Transport: "chat_completions",
+		},
+	}, ".")
+	require.NoError(t, err)
+
+	messages, ok := gotBody["messages"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, messages)
+	system, ok := messages[0].(map[string]any)
+	require.True(t, ok)
+	content, _ := system["content"].(string)
+	require.Contains(t, content, "PLAN MODE (read-only)")
+	require.NotContains(t, content, llmprompt.ChatActionUnavailableInstructions)
 	require.NotContains(t, content, llmprompt.ChatActionToolModeInstructions)
 }
 
@@ -250,7 +317,7 @@ func TestAdapterTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
 	require.NotContains(t, content, "To create a task, output this format")
 }
 
-func TestAdapterTaskWithoutRuntimeActionsKeepsMarkerPrompt(t *testing.T) {
+func TestAdapterTaskWithoutRuntimeActionsDoesNotAdvertiseLegacyMutationMarkers(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
@@ -279,7 +346,8 @@ func TestAdapterTaskWithoutRuntimeActionsKeepsMarkerPrompt(t *testing.T) {
 	user, ok := messages[len(messages)-1].(map[string]any)
 	require.True(t, ok)
 	content, _ := user["content"].(string)
-	require.Contains(t, content, llmprompt.TaskCreationInstructions)
+	require.Contains(t, content, llmprompt.ChatActionUnavailableInstructions)
+	require.NotContains(t, content, "[CREATE_TASK]")
 	require.NotContains(t, content, "TASK CREATION TOOL MODE")
 }
 

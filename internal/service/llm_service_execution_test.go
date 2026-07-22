@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -42,7 +43,7 @@ func (f providerAdapterFunc) Call(req llmcontracts.AgentRequest) (llmcontracts.A
 }
 
 func (f retryingProviderAdapterFunc) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	return callWithRetry(req, func() (llmcontracts.AgentResult, error) {
+	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		return f(req)
 	})
 }
@@ -317,13 +318,11 @@ func TestLLMService_ExecuteTaskWithAgent_PreservesFailedTranscriptForTaskThreadF
 	}
 	got := res.ChatContext.Messages
 	want := []llmcontracts.ChatContextMessage{
-		{Role: "user", Content: "original task context"},
-		{Role: "assistant", Content: "I inspected the repository and could not finish."},
 		{Role: "user", Content: "follow up with the prior failure context"},
 		{Role: "assistant", Content: "ok"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected follow-up replay context\n got: %#v\nwant: %#v", got, want)
+		t.Fatalf("unexpected current-turn lifecycle context\n got: %#v\nwant: %#v", got, want)
 	}
 	if len(capture.lastReq.ChatHistory) != 1 || capture.lastReq.ChatHistory[0].Status != models.ExecFailed {
 		t.Fatalf("provider request should include failed terminal execution history, got %#v", capture.lastReq.ChatHistory)
@@ -423,6 +422,105 @@ func TestLLMService_ExecuteTaskWithAgent_IgnoresStatusMarkerMentionInProse(t *te
 	}
 	if updatedTask.Status != models.StatusCompleted || updatedTask.Category != models.CategoryCompleted {
 		t.Fatalf("expected completed task, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_IgnoresIncompleteStatusControl(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Incomplete Status Control", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Ignore incomplete status", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "complete the work", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "Work is complete.\n[STATUS: FAILED | incomplete control"
+	mock.TextOnly = mock.Response
+	svc.SetLLMCaller(mock)
+
+	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+	if exec == nil || exec.Status != models.ExecCompleted || exec.ErrorMessage != "" {
+		t.Fatalf("expected incomplete control to remain inert, got %#v", exec)
+	}
+	stored, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("GetByID execution: %v", err)
+	}
+	if stored.Status != models.ExecCompleted || stored.ErrorMessage != "" || !strings.Contains(stored.Output, "[STATUS: FAILED | incomplete control") {
+		t.Fatalf("expected completed execution preserving incomplete control, got status=%s error=%q output=%q", stored.Status, stored.ErrorMessage, stored.Output)
+	}
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID task: %v", err)
+	}
+	if updatedTask.Status != models.StatusCompleted || updatedTask.Category != models.CategoryCompleted {
+		t.Fatalf("expected completed task, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_IgnoresExtraStatusReasonDelimiters(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output string
+	}{
+		{name: "failed", output: "Work is complete.\n[STATUS: FAILED | reason | extra]"},
+		{name: "followup", output: "Work is complete.\n[STATUS: NEEDS_FOLLOWUP | reason | extra]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			llmConfigRepo := repository.NewLLMConfigRepo(db)
+			execRepo := repository.NewExecutionRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			projectRepo := repository.NewProjectRepo(db)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			attachmentRepo := repository.NewAttachmentRepo(db)
+			agent := ensureDefaultAgent(t, llmConfigRepo)
+			project := &models.Project{Name: "Extra Status Delimiter " + tc.name, RepoPath: t.TempDir()}
+			if err := projectRepo.Create(ctx, project); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+			task := &models.Task{ProjectID: project.ID, Title: "Ignore extra status delimiter", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "complete the work", AgentID: &agent.ID}
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("create task: %v", err)
+			}
+
+			svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+			mock := testutil.NewMockLLMCaller()
+			mock.Response = tc.output
+			mock.TextOnly = tc.output
+			svc.SetLLMCaller(mock)
+
+			exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+			if err != nil {
+				t.Fatalf("ExecuteTaskWithAgent: %v", err)
+			}
+			if exec == nil || exec.Status != models.ExecCompleted || exec.ErrorMessage != "" {
+				t.Fatalf("expected malformed control to remain inert, got %#v", exec)
+			}
+			stored, err := execRepo.GetByID(ctx, exec.ID)
+			if err != nil {
+				t.Fatalf("GetByID execution: %v", err)
+			}
+			if stored.Status != models.ExecCompleted || stored.ErrorMessage != "" || !strings.Contains(stored.Output, tc.output) {
+				t.Fatalf("expected completed execution preserving malformed control, got status=%s error=%q output=%q", stored.Status, stored.ErrorMessage, stored.Output)
+			}
+		})
 	}
 }
 
@@ -657,8 +755,6 @@ func TestLLMService_CallAgentDirectStreamingDetailed_PreservesFailedHistoryWitho
 	}
 	got := res.ChatContext.Messages
 	want := []llmcontracts.ChatContextMessage{
-		{Role: "user", Content: "original task prompt"},
-		{Role: "assistant", Content: "Previous execution failed before producing output: provider timeout"},
 		{Role: "user", Content: "follow up after failure"},
 		{Role: "assistant", Content: "ok"},
 	}
@@ -687,7 +783,7 @@ func TestLLMService_CallAgentDirectStreamingDetailed_PropagatesTransportScope(t 
 	}
 }
 
-func TestLLMService_CallAgentDirectStreamingDetailed_BuildsChatContextFromNormalizedHistory(t *testing.T) {
+func TestLLMService_CallAgentDirectStreamingDetailed_LifecycleContextContainsOnlyCurrentTurn(t *testing.T) {
 	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
 	capture := &captureProviderAdapter{}
 	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: capture}
@@ -706,25 +802,52 @@ func TestLLMService_CallAgentDirectStreamingDetailed_BuildsChatContextFromNormal
 		t.Fatalf("CallAgentDirectStreamingDetailed error: %v", err)
 	}
 	got := res.ChatContext.Messages
-	if len(got) != 41 {
-		t.Fatalf("expected 20 normalized history prompts, completed/failed assistant outputs, plus current turn, got %d: %#v", len(got), got)
+	want := []llmcontracts.ChatContextMessage{
+		{Role: "user", Content: "current prompt"},
+		{Role: "assistant", Content: "ok"},
 	}
-	if got[0].Content != "old prompt 02" {
-		t.Fatalf("expected oldest retained history after normalization, got %#v", got[0])
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected current-turn lifecycle context\n got: %#v\nwant: %#v", got, want)
 	}
-	if strings.Contains(got[38].Content, "CREATE_TASK") || got[38].Content != "visible answer" {
-		t.Fatalf("expected cleaned historical assistant output, got %#v", got[38])
+	if len(capture.lastReq.ChatHistory) != 20 || capture.lastReq.ChatHistory[0].PromptSent != "old prompt 02" {
+		t.Fatalf("provider request should retain normalized history, got %#v", capture.lastReq.ChatHistory)
 	}
-	for _, msg := range got {
-		if msg.Content == "running output should be skipped" {
-			t.Fatalf("running assistant output should not be included: %#v", got)
+}
+
+func TestLLMService_CallAgentDirectStreamingDetailed_LifecycleContextUsesToolBoundarySteering(t *testing.T) {
+	svc := NewLLMService(nil, nil, nil, nil, nil, nil)
+	adapter := providerAdapterFunc(func(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
+		callback := llmcontracts.SteeringCallbackFromContext(req.Ctx)
+		if callback == nil {
+			return llmcontracts.AgentResult{}, fmt.Errorf("missing steering callback")
 		}
+		for i := 0; i < 2; i++ {
+			if _, err := callback(req.Ctx); err != nil {
+				return llmcontracts.AgentResult{}, err
+			}
+		}
+		return llmcontracts.AgentResult{Output: "task output", TextOnlyOutput: "task output"}, nil
+	})
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderOpenAI: adapter}
+	steering := []string{"first steering", "latest steering"}
+	steeringIndex := 0
+	ctx := llmcontracts.WithSteeringCallback(context.Background(), func(context.Context) (string, error) {
+		message := steering[steeringIndex]
+		steeringIndex++
+		return message, nil
+	})
+
+	agent := models.LLMConfig{Provider: models.ProviderOpenAI, Model: "gpt-test"}
+	res, err := svc.CallAgentDirectStreamingDetailed(ctx, "original prompt", nil, agent, "exec-123", nil, "ctx", "/tmp/workdir", nil)
+	if err != nil {
+		t.Fatalf("CallAgentDirectStreamingDetailed error: %v", err)
 	}
-	if got[39].Role != "user" || got[39].Content != "current prompt" {
-		t.Fatalf("expected normalized current user message, got %#v", got[39])
+	want := []llmcontracts.ChatContextMessage{
+		{Role: "user", Content: "latest steering"},
+		{Role: "assistant", Content: "task output"},
 	}
-	if got[40].Role != "assistant" || got[40].Content != "ok" {
-		t.Fatalf("expected current assistant text, got %#v", got[40])
+	if !reflect.DeepEqual(res.ChatContext.Messages, want) {
+		t.Fatalf("unexpected lifecycle context after streaming steering\n got: %#v\nwant: %#v", res.ChatContext.Messages, want)
 	}
 }
 
@@ -1135,7 +1258,7 @@ func TestLLMService_ExecuteTaskWithAgent_ClaimsToolBoundarySteering(t *testing.T
 	svc.providerAdapters[models.LLMProvider("task-steer-test")] = adapterWithInsert
 	svc.routing = nil
 
-	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	exec, chatContext, err := svc.executeTaskWithAgent(ctx, *task, *agent)
 	if err != nil {
 		t.Fatalf("ExecuteTaskWithAgent: %v", err)
 	}
@@ -1144,6 +1267,13 @@ func TestLLMService_ExecuteTaskWithAgent_ClaimsToolBoundarySteering(t *testing.T
 	}
 	if adapter.steering != "review only" {
 		t.Fatalf("expected steering injected, got %q", adapter.steering)
+	}
+	wantContext := []llmcontracts.ChatContextMessage{
+		{Role: "user", Content: "review only"},
+		{Role: "assistant", Content: "task output"},
+	}
+	if !reflect.DeepEqual(chatContext.Messages, wantContext) {
+		t.Fatalf("unexpected lifecycle context after task steering\n got: %#v\nwant: %#v", chatContext.Messages, wantContext)
 	}
 	updated, err := threadInputRepo.GetByID(ctx, input.ID)
 	if err != nil {
@@ -1154,7 +1284,7 @@ func TestLLMService_ExecuteTaskWithAgent_ClaimsToolBoundarySteering(t *testing.T
 	}
 }
 
-func TestLLMService_ExecuteTaskWithAgent_RestoresToolBoundarySteeringBeforeRetry(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_DoesNotReplayProviderCall(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	execRepo := repository.NewExecutionRepo(db)
@@ -1214,22 +1344,22 @@ func TestLLMService_ExecuteTaskWithAgent_RestoresToolBoundarySteeringBeforeRetry
 	agent := ensureDefaultAgent(t, llmConfigRepo)
 	agent.Provider = testProvider
 
-	exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
-	if err != nil {
-		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err == nil {
+		t.Fatal("expected provider error")
 	}
-	if exec == nil || attempts != 2 {
-		t.Fatalf("expected successful retry after 2 attempts, exec=%#v attempts=%d", exec, attempts)
+	if attempts != 1 {
+		t.Fatalf("expected provider call not to be replayed, attempts=%d", attempts)
 	}
-	if len(steers) != 2 || steers[0] != "retry steer" || steers[1] != "retry steer" {
-		t.Fatalf("expected steering injected into both attempts, got %#v", steers)
+	if len(steers) != 1 || steers[0] != "retry steer" {
+		t.Fatalf("expected steering injected into the single attempt, got %#v", steers)
 	}
 	updated, err := threadInputRepo.GetByID(ctx, inputID)
 	if err != nil {
 		t.Fatalf("get input: %v", err)
 	}
-	if updated == nil || updated.InputStatus != models.ThreadInputApplied {
-		t.Fatalf("expected steering applied after successful retry, got %#v", updated)
+	if updated == nil || updated.InputMode != models.ThreadInputModeQueued || updated.InputStatus != models.ThreadInputPending {
+		t.Fatalf("expected steering requeued after failed call, got %#v", updated)
 	}
 }
 
@@ -1795,7 +1925,7 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureSupportedAggregatorReceivesGrant
 	}
 }
 
-func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndProcessesMarkers(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndLeavesMarkersInert(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	execRepo := repository.NewExecutionRepo(db)
@@ -1817,7 +1947,7 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndPro
 		}
 		providerRequests <- body
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Initial Ollama mixture child\",\"prompt\":\"Created through marker fallback.\"}\n[/CREATE_TASK]"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"Initial Ollama mixture child\",\"prompt\":\"This marker-looking text must remain inert.\"}\n[/CREATE_TASK]"},"done":false}`)
 		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
 	}))
 	defer providerServer.Close()
@@ -1872,6 +2002,21 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndPro
 		if _, exists := providerRequest["tools"]; exists {
 			t.Fatalf("Ollama payload included runtime tools: %#v", providerRequest["tools"])
 		}
+		messages, _ := providerRequest["messages"].([]any)
+		foundLimitation := false
+		for _, raw := range messages {
+			message, _ := raw.(map[string]any)
+			content, _ := message["content"].(string)
+			if strings.Contains(content, llmprompt.ChatActionUnavailableInstructions) {
+				foundLimitation = true
+			}
+			if strings.Contains(content, "[CREATE_TASK]") {
+				t.Fatalf("Ollama initial-task prompt advertised a legacy marker: %q", content)
+			}
+		}
+		if !foundLimitation {
+			t.Fatalf("Ollama initial-task prompt omitted runtime-action limitation: %#v", messages)
+		}
 	default:
 		t.Fatal("expected concrete Ollama aggregator request")
 	}
@@ -1879,14 +2024,11 @@ func TestLLMService_ExecuteTaskWithAgent_MixtureOllamaAggregatorMasksToolsAndPro
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
-	foundChild := false
-	for _, created := range tasks {
-		if created.Title == "Initial Ollama mixture child" {
-			foundChild = true
-		}
+	if len(tasks) != 1 {
+		t.Fatalf("marker-looking Ollama output created a child task: %#v", tasks)
 	}
-	if !foundChild {
-		t.Fatalf("marker fallback did not create child task: %#v", tasks)
+	if strings.Contains(tasks[0].Title, "Initial Ollama mixture child") {
+		t.Fatalf("unexpected child task persisted from marker-looking output: %#v", tasks)
 	}
 }
 
@@ -1935,7 +2077,7 @@ func TestLLMService_ExecuteTaskWithAgent_RuntimeToolsSkipTaskCreationMarkers(t *
 	}
 }
 
-func TestLLMService_ExecuteTaskWithAgent_RuntimeIncapableProviderKeepsTaskCreationMarkers(t *testing.T) {
+func TestLLMService_ExecuteTaskWithAgent_RuntimeIncapableProviderLeavesTaskCreationMarkersInert(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	execRepo := repository.NewExecutionRepo(db)
@@ -1971,8 +2113,8 @@ func TestLLMService_ExecuteTaskWithAgent_RuntimeIncapableProviderKeepsTaskCreati
 	if err != nil {
 		t.Fatalf("list tasks: %v", err)
 	}
-	if len(tasks) != 2 {
-		t.Fatalf("expected runtime-incapable provider to keep marker fallback, got %d tasks: %#v", len(tasks), tasks)
+	if len(tasks) != 1 {
+		t.Fatalf("expected runtime-incapable provider marker text to remain inert, got %d tasks: %#v", len(tasks), tasks)
 	}
 }
 
@@ -4140,10 +4282,15 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
+	for _, name := range []string{"list_tasks", "create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}
+	}
+	if out, handled, isErr, err := rt.Executor(ctx, "list_tasks", []byte(`{"query":"scheduled github poller"}`)); !handled || isErr || err != nil {
+		t.Fatalf("expected list_tasks handler on initial task run handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	} else if !strings.Contains(out, `"ok":true`) || !strings.Contains(out, task.ID) {
+		t.Fatalf("expected list_tasks to discover the scheduled task, got %s", out)
 	}
 	out, handled, isErr, err := rt.Executor(ctx, "github_get_project_inbox", []byte(`{}`))
 	if !handled || isErr || err != nil {
@@ -4174,6 +4321,13 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	goal, err := goalSvc.GetGoal(ctx, implementationTask.ID)
 	if err != nil || goal == nil || goal.Objective != "Implement assigned GitHub issue #42 and open a GitHub PR." {
 		t.Fatalf("expected persisted goal for implementation task, goal=%#v err=%v out=%s", goal, err, out)
+	}
+	// Dev Inbox reconciliation: a subsequent run can discover the existing
+	// implementation task by GitHub issue number before creating a duplicate.
+	if out, handled, isErr, err := rt.Executor(ctx, "list_tasks", []byte(`{"query":"issue #42"}`)); !handled || isErr || err != nil {
+		t.Fatalf("expected list_tasks reconciliation handler handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	} else if !strings.Contains(out, implementationTask.ID) {
+		t.Fatalf("expected list_tasks to reconcile existing implementation task, got %s", out)
 	}
 
 	out, handled, isErr, err = rt.Executor(ctx, "create_task", []byte(`{"title":"GitHub Dev Inbox","prompt":"Poll assigned GitHub issues and create implementation tasks."}`))

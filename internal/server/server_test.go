@@ -1,17 +1,251 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+
+	"github.com/openvibely/openvibely/internal/auth"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/database"
 )
+
+func TestRequestLoggerOmitsSensitiveRequestData(t *testing.T) {
+	var output bytes.Buffer
+	e := echo.New()
+	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(&output)))
+	for _, path := range []string{"/login", "/auth/sso/start", "/auth/sso/callback"} {
+		e.GET(path, func(c echo.Context) error {
+			c.Response().Header().Set("Location", "https://secret.example/token-value")
+			return c.NoContent(http.StatusFound)
+		})
+	}
+	requests := []string{
+		"/login?next=encoded-next-secret",
+		"/auth/sso/start?next=state-secret",
+		"/auth/sso/callback?code=authorization-code-secret&state=callback-state-secret",
+		"/auth/sso/callback?error=access_denied&error_description=provider-description-secret&state=callback-state-secret",
+	}
+	for _, target := range requests {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.Header.Set("Cookie", "ov_session=cookie-secret")
+		req.Header.Set("Authorization", "Bearer authorization-secret")
+		req.Header.Set("X-Forwarded-For", "198.51.100.99")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+	}
+	logged := output.String()
+	for _, safePath := range []string{"/login", "/auth/sso/start", "/auth/sso/callback"} {
+		if !strings.Contains(logged, safePath) {
+			t.Fatalf("logger omitted safe path %q: %s", safePath, logged)
+		}
+	}
+	for _, secret := range []string{"encoded-next-secret", "state-secret", "authorization-code-secret", "callback-state-secret", "provider-description-secret", "cookie-secret", "authorization-secret", "token-value", "198.51.100.99"} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("logger exposed %q: %s", secret, logged)
+		}
+	}
+}
+
+func TestMethodOverrideSkipsExactAuthenticationProtocolPaths(t *testing.T) {
+	e := echo.New()
+	configureMethodOverride(e)
+	paths := []string{"/login", "/logout", "/auth/me", "/auth/sso/start", "/auth/sso/callback", "/logged-out"}
+	for _, path := range paths {
+		e.POST(path, func(c echo.Context) error { return c.NoContent(http.StatusCreated) })
+		e.GET(path, func(c echo.Context) error { return c.NoContent(http.StatusAccepted) })
+		e.PUT(path, func(c echo.Context) error { return c.NoContent(http.StatusAccepted) })
+		e.PATCH(path, func(c echo.Context) error { return c.NoContent(http.StatusAccepted) })
+		e.DELETE(path, func(c echo.Context) error { return c.NoContent(http.StatusAccepted) })
+	}
+	for _, path := range paths {
+		for _, override := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, "ARBITRARY"} {
+			req := httptest.NewRequest(http.MethodPost, path, nil)
+			req.Header.Set("X-HTTP-Method-Override", override)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("path=%s override=%s status=%d", path, override, rec.Code)
+			}
+		}
+	}
+	e.DELETE("/unrelated", func(c echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	req := httptest.NewRequest(http.MethodPost, "/unrelated", nil)
+	req.Header.Set("X-HTTP-Method-Override", http.MethodDelete)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("unrelated method override status=%d", rec.Code)
+	}
+}
+
+func TestStart_RejectsDirectHostedSSOAuthModeInDesktop(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Mode:                     config.ModeDesktop,
+		Port:                     "0",
+		DatabasePath:             filepath.Join(tmpDir, "hosted.db"),
+		ProjectRepoRoot:          filepath.Join(tmpDir, "repos"),
+		AppDataDir:               filepath.Join(tmpDir, "appdata"),
+		Environment:              "production",
+		EnvironmentExplicitlySet: true,
+		AuthMode:                 auth.AuthModeHostedSSO,
+		HostedSSOControlURL:      "https://openvibely.ai",
+		HostedSSOInstanceID:      "instance-1",
+		AppBaseURL:               "https://alice.openvibely.ai",
+		AuthSessionSecret:        base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+	}
+	instance, err := Start(context.Background(), cfg)
+	if instance != nil {
+		instance.Shutdown()
+	}
+	if err == nil || !strings.Contains(err.Error(), "desktop mode") {
+		t.Fatalf("Start instance=%#v error=%v, want desktop hosted SSO rejection", instance, err)
+	}
+}
+
+func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
+	var providerConnections atomic.Int32
+	provider := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	provider.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			providerConnections.Add(1)
+		}
+	}
+	provider.StartTLS()
+	defer provider.Close()
+
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		Mode:                     config.ModeServer,
+		Port:                     "0",
+		DatabasePath:             filepath.Join(tmpDir, "hosted.db"),
+		ProjectRepoRoot:          filepath.Join(tmpDir, "repos"),
+		AppDataDir:               filepath.Join(tmpDir, "appdata"),
+		Environment:              "production",
+		EnvironmentExplicitlySet: true,
+		AuthMode:                 auth.AuthModeHostedSSO,
+		HostedSSOEnabled:         true,
+		HostedSSOControlURL:      provider.URL,
+		HostedSSOInstanceID:      "instance-1",
+		AppBaseURL:               "https://alice.openvibely.ai",
+		AuthSessionSecret:        base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	instance, err := Start(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Start hosted: %v", err)
+	}
+	defer instance.Shutdown()
+	client := &http.Client{
+		Timeout:       5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	type authProtocolResponse struct {
+		status    int
+		allow     string
+		location  string
+		setCookie []string
+	}
+	requestAuthProtocol := func(path, override string) authProtocolResponse {
+		t.Helper()
+		req, requestErr := http.NewRequest(http.MethodPost, instance.BaseURL+path, nil)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		if override != "" {
+			req.Header.Set("X-HTTP-Method-Override", override)
+		}
+		response, requestErr := client.Do(req)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		response.Body.Close()
+		return authProtocolResponse{
+			status: response.StatusCode, allow: response.Header.Get("Allow"), location: response.Header.Get("Location"),
+			setCookie: response.Header.Values("Set-Cookie"),
+		}
+	}
+	for _, path := range []string{"/login", "/logout", "/auth/me", "/auth/sso/start", "/auth/sso/callback", "/logged-out"} {
+		baseline := requestAuthProtocol(path, "")
+		for _, override := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, "ARBITRARY"} {
+			got := requestAuthProtocol(path, override)
+			if got.status != baseline.status || got.allow != baseline.allow || got.location != baseline.location || strings.Join(got.setCookie, "\n") != strings.Join(baseline.setCookie, "\n") {
+				t.Fatalf("path=%s override=%s got=%#v baseline=%#v", path, override, got, baseline)
+			}
+		}
+	}
+	response, err := client.Get(instance.BaseURL + "/projects?tab=active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusFound || !strings.HasPrefix(response.Header.Get("Location"), "/auth/sso/start?next=") {
+		t.Fatalf("status=%d location=%q", response.StatusCode, response.Header.Get("Location"))
+	}
+	startResponse, err := client.Get(instance.BaseURL + response.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startResponse.Body.Close()
+	location, err := url.Parse(startResponse.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerOrigin, err := url.Parse(provider.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startResponse.StatusCode != http.StatusFound || location.Scheme != "https" || location.Host != providerOrigin.Host || location.Path != "/sso/authorize" || location.Query().Get("redirect_uri") != "https://alice.openvibely.ai/auth/sso/callback" {
+		t.Fatalf("start status=%d location=%q", startResponse.StatusCode, location.String())
+	}
+	var binding *http.Cookie
+	for _, cookie := range startResponse.Cookies() {
+		if cookie.Name == "ov_sso_browser" {
+			binding = cookie
+		}
+	}
+	if binding == nil {
+		t.Fatal("hosted start did not set browser binding")
+	}
+	code := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("c", 32)))
+	callbackURL := instance.BaseURL + "/auth/sso/callback?code=" + code + "&state=" + location.Query().Get("state")
+	callbackRequest, err := http.NewRequest(http.MethodPost, callbackURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackRequest.Header.Set("X-HTTP-Method-Override", http.MethodGet)
+	callbackRequest.AddCookie(binding)
+	callbackResponse, err := client.Do(callbackRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackResponse.Body.Close()
+	if callbackResponse.StatusCode != http.StatusMethodNotAllowed || len(callbackResponse.Cookies()) != 0 || callbackResponse.Header.Get("Location") != "" {
+		t.Fatalf("overridden callback status=%d cookies=%#v location=%q", callbackResponse.StatusCode, callbackResponse.Cookies(), callbackResponse.Header.Get("Location"))
+	}
+	if providerConnections.Load() != 0 {
+		t.Fatalf("method-overridden callback contacted provider %d times", providerConnections.Load())
+	}
+}
 
 func TestStart_BootstrapAndShutdown(t *testing.T) {
 	// Smoke-test: start the full server with an in-memory-style temp DB and
@@ -125,6 +359,14 @@ func assertFreshSystemSeedState(t *testing.T, dbPath string) {
 	assertSingleProtectedSystemAgent(t, db, "goal")
 	assertSingleScheduledSystemTask(t, db, "System: Memory Consolidation", "memory_curator")
 	assertSingleScheduledSystemTask(t, db, "System: Skill Library Maintenance", "skill_curator")
+
+	var maxWorkers int
+	if err := db.QueryRow("SELECT max_workers FROM worker_settings WHERE id='singleton'").Scan(&maxWorkers); err != nil {
+		t.Fatalf("read global worker limit after startup: %v", err)
+	}
+	if maxWorkers != 0 {
+		t.Fatalf("global worker limit after startup = %d, want unlimited (0)", maxWorkers)
+	}
 }
 
 func assertSingleProtectedSystemAgent(t *testing.T, db *sql.DB, systemKind string) {

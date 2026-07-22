@@ -12,6 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -65,6 +66,24 @@ func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *tes
 	}
 	if strings.Contains(content, "This is the ONLY way to create a task") || strings.Contains(content, "To create a task, output this format") {
 		t.Fatalf("task prompt retains marker-only guidance: %q", content)
+	}
+}
+
+func TestAppendToolModeSystemPromptCoversTaskFollowupsAndPreservesPlan(t *testing.T) {
+	followup := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate)
+	if !strings.Contains(followup, llmprompt.ChatActionUnavailableInstructions) {
+		t.Fatalf("no-tool follow-up prompt missing capability limitation: %q", followup)
+	}
+
+	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task"}}}
+	capable := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate)
+	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task") {
+		t.Fatalf("tool-capable follow-up prompt missing concrete runtime guidance: %q", capable)
+	}
+
+	plan := appendToolModeSystemPrompt("base", nil, models.ChatModePlan)
+	if plan != "base" {
+		t.Fatalf("Plan prompt received action-mode guidance: %q", plan)
 	}
 }
 

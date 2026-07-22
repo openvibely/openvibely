@@ -1,0 +1,86 @@
+package components
+
+import templpkg "github.com/a-h/templ"
+
+type channelAuthorizationListConfig struct {
+	ContainerID        string
+	Description        string
+	EmptyState         string
+	RemoveConfirmation string
+	AddHelp            string
+}
+
+type channelAuthorizationRow struct {
+	Identity       templpkg.Component
+	DeleteEndpoint string
+}
+
+type channelAuthorizationAddConfig struct {
+	ContainerID      string
+	ProjectID        string
+	Endpoint         string
+	InputType        string
+	InputName        string
+	InputPlaceholder string
+}
+
+templ channelAuthorizationList(config channelAuthorizationListConfig, rows []channelAuthorizationRow, addConfig channelAuthorizationAddConfig) {
+	<div id={ config.ContainerID }>
+		<p class="text-xs opacity-60 mb-2">{ config.Description }</p>
+		if len(rows) == 0 {
+			<p class="text-sm opacity-50 italic mb-3">{ config.EmptyState }</p>
+		} else {
+			<div class="space-y-2 mb-3">
+				for _, row := range rows {
+					<div class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2">
+						@row.Identity
+						<button
+							type="button"
+							class="btn btn-ghost btn-xs text-error"
+							hx-delete={ row.DeleteEndpoint }
+							hx-target={ "#" + config.ContainerID }
+							hx-swap="outerHTML"
+							hx-confirm={ config.RemoveConfirmation }
+						>
+							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+							</svg>
+						</button>
+					</div>
+				}
+			</div>
+		}
+		if config.AddHelp != "" {
+			<p class="text-xs opacity-60 mb-2">{ config.AddHelp }</p>
+		}
+		@channelAuthorizationAddControls(addConfig)
+	</div>
+}
+
+templ channelAuthorizationAddControls(config channelAuthorizationAddConfig) {
+	<div class="flex gap-2" id={ config.ContainerID + "-add-controls" }>
+		<input type="hidden" name="project_id" value={ config.ProjectID }/>
+		<input
+			type={ config.InputType }
+			name={ config.InputName }
+			placeholder={ config.InputPlaceholder }
+			class="input input-bordered input-sm flex-1"
+		/>
+		<input
+			type="text"
+			name="display_name"
+			placeholder="Display name (optional)"
+			class="input input-bordered input-sm w-40"
+		/>
+		<button
+			type="button"
+			class="btn btn-primary btn-sm"
+			hx-post={ config.Endpoint }
+			hx-target={ "#" + config.ContainerID }
+			hx-swap="outerHTML"
+			hx-include={ "#" + config.ContainerID + "-add-controls" }
+		>
+			Add
+		</button>
+	</div>
+}

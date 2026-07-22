@@ -3,113 +3,424 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+var ErrAlertNotFound = errors.New("alert not found")
 
 type AlertRepo struct {
 	db *sql.DB
 }
 
-func NewAlertRepo(db *sql.DB) *AlertRepo {
-	return &AlertRepo{db: db}
+func NewAlertRepo(db *sql.DB) *AlertRepo { return &AlertRepo{db: db} }
+
+const alertSelectColumns = `id, project_id, scope, task_id, execution_id, source_task_id, type, severity,
+	title, message, body, source, metadata_json, COALESCE(idempotency_key, ''), decision_state, decided_at,
+	processing_state, COALESCE(claimant, ''), claimed_at, claim_expires_at, implementation_task_id,
+	processing_error, is_read, created_at, updated_at`
+
+type rowScanner interface {
+	Scan(dest ...any) error
 }
 
-func (r *AlertRepo) Create(ctx context.Context, a *models.Alert) error {
-	err := r.db.QueryRowContext(ctx,
-		`INSERT INTO alerts (project_id, task_id, execution_id, type, severity, title, message)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 RETURNING id, is_read, created_at`,
-		a.ProjectID, a.TaskID, a.ExecutionID, a.Type, a.Severity, a.Title, a.Message).
-		Scan(&a.ID, &a.IsRead, &a.CreatedAt)
-	if err != nil {
-		return fmt.Errorf("creating alert: %w", err)
-	}
-	return nil
-}
-
-func (r *AlertRepo) GetByID(ctx context.Context, id string) (*models.Alert, error) {
+func scanAlert(row rowScanner) (*models.Alert, error) {
 	var a models.Alert
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, project_id, task_id, execution_id, type, severity, title, message, is_read, created_at
-		 FROM alerts WHERE id = ?`, id).
-		Scan(&a.ID, &a.ProjectID, &a.TaskID, &a.ExecutionID, &a.Type, &a.Severity,
-			&a.Title, &a.Message, &a.IsRead, &a.CreatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("alert not found: %s", id)
+	var metadata string
+	if err := row.Scan(&a.ID, &a.ProjectID, &a.Scope, &a.TaskID, &a.ExecutionID, &a.SourceTaskID,
+		&a.Type, &a.Severity, &a.Title, &a.Message, &a.Body, &a.Source, &metadata, &a.IdempotencyKey,
+		&a.DecisionState, &a.DecidedAt, &a.ProcessingState, &a.Claimant, &a.ClaimedAt, &a.ClaimExpiresAt,
+		&a.ImplementationTaskID, &a.ProcessingError, &a.IsRead, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		return nil, err
+	}
+	a.Metadata = map[string]any{}
+	if metadata != "" {
+		if err := json.Unmarshal([]byte(metadata), &a.Metadata); err != nil {
+			return nil, fmt.Errorf("decoding alert metadata: %w", err)
 		}
-		return nil, fmt.Errorf("getting alert: %w", err)
 	}
 	return &a, nil
 }
 
+func normalizeAlert(a *models.Alert) error {
+	if strings.TrimSpace(a.ProjectID) == "" {
+		return errors.New("alert project_id is required")
+	}
+	if strings.TrimSpace(a.Title) == "" {
+		return errors.New("alert title is required")
+	}
+	if a.Scope == "" {
+		a.Scope = models.AlertScopeProject
+	}
+	if a.Severity == "" {
+		a.Severity = models.SeverityInfo
+	}
+	if a.Type == "" {
+		a.Type = models.AlertCustom
+	}
+	if a.Body == "" {
+		a.Body = a.Message
+	}
+	if a.Source == "" {
+		a.Source = "operational"
+	}
+	if a.Metadata == nil {
+		a.Metadata = map[string]any{}
+	}
+	if a.DecisionState == "" {
+		a.DecisionState = models.AlertDecisionNotRequired
+	}
+	if a.ProcessingState == "" {
+		if a.DecisionState == models.AlertDecisionPending {
+			a.ProcessingState = models.AlertProcessingUnclaimed
+		} else {
+			a.ProcessingState = models.AlertProcessingNotApplicable
+		}
+	}
+	return nil
+}
+
+func (r *AlertRepo) Create(ctx context.Context, a *models.Alert) error {
+	created, err := r.CreateIdempotent(ctx, a)
+	if err == nil {
+		*a = *created
+	}
+	return err
+}
+
+func (r *AlertRepo) CreateIdempotent(ctx context.Context, a *models.Alert) (*models.Alert, error) {
+	if err := normalizeAlert(a); err != nil {
+		return nil, err
+	}
+	metadata, err := json.Marshal(a.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("encoding alert metadata: %w", err)
+	}
+	row := r.db.QueryRowContext(ctx, `INSERT INTO alerts (
+		project_id, scope, task_id, execution_id, source_task_id, type, severity, title, message, body,
+		source, metadata_json, idempotency_key, decision_state, processing_state)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+		ON CONFLICT(project_id, idempotency_key) WHERE idempotency_key IS NOT NULL AND idempotency_key <> '' DO NOTHING
+		RETURNING `+alertSelectColumns,
+		a.ProjectID, a.Scope, a.TaskID, a.ExecutionID, a.SourceTaskID, a.Type, a.Severity, a.Title,
+		a.Message, a.Body, a.Source, string(metadata), strings.TrimSpace(a.IdempotencyKey), a.DecisionState, a.ProcessingState)
+	created, err := scanAlert(row)
+	if err == nil {
+		*a = *created
+		return created, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) || strings.TrimSpace(a.IdempotencyKey) == "" {
+		return nil, fmt.Errorf("creating alert: %w", err)
+	}
+	existing, err := r.GetByIdempotencyKey(ctx, a.ProjectID, a.IdempotencyKey)
+	if err != nil {
+		return nil, fmt.Errorf("loading idempotent alert: %w", err)
+	}
+	return existing, nil
+}
+
+func (r *AlertRepo) GetByIdempotencyKey(ctx context.Context, projectID, key string) (*models.Alert, error) {
+	a, err := scanAlert(r.db.QueryRowContext(ctx, `SELECT `+alertSelectColumns+` FROM alerts WHERE project_id = ? AND idempotency_key = ?`, projectID, key))
+	return alertResult(a, err)
+}
+
+func (r *AlertRepo) GetByIDForProject(ctx context.Context, projectID, id string) (*models.Alert, error) {
+	a, err := scanAlert(r.db.QueryRowContext(ctx, `SELECT `+alertSelectColumns+` FROM alerts WHERE project_id = ? AND id = ?`, projectID, id))
+	return alertResult(a, err)
+}
+
+// GetByIDAdmin is intentionally unscoped and is reserved for explicit administrative/internal diagnostics.
+func (r *AlertRepo) GetByIDAdmin(ctx context.Context, id string) (*models.Alert, error) {
+	a, err := scanAlert(r.db.QueryRowContext(ctx, `SELECT `+alertSelectColumns+` FROM alerts WHERE id = ?`, id))
+	return alertResult(a, err)
+}
+
+func alertResult(a *models.Alert, err error) (*models.Alert, error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrAlertNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting alert: %w", err)
+	}
+	return a, nil
+}
+
 func (r *AlertRepo) ListByProject(ctx context.Context, projectID string, limit int) ([]models.Alert, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, project_id, task_id, execution_id, type, severity, title, message, is_read, created_at
-		 FROM alerts WHERE project_id = ?
-		 ORDER BY created_at DESC LIMIT ?`, projectID, limit)
+	return r.ListFiltered(ctx, projectID, models.AlertListFilter{Limit: limit})
+}
+
+func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.Alert, error) {
+	if filter.Limit <= 0 {
+		filter.Limit = 50
+	}
+	if filter.Limit > 100 {
+		filter.Limit = 100
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+	query := `SELECT ` + alertSelectColumns + ` FROM alerts WHERE project_id = ?`
+	args := []any{projectID}
+	if filter.DecisionState != "" {
+		query += ` AND decision_state = ?`
+		args = append(args, filter.DecisionState)
+	}
+	if filter.ProcessingState != "" {
+		query += ` AND processing_state = ?`
+		args = append(args, filter.ProcessingState)
+	}
+	if filter.Type != "" {
+		query += ` AND type = ?`
+		args = append(args, filter.Type)
+	}
+	if strings.TrimSpace(filter.Source) != "" {
+		query += ` AND source = ?`
+		args = append(args, strings.TrimSpace(filter.Source))
+	}
+	if filter.Read != nil {
+		query += ` AND is_read = ?`
+		args = append(args, *filter.Read)
+	}
+	if filter.ImplementationTaskLinked != nil {
+		if *filter.ImplementationTaskLinked {
+			query += ` AND implementation_task_id IS NOT NULL`
+		} else {
+			query += ` AND implementation_task_id IS NULL`
+		}
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
+	args = append(args, filter.Limit, filter.Offset)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing alerts: %w", err)
 	}
 	defer rows.Close()
-
-	var alerts []models.Alert
+	alerts := []models.Alert{}
 	for rows.Next() {
-		var a models.Alert
-		if err := rows.Scan(&a.ID, &a.ProjectID, &a.TaskID, &a.ExecutionID, &a.Type, &a.Severity,
-			&a.Title, &a.Message, &a.IsRead, &a.CreatedAt); err != nil {
+		a, err := scanAlert(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scanning alert: %w", err)
 		}
-		alerts = append(alerts, a)
+		alerts = append(alerts, *a)
 	}
 	return alerts, rows.Err()
 }
 
 func (r *AlertRepo) CountUnread(ctx context.Context, projectID string) (int, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM alerts WHERE project_id = ? AND is_read = 0`, projectID).
-		Scan(&count)
-	if err != nil {
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND is_read = 0`, projectID).Scan(&count); err != nil {
 		return 0, fmt.Errorf("counting unread alerts: %w", err)
 	}
 	return count, nil
 }
 
-func (r *AlertRepo) MarkRead(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE alerts SET is_read = 1 WHERE id = ?`, id)
+func requireAffected(result sql.Result) error {
+	count, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("marking alert read: %w", err)
+		return err
+	}
+	if count == 0 {
+		return ErrAlertNotFound
 	}
 	return nil
 }
 
+func (r *AlertRepo) MarkRead(ctx context.Context, projectID, id string) error {
+	result, err := r.db.ExecContext(ctx, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, projectID, id)
+	if err != nil {
+		return fmt.Errorf("marking alert read: %w", err)
+	}
+	return requireAffected(result)
+}
+
 func (r *AlertRepo) MarkAllRead(ctx context.Context, projectID string) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE alerts SET is_read = 1 WHERE project_id = ? AND is_read = 0`, projectID)
+	_, err := r.db.ExecContext(ctx, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND is_read = 0`, projectID)
 	if err != nil {
 		return fmt.Errorf("marking all alerts read: %w", err)
 	}
 	return nil
 }
 
-func (r *AlertRepo) Delete(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM alerts WHERE id = ?`, id)
+func (r *AlertRepo) Delete(ctx context.Context, projectID, id string) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM alerts WHERE project_id = ? AND id = ?`, projectID, id)
 	if err != nil {
 		return fmt.Errorf("deleting alert: %w", err)
 	}
-	return nil
+	return requireAffected(result)
 }
 
 func (r *AlertRepo) DeleteAll(ctx context.Context, projectID string) error {
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM alerts WHERE project_id = ?`, projectID)
+	_, err := r.db.ExecContext(ctx, `DELETE FROM alerts WHERE project_id = ?`, projectID)
 	if err != nil {
 		return fmt.Errorf("deleting all alerts: %w", err)
 	}
 	return nil
+}
+
+func (r *AlertRepo) SetDecision(ctx context.Context, projectID, id string, state models.AlertDecisionState) error {
+	if state != models.AlertDecisionApproved && state != models.AlertDecisionRejected && state != models.AlertDecisionDismissed {
+		return fmt.Errorf("invalid alert decision state %q", state)
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE alerts
+		SET decision_state = ?, decided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = ? AND id = ? AND decision_state = 'pending'`, state, projectID, id)
+	if err != nil {
+		return fmt.Errorf("setting alert decision: %w", err)
+	}
+	if err := requireAffected(result); err == nil {
+		return nil
+	}
+	a, getErr := r.GetByIDForProject(ctx, projectID, id)
+	if getErr == nil && a.DecisionState == state {
+		return nil
+	}
+	if getErr != nil {
+		return getErr
+	}
+	return fmt.Errorf("alert decision is %s, not pending", a.DecisionState)
+}
+
+func (r *AlertRepo) ClaimApproved(ctx context.Context, projectID, id, claimant string, lease time.Duration) (*models.Alert, error) {
+	claimant = strings.TrimSpace(claimant)
+	if claimant == "" {
+		return nil, errors.New("claimant is required")
+	}
+	if lease <= 0 || lease > 24*time.Hour {
+		lease = 30 * time.Minute
+	}
+	now := time.Now().UTC()
+	expires := now.Add(lease)
+	a, err := scanAlert(r.db.QueryRowContext(ctx, `UPDATE alerts SET
+		processing_state = 'claimed', claimant = ?, claimed_at = ?, claim_expires_at = ?, processing_error = '', updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = ? AND id = ? AND decision_state = 'approved' AND implementation_task_id IS NULL
+		AND (processing_state IN ('unclaimed', 'failed') OR (processing_state = 'claimed' AND claim_expires_at <= ?))
+		RETURNING `+alertSelectColumns, claimant, now, expires, projectID, id, now))
+	if err == nil {
+		return a, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("claiming alert: %w", err)
+	}
+	existing, getErr := r.GetByIDForProject(ctx, projectID, id)
+	if getErr != nil {
+		return nil, getErr
+	}
+	if existing.ProcessingState == models.AlertProcessingClaimed && existing.Claimant == claimant {
+		return existing, nil
+	}
+	return nil, fmt.Errorf("alert is not claimable")
+}
+
+func (r *AlertRepo) ReleaseClaim(ctx context.Context, projectID, id, claimant string) error {
+	result, err := r.db.ExecContext(ctx, `UPDATE alerts SET processing_state = 'unclaimed', claimant = NULL,
+		claimed_at = NULL, claim_expires_at = NULL, processing_error = '', updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = ? AND id = ? AND processing_state = 'claimed' AND claimant = ? AND implementation_task_id IS NULL`,
+		projectID, id, claimant)
+	if err != nil {
+		return fmt.Errorf("releasing alert claim: %w", err)
+	}
+	return requireAffected(result)
+}
+
+func (r *AlertRepo) LinkImplementationTask(ctx context.Context, projectID, id, claimant, taskID string) error {
+	result, err := r.db.ExecContext(ctx, `UPDATE alerts SET implementation_task_id = ?, processing_state = 'implementation_task_linked',
+		claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = ? AND id = ? AND processing_state = 'claimed' AND claimant = ?
+		AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND project_id = ?)`, taskID, projectID, id, claimant, taskID, projectID)
+	if err != nil {
+		return fmt.Errorf("linking implementation task: %w", err)
+	}
+	if err := requireAffected(result); err == nil {
+		return nil
+	}
+	a, getErr := r.GetByIDForProject(ctx, projectID, id)
+	if getErr == nil && a.ImplementationTaskID != nil && *a.ImplementationTaskID == taskID {
+		return nil
+	}
+	return ErrAlertNotFound
+}
+
+func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, alertID, claimant string, input models.AlertImplementationTaskInput) (*models.Task, error) {
+	if strings.TrimSpace(input.Title) == "" || strings.TrimSpace(input.Prompt) == "" {
+		return nil, errors.New("implementation task title and prompt are required")
+	}
+	if input.Priority < 1 || input.Priority > 4 {
+		input.Priority = 2
+	}
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	var linked sql.NullString
+	var state models.AlertProcessingState
+	var storedClaimant string
+	if err := conn.QueryRowContext(ctx, `SELECT implementation_task_id, processing_state, COALESCE(claimant, '')
+		FROM alerts WHERE project_id = ? AND id = ?`, projectID, alertID).Scan(&linked, &state, &storedClaimant); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAlertNotFound
+		}
+		return nil, err
+	}
+	if linked.Valid {
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, err
+		}
+		committed = true
+		_ = conn.Close()
+		return NewTaskRepo(r.db, nil).GetByID(ctx, linked.String)
+	}
+	if state != models.AlertProcessingClaimed || storedClaimant != claimant {
+		return nil, errors.New("alert is not claimed by this caller")
+	}
+	var displayOrder int
+	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'backlog'`, projectID).Scan(&displayOrder); err != nil {
+		return nil, err
+	}
+	var taskID string
+	if err := conn.QueryRowContext(ctx, `INSERT INTO tasks
+		(project_id, title, category, priority, status, prompt, tag, display_order, created_via)
+		VALUES (?, ?, 'backlog', ?, 'pending', ?, ?, ?, ?)
+		RETURNING id`, projectID, strings.TrimSpace(input.Title), input.Priority, input.Prompt, input.Tag, displayOrder, models.TaskOriginSystemAgent).Scan(&taskID); err != nil {
+		return nil, fmt.Errorf("creating implementation task: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE alerts SET implementation_task_id = ?, processing_state = 'implementation_task_linked',
+		claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, taskID, projectID, alertID); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, err
+	}
+	committed = true
+	_ = conn.Close()
+	return NewTaskRepo(r.db, nil).GetByID(ctx, taskID)
+}
+
+func (r *AlertRepo) MarkProcessing(ctx context.Context, projectID, id, claimant string, state models.AlertProcessingState, message string) error {
+	if state != models.AlertProcessingCompleted && state != models.AlertProcessingFailed {
+		return fmt.Errorf("invalid terminal processing state %q", state)
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE alerts SET processing_state = ?, processing_error = ?,
+		claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = ? AND id = ? AND claimant = ? AND processing_state IN ('claimed', 'implementation_task_linked', 'failed')`,
+		state, strings.TrimSpace(message), projectID, id, claimant)
+	if err != nil {
+		return fmt.Errorf("marking alert processing: %w", err)
+	}
+	return requireAffected(result)
 }

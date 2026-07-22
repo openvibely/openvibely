@@ -40,6 +40,7 @@ script removeEditAttachment(attID string) {
 
 templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []models.Execution, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []models.Agent, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
 	<div id="task-detail-content" class="h-full flex flex-col">
+		@layout.PageTitle(task.Title)
 		<!-- Breadcrumb navigation -->
 		<div class="flex items-center gap-2 mb-6 flex-shrink-0 min-w-0">
 			<a
@@ -469,11 +470,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						<div class="card-body p-4">
 							<form
 								method="post"
-								hx-post={ fmt.Sprintf("/tasks/%s/schedule", task.ID) }
+								action={ fmt.Sprintf("/tasks/%s/schedule?project_id=%s", task.ID, task.ProjectID) }
+								hx-post={ fmt.Sprintf("/tasks/%s/schedule?project_id=%s", task.ID, task.ProjectID) }
 								hx-target="#task-detail-content"
 								hx-swap="outerHTML"
 							>
-								<div class="grid grid-cols-2 gap-4 mb-4">
+								<div class="grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2">
 									<div class="form-control">
 										<label class="label">
 											<span class="label-text">Run At</span>
@@ -503,6 +505,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 										</select>
 									</div>
 								</div>
+								if schedulePrimaryAgentSelectionEditable(task.AgentDefinitionID, agentDefs) {
+									<div class="form-control mb-4 min-w-0">
+										<label class="label">
+											<span class="label-text">Primary Agent</span>
+										</label>
+										@SchedulePrimaryAgentSelector(task.AgentDefinitionID, agentDefs, "select select-bordered select-sm w-full max-w-full")
+										<label class="label"><span class="label-text-alt opacity-60">Agent definition used for scheduled runs; model configuration is unchanged</span></label>
+									</div>
+								}
 								<div class="form-control mb-4" id="repeat-interval-container">
 									<label class="label">
 										<span class="label-text">Repeat Every</span>
@@ -655,13 +666,14 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 									</div>
 									<!-- Schedule Edit Form -->
 									<div id={ fmt.Sprintf("schedule-edit-%s", s.ID) } class="hidden" data-schedule-id={ s.ID }>
-										<form
-											method="post"
-											hx-put={ fmt.Sprintf("/schedules/%s", s.ID) }
-											hx-target="#task-detail-content"
-											hx-swap="outerHTML"
-										>
-											<div class="grid grid-cols-2 gap-4 mb-4">
+									<form
+										method="post"
+										action={ fmt.Sprintf("/schedules/%s?project_id=%s", s.ID, task.ProjectID) }
+										hx-put={ fmt.Sprintf("/schedules/%s?project_id=%s", s.ID, task.ProjectID) }
+										hx-target="#task-detail-content"
+										hx-swap="outerHTML"
+									>
+										<input type="hidden" name="_method" value="PUT"/>											<div class="grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2">
 												<div class="form-control">
 													<label class="label">
 														<span class="label-text">Run At</span>
@@ -727,6 +739,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 													</select>
 												</div>
 											</div>
+											if schedulePrimaryAgentSelectionEditable(task.AgentDefinitionID, agentDefs) {
+												<div class="form-control mb-4 min-w-0">
+													<label class="label">
+														<span class="label-text">Primary Agent</span>
+													</label>
+													@SchedulePrimaryAgentSelector(task.AgentDefinitionID, agentDefs, "select select-bordered select-sm w-full max-w-full")
+													<label class="label"><span class="label-text-alt opacity-60">Agent definition used for scheduled runs; model configuration is unchanged</span></label>
+												</div>
+											}
 											<div class="form-control mb-4" id={ fmt.Sprintf("edit-repeat-interval-%s", s.ID) }>
 												<label class="label">
 													<span class="label-text">Repeat Every</span>
@@ -1075,10 +1096,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						var chatMessages = document.getElementById('task-thread-messages');
 						if (!key || !chatMessages || !window.chatAutoScroll) return;
 						var tracker = window._taskThreadPageTracker;
-						var nearBottom = window.chatAutoScroll.isNearBottom(chatMessages);
+						var userScrolledUp = tracker
+							? !!tracker.userScrolledUp
+							: !!window._taskThreadUserScrolledUp;
 						var snapshot = tracker && typeof tracker.snapshot === 'function'
 							? tracker.snapshot()
-							: { scrollTop: chatMessages.scrollTop || 0, userScrolledUp: !nearBottom, pinned: nearBottom };
+							: { scrollTop: chatMessages.scrollTop || 0, userScrolledUp: userScrolledUp, pinned: !userScrolledUp };
 						window._taskThreadScrollStates = window._taskThreadScrollStates || {};
 						window._taskThreadScrollStates[key] = snapshot;
 						window._taskThreadUserScrolledUp = !!snapshot.userScrolledUp;
@@ -1091,7 +1114,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 
 							var state = _getTaskThreadScrollState(taskId);
 							if (!forceBottom && state) {
-								chatMessages.scrollTop = state.pinned ? chatMessages.scrollHeight : (state.scrollTop || 0);
+								chatMessages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : chatMessages.scrollHeight;
 								if (window._taskThreadPageTracker) window._taskThreadPageTracker.userScrolledUp = !!state.userScrolledUp;
 								window._taskThreadUserScrolledUp = !!state.userScrolledUp;
 								return;
@@ -1173,17 +1196,19 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 							});
 						}
 
-						window._openTaskThreadAfterRun = function(taskId) {
-							taskId = taskId || _currentTaskIdFromPath();
-							if (!taskId) return;
-							switchTaskTab('chat');
-							var nextURL = '/tasks/' + taskId + '?tab=chat';
-							if (window.location.pathname !== '/tasks/' + taskId || window.location.search !== '?tab=chat') {
-								history.pushState({}, '', nextURL);
-							}
-							_refreshActiveThreadContent(taskId, true, '', 0);
-						};
-
+							window._openTaskThreadAfterRun = function(taskId) {
+								taskId = taskId || _currentTaskIdFromPath();
+								if (!taskId) return;
+								switchTaskTab('chat');
+								var nextURL = '/tasks/' + taskId + '?tab=chat';
+								if (window.location.pathname !== '/tasks/' + taskId || window.location.search !== '?tab=chat') {
+									window.openVibelyNavigate(nextURL).catch(function(err) {
+										console.error('[task-thread] Failed to open task thread:', err);
+									});
+									return;
+								}
+								_refreshActiveThreadContent(taskId, true, '', 0);
+							};
 					function switchTaskTab(tabName) {
 					var container = document.getElementById('task-detail-content');
 					if (!container) return;
@@ -1455,7 +1480,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 								// parallel task activation event arrives.
 								var sessionInputSC = document.getElementById('task-thread-form-session-id');
 								if (!sessionInputSC || !sessionInputSC.value) {
-									_refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);
+									if (window.reconcileTaskThreadState) window.reconcileTaskThreadState(data.task_id);
+									else _refreshActiveThreadContent(data.task_id, true, data.exec_id || '', 0);
 								}
 							}
 							var terminalStatuses = { completed: true, failed: true, cancelled: true };
@@ -1471,15 +1497,19 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						// The initial SSE connection is handled by the page-load init below.
 						if (!detail.reconnected) return;
 						var taskId = _currentTaskIdFromPath();
-						if (!taskId) return;
-						// Skip the full thread reload if the composer has a pending attachment
-						// upload session — replacing #thread-content innerHTML would destroy the
-						// user's unsent attachment previews and session ID. The per-task
-						// TaskThreadLiveEventsScript reconnect handler already reconciles
-						// pending-input rows without touching the composer.
+						if (!taskId || !_isChatTabActive()) return;
+						var threadContent = document.getElementById('thread-content');
+						if (!threadContent || threadContent.dataset.taskId !== taskId) return;
+						// Never replace the composer while it owns a pending upload session.
 						var sessionInput = document.getElementById('task-thread-form-session-id');
 						if (sessionInput && sessionInput.value) return;
-						_refreshActiveThreadContent(taskId, true);
+						if (threadContent.dataset.loaded !== 'true') {
+							_loadThreadContent(taskId, false);
+							return;
+						}
+						// The scoped thread script compares authoritative snapshot revisions and
+						// suppresses unchanged morphs before streams or DOM state are touched.
+						if (window.reconcileTaskThreadState) window.reconcileTaskThreadState(taskId);
 					};
 
 					var _taskDetailBeforeUnloadHandler = function() {

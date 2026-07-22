@@ -18,6 +18,7 @@ templ UpcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 
 templ upcomingContent(upcoming *models.Upcoming, currentProjectID string) {
 	<div id="upcoming-container" class="h-full overflow-y-auto">
+		@layout.PageTitle("Pulse")
 		<div class="flex items-center justify-between mb-6">
 			<div>
 				<h2 class="text-2xl font-bold">Pulse</h2>
@@ -450,9 +451,5 @@ func scheduleLabel(s *models.Schedule) string {
 }
 
 script openUpcomingTaskDialog(taskID string) {
-	htmx.ajax('GET', '/tasks/' + taskID + '?tab=details', {
-		target: '#main-content',
-		swap: 'innerHTML'
-	});
-	history.pushState({}, '', '/tasks/' + taskID);
+	window.openVibelyNavigate('/tasks/' + taskID + '?tab=details', '/tasks/' + taskID)
 }

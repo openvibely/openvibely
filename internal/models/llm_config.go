@@ -47,7 +47,7 @@ type LLMConfig struct {
 
 	// Per-model worker pool configuration
 	MaxWorkers    int `json:"max_workers"`    // 0 = use global default
-	WorkerTimeout int `json:"worker_timeout"` // 0 = use global default (seconds)
+	WorkerTimeout int `json:"worker_timeout"` // Inactivity timeout; 0 = use global default (seconds)
 
 	// Configurable OAuth endpoints (used for OpenAI OAuth; Claude Max uses hardcoded endpoints)
 	OAuthClientID     string `json:"-"` // Never serialized

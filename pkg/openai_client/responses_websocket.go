@@ -15,9 +15,15 @@ import (
 	"sync/atomic"
 
 	"github.com/coder/websocket"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 var errResponsesWebsocketTransport = errors.New("Responses websocket transport error")
+var errResponsesWebsocketStale = errors.New("Responses websocket stale connection")
+
+func isRetryableResponsesTransportError(err error) bool {
+	return errors.Is(err, errResponsesWebsocketTransport) || errors.Is(err, errResponsesWebsocketStale)
+}
 
 // ResponsesTransportState holds connection/fallback state that may be shared
 // by short-lived clients for the same configured model.
@@ -247,7 +253,7 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		if resp != nil && resp.Body != nil {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
-			return nil, fmt.Errorf("%w: connect %q: %d %s %s", errResponsesWebsocketTransport, endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(body)))
+			return nil, httpretry.NewResponseError(resp, fmt.Errorf("%w: connect %q: %d %s %s", errResponsesWebsocketTransport, endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), strings.TrimSpace(string(body))))
 		}
 		return nil, fmt.Errorf("%w: connect %q: %w", errResponsesWebsocketTransport, endpoint, connectErr)
 	}
@@ -272,24 +278,12 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		return nil, fmt.Errorf("marshal websocket request: %w", err)
 	}
 	writeErr := conn.Write(ctx, websocket.MessageText, body)
-	if writeErr != nil && reusedConnection && ctx.Err() == nil {
-		state.resetConnectionLocked()
-		conn, err = connect()
-		if err == nil {
-			state.conn = conn
-			wirePayload, fullInput, properties = incrementalResponsesWebsocketPayload(payload, state)
-			body, err = json.Marshal(wirePayload)
-		}
-		if err == nil {
-			writeErr = conn.Write(ctx, websocket.MessageText, body)
-		} else {
-			writeErr = err
-		}
-		reusedConnection = false
-	}
 	if writeErr != nil {
 		state.resetConnectionLocked()
 		state.mu.Unlock()
+		if reusedConnection {
+			return nil, fmt.Errorf("%w: send request: %w", errResponsesWebsocketStale, writeErr)
+		}
 		return nil, fmt.Errorf("%w: send request: %w", errResponsesWebsocketTransport, writeErr)
 	}
 
@@ -299,35 +293,16 @@ func (c *Client) openResponsesWebsocketStream(ctx context.Context, payload map[s
 		defer writer.Close()
 		var outputItems []any
 		responseID := ""
-		retriedStaleConnection := false
 		receivedFrame := false
 		for {
 			messageType, data, readErr := conn.Read(ctx)
 			if readErr != nil {
-				if reusedConnection && !receivedFrame && !retriedStaleConnection && ctx.Err() == nil {
-					retriedStaleConnection = true
-					state.resetConnectionLocked()
-					freshConn, reconnectErr := connect()
-					if reconnectErr == nil {
-						state.conn = freshConn
-						conn = freshConn
-						freshPayload, freshInput, freshProperties := incrementalResponsesWebsocketPayload(payload, state)
-						freshBody, marshalErr := json.Marshal(freshPayload)
-						if marshalErr != nil {
-							reconnectErr = fmt.Errorf("marshal websocket retry request: %w", marshalErr)
-						} else {
-							reconnectErr = conn.Write(ctx, websocket.MessageText, freshBody)
-						}
-						if reconnectErr == nil {
-							fullInput, properties = freshInput, freshProperties
-							reusedConnection = false
-							continue
-						}
-					}
-					readErr = reconnectErr
-				}
 				state.resetConnectionLocked()
-				writer.CloseWithError(fmt.Errorf("%w: read response: %w", errResponsesWebsocketTransport, readErr))
+				kind := errResponsesWebsocketTransport
+				if reusedConnection && !receivedFrame {
+					kind = errResponsesWebsocketStale
+				}
+				writer.CloseWithError(fmt.Errorf("%w: read response: %w", kind, readErr))
 				return
 			}
 			receivedFrame = true
@@ -431,7 +406,7 @@ func (c *Client) openResponsesLiteHTTPStream(ctx context.Context, websocketPaylo
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		errBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("POST %q: %w", endpoint, parseAPIError(resp.StatusCode, errBody))
+		return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %w", endpoint, parseAPIError(resp.StatusCode, errBody)))
 	}
 	return resp.Body, nil
 }

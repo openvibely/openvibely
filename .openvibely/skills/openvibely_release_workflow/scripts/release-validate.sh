@@ -19,19 +19,14 @@ fail() { echo -e "${RED}✗${NC} $1"; ((FAIL++)); }
 section() { echo ""; echo -e "${YELLOW}--- $1 ---${NC}"; }
 
 ###############################################################################
-# Helper: normalize_version (mirrors logic in scripts)
+# Production release-version policy
 ###############################################################################
 
-normalize_version() {
-    local raw="${1:-}"
-    local v="${raw#v}"  # strip leading 'v'
-    echo "$v"
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION_HELPER="${SCRIPT_DIR}/release-version.sh"
 
-is_valid_semver() {
-    local v="${1:-}"
-    [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-}
+# shellcheck source=release-version.sh
+source "$VERSION_HELPER"
 
 ###############################################################################
 # 1. Semver parsing
@@ -41,8 +36,8 @@ section "Semver normalization and validation"
 
 # Valid inputs
 for input in "0.1.0" "v0.1.0" "1.0.0" "v1.2.3" "10.20.300"; do
-    v="$(normalize_version "$input")"
-    if is_valid_semver "$v"; then
+    v="$(normalize_release_version "$input")"
+    if is_valid_release_version "$v"; then
         pass "valid:   '$input' → '$v'"
     else
         fail "expected valid: '$input' → '$v'"
@@ -51,8 +46,8 @@ done
 
 # Invalid inputs
 for input in "" "v" "0.1" "0.1.0-alpha" "0.1.0+build" "abc" "v1.2.3.4" "1.2"; do
-    v="$(normalize_version "$input")"
-    if ! is_valid_semver "$v"; then
+    v="$(normalize_release_version "$input")"
+    if ! is_valid_release_version "$v"; then
         pass "invalid: '$input' → '$v' (correctly rejected)"
     else
         fail "expected invalid: '$input' → '$v' (should have been rejected)"
@@ -60,7 +55,186 @@ for input in "" "v" "0.1" "0.1.0-alpha" "0.1.0+build" "abc" "v1.2.3.4" "1.2"; do
 done
 
 ###############################################################################
-# 2. Artifact naming
+# 2. Helper source safety
+###############################################################################
+
+section "Release-version helper source safety"
+
+SOURCE_TEST_TMP="$(mktemp -d)"
+SOURCE_TRACE="${SOURCE_TEST_TMP}/commands.log"
+SOURCE_RESULT="${SOURCE_TEST_TMP}/result"
+SOURCE_RUNNER="${SOURCE_TEST_TMP}/source-test.sh"
+
+cat > "$SOURCE_RUNNER" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+set -T
+
+trace_file="$1"
+result_file="$2"
+helper="$3"
+before_pwd="$PWD"
+before_options="$(set +o)"
+before_shopt="$(shopt -p)"
+
+trap 'printf "%s\n" "$BASH_COMMAND" >> "$trace_file"' DEBUG
+# shellcheck disable=SC1090
+source "$helper"
+trap - DEBUG
+
+after_pwd="$PWD"
+after_options="$(set +o)"
+after_shopt="$(shopt -p)"
+
+{
+    [[ "$before_pwd" == "$after_pwd" ]] && echo "cwd=unchanged" || echo "cwd=changed"
+    [[ "$before_options" == "$after_options" && "$before_shopt" == "$after_shopt" ]] && echo "options=unchanged" || echo "options=changed"
+} > "$result_file"
+EOF
+
+if bash "$SOURCE_RUNNER" "$SOURCE_TRACE" "$SOURCE_RESULT" "$VERSION_HELPER"; then
+    if [[ "$(wc -l < "$SOURCE_TRACE" | tr -d ' ')" == "2" ]]; then
+        pass "source safety: helper executes no commands while loading"
+    else
+        fail "source safety: helper executed commands while loading: $(tr '\n' ';' < "$SOURCE_TRACE")"
+    fi
+    if grep -qx "cwd=unchanged" "$SOURCE_RESULT"; then
+        pass "source safety: helper does not change the caller cwd"
+    else
+        fail "source safety: helper changed the caller cwd"
+    fi
+    if grep -qx "options=unchanged" "$SOURCE_RESULT"; then
+        pass "source safety: helper does not change caller shell options"
+    else
+        fail "source safety: helper changed caller shell options"
+    fi
+else
+    fail "source safety: helper could not be sourced"
+fi
+
+rm -rf "$SOURCE_TEST_TMP"
+
+###############################################################################
+# 3. Production entrypoint version handling
+###############################################################################
+
+section "Production entrypoint version handling"
+
+ENTRYPOINT_TMP="$(mktemp -d)"
+ENTRYPOINT_MOCK_BIN="${ENTRYPOINT_TMP}/bin"
+mkdir -p "$ENTRYPOINT_MOCK_BIN"
+
+cat > "${ENTRYPOINT_MOCK_BIN}/gh" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-} ${2:-}" in
+    "--version ") echo "gh version test" ;;
+    "auth status") exit 1 ;;
+    *) exit 99 ;;
+esac
+EOF
+chmod +x "${ENTRYPOINT_MOCK_BIN}/gh"
+
+check_entrypoint_accepts() {
+    local script="$1" input="$2" expected="$3"
+    local output dist_dir="${ENTRYPOINT_TMP}/valid-${script%.sh}-${input#v}"
+    rm -rf "$dist_dir"
+
+    case "$script" in
+        release-preflight.sh)
+            output="$(DRY_RUN=1 SKIP_GH_AUTH_CHECK=1 PATH="${ENTRYPOINT_MOCK_BIN}:$PATH" \
+                bash "${SCRIPT_DIR}/${script}" "$input" 2>&1)"
+            ;;
+        release-build.sh)
+            output="$(DRY_RUN=1 SKIP_GENERATE=1 PATH="${ENTRYPOINT_MOCK_BIN}:$PATH" \
+                bash "${SCRIPT_DIR}/${script}" "$input" "$dist_dir" 2>&1)"
+            ;;
+        release-notes.sh)
+            output="$(PATH="${ENTRYPOINT_MOCK_BIN}:$PATH" \
+                bash "${SCRIPT_DIR}/${script}" "$input" "" "$dist_dir" 2>&1)"
+            ;;
+        release-publish.sh)
+            mkdir -p "$dist_dir"
+            : > "${dist_dir}/RELEASE_NOTES.md"
+            output="$(DRY_RUN=1 PATH="${ENTRYPOINT_MOCK_BIN}:$PATH" \
+                bash "${SCRIPT_DIR}/${script}" "$input" "$dist_dir" 2>&1)"
+            ;;
+        release.sh)
+            output="$(DRY_RUN=1 SKIP_GH_AUTH_CHECK=1 SKIP_GENERATE=1 AUTO_CONFIRM=1 \
+                DIST_DIR="$dist_dir" PATH="${ENTRYPOINT_MOCK_BIN}:$PATH" \
+                bash "${SCRIPT_DIR}/${script}" "$input" 2>&1)"
+            ;;
+    esac
+
+    if [[ $? -eq 0 ]] && grep -Fq "$expected" <<< "$output"; then
+        pass "entrypoint: $script accepts '$input' as 0.4.1"
+    else
+        fail "entrypoint: $script did not accept '$input' as 0.4.1"
+    fi
+}
+
+for input in "0.4.1" "v0.4.1"; do
+    check_entrypoint_accepts "release-preflight.sh" "$input" "Normalized version: 0.4.1"
+    check_entrypoint_accepts "release-build.sh" "$input" "Building OpenVibely v0.4.1"
+    check_entrypoint_accepts "release-notes.sh" "$input" "Collecting commits for v0.4.1"
+    check_entrypoint_accepts "release-publish.sh" "$input" "Publishing OpenVibely v0.4.1"
+    check_entrypoint_accepts "release.sh" "$input" "release pipeline starting for v0.4.1"
+done
+
+INVALID_MOCK_BIN="${ENTRYPOINT_TMP}/invalid-bin"
+INVALID_WORK_LOG="${ENTRYPOINT_TMP}/invalid-work.log"
+mkdir -p "$INVALID_MOCK_BIN"
+: > "$INVALID_WORK_LOG"
+
+for command_name in git go gh zip tar sha256sum shasum mkdir mktemp cp chmod sed rm find date awk uname; do
+    cat > "${INVALID_MOCK_BIN}/${command_name}" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "${0##*/}" >> "$RELEASE_WORK_LOG"
+exit 99
+EOF
+    chmod +x "${INVALID_MOCK_BIN}/${command_name}"
+done
+
+check_entrypoint_rejects_before_work() {
+    local script="$1" invalid_dist="${ENTRYPOINT_TMP}/invalid-${script%.sh}"
+    local before_lines after_lines output status
+    before_lines="$(wc -l < "$INVALID_WORK_LOG" | tr -d ' ')"
+    rm -rf "$invalid_dist"
+
+    case "$script" in
+        release-preflight.sh|release.sh)
+            output="$(RELEASE_WORK_LOG="$INVALID_WORK_LOG" DIST_DIR="$invalid_dist" \
+                PATH="${INVALID_MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/${script}" invalid 2>&1)"
+            status=$?
+            ;;
+        release-build.sh|release-publish.sh)
+            output="$(RELEASE_WORK_LOG="$INVALID_WORK_LOG" PATH="${INVALID_MOCK_BIN}:$PATH" \
+                bash "${SCRIPT_DIR}/${script}" invalid "$invalid_dist" 2>&1)"
+            status=$?
+            ;;
+        release-notes.sh)
+            output="$(RELEASE_WORK_LOG="$INVALID_WORK_LOG" PATH="${INVALID_MOCK_BIN}:$PATH" \
+                bash "${SCRIPT_DIR}/${script}" invalid "" "$invalid_dist" 2>&1)"
+            status=$?
+            ;;
+    esac
+
+    after_lines="$(wc -l < "$INVALID_WORK_LOG" | tr -d ' ')"
+    if [[ $status -ne 0 ]] && grep -Fq "Invalid semver" <<< "$output" \
+        && [[ "$before_lines" == "$after_lines" ]] && [[ ! -e "$invalid_dist" ]]; then
+        pass "entrypoint: $script rejects invalid input before release work"
+    else
+        fail "entrypoint: $script performed work or did not reject invalid input first"
+    fi
+}
+
+for script in release-preflight.sh release-build.sh release-notes.sh release-publish.sh release.sh; do
+    check_entrypoint_rejects_before_work "$script"
+done
+
+rm -rf "$ENTRYPOINT_TMP"
+
+###############################################################################
+# 4. Artifact naming
 ###############################################################################
 
 section "Artifact naming conventions"
@@ -290,7 +464,6 @@ check_commits_field "multiple commits"      "abc1234"
 
 section "Release build dry-run isolation"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRY_RUN_TMP="$(mktemp -d)"
 MOCK_BIN="${DRY_RUN_TMP}/bin"
 DRY_RUN_DIST="${DRY_RUN_TMP}/dist/9.9.9"

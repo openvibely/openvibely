@@ -12,6 +12,22 @@ import (
 
 func stringPtr(s string) *string { return &s }
 
+func TestTaskDetailContentIncludesAuthoritativeDynamicPageTitle(t *testing.T) {
+	task := &models.Task{ID: "task-title", ProjectID: "project-title", Title: "Investigate <title> & history"}
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail content: %v", err)
+	}
+
+	html := buf.String()
+	if strings.Contains(html, "history.pushState") {
+		t.Fatal("task detail must use centralized HTMX-managed navigation instead of manual history.pushState")
+	}
+	if !strings.Contains(html, `data-openvibely-page-title="Investigate &lt;title&gt; &amp; history - OpenVibely"`) {
+		t.Fatalf("task detail fragment missing escaped authoritative title marker: %s", html)
+	}
+}
+
 func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 	tests := []struct {
 		name               string
@@ -567,6 +583,35 @@ func TestTaskDetailContent_LiveConnectedHandler_SkipsInitialConnect(t *testing.T
 	}
 }
 
+func TestTaskDetailContent_LiveConnectedHandler_ReconcilesWithoutForcedThreadReload(t *testing.T) {
+	task := &models.Task{
+		ID:        "task-live-stable",
+		Title:     "Task",
+		ProjectID: "project-1",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "chat", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+
+	if strings.Contains(output, "_refreshActiveThreadContent(taskId, true);") {
+		t.Fatal("focus reconnect must not blindly replace the loaded task thread")
+	}
+	for _, required := range []string{
+		"if (!taskId || !_isChatTabActive()) return;",
+		"threadContent.dataset.loaded !== 'true'",
+		"window.reconcileTaskThreadState(taskId)",
+	} {
+		if !strings.Contains(output, required) {
+			t.Fatalf("expected state-aware reconnect hook %q", required)
+		}
+	}
+}
+
 // TestTaskDetailContent_LiveConnectedHandler_PreservesPendingAttachmentOnReconnect
 // verifies that _taskDetailLiveConnectedHandler skips the full #thread-content reload
 // when the task-thread composer has a pending attachment upload session. Without this
@@ -703,7 +748,8 @@ func TestTaskDetailContent_ThreadTabRestoresPerTaskScrollState(t *testing.T) {
 		"window._taskThreadScrollStates = window._taskThreadScrollStates || {};",
 		"return taskId ? 'task-thread-scroll-' + taskId : '';",
 		"function _restoreThreadScrollOrBottom(taskId, forceBottom) {",
-		"chatMessages.scrollTop = state.pinned ? chatMessages.scrollHeight : (state.scrollTop || 0);",
+		"chatMessages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : chatMessages.scrollHeight;",
+		"userScrolledUp: userScrolledUp, pinned: !userScrolledUp",
 		"if (_isChatTabActive()) {",
 		"_saveTaskThreadScrollState();",
 		"_restoreThreadScrollOrBottom(taskId, false);",
@@ -825,6 +871,104 @@ func TestTaskDetailContent_AgentSelectorAllowsNoAgentSelection(t *testing.T) {
 	}
 	if strings.Contains(body, `name="agent_definition_present"`) {
 		t.Fatalf("edit form should not need a sentinel for the no-agent option, body=%s", body)
+	}
+}
+
+func TestTaskDetailContent_ScheduleAgentSelectorsHydratePersistedAssignment(t *testing.T) {
+	selectedID := "agent-selected"
+	task := &models.Task{
+		ID:                "task-scheduled-agent",
+		ProjectID:         "project-1",
+		Title:             "Scheduled Agent Task",
+		Status:            models.StatusPending,
+		Category:          models.CategoryScheduled,
+		AgentDefinitionID: &selectedID,
+	}
+	runAt := time.Now().Add(time.Hour).UTC()
+	schedules := []models.Schedule{{
+		ID:             "schedule-agent-1",
+		TaskID:         task.ID,
+		RunAt:          runAt,
+		NextRun:        &runAt,
+		RepeatType:     models.RepeatDaily,
+		RepeatInterval: 1,
+		Enabled:        true,
+	}}
+	agentDefs := []models.Agent{
+		{ID: selectedID, Name: "Selected Runner", Model: "inherit", Scope: models.AgentScopeProject, ProjectID: task.ProjectID, Enabled: true, SelectableAsPrimary: true},
+		{ID: "protected", Name: "Protected Maintenance", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false},
+	}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail: %v", err)
+	}
+	body := buf.String()
+	editStart := strings.Index(body, `id="schedule-edit-schedule-agent-1"`)
+	if editStart == -1 {
+		t.Fatal("expected schedule edit form")
+	}
+	editBody := body[editStart:]
+	for _, want := range []string{
+		`name="schedule_agent_definition_present" value="1"`,
+		`name="agent_definition_id"`,
+		`>Primary Agent</span>`,
+		`value="agent-selected" selected`,
+		`action="/schedules/schedule-agent-1?project_id=project-1"`,
+		`name="_method" value="PUT"`,
+		`/schedules/schedule-agent-1?project_id=project-1`,
+		`grid grid-cols-1 gap-4 mb-4 sm:grid-cols-2`,
+	} {
+		if !strings.Contains(editBody, want) {
+			t.Fatalf("expected schedule edit form to contain %q", want)
+		}
+	}
+	if strings.Contains(editBody, "Protected Maintenance") {
+		t.Fatal("schedule Agent choices must exclude agents that are not selectable as primary")
+	}
+}
+
+func TestTaskDetailContent_ScheduleAgentSelectorsSupportNoAgent(t *testing.T) {
+	task := &models.Task{ID: "task-no-agent", ProjectID: "project-1", Title: "No Agent Task", Status: models.StatusPending, Category: models.CategoryScheduled}
+	runAt := time.Now().Add(time.Hour).UTC()
+	schedules := []models.Schedule{{ID: "schedule-no-agent", TaskID: task.ID, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}}
+	agentDefs := []models.Agent{{ID: "runner", Name: "Runner", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true}}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail: %v", err)
+	}
+	body := buf.String()
+	if strings.Count(body, `>No Agent</option>`) < 3 {
+		t.Fatalf("expected no-agent option in task, add-schedule, and edit-schedule selectors")
+	}
+	if strings.Count(body, `option value="" selected>No Agent</option>`) < 3 {
+		t.Fatalf("expected server-rendered no-agent selection in all schedule-related selectors")
+	}
+	if !strings.Contains(body, `/tasks/task-no-agent/schedule?project_id=project-1`) {
+		t.Fatal("expected add-schedule form to preserve project scope")
+	}
+}
+
+func TestTaskDetailContent_ScheduleEditDoesNotOfferOrClearProtectedAgent(t *testing.T) {
+	protectedID := "protected-agent"
+	task := &models.Task{ID: "task-protected-agent", ProjectID: "project-1", Title: "Protected Agent Task", Status: models.StatusPending, Category: models.CategoryScheduled, AgentDefinitionID: &protectedID}
+	runAt := time.Now().Add(time.Hour).UTC()
+	schedules := []models.Schedule{{ID: "schedule-protected-agent", TaskID: task.ID, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}}
+	agentDefs := []models.Agent{{ID: protectedID, Name: "Protected Maintenance", Model: "inherit", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false}}
+
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, schedules, nil, agentDefs, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail: %v", err)
+	}
+	body := buf.String()
+	editStart := strings.Index(body, `id="schedule-edit-schedule-protected-agent"`)
+	if editStart == -1 {
+		t.Fatal("expected protected schedule edit form")
+	}
+	editBody := body[editStart:]
+	if strings.Contains(editBody, "Protected Maintenance") || strings.Contains(editBody, `name="schedule_agent_definition_present"`) {
+		t.Fatal("protected Agent must not be exposed or overwritten by the schedule edit form")
 	}
 }
 

@@ -349,6 +349,23 @@ func TestChatEvent_CompletedOutputInSSE(t *testing.T) {
 	}
 }
 
+func TestChatEvent_ResponseDoneCarriesAuthoritativeTerminalStatus(t *testing.T) {
+	event := ChatEvent{
+		Type:      ChatResponseDone,
+		ProjectID: "proj1",
+		ExecID:    "exec1",
+		Status:    "failed",
+	}
+	var parsed map[string]interface{}
+	jsonStr := strings.TrimSuffix(strings.TrimPrefix(event.ToSSE(), "data: "), "\n\n")
+	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		t.Fatalf("failed to parse SSE JSON: %v", err)
+	}
+	if got := parsed["status"]; got != "failed" {
+		t.Fatalf("ChatResponseDone status = %v, want failed", got)
+	}
+}
+
 func TestChatEvent_CompletedOutputOmittedWhenEmpty(t *testing.T) {
 	// When CompletedOutput is empty (e.g., ChatNewMessage events), it should be
 	// omitted from JSON per omitempty tag.

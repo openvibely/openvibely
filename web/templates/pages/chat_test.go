@@ -14,6 +14,75 @@ func renderChatContentForTest(agents []models.LLMConfig, history []models.Execut
 	return ChatContent(agents, history, projectID, attachments, pending, latestPlanComplete, false, 30)
 }
 
+func TestChatContent_IncludesSharedTaskResultConverters(t *testing.T) {
+	var buf bytes.Buffer
+	if err := renderChatContentForTest(nil, []models.Execution{{
+		ID:         "exec-task-result",
+		Status:     models.ExecCompleted,
+		PromptSent: "Create task",
+		Output:     "- \"Created\" (backlog) [TASK_ID:task-1]\nExamples: `create\n[TASK_ID:coded/create]` and ``edit\n[TASK_EDITED:coded/edit]``\nUnmatched `` prefix; `later\n[TASK_ID:later/create]\n[TASK_EDITED:later/edit]`\nEscaped \\`- \"Escaped\" (backlog) [TASK_ID:escaped/create] escaped \\`\nEscaped \\``- \"Escaped edit\" (updated: title) [TASK_EDITED:escaped/edit]``\nUnicode fence:\n~~~text\n~~~\u202f\n- \"Unicode\" (backlog) [TASK_ID:unicode/create]\n- \"Unicode edit\" (updated: title) [TASK_EDITED:unicode/edit]\n~~~\nBare CR fence:\n```text\r- \"Bare CR\" (backlog) [TASK_ID:bare-cr/create]\r- \"Bare CR edit\" (updated: title) [TASK_EDITED:bare-cr/edit]\r```\nSame-line example: `[Tool grep_search done]coded[/Tool]`.\n[Using tool: grep_search]\n[Tool grep_search done]actual[/Tool]"}}, "project-1", nil, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+	for _, definition := range []string{
+		"window.convertTaskLinksInMessage = function(messageElement)",
+		"window.convertTaskEditLinksInMessage = function(messageElement)",
+	} {
+		if count := strings.Count(content, definition); count != 1 {
+			t.Fatalf("global Chat must include exactly one shared task-result converter %q, got %d", definition, count)
+		}
+	}
+	if !strings.Contains(content, "if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble)") {
+		t.Fatal("global Chat hydration must apply shared task-result conversion")
+	}
+	if count := strings.Count(content, "if (inCode && !inToolOutput) continue"); count != 2 {
+		t.Fatalf("global Chat shared converters must preserve ordinary code while allowing code-aware raw tool-output conversion, got %d guards", count)
+	}
+	if count := strings.Count(content, "(inToolOutput || inMarkdownFallback) && window.isInsideCode"); count != 2 {
+		t.Fatalf("global Chat fallback hydration must keep coded task-result examples inert, got %d raw-range guards", count)
+	}
+	for _, marker := range []string{"[TASK_ID:coded/create]", "[TASK_EDITED:coded/edit]", "[TASK_ID:later/create]", "[TASK_EDITED:later/edit]", "[TASK_ID:escaped/create]", "[TASK_EDITED:escaped/edit]", "[TASK_ID:unicode/create]", "[TASK_EDITED:unicode/edit]", "[TASK_ID:bare-cr/create]", "[TASK_EDITED:bare-cr/edit]", "`[Tool grep_search done]coded[/Tool]`", "[Tool grep_search done]actual[/Tool]"} {
+		if !strings.Contains(content, marker) {
+			t.Fatalf("global Chat hard-refresh output must retain multiline inline metadata %s until Markdown rendering", marker)
+		}
+	}
+}
+
+func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T) {
+	var buf bytes.Buffer
+	if err := renderChatContentForTest(nil, []models.Execution{{ID: "exec-scroll", Status: models.ExecCompleted, Output: "later markdown"}}, "project-scroll", nil, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+		t.Fatal("global Chat must hide its initial transcript until hydration and scroll restoration settle")
+	}
+	for _, required := range []string{
+		"var chatScrollStateKey = 'chat-scroll-' + projectId;",
+		"window.saveChatTranscriptScrollState(chatScrollStateKey, chatMessages, window._chatPageTracker);",
+		"window.restoreChatTranscriptScroll({",
+		"stateKey: chatScrollStateKey",
+		"renderPromise: renderPromise",
+		"document.body.addEventListener('htmx:historyRestore'",
+		"window.saveChatDraftState = function(root)",
+		"document.body.addEventListener('htmx:beforeHistorySave'",
+		"if (window.saveChatDraftState) window.saveChatDraftState(currentChatRoot);",
+		"window.restoreChatLiveEventHandlers = function()",
+		"if (document.getElementById('chat-page-root') && window.restoreChatLiveEventHandlers) window.restoreChatLiveEventHandlers();",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("global Chat navigation restoration is missing %q", required)
+		}
+	}
+	if strings.Contains(content, "window._chatPageTracker.suspendIntent") {
+		t.Fatal("global Chat must not suspend scroll tracking before HTMX confirms a swap; cancelled revision/no-op swaps must keep accepting user intent")
+	}
+	if strings.Contains(content, "// Scroll to bottom on page load to show latest messages") {
+		t.Fatal("global Chat must not unconditionally jump before transcript hydration finishes")
+	}
+}
+
 func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Very Long Agent Name That Should Not Push Send Button", Model: "very-long-model-name", Provider: models.ProviderAnthropic}}
 
@@ -147,7 +216,7 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	}
 	content := buf.String()
 
-	syncStart := strings.Index(content, "function syncCompletedOutputToBubble(execId, completedOutput)")
+	syncStart := strings.Index(content, "function syncCompletedOutputToBubble(execId, completedOutput, status)")
 	if syncStart == -1 {
 		t.Fatal("expected syncCompletedOutputToBubble helper")
 	}
@@ -175,6 +244,29 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	if !strings.Contains(bubbleSection, "contentDiv.id = 'streaming-message-' + execId;") {
 		t.Fatal("live-created assistant stream node must use the same stable id as server-rendered streaming bubbles")
 	}
+	for _, required := range []string{
+		"contentDiv.setAttribute('data-streaming-resume', 'true');",
+		"contentDiv.setAttribute('data-initial-byte-length', '0');",
+		"contentDiv.setAttribute('data-messages-container', 'chat-messages');",
+		"thinking.id = 'streaming-thinking-resume-' + execId;",
+		"dots.id = 'streaming-dots-resume-' + execId;",
+	} {
+		if !strings.Contains(bubbleSection, required) {
+			t.Fatalf("live-created assistant stream must use the shared resumable DOM contract; missing %q", required)
+		}
+	}
+	if !strings.Contains(bubbleSection, "contentDiv._sseConnected = true;") ||
+		!strings.Contains(bubbleSection, "function persistLiveStreamState(active)") ||
+		!strings.Contains(bubbleSection, "persistLiveStreamState(true);") ||
+		!strings.Contains(bubbleSection, "persistLiveStreamState(false);") {
+		t.Fatal("live-created assistant streams must have one owner and persist/remove their resumable state across active and terminal phases")
+	}
+	if !strings.Contains(content, "function persistResumeStreamState(active)") ||
+		!strings.Contains(content, "container.setAttribute('data-initial-byte-length', String(streamOffset));") ||
+		!strings.Contains(content, "container.setAttribute('data-raw-content', cumulativeContent);") ||
+		!strings.Contains(content, "container.removeAttribute('data-streaming-resume');") {
+		t.Fatal("shared streams must persist the current raw UTF-8 offset while active and remove resumable state at terminal completion")
+	}
 	if !strings.Contains(bubbleSection, "function utf8ByteLength(value)") ||
 		!strings.Contains(bubbleSection, "var streamOffset = utf8ByteLength(textBuffer);") ||
 		!strings.Contains(bubbleSection, "'/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset)") {
@@ -185,6 +277,12 @@ func TestChatContent_LiveCompletionSyncTargetsAssistantStreamContainer(t *testin
 	}
 	if !strings.Contains(bubbleSection, "window.hideMixtureProgress(execId)") {
 		t.Fatal("live-created assistant bubble must hide mixture progress when aggregator output or terminal stream events arrive")
+	}
+	if !strings.Contains(bubbleSection, "var renderGeneration = 0;") ||
+		!strings.Contains(bubbleSection, "var renderPromise = liveRenderer(contentDiv, renderText);") ||
+		!strings.Contains(bubbleSection, "renderPromise.then(finishRender)") ||
+		!strings.Contains(bubbleSection, "if (generation !== renderGeneration) return;") {
+		t.Fatal("live-created assistant bubble must keep render backpressure until the owned async render settles")
 	}
 }
 
@@ -230,11 +328,11 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	if errIdx == -1 {
 		t.Fatal("expected error event listener in createStreamingBubble")
 	}
-	errEnd := errIdx + 1400
-	if errEnd > len(bubbleSection) {
-		errEnd = len(bubbleSection)
+	errEndOffset := strings.Index(bubbleSection[errIdx:], "eventSource.onerror = function() {")
+	if errEndOffset == -1 {
+		t.Fatal("expected createStreamingBubble error handler boundary")
 	}
-	errBody := bubbleSection[errIdx:errEnd]
+	errBody := bubbleSection[errIdx : errIdx+errEndOffset]
 	if !strings.Contains(errBody, "event.data === 'execution not found'") || !strings.Contains(errBody, "setTimeout(connectChatExecutionStream, 150 * streamRetryCount)") {
 		t.Error("error handler in createStreamingBubble must retry early execution lookup races")
 	}
@@ -451,8 +549,11 @@ func TestChatContent_FormDraftClearingIgnoresNestedHTMXControls(t *testing.T) {
 	if !strings.Contains(branch, "event.detail.elt !== chatForm") {
 		t.Fatal("chat form draft clearing must ignore bubbled HTMX events from nested stop/queued controls")
 	}
-	if !strings.Contains(branch, "localStorage.removeItem(draftKey)") {
-		t.Fatal("chat form draft clearing should still remove the draft after a real send")
+	if !strings.Contains(branch, "responseText.trim() !== ''") || !strings.Contains(branch, "window.clearChatDraftState(chatRoot)") {
+		t.Fatal("chat form draft clearing should cancel pending persistence and clear only after an accepted non-empty real send")
+	}
+	if !strings.Contains(content, "clearTimeout(window._chatDraftSaveTimers[key])") {
+		t.Fatal("successful send clearing must cancel a pending debounced draft write")
 	}
 }
 
@@ -544,17 +645,60 @@ func TestChatContent_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *testin
 	}
 	content := buf.String()
 
-	if count := strings.Count(content, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker)"); count < 2 {
-		t.Fatalf("expected chat page to bind attachment image smart-scroll on initial render and HTMX swaps, got %d", count)
+	if count := strings.Count(content, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker)"); count != 1 {
+		t.Fatalf("expected one shared Chat initialization path to bind image smart-scroll for initial render and HTMX swaps, got %d", count)
 	}
 	if !strings.Contains(content, "var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;") {
-		t.Fatal("chat page should consume submit scroll intent after HTMX swaps so attachment sends bottom-align")
+		t.Fatal("chat page should consume submit scroll intent through the shared initialization path")
 	}
-	if !strings.Contains(content, "window.scrollChatToBottomAfterLayout(chatMessages, true)") {
-		t.Fatal("chat page should scroll after layout so variable-sized screenshots are visible")
+	if !strings.Contains(content, "return window.restoreChatTranscriptScroll({") {
+		t.Fatal("chat page should reconcile variable-sized attachments and later layout through the shared scroll coordinator")
 	}
 	if !strings.Contains(content, "if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {") {
 		t.Fatal("chat page should re-evaluate plan prompt after non-streaming swaps")
+	}
+}
+
+func TestChatContent_ReconnectReconcilesChangedTranscriptWithoutReplacingComposer(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+	history := []models.Execution{{ID: "done-1", Status: models.ExecCompleted, Output: "stable"}}
+
+	var buf bytes.Buffer
+	if err := renderChatContentForTest(agents, history, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	for _, required := range []string{
+		`data-chat-revision=`,
+		"if (!nextRevision || nextRevision === currentRevision) return;",
+		"if (window._chatStreamInProgress && hasActiveChatStream())",
+		"function waitForChatCatchup()",
+		"handleSharedLiveConnected({detail: {reconnected: true}})",
+		"target: '#chat-messages'",
+		"select: '#chat-messages'",
+		"swap: 'morph:outerHTML'",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("expected state-aware Chat reconnect contract %q", required)
+		}
+	}
+
+	if !strings.Contains(content, "var attachmentAction = document.getElementById('chat-form-primary-action');") || !strings.Contains(content, "var missedAction = document.getElementById('chat-form-primary-action');") {
+		t.Fatal("attachment-bearing and missed-completion recovery must reconcile action state without remounting the composer")
+	}
+	if strings.Contains(content, "target: chatContainer, swap: 'outerHTML'") {
+		t.Fatal("live reconnect and missed-message recovery must not replace the Chat composer root")
+	}
+
+	handlerStart := strings.Index(content, "var handleSharedLiveConnected = function(event) {")
+	handlerEnd := strings.Index(content[handlerStart:], "var handleSharedChatLiveEvent = function(event) {")
+	if handlerStart < 0 || handlerEnd < 0 {
+		t.Fatal("expected Chat reconnect handler boundaries")
+	}
+	handler := content[handlerStart : handlerStart+handlerEnd]
+	if strings.Contains(handler, "target: chatContainer, swap: 'outerHTML'") {
+		t.Fatal("focus reconnect must not replace chat-page-root and destroy composer draft or attachments")
 	}
 }
 

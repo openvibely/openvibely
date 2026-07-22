@@ -3,6 +3,7 @@ package anthropicclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,55 @@ import (
 	"testing"
 	"time"
 )
+
+type anthropicRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f anthropicRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+type failingAnthropicBody struct{}
+
+func (failingAnthropicBody) Read([]byte) (int, error) {
+	return 0, errors.New("read: operation timed out")
+}
+func (failingAnthropicBody) Close() error { return nil }
+
+func TestSendRetriesResponseBodyTimeoutBeforeOutput(t *testing.T) {
+	attempts := 0
+	client := NewWithAPIKey("test-key")
+	client.httpClient = &http.Client{Transport: anthropicRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		body := io.ReadCloser(failingAnthropicBody{})
+		if attempts == 2 {
+			body = io.NopCloser(strings.NewReader(`{"model":"test","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`))
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
+	})}
+	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || resp.Text != "ok" {
+		t.Fatalf("attempts/text = %d/%q, want 2/ok", attempts, resp.Text)
+	}
+}
+
+func TestHandleStreamRejectsMissingTerminalEvent(t *testing.T) {
+	stream := `data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}` + "\n\n"
+	client := &Client{}
+	_, err := client.handleStream(strings.NewReader(stream), nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want unexpected EOF", err)
+	}
+}
+
+func TestParseAgenticStreamRejectsMissingTerminalEvent(t *testing.T) {
+	client := &Client{}
+	stream := buildSSE([]string{`{"type":"message_start","message":{"id":"msg_1","model":"test","usage":{"input_tokens":1}}}`})
+	_, err := client.parseAgenticStream(strings.NewReader(stream), nil, nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want unexpected EOF", err)
+	}
+}
 
 func TestParseAgenticStream_TextOnly(t *testing.T) {
 	// Simulate a streaming response with only text content
@@ -507,6 +557,7 @@ func TestParseAgenticStream_StripsToolCallTags(t *testing.T) {
 		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done reading."}}`,
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		`{"type":"message_stop"}`,
 	})
 
 	var collected strings.Builder
@@ -552,6 +603,7 @@ func TestParseAgenticStream_ToolCallTagAcrossDeltas(t *testing.T) {
 		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" After"}}`,
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		`{"type":"message_stop"}`,
 	})
 
 	var collected strings.Builder
@@ -740,6 +792,7 @@ func TestParseAgenticStream_CompactionBlockFailed(t *testing.T) {
 		`{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Response text."}}`,
 		`{"type":"content_block_stop","index":1}`,
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":10}}`,
+		`{"type":"message_stop"}`,
 	})
 
 	client := &Client{}
@@ -770,6 +823,7 @@ func TestParseAgenticStream_NoCompaction(t *testing.T) {
 		`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Normal response."}}`,
 		`{"type":"content_block_stop","index":0}`,
 		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+		`{"type":"message_stop"}`,
 	})
 
 	client := &Client{}
@@ -1925,262 +1979,6 @@ func buildSSE(events []string) string {
 
 // devNull is an io.Reader that returns EOF immediately.
 var _ io.Reader = strings.NewReader("")
-
-func TestIsRetryable(t *testing.T) {
-	retryable := []int{429, 500, 502, 503, 529}
-	for _, code := range retryable {
-		if !isRetryable(code) {
-			t.Errorf("expected %d to be retryable", code)
-		}
-	}
-	nonRetryable := []int{200, 400, 401, 403, 404, 422}
-	for _, code := range nonRetryable {
-		if isRetryable(code) {
-			t.Errorf("expected %d to not be retryable", code)
-		}
-	}
-}
-
-func TestRetryBackoff(t *testing.T) {
-	// Without a response, should use exponential backoff
-	if d := retryBackoff(0, nil); d != 1*time.Second {
-		t.Errorf("attempt 0: got %v, want 1s", d)
-	}
-	if d := retryBackoff(1, nil); d != 2*time.Second {
-		t.Errorf("attempt 1: got %v, want 2s", d)
-	}
-	if d := retryBackoff(2, nil); d != 4*time.Second {
-		t.Errorf("attempt 2: got %v, want 4s", d)
-	}
-}
-
-func TestRetryBackoff_RetryAfterHeader(t *testing.T) {
-	resp := &http.Response{
-		StatusCode: 429,
-		Header:     http.Header{"Retry-After": []string{"7"}},
-	}
-	if d := retryBackoff(0, resp); d != 7*time.Second {
-		t.Errorf("got %v, want 7s", d)
-	}
-}
-
-func TestRetryBackoff_429WithoutRetryAfter(t *testing.T) {
-	resp := &http.Response{
-		StatusCode: 429,
-		Header:     http.Header{},
-	}
-	if d := retryBackoff(0, resp); d != 1*time.Second {
-		t.Errorf("got %v, want 1s (default backoff)", d)
-	}
-}
-
-// instantClock swaps clockAfter to return an already-fired channel so that
-// retry backoff sleeps take zero real time during tests.
-func instantClock(t *testing.T) {
-	t.Helper()
-	orig := clockAfter
-	clockAfter = func(d time.Duration) <-chan time.Time {
-		ch := make(chan time.Time, 1)
-		ch <- time.Time{}
-		return ch
-	}
-	t.Cleanup(func() { clockAfter = orig })
-}
-
-func TestDoWithRetry_SuccessOnFirstTry(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
-	}))
-	defer server.Close()
-
-	client := &http.Client{}
-	resp, err := doWithRetry(context.Background(), client, func() (*http.Request, error) {
-		return http.NewRequest("POST", server.URL, strings.NewReader("{}"))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("got status %d, want 200", resp.StatusCode)
-	}
-}
-
-func TestDoWithRetry_RetriesThenSucceeds(t *testing.T) {
-	instantClock(t)
-	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts <= 2 {
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error":"rate limited"}`))
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
-	}))
-	defer server.Close()
-
-	client := &http.Client{}
-	resp, err := doWithRetry(context.Background(), client, func() (*http.Request, error) {
-		return http.NewRequest("POST", server.URL, strings.NewReader("{}"))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("got status %d, want 200", resp.StatusCode)
-	}
-	if attempts != 3 {
-		t.Errorf("expected 3 attempts, got %d", attempts)
-	}
-}
-
-func TestDoWithRetry_ExhaustsRetries(t *testing.T) {
-	instantClock(t)
-	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error":"unavailable"}`))
-	}))
-	defer server.Close()
-
-	client := &http.Client{}
-	resp, err := doWithRetry(context.Background(), client, func() (*http.Request, error) {
-		return http.NewRequest("POST", server.URL, strings.NewReader("{}"))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	// After exhausting retries, the last response is returned (non-200)
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("got status %d, want 503", resp.StatusCode)
-	}
-	// 1 initial + 3 retries = 4 attempts
-	if attempts != 4 {
-		t.Errorf("expected 4 attempts, got %d", attempts)
-	}
-}
-
-func TestDoWithRetry_NonRetryableError(t *testing.T) {
-	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error":"bad request"}`))
-	}))
-	defer server.Close()
-
-	client := &http.Client{}
-	resp, err := doWithRetry(context.Background(), client, func() (*http.Request, error) {
-		return http.NewRequest("POST", server.URL, strings.NewReader("{}"))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Errorf("got status %d, want 400", resp.StatusCode)
-	}
-	if attempts != 1 {
-		t.Errorf("expected 1 attempt (no retry for 400), got %d", attempts)
-	}
-}
-
-func TestDoWithRetry_ContextCancelled(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		w.Write([]byte(`{"error":"rate limited"}`))
-	}))
-	defer server.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	// Cancel immediately so the backoff select picks up cancellation
-	cancel()
-
-	client := &http.Client{}
-	_, err := doWithRetry(ctx, client, func() (*http.Request, error) {
-		return http.NewRequest("POST", server.URL, strings.NewReader("{}"))
-	})
-	if err == nil {
-		t.Fatal("expected error from cancelled context")
-	}
-	if err != context.Canceled {
-		t.Errorf("expected context.Canceled, got %v", err)
-	}
-}
-
-func TestDoWithRetry_RetryAfterHeader(t *testing.T) {
-	instantClock(t)
-	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts == 1 {
-			w.Header().Set("Retry-After", "1")
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error":"rate limited"}`))
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
-	}))
-	defer server.Close()
-
-	client := &http.Client{}
-	resp, err := doWithRetry(context.Background(), client, func() (*http.Request, error) {
-		return http.NewRequest("POST", server.URL, strings.NewReader("{}"))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("got status %d, want 200", resp.StatusCode)
-	}
-	if attempts != 2 {
-		t.Errorf("expected 2 attempts, got %d", attempts)
-	}
-}
-
-func TestDoWithRetry_SkipsRetryOnLongRetryAfter(t *testing.T) {
-	attempts := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts == 1 {
-			w.Header().Set("Retry-After", "7200")
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error":"rate limited"}`))
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"ok":true}`))
-	}))
-	defer server.Close()
-
-	client := &http.Client{}
-	resp, err := doWithRetry(context.Background(), client, func() (*http.Request, error) {
-		return http.NewRequest("POST", server.URL, strings.NewReader("{}"))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusTooManyRequests {
-		t.Errorf("got status %d, want 429", resp.StatusCode)
-	}
-	if attempts != 1 {
-		t.Errorf("expected 1 attempt (skip retry on long Retry-After), got %d", attempts)
-	}
-}
 
 func TestAgenticRequestMarshalJSON_WithRawTools(t *testing.T) {
 	// Verify that rawTools overrides Tools in JSON output.

@@ -4,15 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
 )
-
-var reThinkingBlock = regexp.MustCompile(`(?s)\[Thinking\]\n.*?\[/Thinking\]\n?`)
 
 type workflowProjectResolver struct {
 	s *LLMService
@@ -146,7 +143,7 @@ func defaultRunnableChildCategory(parentCategory models.TaskCategory) models.Tas
 // Otherwise, a new child task is created (fallback for chains without pre-created children).
 func (s *LLMService) triggerTaskChain(ctx context.Context, parentTask models.Task, parentOutput string) error {
 	// Reload latest parent from DB so chain edits made while the task was running
-	// (e.g., via chat EDIT_TASK) are respected at completion time.
+	// (e.g., via the chat edit_task runtime action) are respected at completion time.
 	if s.taskRepo != nil {
 		if latest, getErr := s.taskRepo.GetByID(ctx, parentTask.ID); getErr != nil {
 			applog.Infof("[agent-svc] triggerTaskChain error loading latest parent task=%s: %v", parentTask.ID, getErr)

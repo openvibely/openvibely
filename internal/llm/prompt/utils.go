@@ -194,11 +194,6 @@ func BuildChatHistoryText(history []models.Execution) string {
 			sb.WriteString("\n\n")
 		}
 		if replay := ReplayAssistantContent(exec); replay != "" {
-			// Minimize action-heavy responses to prevent re-execution.
-			if strings.Contains(exec.Output, "[CREATE_TASK]") || strings.Contains(exec.Output, "[EDIT_TASK]") ||
-				strings.Contains(exec.Output, "[SCHEDULE_TASK]") || strings.Contains(exec.Output, "[DELETE_SCHEDULE]") {
-				replay = "(Handled the user's request.)"
-			}
 			sb.WriteString("Assistant: ")
 			sb.WriteString(replay)
 			sb.WriteString("\n\n")

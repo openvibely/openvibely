@@ -1,6 +1,7 @@
 package pages
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -17,7 +18,13 @@ templ AlertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 }
 
 templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount int) {
-	<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container>
+	<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container
+		hx-get={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
+		hx-trigger="alertUpdate from:body"
+		hx-target="this"
+		hx-swap="outerHTML"
+	>
+		@layout.PageTitle("Alerts")
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">
 				Alerts
@@ -63,6 +70,9 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				}
 			</div>
 		</div>
+		<div class="mb-4 rounded-box bg-base-200/60 px-4 py-3 text-sm text-base-content/70">
+			Showing notifications for the selected project only. Approval permits creation of an implementation task; it does not authorize merge, release, or deployment.
+		</div>
 		@CardSearchInput("alerts", "Search alerts...")
 		if len(alerts) == 0 {
 			<div class="text-center py-12">
@@ -82,11 +92,10 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 	<!-- Task Detail Dialog Container -->
 	<script>
 		function openAlertTaskDialog(taskId) {
-			htmx.ajax('GET', '/tasks/' + taskId + '?tab=history&from=alerts', {
-				target: '#main-content',
-				swap: 'innerHTML'
-			});
-			history.pushState({}, '', '/tasks/' + taskId + '?from=alerts');
+			window.openVibelyNavigate(
+				'/tasks/' + taskId + '?tab=history&from=alerts',
+				'/tasks/' + taskId + '?from=alerts'
+			);
 		}
 
 		function deleteAlerts(url, target) {
@@ -107,7 +116,15 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 }
 
 func alertSearchText(alert models.Alert) string {
-	return alert.Title + " " + alert.Message + " " + string(alert.Severity) + " " + alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM")
+	return alert.Title + " " + alert.Message + " " + alert.Body + " " + string(alert.Severity) + " " + string(alert.DecisionState) + " " + string(alert.ProcessingState) + " " + alert.Source + " " + alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM")
+}
+
+func alertMetadataJSON(alert models.Alert) string {
+	if len(alert.Metadata) == 0 {
+		return ""
+	}
+	data, _ := json.MarshalIndent(alert.Metadata, "", "  ")
+	return string(data)
 }
 
 templ alertRow(alert models.Alert, currentProjectID string) {
@@ -141,10 +158,52 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 					<p class={ "font-semibold break-words [overflow-wrap:anywhere]", templ.KV("font-bold", !alert.IsRead) }>
 						{ alert.Title }
 					</p>
+					<div class="mt-2 flex min-w-0 flex-wrap gap-2">
+						<span class="badge badge-outline badge-sm">Project scoped</span>
+						<span class="badge badge-ghost badge-sm">{ string(alert.Type) }</span>
+						if alert.DecisionState != models.AlertDecisionNotRequired {
+							<span class={ "badge badge-sm", templ.KV("badge-warning", alert.DecisionState == models.AlertDecisionPending), templ.KV("badge-success", alert.DecisionState == models.AlertDecisionApproved), templ.KV("badge-error", alert.DecisionState == models.AlertDecisionRejected || alert.DecisionState == models.AlertDecisionDismissed) }>{ string(alert.DecisionState) }</span>
+						} else {
+							<span class="badge badge-neutral badge-sm">Operational</span>
+						}
+						if alert.ProcessingState != models.AlertProcessingNotApplicable {
+							<span class="badge badge-outline badge-sm">{ string(alert.ProcessingState) }</span>
+						}
+					</div>
 					if alert.Message != "" {
 						<p class="text-sm opacity-60 mt-1 break-words [overflow-wrap:anywhere]">{ alert.Message }</p>
 					}
-					<p class="text-sm opacity-50 mt-1 break-words">{ alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM") }</p>
+					if alert.Body != "" || alertMetadataJSON(alert) != "" {
+						<details class="mt-3 rounded-box bg-base-200/50 p-3" onclick="event.stopPropagation()">
+							<summary class="cursor-pointer text-sm font-medium">Inspect notification</summary>
+							if alert.Body != "" {
+								<p class="mt-3 whitespace-pre-wrap break-words text-sm">{ alert.Body }</p>
+							}
+							if alertMetadataJSON(alert) != "" {
+								<pre class="mt-3 max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded bg-base-300 p-2 text-xs">{ alertMetadataJSON(alert) }</pre>
+							}
+						</details>
+					}
+					<div class="mt-2 text-xs opacity-60 break-words">
+						<span>Source: { alert.Source }</span>
+						<span class="mx-1">·</span>
+						<span>{ alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM") }</span>
+						if alert.Claimant != "" {
+							<span class="mx-1">·</span><span>Claimed by { alert.Claimant }</span>
+						}
+					</div>
+					if alert.ProcessingError != "" {
+						<p class="mt-2 text-sm text-error break-words">{ alert.ProcessingError }</p>
+					}
+					if alert.ImplementationTaskID != nil {
+						<button class="btn btn-link btn-xs mt-2 px-0" data-task-id={ *alert.ImplementationTaskID } onclick="event.stopPropagation(); openAlertTaskDialog(this.dataset.taskId)">View implementation task</button>
+					}
+					if alert.DecisionState == models.AlertDecisionPending {
+						<div class="mt-4 flex flex-wrap gap-2" onclick="event.stopPropagation()">
+							<button class="btn btn-success btn-sm" hx-post={ fmt.Sprintf("/alerts/%s/approve?project_id=%s", alert.ID, currentProjectID) } hx-target="#alerts-container" hx-swap="outerHTML">Approve</button>
+							<button class="btn btn-error btn-outline btn-sm" hx-post={ fmt.Sprintf("/alerts/%s/reject?project_id=%s", alert.ID, currentProjectID) } hx-target="#alerts-container" hx-swap="outerHTML">Reject</button>
+						</div>
+					}
 				</div>
 				<div class="flex flex-shrink-0 items-center gap-1 self-start" onclick="event.stopPropagation()">
 					if !alert.IsRead {

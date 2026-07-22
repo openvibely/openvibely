@@ -19,6 +19,7 @@ templ AppSettingsContent(personality string, currentProjectID string, customPers
 
 templ appSettingsContent(personality string, currentProjectID string, customPersonalities []models.CustomPersonality) {
 	<div id="personality-container">
+		@layout.PageTitle("Personality")
 		@PersonalitySection(personality, customPersonalities)
 	</div>
 }

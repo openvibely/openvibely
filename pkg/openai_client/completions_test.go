@@ -3,12 +3,81 @@ package openaiclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+type completionsRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f completionsRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type failingCompletionsBody struct{}
+
+func (failingCompletionsBody) Read([]byte) (int, error) {
+	return 0, errors.New("read: operation timed out")
+}
+func (failingCompletionsBody) Close() error { return nil }
+
+func TestSendCompletionsRetriesStreamTimeoutBeforeOutput(t *testing.T) {
+	attempts := 0
+	client := NewWithCompatibleAPIKey("test-key", "https://compatible.test/v1", "", "")
+	client.httpClient = &http.Client{Transport: completionsRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		body := io.ReadCloser(failingCompletionsBody{})
+		if attempts == 2 {
+			body = io.NopCloser(strings.NewReader(
+				"data: {\"choices\":[{\"delta\":{\"content\":\"retry succeeded\"}}]}\n\n" +
+					"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
+	})}
+
+	resp, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{DisableTools: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || resp.Text != "retry succeeded" {
+		t.Fatalf("attempts/text = %d/%q, want 2/retry succeeded", attempts, resp.Text)
+	}
+}
+
+func TestSendCompletionsDoesNotReplayStreamAfterOutput(t *testing.T) {
+	attempts := 0
+	client := NewWithCompatibleAPIKey("test-key", "https://compatible.test/v1", "", "")
+	client.httpClient = &http.Client{Transport: completionsRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempts++
+		body := io.NopCloser(io.MultiReader(
+			strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"),
+			failingCompletionsBody{},
+		))
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
+	})}
+
+	_, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{DisableTools: true})
+	if err == nil {
+		t.Fatal("expected stream read error")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 after output was observed", attempts)
+	}
+}
+
+func TestParseCompletionsStreamRejectsMissingTerminalEvent(t *testing.T) {
+	client := NewWithAPIKey("test-key")
+	_, err := client.parseCompletionsStream(strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n"), nil)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("error = %v, want unexpected EOF", err)
+	}
+}
 
 func TestCompletionsOptions_DefaultMaxTurnsNoLimit(t *testing.T) {
 	client := NewWithAPIKey("test-key")

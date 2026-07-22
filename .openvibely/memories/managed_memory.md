@@ -2,9 +2,9 @@
 name: managed_memory
 type: project
 created: 2026-05-09
-updated: 2026-07-01
+updated: 2026-07-17
 source: consolidation
-source_id: memory_consolidation_2026_07_01
+source_id: memory_consolidation_2026_07_17
 confidence: high
 title: Managed Memory
 ---
@@ -24,10 +24,12 @@ Durable storage boundaries:
 
 Lifecycle and retrieval facts:
 - Memory lifecycle work is owned by the built-in Memory Curator through `recall_memory`, `update_memory`, and scheduled `consolidate_memory` skills.
+- The user explicitly prefers memory updates not be delegated to another task or agent. When the active agent has authorized scoped memory mutation tools, it should perform the update directly; if direct managed-memory mutation is unavailable, report that limitation rather than creating a delegated memory-update task.
 - Recall is a `route_task` handle-selection step with `selected_memories`, parallel to Skill Curator `selected_skills`, and receives only the compact index from `MEMORIES.md`; topic bodies are not loaded during route selection.
 - Normal tasks and task-thread follow-ups consume managed memory through route-selected handles. Interactive Chat uses a narrower recall-only lifecycle preparation path.
 - Selected-memory prompt context is handle-only for skill-style parity. Memory bodies are loaded only on demand through the authorized `memory_view` tool.
 - `memory_view` is a read-only request-scoped runtime tool authorized only for route-selected indexed handles plus exact indexed handles explicitly requested by the user for that turn. It rejects `MEMORIES.md`, full paths, traversal, unindexed handles, and arbitrary unselected files.
 - `memory_view` is also an explicit agent allowed-tool grant surfaced in the agent create/edit dialog.
+- The product currently exposes selected memory labels in task lifecycle evidence but has no project-level UI for browsing the durable memory index/files, unlike the skill management surface. A bounded read-only browser backed by `MEMORIES.md` and the existing safe memory-file resolver is tracked in `openvibely/openvibely#32`; editing, new persistence, and background processing are intentionally outside that proposal.
 - Route-generated memory summaries/snippets/topics are debug metadata, not final task/chat model context.
 - Memory consolidation runs as a normal visible scheduled task assigned to Memory Curator with scoped memory-file tools; hidden bespoke scheduler behavior is not intended.

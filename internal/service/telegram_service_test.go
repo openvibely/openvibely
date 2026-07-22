@@ -26,6 +26,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTelegramService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Telegram Notification Lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Telegram chat", Prompt: "process", Category: models.CategoryChat, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Type: "suggestion", Title: "Telegram suggestion", Severity: models.SeverityInfo})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved))
+
+	svc := &TelegramService{taskRepo: taskRepo, alertSvc: alertSvc}
+	rt := svc.buildTelegramActionToolRuntimeForTask(project.ID, caller.ID, 12345, 67890, nil)
+	output, handled, isErr, err := rt.Executor(ctx, "claim_alert", json.RawMessage(`{"alert_id":"`+alert.ID+`"}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, caller.ID)
+}
+
 func TestTelegramService_ParseTaskID(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -809,7 +832,7 @@ func TestTelegramService_RuntimeListAlertsTool_Handled(t *testing.T) {
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.NoError(t, err)
-	require.Contains(t, output, "No alerts found")
+	require.Contains(t, output, `"notifications":[]`)
 }
 
 func TestTelegramService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
@@ -1519,122 +1542,6 @@ func TestChannelChatSelectAgent_WithImages(t *testing.T) {
 	agent, err := selectChannelChatAgent(ctx, llmConfigRepo, "analyze this image", true)
 	assert.NoError(t, err)
 	assert.NotNil(t, agent)
-}
-
-func TestTelegramService_ProcessViewThread(t *testing.T) {
-	svc, projectRepo, taskRepo := newTestTelegramService(t)
-	ctx := context.Background()
-
-	project := &models.Project{
-		Name:      "Test Project",
-		RepoPath:  "/tmp/test",
-		IsDefault: true,
-	}
-	require.NoError(t, projectRepo.Create(ctx, project))
-
-	agents, err := svc.llmConfigRepo.List(ctx)
-	require.NoError(t, err)
-	require.NotEmpty(t, agents)
-	agentID := agents[0].ID
-
-	// Create a task with execution history
-	task := &models.Task{
-		Title:     "Fix login bug",
-		Prompt:    "Fix the login form crash",
-		Category:  models.CategoryActive,
-		Status:    models.StatusCompleted,
-		ProjectID: project.ID,
-	}
-	require.NoError(t, taskRepo.Create(ctx, task))
-
-	exec := &models.Execution{
-		TaskID:        task.ID,
-		AgentConfigID: agentID,
-		Status:        models.ExecRunning,
-		PromptSent:    "Fix the login form crash",
-	}
-	require.NoError(t, svc.execRepo.Create(ctx, exec))
-	require.NoError(t, svc.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "Fixed the null pointer in login handler", "", 100, 1000))
-
-	// Simulate LLM output with VIEW_TASK_CHAT marker
-	output := fmt.Sprintf(`Let me retrieve the execution output for that task.
-
-[VIEW_TASK_CHAT]
-{"task_id": "%s"}
-[/VIEW_TASK_CHAT]`, task.ID)
-
-	result := svc.processViewThread(ctx, "chat-exec-123", project.ID, output)
-
-	// Should contain the task's thread transcript
-	assert.Contains(t, result, "Thread history for task")
-	assert.Contains(t, result, "Fix login bug")
-	assert.Contains(t, result, "Fixed the null pointer in login handler")
-}
-
-func TestTelegramService_ProcessViewThread_ByTitle(t *testing.T) {
-	svc, projectRepo, taskRepo := newTestTelegramService(t)
-	ctx := context.Background()
-
-	project := &models.Project{
-		Name:      "Test Project",
-		RepoPath:  "/tmp/test",
-		IsDefault: true,
-	}
-	require.NoError(t, projectRepo.Create(ctx, project))
-
-	agents, err := svc.llmConfigRepo.List(ctx)
-	require.NoError(t, err)
-	require.NotEmpty(t, agents)
-	agentID := agents[0].ID
-
-	task := &models.Task{
-		Title:     "API endpoint refactor",
-		Prompt:    "Refactor the API endpoints",
-		Category:  models.CategoryActive,
-		Status:    models.StatusCompleted,
-		ProjectID: project.ID,
-	}
-	require.NoError(t, taskRepo.Create(ctx, task))
-
-	exec := &models.Execution{
-		TaskID:        task.ID,
-		AgentConfigID: agentID,
-		Status:        models.ExecRunning,
-		PromptSent:    "Refactor the API endpoints",
-	}
-	require.NoError(t, svc.execRepo.Create(ctx, exec))
-	require.NoError(t, svc.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "Refactored 5 endpoints to use middleware", "", 100, 1000))
-
-	// Search by title instead of ID
-	output := `Let me look up that task.
-
-[VIEW_TASK_CHAT]
-{"title": "API endpoint"}
-[/VIEW_TASK_CHAT]`
-
-	result := svc.processViewThread(ctx, "chat-exec-456", project.ID, output)
-
-	assert.Contains(t, result, "API endpoint refactor")
-	assert.Contains(t, result, "Refactored 5 endpoints to use middleware")
-}
-
-func TestTelegramService_ProcessViewThread_NotFound(t *testing.T) {
-	svc, projectRepo, _ := newTestTelegramService(t)
-	ctx := context.Background()
-
-	project := &models.Project{
-		Name:      "Test Project",
-		RepoPath:  "/tmp/test",
-		IsDefault: true,
-	}
-	require.NoError(t, projectRepo.Create(ctx, project))
-
-	output := `[VIEW_TASK_CHAT]
-{"task_id": "nonexistent"}
-[/VIEW_TASK_CHAT]`
-
-	result := svc.processViewThread(ctx, "chat-exec-789", project.ID, output)
-	assert.Contains(t, result, "Could not find task")
 }
 
 func TestTelegramService_ProcessSendToTask(t *testing.T) {
@@ -2806,36 +2713,6 @@ func TestTelegramService_SwitchProjectThenFollowupUsesNewProject(t *testing.T) {
 		userProjects:            make(map[int64]string),
 	}
 	assert.Equal(t, project2.ID, svc2.getActiveProject(userID))
-}
-
-func TestTelegramService_HasListProjects(t *testing.T) {
-	assert.True(t, HasListProjects("Show projects.\n\n[LIST_PROJECTS]"))
-	assert.False(t, HasListProjects("No marker here."))
-}
-
-func TestTelegramService_ParseSwitchProject(t *testing.T) {
-	output := `Switching now.
-
-[SWITCH_PROJECT]
-{"project": "My Project"}
-[/SWITCH_PROJECT]`
-
-	requests := ParseSwitchProject(output)
-	require.Len(t, requests, 1)
-	assert.Equal(t, "My Project", requests[0].Project)
-}
-
-func TestTelegramService_ParseSwitchProject_Empty(t *testing.T) {
-	requests := ParseSwitchProject("No marker here.")
-	assert.Nil(t, requests)
-}
-
-func TestTelegramService_ParseSwitchProject_EmptyProjectName(t *testing.T) {
-	output := `[SWITCH_PROJECT]
-{"project": ""}
-[/SWITCH_PROJECT]`
-	requests := ParseSwitchProject(output)
-	assert.Empty(t, requests)
 }
 
 func TestTelegramService_ProcessIncomingMessage_QueuesWhenChatActive(t *testing.T) {

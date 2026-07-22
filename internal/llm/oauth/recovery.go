@@ -64,13 +64,13 @@ func (m *Manager) RecoverUnauthorized(ctx context.Context, cfg models.LLMConfig,
 
 func (m *Manager) refreshSelected(ctx context.Context, cfg models.LLMConfig, tokenUsed string, minTTL time.Duration, refresh RefreshFunc) (models.LLMConfig, error) {
 	if m == nil || m.repo == nil {
-		return cfg, fmt.Errorf("OAuth recovery unavailable for model config %q (id=%s provider=%s model=%s)", cfg.Name, cfg.ID, cfg.Provider, cfg.Model)
+		return cfg, fmt.Errorf("OAuth recovery unavailable for model config %q (provider=%s model=%s)", cfg.Name, cfg.Provider, cfg.Model)
 	}
 	if strings.TrimSpace(cfg.ID) == "" {
 		return cfg, fmt.Errorf("OAuth refresh requires selected model config id for %q", cfg.Name)
 	}
 	if refresh == nil {
-		return cfg, fmt.Errorf("OAuth refresh not implemented for model config %q (id=%s provider=%s model=%s)", cfg.Name, cfg.ID, cfg.Provider, cfg.Model)
+		return cfg, fmt.Errorf("OAuth refresh not implemented for model config %q (provider=%s model=%s)", cfg.Name, cfg.Provider, cfg.Model)
 	}
 
 	key := string(cfg.Provider) + ":" + cfg.ID
@@ -82,7 +82,7 @@ func (m *Manager) refreshSelected(ctx context.Context, cfg models.LLMConfig, tok
 	}
 	fresh, ok := value.(models.LLMConfig)
 	if !ok {
-		return cfg, fmt.Errorf("OAuth recovery internal type mismatch for model config %q (id=%s)", cfg.Name, cfg.ID)
+		return cfg, fmt.Errorf("OAuth recovery internal type mismatch for model config %q", cfg.Name)
 	}
 	return fresh, nil
 }
@@ -90,34 +90,34 @@ func (m *Manager) refreshSelected(ctx context.Context, cfg models.LLMConfig, tok
 func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfig, tokenUsed string, minTTL time.Duration, refresh RefreshFunc) (models.LLMConfig, error) {
 	loaded, err := m.repo.GetByID(ctx, cfg.ID)
 	if err != nil {
-		return cfg, fmt.Errorf("reload selected OAuth config %q (id=%s provider=%s model=%s): %w", cfg.Name, cfg.ID, cfg.Provider, cfg.Model, err)
+		return cfg, fmt.Errorf("reload selected OAuth config %q (provider=%s model=%s): %w", cfg.Name, cfg.Provider, cfg.Model, err)
 	}
 	if loaded == nil {
-		return cfg, fmt.Errorf("selected OAuth config %q (id=%s provider=%s model=%s) no longer exists", cfg.Name, cfg.ID, cfg.Provider, cfg.Model)
+		return cfg, fmt.Errorf("selected OAuth config %q (provider=%s model=%s) no longer exists", cfg.Name, cfg.Provider, cfg.Model)
 	}
 	if loaded.Provider != cfg.Provider {
-		return cfg, fmt.Errorf("selected OAuth config changed provider for %q (id=%s): was %s now %s", cfg.Name, cfg.ID, cfg.Provider, loaded.Provider)
+		return cfg, fmt.Errorf("selected OAuth config changed provider for %q: was %s now %s", cfg.Name, cfg.Provider, loaded.Provider)
 	}
 
 	// Another worker may have already refreshed and persisted tokens while this
 	// request was running or waiting for the singleflight lock.
 	if strings.TrimSpace(tokenUsed) != "" && loaded.OAuthAccessToken != "" && loaded.OAuthAccessToken != tokenUsed {
-		applog.Infof("[oauth-recovery] selected config already refreshed id=%s provider=%s model=%s", loaded.ID, loaded.Provider, loaded.Model)
+		applog.Infof("[oauth-recovery] selected config already refreshed provider=%s model=%s", loaded.Provider, loaded.Model)
 		return *loaded, nil
 	}
 	if strings.TrimSpace(tokenUsed) == "" && minTTL > 0 && loaded.OAuthAccessToken != "" && loaded.OAuthExpiresAt >= time.Now().Add(minTTL).UnixMilli() {
 		return *loaded, nil
 	}
 	if strings.TrimSpace(loaded.OAuthRefreshToken) == "" {
-		return *loaded, fmt.Errorf("OAuth refresh unavailable for model config %q (id=%s provider=%s model=%s): missing refresh token", loaded.Name, loaded.ID, loaded.Provider, loaded.Model)
+		return *loaded, fmt.Errorf("OAuth refresh unavailable for model config %q (provider=%s model=%s): missing refresh token", loaded.Name, loaded.Provider, loaded.Model)
 	}
 
 	tokens, err := refresh(ctx, *loaded)
 	if err != nil {
-		return *loaded, fmt.Errorf("OAuth token refresh failed for model config %q (id=%s provider=%s model=%s): %w", loaded.Name, loaded.ID, loaded.Provider, loaded.Model, err)
+		return *loaded, fmt.Errorf("OAuth token refresh failed for model config %q (provider=%s model=%s): %w", loaded.Name, loaded.Provider, loaded.Model, err)
 	}
 	if strings.TrimSpace(tokens.AccessToken) == "" {
-		return *loaded, fmt.Errorf("OAuth token refresh failed for model config %q (id=%s provider=%s model=%s): refresh response missing access token", loaded.Name, loaded.ID, loaded.Provider, loaded.Model)
+		return *loaded, fmt.Errorf("OAuth token refresh failed for model config %q (provider=%s model=%s): refresh response missing access token", loaded.Name, loaded.Provider, loaded.Model)
 	}
 	if strings.TrimSpace(tokens.RefreshToken) == "" {
 		tokens.RefreshToken = loaded.OAuthRefreshToken
@@ -132,7 +132,7 @@ func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfi
 		err = m.repo.UpdateOAuthTokens(ctx, loaded.ID, tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresAt)
 	}
 	if err != nil {
-		return *loaded, fmt.Errorf("persist refreshed OAuth tokens for model config %q (id=%s provider=%s model=%s): %w", loaded.Name, loaded.ID, loaded.Provider, loaded.Model, err)
+		return *loaded, fmt.Errorf("persist refreshed OAuth tokens for model config %q (provider=%s model=%s): %w", loaded.Name, loaded.Provider, loaded.Model, err)
 	}
 
 	loaded.OAuthAccessToken = tokens.AccessToken
@@ -141,6 +141,6 @@ func (m *Manager) refreshSelectedLocked(ctx context.Context, cfg models.LLMConfi
 	if tokens.AccountID != "" {
 		loaded.OAuthAccountID = tokens.AccountID
 	}
-	applog.Infof("[oauth-recovery] refreshed selected config id=%s provider=%s model=%s expires=%s", loaded.ID, loaded.Provider, loaded.Model, time.UnixMilli(loaded.OAuthExpiresAt).Format(time.RFC3339))
+	applog.Infof("[oauth-recovery] refreshed selected config provider=%s model=%s expires=%s", loaded.Provider, loaded.Model, time.UnixMilli(loaded.OAuthExpiresAt).Format(time.RFC3339))
 	return *loaded, nil
 }

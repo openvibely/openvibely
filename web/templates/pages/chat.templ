@@ -45,7 +45,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 		@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 	}
 	for _, exec := range chatHistory {
-		<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ components.ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
 			if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
 				@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
 			} else {
@@ -66,7 +66,8 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 
 // ChatContent renders just the chat content (for HTMX)
 templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, currentProjectID string, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, latestPlanComplete bool, hasEarlier bool, windowLimit int) {
-	<div id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full" data-project-id={ currentProjectID }>
+	<div id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full" data-project-id={ currentProjectID } data-chat-revision={ components.ChatTranscriptRevision(chatHistory, nil, currentProjectID) }>
+		@layout.PageTitle("Chat")
 		<div class="mb-4 flex items-center justify-between">
 			<div>
 				<h2 class="text-2xl font-bold">Chat</h2>
@@ -96,7 +97,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			</div>
 		</div>
 		<!-- Chat Messages Container -->
-		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) }>
+			<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) }>
 			if hasEarlier && len(chatHistory) > 0 {
 				@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 			}
@@ -104,7 +105,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				@components.ChatEmptyState("Start a conversation by typing a message below")
 			} else {
 				for _, exec := range chatHistory {
-					<div class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
+					<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ components.ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled { hx-preserve="true" }>
 						if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
 							@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
 						} else {
@@ -153,23 +154,57 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: chatQueuedSteerEndpoint,
 		})
-		<!-- Shared auto-scroll and marker cleaning utilities -->
-		@components.ChatAutoScrollScript()
-		<!-- Chat-specific: task link conversion, draft persistence, HTMX swap handler -->
-		<script>
-				// Scroll to bottom on page load to show latest messages
-				setTimeout(function() {
-					var chatMessages = document.getElementById('chat-messages');
-					if (chatMessages) {
-						if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
+			<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
+			@components.ChatAutoScrollScript()
+			@components.ChatStreamingResumeInitScript()
+			<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
+				<script>
+					window.initializeChatTranscriptScroll = function() {
+						var chatRoot = document.getElementById('chat-page-root');
+						var chatMessages = document.getElementById('chat-messages');
+						if (!chatRoot || !chatMessages || !window.ChatScrollTracker) return Promise.resolve(false);
+						var projectId = chatRoot.getAttribute('data-project-id') || '';
+						var chatScrollStateKey = 'chat-scroll-' + projectId;
+						var chatForm = document.getElementById('chat-form');
+						if (chatForm && window.restoreChatPendingAttachmentState) window.restoreChatPendingAttachmentState(chatForm);
+						var savedState = window.getChatTranscriptScrollState ? window.getChatTranscriptScrollState(chatScrollStateKey) : null;
+						var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;
+						if (sentByUser) savedState = { scrollTop: 0, userScrolledUp: false, pinned: true };
+						if (!window._chatPageTracker || window._chatPageTracker.element !== chatMessages) {
+							if (window._chatPageTracker) window._chatPageTracker.destroy();
+							window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
+						}
+							if (sentByUser && window._chatPageTracker.resetOnUserSend) window._chatPageTracker.resetOnUserSend();
+							else window._chatPageTracker.userScrolledUp = savedState ? !!savedState.userScrolledUp : false;
+						var renderPromise = window.applyChatBubbleTransforms ? window.applyChatBubbleTransforms(chatMessages) : Promise.resolve([]);
+						if (window._initThreadStreaming) window._initThreadStreaming();
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
-						if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
 						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
 						if (window.maybeShowPlanCompletionPromptFromHistory) window.maybeShowPlanCompletionPromptFromHistory();
+						if (!window.restoreChatTranscriptScroll) return Promise.resolve(renderPromise);
+						return window.restoreChatTranscriptScroll({
+							messages: chatMessages,
+							tracker: window._chatPageTracker,
+							getTracker: function() { return window._chatPageTracker; },
+							stateKey: chatScrollStateKey,
+							state: savedState,
+							defaultPinned: true,
+							renderPromise: renderPromise
+						});
+					};
+					setTimeout(function() { window.initializeChatTranscriptScroll(); }, 0);
+					if (!window._chatTranscriptHistoryRestoreBound) {
+						window._chatTranscriptHistoryRestoreBound = true;
+						document.body.addEventListener('htmx:historyRestore', function() {
+							setTimeout(function() {
+								if (document.getElementById('chat-page-root') && window.initializeChatTranscriptScroll) window.initializeChatTranscriptScroll();
+								if (document.getElementById('chat-page-root') && window.restoreChatLiveEventHandlers) window.restoreChatLiveEventHandlers();
+							}, 0);
+						});
 					}
-				}, 0);
-			// Draft message persistence (scoped per project)
-			(function() {
+
+					// Draft message persistence (scoped per project)
+				(function() {
 				var chatRoot = document.getElementById('chat-page-root');
 				if (!chatRoot) return;
 				var projectId = chatRoot.getAttribute('data-project-id');
@@ -208,219 +243,98 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					window._chatEventSources = [];
 					window._chatEventSourceByExec = {};
 				};
-				var draftKey = 'chat-draft-' + projectId;
-				var messageInput = document.getElementById('message-input');
-				var chatForm = document.getElementById('chat-form');
-				if (!messageInput || !chatForm) return;
-
-				var savedDraft = localStorage.getItem(draftKey);
-				if (savedDraft && savedDraft.trim() !== '') {
-					messageInput.value = savedDraft;
-				}
-
-				var saveTimeout;
-				messageInput.addEventListener('input', function() {
-					clearTimeout(saveTimeout);
-					saveTimeout = setTimeout(function() {
-						var value = messageInput.value.trim();
-						if (value !== '') {
-							localStorage.setItem(draftKey, messageInput.value);
-						} else {
-							localStorage.removeItem(draftKey);
+				window.refreshChatComposerAction = function() {
+					var root = document.getElementById('chat-page-root');
+					var target = document.getElementById('chat-form-primary-action');
+					var pid = root ? (root.getAttribute('data-project-id') || '') : '';
+					if (!pid || !target || typeof htmx === 'undefined') return Promise.resolve(false);
+					return htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {
+						target: '#chat-form-primary-action',
+						swap: 'outerHTML'
+					});
+				};
+					window._chatDraftSaveTimers = window._chatDraftSaveTimers || {};
+					window.chatDraftStorageKey = function(root) {
+						root = root || document.getElementById('chat-page-root');
+						var pid = root ? (root.getAttribute('data-project-id') || '') : '';
+						return pid ? 'chat-draft-' + pid : '';
+					};
+					window.saveChatDraftState = function(root) {
+						root = root || document.getElementById('chat-page-root');
+						var key = window.chatDraftStorageKey(root);
+						var input = root ? root.querySelector('#message-input') : null;
+						if (!key || !input) return false;
+						if (window._chatDraftSaveTimers[key]) {
+							clearTimeout(window._chatDraftSaveTimers[key]);
+							delete window._chatDraftSaveTimers[key];
 						}
-					}, 500);
-				});
+						input.defaultValue = input.value;
+						if (input.value.trim() !== '') localStorage.setItem(key, input.value);
+						else localStorage.removeItem(key);
+						return true;
+					};
+					window.restoreChatDraftState = function(root) {
+						root = root || document.getElementById('chat-page-root');
+						var key = window.chatDraftStorageKey(root);
+						var input = root ? root.querySelector('#message-input') : null;
+						if (!key || !input) return false;
+						var saved = localStorage.getItem(key) || '';
+						if (saved.trim() !== '') {
+							input.value = saved;
+							input.defaultValue = saved;
+						}
+						return true;
+					};
+					window.clearChatDraftState = function(root) {
+						root = root || document.getElementById('chat-page-root');
+						var key = window.chatDraftStorageKey(root);
+						var input = root ? root.querySelector('#message-input') : null;
+						if (!key) return false;
+						if (window._chatDraftSaveTimers[key]) {
+							clearTimeout(window._chatDraftSaveTimers[key]);
+							delete window._chatDraftSaveTimers[key];
+						}
+						localStorage.removeItem(key);
+						if (input) {
+							input.value = '';
+							input.defaultValue = '';
+						}
+						return true;
+					};
+
+					var draftKey = window.chatDraftStorageKey(chatRoot);
+					var messageInput = document.getElementById('message-input');
+					var chatForm = document.getElementById('chat-form');
+					if (!messageInput || !chatForm) return;
+
+					window.restoreChatDraftState(chatRoot);
+
+					messageInput.addEventListener('input', function() {
+						if (window._chatDraftSaveTimers[draftKey]) clearTimeout(window._chatDraftSaveTimers[draftKey]);
+						window._chatDraftSaveTimers[draftKey] = setTimeout(function() {
+							window.saveChatDraftState(chatRoot);
+						}, 500);
+					});
+
+					if (!window._chatDraftHistoryBound) {
+						window._chatDraftHistoryBound = true;
+						document.body.addEventListener('htmx:beforeHistorySave', function() {
+							if (window.saveChatDraftState) window.saveChatDraftState();
+						});
+						document.body.addEventListener('htmx:historyRestore', function() {
+							setTimeout(function() {
+								if (window.restoreChatDraftState) window.restoreChatDraftState();
+							}, 0);
+						});
+					}
 
 					chatForm.addEventListener('htmx:afterRequest', function(event) {
 						if (!event.detail || event.detail.elt !== chatForm) return;
-						if (event.detail.successful) {
-							localStorage.removeItem(draftKey);
-						}
+						if (!event.detail.successful) return;
+						var xhr = event.detail.xhr;
+						var responseText = xhr ? (xhr.responseText || '') : '';
+						if (responseText.trim() !== '') window.clearChatDraftState(chatRoot);
 					});			})();
-
-			// Convert task creation markers to clickable links
-			window.convertTaskLinksInMessage = function(messageElement) {
-				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
-				var nodesToProcess = [];
-				var node;
-				while (node = walker.nextNode()) {
-					if (node.textContent.includes('[TASK_ID:')) {
-						nodesToProcess.push(node);
-					}
-				}
-
-				nodesToProcess.forEach(function(textNode) {
-						var regex = /(?:-\s*)?"([^"]+)"\s*(?:\(([^)]+)\)\s*)?\[TASK_ID:([^\]]+)\]/g;
-						var text = textNode.textContent;
-						var matches = [];
-						var m;
-						while ((m = regex.exec(text)) !== null) { matches.push(m); }
-						if (matches.length === 0) return;
-						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
-
-					var fragment = document.createDocumentFragment();
-					var lastIndex = 0;
-
-					matches.forEach(function(match) {
-						var fullMatch = match[0], taskTitle = match[1], category = match[2], taskId = match[3];
-						var matchStart = match.index;
-						if (matchStart > lastIndex) {
-							var beforeText = text.substring(lastIndex, matchStart);
-							// Strip trailing newline before the task item since the div provides its own line break
-							beforeText = beforeText.replace(/\n$/, '');
-							if (beforeText) {
-								fragment.appendChild(document.createTextNode(beforeText));
-							}
-						}
-						var linkWrapper = document.createElement('div');
-						linkWrapper.style.cssText = 'display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.25rem 0;';
-						// Only add bullet if not already inside a list item (markdown renders - as <li>)
-						var insideLi = textNode.parentNode && textNode.parentNode.nodeName === 'LI';
-						if (!insideLi) {
-							var bullet = document.createElement('span');
-							bullet.textContent = '\u2022';
-							bullet.style.opacity = '0.5';
-							linkWrapper.appendChild(bullet);
-						}
-							var link = document.createElement('a');
-							link.href = '/tasks/' + taskId;
-							link.className = inToolOutput
-								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
-								: 'ov-task-result-link cursor-pointer';
-							link.textContent = taskTitle;
-						link.onclick = function(e) {
-							e.preventDefault();
-							e.stopPropagation();
-							htmx.ajax('GET', '/tasks/' + taskId + '?from=chat', { target: '#main-content', swap: 'innerHTML' }).catch(function(err) { console.error('[chat] Failed to load task detail:', err); });
-							history.pushState({}, '', '/tasks/' + taskId + '?from=chat');
-						};
-						linkWrapper.appendChild(link);
-						if (category) {
-							var catBadge = document.createElement('span');
-							catBadge.className = 'badge badge-sm badge-ghost';
-							catBadge.textContent = category;
-							linkWrapper.appendChild(catBadge);
-						}
-						if (category && (category === 'backlog' || category === 'pending')) {
-							var startBtn = document.createElement('button');
-							startBtn.className = 'btn btn-xs ov-task-result-start-btn gap-1';
-							startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><polygon points="6,4 16,10 6,16"/></svg> Start Task';
-							startBtn.onclick = function(e) {
-								e.preventDefault();
-								e.stopPropagation();
-								startBtn.disabled = true;
-								startBtn.classList.add('btn-disabled');
-								startBtn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> Starting...';
-								var formData = new URLSearchParams();
-								formData.set('category', 'active');
-								fetch('/tasks/' + taskId + '/category', {
-									method: 'PATCH',
-									headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-									body: formData.toString()
-								}).then(function(resp) {
-									if (resp.ok) {
-										startBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Started';
-										startBtn.classList.remove('ov-task-result-start-btn');
-										startBtn.classList.add('btn-success');
-									} else {
-										startBtn.innerHTML = 'Failed';
-										startBtn.classList.remove('ov-task-result-start-btn');
-										startBtn.classList.add('btn-error');
-									}
-								}).catch(function() {
-									startBtn.innerHTML = 'Failed';
-									startBtn.disabled = false;
-									startBtn.classList.remove('btn-disabled', 'ov-task-result-start-btn');
-									startBtn.classList.add('btn-error');
-								});
-							};
-							linkWrapper.appendChild(startBtn);
-						}
-						fragment.appendChild(linkWrapper);
-						lastIndex = matchStart + fullMatch.length;
-					});
-
-					if (lastIndex < text.length) {
-						var remaining = text.substring(lastIndex);
-						// Style "Attachments copied to tasks:" as a muted info line
-						var attMatch = remaining.match(/\n*Attachments copied to tasks:\s*(.*)/);
-						if (attMatch) {
-							var beforeAtt = remaining.substring(0, remaining.indexOf('Attachments copied to tasks:'));
-							if (beforeAtt.trim()) {
-								fragment.appendChild(document.createTextNode(beforeAtt));
-							}
-							var attDiv = document.createElement('div');
-							attDiv.className = 'text-xs opacity-60 mt-1';
-							attDiv.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1 -mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>';
-							attDiv.appendChild(document.createTextNode('Attachments copied: ' + attMatch[1]));
-							fragment.appendChild(attDiv);
-						} else {
-							// Strip leading newline since divs provide their own line breaks
-							remaining = remaining.replace(/^\n/, '');
-							if (remaining) {
-								fragment.appendChild(document.createTextNode(remaining));
-							}
-						}
-					}
-					textNode.parentNode.replaceChild(fragment, textNode);
-				});
-			};
-
-			// Convert task edit markers to clickable links
-			window.convertTaskEditLinksInMessage = function(messageElement) {
-				var walker = document.createTreeWalker(messageElement, NodeFilter.SHOW_TEXT, null);
-				var nodesToProcess = [];
-				var node;
-				while (node = walker.nextNode()) {
-					if (node.textContent.includes('[TASK_EDITED:')) {
-						nodesToProcess.push(node);
-					}
-				}
-
-				nodesToProcess.forEach(function(textNode) {
-						var regex = /(?:-\s*)?"([^"]+)"\s*\(updated:\s*([^)]+)\)\s*\[TASK_EDITED:([^\]]+)\]/g;
-						var text = textNode.textContent;
-						var matches = [];
-						var m;
-						while ((m = regex.exec(text)) !== null) { matches.push(m); }
-						if (matches.length === 0) return;
-						var inToolOutput = !!(textNode.parentElement && textNode.parentElement.closest && textNode.parentElement.closest('.stream-tool-body-content'));
-
-					var fragment = document.createDocumentFragment();
-					var lastIndex = 0;
-
-					matches.forEach(function(match) {
-						var fullMatch = match[0], taskTitle = match[1], updatedFields = match[2], taskId = match[3];
-						var matchStart = match.index;
-						if (matchStart > lastIndex) {
-							fragment.appendChild(document.createTextNode(text.substring(lastIndex, matchStart)));
-						}
-						var linkWrapper = document.createElement('span');
-						linkWrapper.innerHTML = '- ';
-							var link = document.createElement('a');
-							link.href = '/tasks/' + taskId;
-							link.className = inToolOutput
-								? 'ov-task-result-link ov-task-result-link--tool cursor-pointer'
-								: 'ov-task-result-link cursor-pointer';
-							link.textContent = '"' + taskTitle + '"';
-						link.onclick = function(e) {
-							e.preventDefault();
-							htmx.ajax('GET', '/tasks/' + taskId + '?from=chat', { target: '#main-content', swap: 'innerHTML' });
-							history.pushState({}, '', '/tasks/' + taskId + '?from=chat');
-						};
-						linkWrapper.appendChild(link);
-						linkWrapper.appendChild(document.createTextNode(' (updated: ' + updatedFields + ')'));
-						fragment.appendChild(linkWrapper);
-						lastIndex = matchStart + fullMatch.length;
-					});
-
-					if (lastIndex < text.length) {
-						fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
-					}
-					textNode.parentNode.replaceChild(fragment, textNode);
-				});
-			};
-
 			// Detect <proposed_plan> marker in raw assistant content.
 			// Checks raw XML tags only; does not match HTML-escaped variants
 			// (&lt;proposed_plan&gt;) since raw content is stored unescaped in
@@ -479,16 +393,20 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				};
 
 				window.applyChatBubbleTransforms = function(chatMessages) {
-					if (!chatMessages) return;
+					if (!chatMessages) return Promise.resolve([]);
 					// Re-hydrate assistant bubbles from raw content first (tool/thinking cards).
 					// This keeps hard-refresh behavior consistent with task-thread rendering
-					// and prevents marker-cleanup passes from stripping tool markers before
-					// tool-card rendering runs.
-					if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
-					chatMessages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
-						if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
-						if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-						if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+					// and prevents transcript-control cleanup from stripping tool controls before
+					// tool-card rendering runs. Post-render transforms run after the shared
+					// hydration barrier so task metadata inside newly rendered DOM is handled once.
+					var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);
+					return Promise.resolve(renderPromise).then(function() {
+						chatMessages.querySelectorAll('.chat-bubble-user-msg, .chat-bubble-assistant-msg').forEach(function(bubble) {
+							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
+							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
+							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
+						});
+						return true;
 					});
 				};
 
@@ -498,10 +416,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				if (!chatMessages) return;
 				if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);
 			};
-			setTimeout(function() {
-				if (window.rehydrateChatAssistantBubbles) window.rehydrateChatAssistantBubbles();
-			}, 0);
-
 			window.switchChatMode = function(mode) {
 				var form = document.getElementById('chat-form');
 				if (!form) return;
@@ -661,7 +575,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				}
 			})();
 
-			// Process task links and clean markers on HTMX swaps
+			// Convert task-result metadata and clean transcript controls on HTMX swaps
 			if (!window._chatSwapHandlerAttached) {
 				window._chatSwapHandlerAttached = true;
 
@@ -700,35 +614,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						chatMessages.querySelectorAll('[data-exec-id]').forEach(function(el) {
 							if (window._chatKnownExecIds) window._chatKnownExecIds[el.getAttribute('data-exec-id')] = true;
 						});
-							if (window.applyChatBubbleTransforms) window.applyChatBubbleTransforms(chatMessages);
-							// Re-attach tracker to possibly new element before binding image load handlers.
-							if (chatMessages !== (window._chatPageTracker && window._chatPageTracker.element)) {
-								if (window.ChatScrollTracker) {
-									if (window._chatPageTracker) window._chatPageTracker.destroy();
-									window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
-								}
-							}
-							if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_chat-messages', window._chatPageTracker);
+							if (window.initializeChatTranscriptScroll) window.initializeChatTranscriptScroll();
 							// During an active stream, this swap can carry partial persisted output.
 							if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory) {
 								window.maybeShowPlanCompletionPromptFromHistory();
 							}
-							// Auto-scroll after swap: a deliberate send pins the next render to
-							// bottom even when attachment markup changes height; otherwise keep
-							// respecting explicit user scroll-up intent.
-						var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;
-						var tracker = window._chatPageTracker;
-						if (sentByUser || !tracker || tracker.shouldAutoScroll()) {
-							if (window.scrollChatToBottomAfterLayout) {
-								window.scrollChatToBottomAfterLayout(chatMessages, true);
-							} else {
-								requestAnimationFrame(function() {
-									if (chatMessages && window.chatAutoScroll) {
-										window.chatAutoScroll.scrollToBottom(chatMessages, true);
-									}
-								});
-							}
-						}
 					}
 				});
 			}
@@ -806,15 +696,31 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					return bubble;
 				}
 
-					function syncCompletedOutputToBubble(execId, completedOutput) {
-							if (!execId || typeof completedOutput !== 'string' || completedOutput === '') return;
-							var streamContainer = document.getElementById('streaming-message-' + execId);
-							if (!streamContainer) return;
-							streamContainer.setAttribute('data-raw-content', completedOutput);
+					function syncCompletedOutputToBubble(execId, completedOutput, status) {
+						if (!execId) return;
+						var streamContainer = document.getElementById('streaming-message-' + execId);
+						if (!streamContainer) return;
+						var completedPair = streamContainer.closest('[data-execution-pair="true"]');
+						if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, status || '');
+						else if (completedPair) completedPair.setAttribute('hx-preserve', 'true');
+						if (typeof completedOutput === 'string') {
+							if (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);
+							else streamContainer.setAttribute('data-raw-content', completedOutput);
+							if (window._chatStreamInProgress) {
+								streamContainer._authoritativeTerminalContent = completedOutput;
+								streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
+							}
+						}
+						if (typeof completedOutput === 'string' && completedOutput !== '') {
 							if (window.renderStreamingContent) {
-							window.renderStreamingContent(streamContainer, completedOutput);
-						} else {
-							streamContainer.textContent = completedOutput;
+								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+								var renderPromise = liveRenderer(streamContainer, completedOutput);
+								if (renderPromise && typeof renderPromise.catch === 'function') {
+									renderPromise.catch(function() { streamContainer.textContent = completedOutput; });
+								}
+							} else {
+								streamContainer.textContent = completedOutput;
+							}
 						}
 						streamContainer.classList.remove('hidden');
 						var bubble = streamContainer.closest('.chat-bubble-assistant-msg');
@@ -834,7 +740,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
 						}
 					}
-
 					function hasActiveChatStream() {
 						var chatMessages = document.getElementById('chat-messages');
 						if (!chatMessages) return false;
@@ -855,6 +760,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					innerDiv.className = 'chat-bubble-inner';
 
 						var thinking = document.createElement('div');
+						thinking.id = 'streaming-thinking-resume-' + execId;
 						thinking.className = 'flex flex-col items-start gap-1';
 						thinking.innerHTML = '<span class="block h-5" aria-hidden="true"></span><span class="ov-loading-dots ov-loading-dots-sm" aria-hidden="true"><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span><span class="ov-loading-dot"></span></span>';
 
@@ -865,13 +771,18 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						progressDiv.setAttribute('role', 'status');
 						progressDiv.setAttribute('aria-live', 'polite');
 
-							var contentDiv = document.createElement('div');
+						var contentDiv = document.createElement('div');
 						contentDiv.id = 'streaming-message-' + execId;
 						contentDiv.className = 'whitespace-pre-wrap leading-relaxed text-sm hidden';
 						contentDiv.style.wordWrap = 'break-word';
 						contentDiv.setAttribute('data-exec-id', execId);
-					var dots = document.createElement('div');
-					dots.className = 'hidden flex items-center gap-1 mt-2 opacity-40';
+						contentDiv.setAttribute('data-streaming-resume', 'true');
+						contentDiv.setAttribute('data-initial-byte-length', '0');
+						contentDiv.setAttribute('data-messages-container', 'chat-messages');
+						contentDiv.setAttribute('data-raw-content', '');
+						var dots = document.createElement('div');
+						dots.id = 'streaming-dots-resume-' + execId;
+						dots.className = 'hidden flex items-center gap-1 mt-2 opacity-40';
 					dots.innerHTML = '<span class="loading loading-dots loading-xs"></span>';
 
 						innerDiv.appendChild(thinking);
@@ -881,50 +792,85 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					bubble.appendChild(roleDiv);
 					bubble.appendChild(innerDiv);
 
-					// Set up streaming via EventSource
-					var textBuffer = '';
-					var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
-					function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
-					var renderScheduled = false;
-					var lastRenderedLength = 0;
-					function renderBufferedOutput(force) {
+						var textBuffer = '';
+						var streamTextEncoder = window.TextEncoder ? new TextEncoder() : null;
+						function utf8ByteLength(value) { return streamTextEncoder ? streamTextEncoder.encode(value || '').length : unescape(encodeURIComponent(value || '')).length; }
+						function persistLiveStreamState(active) {
+							contentDiv.setAttribute('data-raw-content', textBuffer);
+							contentDiv.setAttribute('data-initial-byte-length', String(utf8ByteLength(textBuffer)));
+							if (active) contentDiv.setAttribute('data-streaming-resume', 'true');
+							else {
+								contentDiv.removeAttribute('data-streaming-resume');
+								delete contentDiv._sseConnected;
+							}
+						}
+						var renderScheduled = false;
+						var renderFrame = null;
+						var renderGeneration = 0;
+						var lastRenderedLength = 0;
+						function renderBufferedOutput(force) {
 						if (!window.renderStreamingContent) {
 							contentDiv.textContent = textBuffer;
 							return;
 						}
-						if (!force && renderScheduled) return;
-						var runRender = function() {
-							renderScheduled = false;
-							if (!force && textBuffer.length === lastRenderedLength) return;
-							var shouldScroll = !tracker || tracker.shouldAutoScroll();
-							window.renderStreamingContent(contentDiv, textBuffer);
-							lastRenderedLength = textBuffer.length;
-							if (shouldScroll) {
-								requestAnimationFrame(function() {
-									if (chatMessages && window.chatAutoScroll) {
-										window.chatAutoScroll.scrollToBottom(chatMessages, false);
+							if (!force && renderScheduled) return;
+							var runRender = function() {
+								renderFrame = null;
+								var sourceLength = textBuffer.length;
+								var renderText = textBuffer;
+								if (!force && sourceLength === lastRenderedLength) {
+									renderScheduled = false;
+									return;
+								}
+								var generation = ++renderGeneration;
+								renderScheduled = true;
+								var shouldScroll = !tracker || tracker.shouldAutoScroll();
+								var liveRenderer = window.renderLiveChatContent || window.renderStreamingContent;
+								function finishRender(committed) {
+									if (generation !== renderGeneration) return;
+									renderScheduled = false;
+									if (committed !== false) {
+										lastRenderedLength = sourceLength;
+										if (shouldScroll) {
+											requestAnimationFrame(function() {
+												if (chatMessages && window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(chatMessages, false);
+											});
+										}
 									}
-								});
+									if (textBuffer.length !== sourceLength) renderBufferedOutput(false);
+								}
+								var renderPromise = liveRenderer(contentDiv, renderText);
+								if (renderPromise && typeof renderPromise.then === 'function') {
+									renderPromise.then(finishRender).catch(function() {
+										if (generation !== renderGeneration) return;
+										contentDiv.textContent = renderText;
+										finishRender(true);
+									});
+									return;
+								}
+								finishRender(true);
+							};
+							if (force) {
+								if (renderFrame !== null) cancelAnimationFrame(renderFrame);
+								runRender();
+								return;
 							}
-						};
-						if (force) {
-							runRender();
-							return;
-						}
-						renderScheduled = true;
-						requestAnimationFrame(runRender);
+							renderScheduled = true;
+							renderFrame = requestAnimationFrame(runRender);
 					}
 					var chatMessages = document.getElementById('chat-messages');
 					var tracker = window._chatPageTracker;
 
 					var streamRetryCount = 0;
 					var eventSource = null;
-					function connectChatExecutionStream() {
-						var streamOffset = utf8ByteLength(textBuffer);
-						eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
-						if (window.registerChatStreamEventSource) {
-							window.registerChatStreamEventSource(execId, eventSource);
-						}
+						function connectChatExecutionStream() {
+							var streamOffset = utf8ByteLength(textBuffer);
+							contentDiv._sseConnected = true;
+							contentDiv.setAttribute('data-initial-byte-length', String(streamOffset));
+							eventSource = new EventSource('/events/chat/' + execId + '?offset=' + encodeURIComponent(streamOffset));
+							if (window.registerChatStreamEventSource) {
+								window.registerChatStreamEventSource(execId, eventSource);
+							}
 
 						eventSource.onmessage = function(event) {
 							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
@@ -933,15 +879,28 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							contentDiv.classList.remove('hidden');
 							dots.classList.remove('hidden');
 						}
-						textBuffer += event.data;
-						// Persist raw stream content for completion fallback logic
-						contentDiv.setAttribute('data-raw-content', textBuffer);
-						renderBufferedOutput(false);
+							textBuffer += event.data;
+							// Persist raw stream content and its UTF-8 offset in serializable DOM
+							// attributes so HTMX history restoration can resume this live-created bubble.
+							persistLiveStreamState(true);
+							renderBufferedOutput(false);
 					};
 
-						eventSource.addEventListener('done', function() {
-							if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
-							renderBufferedOutput(true);
+							eventSource.addEventListener('done', function(event) {
+								if (window.hideMixtureProgress) window.hideMixtureProgress(execId);
+								if (Object.prototype.hasOwnProperty.call(contentDiv, '_authoritativeTerminalContent')) {
+									textBuffer = String(contentDiv._authoritativeTerminalContent || '');
+									delete contentDiv._authoritativeTerminalContent;
+									contentDiv.removeAttribute('data-authoritative-terminal-content');
+								}
+								persistLiveStreamState(false);
+								var completedPair = bubble.closest('[data-execution-pair="true"]');
+								if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, event && event.data ? event.data : 'completed');
+									else if (completedPair) {
+										completedPair.setAttribute('data-exec-status', event && event.data ? event.data : 'completed');
+										completedPair.setAttribute('hx-preserve', 'true');
+									}
+									renderBufferedOutput(true);
 						dots.classList.add('hidden');
 						eventSource.close();
 						if (window.unregisterChatStreamEventSource) {
@@ -957,14 +916,17 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						} catch (err) {
 							console.error('[chat] post-stream transform failed:', err);
 						}
-						if (!tracker || tracker.shouldAutoScroll()) {
-							requestAnimationFrame(function() {
-								if (chatMessages && window.chatAutoScroll) {
-									window.chatAutoScroll.scrollToBottom(chatMessages, true);
-								}
-							});
-						}
-					});
+							if (!tracker || tracker.shouldAutoScroll()) {
+								requestAnimationFrame(function() {
+									if (chatMessages && window.chatAutoScroll) {
+										window.chatAutoScroll.scrollToBottom(chatMessages, true);
+									}
+								});
+							}
+							window._chatStreamInProgress = false;
+							if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+							window.syncChatTranscriptRevision(execId);
+						});
 
 						eventSource.addEventListener('error', function(event) {
 							var retryableEarlyError = textBuffer === '' && event.data === 'execution not found' && streamRetryCount < 5;
@@ -973,22 +935,37 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (window.unregisterChatStreamEventSource) {
 							window.unregisterChatStreamEventSource(execId, eventSource);
 						}
-						if (retryableEarlyError) {
-							streamRetryCount++;
-							setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
-							return;
-						}
-						thinking.classList.add('hidden');
-						dots.classList.add('hidden');
-						contentDiv.classList.remove('hidden');
-						if (event.data) {
-							contentDiv.textContent += '\n\nError: ' + event.data;
-						}
-						// Clear streaming flag and re-evaluate plan prompt on error.
-						// DOM scan finds error/partial bubble without <proposed_plan> → hides prompt.
-						window._chatStreamInProgress = false;
-						if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-					});
+							if (retryableEarlyError) {
+								streamRetryCount++;
+								setTimeout(connectChatExecutionStream, 150 * streamRetryCount);
+								return;
+							}
+								if (Object.prototype.hasOwnProperty.call(contentDiv, '_authoritativeTerminalContent')) {
+									textBuffer = String(contentDiv._authoritativeTerminalContent || '');
+									delete contentDiv._authoritativeTerminalContent;
+									contentDiv.removeAttribute('data-authoritative-terminal-content');
+									renderBufferedOutput(true);
+								}
+								persistLiveStreamState(false);
+								thinking.classList.add('hidden');
+							dots.classList.add('hidden');
+							contentDiv.classList.remove('hidden');
+							var failedPair = bubble.closest('[data-execution-pair="true"]');
+							if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(failedPair, 'failed');
+							else if (failedPair) {
+								failedPair.setAttribute('data-exec-status', 'failed');
+								failedPair.setAttribute('hx-preserve', 'true');
+							}
+							if (event.data) {
+								contentDiv.textContent += '\n\nError: ' + event.data;
+							}
+							// Clear streaming flag, synchronize the authoritative failed snapshot,
+							// and re-evaluate plan prompt on error.
+							window._chatStreamInProgress = false;
+							if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+							window.syncChatTranscriptRevision(execId);
+							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+						});
 
 							eventSource.onerror = function() {
 								eventSource.close();
@@ -1049,41 +1026,97 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						return pendingContainer;
 					};
 
-					var handleSharedLiveConnected = function(event) {
-						var detail = event.detail || {};
-						if (!detail.reconnected) return;
-						var chatContainer = document.getElementById('chat-page-root');
-						if (!chatContainer) return;
-						// Reconnection after tab was hidden — refresh chat to catch missed events,
-						// but avoid replacing an actively streaming bubble with stale partial state.
-						var pid = chatContainer.getAttribute('data-project-id');
-						if (window._chatStreamInProgress && hasActiveChatStream()) {
-							setTimeout(function() {
-								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-							}, 0);
-							// Still reconcile pending inputs even when streaming is active —
-							// a steering row may have been consumed while the tab was hidden.
-							if (pid && document.getElementById('pending-thread-inputs')) {
-								htmx.ajax('GET', '/chat/pending-inputs?project_id=' + encodeURIComponent(pid), {target: '#pending-thread-inputs', swap: 'outerHTML'});
+					window.syncChatTranscriptRevision = function(expectedExecID) {
+						var root = document.getElementById('chat-page-root');
+						if (!root || typeof fetch === 'undefined') return Promise.resolve(false);
+						var pid = root.getAttribute('data-project-id') || '';
+						if (!pid) return Promise.resolve(false);
+						window._chatRevisionSyncGeneration = (window._chatRevisionSyncGeneration || 0) + 1;
+						var generation = window._chatRevisionSyncGeneration;
+						return fetch('/chat?project_id=' + encodeURIComponent(pid), {headers: {'HX-Request': 'true'}}).then(function(response) {
+							if (!response.ok) throw new Error('HTTP ' + response.status);
+							return response.text();
+						}).then(function(html) {
+							if (generation !== window._chatRevisionSyncGeneration) return false;
+							var currentRoot = document.getElementById('chat-page-root');
+							if (!currentRoot || currentRoot.getAttribute('data-project-id') !== pid) return false;
+							var detached = document.createElement('template');
+							detached.innerHTML = html;
+							var nextRoot = detached.content.querySelector('#chat-page-root');
+							if (!nextRoot || !window.chatTranscriptSnapshotMatches || !window.chatTranscriptSnapshotMatches(currentRoot, nextRoot, 'chat-messages', expectedExecID || '')) return false;
+							window.applyChatTranscriptSnapshotRevision(currentRoot, nextRoot, 'chat-messages', 'data-chat-revision');
+							if (window._chatReconnectCatchupTimer) {
+								clearTimeout(window._chatReconnectCatchupTimer);
+								window._chatReconnectCatchupTimer = null;
 							}
-							return;
-						}
-						var hasRenderedHistory = !!document.querySelector('#chat-messages .chat-bubble-user-msg, #chat-messages .chat-bubble-assistant-msg');
-						if (hasRenderedHistory) {
-							if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
-							// Refresh the pending-inputs container so any steering rows missed while
-							// the tab was hidden are reconciled. The server query excludes
-							// prepared/in-flight steering (expected_turn_id=NULL), so a stale
-							// "Steering pending" row will be correctly cleared.
-							if (pid && document.getElementById('pending-thread-inputs')) {
-								htmx.ajax('GET', '/chat/pending-inputs?project_id=' + encodeURIComponent(pid), {target: '#pending-thread-inputs', swap: 'outerHTML'});
-							}
-							return;
-						}
-						if (pid) {
-							htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
-						}
+							return true;
+						}).catch(function(err) {
+							console.error('[chat] transcript revision sync failed:', err);
+							return false;
+						});
 					};
+
+						var handleSharedLiveConnected = function(event) {
+							var detail = event.detail || {};
+							if (!detail.reconnected) return;
+							var chatContainer = document.getElementById('chat-page-root');
+							if (!chatContainer) return;
+							var pid = chatContainer.getAttribute('data-project-id');
+							// Pending rows have their own authoritative compact fragment and never
+							// require remounting transcript bubbles or the composer.
+							if (pid && document.getElementById('pending-thread-inputs') && typeof htmx !== 'undefined') {
+								htmx.ajax('GET', '/chat/pending-inputs?project_id=' + encodeURIComponent(pid), {target: '#pending-thread-inputs', swap: 'outerHTML'});
+							}
+							// Known active executions catch up through their offset-aware stream.
+							if (window._chatStreamInProgress && hasActiveChatStream()) {
+								if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+								if (!window._chatReconnectCatchupTimer) {
+									window._chatReconnectCatchupTimer = setTimeout(function waitForChatCatchup() {
+										var currentRoot = document.getElementById('chat-page-root');
+										if (!currentRoot || currentRoot.getAttribute('data-project-id') !== pid) {
+											window._chatReconnectCatchupTimer = null;
+											return;
+										}
+										if (window._chatStreamInProgress && hasActiveChatStream()) {
+											window._chatReconnectCatchupTimer = setTimeout(waitForChatCatchup, 500);
+											return;
+										}
+										window._chatReconnectCatchupTimer = null;
+										handleSharedLiveConnected({detail: {reconnected: true}});
+									}, 500);
+								}
+								return;
+							}
+							if (!pid || typeof fetch === 'undefined' || typeof htmx === 'undefined') return;
+							var url = '/chat?project_id=' + encodeURIComponent(pid);
+							var currentRevision = chatContainer.getAttribute('data-chat-revision') || '';
+							fetch(url, {headers: {'HX-Request': 'true'}}).then(function(response) {
+								if (!response.ok) throw new Error('HTTP ' + response.status);
+								return response.text();
+							}).then(function(html) {
+								var detached = document.createElement('template');
+								detached.innerHTML = html;
+								var nextRoot = detached.content.querySelector('#chat-page-root');
+								var nextRevision = nextRoot ? (nextRoot.getAttribute('data-chat-revision') || '') : '';
+								if (!nextRevision || nextRevision === currentRevision) return;
+								// Refresh only the authoritative transcript. The existing composer,
+								// draft, attachment session, and controls remain mounted.
+								if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
+								return htmx.ajax('GET', url, {
+									target: '#chat-messages',
+									select: '#chat-messages',
+									swap: 'morph:outerHTML'
+								}).then(function() {
+									if (window._initThreadStreaming) window._initThreadStreaming();
+									if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+									var currentRoot = document.getElementById('chat-page-root');
+									if (currentRoot && currentRoot.getAttribute('data-project-id') === pid) currentRoot.setAttribute('data-chat-revision', nextRevision);
+									if (window.evaluatePlanCompletionPrompt) window.evaluatePlanCompletionPrompt();
+								});
+							}).catch(function(err) {
+								console.error('[chat] reconnect reconciliation failed:', err);
+							});
+						};
 
 					var handleSharedChatLiveEvent = function(event) {
 						var data = event.detail || {};
@@ -1156,7 +1189,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										var chatContainer = document.getElementById('chat-page-root');
 										var pid = chatContainer ? chatContainer.getAttribute('data-project-id') : projectId;
 										if (chatContainer && pid && typeof htmx !== 'undefined') {
-											htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
+											if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
+										var attachmentRefresh = htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: '#chat-messages', select: '#chat-messages', swap: 'morph:outerHTML'});
+										if (attachmentRefresh && typeof attachmentRefresh.then === 'function') attachmentRefresh.then(function() { window.syncChatTranscriptRevision(data.exec_id || ''); });
+										var attachmentAction = document.getElementById('chat-form-primary-action');
+										if (attachmentAction) htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {target: '#chat-form-primary-action', swap: 'outerHTML'});
 										}
 										return;
 									}
@@ -1236,12 +1273,16 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 										if (window.htmx) htmx.process(queuedRow);
 									} else {								// Append user bubble and streaming assistant for a real running turn.
 									var pair = document.createElement('div');
+									pair.id = 'chat-execution-' + data.exec_id;
 									pair.className = 'chat-execution-pair space-y-6';
 									pair.setAttribute('data-execution-pair', 'true');
 									pair.setAttribute('data-exec-id', data.exec_id);
+									pair.setAttribute('data-exec-status', 'running');
 									pair.appendChild(createUserBubble(data.message, data.source));
 									pair.appendChild(createStreamingBubble(data.exec_id));
 									chatMessages.appendChild(pair);
+									if (window.refreshChatComposerAction) window.refreshChatComposerAction();
+									window.syncChatTranscriptRevision(data.exec_id);
 									if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 								}
 							// Scroll to bottom (respect user scroll position)
@@ -1264,19 +1305,37 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							var chatContainer = document.getElementById('chat-page-root');
 							if (chatContainer) {
 								var pid = chatContainer.getAttribute('data-project-id');
-								if (pid) {
-									htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: chatContainer, swap: 'outerHTML'});
-								}
+									if (pid) {
+										if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
+											var missedRefresh = htmx.ajax('GET', '/chat?project_id=' + encodeURIComponent(pid), {target: '#chat-messages', select: '#chat-messages', swap: 'morph:outerHTML'});
+											if (missedRefresh && typeof missedRefresh.then === 'function') missedRefresh.then(function() { window.syncChatTranscriptRevision(data.exec_id || ''); });
+											var missedAction = document.getElementById('chat-form-primary-action');
+											if (missedAction) htmx.ajax('GET', '/chat/composer-action?project_id=' + encodeURIComponent(pid), {target: '#chat-form-primary-action', swap: 'outerHTML'});
+									}
 							}
 							return;
 						}
 
-						// chat_response_done may arrive before the last per-exec delta is rendered
-						// in the active bubble (especially after blur/focus reconnect timing).
-						// Reconcile with completed_output so visible UI matches persisted state.
-						if (data.exec_id && typeof data.completed_output === 'string' && data.completed_output !== '') {
-							syncCompletedOutputToBubble(data.exec_id, data.completed_output);
-						}
+							// chat_response_done may arrive before the last per-exec delta is rendered
+							// in the active bubble (especially after blur/focus reconnect timing).
+							// Reconcile output and authoritative terminal status so visible UI matches persisted state.
+							if (data.exec_id) {
+								try {
+									syncCompletedOutputToBubble(data.exec_id, data.completed_output, data.status || '');
+								} catch (err) {
+									console.error('[chat] completed-output reconciliation failed:', err);
+								}
+							}
+							var completedPair = data.exec_id ? document.getElementById('chat-execution-' + data.exec_id) : null;
+							if (window.applyChatExecutionTerminalStatus) window.applyChatExecutionTerminalStatus(completedPair, data.status || '');
+							else if (completedPair) {
+								var completedStatus = completedPair.getAttribute('data-exec-status') || '';
+								var eventStatus = data.status === 'failed' || data.status === 'cancelled' || data.status === 'completed' ? data.status : '';
+								if (eventStatus) completedPair.setAttribute('data-exec-status', eventStatus);
+								else if (!completedStatus || completedStatus === 'running' || completedStatus === 'pending' || completedStatus === 'queued') completedPair.setAttribute('data-exec-status', 'completed');
+								completedPair.setAttribute('hx-preserve', 'true');
+							}
+							window.syncChatTranscriptRevision(data.exec_id || '');
 
 							window._chatStreamInProgress = false;
 							if (window.evaluatePlanCompletionPrompt) {
@@ -1306,13 +1365,22 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						document.body.removeEventListener('htmx:afterSwap', handleChatAfterSwap);
 						document.body.removeEventListener('htmx:beforeSwap', handleChatBeforeSwap);
 						if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
-						window._chatLiveEventHandlers = null;
 					}
 				};
-				var handleChatBeforeSwap = function(event) {
-					var swapTarget = event.detail.target;
-					if (!swapTarget) return;
-					if (swapTarget.id === 'chat-page-root') {
+					var handleChatBeforeSwap = function(event) {
+						var swapTarget = event.detail.target;
+						if (!swapTarget) return;
+						var currentChatRoot = document.getElementById('chat-page-root');
+						var chatMessages = document.getElementById('chat-messages');
+						if (currentChatRoot && chatMessages && (swapTarget.id === 'chat-messages' || swapTarget.id === 'chat-page-root' || swapTarget.id === 'main-content')) {
+							var projectId = currentChatRoot.getAttribute('data-project-id') || '';
+							var chatScrollStateKey = 'chat-scroll-' + projectId;
+							if (window.saveChatTranscriptScrollState) window.saveChatTranscriptScrollState(chatScrollStateKey, chatMessages, window._chatPageTracker);
+							if (window.saveChatDraftState) window.saveChatDraftState(currentChatRoot);
+							var chatForm = document.getElementById('chat-form');
+							if (chatForm && window.saveChatPendingAttachmentState) window.saveChatPendingAttachmentState(chatForm);
+						}
+						if (swapTarget.id === 'chat-page-root') {
 						if (window.closeAllChatStreamEventSources) window.closeAllChatStreamEventSources();
 						return;
 					}
@@ -1330,6 +1398,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					connected: handleSharedLiveConnected,
 					afterSwap: handleChatAfterSwap,
 					beforeSwap: handleChatBeforeSwap
+				};
+				window.restoreChatLiveEventHandlers = function() {
+					var handlers = window._chatLiveEventHandlers;
+					if (!handlers) return;
+					if (handlers.chatEvent) window.addEventListener('sse-chat-live-event', handlers.chatEvent);
+					if (handlers.connected) window.addEventListener('sse-live-connected', handlers.connected);
+					if (handlers.afterSwap) document.body.addEventListener('htmx:afterSwap', handlers.afterSwap);
+					if (handlers.beforeSwap) document.body.addEventListener('htmx:beforeSwap', handlers.beforeSwap);
 				};
 			})();
 		</script>

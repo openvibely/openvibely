@@ -983,12 +983,14 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 		FirstTurn: channelChatIngressFirstTurnOptions{
 			Task:         &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
 			ReplyContext: ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
-			RuntimeTools: s.buildSlackActionToolRuntime(projectID, slackMarkerContext{
-				TeamID:    msg.TeamID,
-				ChannelID: msg.ChannelID,
-				ThreadTS:  msg.ThreadTS,
-				UserID:    msg.UserID,
-			}, nil),
+			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
+				return s.buildSlackActionToolRuntimeForTask(projectID, taskID, slackActionContext{
+					TeamID:    msg.TeamID,
+					ChannelID: msg.ChannelID,
+					ThreadTS:  msg.ThreadTS,
+					UserID:    msg.UserID,
+				}, nil)
+			},
 			ChannelChatRunner: s.channelChatRunner,
 			CreateTaskContext: func(ctx context.Context, taskID string) error {
 				if s.slackTaskContextRepo == nil {
@@ -1022,22 +1024,30 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 	return
 }
 
-type slackMarkerContext struct {
+type slackActionContext struct {
 	TeamID    string
 	ChannelID string
 	ThreadTS  string
 	UserID    string
 }
 
-func (s *SlackService) buildSlackActionToolRuntime(projectID string, markerCtx slackMarkerContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	handlers := s.slackActionHandlers(projectID, markerCtx, collector)
+func (s *SlackService) buildSlackActionToolRuntime(projectID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
+	return s.buildSlackActionToolRuntimeForTask(projectID, "", actionCtx, collector)
+}
+
+func (s *SlackService) buildSlackActionToolRuntimeForTask(projectID, callerTaskID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
+	handlers := s.slackActionHandlersForTask(projectID, callerTaskID, actionCtx, collector)
 	return &llmcontracts.RuntimeTools{
 		Definitions: actionToolDefinitions(chatcontrol.SurfaceSlack, true),
 		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceSlack, handlers),
 	}
 }
 
-func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMarkerContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
+func (s *SlackService) slackActionHandlers(projectID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
+	return s.slackActionHandlersForTask(projectID, "", actionCtx, collector)
+}
+
+func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID:     projectID,
 		TaskSvc:       s.taskSvc,
@@ -1051,7 +1061,7 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 					}
 				}
 				if s.slackTaskContextRepo != nil {
-					_ = s.slackTaskContextRepo.Upsert(ctx, &models.SlackTaskContext{TaskID: t.ID, SlackTeamID: markerCtx.TeamID, SlackChannelID: markerCtx.ChannelID, SlackThreadTS: markerCtx.ThreadTS, SlackUserID: markerCtx.UserID})
+					_ = s.slackTaskContextRepo.Upsert(ctx, &models.SlackTaskContext{TaskID: t.ID, SlackTeamID: actionCtx.TeamID, SlackChannelID: actionCtx.ChannelID, SlackThreadTS: actionCtx.ThreadTS, SlackUserID: actionCtx.UserID})
 				}
 			}
 		},
@@ -1062,7 +1072,7 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 		ProjectID:                projectID,
 		Surface:                  chatcontrol.SurfaceSlack,
 		Source:                   models.TaskOriginSlack,
-		ActorID:                  markerCtx.UserID,
+		ActorID:                  actionCtx.UserID,
 		TaskRepo:                 s.taskRepo,
 		ExecRepo:                 s.execRepo,
 		ThreadInputRepo:          s.threadInputRepo,
@@ -1073,9 +1083,9 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
 		CompleteExecution:        channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 		ChannelMessageRouter:     s.channelMessageRouter,
-		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: markerCtx.TeamID, SlackChannelID: markerCtx.ChannelID, SlackThreadTS: markerCtx.ThreadTS, SlackUserID: markerCtx.UserID},
+		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: actionCtx.TeamID, SlackChannelID: actionCtx.ChannelID, SlackThreadTS: actionCtx.ThreadTS, SlackUserID: actionCtx.UserID},
 		NewQueuedInput: func(_ *models.Task, runExecutionID, agentID string) *models.ThreadInput {
-			return &models.ThreadInput{SlackTeamID: markerCtx.TeamID, SlackChannelID: markerCtx.ChannelID, SlackThreadTS: markerCtx.ThreadTS, SlackUserID: markerCtx.UserID}
+			return &models.ThreadInput{SlackTeamID: actionCtx.TeamID, SlackChannelID: actionCtx.ChannelID, SlackThreadTS: actionCtx.ThreadTS, SlackUserID: actionCtx.UserID}
 		},
 		FilterHistory: filterSlackChatHistory,
 		ConfigureSendOptions: func(opts *channelTaskThreadSendOptions) {
@@ -1089,6 +1099,7 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             projectID,
+		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
 		LLMConfigRepo:         s.llmConfigRepo,
@@ -1102,10 +1113,10 @@ func (s *SlackService) slackActionHandlers(projectID string, markerCtx slackMark
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
-			if !s.checkAuthorization(ctx, project.ID, markerCtx.UserID) {
-				return fmt.Errorf("Slack user %q is not authorized to use project %q", markerCtx.UserID, project.Name)
+			if !s.checkAuthorization(ctx, project.ID, actionCtx.UserID) {
+				return fmt.Errorf("Slack user %q is not authorized to use project %q", actionCtx.UserID, project.Name)
 			}
-			return s.setActiveProject(ctx, markerCtx.TeamID, markerCtx.UserID, project.ID)
+			return s.setActiveProject(ctx, actionCtx.TeamID, actionCtx.UserID, project.ID)
 		},
 	}))
 	handlers["get_current_project"] = func(ctx context.Context, _ json.RawMessage) (string, error) {

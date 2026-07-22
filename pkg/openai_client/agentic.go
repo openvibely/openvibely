@@ -9,11 +9,12 @@ import (
 	"fmt"
 	"io"
 	"math"
-
-	"github.com/openvibely/openvibely/internal/applog"
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/httpretry"
 )
 
 // DefaultCompactionThreshold is the default approximate token count that
@@ -1019,6 +1020,45 @@ func statelessOAuthOutputItems(items []any) []any {
 
 // sendAgenticTurn sends a single request and returns parsed results.
 func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
+	policy := httpretry.DefaultPolicy()
+	policy.AllowReplay = true
+	policy.RetryableError = isRetryableResponsesTransportError
+	policy.OnRetry = func(event httpretry.RetryEvent) {
+		applog.Infof("[openai-client] stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+	}
+	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*agenticTurnResult, bool, error) {
+		attemptOpts := *opts
+		observed := false
+		attemptOpts.OnText = func(text string) {
+			observed = true
+			if opts.OnText != nil {
+				opts.OnText(text)
+			}
+		}
+		attemptOpts.OnThinking = func(text string) {
+			observed = true
+			if opts.OnThinking != nil {
+				opts.OnThinking(text)
+			}
+		}
+		attemptOpts.OnToolUse = func(name string, input json.RawMessage) {
+			observed = true
+			if opts.OnToolUse != nil {
+				opts.OnToolUse(name, input)
+			}
+		}
+		attemptOpts.OnToolResult = func(name, output string, isError bool) {
+			observed = true
+			if opts.OnToolResult != nil {
+				opts.OnToolResult(name, output, isError)
+			}
+		}
+		result, err := c.sendAgenticTurnOnce(attemptCtx, inputItems, tools, &attemptOpts, isChatGPTOAuth)
+		return result, observed, err
+	})
+}
+
+func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
 	payload := map[string]any{
 		"model":  opts.Model,
 		"input":  inputItems,
@@ -1091,33 +1131,27 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 		body, wsErr := openStream(useWebsocket)
 		if useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
 			c.responsesTransportState.disableWebsocket()
-			useWebsocket = false
-			body, wsErr = openStream(false)
+			return nil, wsErr
 		}
 		if wsErr != nil {
 			return nil, wsErr
 		}
-		sawOutput := false
 		onText := func(text string) {
-			sawOutput = true
 			if opts.OnText != nil {
 				opts.OnText(text)
 			}
 		}
 		onThinking := func(text string) {
-			sawOutput = true
 			if opts.OnThinking != nil {
 				opts.OnThinking(text)
 			}
 		}
 		onToolUse := func(name string, input json.RawMessage) {
-			sawOutput = true
 			if opts.OnToolUse != nil {
 				opts.OnToolUse(name, input)
 			}
 		}
 		onToolResult := func(name, output string, isError bool) {
-			sawOutput = true
 			if opts.OnToolResult != nil {
 				opts.OnToolResult(name, output, isError)
 			}
@@ -1126,15 +1160,11 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 		body.Close()
 		if wsErr != nil && useWebsocket && shouldFallbackResponsesWebsocket(ctx, wsErr) {
 			c.responsesTransportState.disableWebsocket()
-			if !sawOutput {
-				body, wsErr = openStream(false)
-				if wsErr == nil {
-					result, wsErr = c.parseAgenticStreamWithToolCallbacks(body, onText, onThinking, onToolUse, onToolResult)
-					body.Close()
-				}
-			}
 		}
-		return result, wsErr
+		if wsErr != nil {
+			return result, httpretry.NewStreamError(wsErr)
+		}
+		return result, nil
 	}
 
 	body, err := json.Marshal(payload)
@@ -1175,12 +1205,16 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 		errBody, _ := io.ReadAll(resp.Body)
 		trimmed := strings.TrimSpace(string(errBody))
 		if trimmed == "" {
-			return nil, fmt.Errorf("POST %q: %d %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode))
+			return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %d %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode)))
 		}
-		return nil, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed)
+		return nil, httpretry.NewResponseError(resp, fmt.Errorf("POST %q: %d %s %s", endpoint, resp.StatusCode, http.StatusText(resp.StatusCode), trimmed))
 	}
 
-	return c.parseAgenticStreamWithToolCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
+	result, err := c.parseAgenticStreamWithToolCallbacks(resp.Body, opts.OnText, opts.OnThinking, opts.OnToolUse, opts.OnToolResult)
+	if err != nil {
+		return result, httpretry.NewStreamError(err)
+	}
+	return result, nil
 }
 
 // parseAgenticStream parses a streaming response, handling text deltas and function calls.
@@ -1387,6 +1421,9 @@ func (c *Client) parseAgenticStreamWithToolCallbacks(body io.Reader, onText func
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+	if completed == nil {
+		return nil, io.ErrUnexpectedEOF
 	}
 
 	emitter.Flush()

@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +11,26 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestManagerRefreshErrorsDoNotExposeConfigID(t *testing.T) {
+	cfg := models.LLMConfig{
+		ID:               "private-config-id",
+		Name:             "OAuth Config",
+		Provider:         models.ProviderOpenAI,
+		Model:            "gpt-5.3-codex",
+		AuthMethod:       models.AuthMethodOAuth,
+		OAuthAccessToken: "access-token",
+	}
+	_, err := NewManager(nil).EnsureFresh(context.Background(), cfg, time.Hour, func(context.Context, models.LLMConfig) (TokenSet, error) {
+		return TokenSet{}, nil
+	})
+	if err == nil {
+		t.Fatal("expected unavailable recovery error")
+	}
+	if strings.Contains(err.Error(), cfg.ID) {
+		t.Fatalf("OAuth recovery error exposed config id: %v", err)
+	}
+}
 
 func createOAuthConfig(t *testing.T, repo *repository.LLMConfigRepo, cfg models.LLMConfig) models.LLMConfig {
 	t.Helper()

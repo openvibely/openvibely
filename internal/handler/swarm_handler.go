@@ -165,7 +165,6 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 		Agent:            *agent,
 		ProjectID:        task.ProjectID,
 		IsTaskFollowup:   true,
-		ProcessMarkers:   false,
 		InputOrigin:      models.TaskOriginWeb,
 		DeferHistoryLoad: true,
 		Task:             task,

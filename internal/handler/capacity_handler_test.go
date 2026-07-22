@@ -51,6 +51,24 @@ func TestHandler_GetGlobalCapacity(t *testing.T) {
 	assert.Equal(t, 3, resp.AvailableSlots)
 }
 
+func TestHandler_GetGlobalCapacity_Unlimited(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	h.workerSvc.Resize(0)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/capacity/global", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp GlobalCapacityResponse
+	err := json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, 0, resp.MaxWorkers)
+	assert.True(t, resp.HasCapacity)
+	assert.Equal(t, 0, resp.AvailableSlots)
+}
+
 func TestHandler_GetGlobalCapacity_AtCapacity(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

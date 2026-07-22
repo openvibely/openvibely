@@ -15,7 +15,7 @@
 //   - chat: set_chat_mode
 //
 // Chat read-only (plan + orchestrate):
-//   - tasks: view_task_thread
+//   - tasks: list_tasks, view_task_thread
 //   - projects: list_projects, project_info, get_current_project
 //   - models: list_models, get_model
 //   - agents: list_agents
@@ -198,6 +198,17 @@ var registry = []ActionDef{
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
 		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"min_priority":{"type":"integer","minimum":1,"maximum":4},"include_completed":{"type":"boolean"}},"additionalProperties":false}`),
+	},
+	{
+		Name:               "list_tasks",
+		Description:        "Discover tasks in the current project by partial title and/or optional category/status filters. Returns compact summaries (task ID, title, category, status, priority, updated time, parent/swarm role) with deterministic ordering and explicit limit/offset pagination. Read-only; excludes internal chat rows and never crosses projects. Use it to find an existing task's ID before create_task/edit_task/execute_tasks or to reconcile a GitHub issue by number/URL.",
+		Domain:             DomainTasks,
+		Access:             AccessRead,
+		Sensitivity:        SensitivityNormal,
+		AllowedModes:       bothModes(),
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: false,
+		Parameters:         json.RawMessage(`{"type":"object","properties":{"query":{"type":"string","description":"Optional partial (case-insensitive substring) title match."},"category":{"type":"string","enum":["active","backlog","scheduled","completed"],"description":"Optional category filter. Internal chat rows are always excluded."},"status":{"type":"string","enum":["pending","queued","running","completed","failed","cancelled","blocked"],"description":"Optional task status filter."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Max results to return (default 20, capped at 50)."},"offset":{"type":"integer","minimum":0,"description":"Number of results to skip for pagination."}},"additionalProperties":false}`),
 	},
 	{
 		Name:               "view_task_thread",
@@ -463,30 +474,30 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"enabled":{"type":"boolean"}},"additionalProperties":false}`),
 	},
 
-	// --- Alerts domain ---
+	// --- Alerts and actionable notifications domain ---
 	{
 		Name:         "list_alerts",
-		Description:  "List alerts for the current project.",
+		Description:  "List project-scoped alerts and actionable notifications with stable pagination and lifecycle filters.",
 		Domain:       DomainAlerts,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"decision_state":{"type":"string","enum":["not_required","pending","approved","rejected","dismissed"]},"processing_state":{"type":"string","enum":["not_applicable","unclaimed","claimed","implementation_task_linked","completed","failed"]},"type":{"type":"string"},"source":{"type":"string"},"read":{"type":"boolean"},"implementation_task_linked":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":100},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}`),
 	},
 	{
 		Name:         "get_alert",
-		Description:  "Get a specific alert by id.",
+		Description:  "Get one notification in the caller's project before claiming or processing it.",
 		Domain:       DomainAlerts,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"alert_id":{"type":"string"}},"required":["alert_id"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"}},"required":["alert_id"],"additionalProperties":false}`),
 	},
 	{
 		Name:         "create_alert",
-		Description:  "Create a new alert.",
+		Description:  "Create a project-scoped operational alert.",
 		Domain:       DomainAlerts,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
@@ -495,8 +506,78 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"title":{"type":"string"},"message":{"type":"string"},"severity":{"type":"string","enum":["info","warning","error"]},"type":{"type":"string","enum":["custom","task_failed","task_needs_followup"]},"task_id":{"type":"string"}},"required":["title"],"additionalProperties":false}`),
 	},
 	{
+		Name:         "create_notification",
+		Description:  "Create a project-scoped actionable notification for human review. Approval authorizes task creation only, not merge, release, or deployment.",
+		Domain:       DomainAlerts,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"type":{"type":"string","maxLength":100},"title":{"type":"string","maxLength":200},"message":{"type":"string","maxLength":2000},"body":{"type":"string","maxLength":20000},"severity":{"type":"string","enum":["info","warning","error"]},"source":{"type":"string","maxLength":100},"metadata":{"type":"object"},"idempotency_key":{"type":"string","maxLength":200}},"required":["type","title"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "claim_alert",
+		Description:  "Atomically claim an approved notification for the current persisted task using a bounded lease.",
+		Domain:       DomainAlerts,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"lease_seconds":{"type":"integer","minimum":1,"maximum":86400}},"required":["alert_id"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "create_alert_implementation_task",
+		Description:  "Idempotently create and link one backlog implementation task for a notification claimed by the current task.",
+		Domain:       DomainAlerts,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string","enum":["","feature","bug"]}},"required":["alert_id","title","prompt"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "link_alert_implementation_task",
+		Description:  "Link an existing same-project implementation task to a notification claimed by the current task.",
+		Domain:       DomainAlerts,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"task_id":{"type":"string"}},"required":["alert_id","task_id"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "complete_alert_processing",
+		Description:  "Mark processing completed for a notification owned by the current task.",
+		Domain:       DomainAlerts,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"message":{"type":"string","maxLength":2000}},"required":["alert_id"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "fail_alert_processing",
+		Description:  "Mark processing failed with retryable diagnostic context for a notification owned by the current task.",
+		Domain:       DomainAlerts,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"message":{"type":"string","maxLength":2000}},"required":["alert_id"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "release_alert_claim",
+		Description:  "Release the current task's unlinked claim so another scheduled scan can retry it.",
+		Domain:       DomainAlerts,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"}},"required":["alert_id"],"additionalProperties":false}`),
+	},
+	{
 		Name:              "delete_alert",
-		Description:       "Delete an alert by id.",
+		Description:       "Delete an alert by id from the caller's project.",
 		Domain:            DomainAlerts,
 		Access:            AccessWrite,
 		Sensitivity:       SensitivityDestructive,
@@ -507,7 +588,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "toggle_alert",
-		Description:  "Mark an alert as read.",
+		Description:  "Mark an alert as read in the caller's project.",
 		Domain:       DomainAlerts,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,

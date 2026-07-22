@@ -11,9 +11,85 @@ import (
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
+
+func TestAppendToolModeSystemPromptCoversTaskFollowupsAndPreservesPlan(t *testing.T) {
+	followup := appendToolModeSystemPrompt("base", nil, models.ChatModeOrchestrate)
+	if !strings.Contains(followup, llmprompt.ChatActionUnavailableInstructions) {
+		t.Fatalf("no-tool follow-up prompt missing capability limitation: %q", followup)
+	}
+
+	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task"}}}
+	capable := appendToolModeSystemPrompt("base", rt, models.ChatModeOrchestrate)
+	if !strings.Contains(capable, llmprompt.ChatActionToolModeInstructions) || !strings.Contains(capable, "Available action tools: create_task") {
+		t.Fatalf("tool-capable follow-up prompt missing concrete runtime guidance: %q", capable)
+	}
+
+	plan := appendToolModeSystemPrompt("base", nil, models.ChatModePlan)
+	if plan != "base" {
+		t.Fatalf("Plan prompt received action-mode guidance: %q", plan)
+	}
+}
+
+func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, event := range []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-test","usage":{"input_tokens":4}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"follow-up response"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", event)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	adapter := New(nil, nil, nil)
+	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation:         llmcontracts.OperationStreaming,
+		Message:           "Continue the task",
+		Followup:          true,
+		ChatMode:          models.ChatModeOrchestrate,
+		ChatSystemContext: "FOLLOWUP_CONTEXT_SENTINEL",
+		Agent: models.LLMConfig{
+			Name:       "Claude API",
+			Provider:   models.ProviderAnthropic,
+			Model:      "claude-test",
+			AuthMethod: models.AuthMethodAPIKey,
+			APIKey:     "test-key",
+		},
+	}, ".", nil)
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	payload := fmt.Sprint(gotBody)
+	if !strings.Contains(payload, "# Task Follow-up Constraints") || !strings.Contains(payload, "FOLLOWUP_CONTEXT_SENTINEL") {
+		t.Fatalf("zero-history follow-up did not use Chat assembly: %#v", gotBody)
+	}
+	if !strings.Contains(payload, llmprompt.ChatActionUnavailableInstructions) {
+		t.Fatalf("zero-history follow-up missing capability limitation: %#v", gotBody)
+	}
+	if strings.Contains(payload, "TASK CREATION TOOL MODE") {
+		t.Fatalf("zero-history follow-up received initial-task guidance: %#v", gotBody)
+	}
+}
 
 func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

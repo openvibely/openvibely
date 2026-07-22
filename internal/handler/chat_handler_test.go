@@ -201,11 +201,19 @@ func TestHandler_Chat_LightModeToolCallContrastStyles(t *testing.T) {
 	assert.Contains(t, body, `[data-theme="light"] .stream-tool-body-row {`)
 	assert.Contains(t, body, `border-top-color: transparent;`)
 	assert.Contains(t, body, `[data-theme="light"] .stream-tool-body-content {`)
-	assert.Contains(t, body, `background: var(--ov-l-surface);`)
-	assert.Contains(t, body, `border: none;`)
-	assert.Contains(t, body, `[data-theme="light"] .stream-tool-body-scroll pre`)
 	assert.Contains(t, body, `background: transparent;`)
+	assert.Contains(t, body, `border: none;`)
+	assert.Contains(t, body, `[data-theme="light"] .chat-bubble-assistant-msg pre {`)
+	assert.Contains(t, body, `background-color: var(--ov-l-surface);`)
+	assert.Contains(t, body, `border-color: var(--ov-l-border);`)
+	assert.Contains(t, body, `[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {`)
+	assert.Contains(t, body, `[data-theme="light"] .stream-thinking summary {`)
+	assert.Contains(t, body, `[data-theme="light"] .stream-thinking .stream-thinking-body {`)
+	assert.Contains(t, body, `color: var(--ov-l-text);`)
+	assert.NotContains(t, body, `[data-theme="light"] .stream-tool-body-scroll pre`)
 	assert.Contains(t, body, `overflow: hidden;`)
+	assert.NotContains(t, body, `[data-theme="dark"] .stream-tool-body {`)
+	assert.NotContains(t, body, `[data-theme="dark"] .stream-tool-body-content`)
 	assert.Contains(t, body, `[data-theme="light"] .tool-status-done`)
 	assert.Contains(t, body, `color: var(--ov-l-success);`)
 	assert.Contains(t, body, `[data-theme="light"] .tool-status-error`)
@@ -410,7 +418,7 @@ func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeToo
 	time.Sleep(20 * time.Millisecond)
 }
 
-func TestHandler_ChatSend_MixtureOllamaAggregatorCreatesTaskThroughMarker(t *testing.T) {
+func TestHandler_ChatSend_MixtureOllamaAggregatorLeavesActionMarkerTextInert(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -428,7 +436,7 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorCreatesTaskThroughMarker(t *tes
 		}
 		providerRequests <- body
 		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Investigate marker fallback through Ollama.\"}\n[/CREATE_TASK]"},"done":false}`)
+		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":"[CREATE_TASK]\n{\"title\":\"HTTP mixture marker investigation\",\"prompt\":\"Verify marker-looking text remains inert through Ollama.\"}\n[/CREATE_TASK]"},"done":false}`)
 		_, _ = fmt.Fprintln(w, `{"model":"test-model","message":{"role":"assistant","content":""},"done":true,"eval_count":12}`)
 	}))
 	defer providerServer.Close()
@@ -466,18 +474,19 @@ func TestHandler_ChatSend_MixtureOllamaAggregatorCreatesTaskThroughMarker(t *tes
 	require.True(t, slices.ContainsFunc(messages, func(raw any) bool {
 		message, _ := raw.(map[string]any)
 		content, _ := message["content"].(string)
-		return message["role"] == "system" && strings.Contains(content, "[CREATE_TASK]")
-	}), "runtime-tool-incapable aggregator must retain marker guidance")
-	require.Eventually(t, func() bool {
-		tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
-		return err == nil && slices.ContainsFunc(tasks, func(task models.Task) bool {
-			return task.Title == "HTTP mixture marker investigation"
-		})
-	}, 3*time.Second, 10*time.Millisecond)
+		return message["role"] == "system" &&
+			strings.Contains(content, "Runtime actions are unavailable for this request") &&
+			!strings.Contains(content, "[CREATE_TASK]")
+	}), "runtime-tool-incapable aggregator must surface its action limitation without marker guidance")
 	require.Eventually(t, func() bool {
 		active, err := h.execRepo.FindLatestActiveChatExecution(ctx, "default")
 		return err == nil && active == nil
 	}, 3*time.Second, 10*time.Millisecond)
+	tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.False(t, slices.ContainsFunc(tasks, func(task models.Task) bool {
+		return task.Title == "HTTP mixture marker investigation"
+	}), "marker-looking model prose must not create a task")
 	time.Sleep(20 * time.Millisecond)
 }
 
@@ -2684,88 +2693,6 @@ func TestCopyChatAttachmentsToTask_NoAttachments(t *testing.T) {
 // TestProcessChatTaskCreations_DeferredAttachmentActivationExactlyOnce verifies that
 // the production Chat creation path publishes attachments before activating and
 // submits the resulting task exactly once.
-func TestProcessChatTaskCreations_DeferredAttachmentActivationExactlyOnce(t *testing.T) {
-	h, _, llmConfigRepo := setupTestHandler(t)
-	ctx := context.Background()
-
-	agent := &models.LLMConfig{
-		Name: "Test Agent", Provider: models.ProviderTest,
-		Model: "claude-3-sonnet-20240229", APIKey: "test-key",
-		MaxTokens: 4096, Temperature: 1.0, IsDefault: true,
-	}
-	require.NoError(t, llmConfigRepo.Create(ctx, agent))
-
-	projects, _ := h.projectSvc.List(ctx)
-
-	// Create a chat task and execution
-	chatTask := &models.Task{
-		ProjectID: projects[0].ID, Title: "Chat: deferred test",
-		Prompt: "test", Status: models.StatusPending,
-		Category: models.CategoryChat, AgentID: &agent.ID,
-	}
-	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
-
-	exec := &models.Execution{
-		TaskID: chatTask.ID, AgentConfigID: agent.ID,
-		Status: models.ExecRunning, PromptSent: "test",
-	}
-	require.NoError(t, h.execRepo.Create(ctx, exec))
-
-	tmpDir := t.TempDir()
-	oldUploadsDir := uploadsDir
-	uploadsDir = tmpDir
-	defer func() { uploadsDir = oldUploadsDir }()
-
-	// Create a chat attachment (simulating user uploading screenshot in chat)
-	chatDir := filepath.Join(tmpDir, "chat", exec.ID)
-	require.NoError(t, os.MkdirAll(chatDir, 0755))
-	testFile := filepath.Join(chatDir, "screenshot.png")
-	require.NoError(t, os.WriteFile(testFile, []byte{0x89, 0x50, 0x4E, 0x47}, 0644))
-
-	chatAtt := &models.ChatAttachment{
-		ExecutionID: exec.ID,
-		FileName:    "screenshot.png",
-		FilePath:    testFile,
-		MediaType:   "image/png",
-		FileSize:    4,
-	}
-	require.NoError(t, h.chatAttachmentRepo.Create(ctx, chatAtt))
-
-	output := `[CREATE_TASK]
-{"title":"Deferred active task","prompt":"update styling based on screenshot","category":"active","agent_id":"` + agent.ID + `"}
-[/CREATE_TASK]`
-	updatedOutput, copiedCount := h.processChatTaskCreations(ctx, exec.ID, projects[0].ID, output, []models.LLMConfig{*agent})
-	require.Equal(t, 1, copiedCount)
-	createdIDs := extractTaskIDsFromOutput(updatedOutput)
-	require.Len(t, createdIDs, 1)
-	deferredTask, err := h.taskRepo.GetByID(ctx, createdIDs[0])
-	require.NoError(t, err)
-	require.NotNil(t, deferredTask)
-	assert.Equal(t, models.CategoryActive, deferredTask.Category)
-	assert.Contains(t, updatedOutput, `"Deferred active task" (active)`)
-
-	// The key invariant: publication and prompt updates are complete when the
-	// production creation path reports and submits the task as Active.
-	taskAttachments, err := h.attachmentRepo.ListByTask(ctx, deferredTask.ID)
-	require.NoError(t, err)
-	require.Len(t, taskAttachments, 1)
-	assert.Equal(t, "screenshot.png", taskAttachments[0].FileName)
-	assert.Contains(t, deferredTask.Prompt, "[Attached files from chat:")
-	assert.Contains(t, deferredTask.Prompt, "screenshot.png (path: ")
-	taskDir := filepath.Join(tmpDir, "tasks", deferredTask.ID)
-	assert.FileExists(t, filepath.Join(taskDir, "screenshot.png"))
-	select {
-	case submitted := <-h.workerSvc.Submitted():
-		assert.Equal(t, deferredTask.ID, submitted.ID)
-	case <-time.After(time.Second):
-		t.Fatal("activated attachment task was not submitted")
-	}
-	select {
-	case submitted := <-h.workerSvc.Submitted():
-		t.Fatalf("activated attachment task was submitted more than once: %s", submitted.ID)
-	default:
-	}
-}
 
 // TestHandler_Chat_FullPageVsHTMXPartial verifies that HTMX requests return partial content
 // while non-HTMX requests return full page with layout. This difference is why the server
@@ -3309,8 +3236,8 @@ func TestHandler_TaskThreadSend_CancelQueuedCapacityWait(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
-	maxWorkers := 1
-	project := &models.Project{Name: "Cancellable Queue Project", MaxWorkers: &maxWorkers}
+	h.workerSvc.Resize(1)
+	project := &models.Project{Name: "Cancellable Global Queue Project"}
 	require.NoError(t, h.projectSvc.Create(ctx, project))
 	h.workerSvc.SetProjectRepo(h.projectRepo)
 
@@ -3342,7 +3269,7 @@ func TestHandler_TaskThreadSend_CancelQueuedCapacityWait(t *testing.T) {
 		return "should not run", "", 1, nil
 	}))
 
-	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID), "should saturate project slot")
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID), "should saturate global worker slot")
 
 	form := url.Values{}
 	form.Set("message", "Follow up that will be cancelled while queued")
@@ -3723,7 +3650,9 @@ func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneFallback(t *testing.T
 	// Shared live-event chat_response_done branch must invoke evaluatePlanCompletionPrompt.
 	doneHandlerIdx := strings.Index(body, "if (eventType === 'chat_response_done') {")
 	require.NotEqual(t, -1, doneHandlerIdx, "chat_response_done handler must exist")
-	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+1500]
+	doneHandlerEnd := strings.Index(body[doneHandlerIdx:], "var handleChatAfterSwap = function(event)")
+	require.Greater(t, doneHandlerEnd, 0, "chat_response_done handler boundary must exist")
+	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+doneHandlerEnd]
 
 	assert.Contains(t, doneHandlerBody, "evaluatePlanCompletionPrompt",
 		"chat_response_done must invoke evaluatePlanCompletionPrompt as fallback")
@@ -3731,8 +3660,8 @@ func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneFallback(t *testing.T
 		"chat_response_done must clear streaming flag")
 	assert.Contains(t, doneHandlerBody, "data.completed_output",
 		"chat_response_done fallback should use completed_output when present")
-	assert.Contains(t, doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output)",
-		"chat_response_done should reconcile the live bubble with completed_output")
+	assert.Contains(t, doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output, data.status || '')",
+		"chat_response_done should reconcile the live bubble with authoritative output and status")
 	assert.Contains(t, doneHandlerBody, "if (data.is_task_followup) return;",
 		"global chat page must ignore task-thread completion broadcasts")
 }
@@ -3763,7 +3692,7 @@ func TestHandler_Chat_PlanCompletionPrompt_NewMessageSetsStreamingFlag(t *testin
 
 	newMsgIdx := strings.Index(body, "if (eventType === 'chat_new_message') {")
 	require.NotEqual(t, -1, newMsgIdx, "chat_new_message handler must exist")
-	newMsgBody := body[newMsgIdx : newMsgIdx+2000]
+	newMsgBody := body[newMsgIdx : newMsgIdx+3200]
 
 	assert.Contains(t, newMsgBody, "_chatStreamInProgress = !data.queued",
 		"chat_new_message must set streaming flag for active streams and leave queued inputs non-streaming")
@@ -3811,16 +3740,21 @@ func TestHandler_Chat_LiveStreamingUsesRenderStreamingContent(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 
-	onMsgIdx := strings.Index(body, "eventSource.onmessage = function(event)")
-	require.NotEqual(t, -1, onMsgIdx, "live streaming onmessage handler must exist")
+	renderHelperIdx := strings.Index(body, "function renderBufferedOutput(force)")
+	require.NotEqual(t, -1, renderHelperIdx, "live streaming should define a batched render helper")
+	onMsgOffset := strings.Index(body[renderHelperIdx:], "eventSource.onmessage = function(event)")
+	require.NotEqual(t, -1, onMsgOffset, "live streaming onmessage handler must exist")
+	onMsgIdx := renderHelperIdx + onMsgOffset
 	onMsgBody := body[onMsgIdx : onMsgIdx+2400]
 
 	assert.Contains(t, body, "function renderBufferedOutput(force)",
 		"live streaming should define a batched render helper")
 	assert.Contains(t, body, "if (!window.renderStreamingContent)",
 		"batched render helper should provide text fallback when renderer is unavailable")
-	assert.Contains(t, body, "window.renderStreamingContent(contentDiv, textBuffer)",
+	assert.Contains(t, body, "var renderPromise = liveRenderer(contentDiv, renderText)",
 		"batched render helper should render via shared renderer")
+	assert.Contains(t, body, "renderPromise.then(finishRender)",
+		"batched render helper should wait for the shared renderer before accepting another batch")
 	assert.Contains(t, onMsgBody, "renderBufferedOutput(false)",
 		"live streaming should batch per-chunk rendering to keep UI responsive")
 }
@@ -3850,9 +3784,14 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamDoneEvaluatesBeforeTransforms(t
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 
-	doneIdx := strings.Index(body, "eventSource.addEventListener('done', function()")
-	require.NotEqual(t, -1, doneIdx, "stream done handler must exist")
-	doneBody := body[doneIdx : doneIdx+2000]
+	renderHelperIdx := strings.Index(body, "function renderBufferedOutput(force)")
+	require.NotEqual(t, -1, renderHelperIdx, "fresh stream render helper must exist")
+	doneOffset := strings.Index(body[renderHelperIdx:], "eventSource.addEventListener('done', function(event)")
+	require.NotEqual(t, -1, doneOffset, "stream done handler must exist")
+	doneIdx := renderHelperIdx + doneOffset
+	doneEnd := strings.Index(body[doneIdx:], "eventSource.addEventListener('error'")
+	require.Greater(t, doneEnd, 0, "stream done handler boundary must exist")
+	doneBody := body[doneIdx : doneIdx+doneEnd]
 
 	handleIdx := strings.Index(doneBody, "handlePlanModeCompletion")
 	convertIdx := strings.Index(doneBody, "convertTaskLinksInMessage")
@@ -4029,16 +3968,17 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	// The handler body with isThread branch can be ~1200 chars.
 	errIdx := strings.Index(body, "eventSource.addEventListener('error'")
 	require.NotEqual(t, -1, errIdx, "streaming bubble must have error event listener")
-	errEnd := errIdx + 2000
-	if errEnd > len(body) {
-		errEnd = len(body)
-	}
-	errBody := body[errIdx:errEnd]
+	errEndOffset := strings.Index(body[errIdx:], "eventSource.onerror")
+	require.Greater(t, errEndOffset, 0, "streaming bubble error handler boundary must exist")
+	errBody := body[errIdx : errIdx+errEndOffset]
 
 	assert.Contains(t, errBody, "event.data === 'execution not found'",
 		"streaming bubble error handler must retry early execution lookup races")
-	assert.Contains(t, errBody, "setTimeout(connectExecutionStream, 150 * streamRetryCount)",
+	assert.Contains(t, errBody, "scheduleExecutionStreamRetry()",
 		"streaming bubble error handler must reconnect before failing empty streams")
+	assert.Contains(t, body, "connectExecutionStream();")
+	assert.Contains(t, body, "}, 150 * streamRetryCount);",
+		"streaming bubble retry scheduler must reconnect with bounded backoff")
 	assert.Contains(t, errBody, "_chatStreamInProgress = false",
 		"streaming bubble error handler must clear _chatStreamInProgress for chat context")
 	assert.Contains(t, errBody, "evaluatePlanCompletionPrompt",
@@ -4053,7 +3993,7 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 	}
 	oeBody := body[oeIdx:oeEnd]
 
-	assert.Contains(t, oeBody, "setTimeout(connectExecutionStream, 150 * streamRetryCount)",
+	assert.Contains(t, oeBody, "scheduleExecutionStreamRetry()",
 		"streaming bubble onerror must reconnect before failing empty streams")
 	assert.Contains(t, oeBody, "_chatStreamInProgress = false",
 		"streaming bubble onerror must clear _chatStreamInProgress for chat context")
@@ -4062,8 +4002,8 @@ func TestHandler_Chat_PlanCompletionPrompt_StreamErrorClearsFlag(t *testing.T) {
 }
 
 func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
-	// Visibility reconnect should not force a full chat outerHTML refresh while
-	// a local streaming bubble is still active.
+	// Visibility reconnect should keep active streams and unchanged completed
+	// transcript DOM mounted, while still reconciling genuinely missed state.
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -4087,27 +4027,29 @@ func TestHandler_Chat_ReconnectRefreshSkipsWhileActiveStream(t *testing.T) {
 
 	onConnectIdx := strings.Index(body, "var handleSharedLiveConnected = function(event) {")
 	require.NotEqual(t, -1, onConnectIdx, "visibility reconnect handler must exist")
-	// Use a wide window: the reconnect handler includes pending-inputs refresh branches
-	// for both the active-stream and rendered-history paths in addition to the full refresh.
-	onConnectBody := body[onConnectIdx : onConnectIdx+2400]
+	// Use a wide window for the complete revision-check and targeted morph path.
+	onConnectEnd := strings.Index(body[onConnectIdx:], "var handleSharedChatLiveEvent = function(event) {")
+	require.NotEqual(t, -1, onConnectEnd, "visibility reconnect handler must have a bounded body")
+	onConnectBody := body[onConnectIdx : onConnectIdx+onConnectEnd]
 
 	assert.Contains(t, onConnectBody, "window._chatStreamInProgress && hasActiveChatStream()",
-		"reconnect handler must detect active stream before triggering refresh")
-	assert.Contains(t, onConnectBody, "#chat-messages .chat-bubble-user-msg, #chat-messages .chat-bubble-assistant-msg",
-		"reconnect handler must detect static rendered history after hard refresh")
-	assert.Contains(t, onConnectBody, "if (hasRenderedHistory)",
-		"reconnect handler must skip destructive chat root refresh when history is already rendered")
-	assert.Contains(t, onConnectBody, "return;",
-		"reconnect handler should early-return when active stream or rendered history is present")
+		"reconnect handler must leave active offset-aware streams mounted")
+	assert.Contains(t, onConnectBody, "function waitForChatCatchup()",
+		"reconnect handler must reconcile a queued promotion missed while the prior stream catches up")
 	assert.Contains(t, onConnectBody, "/chat/pending-inputs",
 		"reconnect handler must refresh pending-inputs to reconcile stale steering rows")
-
-	ajaxIdx := strings.Index(onConnectBody, "htmx.ajax('GET', '/chat?project_id=")
-	historyIdx := strings.Index(onConnectBody, "if (hasRenderedHistory)")
-	require.NotEqual(t, -1, ajaxIdx, "reconnect handler must still refresh when no history is rendered")
-	require.NotEqual(t, -1, historyIdx, "rendered history guard must exist")
-	assert.Less(t, historyIdx, ajaxIdx,
-		"rendered history guard must run before issuing destructive chat root refresh")
+	assert.Contains(t, onConnectBody, "var currentRevision = chatContainer.getAttribute('data-chat-revision') || '';",
+		"reconnect handler must capture the current authoritative transcript revision")
+	assert.Contains(t, onConnectBody, "if (!nextRevision || nextRevision === currentRevision) return;",
+		"unchanged completed transcripts must not mutate the DOM")
+	assert.Contains(t, onConnectBody, "target: '#chat-messages'",
+		"changed reconnect state must target only the transcript")
+	assert.Contains(t, onConnectBody, "select: '#chat-messages'",
+		"changed reconnect state must select only the authoritative transcript fragment")
+	assert.Contains(t, onConnectBody, "swap: 'morph:outerHTML'",
+		"changed reconnect state must preserve stable execution nodes through morphing")
+	assert.NotContains(t, onConnectBody, "target: chatContainer, swap: 'outerHTML'",
+		"focus reconnect must not replace the composer, draft, or attachment session")
 }
 
 func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneCompletedOutput(t *testing.T) {
@@ -4137,9 +4079,11 @@ func TestHandler_Chat_PlanCompletionPrompt_ChatResponseDoneCompletedOutput(t *te
 	// Shared live-event chat_response_done branch must pass completed_output to evaluator.
 	doneHandlerIdx := strings.Index(body, "if (eventType === 'chat_response_done') {")
 	require.NotEqual(t, -1, doneHandlerIdx, "chat_response_done handler must exist")
-	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+2200]
+	doneHandlerEnd := strings.Index(body[doneHandlerIdx:], "var handleChatAfterSwap = function(event)")
+	require.Greater(t, doneHandlerEnd, 0, "chat_response_done handler boundary must exist")
+	doneHandlerBody := body[doneHandlerIdx : doneHandlerIdx+doneHandlerEnd]
 
-	syncIdx := strings.Index(doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output)")
+	syncIdx := strings.Index(doneHandlerBody, "syncCompletedOutputToBubble(data.exec_id, data.completed_output, data.status || '')")
 	flagIdx := strings.Index(doneHandlerBody, "_chatStreamInProgress = false")
 	evalIdx := strings.Index(doneHandlerBody, "evaluatePlanCompletionPrompt(data.completed_output)")
 
@@ -4175,11 +4119,11 @@ func TestHandler_Chat_AssistantBubbleRehydrationOnLoadAndSwap(t *testing.T) {
 	body := rec.Body.String()
 
 	assert.Contains(t, body, "if (window.cleanAssistantMessages) window.cleanAssistantMessages(chatMessages);",
-		"chat transforms must rehydrate assistant bubbles from data-raw-content before marker cleaning")
+		"chat transforms must rehydrate assistant bubbles from data-raw-content before transcript-control cleaning")
 	assert.Contains(t, body, "window.rehydrateChatAssistantBubbles = function()",
 		"chat page must expose explicit rehydration helper")
-	assert.Contains(t, body, "if (window.rehydrateChatAssistantBubbles) window.rehydrateChatAssistantBubbles();",
-		"chat page must schedule initial rehydration pass after load")
+	assert.NotContains(t, body, "if (window.rehydrateChatAssistantBubbles) window.rehydrateChatAssistantBubbles();",
+		"chat page must not restart the per-bubble initial render with a duplicate hydration pass")
 	assert.Contains(t, body, "if (!window._chatStreamInProgress && window.maybeShowPlanCompletionPromptFromHistory)",
 		"afterSwap prompt recovery must not run while an active stream is still in progress")
 }
@@ -4243,11 +4187,19 @@ func TestHandler_Chat_RenderChatMarkdown_EscapesRawHTMLLikeTags(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
 
-	// Regression guard: chat markdown rendering must escape raw HTML-like tags
-	// (e.g. malformed <div>/<button>/<function_calls> blocks) before marked.parse.
-	assert.Contains(t, body, "window.escapeRawHTMLForMarkdown = function(text)")
+	// Regression guard: full-page Chat must use the shared Markdown range grammar,
+	// escape raw tag openers before Marked, and DOM-sanitize Marked output.
+	assert.Contains(t, body, "window.codeRanges = function(text)")
+	assert.Contains(t, body, "window.escapeRawHTMLForMarkdown = function(text, ranges)")
 	assert.Contains(t, body, "var escapedText = window.escapeRawHTMLForMarkdown(text);")
-	assert.Contains(t, body, "var html = marked.parse(escapedText);")
+	assert.Contains(t, body, "window.configureChatMarked = function()")
+	assert.Contains(t, body, "if (!window.configureChatMarked || !window.configureChatMarked())")
+	assert.Contains(t, body, "window.renderChatMarkdownFallback = function(text)")
+	assert.Contains(t, body, `data-chat-markdown-fallback="true"`)
+	assert.Contains(t, body, "return window.renderChatMarkdownFallback(text);")
+	assert.Contains(t, body, "(inToolOutput || inMarkdownFallback) && window.isInsideCode")
+	assert.Contains(t, body, "return window.sanitizeChatHTML(window.marked.parse(escapedText));")
+	assert.NotContains(t, body, "OVMDHTML")
 }
 
 func TestHandler_Chat_PlanCompletionCTA_ServerRenderedPersistence(t *testing.T) {

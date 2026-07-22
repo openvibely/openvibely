@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4/middleware"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 )
 
 // ---- CreateSchedule ----
@@ -18,7 +21,7 @@ func TestCreateSchedule_InvalidDate(t *testing.T) {
 	project := tc.CreateProject().Build()
 	task := tc.CreateTask(project.ID).Build()
 
-	rec := tc.HTMX().Post("/tasks/"+task.ID+"/schedule").WithForm(url.Values{
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
 		"run_at":          {"not-a-date"},
 		"repeat_type":     {"once"},
 		"repeat_interval": {"1"},
@@ -35,7 +38,7 @@ func TestCreateSchedule_Success_Redirect(t *testing.T) {
 	task := tc.CreateTask(project.ID).Build()
 
 	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
-	rec := tc.HTTP().Post("/tasks/"+task.ID+"/schedule").WithForm(url.Values{
+	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"once"},
 		"repeat_interval": {"1"},
@@ -60,7 +63,7 @@ func TestCreateSchedule_HTMX_Success(t *testing.T) {
 	task := tc.CreateTask(project.ID).Build()
 
 	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
-	rec := tc.HTMX().Post("/tasks/"+task.ID+"/schedule").WithForm(url.Values{
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"daily"},
 		"repeat_interval": {"1"},
@@ -77,7 +80,7 @@ func TestCreateSchedule_DefaultRepeatType(t *testing.T) {
 	task := tc.CreateTask(project.ID).Build()
 
 	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
-	rec := tc.HTTP().Post("/tasks/"+task.ID+"/schedule").WithForm(url.Values{
+	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_interval": {"1"},
 		// omit repeat_type — should default to "once"
@@ -96,6 +99,270 @@ func TestCreateSchedule_DefaultRepeatType(t *testing.T) {
 	}
 	if schedules[0].RepeatType != models.RepeatOnce {
 		t.Errorf("expected RepeatOnce default, got %q", schedules[0].RepeatType)
+	}
+}
+
+func createScheduleTestAgent(t *testing.T, repo *repository.AgentRepo, name string, scope models.AgentScope, projectID string, selectable bool) *models.Agent {
+	t.Helper()
+	agent := &models.Agent{
+		Name:                name,
+		Key:                 strings.ToLower(strings.ReplaceAll(name, " ", "-")),
+		SystemPrompt:        "Act as " + name,
+		Model:               "inherit",
+		Scope:               scope,
+		ProjectID:           projectID,
+		Enabled:             true,
+		SelectableAsPrimary: selectable,
+		GeneratedStatus:     models.AgentStatusUserEdited,
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		t.Fatalf("create agent %q: %v", name, err)
+	}
+	return agent
+}
+
+func TestCreateSchedule_AssignsPrimaryAgent(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.agentRepo = agentRepo
+	agent := createScheduleTestAgent(t, agentRepo, "Schedule Runner", models.AgentScopeProject, project.ID, true)
+
+	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule?project_id=" + project.ID).WithForm(url.Values{
+		"run_at":                            {runAt},
+		"repeat_type":                       {"once"},
+		"repeat_interval":                   {"1"},
+		"schedule_agent_definition_present": {"1"},
+		"agent_definition_id":               {agent.ID},
+	}).Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.AgentDefinitionID == nil || *stored.AgentDefinitionID != agent.ID {
+		t.Fatalf("primary agent = %v, want %s", stored.AgentDefinitionID, agent.ID)
+	}
+}
+
+func TestCreateSchedule_ExplicitNoAgentClearsPrimaryAgent(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.agentRepo = agentRepo
+	agent := createScheduleTestAgent(t, agentRepo, "Existing Runner", models.AgentScopeGlobal, "", true)
+	task := tc.CreateTask(project.ID).Build()
+	if err := tc.taskRepo.UpdateAgentDefinition(context.Background(), task.ID, &agent.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule?project_id=" + project.ID).WithForm(url.Values{
+		"run_at":                            {runAt},
+		"repeat_type":                       {"once"},
+		"repeat_interval":                   {"1"},
+		"schedule_agent_definition_present": {"1"},
+		"agent_definition_id":               {""},
+	}).Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	stored, _ := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if stored.AgentDefinitionID != nil {
+		t.Fatalf("expected no primary agent, got %v", *stored.AgentDefinitionID)
+	}
+}
+
+func TestUpdateSchedule_PersistsAndClearsPrimaryAgentWithoutChangingModel(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	model := tc.CreateLLMConfig().Build()
+	taskBuilder := tc.CreateTask(project.ID)
+	taskBuilder.task.AgentID = &model.ID
+	task := taskBuilder.Build()
+	schedule := tc.CreateSchedule(task.ID).Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.agentRepo = agentRepo
+	agent := createScheduleTestAgent(t, agentRepo, "Updated Runner", models.AgentScopeProject, project.ID, true)
+	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+
+	for _, agentID := range []string{agent.ID, ""} {
+		rec := tc.HTTP().Put("/schedules/" + schedule.ID + "?project_id=" + project.ID).WithForm(url.Values{
+			"run_at":                            {runAt},
+			"repeat_type":                       {"daily"},
+			"repeat_interval":                   {"1"},
+			"schedule_agent_definition_present": {"1"},
+			"agent_definition_id":               {agentID},
+		}).Execute()
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("agent %q: expected 303, got %d body=%s", agentID, rec.Code, rec.Body.String())
+		}
+		stored, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.AgentID == nil || *stored.AgentID != model.ID {
+			t.Fatalf("model assignment changed: got %v, want %s", stored.AgentID, model.ID)
+		}
+		if agentID == "" && stored.AgentDefinitionID != nil {
+			t.Fatalf("expected no primary agent, got %v", *stored.AgentDefinitionID)
+		}
+		if agentID != "" && (stored.AgentDefinitionID == nil || *stored.AgentDefinitionID != agentID) {
+			t.Fatalf("primary agent = %v, want %s", stored.AgentDefinitionID, agentID)
+		}
+	}
+}
+
+func TestUpdateSchedule_RejectsIneligibleAndCrossProjectAgents(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	otherProject := tc.CreateProject().WithName("Other Project").Build()
+	task := tc.CreateTask(project.ID).Build()
+	schedule := tc.CreateSchedule(task.ID).Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.agentRepo = agentRepo
+	ineligible := createScheduleTestAgent(t, agentRepo, "Maintenance Agent", models.AgentScopeGlobal, "", false)
+	otherProjectAgent := createScheduleTestAgent(t, agentRepo, "Other Project Agent", models.AgentScopeProject, otherProject.ID, true)
+	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+
+	for _, agentID := range []string{ineligible.ID, otherProjectAgent.ID} {
+		rec := tc.HTTP().Put("/schedules/" + schedule.ID + "?project_id=" + project.ID).WithForm(url.Values{
+			"run_at":                            {runAt},
+			"repeat_type":                       {"daily"},
+			"repeat_interval":                   {"1"},
+			"schedule_agent_definition_present": {"1"},
+			"agent_definition_id":               {agentID},
+		}).Execute()
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("agent %s: expected 400, got %d body=%s", agentID, rec.Code, rec.Body.String())
+		}
+	}
+	stored, _ := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if stored.AgentDefinitionID != nil {
+		t.Fatalf("rejected assignment must not persist, got %v", *stored.AgentDefinitionID)
+	}
+}
+
+func TestViewSchedule_PrimaryAgentOptionsAreEligibleAndProjectScoped(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	otherProject := tc.CreateProject().WithName("Other Project").Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.agentRepo = agentRepo
+	global := createScheduleTestAgent(t, agentRepo, "Global Runner", models.AgentScopeGlobal, "", true)
+	projectAgent := createScheduleTestAgent(t, agentRepo, "Project Runner", models.AgentScopeProject, project.ID, true)
+	ineligible := createScheduleTestAgent(t, agentRepo, "Protected Maintenance", models.AgentScopeGlobal, "", false)
+	other := createScheduleTestAgent(t, agentRepo, "Other Runner", models.AgentScopeProject, otherProject.ID, true)
+	_ = global
+	_ = projectAgent
+
+	rec := tc.HTTP().Get("/schedule?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`name="agent_id"`,
+		`>Model</span>`,
+		`name="agent_definition_id"`,
+		`>Primary Agent</span>`,
+		`>No Agent</option>`,
+		global.Name,
+		projectAgent.Name,
+		`/tasks?project_id=` + project.ID + `&amp;from=schedule`,
+		`action="/tasks?project_id=` + project.ID + `&amp;from=schedule"`,
+		`grid grid-cols-1 gap-3 sm:grid-cols-2`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected schedule modal to contain %q", want)
+		}
+	}
+	for _, excluded := range []string{ineligible.Name, other.Name} {
+		if strings.Contains(body, excluded) {
+			t.Fatalf("schedule modal exposed unavailable agent %q", excluded)
+		}
+	}
+}
+
+func TestCreateScheduledTask_NativeFormRedirectsToProjectSchedule(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+
+	rec := tc.HTTP().Post("/tasks?project_id=" + project.ID + "&from=schedule").WithForm(url.Values{
+		"title":           {"Native Scheduled Task"},
+		"prompt":          {"Run later"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"run_at":          {runAt},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}).Execute()
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 from native schedule creation, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if location := rec.Header().Get("Location"); location != "/schedule?project_id="+project.ID {
+		t.Fatalf("native redirect lost project scope: %q", location)
+	}
+	tasks, err := tc.taskRepo.ListByProject(context.Background(), project.ID, "")
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("list tasks: count=%d err=%v", len(tasks), err)
+	}
+	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), tasks[0].ID)
+	if err != nil || len(schedules) != 1 {
+		t.Fatalf("list schedules: count=%d err=%v", len(schedules), err)
+	}
+}
+
+func TestCreateScheduledTask_PersistsPrimaryAgentAndExplicitNoAgent(t *testing.T) {
+	for _, tcse := range []struct {
+		name        string
+		assignAgent bool
+	}{
+		{name: "assigned", assignAgent: true},
+		{name: "no agent", assignAgent: false},
+	} {
+		t.Run(tcse.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			agentRepo := repository.NewAgentRepo(tc.db)
+			tc.handler.agentRepo = agentRepo
+			agent := createScheduleTestAgent(t, agentRepo, "Scheduled Creator", models.AgentScopeProject, project.ID, true)
+			agentID := ""
+			if tcse.assignAgent {
+				agentID = agent.ID
+			}
+			runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+			rec := tc.HTMX().Post("/tasks?project_id=" + project.ID + "&from=schedule").WithForm(url.Values{
+				"title":               {"Scheduled Assignment " + tcse.name},
+				"prompt":              {"Run later"},
+				"category":            {"scheduled"},
+				"priority":            {"2"},
+				"run_at":              {runAt},
+				"repeat_type":         {"daily"},
+				"repeat_interval":     {"1"},
+				"agent_definition_id": {agentID},
+			}).Execute()
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			tasks, err := tc.taskRepo.ListByProject(context.Background(), project.ID, "")
+			if err != nil || len(tasks) != 1 {
+				t.Fatalf("list tasks: count=%d err=%v", len(tasks), err)
+			}
+			if tcse.assignAgent && (tasks[0].AgentDefinitionID == nil || *tasks[0].AgentDefinitionID != agent.ID) {
+				t.Fatalf("primary agent = %v, want %s", tasks[0].AgentDefinitionID, agent.ID)
+			}
+			if !tcse.assignAgent && tasks[0].AgentDefinitionID != nil {
+				t.Fatalf("expected explicit no-agent assignment, got %v", *tasks[0].AgentDefinitionID)
+			}
+		})
 	}
 }
 
@@ -122,7 +389,7 @@ func TestUpdateSchedule_InvalidDate(t *testing.T) {
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
 
-	rec := tc.HTTP().Put("/schedules/"+schedule.ID).WithForm(url.Values{
+	rec := tc.HTTP().Put("/schedules/" + schedule.ID).WithForm(url.Values{
 		"run_at":          {"bad-date"},
 		"repeat_type":     {"once"},
 		"repeat_interval": {"1"},
@@ -140,7 +407,7 @@ func TestUpdateSchedule_Success_Redirect(t *testing.T) {
 	schedule := tc.CreateSchedule(task.ID).Build()
 
 	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
-	rec := tc.HTTP().Put("/schedules/"+schedule.ID).WithForm(url.Values{
+	rec := tc.HTTP().Put("/schedules/" + schedule.ID).WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"once"},
 		"repeat_interval": {"1"},
@@ -158,7 +425,7 @@ func TestUpdateSchedule_HTMX_Success(t *testing.T) {
 	schedule := tc.CreateSchedule(task.ID).Build()
 
 	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
-	rec := tc.HTMX().Put("/schedules/"+schedule.ID).WithForm(url.Values{
+	rec := tc.HTMX().Put("/schedules/" + schedule.ID).WithForm(url.Values{
 		"run_at":          {runAt},
 		"repeat_type":     {"daily"},
 		"repeat_interval": {"1"},
@@ -166,6 +433,93 @@ func TestUpdateSchedule_HTMX_Success(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for HTMX update, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateSchedule_WithoutAgentFieldPreservesExistingAssignment(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.agentRepo = agentRepo
+	protected := createScheduleTestAgent(t, agentRepo, "Protected Scheduled Maintenance", models.AgentScopeGlobal, "", false)
+	task := tc.CreateTask(project.ID).Build()
+	if err := tc.taskRepo.UpdateAgentDefinition(context.Background(), task.ID, &protected.ID); err != nil {
+		t.Fatal(err)
+	}
+	schedule := tc.CreateSchedule(task.ID).Build()
+	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+
+	rec := tc.HTTP().Put("/schedules/" + schedule.ID + "?project_id=" + project.ID).WithForm(url.Values{
+		"run_at":          {runAt},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}).Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	stored, _ := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if stored.AgentDefinitionID == nil || *stored.AgentDefinitionID != protected.ID {
+		t.Fatalf("timing-only update changed protected assignment: got %v, want %s", stored.AgentDefinitionID, protected.ID)
+	}
+}
+
+func TestUpdateSchedule_HTMXResponseHydratesSavedPrimaryAgent(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	schedule := tc.CreateSchedule(task.ID).Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.agentRepo = agentRepo
+	agent := createScheduleTestAgent(t, agentRepo, "HTMX Scheduled Runner", models.AgentScopeProject, project.ID, true)
+	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+
+	rec := tc.HTMX().Put("/schedules/" + schedule.ID + "?project_id=" + project.ID).WithForm(url.Values{
+		"run_at":                            {runAt},
+		"repeat_type":                       {"daily"},
+		"repeat_interval":                   {"1"},
+		"schedule_agent_definition_present": {"1"},
+		"agent_definition_id":               {agent.ID},
+	}).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `value="`+agent.ID+`" selected`) {
+		t.Fatalf("HTMX response did not hydrate saved primary agent %s", agent.ID)
+	}
+	if !strings.Contains(body, `/schedules/`+schedule.ID+`?project_id=`+project.ID) {
+		t.Fatal("HTMX response lost project-scoped schedule edit URL")
+	}
+}
+
+func TestUpdateSchedule_NativeFormMethodOverridePersistsPrimaryAgent(t *testing.T) {
+	tc := NewTestContext(t)
+	tc.echo.Pre(middleware.MethodOverride())
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	schedule := tc.CreateSchedule(task.ID).Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.agentRepo = agentRepo
+	agent := createScheduleTestAgent(t, agentRepo, "Native Scheduled Runner", models.AgentScopeProject, project.ID, true)
+	runAt := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+
+	rec := tc.HTTP().Post("/schedules/" + schedule.ID + "?project_id=" + project.ID).WithForm(url.Values{
+		"_method":                           {"PUT"},
+		"run_at":                            {runAt},
+		"repeat_type":                       {"daily"},
+		"repeat_interval":                   {"1"},
+		"schedule_agent_definition_present": {"1"},
+		"agent_definition_id":               {agent.ID},
+	}).Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 from native form fallback, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	stored, _ := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if stored.AgentDefinitionID == nil || *stored.AgentDefinitionID != agent.ID {
+		t.Fatalf("native form primary agent = %v, want %s", stored.AgentDefinitionID, agent.ID)
+	}
+	if location := rec.Header().Get("Location"); !strings.Contains(location, "project_id="+project.ID) || !strings.Contains(location, "tab=schedules") {
+		t.Fatalf("native redirect lost project/schedule context: %q", location)
 	}
 }
 
@@ -205,7 +559,7 @@ func TestRescheduleTask_InvalidDate(t *testing.T) {
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
 
-	rec := tc.HTMX().Patch("/schedules/"+schedule.ID+"/reschedule").WithForm(url.Values{
+	rec := tc.HTMX().Patch("/schedules/" + schedule.ID + "/reschedule").WithForm(url.Values{
 		"new_date": {"not-a-date"},
 		"hour":     {"10"},
 	}).Execute()
@@ -221,7 +575,7 @@ func TestRescheduleTask_InvalidHour(t *testing.T) {
 	task := tc.CreateTask(project.ID).Build()
 	schedule := tc.CreateSchedule(task.ID).Build()
 
-	rec := tc.HTMX().Patch("/schedules/"+schedule.ID+"/reschedule").WithForm(url.Values{
+	rec := tc.HTMX().Patch("/schedules/" + schedule.ID + "/reschedule").WithForm(url.Values{
 		"new_date": {time.Now().AddDate(0, 0, 1).Format("2006-01-02")},
 		"hour":     {"99"},
 	}).Execute()
@@ -251,7 +605,7 @@ func TestRescheduleTask_Success_HTMX(t *testing.T) {
 	schedule := tc.CreateSchedule(task.ID).WithRepeatType(models.RepeatDaily).Build()
 
 	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
-	rec := tc.HTMX().Patch("/schedules/"+schedule.ID+"/reschedule").WithForm(url.Values{
+	rec := tc.HTMX().Patch("/schedules/" + schedule.ID + "/reschedule").WithForm(url.Values{
 		"new_date": {tomorrow},
 		"hour":     {"10"},
 	}).Execute()
@@ -268,7 +622,7 @@ func TestRescheduleTask_Success_Redirect(t *testing.T) {
 	schedule := tc.CreateSchedule(task.ID).WithRepeatType(models.RepeatDaily).Build()
 
 	tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
-	rec := tc.HTTP().Patch("/schedules/"+schedule.ID+"/reschedule").WithForm(url.Values{
+	rec := tc.HTTP().Patch("/schedules/" + schedule.ID + "/reschedule").WithForm(url.Values{
 		"new_date": {tomorrow},
 		"hour":     {"10"},
 	}).Execute()
@@ -369,7 +723,7 @@ func TestUpdateProjectWorkerLimit_Success(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
 
-	rec := tc.HTMX().Post("/workers/projects/"+project.ID+"/limit").WithForm(url.Values{
+	rec := tc.HTMX().Post("/workers/projects/" + project.ID + "/limit").WithForm(url.Values{
 		"max_workers": {"3"},
 	}).Execute()
 	if rec.Code != http.StatusOK {
@@ -381,7 +735,7 @@ func TestUpdateProjectWorkerLimit_Zero_RemovesLimit(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
 
-	rec := tc.HTMX().Post("/workers/projects/"+project.ID+"/limit").WithForm(url.Values{
+	rec := tc.HTMX().Post("/workers/projects/" + project.ID + "/limit").WithForm(url.Values{
 		"max_workers": {"0"},
 	}).Execute()
 	if rec.Code != http.StatusOK {

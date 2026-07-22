@@ -12,6 +12,28 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestGlobalWorkerCapacityUnlimitedAndFinite(t *testing.T) {
+	tests := []struct {
+		name       string
+		maxWorkers int
+		running    int
+		want       bool
+	}{
+		{name: "unlimited permits idle worker", maxWorkers: 0, running: 0, want: true},
+		{name: "unlimited permits concurrent workers", maxWorkers: 0, running: 100, want: true},
+		{name: "finite permits worker below limit", maxWorkers: 2, running: 1, want: true},
+		{name: "finite blocks worker at limit", maxWorkers: 2, running: 2, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasGlobalWorkerCapacity(tt.maxWorkers, tt.running); got != tt.want {
+				t.Fatalf("hasGlobalWorkerCapacity(%d, %d) = %v, want %v", tt.maxWorkers, tt.running, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestWorkerService_ModelSlotAcquireRelease(t *testing.T) {
 	ws := &WorkerService{
 		pending:     make(map[string]bool),
@@ -1159,13 +1181,14 @@ func TestWorkerService_NoStarvation(t *testing.T) {
 		pending:     make(map[string]bool),
 		cancelFuncs: make(map[string]context.CancelFunc),
 		submitted:   make(chan models.Task, 100),
-		numWorkers:  10,
+		numWorkers:  0,
 	}
 
 	agentID := "test-agent"
 	projectID := "test-project"
 
-	// Simulate concurrent workers acquiring and releasing slots
+	// Simulate concurrent workers acquiring and releasing slots without a finite
+	// global cap so every successful acquisition has a matching release.
 	var wg sync.WaitGroup
 	const numGoroutines = 20
 	const opsPerGoroutine = 50

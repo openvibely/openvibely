@@ -2,12 +2,148 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHandler_ApproveAlertIsProjectScoped(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Approval Project")
+	foreign := createProject(t, h, "Foreign Approval Project")
+	a := &models.Alert{ProjectID: project.ID, Scope: models.AlertScopeProject, Type: models.AlertType("suggestion"), Severity: models.SeverityInfo,
+		Title: "Review suggestion", Body: "Inspect me", Source: "test", DecisionState: models.AlertDecisionPending, ProcessingState: models.AlertProcessingUnclaimed}
+	require.NoError(t, h.alertSvc.Create(context.Background(), a))
+
+	foreignReq := httptest.NewRequest(http.MethodPost, "/alerts/"+a.ID+"/approve?project_id="+foreign.ID, nil)
+	foreignRec := httptest.NewRecorder()
+	foreignCtx := e.NewContext(foreignReq, foreignRec)
+	foreignCtx.SetParamNames("id")
+	foreignCtx.SetParamValues(a.ID)
+	err := h.ApproveAlert(foreignCtx)
+	require.Error(t, err)
+	unchanged, getErr := h.alertSvc.GetByID(context.Background(), project.ID, a.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, models.AlertDecisionPending, unchanged.DecisionState)
+
+	req := httptest.NewRequest(http.MethodPost, "/alerts/"+a.ID+"/approve?project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(a.ID)
+	require.NoError(t, h.ApproveAlert(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "approved")
+	require.NotContains(t, rec.Body.String(), ">Approve<")
+	approved, getErr := h.alertSvc.GetByID(context.Background(), project.ID, a.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, models.AlertDecisionApproved, approved.DecisionState)
+	require.Equal(t, models.AlertProcessingUnclaimed, approved.ProcessingState)
+}
+
+func TestHandler_RejectAlertAndActionableVisibilityAreProjectScoped(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Review Project")
+	foreign := createProject(t, h, "Foreign Review Project")
+	alert := &models.Alert{ProjectID: project.ID, Scope: models.AlertScopeProject, Type: "suggestion", Severity: models.SeverityInfo,
+		Title: "Reject this suggestion", Body: "Project-only review body", Source: "test", DecisionState: models.AlertDecisionPending, ProcessingState: models.AlertProcessingUnclaimed}
+	require.NoError(t, h.alertSvc.Create(context.Background(), alert))
+
+	foreignListReq := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+foreign.ID, nil)
+	foreignListRec := httptest.NewRecorder()
+	require.NoError(t, h.ListAlerts(e.NewContext(foreignListReq, foreignListRec)))
+	require.NotContains(t, foreignListRec.Body.String(), alert.Title)
+	require.NotContains(t, foreignListRec.Body.String(), alert.Body)
+
+	projectListReq := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID, nil)
+	projectListRec := httptest.NewRecorder()
+	require.NoError(t, h.ListAlerts(e.NewContext(projectListReq, projectListRec)))
+	require.Contains(t, projectListRec.Body.String(), alert.Title)
+	require.Contains(t, projectListRec.Body.String(), alert.Body)
+	require.Contains(t, projectListRec.Body.String(), ">Approve<")
+	require.Contains(t, projectListRec.Body.String(), ">Reject<")
+
+	foreignRejectReq := httptest.NewRequest(http.MethodPost, "/alerts/"+alert.ID+"/reject?project_id="+foreign.ID, nil)
+	foreignRejectRec := httptest.NewRecorder()
+	foreignRejectCtx := e.NewContext(foreignRejectReq, foreignRejectRec)
+	foreignRejectCtx.SetParamNames("id")
+	foreignRejectCtx.SetParamValues(alert.ID)
+	require.Error(t, h.RejectAlert(foreignRejectCtx))
+
+	rejectReq := httptest.NewRequest(http.MethodPost, "/alerts/"+alert.ID+"/reject?project_id="+project.ID, nil)
+	rejectReq.Header.Set("HX-Request", "true")
+	rejectRec := httptest.NewRecorder()
+	rejectCtx := e.NewContext(rejectReq, rejectRec)
+	rejectCtx.SetParamNames("id")
+	rejectCtx.SetParamValues(alert.ID)
+	require.NoError(t, h.RejectAlert(rejectCtx))
+	require.Contains(t, rejectRec.Body.String(), "rejected")
+	require.NotContains(t, rejectRec.Body.String(), ">Approve<")
+	stored, err := h.alertSvc.GetByID(context.Background(), project.ID, alert.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertDecisionRejected, stored.DecisionState)
+}
+
+func TestHandler_IntegratedNotificationApprovalToImplementationTask(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := createProject(t, h, "Integrated Notification Project")
+	caller := &models.Task{ProjectID: project.ID, Title: "Scheduled scanner", Prompt: "scan approved notifications", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	runtime := service.BuildAlertRuntimeActionHandlers(service.AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: h.alertSvc})
+
+	createdJSON, err := runtime["create_notification"](ctx, json.RawMessage(`{"type":"product_suggestion","title":"Integrated suggestion","body":"Implement after approval","idempotency_key":"integrated-flow"}`))
+	require.NoError(t, err)
+	var created struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+
+	listReq := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID, nil)
+	listRec := httptest.NewRecorder()
+	require.NoError(t, h.ListAlerts(e.NewContext(listReq, listRec)))
+	require.Contains(t, listRec.Body.String(), "Integrated suggestion")
+	require.Contains(t, listRec.Body.String(), "pending")
+
+	approveReq := httptest.NewRequest(http.MethodPost, "/alerts/"+created.Notification.ID+"/approve?project_id="+project.ID, nil)
+	approveReq.Header.Set("HX-Request", "true")
+	approveRec := httptest.NewRecorder()
+	approveCtx := e.NewContext(approveReq, approveRec)
+	approveCtx.SetParamNames("id")
+	approveCtx.SetParamValues(created.Notification.ID)
+	require.NoError(t, h.ApproveAlert(approveCtx))
+
+	approvedJSON, err := runtime["list_alerts"](ctx, json.RawMessage(`{"decision_state":"approved","processing_state":"unclaimed"}`))
+	require.NoError(t, err)
+	require.Contains(t, approvedJSON, created.Notification.ID)
+	_, err = runtime["get_alert"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`"}`))
+	require.NoError(t, err)
+	_, err = runtime["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`"}`))
+	require.NoError(t, err)
+	linkedJSON, err := runtime["create_alert_implementation_task"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`","title":"Implement integrated suggestion","prompt":"Implement the approved suggestion.","priority":2}`))
+	require.NoError(t, err)
+	var linked struct {
+		ImplementationTaskID string `json:"implementation_task_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(linkedJSON), &linked))
+	require.NotEmpty(t, linked.ImplementationTaskID)
+	stored, err := h.alertSvc.GetByID(ctx, project.ID, created.Notification.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertProcessingImplementationTaskLinked, stored.ProcessingState)
+	require.Equal(t, linked.ImplementationTaskID, *stored.ImplementationTaskID)
+	implementation, err := taskRepo.GetByID(ctx, linked.ImplementationTaskID)
+	require.NoError(t, err)
+	require.Equal(t, project.ID, implementation.ProjectID)
+	require.Equal(t, models.CategoryBacklog, implementation.Category)
+}
 
 func TestHandler_ListAlerts(t *testing.T) {
 	t.Run("lists alerts for current project", func(t *testing.T) {
@@ -96,7 +232,7 @@ func TestHandler_MarkAlertRead(t *testing.T) {
 		assertAlertUpdate(t, rec)
 
 		// Verify alert is marked as read
-		updatedAlert, err := h.alertSvc.GetByID(context.Background(), alert.ID)
+		updatedAlert, err := h.alertSvc.GetByIDAdmin(context.Background(), alert.ID)
 		require.NoError(t, err)
 		require.True(t, updatedAlert.IsRead)
 	})
@@ -164,7 +300,7 @@ func TestHandler_MarkAllAlertsRead(t *testing.T) {
 		// Verify all alerts are marked as read
 		ctx := context.Background()
 		for _, alertID := range []string{alert1.ID, alert2.ID, alert3.ID} {
-			alert, err := h.alertSvc.GetByID(ctx, alertID)
+			alert, err := h.alertSvc.GetByIDAdmin(ctx, alertID)
 			require.NoError(t, err)
 			require.True(t, alert.IsRead, "Alert %s should be marked as read", alertID)
 		}
@@ -189,11 +325,11 @@ func TestHandler_MarkAllAlertsRead(t *testing.T) {
 
 		// Verify only project 1 alert is marked as read
 		ctx := context.Background()
-		updatedAlert1, err := h.alertSvc.GetByID(ctx, alert1.ID)
+		updatedAlert1, err := h.alertSvc.GetByIDAdmin(ctx, alert1.ID)
 		require.NoError(t, err)
 		require.True(t, updatedAlert1.IsRead)
 
-		updatedAlert2, err := h.alertSvc.GetByID(ctx, alert2.ID)
+		updatedAlert2, err := h.alertSvc.GetByIDAdmin(ctx, alert2.ID)
 		require.NoError(t, err)
 		require.False(t, updatedAlert2.IsRead)
 	})
@@ -206,7 +342,7 @@ func TestHandler_DeleteAlert(t *testing.T) {
 		alert := createAlert(t, h, project.ID, "To Delete")
 
 		// Delete alert
-		req := httptest.NewRequest(http.MethodDelete, "/alerts/"+alert.ID, nil)
+		req := httptest.NewRequest(http.MethodDelete, "/alerts/"+alert.ID+"?project_id="+project.ID, nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
 		c.SetParamNames("id")
@@ -217,7 +353,7 @@ func TestHandler_DeleteAlert(t *testing.T) {
 		require.Equal(t, http.StatusSeeOther, rec.Code)
 
 		// Verify alert is deleted
-		_, err = h.alertSvc.GetByID(context.Background(), alert.ID)
+		_, err = h.alertSvc.GetByIDAdmin(context.Background(), alert.ID)
 		require.Error(t, err)
 	})
 
@@ -250,7 +386,7 @@ func TestHandler_DeleteAlert(t *testing.T) {
 		project := createProject(t, h, "Test Project")
 		alert := createAlert(t, h, project.ID, "Alert")
 
-		req := httptest.NewRequest(http.MethodDelete, "/alerts/"+alert.ID, nil)
+		req := httptest.NewRequest(http.MethodDelete, "/alerts/"+alert.ID+"?project_id="+project.ID, nil)
 		req.Header.Set("HX-Request", "true")
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
@@ -326,7 +462,7 @@ func TestHandler_DeleteAllAlerts(t *testing.T) {
 		// Verify all alerts are deleted
 		ctx := context.Background()
 		for _, alertID := range []string{alert1.ID, alert2.ID, alert3.ID} {
-			_, err := h.alertSvc.GetByID(ctx, alertID)
+			_, err := h.alertSvc.GetByIDAdmin(ctx, alertID)
 			require.Error(t, err, "Alert %s should be deleted", alertID)
 		}
 	})
@@ -350,10 +486,10 @@ func TestHandler_DeleteAllAlerts(t *testing.T) {
 
 		// Verify only project 1 alert is deleted
 		ctx := context.Background()
-		_, err = h.alertSvc.GetByID(ctx, alert1.ID)
+		_, err = h.alertSvc.GetByIDAdmin(ctx, alert1.ID)
 		require.Error(t, err)
 
-		alert2Check, err := h.alertSvc.GetByID(ctx, alert2.ID)
+		alert2Check, err := h.alertSvc.GetByIDAdmin(ctx, alert2.ID)
 		require.NoError(t, err)
 		require.Equal(t, alert2.ID, alert2Check.ID)
 	})

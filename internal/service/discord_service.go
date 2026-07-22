@@ -444,12 +444,14 @@ func (s *DiscordService) processIncomingMessage(msg discordIncomingMessage) {
 		FirstTurn: channelChatIngressFirstTurnOptions{
 			Task:         &models.Task{Title: fmt.Sprintf("Discord %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginDiscord},
 			ReplyContext: ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordChannelID: msg.replyChannelID(), DiscordThreadID: msg.ThreadID, DiscordMessageID: msg.MessageID, DiscordUserID: msg.UserID},
-			RuntimeTools: s.buildDiscordActionToolRuntime(projectID, discordMarkerContext{
-				ChannelID: msg.replyChannelID(),
-				ThreadID:  msg.ThreadID,
-				MessageID: msg.MessageID,
-				UserID:    msg.UserID,
-			}, nil),
+			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
+				return s.buildDiscordActionToolRuntimeForTask(projectID, taskID, discordActionContext{
+					ChannelID: msg.replyChannelID(),
+					ThreadID:  msg.ThreadID,
+					MessageID: msg.MessageID,
+					UserID:    msg.UserID,
+				}, nil)
+			},
 			ChannelChatRunner: s.channelChatRunner,
 			CreateTaskContext: func(ctx context.Context, taskID string) error {
 				if s.discordTaskContextRepo == nil {
@@ -666,22 +668,30 @@ func (s *DiscordService) getActiveProject(ctx context.Context, userID string) st
 	return selected
 }
 
-func (s *DiscordService) buildDiscordActionToolRuntime(projectID string, markerCtx discordMarkerContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	handlers := s.discordActionHandlers(projectID, markerCtx, collector)
+func (s *DiscordService) buildDiscordActionToolRuntime(projectID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
+	return s.buildDiscordActionToolRuntimeForTask(projectID, "", actionCtx, collector)
+}
+
+func (s *DiscordService) buildDiscordActionToolRuntimeForTask(projectID, callerTaskID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
+	handlers := s.discordActionHandlersForTask(projectID, callerTaskID, actionCtx, collector)
 	return &llmcontracts.RuntimeTools{
 		Definitions: actionToolDefinitions(chatcontrol.SurfaceDiscord, true),
 		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord, handlers),
 	}
 }
 
-type discordMarkerContext struct {
+type discordActionContext struct {
 	ChannelID string
 	ThreadID  string
 	MessageID string
 	UserID    string
 }
 
-func (s *DiscordService) discordActionHandlers(projectID string, markerCtx discordMarkerContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
+func (s *DiscordService) discordActionHandlers(projectID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
+	return s.discordActionHandlersForTask(projectID, "", actionCtx, collector)
+}
+
+func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID:     projectID,
 		TaskSvc:       s.taskSvc,
@@ -695,7 +705,7 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 					}
 				}
 				if s.discordTaskContextRepo != nil {
-					_ = s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: t.ID, DiscordChannelID: markerCtx.ChannelID, DiscordThreadID: markerCtx.ThreadID, DiscordMessageID: markerCtx.MessageID, DiscordUserID: markerCtx.UserID})
+					_ = s.discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: t.ID, DiscordChannelID: actionCtx.ChannelID, DiscordThreadID: actionCtx.ThreadID, DiscordMessageID: actionCtx.MessageID, DiscordUserID: actionCtx.UserID})
 				}
 			}
 		},
@@ -706,7 +716,7 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 		ProjectID:                projectID,
 		Surface:                  chatcontrol.SurfaceDiscord,
 		Source:                   models.TaskOriginDiscord,
-		ActorID:                  markerCtx.UserID,
+		ActorID:                  actionCtx.UserID,
 		TaskRepo:                 s.taskRepo,
 		ExecRepo:                 s.execRepo,
 		ThreadInputRepo:          s.threadInputRepo,
@@ -717,14 +727,15 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
 		CompleteExecution:        channelCompletionFunc("discord", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 		ChannelMessageRouter:     s.channelMessageRouter,
-		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordChannelID: markerCtx.ChannelID, DiscordThreadID: markerCtx.ThreadID, DiscordMessageID: markerCtx.MessageID, DiscordUserID: markerCtx.UserID},
+		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginDiscord, DiscordChannelID: actionCtx.ChannelID, DiscordThreadID: actionCtx.ThreadID, DiscordMessageID: actionCtx.MessageID, DiscordUserID: actionCtx.UserID},
 		NewQueuedInput: func(_ *models.Task, runExecutionID, agentID string) *models.ThreadInput {
-			return &models.ThreadInput{DiscordChannelID: markerCtx.ChannelID, DiscordThreadID: markerCtx.ThreadID, DiscordMessageID: markerCtx.MessageID, DiscordUserID: markerCtx.UserID}
+			return &models.ThreadInput{DiscordChannelID: actionCtx.ChannelID, DiscordThreadID: actionCtx.ThreadID, DiscordMessageID: actionCtx.MessageID, DiscordUserID: actionCtx.UserID}
 		},
 		FilterHistory: filterDiscordChatHistory,
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             projectID,
+		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
 		LLMConfigRepo:         s.llmConfigRepo,
@@ -738,10 +749,10 @@ func (s *DiscordService) discordActionHandlers(projectID string, markerCtx disco
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
-			if !s.checkAuthorization(ctx, project.ID, markerCtx.UserID) {
-				return fmt.Errorf("Discord user %q is not authorized to use project %q", markerCtx.UserID, project.Name)
+			if !s.checkAuthorization(ctx, project.ID, actionCtx.UserID) {
+				return fmt.Errorf("Discord user %q is not authorized to use project %q", actionCtx.UserID, project.Name)
 			}
-			return s.setActiveProject(ctx, markerCtx.UserID, project.ID)
+			return s.setActiveProject(ctx, actionCtx.UserID, project.ID)
 		},
 	}))
 	handlers["get_current_project"] = func(ctx context.Context, _ json.RawMessage) (string, error) {

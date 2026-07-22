@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-07-01
+updated: 2026-07-17
 source: consolidation
-source_id: memory_consolidation_2026_07_01
+source_id: memory_consolidation_2026_07_17
 confidence: high
 title: Usage Analytics
 ---
@@ -66,4 +66,10 @@ OAuth account facts:
 - API-key accounts contribute local usage but do not get subscription/account-limit snapshots or fake billing cards.
 - OAuth access tokens, refresh tokens, JWTs, decoded claims, auth headers, local config IDs, raw account IDs, fingerprints, and provider identity fields are backend-only and absent from frontend, templates, logs, model tools, and tool results.
 - Provider account-limit endpoints are fragile; refresh failures affect live account cards, not local token usage.
+- OpenAI account-limit windows are identified and labeled from `limit_window_seconds`, not from `primary_window`/`secondary_window` source slots. Recognized 5-hour, daily, weekly, monthly, and annual durations use a 5% tolerance, seconds round upward to persisted minutes, and semantic keys/order remain stable when provider slots swap.
+- When persisted account-limit snapshots are merged with current model configs, prefer the current config's resolved `OAuthAccountID` over stale `account_usage_snapshots.account_id`. Older rows may contain a local config ID or pre-profile placeholder; stale-first grouping can split one Anthropic subscription into duplicate cards and hide the row carrying `Claude Max (20x)` profile metadata.
+- When multiple configs contribute historical views for one provider account, the newest timestamped full snapshot must exclusively own all dynamic account-limit state. Older snapshots may backfill only missing safe descriptive metadata such as normalized plan/subscription labels; they must never backfill or resurrect primary limits, secondary limits, extra/model-specific limits, utilization, reset timestamps, usage-credit state or amounts, credit balances/badges, spend-control state, dynamic timestamps, or errors.
+- Historical account deduplication must not backfill `ExtraUsageLabel`, `ExtraUsageMonthlyUSD`, or `ExtraUsageUsedUSD` from an older losing OpenAI or Anthropic snapshot. Safe plan metadata may be backfilled, but limits, usage-credit state and amounts, timestamps, and errors remain winner-owned.
+- Persisted OpenAI snapshots created before duration-based window normalization are repaired at account-view assembly time from stored window minutes, so this behavior requires no schema migration.
+- Analytics renders canonical account-limit ordering from the normalized `limits` list and displays elapsed reset times as `Reset due` or omits the line, never `Resets: 0 minutes`.
 

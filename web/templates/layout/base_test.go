@@ -3,12 +3,302 @@ package layout
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TestBaseProvidesCentralClientSidePageTitleAndHistorySynchronization(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Initial", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, expected := range []string{
+		"window.openVibelyNavigate = function",
+		"hx-push-url",
+		"window.syncOpenVibelyPageTitle = function",
+		"[data-openvibely-page-title]",
+		"document.title = marker.getAttribute('data-openvibely-page-title')",
+		"htmx:afterSwap",
+		"htmx:historyRestore",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Errorf("base layout missing client-side title/history synchronization contract %q", expected)
+		}
+	}
+	if strings.Contains(html, "history.pushState") {
+		t.Fatal("base layout and sidebar must use HTMX-managed navigation instead of manual history.pushState")
+	}
+
+	start := strings.Index(html, "window.openVibelyNavigate = function")
+	if start < 0 {
+		t.Fatal("could not find rendered client-side navigation script")
+	}
+	end := strings.Index(html[start:], "// Scroll position restoration for drop zones")
+	if end < 0 {
+		t.Fatal("could not extract rendered client-side navigation and page title script")
+	}
+	scriptBody := html[start : start+end]
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the rendered page title synchronization script")
+	}
+	script := `
+const listeners = {};
+const ajaxCalls = [];
+let historyRoot;
+let navigationSource;
+global.window = {};
+global.document = {
+  title: 'Initial - OpenVibely',
+  body: { appendChild: function(element) { navigationSource = element; } },
+  addEventListener: function(name, handler) { listeners[name] = handler; },
+  getElementById: function(id) {
+    if (id === 'main-content') return historyRoot;
+    return null;
+  },
+  createElement: function() {
+    const attributes = {};
+    return {
+      setAttribute: function(name, value) { attributes[name] = String(value); },
+      getAttribute: function(name) { return attributes[name] || null; },
+      remove: function() {}
+    };
+  }
+};
+global.htmx = {
+  ajax: function(method, url, context) {
+    if (navigationSource !== context.source) throw new Error('programmatic navigation source was not connected before the HTMX request');
+    ajaxCalls.push({ method: method, url: url, context: context });
+    return Promise.resolve();
+  }
+};
+const swapMarker = { getAttribute: function() { return 'Tasks - OpenVibely'; } };
+const cacheHitMarker = { getAttribute: function() { return 'Chat - OpenVibely'; } };
+const cacheMissMarker = { getAttribute: function() { return 'History Task - OpenVibely'; } };
+const swapRoot = { matches: function() { return false; }, querySelector: function() { return swapMarker; } };
+const cacheHitRoot = { matches: function() { return false; }, querySelector: function() { return cacheHitMarker; } };
+const cacheMissRoot = { matches: function() { return false; }, querySelector: function() { return cacheMissMarker; } };
+historyRoot = cacheHitRoot;
+` + scriptBody + `
+window.openVibelyNavigate('/tasks/task-1?from=chat');
+if (ajaxCalls.length !== 1) throw new Error('programmatic navigation did not issue one HTMX request');
+const navigation = ajaxCalls[0];
+if (navigation.method !== 'GET' || navigation.url !== '/tasks/task-1?from=chat') throw new Error('programmatic navigation used the wrong request');
+if (navigation.context.target !== '#main-content' || navigation.context.swap !== 'innerHTML') throw new Error('programmatic navigation changed the main-content swap contract');
+if (!navigation.context.source || navigation.context.source.getAttribute('hx-push-url') !== 'true') throw new Error('programmatic navigation did not opt into HTMX-managed history');
+window.openVibelyNavigate('/tasks/task-2?tab=history', '/tasks/task-2');
+if (ajaxCalls.length !== 2 || ajaxCalls[1].context.source.getAttribute('hx-push-url') !== '/tasks/task-2') throw new Error('programmatic navigation did not preserve an explicit history URL');
+listeners['htmx:afterSwap']({ detail: { target: swapRoot } });
+if (document.title !== 'Tasks - OpenVibely') throw new Error('afterSwap did not apply destination title: ' + document.title);
+listeners['htmx:historyRestore']({ detail: { item: { title: 'Chat - OpenVibely' } } });
+if (document.title !== 'Chat - OpenVibely') throw new Error('cache-hit history restore did not apply restored title: ' + document.title);
+historyRoot = cacheMissRoot;
+listeners['htmx:historyRestore']({ detail: { cacheMiss: true, serverResponse: '<!doctype html><title>History Task - OpenVibely</title>' } });
+if (document.title !== 'History Task - OpenVibely') throw new Error('cache-miss history restore did not apply restored title: ' + document.title);
+`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("rendered client-side title/history synchronization failed: %v\n%s", err, output)
+	}
+}
+
+func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "window._tabVisibility = (function() {")
+	end := strings.Index(html[start:], "// Track which element was focused before mousedown")
+	if start < 0 || end < 0 {
+		t.Fatal("tab visibility manager boundaries are missing")
+	}
+	manager := html[start : start+end]
+	if !strings.Contains(manager, "document.addEventListener('visibilitychange'") {
+		t.Fatal("hidden-to-visible transitions must remain owned by the visibility manager")
+	}
+	for _, forbidden := range []string{"window.addEventListener('focus'", "window.addEventListener('blur'", "window.addEventListener('pageshow'"} {
+		if strings.Contains(manager, forbidden) {
+			t.Fatalf("plain blur/focus/pageshow must not trigger transcript reconciliation: found %q", forbidden)
+		}
+	}
+}
+
+func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	content := buf.String()
+	start := strings.Index(content, "window.configureChatMarked = function")
+	end := strings.Index(content, "// Add copy buttons")
+	if start == -1 || end == -1 || end <= start {
+		t.Fatal("base layout must define shared Markdown code ranges before the chat renderer")
+	}
+
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the rendered Markdown safety helpers")
+	}
+	protected := []string{
+		"`first\n<img src=x onerror=alert(1)>\nlast`",
+		"~~~html\n<img src=x onerror=alert(1)>\n~~~",
+		"`````html\n<img src=x onerror=alert(1)>\n`````",
+		"```html\r<img src=x onerror=alert(1)>\r```",
+		"~~~html\r<img src=x onerror=alert(1)>\r~~~~\t ",
+		"`````html\r<img src=x onerror=alert(1)>\r```\r``````   ",
+		"Unmatched `` prefix; `<img src=x onerror=alert(1)>`",
+		`\\` + "`<img src=x onerror=alert(1)>`",
+		"```html\n<img src=x onerror=alert(1)>\n```\u00a0\n<img src=y onerror=alert(2)>\n```",
+		"~~~html\n<img src=x onerror=alert(1)>\n~~~\u2003\n<img src=y onerror=alert(2)>\n~~~",
+		"`````html\n<img src=x onerror=alert(1)>\n`````\u202f\n<img src=y onerror=alert(2)>\n`````",
+	}
+	validClosers := map[string]string{
+		"backtick spaces and tabs": "```html\n<img src=x onerror=alert(1)>\n``` \t\n<img src=y onerror=alert(2)>",
+		"tilde spaces and tabs":    "~~~html\n<img src=x onerror=alert(1)>\n~~~~\t \n<img src=y onerror=alert(2)>",
+		"long fence spaces":        "`````html\n<img src=x onerror=alert(1)>\n``````   \n<img src=y onerror=alert(2)>",
+	}
+	malicious := []string{
+		`\` + "`<img src=x onerror=alert(1)>`",
+		`<img src=x onerror=alert(1)>`,
+		`<img src="x" onerror="alert(1)">`,
+		`<img src='x' onerror='alert(1)'>`,
+		`<img/onerror=alert(1)>`,
+		`<script>alert(1)</script>`,
+		`<a href="javascript:alert(1)">click</a>`,
+	}
+
+	script := "global.window = {};\n" +
+		"global.document = { createElement: function(tag) { if (tag !== 'template') throw new Error('unexpected element'); return { _html: '', content: { querySelectorAll: function() { return []; } }, set innerHTML(value) { this._html = value; }, get innerHTML() { return this._html; } }; } };\n" +
+		content[start:end] + "\n" +
+		"const dependencyPayload = '<img src=x onerror=alert(1)> plain & text';\n" +
+		"const dependencyMetadataPayload = 'Inline `- \"Coded create\" (backlog) [TASK_ID:coded/create]`\\nMultiline ``- \"Coded edit\" (updated: title)\\n[TASK_EDITED:coded/edit]``\\n```text\\n- \"Fenced create\" (backlog) [TASK_ID:coded/fence]\\n```\\n~~~text\\r- \"Bare CR fenced edit\" (updated: title) [TASK_EDITED:coded/cr]\\r~~~\\r- \"Real create\" (backlog) [TASK_ID:real/create]';\n" +
+		"const safeDependencyFallback = '<span data-chat-markdown-fallback=\"true\" style=\"white-space: pre-wrap\">&lt;img src=x onerror=alert(1)&gt; plain &amp; text</span>';\n" +
+		"const safeMetadataFallback = '<span data-chat-markdown-fallback=\"true\" style=\"white-space: pre-wrap\">' + window.escapeHTMLForChat(dependencyMetadataPayload) + '</span>';\n" +
+		"function assertDependencyFallback(exitCode) { const payloadRendered = window.renderChatMarkdown(dependencyPayload); const metadataRendered = window.renderChatMarkdown(dependencyMetadataPayload); if (payloadRendered !== safeDependencyFallback || metadataRendered !== safeMetadataFallback) { console.error('Marked dependency failed open', exitCode, JSON.stringify({ payloadRendered, metadataRendered })); process.exit(exitCode); } }\n" +
+		"assertDependencyFallback(5);\n" +
+		"window.marked = global.marked = { setOptions: function() {} };\n" +
+		"assertDependencyFallback(6);\n" +
+		"window.marked = global.marked = { parse: function(value) { return value; }, setOptions: function() { throw new Error('configuration failed'); } };\n" +
+		"assertDependencyFallback(9);\n" +
+		"window.marked = global.marked = { parse: function() { throw new Error('load failed'); }, setOptions: function() {} };\n" +
+		"assertDependencyFallback(7);\n" +
+		"let lateConfigured = false; window.marked = global.marked = { parse: function(value) { return '<p>' + value + '</p>'; }, setOptions: function(options) { lateConfigured = !!(options && options.gfm && options.breaks); } };\n" +
+		"const lateRendered = window.renderChatMarkdown('**late** <img src=x onerror=alert(1)>');\n" +
+		"if (!lateConfigured || lateRendered !== '<p>**late** &lt;img src=x onerror=alert(1)></p>' || lateRendered.indexOf('data-chat-markdown-fallback') !== -1) { console.error('late Marked was not configured safely', JSON.stringify({ lateConfigured, lateRendered })); process.exit(8); }\n" +
+		"window.marked = global.marked = { parse: function(value) { return value; }, setOptions: function() {} };\n" +
+		"const protectedCases = " + mustJSON(t, protected) + ";\n" +
+		"for (const value of protectedCases) { if (window.escapeRawHTMLForMarkdown(value) !== value) { console.error('changed protected', JSON.stringify(value), JSON.stringify(window.escapeRawHTMLForMarkdown(value))); process.exit(1); } }\n" +
+		"const validClosers = " + mustJSON(t, validClosers) + ";\n" +
+		"for (const [name, value] of Object.entries(validClosers)) { const escaped = window.escapeRawHTMLForMarkdown(value); if (escaped.indexOf('<img src=x') === -1 || escaped.indexOf('<img src=y') !== -1 || escaped.indexOf('&lt;img src=y') === -1) { console.error('valid closer mismatch', name, JSON.stringify(escaped)); process.exit(4); } }\n" +
+		"const maliciousCases = " + mustJSON(t, malicious) + ";\n" +
+		"for (const value of maliciousCases) { const escaped = window.escapeRawHTMLForMarkdown(value); if (/<\\/?(?:img|script|a)\\b/i.test(escaped) || /<img\\//i.test(escaped)) { console.error('raw tag survived', JSON.stringify(value), JSON.stringify(escaped)); process.exit(2); } const rendered = window.renderChatMarkdown(value); if (/<\\/?(?:img|script|a)\\b/i.test(rendered) || /<img\\//i.test(rendered)) { console.error('active tag survived', JSON.stringify(value), JSON.stringify(rendered)); process.exit(3); } }\n"
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("rendered Markdown safety helpers failed: %v\n%s", err, output)
+	}
+
+	generated, err := os.ReadFile("base_templ.go")
+	if err != nil {
+		t.Fatalf("read generated base template: %v", err)
+	}
+	for _, snippet := range []string{
+		"window.configureChatMarked = function()",
+		"typeof parser.parse !== 'function'",
+		"window._chatMarkedConfiguredFor === parser",
+		"if (!window.configureChatMarked || !window.configureChatMarked())",
+		"return window.renderChatMarkdownFallback(text)",
+		"window.escapeHTMLForChat = function(value)",
+		"window.renderChatMarkdownFallback = function(text)",
+		`data-chat-markdown-fallback=\"true\"`,
+		"window.markdownLineRanges = function(text)",
+		`if (text.charAt(end) === '\\r' && text.charAt(next) === '\\n') next++`,
+		"window.codeRanges = function(text)",
+		"window.codeRangesAsync = function(text, owner)",
+		"owner._codeRangeWorkerState.finish(null)",
+		"window.URL.createObjectURL(new Blob([workerSource]",
+		"/^[ \\\\t]*$/.test(line.substring(runEnd))",
+		"window.escapeRawHTMLForMarkdown = function(text, ranges)",
+		"window.sanitizeChatHTML = function(html)",
+		"window.sanitizeChatHTMLFragmentAsync = function(html, cancelled)",
+		"window.renderChatMarkdownLargeFallback = function(text)",
+		"state.fallbackTimer = setTimeout(function()",
+		"/^on/i.test(attr.name)",
+		"javascript:|vbscript:|data:",
+	} {
+		if !strings.Contains(string(generated), snippet) {
+			t.Fatalf("generated base template missing Markdown safety snippet %q", snippet)
+		}
+	}
+	if strings.Contains(string(generated), "worker.onerror = function() { finish(window.renderChatMarkdown(text))") {
+		t.Fatal("large Markdown worker failures must not synchronously parse the full document")
+	}
+	if strings.Contains(string(generated), "finish(window.codeRanges(text))") ||
+		strings.Contains(string(generated), "Promise.resolve(window.codeRanges(text))") {
+		t.Fatal("large code-range worker failures must not synchronously scan the full document")
+	}
+	if !strings.Contains(string(generated), "html.length - chunkStart > 128 * 1024") {
+		t.Fatal("large sanitized HTML must be parsed in bounded top-level chunks")
+	}
+}
+
+func TestLargeMarkdownAndCodeRangeWorkersCancelAndComplete(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	content := buf.String()
+	start := strings.Index(content, "window.configureChatMarked = function")
+	end := strings.Index(content, "// Add copy buttons")
+	if start == -1 || end == -1 || end <= start {
+		t.Fatal("base layout must define Markdown worker helpers")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute worker lifecycle helpers")
+	}
+	script := "global.window = {};\n" +
+		"global.document = { createElement: function() { return { _html: '', content: { querySelectorAll: function() { return []; } }, set innerHTML(value) { this._html = value; }, get innerHTML() { return this._html; } }; } };\n" +
+		"let lastBlob = null; global.Blob = function(parts) { this.parts = parts; lastBlob = this; }; window.URL = { createObjectURL: function() { return 'blob:test'; } };\n" +
+		"const workers = []; global.Worker = function(url) { this.url = url; this.terminated = false; workers.push(this); }; Worker.prototype.terminate = function() { this.terminated = true; }; Worker.prototype.postMessage = function(value) { this.value = value; };\n" +
+		"window.marked = global.marked = { parse: function(value) { return '<p>' + value + '</p>'; }, setOptions: function() {} };\n" +
+		content[start:end] + "\n" +
+		"const large = 'x'.repeat(110 * 1024), codeOwner = {};\n" +
+		"const firstCode = window.codeRangesAsync(large, codeOwner); const firstCodeWorker = workers[workers.length - 1];\n" +
+		"const secondCode = window.codeRangesAsync(large + 'y', codeOwner); const secondCodeWorker = workers[workers.length - 1];\n" +
+		"if (!firstCodeWorker.terminated) throw new Error('superseded code-range worker was not terminated');\n" +
+		"secondCodeWorker.onmessage({ data: { ranges: [{ start: 1, end: 2 }] } });\n" +
+		"const markdownOwner = {}; const firstMarkdown = window.renderChatMarkdownAsync(large, markdownOwner); const firstMarkdownWorker = workers[workers.length - 1];\n" +
+		"const markdownWorkerSource = lastBlob.parts.join(''); let importedURL = '', workerPost = null; const workerScope = { postMessage: function(value) { workerPost = value; } };\n" +
+		"new Function('self', 'importScripts', 'marked', markdownWorkerSource)(workerScope, function(url) { importedURL = url; }, { setOptions: function() {}, parse: function(value) { return value; } });\n" +
+		"workerScope.onmessage({ data: 'outside <img src=x>\\n```html\\n<img src=y>\\n```' });\n" +
+		"if (importedURL.indexOf('marked@15.0.4') === -1 || !workerPost || workerPost.error || workerPost.html.indexOf('outside &lt;img src=x>') === -1 || workerPost.html.indexOf('<img src=y>') === -1) throw new Error('generated Markdown worker did not execute safely');\n" +
+		"const ThreadWorker = require('worker_threads').Worker; const threadWorkerSource = \"const {parentPort}=require('worker_threads');var self=globalThis;self.postMessage=function(value){parentPort.postMessage(value);};\" + markdownWorkerSource.replace(/importScripts\\([^;]+\\);/, \"var marked={setOptions:function(){},parse:function(value){return value;}};\") + \";parentPort.on('message',function(data){self.onmessage({data:data});});\";\n" +
+		"const threadWorker = new ThreadWorker(threadWorkerSource, { eval: true }); const threadResult = new Promise(function(resolve, reject) { threadWorker.once('message', function(value) { threadWorker.terminate(); if (!value || value.error || value.html.indexOf('outside &lt;img src=thread>') === -1) reject(new Error('real worker thread returned unsafe output')); else resolve(true); }); threadWorker.once('error', reject); }); threadWorker.postMessage('outside <img src=thread>');\n" +
+		"const secondMarkdown = window.renderChatMarkdownAsync(large + 'y', markdownOwner); const secondMarkdownWorker = workers[workers.length - 1];\n" +
+		"if (!firstMarkdownWorker.terminated) throw new Error('superseded Markdown worker was not terminated');\n" +
+		"secondMarkdownWorker.onmessage({ data: { html: '<ol><li>whole document</li></ol>' } });\n" +
+		"window._chatCodeRangeWorkerTimeoutMS = 5; const timeoutOwner = {}; const timedCode = window.codeRangesAsync(large + 'timeout', timeoutOwner); const timedCodeWorker = workers[workers.length - 1];\n" +
+		"Promise.all([firstCode, secondCode, firstMarkdown, secondMarkdown, threadResult, timedCode]).then(function(values) { if (values[0] !== null || values[1].length !== 1 || values[2] !== null || !values[3] || typeof values[3] !== 'object' || values[4] !== true || values[5] !== null || !timedCodeWorker.terminated || codeOwner._codeRangeWorkerState !== null || timeoutOwner._codeRangeWorkerState !== null || markdownOwner._markdownWorkerState !== null) process.exit(1); }, function(err) { console.error(err); process.exit(2); });\n"
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("large Markdown/code-range worker lifecycle failed: %v\n%s", err, output)
+	}
+}
+
+func mustJSON(t *testing.T, value any) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal JavaScript fixture: %v", err)
+	}
+	return string(encoded)
+}
 
 func TestToastCloseButtonIsAccessibleAndTopRightAligned(t *testing.T) {
 	var buf bytes.Buffer
@@ -736,6 +1026,121 @@ func TestCollapsedSidebar_NoHoverTooltipBoxes(t *testing.T) {
 	}
 }
 
+func TestToolOutputContainerCSS_UsesSeparateBorderlessLightInputAndOutputSurfaces(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	expected := []string{
+		`[data-theme="light"] .stream-tool-body {`,
+		"border: none;",
+		"background: transparent;",
+		`[data-theme="light"] .stream-tool-body-row {`,
+		"border-top-color: transparent;",
+		`[data-theme="light"] .stream-tool-body-label {`,
+		"color: var(--ov-l-text-muted);",
+		`[data-theme="light"] .stream-tool-body-content {`,
+		"background: transparent;",
+		"color: var(--ov-l-text-strong);",
+		`[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {`,
+		"border: none;",
+		"background: hsl(var(--b2, var(--b1)) / 0.4);",
+		"border-radius: 5px;",
+		"grid-template-columns: max-content minmax(0, 1fr);",
+		"border-top: 0.5px solid hsl(var(--bc) / 0.1);",
+		"padding: 4px 8px 4px 4px;",
+		"padding: 4px;",
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected separate tool surface CSS fragment %q", fragment)
+		}
+	}
+
+	for _, fragment := range []string{
+		`.stream-tool-output-container`,
+		`[data-theme="light"] .stream-tool-body-scroll pre {`,
+		`[data-theme="dark"] .stream-tool-body {`,
+		`[data-theme="dark"] .stream-tool-body-label,`,
+		`[data-theme="dark"] .stream-tool-body-label {`,
+		`[data-theme="dark"] .stream-tool-body-content,`,
+		`[data-theme="dark"] .stream-tool-body-content {`,
+	} {
+		if strings.Contains(html, fragment) {
+			t.Errorf("tool output styling must preserve separate input/output surfaces; found %q", fragment)
+		}
+	}
+}
+
+func TestThinkingCSS_UsesReadableLightThemeForegrounds(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, fragment := range []string{
+		`[data-theme="light"] .stream-thinking summary {`,
+		"color: var(--ov-l-text-muted);",
+		`[data-theme="light"] .stream-thinking[open] summary,`,
+		`[data-theme="light"] .stream-thinking summary:hover {`,
+		"color: var(--ov-l-text-strong);",
+		`[data-theme="light"] .stream-thinking .stream-thinking-body {`,
+		"color: var(--ov-l-text);",
+		`.stream-thinking summary:focus-visible {`,
+		"outline: 2px solid var(--ov-link-color);",
+	} {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected readable light thinking CSS fragment %q", fragment)
+		}
+	}
+}
+
+func TestToolOutputToggleCSS_UsesCompactThemeSafeColorWithoutRestylingContainer(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	expected := []string{
+		"[data-theme=\"light\"] .stream-tool-output-toggle {",
+		"color: var(--ov-l-text-strong);",
+		"[data-theme=\"light\"] .stream-tool-output-toggle:hover {",
+		"background: #e5e7eb;",
+		"[data-theme=\"light\"] .stream-tool-output-toggle:active {",
+		"background: #d1d5db;",
+		"[data-theme=\"dark\"] .stream-tool-output-toggle {",
+		"color: #b8c0cc;",
+		"[data-theme=\"dark\"] .stream-tool-output-toggle:hover {",
+		"background: rgba(255, 255, 255, 0.1);",
+		"[data-theme=\"dark\"] .stream-tool-output-toggle:active {",
+		"background: rgba(255, 255, 255, 0.16);",
+		"appearance: none;",
+		"max-width: 100%;",
+		"min-height: 1.25rem;",
+		"padding: 0.0625rem 0.25rem;",
+		"border: 0;",
+		"background: transparent;",
+		"color: inherit;",
+		"font-weight: 500;",
+		"transition: background-color 120ms ease, color 120ms ease;",
+		".stream-tool-output-toggle:focus-visible {",
+		"outline: 2px solid var(--ov-link-color);",
+	}
+	for _, fragment := range expected {
+		if !strings.Contains(html, fragment) {
+			t.Errorf("expected compact tool output toggle CSS fragment %q", fragment)
+		}
+	}
+
+	if strings.Contains(html, ".stream-tool-output-container") {
+		t.Error("tool output toggle styling must use the original tool container without adding a new surface")
+	}
+}
+
 func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
@@ -753,13 +1158,16 @@ func TestToolOutputCSS_UsesBoundedResponsiveScrollableContainer(t *testing.T) {
 		"border-top: none;",
 		".stream-tool-body-content {",
 		"overflow: hidden;",
+		".stream-tool-output-preview {",
+		".stream-tool-body-content .stream-tool-output-text {",
+		"white-space: pre;",
+		"[data-theme=\"light\"] .stream-tool-body-content {",
+		".stream-tool-body-scroll + .stream-tool-output-toggle {",
 		".stream-tool-body-scroll {",
 		"overflow-x: auto;",
-		"overflow-y: hidden;",
+		"overflow-y: auto;",
 		"max-height: min(26rem, 52vh);",
 		"max-width: 100%;",
-		`.stream-tool-body-scroll[data-scrollable-y="true"] {`,
-		"overflow-y: auto;",
 		"width: max-content;",
 		"min-width: 100%;",
 	}

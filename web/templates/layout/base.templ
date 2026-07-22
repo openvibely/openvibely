@@ -2,13 +2,24 @@ package layout
 
 import "github.com/openvibely/openvibely/internal/models"
 
+func documentTitle(title string) string {
+	if title == "" {
+		return "OpenVibely"
+	}
+	return title + " - OpenVibely"
+}
+
+templ PageTitle(title string) {
+	<span class="hidden" aria-hidden="true" data-openvibely-page-title={ documentTitle(title) }></span>
+}
+
 templ Base(title string, projects []models.Project, currentProjectID string) {
 	<!DOCTYPE html>
 	<html lang="en" data-theme="dark">
 		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-			<title>{ title } - OpenVibely</title>
+			<title>{ documentTitle(title) }</title>
 			<!-- Theme init: must run before any CSS to prevent flash -->
 			<script>
 				(function() {
@@ -1321,6 +1332,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background-color: var(--ov-l-surface);
 						border-color: var(--ov-l-border);
 					}
+					[data-theme="light"] .stream-thinking summary {
+						color: var(--ov-l-text-muted);
+					}
+					[data-theme="light"] .stream-thinking[open] summary,
+					[data-theme="light"] .stream-thinking summary:hover {
+						color: var(--ov-l-text-strong);
+					}
+					[data-theme="light"] .stream-thinking .stream-thinking-body {
+						color: var(--ov-l-text);
+					}
 					/* Light mode chat input */
 					[data-theme="light"] .chat-input-container {
 						background-color: #FFFFFF;
@@ -1353,16 +1374,30 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						opacity: 1;
 					}
 					[data-theme="light"] .stream-tool-body-content {
-						background: var(--ov-l-surface);
-						border: none;
-					}
-					[data-theme="light"] .stream-tool-body-scroll pre {
 						background: transparent;
 						border: none;
-					}
-					[data-theme="light"] .stream-tool-body-content,
-					[data-theme="light"] .stream-tool-body-scroll pre {
 						color: var(--ov-l-text-strong);
+					}
+					[data-theme="light"] .stream-tool-body-content .stream-tool-output-text {
+						border: none;
+					}
+					[data-theme="light"] .stream-tool-output-toggle {
+						color: var(--ov-l-text-strong);
+					}
+					[data-theme="light"] .stream-tool-output-toggle:hover {
+						background: #e5e7eb;
+					}
+					[data-theme="light"] .stream-tool-output-toggle:active {
+						background: #d1d5db;
+					}
+					[data-theme="dark"] .stream-tool-output-toggle {
+						color: #b8c0cc;
+					}
+					[data-theme="dark"] .stream-tool-output-toggle:hover {
+						background: rgba(255, 255, 255, 0.1);
+					}
+					[data-theme="dark"] .stream-tool-output-toggle:active {
+						background: rgba(255, 255, 255, 0.16);
 					}
 					[data-theme="light"] .tool-status-done {
 						color: var(--ov-l-success);
@@ -1624,6 +1659,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					font-size: 0.8125rem;
 				}
 				.stream-thinking summary::-webkit-details-marker { display: none; }
+				.stream-thinking summary:focus-visible {
+					outline: 2px solid var(--ov-link-color);
+					outline-offset: 2px;
+					border-radius: 0.2rem;
+				}
 				.stream-thinking .thinking-toggle {
 					width: 16px; height: 16px;
 					margin-left: 0;
@@ -1715,18 +1755,42 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.stream-tool-body-row:first-child > .stream-tool-body-content {
 					border-top: none;
 				}
+				.stream-tool-output-toggle {
+					display: inline-flex;
+					align-items: center;
+					justify-content: center;
+					box-sizing: border-box;
+					max-width: 100%;
+					min-height: 1.25rem;
+					padding: 0.0625rem 0.25rem;
+					appearance: none;
+					border: 0;
+					border-radius: 0.25rem;
+					background: transparent;
+					color: inherit;
+					font-family: ui-monospace, SFMono-Regular, monospace;
+					font-size: 0.85em;
+					font-weight: 500;
+					line-height: 1.25;
+					cursor: pointer;
+					transition: background-color 120ms ease, color 120ms ease;
+				}
+				.stream-tool-output-toggle:focus-visible {
+					outline: 2px solid var(--ov-link-color);
+					outline-offset: 2px;
+				}
+				.stream-tool-body-scroll + .stream-tool-output-toggle {
+					margin-top: 0.25rem;
+				}
 				.stream-tool-body-scroll {
 					overflow-x: auto;
-					overflow-y: hidden;
+					overflow-y: auto;
 					max-height: min(26rem, 52vh);
 					width: 100%;
 					max-width: 100%;
 					min-width: 0;
 					scrollbar-width: thin;
 					scrollbar-color: hsl(var(--bc) / 0.3) transparent;
-				}
-				.stream-tool-body-scroll[data-scrollable-y="true"] {
-					overflow-y: auto;
 				}
 				.stream-tool-body-scroll::-webkit-scrollbar {
 					width: 6px;
@@ -1742,7 +1806,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.stream-tool-body-scroll::-webkit-scrollbar-thumb:hover {
 					background-color: hsl(var(--bc) / 0.4);
 				}
-				.stream-tool-body-scroll pre {
+				.stream-tool-body-content .stream-tool-output-text {
 					font-family: ui-monospace, SFMono-Regular, monospace;
 					margin: 0;
 					font-size: 0.85em;
@@ -1752,6 +1816,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					max-width: none;
 					width: max-content;
 					min-width: 100%;
+				}
+				.stream-tool-output-preview {
+					max-width: 100%;
+					overflow: hidden;
+					margin: 0 0 0.35rem;
 				}
 				/* Tool status icons (check / error) */
 				.tool-status-icon {
@@ -1764,22 +1833,37 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.tool-status-error { color: hsl(var(--er, 0 60% 50%) / 0.7); }
 			</style>
 			<script>
-// Configure marked for chat rendering
-				if (window.marked) {
-					marked.setOptions({
-						breaks: true,
-						gfm: true,
-						highlight: function(code, lang) {
-							if (window.hljs && lang && hljs.getLanguage(lang)) {
-								try { return hljs.highlight(code, { language: lang }).value; } catch(e) {}
-							}
-							if (window.hljs) {
-								try { return hljs.highlightAuto(code).value; } catch(e) {}
-							}
-							return code;
+// Configure Marked for chat rendering. Re-run this on first use so a
+				// dependency that becomes available after initial page load is configured
+				// before any model output reaches an innerHTML sink.
+				window.configureChatMarked = function() {
+					var parser = window.marked;
+					if (!parser || typeof parser.parse !== 'function') return false;
+					if (window._chatMarkedConfiguredFor === parser) return true;
+					try {
+						if (typeof parser.setOptions === 'function') {
+							parser.setOptions({
+								breaks: true,
+								gfm: true,
+								highlight: function(code, lang) {
+									if (window.hljs && lang && hljs.getLanguage(lang)) {
+										try { return hljs.highlight(code, { language: lang }).value; } catch(e) {}
+									}
+									if (window.hljs) {
+										try { return hljs.highlightAuto(code).value; } catch(e) {}
+									}
+									return code;
+								}
+							});
 						}
-					});
-				}
+						window._chatMarkedConfiguredFor = parser;
+						return true;
+					} catch(e) {
+						return false;
+					}
+				};
+				window.configureChatMarked();
+				// Escape plain text for safe innerHTML fallback rendering.
 				window.escapeHTMLForChat = function(value) {
 					if (!value) return '';
 					return String(value)
@@ -1789,42 +1873,382 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						.replace(/"/g, '&quot;')
 						.replace(/'/g, '&#39;');
 				};
-				// Escape raw HTML-like tags from model output before markdown parsing.
-				// Preserve fenced and inline code sections so code rendering remains intact.
-				window.escapeRawHTMLForMarkdown = function(text) {
-					if (!text) return text;
-					var placeholders = [];
-					var markerPrefix = '\u0000OVMDHTML';
-					function stash(match) {
-						var idx = placeholders.push(match) - 1;
-						return markerPrefix + idx + '\u0000';
+				// Preserve escaped plain text and mark it so downstream task-result
+				// hydration can keep Markdown code examples inert without Marked DOM.
+				window.renderChatMarkdownFallback = function(text) {
+					return '<span data-chat-markdown-fallback="true" style="white-space: pre-wrap">' + window.escapeHTMLForChat(text) + '</span>';
+				};
+				// Split source text without normalizing LF, CRLF, or bare CR endings.
+				window.markdownLineRanges = function(text) {
+					var lines = [];
+					for (var start = 0; start <= text.length;) {
+						var lfEnd = text.indexOf('\n', start);
+						var crEnd = text.indexOf('\r', start);
+						var end;
+						if (lfEnd === -1) end = crEnd === -1 ? text.length : crEnd;
+						else if (crEnd === -1) end = lfEnd;
+						else end = Math.min(lfEnd, crEnd);
+						var next = end;
+						if (end < text.length) {
+							next = end + 1;
+							if (text.charAt(end) === '\r' && text.charAt(next) === '\n') next++;
+						}
+						lines.push({ start: start, end: end, next: next });
+						if (end === text.length) break;
+						start = next;
 					}
-					var protectedText = text.replace(/```[\s\S]*?```/g, stash);
-					protectedText = protectedText.replace(/`[^`\n]*`/g, stash);
-					protectedText = protectedText.replace(/<\/?[A-Za-z][A-Za-z0-9:_-]*(?:\s+[^<>]*?)?>/g, function(tag) {
-						return window.escapeHTMLForChat(tag);
+					return lines;
+				};
+				// Shared Markdown code-range parser used by transcript processing and
+				// raw-HTML escaping. Keep this aligned with the Go parser in
+				// internal/llm/transcript/markers.go.
+				window.codeRanges = function(text) {
+					var ranges = [];
+					var plainStart = 0;
+					var fenceStart = -1;
+					var fenceChar = '';
+					var fenceLength = 0;
+					function addInlineRanges(start, end) {
+						var runs = [];
+						for (var i = start; i < end;) {
+							if (text.charAt(i) !== '`') { i++; continue; }
+							var runStart = i;
+							while (i < end && text.charAt(i) === '`') i++;
+							var backslashCount = 0;
+							for (var slash = runStart - 1; slash >= start && text.charAt(slash) === '\\'; slash--) backslashCount++;
+							var openerStart = runStart;
+							var openerLength = i - runStart;
+							// Outside code, an odd backslash count escapes only the first
+							// backtick. Any remaining run can still open an inline span.
+							if (backslashCount % 2 === 1) {
+								openerStart++;
+								openerLength--;
+							}
+							runs.push({ start: runStart, end: i, rawLength: i - runStart, openerStart: openerStart, openerLength: openerLength, next: -1 });
+						}
+						var lastRawRunByLength = {};
+						// Closers use raw runs because backslashes are literal inside code.
+						// Unmatched candidates remain literal and later runs are reconsidered.
+						for (var runIndex = runs.length - 1; runIndex >= 0; runIndex--) {
+							var openerKey = String(runs[runIndex].openerLength);
+							if (runs[runIndex].openerLength > 0 && Object.prototype.hasOwnProperty.call(lastRawRunByLength, openerKey)) {
+								runs[runIndex].next = lastRawRunByLength[openerKey];
+							}
+							lastRawRunByLength[String(runs[runIndex].rawLength)] = runIndex;
+						}
+						for (var openIndex = 0; openIndex < runs.length;) {
+							var closeIndex = runs[openIndex].next;
+							if (closeIndex === -1) { openIndex++; continue; }
+							ranges.push({ start: runs[openIndex].openerStart, end: runs[closeIndex].end });
+							openIndex = closeIndex + 1;
+						}
+					}
+					var sourceLines = window.markdownLineRanges(text);
+					for (var lineIndex = 0; lineIndex < sourceLines.length; lineIndex++) {
+						var sourceLine = sourceLines[lineIndex];
+						var lineStart = sourceLine.start;
+						var lineEnd = sourceLine.end;
+						var nextLine = sourceLine.next;
+						var line = text.substring(lineStart, lineEnd);
+						var indent = 0;
+						while (indent < line.length && indent < 3 && line.charAt(indent) === ' ') indent++;
+						var marker = line.charAt(indent);
+						var runEnd = indent;
+						while (runEnd < line.length && line.charAt(runEnd) === marker) runEnd++;
+						var runLength = runEnd - indent;
+
+						if (fenceStart !== -1) {
+							if (marker === fenceChar && runLength >= fenceLength && /^[ \t]*$/.test(line.substring(runEnd))) {
+								var fenceEnd = lineEnd < text.length ? nextLine : lineEnd;
+								ranges.push({ start: fenceStart, end: fenceEnd });
+								fenceStart = -1;
+								plainStart = fenceEnd;
+							}
+						} else if ((marker === '`' || marker === '~') && runLength >= 3 &&
+							!(marker === '`' && line.substring(runEnd).indexOf('`') !== -1)) {
+							addInlineRanges(plainStart, lineStart);
+							fenceStart = lineStart;
+							fenceChar = marker;
+							fenceLength = runLength;
+						}
+					}
+					if (fenceStart !== -1) {
+						ranges.push({ start: fenceStart, end: text.length });
+					} else {
+						addInlineRanges(plainStart, text.length);
+					}
+					return ranges;
+				};
+				window.codeRangesAsync = function(text, owner) {
+					if (!text || text.length < 64 * 1024) {
+						return Promise.resolve(window.codeRanges(text || ''));
+					}
+					if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
+						return Promise.resolve(null);
+					}
+					if (owner && owner._codeRangeWorkerState) {
+						owner._codeRangeWorkerState.finish(null);
+					}
+					try {
+						if (!window._codeRangeWorkerURL) {
+							var workerSource = 'var window=self;window.markdownLineRanges=' + window.markdownLineRanges.toString() +
+								';window.codeRanges=' + window.codeRanges.toString() +
+								';self.onmessage=function(event){try{self.postMessage({ranges:window.codeRanges(event.data)});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};';
+							window._codeRangeWorkerURL = window.URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
+						}
+						return new Promise(function(resolve) {
+							var worker = new Worker(window._codeRangeWorkerURL);
+							var state = { worker: worker, resolve: resolve, fallbackTimer: null, finished: false, finish: null };
+							function finish(ranges) {
+								if (state.finished) return;
+								state.finished = true;
+								if (state.fallbackTimer) clearTimeout(state.fallbackTimer);
+								worker.terminate();
+								if (owner && owner._codeRangeWorkerState === state) owner._codeRangeWorkerState = null;
+								resolve(ranges);
+							}
+							state.finish = finish;
+							if (owner) owner._codeRangeWorkerState = state;
+							worker.onmessage = function(event) {
+								finish(event.data && !event.data.error ? event.data.ranges : null);
+							};
+							worker.onerror = function() { finish(null); };
+							state.fallbackTimer = setTimeout(function() { finish(null); }, window._chatCodeRangeWorkerTimeoutMS || 3000);
+							worker.postMessage(text);
+						});
+					} catch (err) {
+						return Promise.resolve(null);
+					}
+				};
+				window.isInsideCodeRanges = function(ranges, start, end) {
+					var low = 0;
+					var high = ranges.length - 1;
+					while (low <= high) {
+						var middle = (low + high) >> 1;
+						if (start < ranges[middle].start) high = middle - 1;
+						else if (start >= ranges[middle].end) low = middle + 1;
+						else return true;
+					}
+					return false;
+				};
+				window.isInsideCode = function(text, start, end) {
+					return window.isInsideCodeRanges(window.codeRanges(text), start, end);
+				};
+				// Escape raw HTML from model output before Markdown parsing. Code ranges
+				// remain byte-for-byte intact so Marked can render benign HTML examples.
+				window.escapeRawHTMLForMarkdown = function(text, ranges) {
+					if (!text) return text;
+					ranges = ranges || window.codeRanges(text);
+					var rangeIndex = 0;
+					var escaped = '';
+					for (var i = 0; i < text.length; i++) {
+						while (rangeIndex < ranges.length && i >= ranges[rangeIndex].end) rangeIndex++;
+						var inCode = rangeIndex < ranges.length && i >= ranges[rangeIndex].start && i < ranges[rangeIndex].end;
+						escaped += text.charAt(i) === '<' && !inCode ? '&lt;' : text.charAt(i);
+					}
+					return escaped;
+				};
+				// Defense in depth for HTML emitted by Marked/highlight.js. Browser HTML
+				// parsing normalizes quoted, unquoted, and malformed attributes before
+				// this allow/deny pass, avoiding regex-only sanitizer gaps.
+				window.sanitizeChatHTMLTemplate = function(html) {
+					if (!html || typeof document === 'undefined' || !document.createElement) return null;
+					var template = document.createElement('template');
+					if (!template.content || !template.content.querySelectorAll) return null;
+					template.innerHTML = html;
+					template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base, form, svg, math').forEach(function(element) {
+						element.remove();
 					});
-					protectedText = protectedText.replace(new RegExp(markerPrefix + '(\\d+)\\u0000', 'g'), function(_, idx) {
-						var i = parseInt(idx, 10);
-						if (Number.isNaN(i) || i < 0 || i >= placeholders.length) return '';
-						return placeholders[i];
+					template.content.querySelectorAll('*').forEach(function(element) {
+						Array.prototype.slice.call(element.attributes || []).forEach(function(attr) {
+							var name = attr.name.toLowerCase();
+							if (/^on/i.test(attr.name) || name === 'srcdoc' || name === 'srcset' || name === 'style') {
+								element.removeAttribute(attr.name);
+								return;
+							}
+							if (name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action' || name === 'formaction') {
+								var normalized = String(attr.value || '').replace(/[\u0000-\u0020\u007f-\u009f]/g, '').toLowerCase();
+								if (/^(?:javascript:|vbscript:|data:)/.test(normalized)) element.removeAttribute(attr.name);
+							}
+						});
 					});
-					return protectedText;
+					return template;
+				};
+				window.sanitizeChatHTML = function(html) {
+					if (!html) return html;
+					var template = window.sanitizeChatHTMLTemplate(html);
+					return template ? template.innerHTML : window.escapeHTMLForChat(html);
+				};
+				window.sanitizeChatHTMLFragment = function(html) {
+					var template = window.sanitizeChatHTMLTemplate(html);
+					return template ? template.content : null;
+				};
+				window.sanitizeChatHTMLFragmentAsync = function(html, cancelled) {
+					if (!html || typeof document === 'undefined' || !document.createElement) return Promise.resolve(null);
+					var template = document.createElement('template');
+					if (!template.content || !document.createTreeWalker) return Promise.resolve(window.sanitizeChatHTMLFragment(html));
+					// Split Marked's top-level blocks before parsing. If one block is itself
+					// enormous, return null so the caller can use the safe text fallback.
+					var chunks = [];
+					var chunkStart = 0;
+					var tagPattern = /<\/?([a-zA-Z][\w:-]*)(?:\s[^<>]*?)?\s*\/?>/g;
+					var voidTags = { AREA:1, BASE:1, BR:1, COL:1, EMBED:1, HR:1, IMG:1, INPUT:1, LINK:1, META:1, PARAM:1, SOURCE:1, TRACK:1, WBR:1 };
+					var depth = 0;
+					var tagMatch;
+					while ((tagMatch = tagPattern.exec(html)) !== null) {
+						var wholeTag = tagMatch[0];
+						var tagName = tagMatch[1].toUpperCase();
+						if (wholeTag.charAt(1) === '/') depth = Math.max(0, depth - 1);
+						else if (!voidTags[tagName] && wholeTag.substring(wholeTag.length - 2) !== '/>') depth++;
+						if (depth === 0 && tagPattern.lastIndex - chunkStart >= 32 * 1024) {
+							if (tagPattern.lastIndex - chunkStart > 128 * 1024) return Promise.resolve(null);
+							chunks.push(html.substring(chunkStart, tagPattern.lastIndex));
+							chunkStart = tagPattern.lastIndex;
+						}
+					}
+					if (html.length - chunkStart > 128 * 1024) return Promise.resolve(null);
+					if (chunkStart < html.length) chunks.push(html.substring(chunkStart));
+					if (chunks.length === 0) chunks.push(html);
+					var walker = null;
+					return new Promise(function(resolve) {
+						var elements = [];
+						function collectBatch() {
+							if (cancelled && cancelled()) { resolve(null); return; }
+							var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+							var processed = 0;
+							var element;
+							while ((element = walker.nextNode()) !== null) {
+								elements.push(element);
+								processed++;
+								if (processed >= 256 || ((window.performance && performance.now ? performance.now() : Date.now()) - startedAt) >= 8) {
+									setTimeout(collectBatch, 0);
+									return;
+								}
+							}
+							setTimeout(sanitizeBatch, 0);
+						}
+						var elementIndex = 0;
+						function sanitizeBatch() {
+							if (cancelled && cancelled()) { resolve(null); return; }
+							var startedAt = window.performance && performance.now ? performance.now() : Date.now();
+							var processed = 0;
+							while (elementIndex < elements.length) {
+								var element = elements[elementIndex++];
+								processed++;
+								if (/^(?:SCRIPT|STYLE|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|SVG|MATH)$/.test(element.tagName || '')) {
+									element.remove();
+								} else {
+									Array.prototype.slice.call(element.attributes || []).forEach(function(attr) {
+										var name = attr.name.toLowerCase();
+										if (/^on/i.test(attr.name) || name === 'srcdoc' || name === 'srcset' || name === 'style') {
+											element.removeAttribute(attr.name);
+											return;
+										}
+										if (name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action' || name === 'formaction') {
+											var normalized = String(attr.value || '').replace(/[\u0000-\u0020\u007f-\u009f]/g, '').toLowerCase();
+											if (/^(?:javascript:|vbscript:|data:)/.test(normalized)) element.removeAttribute(attr.name);
+										}
+									});
+								}
+								if (processed >= 256 || ((window.performance && performance.now ? performance.now() : Date.now()) - startedAt) >= 8) {
+									setTimeout(sanitizeBatch, 0);
+									return;
+								}
+							}
+							resolve(template.content);
+						}
+						var parseIndex = 0;
+						function parseBatch() {
+							if (cancelled && cancelled()) { resolve(null); return; }
+							var chunkTemplate = document.createElement('template');
+							chunkTemplate.innerHTML = chunks[parseIndex++];
+							template.content.appendChild(chunkTemplate.content);
+							if (parseIndex < chunks.length) { setTimeout(parseBatch, 0); return; }
+							walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT, null);
+							setTimeout(collectBatch, 0);
+						}
+						setTimeout(parseBatch, 0);
+					});
+				};
+				window.renderChatMarkdownLargeFallback = function(text) {
+					if (typeof document === 'undefined' || !document.createDocumentFragment || !document.createElement) return window.renderChatMarkdownFallback(text);
+					var fragment = document.createDocumentFragment();
+					var span = document.createElement('span');
+					span.setAttribute('data-chat-markdown-fallback', 'true');
+					span.style.whiteSpace = 'pre-wrap';
+					span.textContent = text || '';
+					fragment.appendChild(span);
+					return fragment;
 				};
 				// Render markdown to HTML safely for chat messages
 				window.renderChatMarkdown = function(text) {
-					if (!text || !window.marked) return text;
+					if (!text) return text;
+					if (!window.configureChatMarked || !window.configureChatMarked()) {
+						return window.renderChatMarkdownFallback(text);
+					}
 					try {
 						var escapedText = window.escapeRawHTMLForMarkdown(text);
-						// marked.parse returns HTML string
-						var html = marked.parse(escapedText);
-						// Basic XSS sanitization: strip script tags, event handlers
-						html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-						html = html.replace(/\bon\w+\s*=\s*"[^"]*"/gi, '');
-						html = html.replace(/\bon\w+\s*=\s*'[^']*'/gi, '');
-						return html;
+						return window.sanitizeChatHTML(window.marked.parse(escapedText));
 					} catch(e) {
-						return text;
+						return window.renderChatMarkdownFallback(text);
+					}
+				};
+				// Parse large Markdown documents away from the main thread. The complete
+				// source is parsed as one document so lists, references, tables, and code
+				// fences retain their normal Marked semantics.
+				window.renderChatMarkdownAsync = function(text, owner, ranges) {
+					if (!text || text.length < 64 * 1024) {
+						return Promise.resolve(window.renderChatMarkdown(text));
+					}
+					if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || !window.URL || !window.URL.createObjectURL) {
+						return Promise.resolve(window.renderChatMarkdownLargeFallback(text));
+					}
+					if (!window.configureChatMarked || !window.configureChatMarked()) {
+						return Promise.resolve(window.renderChatMarkdownFallback(text));
+					}
+					if (owner && owner._markdownWorkerState) {
+						owner._markdownWorkerState.cancelled = true;
+						if (owner._markdownWorkerState.fallbackTimer) clearTimeout(owner._markdownWorkerState.fallbackTimer);
+						owner._markdownWorkerState.worker.terminate();
+						owner._markdownWorkerState.resolve(null);
+						owner._markdownWorkerState = null;
+					}
+					try {
+						if (!window._markdownWorkerURL) {
+							var workerSource = 'var window=self;window.markdownLineRanges=' + window.markdownLineRanges.toString() +
+								';window.codeRanges=' + window.codeRanges.toString() +
+								';window.escapeRawHTMLForMarkdown=' + window.escapeRawHTMLForMarkdown.toString() +
+								";importScripts('https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js');" +
+								"marked.setOptions({breaks:true,gfm:true});" +
+								"self.onmessage=function(event){try{self.postMessage({html:marked.parse(window.escapeRawHTMLForMarkdown(event.data))});}catch(err){self.postMessage({error:String(err&&err.message||err)});}};";
+							window._markdownWorkerURL = window.URL.createObjectURL(new Blob([workerSource], { type: 'text/javascript' }));
+						}
+						return new Promise(function(resolve) {
+							var worker = new Worker(window._markdownWorkerURL);
+							var state = { worker: worker, resolve: resolve, cancelled: false, fallbackTimer: null, finished: false };
+							if (owner) owner._markdownWorkerState = state;
+							function finish(html) {
+								if (state.finished) return;
+								state.finished = true;
+								if (state.fallbackTimer) clearTimeout(state.fallbackTimer);
+								worker.terminate();
+								if (owner && owner._markdownWorkerState === state) owner._markdownWorkerState = null;
+								resolve(html);
+							}
+							worker.onmessage = function(event) {
+								worker.terminate();
+								if (state.fallbackTimer) { clearTimeout(state.fallbackTimer); state.fallbackTimer = null; }
+								if (!event.data || event.data.error) { finish(window.renderChatMarkdownLargeFallback(text)); return; }
+								window.sanitizeChatHTMLFragmentAsync(event.data.html, function() { return state.cancelled; }).then(function(fragment) {
+									finish(fragment === null ? (state.cancelled ? null : window.renderChatMarkdownLargeFallback(text)) : fragment);
+								}, function() { finish(window.renderChatMarkdownLargeFallback(text)); });
+							};
+							worker.onerror = function() { finish(window.renderChatMarkdownLargeFallback(text)); };
+							state.fallbackTimer = setTimeout(function() { finish(window.renderChatMarkdownLargeFallback(text)); }, 3000);
+							worker.postMessage(text);
+						});
+					} catch (err) {
+						return Promise.resolve(window.renderChatMarkdownLargeFallback(text));
 					}
 				};
 				// Add copy buttons to all <pre> blocks inside a container element
@@ -2073,11 +2497,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					// Normal click on card body → navigate to task detail page
 					if (taskID) {
-						htmx.ajax('GET', '/tasks/' + taskID, {
-							target: '#main-content',
-							swap: 'innerHTML'
-						});
-						history.pushState({}, '', '/tasks/' + taskID);
+						window.openVibelyNavigate('/tasks/' + taskID);
 					}
 				}
 
@@ -2395,6 +2815,44 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					clearSelection();
 				}
 
+					window.openVibelyNavigate = function(url, historyURL) {
+						var source = document.createElement('a');
+						source.className = 'hidden';
+						source.setAttribute('aria-hidden', 'true');
+						source.setAttribute('tabindex', '-1');
+						source.setAttribute('href', url);
+						source.setAttribute('hx-get', url);
+						source.setAttribute('hx-target', '#main-content');
+						source.setAttribute('hx-swap', 'innerHTML');
+						source.setAttribute('hx-push-url', historyURL || 'true');
+						document.body.appendChild(source);
+						var request = htmx.ajax('GET', url, {
+							source: source,
+							target: '#main-content',
+							swap: 'innerHTML'
+						});
+						request.then(function() { source.remove(); }, function() { source.remove(); });
+						return request;
+					};
+
+					window.syncOpenVibelyPageTitle = function(root) {
+						if (!root) return;
+						var marker = root.matches && root.matches('[data-openvibely-page-title]')
+							? root
+							: root.querySelector && root.querySelector('[data-openvibely-page-title]');
+						if (!marker) return;
+						document.title = marker.getAttribute('data-openvibely-page-title');
+					};
+
+					function syncOpenVibelyTitleFromHTMX(event) {
+						var target = event && event.detail && event.detail.target;
+						if (!target) target = document.getElementById('main-content');
+						window.syncOpenVibelyPageTitle(target);
+					}
+
+					document.addEventListener('htmx:afterSwap', syncOpenVibelyTitleFromHTMX);
+					document.addEventListener('htmx:historyRestore', syncOpenVibelyTitleFromHTMX);
+
 				// Scroll position restoration for drop zones
 				let savedScrollPositions = new Map();
 
@@ -2667,13 +3125,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								event.preventDefault();
 								event.stopPropagation();
 								closeOpenModalsForToastNavigation();
-								htmx.ajax('GET', linkURL, {
-									target: '#main-content',
-									swap: 'innerHTML'
-								}).catch(function(err) {
+								window.openVibelyNavigate(linkURL).catch(function(err) {
 									console.error('[toast] Failed to load link URL:', err);
 								});
-								history.pushState({}, '', linkURL);
 								dismissToast(toast);
 							});
 							containerEl.appendChild(link);
@@ -2684,13 +3138,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (taskId) {
 						toast.addEventListener('click', function() {
 							closeOpenModalsForToastNavigation();
-							htmx.ajax('GET', '/tasks/' + taskId, {
-								target: '#main-content',
-								swap: 'innerHTML'
-							}).catch(function(err) {
+							window.openVibelyNavigate('/tasks/' + taskId).catch(function(err) {
 								console.error('[toast] Failed to load task detail:', err);
 							});
-							history.pushState({}, '', '/tasks/' + taskId);
 							dismissToast(toast);
 						});
 					}

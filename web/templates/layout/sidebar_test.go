@@ -178,13 +178,22 @@ func TestSidebar_NavigationAbortsPollingAndSuppressesStaleMorphs(t *testing.T) {
 	if strings.Contains(pointerdownBlock, `closeMobileDrawer()`) || strings.Contains(pointerdownBlock, `sidebarToggle.checked = false`) {
 		t.Fatal("sidebar must not close the mobile drawer on pointerdown before the click/HTMX request can fire")
 	}
+	if strings.Contains(pointerdownBlock, `cancelChatContentRenders`) {
+		t.Fatal("sidebar pointerdown must not cancel transcript rendering before navigation is committed")
+	}
 	beforeRequestBlock := html[beforeRequestStart:beforeSendStart]
+	if strings.Contains(beforeRequestBlock, `cancelChatContentRenders`) {
+		t.Fatal("HTMX beforeRequest must not cancel transcript rendering before a response is ready to swap")
+	}
 	if strings.Contains(beforeRequestBlock, `closeMobileDrawer();`) && strings.Contains(beforeRequestBlock, `window.location.pathname !== navBase`) {
 		t.Fatal("sidebar must not close the mobile drawer in the real-navigation htmx:beforeRequest path before HTMX sends the request")
 	}
 	beforeSendBlock := html[beforeSendStart:]
 	if !strings.Contains(beforeSendBlock, `closeMobileDrawer()`) {
 		t.Fatal("sidebar must close the mobile drawer in htmx:beforeSend after HTMX accepts the nav request")
+	}
+	if !strings.Contains(beforeSendBlock, `if (event.detail.shouldSwap !== false && target && target.id === 'main-content' && window.cancelChatContentRenders) window.cancelChatContentRenders()`) {
+		t.Fatal("committed main-content swaps must cancel obsolete transcript renders")
 	}
 }
 
@@ -299,6 +308,55 @@ func TestSidebar_UserAreaAndThemeToggleCoexist(t *testing.T) {
 	if !strings.Contains(html, `action="/logout"`) {
 		t.Fatal("sidebar user menus must preserve logout form action")
 	}
+	for _, snippet := range []string{
+		"name.textContent = data.display || data.username",
+		"logoutLabel.textContent = 'Log out of this workspace'",
+		"data.auth_source === 'hosted_sso'",
+	} {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("sidebar hosted identity/logout behavior missing: %s", snippet)
+		}
+	}
+	if strings.Contains(html, "name.innerHTML =") || strings.Contains(html, "logoutLabel.innerHTML =") {
+		t.Fatal("identity and logout labels must use text-only DOM assignment")
+	}
+}
+
+func TestSidebar_HostedIdentityUsesOnlyInertTextSinks(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "fetch('/auth/me'")
+	if start < 0 {
+		t.Fatal("hosted identity browser update block not found")
+	}
+	end := strings.Index(html[start:], ".catch(function() {})")
+	if end < 0 {
+		t.Fatal("hosted identity browser update block terminator not found")
+	}
+	block := html[start : start+end]
+	for _, required := range []string{
+		"name.textContent = data.display || data.username",
+		"avatar.textContent = initial",
+		"avatarCollapsed.textContent = initial",
+		"logoutLabel.textContent = 'Log out of this workspace'",
+	} {
+		if !strings.Contains(block, required) {
+			t.Fatalf("missing inert identity sink %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
+		"setAttribute('href'", "setAttribute(\"href\"", "setAttribute('src'", "setAttribute(\"src\"",
+		"style.cssText", "eval(", "new Function",
+	} {
+		if strings.Contains(block, forbidden) {
+			t.Fatalf("identity update block contains active sink %q", forbidden)
+		}
+	}
 }
 
 func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
@@ -314,7 +372,7 @@ func TestSidebar_FooterAlignmentAndAccessibleHitTargets(t *testing.T) {
 		`sidebar-theme-toggle-container border-t border-base-300 p-3 flex items-center justify-end gap-2`,
 		`id="sidebar-user-menu-trigger"`,
 		`class="sidebar-user-trigger btn btn-ghost w-full justify-start items-center gap-2 normal-case"`,
-		`class="text-sm" role="menuitem">Logout</button>`,
+		`id="sidebar-logout-label" type="submit" class="text-sm" role="menuitem">Logout</button>`,
 		`aria-label="Open user menu"`,
 		`.sidebar-theme-toggle-container {`,
 		`min-height: 3.25rem;`,

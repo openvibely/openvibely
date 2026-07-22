@@ -31,6 +31,7 @@ type ChatEvent struct {
 	Source          string        `json:"source,omitempty"` // "telegram", "web", "api"
 	AgentName       string        `json:"agent_name,omitempty"`
 	CompletedOutput string        `json:"completed_output,omitempty"` // Final assistant output for ChatResponseDone; enables plan-completion prompt without DOM scan
+	Status          string        `json:"status,omitempty"`           // Authoritative terminal execution status for ChatResponseDone
 	Queued          bool          `json:"queued,omitempty"`
 	Steering        bool          `json:"steering,omitempty"`
 	HasAttachments  bool          `json:"has_attachments,omitempty"`

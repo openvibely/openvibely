@@ -663,8 +663,10 @@ func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
 			s.sendMessage(ctx, chatID, "Queued. I'll send this after the current response finishes.")
 		},
 		FirstTurn: channelChatIngressFirstTurnOptions{
-			Task:              &models.Task{Title: fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)), CreatedVia: models.TaskOriginTelegram, TelegramChatID: chatID},
-			RuntimeTools:      s.buildTelegramActionToolRuntime(projectID, chatID, userID, nil),
+			Task: &models.Task{Title: fmt.Sprintf("Telegram %s: %s", start.Format("15:04:05.000"), util.Truncate(text, 47)), CreatedVia: models.TaskOriginTelegram, TelegramChatID: chatID},
+			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
+				return s.buildTelegramActionToolRuntimeForTask(projectID, taskID, chatID, userID, nil)
+			},
 			ChannelChatRunner: s.channelChatRunner,
 			CompleteExecution: channelCompletionFunc("telegram", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 			LinkAttachments: func(ctx context.Context, execID string, atts []models.ChatAttachment) ([]models.ChatAttachment, error) {
@@ -1203,7 +1205,11 @@ func telegramStreamingDisplay(cleaned string, terminal bool) string {
 }
 
 func (s *TelegramService) buildTelegramActionToolRuntime(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
-	handlers := s.telegramActionHandlers(projectID, chatID, userID, collector)
+	return s.buildTelegramActionToolRuntimeForTask(projectID, "", chatID, userID, collector)
+}
+
+func (s *TelegramService) buildTelegramActionToolRuntimeForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
+	handlers := s.telegramActionHandlersForTask(projectID, callerTaskID, chatID, userID, collector)
 	return &llmcontracts.RuntimeTools{
 		Definitions: actionToolDefinitions(chatcontrol.SurfaceTelegram, true),
 		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceTelegram, handlers),
@@ -1211,6 +1217,10 @@ func (s *TelegramService) buildTelegramActionToolRuntime(projectID string, chatI
 }
 
 func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
+	return s.telegramActionHandlersForTask(projectID, "", chatID, userID, collector)
+}
+
+func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID:     projectID,
 		TaskSvc:       s.taskSvc,
@@ -1275,6 +1285,7 @@ func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64,
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             projectID,
+		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
 		LLMConfigRepo:         s.llmConfigRepo,
@@ -1322,36 +1333,6 @@ func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID i
 		}
 	}
 	return nil
-}
-
-func (s *TelegramService) processViewThread(ctx context.Context, execID, projectID, output string) string {
-	viewRequests := ParseViewThread(output)
-	if len(viewRequests) == 0 {
-		return output
-	}
-
-	applog.Infof("[telegram] processViewThread exec=%s found %d view requests", execID, len(viewRequests))
-
-	for _, req := range viewRequests {
-		task, err := resolveChannelTaskReference(ctx, s.taskRepo, projectID, req.TaskID, req.Title)
-		if err != nil {
-			applog.Infof("[telegram] processViewThread error resolving task: %v", err)
-			output += fmt.Sprintf("\n\n---\nCould not find task: %v", err)
-			continue
-		}
-
-		executions, err := s.execRepo.ListByTaskChronological(ctx, task.ID)
-		if err != nil {
-			applog.Infof("[telegram] processViewThread error listing executions for task %s: %v", task.ID, err)
-			output += fmt.Sprintf("\n\n---\nError retrieving thread for task \"%s\": %v", task.Title, err)
-			continue
-		}
-
-		transcript := formatThreadTranscript(task, executions, req.Offset, req.Limit)
-		output += transcript
-	}
-
-	return output
 }
 
 // handleNaturalLanguageProjectCommand detects natural language project commands
@@ -1420,8 +1401,6 @@ func extractProjectSwitchTarget(lower string) string {
 	return ""
 }
 
-// processListProjects handles [LIST_PROJECTS] markers by returning all available projects.
-// processSwitchProject handles [SWITCH_PROJECT] markers by changing the user's active project.
 // selectDefaultAgent retrieves the default model or falls back to the first available.
 func (s *TelegramService) selectDefaultAgent(ctx context.Context) (*models.LLMConfig, error) {
 	agents, err := s.llmConfigRepo.List(ctx)

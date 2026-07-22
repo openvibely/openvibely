@@ -49,6 +49,7 @@ func agentPermissionDefaultsJSON(perms models.AgentPermissionDefaults) string {
 
 templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOption) {
 	<div id="agents-container" class="overflow-x-hidden max-w-full min-w-0" data-search-container>
+		@layout.PageTitle("Agents")
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Agents</h2>
 			<button class="btn btn-primary btn-sm" onclick="openNewAgentModal()">
