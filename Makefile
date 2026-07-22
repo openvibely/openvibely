@@ -3,7 +3,7 @@
 TEMPL_VERSION := $(shell go list -m -f '{{.Version}}' github.com/a-h/templ)
 SWAG_VERSION := $(shell go list -m -f '{{.Version}}' github.com/swaggo/swag)
 GOOSE_VERSION := $(shell go list -m -f '{{.Version}}' github.com/pressly/goose/v3)
-AIR_VERSION := v1.65.3
+AIR_VERSION := v1.67.2
 GO_BIN := $(shell go env GOBIN)
 ifeq ($(GO_BIN),)
 GO_BIN := $(shell go env GOPATH)/bin
