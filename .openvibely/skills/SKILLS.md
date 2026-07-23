@@ -79,7 +79,7 @@ always_use:
 
 ## openvibely_recursive_self_improvement_bootstrap
 
-[OpenVibely Recursive Self-Improvement Bootstrap](openvibely_recursive_self_improvement_bootstrap/SKILL.md) — Bootstrap an autonomous, reviewable OpenVibely loop that turns project vision, specs, and defect lists into prioritized tasks, goals, schedules, wakeups, memory, and skills.
+[OpenVibely Recursive Self-Improvement Bootstrap](openvibely_recursive_self_improvement_bootstrap/SKILL.md) — Bootstrap a reviewable task-and-schedule loop that drives explicit project vision, specs, and defects toward completion.
 
 ## openvibely_project_guidance
 
@@ -187,3 +187,15 @@ always_use:
 ## openvibely_managed_memory_maintenance
 
 [OpenVibely Managed Memory Maintenance](openvibely_managed_memory_maintenance/SKILL.md) — Apply narrow, idempotent corrections to authoritative OpenVibely managed-memory topics and verify the saved result.
+
+## openvibely_security_boundary_workflow
+
+[OpenVibely Security Boundary Workflow](openvibely_security_boundary_workflow/SKILL.md) — Implement and audit strict configuration, HTTP protocol, retry-deadline, cookie, and identity boundaries for OpenVibely authentication and external integrations.
+
+## openvibely_github_actions_workflow
+
+[OpenVibely GitHub Actions Workflow](openvibely_github_actions_workflow/SKILL.md) — Implement and validate secure GitHub Actions dependency caching and other workflow-only changes.
+
+## openvibely_automation_graph_workflow
+
+[OpenVibely Automation Graph Workflow](openvibely_automation_graph_workflow/SKILL.md) — Implement, debug, and explain OpenVibely Automation graph nodes, publication effects, runtime handoffs, and projections without creating a parallel executor.

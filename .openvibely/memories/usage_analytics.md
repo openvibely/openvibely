@@ -2,14 +2,14 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-07-17
+updated: 2026-07-20
 source: consolidation
-source_id: memory_consolidation_2026_07_17
+source_id: memory_consolidation_2026_07_20
 confidence: high
 title: Usage Analytics
 ---
 
-OpenVibely usage analytics are local operational analytics, not third-party product telemetry. No PostHog, Segment, Mixpanel, or Google Analytics-style frontend tracking was found in source as of 2026-06-06.
+OpenVibely usage analytics are local operational analytics, not third-party product telemetry. Third-party frontend tracking such as PostHog, Segment, Mixpanel, or Google Analytics is outside the intended architecture.
 
 Durable analytics model:
 - Persistent model-usage analytics exist for Anthropic and OpenAI OAuth/API-key paths, plus OpenAI-compatible Chat Completions API-key configs.
@@ -68,8 +68,7 @@ OAuth account facts:
 - Provider account-limit endpoints are fragile; refresh failures affect live account cards, not local token usage.
 - OpenAI account-limit windows are identified and labeled from `limit_window_seconds`, not from `primary_window`/`secondary_window` source slots. Recognized 5-hour, daily, weekly, monthly, and annual durations use a 5% tolerance, seconds round upward to persisted minutes, and semantic keys/order remain stable when provider slots swap.
 - When persisted account-limit snapshots are merged with current model configs, prefer the current config's resolved `OAuthAccountID` over stale `account_usage_snapshots.account_id`. Older rows may contain a local config ID or pre-profile placeholder; stale-first grouping can split one Anthropic subscription into duplicate cards and hide the row carrying `Claude Max (20x)` profile metadata.
-- When multiple configs contribute historical views for one provider account, the newest timestamped full snapshot must exclusively own all dynamic account-limit state. Older snapshots may backfill only missing safe descriptive metadata such as normalized plan/subscription labels; they must never backfill or resurrect primary limits, secondary limits, extra/model-specific limits, utilization, reset timestamps, usage-credit state or amounts, credit balances/badges, spend-control state, dynamic timestamps, or errors.
-- Historical account deduplication must not backfill `ExtraUsageLabel`, `ExtraUsageMonthlyUSD`, or `ExtraUsageUsedUSD` from an older losing OpenAI or Anthropic snapshot. Safe plan metadata may be backfilled, but limits, usage-credit state and amounts, timestamps, and errors remain winner-owned.
+- When multiple configs contribute historical views for one provider account, the newest timestamped full snapshot must exclusively own all dynamic account-limit state. Older snapshots may backfill only missing safe descriptive metadata such as normalized plan/subscription labels; they must never backfill or resurrect primary/secondary/extra/model-specific limits, `ExtraUsageLabel`, `ExtraUsageMonthlyUSD`, `ExtraUsageUsedUSD`, utilization, reset timestamps, usage-credit state or amounts, credit balances/badges, spend-control state, dynamic timestamps, or errors.
 - Persisted OpenAI snapshots created before duration-based window normalization are repaired at account-view assembly time from stored window minutes, so this behavior requires no schema migration.
 - Analytics renders canonical account-limit ordering from the normalized `limits` list and displays elapsed reset times as `Reset due` or omits the line, never `Resets: 0 minutes`.
 

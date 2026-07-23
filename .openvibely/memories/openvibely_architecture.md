@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-07-17
+updated: 2026-07-20
 source: consolidation
-source_id: memory_consolidation_2026_07_17
+source_id: memory_consolidation_2026_07_20
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -44,7 +44,13 @@ Worker capacity settings:
 OAuth and hosted deployment facts:
 - Model OAuth initiate/callback resolves absolute app URLs through shared URL-building behavior: `APP_BASE_URL` first, then forwarded/request host fallback.
 - Hosted deployments use `APP_BASE_URL` so Anthropic/OpenAI OAuth redirects stay on the public hostname. Without it, OAuth keeps localhost callback-server behavior for local development.
-- Hosted deployments use Docker Compose projects under `/docker/<project>/docker-compose.yml`; the recorded Hostinger deployment routes app and docs containers through Traefik with persistent `/data` storage. Exact host inventory is operational state and should be verified live before acting on it.
+- `start.sh` deliberately uses `${VAR+x}` presence checks to distinguish an unset variable from one explicitly set to an empty string while remaining compatible with macOS Bash 3.2. Its local `ENVIRONMENT=development` default stays unexported when `ENVIRONMENT` was absent so hosted SSO does not mistake the script default for explicit operator authorization of development-mode HTTP; explicitly empty hosted SSO settings are exported so Go configuration rejects them rather than treating SSO as unrequested.
+- Hosted workspace SSO is server-only and uses an explicit `hosted_sso` auth mode that takes precedence over rolling-deployment local credentials. Configuration strictly validates canonical hosted origins, immutable instance ID, and a canonical 32-byte base64url HMAC key; desktop mode must reject hosted SSO even when related flags are false, while non-hosted local-auth behavior remains compatible.
+- Hosted workspace SSO uses backend authorization-code exchange with PKCE, exact instance/email-verification checks, one-hour host-only versioned `ov_session` cookies, purpose-separated HMAC domains, and an authenticated `ov_sso_browser` binding. Pending transactions are process-local, ten-minute, bounded per browser and globally, and globally rate-limited.
+- Hosted SSO injects validated canonical `APP_BASE_URL` into SSO and existing OAuth/absolute-URL consumers, hardens auth-route method override and path-only request logging, defines workspace-local logout with exact-origin CSRF validation, and preserves public callback/webhook routes.
+- Process-local pending SSO state requires exactly one application replica per hosted workspace until shared pending storage exists. Rollout requires publishing the client in the workspace image and deliberately recreating/upgrading containers while retaining `/data`; exact `CONTROL_BASE_URL`, stored workspace `AppBaseURL`, and public hostname must agree.
+- Hosted control-plane image tags, environment overrides, and deployed image contents are operational state. Verify the live Compose configuration before rollout rather than assuming an override documented in `.env.example` is active.
+- Hosted deployments use Docker Compose projects under `/docker/<project>/docker-compose.yml` and route app/docs containers through Traefik with persistent `/data` storage. Exact host inventory is operational state and must be verified live before acting on it.
 
 Live DB inspection facts:
 - For read-only diagnosis against the live app DB (`$HOME/.openvibely/openvibely.db`), the `tasks` table has no `role` column; swarm role/state live in `swarm_role`, `swarm_status`, `swarm_config`, `swarm_sequence` (plus `parent_task_id`, `category`, `status`, `worktree_path`, `worktree_branch`, `merge_status`). The `executions` table has no `created_at`/`diff` columns; use `started_at`/`completed_at` for timing and `error_message`/`diff_output` for failure text/diff. Run `PRAGMA table_info(<table>)` first when unsure rather than guessing column names.
