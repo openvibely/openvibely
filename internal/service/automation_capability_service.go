@@ -1,0 +1,153 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+)
+
+const automationCapabilityLimit = 50
+
+type AutomationCapabilitySnapshotBuilder struct {
+	projectRepo      *repository.ProjectRepo
+	agentRepo        *repository.AgentRepo
+	taskRepo         *repository.TaskRepo
+	settingsRepo     *repository.SettingsRepo
+	githubConnection automationGitHubConnectionProvider
+}
+
+func NewAutomationCapabilitySnapshotBuilder(projectRepo *repository.ProjectRepo, agentRepo *repository.AgentRepo, taskRepo *repository.TaskRepo, settingsRepo *repository.SettingsRepo) *AutomationCapabilitySnapshotBuilder {
+	return &AutomationCapabilitySnapshotBuilder{projectRepo: projectRepo, agentRepo: agentRepo, taskRepo: taskRepo, settingsRepo: settingsRepo}
+}
+
+func (b *AutomationCapabilitySnapshotBuilder) SetGitHubConnectionProvider(provider automationGitHubConnectionProvider) {
+	b.githubConnection = provider
+}
+
+func (b *AutomationCapabilitySnapshotBuilder) Build(ctx context.Context, projectID string) (models.AutomationCapabilitySnapshot, error) {
+	var snapshot models.AutomationCapabilitySnapshot
+	if b == nil || b.projectRepo == nil {
+		return snapshot, errors.New("project repository is unavailable")
+	}
+	project, err := b.projectRepo.GetByID(ctx, projectID)
+	if err != nil {
+		return snapshot, err
+	}
+	if project == nil {
+		return snapshot, errors.New("project not found")
+	}
+	snapshot.Project.ID = project.ID
+	snapshot.Project.Name = project.Name
+	snapshot.SupportedNodeTypes = customAutomationDescriptionNodeTypes()
+	snapshot.SupportedRoles = supportedAutomationRoles()
+	snapshot.Integrations = map[string]models.AutomationIntegrationCapability{
+		"native": {Configured: true, ApprovalModes: []string{"notification_approval"}},
+		"github": {Configured: b.githubConfigured(ctx), ApprovalModes: []string{"assignment", "pull_request_review"}},
+	}
+	snapshot.SafetyBoundaries = map[string]bool{
+		"human_approval_required": true, "merge_requires_separate_authorization": true,
+		"release_requires_separate_authorization": true, "deployment_requires_separate_authorization": true,
+	}
+	if b.agentRepo != nil {
+		agents, listErr := b.agentRepo.ListSelectableForProject(ctx, projectID, automationCapabilityLimit)
+		if listErr != nil {
+			return snapshot, listErr
+		}
+		for _, agent := range agents {
+			if len(snapshot.Agents) >= automationCapabilityLimit {
+				break
+			}
+			if !agent.Enabled || agent.ArchivedAt != nil || !agent.SelectableAsPrimary || (agent.ProjectID != "" && agent.ProjectID != projectID) {
+				continue
+			}
+			key := strings.TrimSpace(agent.Key)
+			if key == "" {
+				key = agent.ID
+			}
+			capabilities := append([]string(nil), agent.Tools...)
+			sort.Strings(capabilities)
+			snapshot.Agents = append(snapshot.Agents, models.AutomationCapabilityRef{ID: key, Name: agent.Name, Capabilities: capabilities})
+			for _, skill := range agent.Skills {
+				if len(snapshot.Skills) >= automationCapabilityLimit {
+					break
+				}
+				snapshot.Skills = append(snapshot.Skills, models.AutomationCapabilityRef{ID: key + ":" + skill.Name, Name: skill.Name})
+			}
+		}
+	}
+	if b.taskRepo != nil {
+		tasks, listErr := b.taskRepo.ListAutomationReusableTasks(ctx, projectID, automationCapabilityLimit)
+		if listErr != nil {
+			return snapshot, listErr
+		}
+		for _, task := range tasks {
+			snapshot.ReusableResources = append(snapshot.ReusableResources, models.AutomationCapabilityRef{ID: task.ID, Name: task.Title, Capabilities: []string{"task"}})
+		}
+	}
+	snapshot.SourceFiles = boundedAutomationSourceFiles(project.RepoPath)
+	sort.Slice(snapshot.Agents, func(i, j int) bool { return capabilityRefLess(snapshot.Agents[i], snapshot.Agents[j]) })
+	sort.Slice(snapshot.Skills, func(i, j int) bool { return capabilityRefLess(snapshot.Skills[i], snapshot.Skills[j]) })
+	sort.Slice(snapshot.ReusableResources, func(i, j int) bool {
+		return capabilityRefLess(snapshot.ReusableResources[i], snapshot.ReusableResources[j])
+	})
+	return snapshot, nil
+}
+
+func capabilityRefLess(a, b models.AutomationCapabilityRef) bool {
+	if a.Name != b.Name {
+		return a.Name < b.Name
+	}
+	return a.ID < b.ID
+}
+
+func supportedAutomationRoles() []string {
+	return customAutomationDescriptionRoles()
+}
+
+func (b *AutomationCapabilitySnapshotBuilder) githubConfigured(ctx context.Context) bool {
+	if b == nil || b.settingsRepo == nil || b.githubConnection == nil {
+		return false
+	}
+	mode, err := b.settingsRepo.Get(ctx, GitHubSettingAuthMode)
+	if err != nil {
+		return false
+	}
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != GitHubAuthModePAT && mode != GitHubAuthModeApp {
+		return false
+	}
+	status, err := b.githubConnection.GetConnectionStatus(ctx)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(status.AuthMode), mode) && status.Configured && status.Connected
+}
+
+func boundedAutomationSourceFiles(repoPath string) []string {
+	if strings.TrimSpace(repoPath) == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(repoPath)
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, 20)
+	for _, entry := range entries {
+		if len(out) >= 20 || entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		name := filepath.Base(entry.Name())
+		lower := strings.ToLower(name)
+		if strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".txt") {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}

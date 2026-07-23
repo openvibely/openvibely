@@ -314,6 +314,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		Agent:            *agent,
 		ChatHistory:      priorHistory,
 		ProjectID:        projectID,
+		PrincipalID:      h.authPrincipalID(c),
 		SystemContext:    combineContexts(combineContexts(taskContext, attachmentContext), personalityContext),
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,

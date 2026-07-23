@@ -427,6 +427,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		Agent:            *agent,
 		ChatHistory:      priorHistory,
 		ProjectID:        projectID,
+		PrincipalID:      h.authPrincipalID(c),
 		SystemContext:    fullContext,
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,

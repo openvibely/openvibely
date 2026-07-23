@@ -87,6 +87,45 @@ func (r *ThreadInputRepo) CreateQueued(ctx context.Context, input *models.Thread
 	})
 }
 
+// CreateQueuedWithAutomationContext persists a normal queued input and its
+// server-derived causal bindings in one transaction. The existing thread_inputs
+// queue remains authoritative for admission, cancellation, and promotion.
+func (r *ThreadInputRepo) CreateQueuedWithAutomationContext(ctx context.Context, input *models.ThreadInput, automationContext models.AutomationContext, bindingKey string) error {
+	if automationContext.ProjectID == "" || automationContext.ProjectID != input.ProjectID || len(automationContext.Bindings) == 0 {
+		return errors.New("queued automation context does not match input project")
+	}
+	if bindingKey == "" {
+		return errors.New("automation binding key is required")
+	}
+	return r.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+		if err := r.CreateQueuedWithExecutor(ctx, exec, input); err != nil {
+			return err
+		}
+		return bindAutomationThreadInputWithExecutor(ctx, exec, input.ID, automationContext, bindingKey)
+	})
+}
+
+func bindAutomationThreadInputWithExecutor(ctx context.Context, exec SQLExecutor, inputID string, automationContext models.AutomationContext, bindingKey string) error {
+	var inputProjectID string
+	if err := exec.QueryRowContext(ctx, `SELECT project_id FROM thread_inputs WHERE id = ?`, inputID).Scan(&inputProjectID); err != nil {
+		return fmt.Errorf("loading automation thread input: %w", err)
+	}
+	if inputProjectID != automationContext.ProjectID {
+		return errors.New("automation thread input project mismatch")
+	}
+	for i, binding := range automationContext.Bindings {
+		key := fmt.Sprintf("%s:%d", bindingKey, i)
+		if _, err := exec.ExecContext(ctx, `INSERT INTO automation_thread_input_bindings
+			(thread_input_id, project_id, automation_id, version_id, node_id, invocation_id, work_item_id, binding_key)
+			VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?)
+			ON CONFLICT(thread_input_id, binding_key) DO NOTHING`, inputID, automationContext.ProjectID,
+			binding.AutomationID, binding.VersionID, binding.NodeID, binding.InvocationID, binding.WorkItemID, key); err != nil {
+			return fmt.Errorf("binding automation thread input: %w", err)
+		}
+	}
+	return nil
+}
+
 func (r *ThreadInputRepo) CreateQueuedWithExecutor(ctx context.Context, exec SQLExecutor, input *models.ThreadInput) error {
 	if input.InputMode == "" {
 		input.InputMode = models.ThreadInputModeQueued
@@ -663,13 +702,47 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 			isFollowup = 1
 		}
 		if err := dbexec.QueryRowContext(ctx, `
-				INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
-				VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
-				RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
+					INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
+					VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)
+					RETURNING id, started_at`, exec.TaskID, exec.AgentConfigID, exec.Status, exec.PromptSent, isFollowup).Scan(&exec.ID, &exec.StartedAt); err != nil {
 			return fmt.Errorf("creating promoted task execution: %w", err)
 		}
-		res, err = dbexec.ExecContext(ctx, `
-				UPDATE thread_inputs
+		bindingRows, err := dbexec.QueryContext(ctx, `SELECT automation_id, version_id, node_id,
+				COALESCE(invocation_id, ''), COALESCE(work_item_id, ''), binding_key
+				FROM automation_thread_input_bindings WHERE thread_input_id = ? AND project_id = ?
+				ORDER BY binding_key, id`, inputID, promoted.ProjectID)
+		if err != nil {
+			return fmt.Errorf("loading automation input bindings: %w", err)
+		}
+		for bindingRows.Next() {
+			var automationID, versionID, nodeID, invocationID, workItemID, bindingKey string
+			if err := bindingRows.Scan(&automationID, &versionID, &nodeID, &invocationID, &workItemID, &bindingKey); err != nil {
+				_ = bindingRows.Close()
+				return err
+			}
+			activityKey := "thread-input:" + inputID + ":" + bindingKey + ":execute"
+			var activityID string
+			if err := dbexec.QueryRowContext(ctx, `INSERT INTO automation_activities
+					(project_id, automation_id, version_id, node_id, invocation_id, work_item_id, activity_key, activity_type, status)
+					VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, 'thread_input_execution', 'running')
+					ON CONFLICT(automation_id, version_id, activity_key) DO UPDATE SET status = 'running'
+					RETURNING id`, promoted.ProjectID, automationID, versionID, nodeID, invocationID, workItemID, activityKey).Scan(&activityID); err != nil {
+				_ = bindingRows.Close()
+				return fmt.Errorf("upserting automation input activity: %w", err)
+			}
+			for _, resource := range []struct{ kind, id string }{{"task", exec.TaskID}, {"execution", exec.ID}} {
+				if _, err := dbexec.ExecContext(ctx, `INSERT INTO automation_activity_resources
+						(activity_id, resource_type, resource_id, relation) VALUES (?, ?, ?, 'subject')
+						ON CONFLICT(activity_id, resource_type, resource_id, relation) DO NOTHING`, activityID, resource.kind, resource.id); err != nil {
+					_ = bindingRows.Close()
+					return err
+				}
+			}
+		}
+		if err := bindingRows.Close(); err != nil {
+			return err
+		}
+		res, err = dbexec.ExecContext(ctx, `				UPDATE thread_inputs
 				SET input_status = 'applied', run_execution_id = ?, turn_id = ?, expected_turn_id = NULL, applied_at = datetime('now'), updated_at = datetime('now')
 				WHERE id = ? AND scope = 'task_thread' AND task_id = ? AND input_mode = 'queued' AND input_status = 'pending' AND expected_turn_id = id`, exec.ID, exec.ID, inputID, exec.TaskID)
 		if err != nil {
@@ -846,6 +919,7 @@ func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID st
 
 type SQLExecutor interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
@@ -891,6 +965,10 @@ type manualTx struct {
 
 func (t *manualTx) ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
 	return t.conn.ExecContext(ctx, query, args...)
+}
+
+func (t *manualTx) QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error) {
+	return t.conn.QueryContext(ctx, query, args...)
 }
 
 func (t *manualTx) QueryRowContext(ctx context.Context, query string, args ...interface{}) *sql.Row {

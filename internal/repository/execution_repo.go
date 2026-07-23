@@ -6,16 +6,22 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
 type ExecutionRepo struct {
-	db *sql.DB
+	db             *sql.DB
+	automationRepo *AutomationRepo
 }
 
 func NewExecutionRepo(db *sql.DB) *ExecutionRepo {
 	return &ExecutionRepo{db: db}
+}
+
+func (r *ExecutionRepo) SetAutomationRepo(repo *AutomationRepo) {
+	r.automationRepo = repo
 }
 
 func (r *ExecutionRepo) DB() *sql.DB {
@@ -26,17 +32,17 @@ func (r *ExecutionRepo) DB() *sql.DB {
 }
 
 const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
-	tokens_used, duration_ms, is_followup, diff_output, cli_session_id, started_at, completed_at`
+		tokens_used, duration_ms, is_followup, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
 // executionSelectColumnsLight omits diff_output (substituting an empty string) so that
 // list/pagination queries don't load the potentially very large diff blob on every request.
 // The scan shape matches executionSelectColumns, so scanExecutionRow still works; the
 // resulting Execution will have DiffOutput == "".
 const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
-	tokens_used, duration_ms, is_followup, '' AS diff_output, cli_session_id, started_at, completed_at`
+		tokens_used, duration_ms, is_followup, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
 const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.error_message,
-	e.tokens_used, e.duration_ms, e.is_followup, '' AS diff_output, e.cli_session_id, e.started_at, e.completed_at`
+		e.tokens_used, e.duration_ms, e.is_followup, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
 
 func scanExecutionRow(scanner interface {
 	Scan(dest ...interface{}) error
@@ -44,7 +50,7 @@ func scanExecutionRow(scanner interface {
 	var e models.Execution
 	err := scanner.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
 		&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup,
-		&e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt)
+		&e.DiffOutput, &e.CliSessionID, &e.DispatchID, &e.StartedAt, &e.CompletedAt)
 	return e, err
 }
 
@@ -223,6 +229,15 @@ func (r *ExecutionRepo) CreateDirectTaskFollowup(ctx context.Context, e *models.
 	return nil
 }
 
+func (r *ExecutionRepo) SetAgentConfigIfEmpty(ctx context.Context, id, agentConfigID string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE executions SET agent_config_id = NULLIF(?, '')
+		WHERE id = ? AND (agent_config_id IS NULL OR agent_config_id = '')`, agentConfigID, id)
+	if err != nil {
+		return fmt.Errorf("updating execution agent config: %w", err)
+	}
+	return nil
+}
+
 func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE executions SET output = ? WHERE id = ?`, output, id)
@@ -245,6 +260,47 @@ func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.E
 		status, output, output, errMsg, tokensUsed, durationMs, id)
 	if err != nil {
 		return fmt.Errorf("completing execution: %w", err)
+	}
+	if err := r.syncAutomationActivitiesForExecution(ctx, id, status, errMsg); err != nil {
+		applog.Infof("[execution-repo] automation activity projection deferred execution=%s: %v", id, err)
+		return nil
+	}
+	if err := r.finalizeAutomationExecution(ctx, id, status); err != nil {
+		applog.Infof("[execution-repo] automation terminal projection deferred execution=%s: %v", id, err)
+	}
+	return nil
+}
+
+func (r *ExecutionRepo) finalizeAutomationExecution(ctx context.Context, executionID string, status models.ExecutionStatus) error {
+	if r.automationRepo == nil {
+		return nil
+	}
+	var projectID string
+	if err := r.db.QueryRowContext(ctx, `SELECT t.project_id FROM executions e JOIN tasks t ON t.id = e.task_id WHERE e.id = ?`, executionID).Scan(&projectID); err != nil {
+		return fmt.Errorf("loading automation execution project: %w", err)
+	}
+	if err := r.automationRepo.FinalizeExecutionProjection(ctx, projectID, executionID, status); err != nil {
+		return fmt.Errorf("finalizing automation execution projection: %w", err)
+	}
+	return nil
+}
+
+func (r *ExecutionRepo) syncAutomationActivitiesForExecution(ctx context.Context, executionID string, status models.ExecutionStatus, message string) error {
+	activityStatus := models.AutomationActivityCompleted
+	if status == models.ExecFailed {
+		activityStatus = models.AutomationActivityFailed
+	} else if status == models.ExecCancelled {
+		activityStatus = models.AutomationActivityCancelled
+	} else if status == models.ExecRunning {
+		activityStatus = models.AutomationActivityRunning
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE automation_activities SET status = ?,
+		completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN CURRENT_TIMESTAMP ELSE NULL END,
+		error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
+		AND id IN (SELECT activity_id FROM automation_activity_resources
+		WHERE resource_type = 'execution' AND resource_id = ?)`, activityStatus, activityStatus, strings.TrimSpace(message), executionID)
+	if err != nil {
+		return fmt.Errorf("updating automation execution activities: %w", err)
 	}
 	return nil
 }
@@ -314,6 +370,11 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 	}
 	changed, _ := res.RowsAffected()
 	if changed > 0 {
+		if err := r.syncAutomationActivitiesForExecution(ctx, id, models.ExecCompleted, ""); err != nil {
+			applog.Infof("[execution-repo] automation steering activity projection deferred execution=%s: %v", id, err)
+		} else if err := r.finalizeAutomationExecution(ctx, id, models.ExecCompleted); err != nil {
+			applog.Infof("[execution-repo] automation steering terminal projection deferred execution=%s: %v", id, err)
+		}
 		return CompleteSuccessCompleted, nil
 	}
 
@@ -331,16 +392,9 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 }
 
 func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (int64, error) {
-	// A running execution is only stale if its own task row is no longer in a
-	// worker-runnable state. Swarm children are independent runnable work: their
-	// parent is an orchestration container and may be terminal, queued, inactive,
-	// or otherwise out of sync with a still-running child execution. Therefore the
-	// recovery sweep must not infer child staleness from parent/container state.
-	//
-	// Active and scheduled are the categories the worker pool dispatches/keeps
-	// running (see WorkerService.dispatchNext's queue-pruning check). Queued and
-	// running statuses can still have a live goroutine or capacity-waiting
-	// follow-up; pending/terminal statuses cannot own an already-running execution.
+	// Automation dispatch executions are recovered by AutomationReconciler from
+	// their durable outbox/reservation identity. Generic recovery must not
+	// terminalize them before prepared resubmission can occur.
 	staleTaskPredicate := `
 			t.category != 'chat'
 			AND (t.status NOT IN ('queued', 'running')
@@ -355,6 +409,7 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 		      FROM executions e
 		      JOIN tasks t ON t.id = e.task_id
 		      WHERE e.status = 'running'
+		        AND e.dispatch_id IS NULL
 		        AND `+staleTaskPredicate+`
 		  )`); err != nil {
 		return 0, fmt.Errorf("requeueing stale running task steering inputs: %w", err)
@@ -371,6 +426,7 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 			END,
 			completed_at = datetime('now')
 		WHERE status = 'running'
+		  AND dispatch_id IS NULL
 		  AND EXISTS (
 		      SELECT 1
 		      FROM tasks t

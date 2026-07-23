@@ -18,28 +18,45 @@ Human approval authorizes creation of an OpenVibely implementation task only. It
 
 ## Bootstrap
 
-1. Create one visible suggestion-producing task and one visible notification-inbox task in the current project. Recurrence comes from schedules, so do not set persisted goals on recurring loop tasks unless the user explicitly requests goal-driven continuation.
-2. Schedule the suggestion producer at the requested audit cadence. Its prompt should inspect one focused area, avoid duplicates, and call `create_notification` with a stable `idempotency_key`, a generic `type`, a concise title/message, a detailed body, and structured metadata. It must not create implementation tasks or modify code.
-3. Schedule the notification inbox, commonly hourly. Its prompt must call `list_alerts` with `decision_state=approved`, then inspect each result with `get_alert` before attempting `claim_alert`.
+1. Create one visible scheduled OpenVibely task for each maintained loop role: Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, Notification Inbox, and Loop Auditor. Do not create separate runner tasks. The task attached to the schedule owns the loop prompt. Recurrence comes from schedules, so do not set persisted goals on recurring loop tasks unless the user explicitly requests goal-driven continuation.
+2. Schedule Vision Suggestions and the three finder tasks at the requested audit cadence, usually daily. Their prompts should inspect one focused area, avoid duplicates, and call `create_notification` with a stable `idempotency_key`, a generic `type`, a concise title/message, a detailed body, and structured metadata. They must not create implementation tasks or modify code.
+3. Schedule the Notification Inbox, commonly hourly. Its prompt must call `list_alerts` with `decision_state=approved`, then inspect each result with `get_alert` before attempting `claim_alert`.
 4. For each claimed notification, call `create_alert_implementation_task`. This operation atomically creates and links one Backlog task, and is idempotent on retries. Put the notification ID, reviewed body, metadata, acceptance criteria, and the approval boundary in the task prompt.
 5. After successful linkage, call `complete_alert_processing`. If work cannot be linked, call `fail_alert_processing` with a concise retry diagnostic. Use `release_alert_claim` only when no implementation task was linked and another scan should retry immediately.
-6. Report the visible tasks and schedules created, plus any missing runtime-tool or model capability.
+6. Schedule the Loop Auditor, usually weekly. It should inspect stale notifications, expired or failed claims, missing notification/task links, duplicate implementation work, and blocked tasks. It reports findings through Native notifications and does not bypass approval or alter implementation work itself.
+7. After all tasks and schedules exist, call `register_automation_resources` once with `adapter_key: native_sdlc`, stable key `native-sdlc/default`, and the actual IDs. Bind both the task and its schedule to the same node key: `vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `inbox`, and `auditor`. Do not use separate trigger node keys, pass topology JSON, or infer old resources. A setup rerun reuses the same Automation identity.
+8. Report the visible tasks and schedules created, the returned Automation URL, plus any missing runtime-tool or model capability.
 
 Do not supply another project's `project_id`. Runtime tools bind to the executing task's persisted project and reject mismatches. Do not derive project ownership from the active browser project.
 
-## Suggestion Producer Prompt
+## Suggested Visible Tasks
+
+- `Native Vision Suggestions`, daily. Reads project vision/source-of-truth files and creates reviewable feature notifications only.
+- `Native Notification Inbox`, hourly. Processes approved notifications into one linked implementation task each.
+- `Native Bug Finder`, daily. Audits a focused component for likely defects and creates bug notifications only.
+- `Native Optimization Finder`, daily. Looks for measurable performance or workflow improvements and creates optimization notifications only.
+- `Native Redundancy Finder`, daily. Looks for duplicated or redundant code and creates maintenance notifications only.
+- `Native Loop Auditor`, weekly. Reviews stale notifications, claims, missing task links, duplicate tasks, and blocked work.
+
+## Discovery Prompt Pattern
 
 ```text
-Inspect one focused project area for a small, reviewable improvement. Do not modify code and do not create implementation tasks.
+Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files. Do not modify code and do not create implementation tasks.
 
-For each actionable suggestion, call `create_notification` with:
+Use this task's role as its scope:
+- Vision Suggestions: small, reviewable gaps against the project vision or source-of-truth files.
+- Bug Finder: likely defects, edge-case failures, broken behavior, or missing regression coverage.
+- Optimization Finder: measurable performance, latency, memory, build, or workflow efficiency improvements.
+- Redundancy Finder: duplicated or redundant code that could be made generic without over-engineering.
+
+For each actionable finding, call `create_notification` with:
 - a generic type such as `product_suggestion`, `bug_suggestion`, `performance_suggestion`, or `maintenance_suggestion`;
 - a concise title and message;
 - a detailed body with evidence, scope, risk, and acceptance criteria;
 - structured metadata identifying the inspected component and evidence;
 - a stable idempotency key derived from the project-independent finding identity.
 
-The notification will remain pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.
+The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.
 ```
 
 ## Notification Inbox Prompt

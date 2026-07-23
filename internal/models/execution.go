@@ -24,6 +24,7 @@ type Execution struct {
 	IsFollowup    bool            `json:"is_followup"`
 	DiffOutput    string          `json:"diff_output"`
 	CliSessionID  string          `json:"cli_session_id"`
+	DispatchID    string          `json:"dispatch_id,omitempty"`
 	StartedAt     time.Time       `json:"started_at"`
 	CompletedAt   *time.Time      `json:"completed_at"`
 }

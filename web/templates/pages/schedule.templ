@@ -363,6 +363,13 @@ func getScheduleID(task repository.TaskWithSchedule) string {
 	return ""
 }
 
+func scheduleDisplayTitle(task repository.TaskWithSchedule) string {
+	if task.AutomationScheduleName != "" {
+		return task.AutomationScheduleName
+	}
+	return task.Task.Title
+}
+
 func getStartOfWeek(weekOffset int) time.Time {
 	now := time.Now()
 	startOfWeek := now
@@ -543,20 +550,20 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 														if occurrence.Task.Schedule != nil && !occurrence.Task.Schedule.Enabled {
 															<div
 																class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-base-300 opacity-50 cursor-not-allowed border-l-2 border-base-content border-opacity-20 overflow-hidden"
-																title={ occurrence.Task.Task.Title + " (disabled)" }
+																title={ scheduleDisplayTitle(occurrence.Task) + " (disabled)" }
 																draggable="false"
 																data-schedule-id={ getScheduleID(occurrence.Task) }
 																data-task-id={ occurrence.Task.Task.ID }
 																data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
 																onclick="openTaskDialog(this.dataset.taskId)"
 															>
-																<div class="font-semibold truncate leading-tight line-through">{ occurrence.Task.Task.Title }</div>
+																<div class="font-semibold truncate leading-tight line-through">{ scheduleDisplayTitle(occurrence.Task) }</div>
 																<div class="opacity-60 leading-tight">paused</div>
 															</div>
 														} else {
 															<div
 																class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-move transition-colors border-l-2 border-indigo-500 overflow-hidden"
-																title={ occurrence.Task.Task.Title }
+																title={ scheduleDisplayTitle(occurrence.Task) }
 																draggable="true"
 																data-schedule-id={ getScheduleID(occurrence.Task) }
 																data-task-id={ occurrence.Task.Task.ID }
@@ -564,7 +571,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 																onclick="openTaskDialog(this.dataset.taskId)"
 																ondragstart="handleScheduleDragStart(event)"
 															>
-																<div class="font-semibold truncate leading-tight">{ occurrence.Task.Task.Title }</div>
+																<div class="font-semibold truncate leading-tight">{ scheduleDisplayTitle(occurrence.Task) }</div>
 																if occurrence.Task.Schedule != nil && occurrence.Task.Schedule.RepeatType.IsSubDaily() {
 																	<div class="opacity-60 leading-tight">{ formatRepeatLabel(occurrence.Task.Schedule.RepeatType, occurrence.Task.Schedule.RepeatInterval) }</div>
 																} else {

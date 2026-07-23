@@ -18,15 +18,17 @@ import (
 
 // TaskCreationRequest represents a typed task creation action request.
 type TaskCreationRequest struct {
-	Title             string                     `json:"title"`
-	Prompt            string                     `json:"prompt"`
-	Goal              string                     `json:"goal"`                // Optional persisted task goal
-	Category          string                     `json:"category"`            // "active" or "backlog" (default: "backlog")
-	Priority          int                        `json:"priority"`            // 1=Low, 2=Normal, 3=High, 4=Urgent (default: 2)
-	AgentID           string                     `json:"agent_id"`            // Optional: specific LLM config ID (empty = auto-select or default)
-	AgentDefinitionID string                     `json:"agent_definition_id"` // Optional: known agent definition ID
-	Agent             string                     `json:"agent"`               // Optional: agent definition name (resolved to AgentDefinitionID)
-	Chain             *models.ChainConfiguration `json:"chain,omitempty"`     // Optional: chain config for sequential task execution
+	Title                   string                     `json:"title"`
+	Prompt                  string                     `json:"prompt"`
+	Goal                    string                     `json:"goal"`                // Optional persisted task goal
+	Category                string                     `json:"category"`            // "active" or "backlog" (default: "backlog")
+	Priority                int                        `json:"priority"`            // 1=Low, 2=Normal, 3=High, 4=Urgent (default: 2)
+	AgentID                 string                     `json:"agent_id"`            // Optional: specific LLM config ID (empty = auto-select or default)
+	AgentDefinitionID       string                     `json:"agent_definition_id"` // Optional: known agent definition ID
+	Agent                   string                     `json:"agent"`               // Optional: agent definition name (resolved to AgentDefinitionID)
+	Chain                   *models.ChainConfiguration `json:"chain,omitempty"`     // Optional: chain config for sequential task execution
+	SourceGitHubIssueNumber int                        `json:"source_github_issue_number,omitempty"`
+	SourceGitHubRepoURL     string                     `json:"source_github_repo_url,omitempty"`
 }
 
 // EffectiveTaskCreationCategory resolves the category a task creation request would

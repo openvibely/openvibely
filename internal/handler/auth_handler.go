@@ -452,6 +452,17 @@ func (h *Handler) pruneLoginFailuresLocked(now time.Time) {
 	}
 }
 
+func (h *Handler) authPrincipalID(c echo.Context) string {
+	if c != nil {
+		if value := c.Get("auth_user"); value != nil {
+			if user, ok := value.(*auth.User); ok && strings.TrimSpace(user.Username) != "" {
+				return "web:" + strings.TrimSpace(user.Username)
+			}
+		}
+	}
+	return "local"
+}
+
 func (h *Handler) AuthLogout(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	if h.authMode == auth.AuthModeHostedSSO {

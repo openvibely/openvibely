@@ -1,0 +1,814 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/automationobs"
+	"github.com/openvibely/openvibely/internal/events"
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+type AutomationPublicationSnapshot struct {
+	Attempt models.AutomationPublicationAttempt
+	Steps   []models.AutomationPublicationStep
+}
+
+type AutomationPublicationTaskUpdate struct {
+	StepKey           string
+	TaskID            string
+	Title             string
+	Prompt            string
+	Category          models.TaskCategory
+	Priority          int
+	AgentDefinitionID *string
+	ParentTaskID      *string
+	ChainConfig       string
+	Status            models.TaskStatus
+	ApplyTopology     bool
+}
+
+var ErrAutomationPublicationInProgress = errors.New("automation publication is already in progress")
+var ErrAutomationDispatchInFlight = errors.New("automation has in-flight dispatch work")
+
+func normalizedTaskChainConfig(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "{}"
+	}
+	return value
+}
+
+func (r *AutomationRepo) AcquirePublicationAttempt(ctx context.Context, attemptID, owner string, now time.Time, lease time.Duration) error {
+	if attemptID == "" || owner == "" || lease <= 0 {
+		return errors.New("automation publication lease context is required")
+	}
+	expires := now.UTC().Add(lease)
+	result, err := r.db.ExecContext(ctx, `UPDATE automation_publication_attempts
+		SET claim_owner = ?, claim_expires_at = ?, status = 'publishing', error_message = '', updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status <> 'completed'
+		  AND (claim_owner = '' OR claim_expires_at <= ? OR claim_owner = ?)`, owner, expires, attemptID,
+		automationCursorSQLTime(now.UTC()), owner)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return ErrAutomationPublicationInProgress
+	}
+	return nil
+}
+
+func (r *AutomationRepo) ReleasePublicationAttempt(ctx context.Context, attemptID, owner string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE automation_publication_attempts
+		SET claim_owner = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND claim_owner = ?`, attemptID, owner)
+	return err
+}
+
+func (r *AutomationRepo) ReservePublicationAttempt(ctx context.Context, projectID, automationID, versionID, planRevision string, effects []models.AutomationPublicationEffect) (*AutomationPublicationSnapshot, error) {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	var state models.AutomationVersionState
+	if err := conn.QueryRowContext(ctx, `SELECT state FROM automation_versions WHERE project_id = ? AND automation_id = ? AND id = ?`, projectID, automationID, versionID).Scan(&state); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("staged Automation graph not found")
+		}
+		return nil, err
+	}
+	var attemptID string
+	err = conn.QueryRowContext(ctx, `SELECT id FROM automation_publication_attempts WHERE project_id = ? AND automation_id = ? AND version_id = ? AND plan_revision = ?`, projectID, automationID, versionID, planRevision).Scan(&attemptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if state != models.AutomationVersionDraft {
+			return nil, errors.New("automation version is not publishable")
+		}
+		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_publication_attempts (project_id, automation_id, version_id, plan_revision, status)
+			VALUES (?, ?, ?, ?, 'publishing') RETURNING id`, projectID, automationID, versionID, planRevision).Scan(&attemptID); err != nil {
+			return nil, err
+		}
+		for order, effect := range effects {
+			status := "pending"
+			if effect.Operation == "reuse" || effect.Operation == "unchanged" || effect.Operation == "delete" {
+				status = "completed"
+			}
+			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_publication_steps
+					(attempt_id, step_key, operation, target_key, display_order, status, resource_type, resource_id)
+					VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, attemptID, effect.StepKey, effect.Operation, effect.TargetKey, order, status, effect.ResourceType, effect.ResourceID); err != nil {
+				return nil, err
+			}
+		}
+	} else if err != nil {
+		return nil, err
+	}
+	snapshot, err := loadPublicationSnapshot(ctx, conn, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, err
+	}
+	committed = true
+	return snapshot, nil
+}
+
+func (r *AutomationRepo) GetPublicationAttempt(ctx context.Context, projectID, automationID, versionID, planRevision string) (*AutomationPublicationSnapshot, error) {
+	var attemptID string
+	err := r.db.QueryRowContext(ctx, `SELECT id FROM automation_publication_attempts WHERE project_id = ? AND automation_id = ? AND version_id = ? AND plan_revision = ?`, projectID, automationID, versionID, planRevision).Scan(&attemptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return loadPublicationSnapshot(ctx, r.db, attemptID)
+}
+
+func (r *AutomationRepo) GetRecoverablePublicationAttempt(ctx context.Context, projectID, automationID string) (*AutomationPublicationSnapshot, error) {
+	var attemptID string
+	err := r.db.QueryRowContext(ctx, `SELECT p.id
+		FROM automation_publication_attempts p
+		JOIN automation_versions v ON v.project_id = p.project_id AND v.automation_id = p.automation_id AND v.id = p.version_id
+		WHERE p.project_id = ? AND p.automation_id = ? AND p.status <> 'completed' AND v.state = 'draft'
+		ORDER BY p.updated_at DESC, p.id DESC LIMIT 1`, projectID, automationID).Scan(&attemptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return loadPublicationSnapshot(ctx, r.db, attemptID)
+}
+
+func (r *AutomationRepo) ListRecoverablePublicationAttempts(ctx context.Context, projectID string) ([]AutomationPublicationSnapshot, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT p.id
+		FROM automation_publication_attempts p
+		JOIN automation_versions v ON v.project_id = p.project_id AND v.automation_id = p.automation_id AND v.id = p.version_id
+		WHERE p.project_id = ? AND p.status <> 'completed' AND v.state = 'draft'
+		ORDER BY p.updated_at DESC, p.id DESC`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	var attemptIDs []string
+	for rows.Next() {
+		var attemptID string
+		if err := rows.Scan(&attemptID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		attemptIDs = append(attemptIDs, attemptID)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	attempts := make([]AutomationPublicationSnapshot, 0, len(attemptIDs))
+	for _, attemptID := range attemptIDs {
+		snapshot, err := loadPublicationSnapshot(ctx, r.db, attemptID)
+		if err != nil {
+			return nil, err
+		}
+		attempts = append(attempts, *snapshot)
+	}
+	return attempts, nil
+}
+
+func loadPublicationSnapshot(ctx context.Context, q queryer, attemptID string) (*AutomationPublicationSnapshot, error) {
+	var out AutomationPublicationSnapshot
+	err := q.QueryRowContext(ctx, `SELECT id, project_id, automation_id, version_id, plan_revision, status,
+		error_message, claim_owner, claim_expires_at, created_at, updated_at, completed_at FROM automation_publication_attempts WHERE id = ?`, attemptID).
+		Scan(&out.Attempt.ID, &out.Attempt.ProjectID, &out.Attempt.AutomationID, &out.Attempt.VersionID,
+			&out.Attempt.PlanRevision, &out.Attempt.Status, &out.Attempt.ErrorMessage, &out.Attempt.ClaimOwner,
+			&out.Attempt.ClaimExpiresAt, &out.Attempt.CreatedAt, &out.Attempt.UpdatedAt, &out.Attempt.CompletedAt)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.QueryContext(ctx, `SELECT id, attempt_id, step_key, operation, target_key, display_order, status,
+		resource_type, resource_id, error_message, updated_at FROM automation_publication_steps
+		WHERE attempt_id = ? ORDER BY display_order, id`, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var step models.AutomationPublicationStep
+		if err := rows.Scan(&step.ID, &step.AttemptID, &step.StepKey, &step.Operation, &step.TargetKey,
+			&step.DisplayOrder, &step.Status, &step.ResourceType, &step.ResourceID, &step.ErrorMessage, &step.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out.Steps = append(out.Steps, step)
+	}
+	return &out, rows.Err()
+}
+
+func (r *AutomationRepo) MarkPublicationStep(ctx context.Context, attemptID, stepKey, status, resourceID, errorMessage string) error {
+	result, err := r.db.ExecContext(ctx, `UPDATE automation_publication_steps
+		SET status = ?, resource_id = CASE WHEN ? = '' THEN resource_id ELSE ? END,
+			error_message = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE attempt_id = ? AND step_key = ?`, status, resourceID, resourceID, errorMessage, attemptID, stepKey)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return errors.New("automation publication step not found")
+	}
+	return nil
+}
+
+func (r *AutomationRepo) MarkPublicationAttemptFailed(ctx context.Context, attemptID string, failure error) error {
+	message := "publication failed"
+	if failure != nil {
+		message = failure.Error()
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE automation_publication_attempts SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status <> 'completed'`, message, attemptID)
+	return err
+}
+
+func (r *AutomationRepo) FindCompilerTask(ctx context.Context, projectID, automationID, nodeKey string) (*models.Task, error) {
+	createdVia := AutomationCompilerTaskCreatedVia(automationID, nodeKey)
+	var taskID string
+	err := r.db.QueryRowContext(ctx, `SELECT id FROM tasks WHERE project_id = ? AND created_via = ? ORDER BY created_at, id LIMIT 1`, projectID, createdVia).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return NewTaskRepo(r.db, nil).GetByID(ctx, taskID)
+}
+
+func AutomationCompilerTaskCreatedVia(automationID, nodeKey string) string {
+	return "automation:" + automationID + ":" + nodeKey
+}
+
+func (r *AutomationRepo) PublishDraftVersion(ctx context.Context, attemptID string, taskUpdates []AutomationPublicationTaskUpdate) (*models.AutomationDefinition, error) {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	snapshot, err := loadPublicationSnapshot(ctx, conn, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot.Attempt.Status == "completed" {
+		var automation models.Automation
+		if err := scanAutomation(conn.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
+			lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+			created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`, snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID), &automation); err != nil {
+			return nil, err
+		}
+		definition, err := r.loadDefinition(ctx, conn, automation, snapshot.Attempt.VersionID)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, err
+		}
+		committed = true
+		return definition, nil
+	}
+	for _, step := range snapshot.Steps {
+		stagedTaskUpdate := step.Operation == "update" && step.ResourceType == "task" && step.Status == "running" && step.ResourceID != ""
+		if step.Status != "completed" && !stagedTaskUpdate {
+			return nil, fmt.Errorf("publication step %q is not complete", step.StepKey)
+		}
+	}
+	var automation models.Automation
+	if err := scanAutomation(conn.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`, snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID), &automation); err != nil {
+		return nil, err
+	}
+	effectiveLifecycle := automation.LifecycleState
+	if effectiveLifecycle == models.AutomationDraft {
+		effectiveLifecycle = models.AutomationActive
+	}
+	var state models.AutomationVersionState
+	if err := conn.QueryRowContext(ctx, `SELECT state FROM automation_versions WHERE project_id = ? AND automation_id = ? AND id = ?`, snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID).Scan(&state); err != nil {
+		return nil, err
+	}
+	if state != models.AutomationVersionDraft {
+		return nil, errors.New("Automation graph is not staged for Save")
+	}
+	nodeIDs := map[string]string{}
+	rows, err := conn.QueryContext(ctx, `SELECT node_key, id FROM automation_nodes WHERE project_id = ? AND automation_id = ? AND version_id = ?`, snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var key, id string
+		if err := rows.Scan(&key, &id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		nodeIDs[key] = id
+	}
+	rows.Close()
+	scheduleEnabled := map[string]bool{}
+	var candidateJSON string
+	if err := conn.QueryRowContext(ctx, `SELECT candidate_json FROM automation_draft_metadata
+		WHERE project_id = ? AND automation_id = ? AND version_id = ?`, snapshot.Attempt.ProjectID,
+		snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID).Scan(&candidateJSON); err != nil {
+		return nil, err
+	}
+	var candidate models.AutomationDraftCandidate
+	if err := json.Unmarshal([]byte(candidateJSON), &candidate); err != nil {
+		return nil, err
+	}
+	for _, node := range candidate.Nodes {
+		if enabled, ok := node.Config["enabled"].(bool); ok {
+			scheduleEnabled[node.Key] = enabled
+		}
+	}
+	stepsByKey := make(map[string]models.AutomationPublicationStep, len(snapshot.Steps))
+	for _, step := range snapshot.Steps {
+		stepsByKey[step.StepKey] = step
+	}
+	appliedTaskUpdates := make(map[string]bool, len(taskUpdates))
+	for _, update := range taskUpdates {
+		step, ok := stepsByKey[update.StepKey]
+		stagedUpdate := ok && step.Operation == "update" && step.Status == "running"
+		if !ok || step.ResourceType != "task" || step.ResourceID == "" || step.ResourceID != update.TaskID || (step.Status != "completed" && !stagedUpdate) {
+			return nil, fmt.Errorf("publication task update %q does not match its task step", update.StepKey)
+		}
+		appliedCategory := update.Category
+		if effectiveLifecycle != models.AutomationActive && appliedCategory == models.CategoryActive {
+			appliedCategory = models.CategoryBacklog
+		}
+		var result sql.Result
+		var updateErr error
+		if update.ApplyTopology {
+			if update.Status == "" {
+				return nil, fmt.Errorf("publication task topology %q has no status", update.StepKey)
+			}
+			result, updateErr = conn.ExecContext(ctx, `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_definition_id = ?,
+				parent_task_id = ?, chain_config = ?, status = CASE WHEN status IN ('running','queued') THEN status ELSE ? END,
+				updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`, update.Title, update.Prompt, appliedCategory,
+				update.Priority, update.AgentDefinitionID, update.ParentTaskID, normalizedTaskChainConfig(update.ChainConfig), update.Status,
+				update.TaskID, snapshot.Attempt.ProjectID)
+		} else {
+			result, updateErr = conn.ExecContext(ctx, `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP
+				WHERE id = ? AND project_id = ?`, update.Title, update.Prompt, appliedCategory, update.Priority, update.AgentDefinitionID, update.TaskID, snapshot.Attempt.ProjectID)
+		}
+		if updateErr != nil {
+			if strings.Contains(updateErr.Error(), "UNIQUE constraint failed: tasks.project_id, tasks.title") {
+				return nil, ErrDuplicateTask
+			}
+			return nil, fmt.Errorf("applying publication task update: %w", updateErr)
+		}
+		if affected, rowsErr := result.RowsAffected(); rowsErr != nil {
+			return nil, rowsErr
+		} else if affected != 1 {
+			return nil, errors.New("publication task update target is unavailable")
+		}
+		if stagedUpdate {
+			if _, updateErr := conn.ExecContext(ctx, `UPDATE automation_publication_steps
+				SET status = 'completed', error_message = '', updated_at = CURRENT_TIMESTAMP
+				WHERE attempt_id = ? AND step_key = ? AND status = 'running'`, attemptID, update.StepKey); updateErr != nil {
+				return nil, updateErr
+			}
+		}
+		appliedTaskUpdates[update.StepKey] = true
+	}
+	for _, step := range snapshot.Steps {
+		if step.Operation == "update" && step.ResourceType == "task" && step.Status == "running" && !appliedTaskUpdates[step.StepKey] {
+			return nil, fmt.Errorf("staged publication task update %q is missing", step.StepKey)
+		}
+	}
+	newSchedules := map[string]bool{}
+	for _, step := range snapshot.Steps {
+		if step.ResourceID == "" || (step.ResourceType != "task" && step.ResourceType != "schedule") || step.Operation == "delete" {
+			continue
+		}
+		nodeKey := strings.TrimPrefix(step.TargetKey, step.ResourceType+":")
+		if strings.Contains(nodeKey, ":") {
+			continue
+		}
+		nodeID := nodeIDs[nodeKey]
+		if nodeID == "" {
+			return nil, fmt.Errorf("publication step %q references unknown node", step.StepKey)
+		}
+		if err := validateAutomationResource(ctx, conn, snapshot.Attempt.ProjectID, step.ResourceType, step.ResourceID); err != nil {
+			return nil, err
+		}
+		relation := "owned"
+		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(version_id, node_id, resource_type, resource_id, relation) DO NOTHING`,
+			snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID, nodeID, step.ResourceType, step.ResourceID, relation); err != nil {
+			return nil, err
+		}
+		if step.ResourceType == "schedule" {
+			newSchedules[step.ResourceID] = true
+			var owner string
+			ownerErr := conn.QueryRowContext(ctx, `SELECT automation_id FROM automation_trigger_owners WHERE schedule_id = ?`, step.ResourceID).Scan(&owner)
+			if ownerErr != nil && !errors.Is(ownerErr, sql.ErrNoRows) {
+				return nil, ownerErr
+			}
+			if ownerErr == nil && owner != snapshot.Attempt.AutomationID {
+				return nil, fmt.Errorf("%w: %s", ErrAutomationTriggerOwned, step.ResourceID)
+			}
+			ownershipState := "active"
+			if effectiveLifecycle == models.AutomationPaused {
+				ownershipState = "paused"
+			} else if effectiveLifecycle == models.AutomationArchived {
+				ownershipState = "archived"
+			}
+			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_trigger_owners
+					(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+					VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(schedule_id) DO UPDATE SET version_id = excluded.version_id,
+					node_id = excluded.node_id, ownership_state = excluded.ownership_state, updated_at = CURRENT_TIMESTAMP`, step.ResourceID,
+				snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID, nodeID, ownershipState); err != nil {
+				return nil, err
+			}
+			enabled := effectiveLifecycle == models.AutomationActive && scheduleEnabled[nodeKey]
+			if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, enabled, step.ResourceID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(newSchedules) == 0 {
+		var adapterKey string
+		if err := conn.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
+			WHERE project_id = ? AND automation_id = ? AND id = ?`, snapshot.Attempt.ProjectID,
+			snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID).Scan(&adapterKey); err != nil {
+			return nil, err
+		}
+		if adapterKey != "custom" {
+			return nil, errors.New("published automation requires at least one trigger schedule")
+		}
+	}
+	oldRows, err := conn.QueryContext(ctx, `SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ? AND version_id <> ?`, snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID)
+	if err != nil {
+		return nil, err
+	}
+	var oldSchedules []string
+	for oldRows.Next() {
+		var id string
+		if err := oldRows.Scan(&id); err != nil {
+			oldRows.Close()
+			return nil, err
+		}
+		if !newSchedules[id] {
+			oldSchedules = append(oldSchedules, id)
+		}
+	}
+	oldRows.Close()
+	for _, id := range oldSchedules {
+		if _, err := conn.ExecContext(ctx, `DELETE FROM schedules WHERE id = ?`, id); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET state = 'published', published_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'draft'`, snapshot.Attempt.VersionID); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE automations SET name = ?, description = ?, automation_type = ?, lifecycle_state = ?,
+		published_version_id = ?, archived_at = CASE WHEN ? = 'archived' THEN archived_at ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`,
+		candidate.Name, candidate.Description, candidate.AutomationType, effectiveLifecycle, snapshot.Attempt.VersionID, effectiveLifecycle,
+		snapshot.Attempt.AutomationID, snapshot.Attempt.ProjectID); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE automation_publication_attempts SET status = 'completed', error_message = '', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, attemptID); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions WHERE project_id = ? AND automation_id = ? AND id <> ?`,
+		snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET version = 1 WHERE project_id = ? AND automation_id = ? AND id = ?`,
+		snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID); err != nil {
+		return nil, err
+	}
+	if err := scanAutomation(conn.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`, snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID), &automation); err != nil {
+		return nil, err
+	}
+	definition, err := r.loadDefinition(ctx, conn, automation, snapshot.Attempt.VersionID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, err
+	}
+	committed = true
+	r.PublishInvalidation(events.AutomationDefinitionUpdated, snapshot.Attempt.ProjectID, models.AutomationBinding{AutomationID: snapshot.Attempt.AutomationID, VersionID: snapshot.Attempt.VersionID})
+	return definition, nil
+}
+
+func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automationID string) ([]models.Task, error) {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	var current models.AutomationLifecycleState
+	var versionID sql.NullString
+	if err := conn.QueryRowContext(ctx, `SELECT lifecycle_state, published_version_id FROM automations
+		WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&current, &versionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, errors.New("automation not found")
+		}
+		return nil, err
+	}
+	if !versionID.Valid {
+		return nil, errors.New("Automation cannot change active lifecycle state before Save")
+	}
+	if current == models.AutomationArchived {
+		return nil, errors.New("archived automation cannot be resumed")
+	}
+	if current == models.AutomationActive {
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, err
+		}
+		committed = true
+		return nil, nil
+	}
+
+	var candidateJSON string
+	hasCandidate := true
+	if err := conn.QueryRowContext(ctx, `SELECT candidate_json FROM automation_draft_metadata
+		WHERE project_id = ? AND automation_id = ? AND version_id = ?`, projectID, automationID, versionID.String).Scan(&candidateJSON); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+		hasCandidate = false
+	}
+	var candidate models.AutomationDraftCandidate
+	if hasCandidate {
+		if err := json.Unmarshal([]byte(candidateJSON), &candidate); err != nil {
+			return nil, err
+		}
+	}
+	enabledByNode := make(map[string]bool, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		if enabled, ok := node.Config["enabled"].(bool); ok {
+			enabledByNode[node.Key] = enabled
+		}
+	}
+	rows, err := conn.QueryContext(ctx, `SELECT o.schedule_id, n.node_key
+		FROM automation_trigger_owners o
+		JOIN automation_nodes n ON n.id = o.node_id AND n.version_id = o.version_id
+			AND n.automation_id = o.automation_id AND n.project_id = o.project_id
+		WHERE o.project_id = ? AND o.automation_id = ? AND o.version_id = ?`, projectID, automationID, versionID.String)
+	if err != nil {
+		return nil, err
+	}
+	var ownedSchedules []struct {
+		id      string
+		nodeKey string
+	}
+	for rows.Next() {
+		var schedule struct {
+			id      string
+			nodeKey string
+		}
+		if err := rows.Scan(&schedule.id, &schedule.nodeKey); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ownedSchedules = append(ownedSchedules, schedule)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for _, schedule := range ownedSchedules {
+		enabled := true
+		if hasCandidate {
+			enabled = enabledByNode[schedule.nodeKey]
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, enabled, schedule.id); err != nil {
+			return nil, err
+		}
+	}
+
+	var admittedTaskIDs []string
+	for _, node := range candidate.Nodes {
+		category, _ := node.Config["category"].(string)
+		if node.Type != models.AutomationNodeAgentTask || node.Role != "task" || category != string(models.CategoryActive) {
+			continue
+		}
+		var taskID string
+		err := conn.QueryRowContext(ctx, `SELECT t.id FROM automation_definition_resources resource
+			JOIN automation_nodes n ON n.id = resource.node_id AND n.version_id = resource.version_id
+			JOIN tasks t ON t.id = resource.resource_id AND t.project_id = resource.project_id
+			WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ?
+				AND resource.resource_type = 'task' AND n.node_key = ? AND t.category = 'backlog'
+				AND t.parent_task_id IS NULL AND t.status = 'pending'`, projectID, automationID, versionID.String, node.Key).Scan(&taskID)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'active', updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND project_id = ? AND category = 'backlog' AND parent_task_id IS NULL AND status = 'pending'`, taskID, projectID); err != nil {
+			return nil, err
+		}
+		admittedTaskIDs = append(admittedTaskIDs, taskID)
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE automation_trigger_owners SET ownership_state = 'active', updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = ? AND automation_id = ?`, projectID, automationID); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE automations SET lifecycle_state = 'active', archived_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = ? AND id = ?`, projectID, automationID); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, err
+	}
+	committed = true
+	if err := conn.Close(); err != nil {
+		return nil, err
+	}
+
+	admittedTasks := make([]models.Task, 0, len(admittedTaskIDs))
+	taskRepo := NewTaskRepo(r.db, nil)
+	for _, taskID := range admittedTaskIDs {
+		task, err := taskRepo.GetByID(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if task != nil {
+			admittedTasks = append(admittedTasks, *task)
+		}
+	}
+	automationobs.Event("automation.lifecycle.resumed",
+		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+		automationobs.String("version_id", versionID.String), automationobs.String("state", string(models.AutomationActive)))
+	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: versionID.String})
+	return admittedTasks, nil
+}
+
+func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, automationID string, state models.AutomationLifecycleState) error {
+	if state == models.AutomationActive {
+		_, err := r.ResumeAutomation(ctx, projectID, automationID)
+		return err
+	}
+	if state != models.AutomationPaused && state != models.AutomationArchived {
+		return errors.New("unsupported automation lifecycle state")
+	}
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	var current models.AutomationLifecycleState
+	var published sql.NullString
+	if err := conn.QueryRowContext(ctx, `SELECT lifecycle_state, published_version_id FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&current, &published); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("automation not found")
+		}
+		return err
+	}
+	if !published.Valid {
+		return errors.New("Automation cannot change active lifecycle state before Save")
+	}
+	if current == models.AutomationArchived && state != models.AutomationArchived {
+		return errors.New("archived automation cannot be resumed")
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = 0, updated_at = CURRENT_TIMESTAMP
+		WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ?)`, projectID, automationID); err != nil {
+		return err
+	}
+	if state == models.AutomationArchived {
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_trigger_owners SET ownership_state = 'archived', updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND automation_id = ?`, projectID, automationID); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automations SET lifecycle_state = ?, archived_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, state, projectID, automationID); err != nil {
+			return err
+		}
+	} else {
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_trigger_owners SET ownership_state = 'paused', updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND automation_id = ?`, projectID, automationID); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automations SET lifecycle_state = ?, archived_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, state, projectID, automationID); err != nil {
+			return err
+		}
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	eventName := "automation.lifecycle.paused"
+	if state == models.AutomationArchived {
+		eventName = "automation.lifecycle.archived"
+	}
+	automationobs.Event(eventName,
+		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+		automationobs.String("version_id", published.String), automationobs.String("state", string(state)))
+	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: published.String})
+	return nil
+}
+
+// DeleteAutomation permanently removes one project-scoped Automation definition and
+// its Automation-owned metadata. Existing domain tasks remain authoritative;
+// trigger schedules exclusively owned by the Automation are deleted before metadata cascades.
+func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automationID string) error {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	var versionID sql.NullString
+	if err := conn.QueryRowContext(ctx, `SELECT published_version_id FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&versionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("automation not found")
+		}
+		return err
+	}
+	if err := rejectStagedAutomationSave(ctx, conn, projectID, automationID, versionID.String); err != nil {
+		return fmt.Errorf("%w: reopen and retry the pending Save before deleting the Automation", err)
+	}
+	var inFlight int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*)
+		FROM automation_invocations i
+		LEFT JOIN automation_dispatch_outbox d ON d.invocation_id = i.id
+		WHERE i.project_id = ? AND i.automation_id = ?
+		  AND (i.status IN ('claimed','dispatched','running')
+		    OR d.status IN ('pending','processing','submitted')
+		    OR EXISTS (SELECT 1 FROM executions e WHERE e.dispatch_id = d.id AND e.status = 'running'))`, projectID, automationID).Scan(&inFlight); err != nil {
+		return err
+	}
+	if inFlight > 0 {
+		return ErrAutomationDispatchInFlight
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM schedules
+		WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ?)`, projectID, automationID); err != nil {
+		return err
+	}
+	result, err := conn.ExecContext(ctx, `DELETE FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return errors.New("automation not found")
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	automationobs.Event("automation.lifecycle.deleted",
+		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+		automationobs.String("version_id", versionID.String), automationobs.String("state", "deleted"))
+	r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{AutomationID: automationID, VersionID: versionID.String})
+	return nil
+}

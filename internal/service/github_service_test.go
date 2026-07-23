@@ -455,7 +455,7 @@ func envContainsValue(env []string, value string) bool {
 	return false
 }
 
-func TestGetPullRequestReturnsHeadRefFromResolvedRepository(t *testing.T) {
+func TestGetPullRequestReturnsHeadRefAndMergedStateFromResolvedRepository(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
 	ctx := context.Background()
@@ -474,7 +474,7 @@ func TestGetPullRequestReturnsHeadRefFromResolvedRepository(t *testing.T) {
 			t.Fatalf("expected configured PAT bearer auth, got %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"number":4,"html_url":"https://github.com/openvibely/openvibely-hosted/pull/4","state":"open","head":{"ref":"task/clean-history","repo":{"full_name":"openvibely/openvibely-hosted"}}}`))
+		_, _ = w.Write([]byte(`{"number":4,"html_url":"https://github.com/openvibely/openvibely-hosted/pull/4","state":"closed","merged":true,"head":{"ref":"task/clean-history","repo":{"full_name":"openvibely/openvibely-hosted"}}}`))
 	}))
 	defer server.Close()
 
@@ -484,7 +484,7 @@ func TestGetPullRequestReturnsHeadRefFromResolvedRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetPullRequest: %v", err)
 	}
-	if pr.Number != 4 || pr.HeadRef != "task/clean-history" || pr.HeadRepoFullName != "openvibely/openvibely-hosted" {
+	if pr.Number != 4 || pr.State != "closed" || !pr.Merged || pr.HeadRef != "task/clean-history" || pr.HeadRepoFullName != "openvibely/openvibely-hosted" {
 		t.Fatalf("unexpected pull request: %#v", pr)
 	}
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,6 +20,13 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
+var ErrTaskAlreadyQueuedOrRunning = errors.New("task is already queued or running")
+
+type preparedAutomationDispatch struct {
+	Envelope    models.AutomationDispatchEnvelope
+	ExecutionID string
+}
+
 type WorkerService struct {
 	llmSvc        *LLMService
 	projectRepo   *repository.ProjectRepo
@@ -26,9 +34,10 @@ type WorkerService struct {
 	llmConfigRepo *repository.LLMConfigRepo
 
 	mu         sync.Mutex
-	numWorkers int             // max parallel tasks (global limit)
-	queue      []models.Task   // FIFO task queue
-	pending    map[string]bool // task IDs in queue or running (dedup)
+	numWorkers int                                   // max parallel tasks (global limit)
+	queue      []models.Task                         // FIFO task queue
+	pending    map[string]bool                       // task IDs in queue or running (dedup)
+	prepared   map[string]preparedAutomationDispatch // prepared Automation dispatches keyed by task ID
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
@@ -64,6 +73,7 @@ type WorkerService struct {
 	mutationRecorder                 func(models.Task) agentlibrary.MutationRecorder
 	agentRootSyncService             *AgentLibraryMaintenanceService
 	taskGoalSvc                      *TaskGoalService
+	automationRepo                   *repository.AutomationRepo
 	afterCompleteRuntimeToolProvider func(context.Context, models.Task) *llmcontracts.RuntimeTools
 	currentCatalog                   atomic.Value // stores *agentskills.Catalog for hook skill resolution
 }
@@ -108,6 +118,10 @@ func (w *WorkerService) SetTaskGoalService(svc *TaskGoalService) {
 	w.taskGoalSvc = svc
 }
 
+func (w *WorkerService) SetAutomationRepo(repo *repository.AutomationRepo) {
+	w.automationRepo = repo
+}
+
 func (w *WorkerService) SetAfterCompleteRuntimeToolProvider(fn func(context.Context, models.Task) *llmcontracts.RuntimeTools) {
 	w.afterCompleteRuntimeToolProvider = fn
 }
@@ -140,6 +154,7 @@ func NewWorkerService(llmSvc *LLMService, numWorkers int, projectRepo *repositor
 		projectRepo: projectRepo,
 		numWorkers:  numWorkers,
 		pending:     make(map[string]bool),
+		prepared:    make(map[string]preparedAutomationDispatch),
 		cancelFuncs: make(map[string]context.CancelFunc),
 		submitted:   make(chan models.Task, 100),
 	}
@@ -224,6 +239,33 @@ func (w *WorkerService) Submit(task models.Task) {
 	w.dispatchNext()
 }
 
+// SubmitPrepared adapts a durably claimed Automation dispatch into the existing
+// worker queue. It owns no execution, capacity, lifecycle, or completion path of
+// its own; those remain in WorkerService and LLMService.
+func (w *WorkerService) SubmitPrepared(envelope models.AutomationDispatchEnvelope, executionID string) error {
+	if envelope.DispatchID == "" || envelope.Task.ID == "" || executionID == "" {
+		return fmt.Errorf("complete prepared automation dispatch is required")
+	}
+	if envelope.Task.Category == models.CategoryChat {
+		return fmt.Errorf("automation dispatch cannot target a chat task")
+	}
+	w.mu.Lock()
+	if w.pending[envelope.Task.ID] {
+		w.mu.Unlock()
+		return fmt.Errorf("%w: %s", ErrTaskAlreadyQueuedOrRunning, envelope.Task.ID)
+	}
+	w.pending[envelope.Task.ID] = true
+	w.prepared[envelope.Task.ID] = preparedAutomationDispatch{Envelope: envelope, ExecutionID: executionID}
+	w.queue = append(w.queue, envelope.Task)
+	w.mu.Unlock()
+	select {
+	case w.submitted <- envelope.Task:
+	default:
+	}
+	w.dispatchNext()
+	return nil
+}
+
 // dispatchNext scans the queue FIFO and dispatches tasks that have available
 // global, project, and model slots. Called after Submit, task completion, and Resize.
 func (w *WorkerService) dispatchNext() {
@@ -243,17 +285,30 @@ func (w *WorkerService) dispatchNext() {
 		}
 
 		task := w.queue[i]
+		prepared, isPrepared := w.prepared[task.ID]
 
 		// Prune stale tasks (status/category changed while queued)
 		if w.taskRepo != nil {
 			dbTask, err := w.taskRepo.GetByID(context.Background(), task.ID)
-			if err != nil || dbTask == nil ||
-				dbTask.Status != models.StatusPending ||
+			validStatus := dbTask != nil && dbTask.Status == models.StatusPending
+			if isPrepared {
+				validStatus = dbTask != nil && dbTask.Status == models.StatusRunning
+			}
+			if err != nil || dbTask == nil || !validStatus ||
 				(dbTask.Category != models.CategoryActive && dbTask.Category != models.CategoryScheduled) {
 				w.queue = append(w.queue[:i], w.queue[i+1:]...)
 				delete(w.pending, task.ID)
+				delete(w.prepared, task.ID)
 				applog.Infof("[worker] pruned stale task=%s %q from queue", task.ID, task.Title)
 				continue
+			}
+			if !isPrepared {
+				// Ordinary submissions are admission hints keyed by Task ID. The
+				// persisted Task is authoritative at dispatch time so a queued root
+				// cannot run replaced prompt, Agent, or topology data under the
+				// current Automation graph. Prepared dispatches retain their exact
+				// immutable envelope and pre-created execution instead.
+				task = *dbTask
 			}
 
 			// Dependency gating: chained tasks must wait for parent to reach terminal state.
@@ -285,24 +340,36 @@ func (w *WorkerService) dispatchNext() {
 
 		// Remove from queue (shift remaining)
 		w.queue = append(w.queue[:i], w.queue[i+1:]...)
+		delete(w.prepared, task.ID)
 
 		// Dispatch
 		w.wg.Add(1)
-		go w.executeTask(task, agentConfigID)
+		go w.executeTask(task, agentConfigID, prepared, isPrepared)
 	}
 }
 
-func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
+func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prepared preparedAutomationDispatch, isPrepared bool) {
 	defer w.wg.Done()
 
 	applog.Infof("[worker] executing task=%s %q (project: %s, model: %s)", task.ID, task.Title, task.ProjectID, agentConfigID)
 
 	taskCtx, taskCancel := context.WithCancel(w.ctx)
+	if isPrepared {
+		taskCtx = WithAutomationContext(taskCtx, prepared.Envelope.Context)
+		taskCtx = withPreparedAutomationExecution(taskCtx, prepared.ExecutionID)
+		taskCtx = withTaskPreClaimed(taskCtx)
+	} else if w.automationRepo != nil {
+		if automationContext, err := w.automationRepo.ContextForTask(taskCtx, task.ProjectID, task.ID); err != nil {
+			applog.Infof("[worker] task=%s automation context load failed: %v", task.ID, err)
+		} else if len(automationContext.Bindings) > 0 {
+			taskCtx = WithAutomationContext(taskCtx, automationContext)
+		}
+	}
 	w.RegisterCancel(task.ID, taskCancel)
 
 	var executionErr error
-	claimed := w.taskRepo == nil
-	completionAttempted := w.taskRepo == nil
+	claimed := w.taskRepo == nil || isPrepared
+	completionAttempted := w.taskRepo == nil || isPrepared
 	logOutcome := true
 
 	defer func() {
@@ -337,6 +404,24 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 		w.releaseProjectSlot(task.ProjectID)
 		w.releaseModelSlot(agentConfigID)
 
+		if isPrepared && w.automationRepo != nil {
+			status := models.ExecFailed
+			message := "automation execution did not reach a terminal state"
+			execRepo := w.execRepo
+			if execRepo == nil && w.llmSvc != nil {
+				execRepo = w.llmSvc.execRepo
+			}
+			if execRepo != nil {
+				if current, err := execRepo.GetByID(context.Background(), prepared.ExecutionID); err == nil && current != nil {
+					status = current.Status
+					message = current.ErrorMessage
+				}
+			}
+			if err := w.automationRepo.CompleteDispatch(context.Background(), prepared.Envelope.DispatchID, prepared.ExecutionID, status, message); err != nil {
+				applog.Infof("[worker] automation dispatch completion failed dispatch=%s execution=%s: %v", prepared.Envelope.DispatchID, prepared.ExecutionID, err)
+			}
+		}
+
 		if logOutcome {
 			if executionErr != nil {
 				applog.Infof("[worker] task failed task=%s %q: %v", task.ID, task.Title, executionErr)
@@ -370,7 +455,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 	// publishes a TaskStatusChanged event so the Tasks page updates live.
 	// If claim fails (task already running/completed/cancelled), skip — the
 	// task either was already promoted or shouldn't run.
-	if w.taskRepo != nil {
+	if w.taskRepo != nil && !isPrepared {
 		claimedTask, claimErr := w.taskRepo.ClaimTask(taskCtx, task.ID)
 		if claimErr != nil {
 			applog.Infof("[worker] task=%s claim failed: %v", task.ID, claimErr)
@@ -390,6 +475,8 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string) {
 		// Tag the context so executeTaskWithAgent knows the task has
 		// already been claimed and won't skip it as "already running".
 		taskCtx = withTaskPreClaimed(taskCtx)
+	} else if isPrepared {
+		task.Status = models.StatusRunning
 	}
 
 	turn := w.PrepareLifecycleTurn(taskCtx, task)

@@ -9,16 +9,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
 var ErrAlertNotFound = errors.New("alert not found")
 
 type AlertRepo struct {
-	db *sql.DB
+	db             *sql.DB
+	automationRepo *AutomationRepo
 }
 
 func NewAlertRepo(db *sql.DB) *AlertRepo { return &AlertRepo{db: db} }
+
+func (r *AlertRepo) SetAutomationRepo(repo *AutomationRepo) { r.automationRepo = repo }
 
 const alertSelectColumns = `id, project_id, scope, task_id, execution_id, source_task_id, type, severity,
 	title, message, body, source, metadata_json, COALESCE(idempotency_key, ''), decision_state, decided_at,
@@ -101,27 +105,70 @@ func (r *AlertRepo) CreateIdempotent(ctx context.Context, a *models.Alert) (*mod
 	if err != nil {
 		return nil, fmt.Errorf("encoding alert metadata: %w", err)
 	}
-	row := r.db.QueryRowContext(ctx, `INSERT INTO alerts (
+	hasAutomationContext := a.AutomationContext != nil && r.automationRepo != nil
+	var automationContext models.AutomationContext
+	if hasAutomationContext {
+		automationContext = *a.AutomationContext
+	}
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	createdNew := true
+	created, err := scanAlert(conn.QueryRowContext(ctx, `INSERT INTO alerts (
 		project_id, scope, task_id, execution_id, source_task_id, type, severity, title, message, body,
 		source, metadata_json, idempotency_key, decision_state, processing_state)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
 		ON CONFLICT(project_id, idempotency_key) WHERE idempotency_key IS NOT NULL AND idempotency_key <> '' DO NOTHING
 		RETURNING `+alertSelectColumns,
 		a.ProjectID, a.Scope, a.TaskID, a.ExecutionID, a.SourceTaskID, a.Type, a.Severity, a.Title,
-		a.Message, a.Body, a.Source, string(metadata), strings.TrimSpace(a.IdempotencyKey), a.DecisionState, a.ProcessingState)
-	created, err := scanAlert(row)
-	if err == nil {
-		*a = *created
-		return created, nil
+		a.Message, a.Body, a.Source, string(metadata), strings.TrimSpace(a.IdempotencyKey), a.DecisionState, a.ProcessingState))
+	if errors.Is(err, sql.ErrNoRows) && strings.TrimSpace(a.IdempotencyKey) != "" {
+		createdNew = false
+		created, err = scanAlert(conn.QueryRowContext(ctx, `SELECT `+alertSelectColumns+` FROM alerts
+			WHERE project_id = ? AND idempotency_key = ?`, a.ProjectID, strings.TrimSpace(a.IdempotencyKey)))
 	}
-	if !errors.Is(err, sql.ErrNoRows) || strings.TrimSpace(a.IdempotencyKey) == "" {
+	if err != nil {
 		return nil, fmt.Errorf("creating alert: %w", err)
 	}
-	existing, err := r.GetByIdempotencyKey(ctx, a.ProjectID, a.IdempotencyKey)
-	if err != nil {
-		return nil, fmt.Errorf("loading idempotent alert: %w", err)
+	if hasAutomationContext {
+		if !createdNew {
+			for _, binding := range automationContext.Bindings {
+				var exists bool
+				if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM automation_transitions
+					WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND event_key = ?)`,
+					a.ProjectID, binding.AutomationID, binding.VersionID, binding.NodeID, "alert:"+created.ID+":created:notification").Scan(&exists); err != nil {
+					return nil, err
+				}
+				if !exists {
+					return nil, fmt.Errorf("alert idempotency key is already bound outside this Automation source")
+				}
+			}
+		}
+		if err := recordAlertCreatedProjection(ctx, conn, created, automationContext); err != nil {
+			return nil, err
+		}
 	}
-	return existing, nil
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, err
+	}
+	committed = true
+	_ = conn.Close()
+	*a = *created
+	if hasAutomationContext {
+		r.automationRepo.PublishResourceInvalidations(context.WithoutCancel(ctx), events.AutomationWorkItemUpdated, a.ProjectID, "alert", a.ID)
+	}
+	return created, nil
 }
 
 func (r *AlertRepo) GetByIdempotencyKey(ctx context.Context, projectID, key string) (*models.Alert, error) {
@@ -266,23 +313,50 @@ func (r *AlertRepo) SetDecision(ctx context.Context, projectID, id string, state
 	if state != models.AlertDecisionApproved && state != models.AlertDecisionRejected && state != models.AlertDecisionDismissed {
 		return fmt.Errorf("invalid alert decision state %q", state)
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE alerts
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	result, err := conn.ExecContext(ctx, `UPDATE alerts
 		SET decision_state = ?, decided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND id = ? AND decision_state = 'pending'`, state, projectID, id)
 	if err != nil {
 		return fmt.Errorf("setting alert decision: %w", err)
 	}
-	if err := requireAffected(result); err == nil {
-		return nil
+	changed, _ := result.RowsAffected()
+	if changed == 0 {
+		var current models.AlertDecisionState
+		if err := conn.QueryRowContext(ctx, `SELECT decision_state FROM alerts WHERE project_id = ? AND id = ?`, projectID, id).Scan(&current); err != nil {
+			return err
+		}
+		if current != state {
+			return fmt.Errorf("alert decision is %s, not pending", current)
+		}
 	}
-	a, getErr := r.GetByIDForProject(ctx, projectID, id)
-	if getErr == nil && a.DecisionState == state {
-		return nil
+	if r.automationRepo != nil {
+		if err := recordAlertDecisionProjection(ctx, conn, projectID, id, state); err != nil {
+			return err
+		}
 	}
-	if getErr != nil {
-		return getErr
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
 	}
-	return fmt.Errorf("alert decision is %s, not pending", a.DecisionState)
+	committed = true
+	_ = conn.Close()
+	if r.automationRepo != nil {
+		r.automationRepo.PublishResourceInvalidations(context.WithoutCancel(ctx), events.AutomationTransitionCreated, projectID, "alert", id)
+	}
+	return nil
 }
 
 func (r *AlertRepo) ClaimApproved(ctx context.Context, projectID, id, claimant string, lease time.Duration) (*models.Alert, error) {
@@ -295,54 +369,136 @@ func (r *AlertRepo) ClaimApproved(ctx context.Context, projectID, id, claimant s
 	}
 	now := time.Now().UTC()
 	expires := now.Add(lease)
-	a, err := scanAlert(r.db.QueryRowContext(ctx, `UPDATE alerts SET
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	a, err := scanAlert(conn.QueryRowContext(ctx, `UPDATE alerts SET
 		processing_state = 'claimed', claimant = ?, claimed_at = ?, claim_expires_at = ?, processing_error = '', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND id = ? AND decision_state = 'approved' AND implementation_task_id IS NULL
 		AND (processing_state IN ('unclaimed', 'failed') OR (processing_state = 'claimed' AND claim_expires_at <= ?))
 		RETURNING `+alertSelectColumns, claimant, now, expires, projectID, id, now))
-	if err == nil {
-		return a, nil
+	if errors.Is(err, sql.ErrNoRows) {
+		a, err = scanAlert(conn.QueryRowContext(ctx, `SELECT `+alertSelectColumns+` FROM alerts WHERE project_id = ? AND id = ?`, projectID, id))
+		if err == nil && (a.ProcessingState != models.AlertProcessingClaimed || a.Claimant != claimant) {
+			return nil, fmt.Errorf("alert is not claimable")
+		}
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	if err != nil {
 		return nil, fmt.Errorf("claiming alert: %w", err)
 	}
-	existing, getErr := r.GetByIDForProject(ctx, projectID, id)
-	if getErr != nil {
-		return nil, getErr
+	if r.automationRepo != nil {
+		if err := recordAlertClaimProjection(ctx, conn, projectID, id, claimant); err != nil {
+			return nil, err
+		}
 	}
-	if existing.ProcessingState == models.AlertProcessingClaimed && existing.Claimant == claimant {
-		return existing, nil
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("alert is not claimable")
+	committed = true
+	_ = conn.Close()
+	if r.automationRepo != nil {
+		r.automationRepo.PublishResourceInvalidations(context.WithoutCancel(ctx), events.AutomationWorkItemUpdated, projectID, "alert", id)
+	}
+	return a, nil
 }
 
 func (r *AlertRepo) ReleaseClaim(ctx context.Context, projectID, id, claimant string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE alerts SET processing_state = 'unclaimed', claimant = NULL,
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	result, err := conn.ExecContext(ctx, `UPDATE alerts SET processing_state = 'unclaimed', claimant = NULL,
 		claimed_at = NULL, claim_expires_at = NULL, processing_error = '', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND id = ? AND processing_state = 'claimed' AND claimant = ? AND implementation_task_id IS NULL`,
 		projectID, id, claimant)
 	if err != nil {
 		return fmt.Errorf("releasing alert claim: %w", err)
 	}
-	return requireAffected(result)
+	if err := requireAffected(result); err != nil {
+		return err
+	}
+	if r.automationRepo != nil {
+		if err := recordAlertClaimReleasedProjection(ctx, conn, projectID, id, claimant); err != nil {
+			return err
+		}
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	_ = conn.Close()
+	if r.automationRepo != nil {
+		r.automationRepo.PublishResourceInvalidations(context.WithoutCancel(ctx), events.AutomationWorkItemUpdated, projectID, "alert", id)
+	}
+	return nil
 }
 
 func (r *AlertRepo) LinkImplementationTask(ctx context.Context, projectID, id, claimant, taskID string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE alerts SET implementation_task_id = ?, processing_state = 'implementation_task_linked',
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	result, err := conn.ExecContext(ctx, `UPDATE alerts SET implementation_task_id = ?, processing_state = 'implementation_task_linked',
 		claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND id = ? AND processing_state = 'claimed' AND claimant = ?
 		AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND project_id = ?)`, taskID, projectID, id, claimant, taskID, projectID)
 	if err != nil {
 		return fmt.Errorf("linking implementation task: %w", err)
 	}
-	if err := requireAffected(result); err == nil {
-		return nil
+	if changed, _ := result.RowsAffected(); changed == 0 {
+		var linked sql.NullString
+		if err := conn.QueryRowContext(ctx, `SELECT implementation_task_id FROM alerts WHERE project_id = ? AND id = ?`, projectID, id).Scan(&linked); err != nil {
+			return ErrAlertNotFound
+		}
+		if !linked.Valid || linked.String != taskID {
+			return ErrAlertNotFound
+		}
 	}
-	a, getErr := r.GetByIDForProject(ctx, projectID, id)
-	if getErr == nil && a.ImplementationTaskID != nil && *a.ImplementationTaskID == taskID {
-		return nil
+	if r.automationRepo != nil {
+		if err := recordAlertImplementationProjection(ctx, conn, projectID, id, taskID); err != nil {
+			return err
+		}
 	}
-	return ErrAlertNotFound
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	_ = conn.Close()
+	if r.automationRepo != nil {
+		r.automationRepo.PublishResourceInvalidations(context.WithoutCancel(ctx), events.AutomationResourceLinked, projectID, "alert", id)
+	}
+	return nil
 }
 
 func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, alertID, claimant string, input models.AlertImplementationTaskInput) (*models.Task, error) {
@@ -378,11 +534,19 @@ func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, ale
 		return nil, err
 	}
 	if linked.Valid {
+		if r.automationRepo != nil {
+			if err := recordAlertImplementationProjection(ctx, conn, projectID, alertID, linked.String); err != nil {
+				return nil, err
+			}
+		}
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, err
 		}
 		committed = true
 		_ = conn.Close()
+		if r.automationRepo != nil {
+			r.automationRepo.PublishResourceInvalidations(context.WithoutCancel(ctx), events.AutomationResourceLinked, projectID, "alert", alertID)
+		}
 		return NewTaskRepo(r.db, nil).GetByID(ctx, linked.String)
 	}
 	if state != models.AlertProcessingClaimed || storedClaimant != claimant {
@@ -403,11 +567,19 @@ func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, ale
 		claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, taskID, projectID, alertID); err != nil {
 		return nil, err
 	}
+	if r.automationRepo != nil {
+		if err := recordAlertImplementationProjection(ctx, conn, projectID, alertID, taskID); err != nil {
+			return nil, err
+		}
+	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, err
 	}
 	committed = true
 	_ = conn.Close()
+	if r.automationRepo != nil {
+		r.automationRepo.PublishResourceInvalidations(context.WithoutCancel(ctx), events.AutomationResourceLinked, projectID, "alert", alertID)
+	}
 	return NewTaskRepo(r.db, nil).GetByID(ctx, taskID)
 }
 
@@ -415,12 +587,42 @@ func (r *AlertRepo) MarkProcessing(ctx context.Context, projectID, id, claimant 
 	if state != models.AlertProcessingCompleted && state != models.AlertProcessingFailed {
 		return fmt.Errorf("invalid terminal processing state %q", state)
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE alerts SET processing_state = ?, processing_error = ?,
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	result, err := conn.ExecContext(ctx, `UPDATE alerts SET processing_state = ?, processing_error = ?,
 		claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND id = ? AND claimant = ? AND processing_state IN ('claimed', 'implementation_task_linked', 'failed')`,
 		state, strings.TrimSpace(message), projectID, id, claimant)
 	if err != nil {
 		return fmt.Errorf("marking alert processing: %w", err)
 	}
-	return requireAffected(result)
+	if err := requireAffected(result); err != nil {
+		return err
+	}
+	if r.automationRepo != nil {
+		if err := recordAlertProcessingProjection(ctx, conn, projectID, id, state, message); err != nil {
+			return err
+		}
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	_ = conn.Close()
+	if r.automationRepo != nil {
+		r.automationRepo.PublishResourceInvalidations(context.WithoutCancel(ctx), events.AutomationTransitionCreated, projectID, "alert", id)
+	}
+	return nil
 }

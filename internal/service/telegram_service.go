@@ -1226,7 +1226,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		TaskSvc:       s.taskSvc,
 		LLMConfigRepo: s.llmConfigRepo,
 		Collector:     collector,
-		OnTasksCreated: func(ctx context.Context, createdTasks []models.Task) {
+		OnTasksCreated: func(ctx context.Context, _ []TaskCreationRequest, createdTasks []models.Task) error {
 			for _, t := range createdTasks {
 				if s.taskRepo != nil {
 					if err := s.taskRepo.UpdateTelegramOrigin(ctx, t.ID, chatID); err != nil {
@@ -1234,6 +1234,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 					}
 				}
 			}
+			return nil
 		},
 	})
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskGoalSvc}))
