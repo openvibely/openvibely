@@ -56,7 +56,7 @@ The exact pre-collapse implementation tree remains at `backup/e109ce89-before-ma
 - `backup/e109ce89-recovered-rebase-tip-20260724`, which additionally preserves the next two successfully replayed checkpoints through `0db6521d`;
 - `backup/e109ce89-collapsed-published-tip-20260724`, which preserves the collapsed tree at `1a3347be`.
 
-The assigned task branch contains the 43 recovered direct checkpoints, followed by an explicit tree-reconciliation checkpoint with the exact pre-collapse implementation tree and documentation checkpoints. Base `600ca2b3` and recovered tip `623649dd` remain direct ancestors of the task branch, and the implementation tree is unchanged from the tree that passed current validation.
+The assigned task branch contains the 43 recovered direct checkpoints, followed by an explicit tree-reconciliation checkpoint with the exact pre-collapse implementation tree and documentation checkpoints. Base `600ca2b3` and recovered tip `623649dd` remain direct ancestors of the task branch. Merge checkpoint `c9bea540` integrates local `main` checkpoint `5ea1ebac` without rewriting that recovered history and retains the upstream Chrome browser teardown fix across Automation, Chat, reconnect, and Task Thread coverage.
 
 Shared `main` was not rewritten. Both `origin/main` and `upstream/main` pointed to collapsed checkpoint `1a3347be` at reconciliation time, so replacing that published ancestry requires explicitly approved shared-history rewriting. Task-branch checkpoint recovery is complete; remote-main history cleanup remains a separate destructive integration decision.
 
@@ -67,11 +67,11 @@ Current checkpoint evidence:
 - `templ generate` completed with zero generated updates.
 - `gofmt` and `git diff --check` pass.
 - `go build ./...` passes; desktop linking emits only the documented non-failing newer-SDK macOS warnings.
-- The focused migration/repository/service/handler/template package suite passes.
+- The focused repository/service/handler/template package suite passes.
 - `TMPDIR=/private/tmp go test -p 1 ./... -count=1 -timeout 300s` passes every package.
 
 The pre-reservation recovery finding from the strict audit of checkpoint `689271e7` is repaired in the current implementation tree. Web Save uses one transactional guard to discard staging only when no publication attempt exists: initial planning and attempt-reservation failures leave no hidden graph, Automation identity, false recovery item, Task, or Scheduler row, while failures after reservation preserve the exact journal and compiler-created resources for retry. First and replacement Save regressions prove later Saves remain unblocked and the current saved behavior is unchanged.
 
-`VISION.md`, `IMPLEMENTATION.md`, this status ledger, the standalone `docs/automations-user-guide.md`, the local guide index, and both complete representations of the authoritative `automation_graphs` managed-memory topic describe the same one-current-graph, direct-Save, Live-only contract. After checkpoint `635d06a5`, the authorized reconciliation updated the authoritative project copy, reloaded it through the managed-memory view, and copied the complete topic to the task-worktree tracked artifact; their bytes and semantic completion state match. The separate public documentation repository still needs an Automation Graphs page and navigation links, but its checkout contains unrelated uncommitted skill changes and was left untouched.
+`VISION.md`, `IMPLEMENTATION.md`, this status ledger, the standalone `docs/automations-user-guide.md`, and the local guide index describe the same one-current-graph, direct-Save, Live-only contract. The task-worktree tracked `automation_graphs` topic remains at clean reconciliation checkpoint `3253e3c1`, while the authoritative managed-memory view records the subsequent audit finding that required integrating `5ea1ebac`; that integration is now complete at `c9bea540`. This runtime exposes `memory_view` but no authorized scoped managed-memory writer, so the two representations cannot yet be updated and synchronized safely. The separate public documentation repository still needs an Automation Graphs page and navigation links, but its checkout contains unrelated uncommitted skill changes and was left untouched.
 
-A new strict read-only full contract audit is the remaining task-branch completion gate. No clean-audit completion is claimed here.
+A new strict read-only full contract audit remains required after authoritative managed-memory reconciliation. No clean-audit completion is claimed here.
