@@ -56,7 +56,9 @@ The exact pre-collapse implementation tree remains at `backup/e109ce89-before-ma
 - `backup/e109ce89-recovered-rebase-tip-20260724`, which additionally preserves the next two successfully replayed checkpoints through `0db6521d`;
 - `backup/e109ce89-collapsed-published-tip-20260724`, which preserves the current collapsed tree at `1a3347be`.
 
-The granular history has not replaced shared `main`. Both `origin/main` and `upstream/main` already point to collapsed checkpoint `1a3347be`, so restoring the recovered ancestry there requires an explicitly approved shared-history force rewrite. The task must not perform that destructive operation implicitly. This lineage gate remains open even though the recovered objects are now protected from garbage collection.
+The assigned task branch now contains the 43 recovered direct checkpoints, followed by one explicit tree-reconciliation checkpoint with the exact pre-collapse implementation tree and this documentation checkpoint. Base `600ca2b3` and recovered tip `623649dd` are both direct ancestors of the clean task tip, and the final repository tree is unchanged from the tree that passed current validation.
+
+Shared `main` has not been rewritten. Both `origin/main` and `upstream/main` still point to collapsed checkpoint `1a3347be`, so replacing that already-published ancestry requires explicitly approved shared-history rewriting. Task-branch checkpoint recovery is complete; remote-main history cleanup remains a separate destructive integration decision.
 
 ## Validation
 
@@ -72,4 +74,4 @@ The pre-reservation recovery finding from the strict audit of checkpoint `689271
 
 `VISION.md`, `IMPLEMENTATION.md`, this status ledger, and the authoritative `automation_graphs` managed memory now describe the same one-current-graph, direct-Save, Live-only contract. The current runtime exposes managed memory read access but no scoped memory writer; no repository file was edited as a substitute for an authorized managed-memory update. The separate public documentation repository still needs an Automation Graphs page and navigation links, but its checkout contains unrelated uncommitted skill changes and was left untouched.
 
-A new strict read-only full contract audit remains blocked until the checkpoint-lineage decision above is resolved and the resulting tree has fresh validation evidence. No clean-audit completion is claimed here.
+A new strict read-only full contract audit is the remaining task-branch completion gate. No clean-audit completion is claimed here.
