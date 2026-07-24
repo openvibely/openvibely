@@ -2,7 +2,7 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-07-17
+updated: 2026-07-24
 source: consolidation
 source_id: memory_consolidation_2026_07_17
 confidence: high
@@ -43,6 +43,7 @@ Commit-message direction:
 - Task-execution commit subjects should be concise, subject-only, plain language, and follow Tim Pope-style git subject guidance: capitalized imperative mood such as `Fix bug`, not lowercase `fix bug` or conventional-prefix `fix: bug`. Strip provider/status/tool boilerplate, conventional commit prefixes, and common body/file-list boilerplate headings from LLM-provided candidates before accepting a subject.
 - Do not add or accept a `Changed files:`/file-list body; do not invent `task` scopes or mention task/worktree machinery unless it is the actual code scope; do not use generic `Task completed:`/`Followup:` subjects or lifecycle labels.
 - Existing historical commits keep their original subjects. Changes-tab integration commits remain static (`Merge task:`, `Squash merge task:`), and fast-forward creates no merge commit.
+- Resolved task-branch recovery incident (2026-07-24): automation task `e109ce8999815c5518324d5ce39b470b` had collapsed 43 granular checkpoints into `d23694b8` plus status child `1a3347be`. Reflog and unreachable-object recovery restored the 43-checkpoint chain from base `600ca2b3` through `623649dd` as direct ancestors of the task branch, followed by tree reconciliation `51fd47f4`, documentation/status checkpoints, and managed-memory reconciliation checkpoint `3253e3c1`. The reconciliation tree exactly matches the pre-collapse implementation tree. Backup refs preserve the recovered chain, later replay tip, pre-rebase tree, and collapsed published tip. Shared published ancestry was not rewritten. When local `main` and `upstream/main` advanced to `5ea1ebac` (`Fix Chrome browser test teardown race`), merge checkpoint `c9bea540` integrated that commit without rewriting the recovered history; documentation checkpoint `0bc0a13d` followed after generation, build, focused tests, and the serialized full suite passed. At `0bc0a13d`, local `main` and recovered tip `623649dd` were both ancestors and the worktree was clean. Final completion remains blocked on reconciling the authoritative and tracked Automation memory topics before restarting the strict read-only audit.
 
 Follow-up lineage direction:
 - Task-thread follow-ups to terminal merged/stale tasks are guarded against blindly merging the current target into an old historical task branch/worktree.

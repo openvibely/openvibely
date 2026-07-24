@@ -717,7 +717,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		server.URL+"/automations?project_id="+projectID,
 	)
 	cmd.Stderr = stderrFile
-	if err := cmd.Start(); err != nil {
+	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 
@@ -736,10 +736,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			outcome = "fail:timed out waiting for browser result; last progress=" + lastProgress
 		}
 	}
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-	}
-	_ = cmd.Wait()
+	stopBrowserProcess(cmd)
 	if outcome != "pass:" {
 		stderr, _ := os.ReadFile(stderrPath)
 		if len(stderr) > 4000 {

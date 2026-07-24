@@ -29,6 +29,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func blockAutomaticQueuedTurnPromotion(t *testing.T, h *Handler, taskID, agentID string) {
+	t.Helper()
+	createExec(t, h, taskID, agentID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active test blocker"
+		ex.IsFollowup = true
+	})
+}
+
 func TestProcessStreamingResponse_TaskFollowupRespectsGlobalWorkerLimit(t *testing.T) {
 	setup := func(t *testing.T, maxWorkers int) (*Handler, *models.Project, *models.Task, *models.Execution, *models.LLMConfig, <-chan struct{}) {
 		t.Helper()
@@ -3634,6 +3643,7 @@ func TestProcessStreamingResponse_DoesNotApplyPreparedSteeringWhenProviderCallFa
 		Content:        "retry this steering",
 	}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+	blockAutomaticQueuedTurnPromotion(t, h, task.ID, agent.ID)
 
 	h.processStreamingResponse(streamingResponseParams{
 		ExecID:         exec.ID,
@@ -3841,6 +3851,7 @@ func TestProcessStreamingResponse_DoesNotMovePreparedSteeringAttachmentsWhenProv
 		AttachmentSessionID: sessionID,
 	}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+	blockAutomaticQueuedTurnPromotion(t, h, task.ID, agent.ID)
 
 	h.processStreamingResponse(streamingResponseParams{
 		ExecID:         exec.ID,
@@ -3907,6 +3918,7 @@ func TestProcessStreamingResponse_RequeuesPreparedSteeringWhenCommitFailsAfterPr
 		AttachmentSessionID: sessionID,
 	}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+	blockAutomaticQueuedTurnPromotion(t, h, task.ID, agent.ID)
 
 	h.processStreamingResponse(streamingResponseParams{
 		ExecID:         exec.ID,
@@ -3982,6 +3994,7 @@ func TestProcessStreamingResponse_RequeuesOnlyUncommittedSteeringWhenLaterCommit
 	}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, second, exec.ID))
 	h.chatAttachmentRepo = nil
+	blockAutomaticQueuedTurnPromotion(t, h, task.ID, agent.ID)
 
 	h.processStreamingResponse(streamingResponseParams{
 		ExecID:         exec.ID,
@@ -4028,6 +4041,7 @@ func TestProcessStreamingResponse_DoesNotApplySteeringCreatedDuringFailedModelCa
 		ex.PromptSent = "active prompt"
 		ex.IsFollowup = true
 	})
+	blockAutomaticQueuedTurnPromotion(t, h, task.ID, agent.ID)
 
 	var steeringID string
 	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
