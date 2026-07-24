@@ -559,7 +559,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	automationPlanner.SetAgentRepository(agentRepo)
 	automationCompiler := service.NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, automationPlanner)
 	automationCompiler.SetAgentRepository(agentRepo)
-	automationLifecycleSvc := service.NewAutomationLifecycleService(automationRepo, scheduleRepo)
+	automationLifecycleSvc := service.NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)
 	automationConfirmationSecret, confirmationSecretErr := service.LoadOrCreateAutomationConfirmationSecret(context.Background(), settingsRepo)
 	if confirmationSecretErr != nil {
 		return nil, fmt.Errorf("initializing automation confirmation secret: %w", confirmationSecretErr)

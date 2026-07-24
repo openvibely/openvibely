@@ -742,8 +742,8 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"description":{"type":"string","minLength":1,"maxLength":4000}},"required":["description"],"additionalProperties":false}`),
 	},
 	{
-		Name:         "create_automation_draft",
-		Description:  "Persist an unpublished custom or maintained-template Automation draft from a description, template, or Blank. Describe uses the same surfaced capability contract as the visual builder. This creates no runtime resources.",
+		Name:         "plan_automation_save",
+		Description:  "Generate, validate, and display the exact save plan for a custom or maintained-template Automation using the same surfaced capabilities as the visual builder. This creates no runtime resources and requires a later user confirmation before Save.",
 		Domain:       DomainAutomations,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
@@ -752,24 +752,14 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc","vision_driver"]},"description":{"type":"string","maxLength":4000}},"required":["source"],"additionalProperties":false}`),
 	},
 	{
-		Name:         "plan_automation_publication",
-		Description:  "Revalidate an Automation draft and return the exact create, reuse, update, disable, and unchanged publication plan. This creates no runtime resources.",
-		Domain:       DomainAutomations,
-		Access:       AccessRead,
-		Sensitivity:  SensitivityNormal,
-		AllowedModes: bothModes(),
-		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"automation_id":{"type":"string"},"version_id":{"type":"string"}},"required":["automation_id","version_id"],"additionalProperties":false}`),
-	},
-	{
-		Name:         "publish_automation_draft",
-		Description:  "Publish a previously displayed Automation plan only after a later exact user confirmation in the same thread.",
+		Name:         "save_automation",
+		Description:  "Save a previously displayed Automation plan only after a later exact user confirmation in the same thread.",
 		Domain:       DomainAutomations,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"automation_id":{"type":"string"},"version_id":{"type":"string"},"plan_revision":{"type":"string"},"confirmation_token":{"type":"string"},"confirming_user_input_id":{"type":"string"}},"required":["automation_id","version_id","plan_revision","confirmation_token","confirming_user_input_id"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"confirmation_token":{"type":"string"},"confirming_user_input_id":{"type":"string"}},"required":["confirmation_token","confirming_user_input_id"],"additionalProperties":false}`),
 	},
 
 	// --- Chat domain ---

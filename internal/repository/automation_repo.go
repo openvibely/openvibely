@@ -12,7 +12,24 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-var ErrAutomationTriggerOwned = errors.New("automation trigger schedule is already owned")
+var (
+	ErrAutomationTriggerOwned      = errors.New("automation trigger schedule is already owned")
+	ErrAutomationSaveJournalExists = errors.New("automation has a staged Save journal")
+)
+
+func rejectStagedAutomationSave(ctx context.Context, conn *sql.Conn, projectID, automationID, currentVersionID string) error {
+	var stagedVersionID string
+	err := conn.QueryRowContext(ctx, `SELECT id FROM automation_versions
+		WHERE project_id = ? AND automation_id = ? AND id <> ? AND state = 'draft' LIMIT 1`,
+		projectID, automationID, currentVersionID).Scan(&stagedVersionID)
+	if err == nil {
+		return ErrAutomationSaveJournalExists
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	return fmt.Errorf("checking staged Automation Save journal: %w", err)
+}
 
 type AutomationRepo struct {
 	db          *sql.DB
@@ -99,6 +116,15 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 	if err != nil {
 		return nil, false, err
 	}
+	if a != nil {
+		currentVersionID := ""
+		if a.PublishedVersionID != nil {
+			currentVersionID = *a.PublishedVersionID
+		}
+		if err := rejectStagedAutomationSave(ctx, conn, in.ProjectID, a.ID, currentVersionID); err != nil {
+			return nil, false, fmt.Errorf("%w: reopen and retry the pending Save before maintained registration", err)
+		}
+	}
 	if a != nil && a.PublishedVersionID != nil {
 		var publishedAdapter string
 		if err := conn.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
@@ -113,6 +139,14 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 			return nil, false, err
 		}
 		if same {
+			if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions
+						WHERE project_id = ? AND automation_id = ? AND id <> ? AND state = 'published'`, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
+				return nil, false, fmt.Errorf("removing retained automation graphs: %w", err)
+			}
+			if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET version = 1, state = 'published'
+					WHERE project_id = ? AND automation_id = ? AND id = ?`, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
+				return nil, false, fmt.Errorf("normalizing current automation graph: %w", err)
+			}
 			if _, err := conn.ExecContext(ctx, `UPDATE automations SET name = ?, description = ?, automation_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`, in.Name, in.Description, in.AutomationType, a.ID, in.ProjectID); err != nil {
 				return nil, false, fmt.Errorf("updating automation identity: %w", err)
 			}
@@ -153,6 +187,10 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		}
 	}
 
+	effectiveLifecycle := a.LifecycleState
+	if effectiveLifecycle == models.AutomationDraft {
+		effectiveLifecycle = models.AutomationActive
+	}
 	var versionNumber int
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) + 1 FROM automation_versions WHERE automation_id = ?`, a.ID).Scan(&versionNumber); err != nil {
 		return nil, false, fmt.Errorf("selecting automation version: %w", err)
@@ -223,12 +261,21 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 			if err == nil && ownerAutomationID != a.ID {
 				return nil, false, fmt.Errorf("%w: %s", ErrAutomationTriggerOwned, binding.ResourceID)
 			}
+			ownershipState := string(effectiveLifecycle)
+			if ownershipState == string(models.AutomationActive) {
+				ownershipState = "active"
+			}
 			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_trigger_owners
 				(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
-				VALUES (?, ?, ?, ?, ?, 'active')
+				VALUES (?, ?, ?, ?, ?, ?)
 				ON CONFLICT(schedule_id) DO UPDATE SET version_id = excluded.version_id, node_id = excluded.node_id,
-				ownership_state = 'active', updated_at = CURRENT_TIMESTAMP`, binding.ResourceID, in.ProjectID, a.ID, versionID, nodeID); err != nil {
+				ownership_state = excluded.ownership_state, updated_at = CURRENT_TIMESTAMP`, binding.ResourceID, in.ProjectID,
+				a.ID, versionID, nodeID, ownershipState); err != nil {
 				return nil, false, fmt.Errorf("claiming trigger ownership: %w", err)
+			}
+			enabled := effectiveLifecycle == models.AutomationActive
+			if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, enabled, binding.ResourceID); err != nil {
+				return nil, false, fmt.Errorf("updating trigger lifecycle: %w", err)
 			}
 		}
 	}
@@ -253,21 +300,23 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 	}
 	rows.Close()
 	for _, scheduleID := range oldTriggerIDs {
-		if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, scheduleID); err != nil {
-			return nil, false, fmt.Errorf("disabling superseded trigger: %w", err)
-		}
-		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_trigger_owners WHERE schedule_id = ? AND automation_id = ?`, scheduleID, a.ID); err != nil {
-			return nil, false, fmt.Errorf("releasing superseded trigger: %w", err)
+		if _, err := conn.ExecContext(ctx, `DELETE FROM schedules WHERE id = ?`, scheduleID); err != nil {
+			return nil, false, fmt.Errorf("deleting obsolete owned trigger: %w", err)
 		}
 	}
 
-	if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET state = 'superseded' WHERE automation_id = ? AND state = 'published'`, a.ID); err != nil {
-		return nil, false, err
-	}
 	if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET state = 'published', published_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'draft'`, versionID); err != nil {
 		return nil, false, err
 	}
-	if _, err := conn.ExecContext(ctx, `UPDATE automations SET lifecycle_state = 'active', published_version_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`, versionID, a.ID, in.ProjectID); err != nil {
+	if _, err := conn.ExecContext(ctx, `UPDATE automations SET lifecycle_state = ?, published_version_id = ?,
+		archived_at = CASE WHEN ? = 'archived' THEN archived_at ELSE NULL END, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND project_id = ?`, effectiveLifecycle, versionID, effectiveLifecycle, a.ID, in.ProjectID); err != nil {
+		return nil, false, err
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions WHERE project_id = ? AND automation_id = ? AND id <> ? AND state = 'published'`, in.ProjectID, a.ID, versionID); err != nil {
+		return nil, false, err
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET version = 1 WHERE project_id = ? AND automation_id = ? AND id = ?`, in.ProjectID, a.ID, versionID); err != nil {
 		return nil, false, err
 	}
 	updated, err := getAutomationByStableKeyQuery(ctx, conn, in.ProjectID, in.StableKey)

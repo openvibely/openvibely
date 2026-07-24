@@ -18,35 +18,43 @@ The JSON must use schema_version 1 and exactly these top-level fields: schema_ve
 Nodes use exactly these fields: key, name, type, role, config, position. Position uses exactly x and y.
 Edges use exactly these fields: key, from, to, from_port, to_port, label, condition. The from and to values are node keys. Never use source or target as edge field names.
 Condition uses only state when the supported handoff below requires it. Omit optional fields rather than inventing additional fields.
+Automation name must be a non-empty string of at most 200 characters. Description must be a string of at most 2000 characters. A custom graph must contain at least one node and at most 50 nodes and 100 edges.
+Every node key and edge key must be non-empty and unique. Every node name must be non-empty and at most 200 characters. Each edge must reference two existing different node keys. Every edge must use from_port right and to_port left so execution runs from the source OUT port to the target IN port.
 
 Choose the registered adapter that represents the user's request:
-- Use a maintained adapter, native_sdlc, github_sdlc, or vision_driver, only when its canonical topology exactly matches. Its node keys, types, roles, and edges must remain canonical.
-- Use adapter_key custom and automation_type custom for a user-defined graph assembled from the surfaced capabilities below. Node keys and names are user-owned.
+- Prefer adapter_key custom and automation_type custom for a user-defined graph assembled from the surfaced capabilities below. Node keys and names are user-owned.
+- Use a maintained adapter only when one canonical candidate below exactly represents the user's requested lifecycle. Copy that candidate's adapter_key, automation_type, node keys, node types, node roles, and edge topology exactly. You may tailor its name, description, and supported node configuration values, but never guess or alter its topology.
+
+Canonical maintained adapter candidates generated from the registry:
+%s
 
 Supported custom nodes and configuration:
-- Every Schedule or Agent task priority must be an integer from 1 to 4: 1 low, 2 normal, 3 high, 4 urgent.
-- Schedule: type trigger, role fixed_schedule; this is the scheduled task, with config prompt, category scheduled, priority, optional agent_ref, target_node_key when connected, run_at in HH:MM, repeat_type, repeat_interval, enabled. It may run by itself and may connect to supported task, action, or Outcome capabilities.
-- Agent task: type agent_task, role task; this is an ordinary task, with config prompt, category, priority, and optional agent_ref selected only from the project capability snapshot. Never add skills or source_files to task config. It may be a standalone ordinary task or connect to supported task, action, or Outcome capabilities. Scheduling belongs only to the Schedule node.
-- Create notification: type action, role create_notification; config notification_type and instructions.
-- Human approval: type human_gate, role native_approval; config approval_method native_alert.
-- Create GitHub issue: type action, role create_github_issue; config instructions and labels. Never configure assignees.
-- Human assignment: type human_gate, role github_assignment; config approval_method github_assignment.
-- GitHub inbox: type agent_task, role github_inbox; ordinary task config with category backlog. Its connected Schedule is the scheduled task.
-- Implementation task template: type agent_task, role implementation; task config with category active.
-- Open pull request: type action, role open_pull_request; config instructions, base, draft.
-- Human review: type human_gate, role pull_request_review; config approval_method pull_request_review.
-- Outcome: type outcome, role completed; empty config.
+- Every Schedule or Task priority must be an integer from 1 to 4: 1 low, 2 normal, 3 high, 4 urgent.
+- Schedule: type trigger, role fixed_schedule. A Schedule is the scheduled Task. Its config owns a non-empty substantive prompt, category must be exactly scheduled, priority, optional agent_ref, run_at as HH:MM local time, repeat_type must be exactly one of once, minutes, hours, daily, weekly, monthly, repeat_interval must be an integer from 1 to 365, and enabled must be a boolean. Do not set target_node_key; it is derived from edges. A Schedule may perform the complete recurring job by itself or connect to supported Task, action, or Outcome capabilities. Do not add a separate Task merely to hold the recurring work.
+- Task: type agent_task, role task. Its config owns a non-empty prompt, category must be exactly active or backlog, priority, and optional agent_ref selected only from the project capability snapshot. Never add skills or source_files to Task config. A Task may perform analysis, implementation, or other supported work. It may stand alone or connect to supported Task, action, or Outcome capabilities. Add a Task after a Schedule only when the user requests a genuinely separate follow-up step. When it is connected GitHub inbox -> Task -> Open pull request, it supplies the configuration for the distinct issue-linked Task created when the inbox handles an assigned issue; do not use another role or task type for that work.
+- Create notification: type action, role create_notification. Its config has notification_type and instructions. notification_type must be a non-empty string of at most 100 characters. instructions must be a non-empty string of at most 2000 characters. Every Create notification MUST have exactly one outgoing edge to a Human approval node, even when approval is terminal and has no Outcome branches.
+- Human approval: type human_gate, role native_approval; config must be exactly approval_method native_alert.
+- Create GitHub issue: type action, role create_github_issue. Its config has instructions and labels. instructions must be a non-empty string of at most 2000 characters. labels must be an array of at most 10 non-empty plain strings of at most 100 characters without the openvibely: prefix. Never configure assignees.
+- Human assignment: type human_gate, role github_assignment; config must be exactly approval_method github_assignment.
+- GitHub inbox: type agent_task, role github_inbox; use the same Task config fields with category backlog. A connected Schedule is its own scheduled Task and hands off to the inbox after successful completion.
+- Open pull request: type action, role open_pull_request. Its config has instructions, which must be a non-empty string of at most 2000 characters; base must be a string that is blank or at most 200 characters; and draft must be a boolean.
+- Human review: type human_gate, role pull_request_review; config must be exactly approval_method pull_request_review.
+- Outcome: type outcome, role completed; config must be an empty object.
 
 Supported custom handoffs are deterministic capability connections, not fixed workflow recipes:
-- A Schedule or Agent task may connect to ordinary Agent tasks, Create notification, Create GitHub issue, or an Outcome. A task may fan out to several different supported targets. An ordinary Agent task may also stand alone.
-- Each ordinary Agent task may have at most one task or Schedule parent because a persisted task has one parent. Schedule and task categories remain the user's normal task settings; a Schedule-triggered child becomes runnable when its Schedule task completes.
-- Create notification connects to Human approval. Human approval may be terminal or connect either or both approved/rejected results to Outcomes. Result edges use condition state approved or rejected, with at most one Outcome for each state. Multiple valid task producers may share one Create notification action.
-- The human-gated GitHub lifecycle uses Create GitHub issue -> Human assignment and a separately scheduled GitHub inbox. Human assignment -> GitHub inbox uses condition state assigned. Continue GitHub inbox -> Implementation task template -> Open pull request -> Human review -> Outcome.
+- A Schedule or Task may connect to ordinary Tasks, Create notification, Create GitHub issue, or an Outcome. A Task may fan out to several different supported targets, but may connect to at most one target of each action or Outcome kind. A Task may also stand alone.
+- Each ordinary Task may have at most one Task or Schedule source because a persisted task has one parent. Schedule -> Task is an explicit downstream handoff: the scheduled Task performs its own configured work first, then OpenVibely activates the separate connected Task after successful completion. Never compile or describe this edge as the Scheduler directly targeting the connected Task.
+- Create notification needs at least one Schedule or Task source and exactly one Human approval target. Human approval may be terminal or connect either or both approved/rejected results to Outcomes. Result edges use condition state approved or rejected, with at most one Outcome for each state. Multiple valid task producers may share one Create notification action.
+- Create GitHub issue needs at least one Schedule or Task source and exactly one outgoing edge to Human assignment. Human assignment needs exactly one outgoing edge to GitHub inbox with condition state assigned.
+- GitHub inbox needs exactly one Schedule source and exactly one Human assignment source. It needs exactly one Task target, and that Task must have exactly one incoming edge from the inbox and exactly one outgoing edge to Open pull request.
+- Open pull request must have exactly one incoming edge from that issue-linked Task and exactly one outgoing edge to Human review. Human review must have at least one Open pull request source. Human review must have exactly one outgoing edge to one Outcome. Outcome nodes are terminal.
 - Do not add multiple task parents, create cycles, bypass a human assignment/review gate, or attach conditions to non-gate edges.
 
 Only generate GitHub capability nodes when the supplied snapshot says GitHub is configured. Preserve human assignment, approval, pull request review, merge, release, and deployment boundaries. Do not emit database IDs, project IDs, URLs, arbitrary tools, executable code, SQL, credentials, hidden/internal capabilities, or unknown configuration fields.
 
-Project capability snapshot:
+If requested work depends on an external capability such as web, market-data, repository, or communication access, select agent_ref only when a listed Agent explicitly has a compatible capability. If no listed Agent has it, omit agent_ref, add an explicit warning that the capability is not shown as available and must be configured before execution, and do not claim the Task can perform that external operation.
+
+Project capability snapshot for custom graphs:
 %s
 
 User description:
@@ -62,6 +70,82 @@ Validation failure: %s
 Previous output:
 %s`
 
+type automationDescriptionProjectCapability struct {
+	Name string `json:"name"`
+}
+
+type automationDescriptionCapabilitySnapshot struct {
+	Project            automationDescriptionProjectCapability            `json:"project"`
+	SupportedNodeTypes []models.AutomationNodeType                       `json:"supported_node_types"`
+	SupportedRoles     []string                                          `json:"supported_roles"`
+	Agents             []models.AutomationCapabilityRef                  `json:"agents"`
+	Integrations       map[string]models.AutomationIntegrationCapability `json:"integrations"`
+	SafetyBoundaries   map[string]bool                                   `json:"safety_boundaries"`
+}
+
+func customAutomationDescriptionNodeTypes() []models.AutomationNodeType {
+	return []models.AutomationNodeType{
+		models.AutomationNodeAction,
+		models.AutomationNodeAgentTask,
+		models.AutomationNodeHumanGate,
+		models.AutomationNodeOutcome,
+		models.AutomationNodeTrigger,
+	}
+}
+
+func customAutomationDescriptionRoles() []string {
+	return []string{
+		"completed",
+		"create_github_issue",
+		"create_notification",
+		"fixed_schedule",
+		"github_assignment",
+		"github_inbox",
+		"native_approval",
+		"open_pull_request",
+		"pull_request_review",
+		"task",
+	}
+}
+
+func automationDescriptionCapabilities(snapshot models.AutomationCapabilitySnapshot) automationDescriptionCapabilitySnapshot {
+	integrations := make(map[string]models.AutomationIntegrationCapability, 2)
+	for _, key := range []string{"native", "github"} {
+		if capability, ok := snapshot.Integrations[key]; ok {
+			integrations[key] = capability
+		}
+	}
+	safetyBoundaries := make(map[string]bool, len(snapshot.SafetyBoundaries))
+	for key, enabled := range snapshot.SafetyBoundaries {
+		safetyBoundaries[key] = enabled
+	}
+	return automationDescriptionCapabilitySnapshot{
+		Project:            automationDescriptionProjectCapability{Name: snapshot.Project.Name},
+		SupportedNodeTypes: customAutomationDescriptionNodeTypes(),
+		SupportedRoles:     customAutomationDescriptionRoles(),
+		Agents:             append([]models.AutomationCapabilityRef{}, snapshot.Agents...),
+		Integrations:       integrations,
+		SafetyBoundaries:   safetyBoundaries,
+	}
+}
+
+func (s *AutomationDraftService) automationDescriptionMaintainedAdapters() (string, error) {
+	keys := []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC, AutomationAdapterVisionDriver}
+	candidates := make([]models.AutomationDraftCandidate, 0, len(keys))
+	for _, key := range keys {
+		candidate, err := s.TemplateCandidate(key)
+		if err != nil {
+			return "", err
+		}
+		candidates = append(candidates, candidate)
+	}
+	encoded, err := json.Marshal(candidates)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
 func (s *AutomationDraftService) PreviewDescription(ctx context.Context, description string, snapshot models.AutomationCapabilitySnapshot, generate AutomationDescriptionGenerator) (*models.AutomationDraftResult, error) {
 	description = strings.TrimSpace(description)
 	if description == "" {
@@ -73,11 +157,15 @@ func (s *AutomationDraftService) PreviewDescription(ctx context.Context, descrip
 	if generate == nil {
 		return nil, errors.New("automation description generator is unavailable")
 	}
-	snapshotJSON, err := json.Marshal(snapshot)
+	snapshotJSON, err := json.Marshal(automationDescriptionCapabilities(snapshot))
 	if err != nil {
 		return nil, err
 	}
-	prompt := fmt.Sprintf(automationDescriptionPrompt, string(snapshotJSON), description)
+	maintainedAdapters, err := s.automationDescriptionMaintainedAdapters()
+	if err != nil {
+		return nil, err
+	}
+	prompt := fmt.Sprintf(automationDescriptionPrompt, maintainedAdapters, string(snapshotJSON), description)
 	return s.generateCandidateWithRepair(ctx, prompt, snapshot, generate)
 }
 
@@ -91,6 +179,7 @@ func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context
 		candidate, parseErr = s.NormalizeCandidate(candidate)
 		if parseErr == nil {
 			normalizeGeneratedTaskPriorities(&candidate)
+			normalizeGeneratedRequiredNativeApprovals(&candidate)
 		}
 	}
 	var issues []models.AutomationValidationIssue
@@ -120,11 +209,107 @@ func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context
 		return nil, err
 	}
 	normalizeGeneratedTaskPriorities(&candidate)
+	normalizeGeneratedRequiredNativeApprovals(&candidate)
 	issues = s.ValidateCandidateWithCapabilities(candidate, snapshot)
 	if len(issues) > 0 {
 		return nil, fmt.Errorf("automation generation repair failed: %s", issues[0].Message)
 	}
 	return draftPreviewResult(candidate, nil), nil
+}
+
+func normalizeGeneratedRequiredNativeApprovals(candidate *models.AutomationDraftCandidate) {
+	if candidate.AdapterKey != AutomationAdapterCustom {
+		return
+	}
+
+	usedNodeKeys := make(map[string]struct{}, len(candidate.Nodes))
+	usedEdgeKeys := make(map[string]struct{}, len(candidate.Edges))
+	nodesByKey := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	incoming := make(map[string]int, len(candidate.Nodes))
+	outgoing := make(map[string][]int, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		usedNodeKeys[node.Key] = struct{}{}
+		nodesByKey[node.Key] = node
+	}
+	for i, edge := range candidate.Edges {
+		usedEdgeKeys[edge.Key] = struct{}{}
+		incoming[edge.To]++
+		outgoing[edge.From] = append(outgoing[edge.From], i)
+	}
+
+	for i := range candidate.Nodes {
+		notification := candidate.Nodes[i]
+		if notification.Type != models.AutomationNodeAction || notification.Role != "create_notification" {
+			continue
+		}
+		outgoingEdges := outgoing[notification.Key]
+		directOutcome := false
+		switch len(outgoingEdges) {
+		case 0:
+		case 1:
+			target := nodesByKey[candidate.Edges[outgoingEdges[0]].To]
+			if target.Type != models.AutomationNodeOutcome {
+				continue
+			}
+			directOutcome = true
+		default:
+			continue
+		}
+
+		approvalKey := ""
+		for _, node := range candidate.Nodes {
+			if node.Type == models.AutomationNodeHumanGate && node.Role == "native_approval" && incoming[node.Key] == 0 {
+				if approvalKey != "" {
+					approvalKey = ""
+					break
+				}
+				approvalKey = node.Key
+			}
+		}
+		if approvalKey == "" {
+			base := notification.Key + "_approval"
+			approvalKey = base
+			for suffix := 2; ; suffix++ {
+				if _, exists := usedNodeKeys[approvalKey]; !exists {
+					break
+				}
+				approvalKey = fmt.Sprintf("%s_%d", base, suffix)
+			}
+			var position *models.AutomationDraftPoint
+			if notification.Position != nil {
+				position = &models.AutomationDraftPoint{X: notification.Position.X + 280, Y: notification.Position.Y}
+			}
+			candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{
+				Key: approvalKey, Name: "Human approval", Type: models.AutomationNodeHumanGate, Role: "native_approval",
+				Config: map[string]any{"approval_method": "native_alert"}, Position: position,
+			})
+			usedNodeKeys[approvalKey] = struct{}{}
+		}
+
+		if directOutcome {
+			edge := &candidate.Edges[outgoingEdges[0]]
+			edge.From = approvalKey
+			state, validState := customAutomationEdgeConditionState(edge.Condition)
+			if !validState || (state != "approved" && state != "rejected") {
+				edge.Condition = map[string]any{"state": "approved"}
+			}
+		}
+
+		edgeBase := notification.Key + "_approval"
+		edgeKey := edgeBase
+		for suffix := 2; ; suffix++ {
+			if _, exists := usedEdgeKeys[edgeKey]; !exists {
+				break
+			}
+			edgeKey = fmt.Sprintf("%s_%d", edgeBase, suffix)
+		}
+		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{
+			Key: edgeKey, From: notification.Key, To: approvalKey, FromPort: "right", ToPort: "left", Condition: map[string]any{},
+		})
+		usedEdgeKeys[edgeKey] = struct{}{}
+		incoming[approvalKey]++
+		outgoing[notification.Key] = append(outgoing[notification.Key], len(candidate.Edges)-1)
+	}
 }
 
 func normalizeGeneratedTaskPriorities(candidate *models.AutomationDraftCandidate) {

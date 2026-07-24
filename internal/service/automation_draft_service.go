@@ -30,11 +30,13 @@ type AutomationDraftService struct {
 }
 
 type AutomationDraftCreateRequest struct {
-	ProjectID  string
-	Source     string
-	CreatedVia string
-	StableKey  string
-	Candidate  models.AutomationDraftCandidate
+	ProjectID    string
+	AutomationID string
+	VersionID    string
+	Source       string
+	CreatedVia   string
+	StableKey    string
+	Candidate    models.AutomationDraftCandidate
 }
 
 func NewAutomationDraftService(repo *repository.AutomationRepo, registry *AutomationAdapterRegistry) *AutomationDraftService {
@@ -50,14 +52,14 @@ func (s *AutomationDraftService) SetCapabilitySnapshotBuilder(capabilities *Auto
 
 func DecodeAutomationDraftCandidate(raw []byte) (models.AutomationDraftCandidate, error) {
 	if len(raw) == 0 || len(raw) > maxAutomationDraftBytes {
-		return models.AutomationDraftCandidate{}, errors.New("automation draft candidate must be between 1 byte and 64 KiB")
+		return models.AutomationDraftCandidate{}, errors.New("automation graph candidate must be between 1 byte and 64 KiB")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	decoder.UseNumber()
 	var candidate models.AutomationDraftCandidate
 	if err := decoder.Decode(&candidate); err != nil {
-		return candidate, fmt.Errorf("invalid automation draft candidate: %w", err)
+		return candidate, fmt.Errorf("invalid automation graph candidate: %w", err)
 	}
 	if err := ensureJSONEOF(decoder); err != nil {
 		return candidate, err
@@ -70,9 +72,9 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 	if err := decoder.Decode(&extra); err == io.EOF {
 		return nil
 	} else if err != nil {
-		return fmt.Errorf("invalid automation draft candidate: %w", err)
+		return fmt.Errorf("invalid automation graph candidate: %w", err)
 	}
-	return errors.New("automation draft candidate contains trailing JSON")
+	return errors.New("automation graph candidate contains trailing JSON")
 }
 
 func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
@@ -100,6 +102,9 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 			config["repeat_type"] = string(models.RepeatDaily)
 			config["repeat_interval"] = 1
 			config["enabled"] = true
+			if node.AllowedResources["task"] {
+				config["category"] = string(models.CategoryScheduled)
+			}
 			if strings.Contains(node.Key, "inbox") {
 				config["repeat_type"] = string(models.RepeatHours)
 				config["repeat_interval"] = 1
@@ -126,7 +131,10 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 		if strings.TrimSpace(edge.Condition) != "" {
 			_ = json.Unmarshal([]byte(edge.Condition), &condition)
 		}
-		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: edge.Key, From: edge.From, To: edge.To, Label: edge.Label, Condition: condition})
+		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{
+			Key: edge.Key, From: edge.From, To: edge.To, FromPort: "right", ToPort: "left",
+			Label: edge.Label, Condition: condition,
+		})
 	}
 	return candidate, nil
 }
@@ -183,6 +191,14 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 				}
 			}
 		}
+		if adapter.DynamicTopology {
+			// Older custom publications exposed GitHub issue work as a separate
+			// implementation role. Tasks are generic now; the surrounding inbox and
+			// pull-request connections determine issue-linked materialization.
+			if node.Type == models.AutomationNodeAgentTask && node.Role == "implementation" {
+				node.Role = "task"
+			}
+		}
 		if canonical, exists := adapterNodes[node.Key]; exists {
 			if node.Name == "" {
 				node.Name = canonical.Name
@@ -237,6 +253,14 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 	candidate.Assumptions = normalizeDraftMessages(candidate.Assumptions)
 	candidate.Warnings = normalizeDraftMessages(candidate.Warnings)
 	return candidate, nil
+}
+
+func (s *AutomationDraftService) normalizeReopenedCandidate(candidate models.AutomationDraftCandidate) (models.AutomationDraftCandidate, error) {
+	for i := range candidate.Edges {
+		candidate.Edges[i].FromPort = "right"
+		candidate.Edges[i].ToPort = "left"
+	}
+	return s.NormalizeCandidate(candidate)
 }
 
 func normalizeDraftMessages(values []string) []string {
@@ -307,7 +331,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		return []models.AutomationValidationIssue{{Code: "unsupported_adapter", Message: "The selected topology is not supported by a registered adapter."}}
 	}
 	if candidate.SchemaVersion != automationDraftSchemaVersion {
-		issues = append(issues, models.AutomationValidationIssue{Code: "schema_version", Message: "Unsupported automation draft schema version."})
+		issues = append(issues, models.AutomationValidationIssue{Code: "schema_version", Message: "Unsupported automation graph schema version."})
 	}
 	if candidate.Name == "" || len(candidate.Name) > 200 {
 		issues = append(issues, models.AutomationValidationIssue{Code: "name", Message: "Automation name must be between 1 and 200 characters."})
@@ -382,8 +406,8 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			continue
 		}
 		seenEdgeKeys[edge.Key] = true
-		if !validAutomationDraftPort(edge.FromPort) || !validAutomationDraftPort(edge.ToPort) {
-			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Graph connection ports must be left or right."})
+		if edge.FromPort != "right" || edge.ToPort != "left" {
+			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Graph connections must run from a source OUT port to a target IN port."})
 			continue
 		}
 		if !seenNodes[edge.From] || !seenNodes[edge.To] || edge.From == edge.To {
@@ -460,18 +484,65 @@ func customAutomationTaskSource(node models.AutomationDraftNode) bool {
 	return node.Type == models.AutomationNodeTrigger || node.Type == models.AutomationNodeAgentTask && node.Role == "task"
 }
 
+func customAutomationGitHubIssueTask(candidate models.AutomationDraftCandidate, nodeKey string) bool {
+	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		nodes[node.Key] = node
+	}
+	node, ok := nodes[nodeKey]
+	if !ok || node.Type != models.AutomationNodeAgentTask || (node.Role != "task" && node.Role != "implementation") {
+		return false
+	}
+	inboxSources := 0
+	pullRequestTargets := 0
+	incoming := 0
+	outgoing := 0
+	for _, edge := range candidate.Edges {
+		if edge.To == nodeKey {
+			incoming++
+			source := nodes[edge.From]
+			if source.Type == models.AutomationNodeAgentTask && source.Role == "github_inbox" {
+				inboxSources++
+			}
+		}
+		if edge.From == nodeKey {
+			outgoing++
+			target := nodes[edge.To]
+			if target.Type == models.AutomationNodeAction && target.Role == "open_pull_request" {
+				pullRequestTargets++
+			}
+		}
+	}
+	return incoming == 1 && inboxSources == 1 && outgoing == 1 && pullRequestTargets == 1
+}
+
+func customAutomationGitHubIssueTaskTarget(candidate models.AutomationDraftCandidate, inboxKey string) *models.AutomationDraftNode {
+	for _, edge := range candidate.Edges {
+		if edge.From != inboxKey || !customAutomationGitHubIssueTask(candidate, edge.To) {
+			continue
+		}
+		for _, node := range candidate.Nodes {
+			if node.Key == edge.To {
+				value := node
+				return &value
+			}
+		}
+	}
+	return nil
+}
+
 func customAutomationHandoffSupported(from, to models.AutomationDraftNode) bool {
 	if customAutomationTaskSource(from) {
 		return to.Type == models.AutomationNodeAgentTask && to.Role == "task" ||
 			from.Type == models.AutomationNodeTrigger && to.Type == models.AutomationNodeAgentTask && to.Role == "github_inbox" ||
 			to.Type == models.AutomationNodeOutcome ||
-			to.Type == models.AutomationNodeAction && (to.Role == "create_notification" || to.Role == "create_github_issue")
+			to.Type == models.AutomationNodeAction && (to.Role == "create_notification" || to.Role == "create_github_issue" || to.Role == "open_pull_request")
 	}
 	return from.Type == models.AutomationNodeAction && from.Role == "create_notification" && to.Type == models.AutomationNodeHumanGate && to.Role == "native_approval" ||
 		from.Type == models.AutomationNodeHumanGate && from.Role == "native_approval" && to.Type == models.AutomationNodeOutcome ||
 		from.Type == models.AutomationNodeAction && from.Role == "create_github_issue" && to.Type == models.AutomationNodeHumanGate && to.Role == "github_assignment" ||
 		from.Type == models.AutomationNodeHumanGate && from.Role == "github_assignment" && to.Type == models.AutomationNodeAgentTask && to.Role == "github_inbox" ||
-		from.Type == models.AutomationNodeAgentTask && from.Role == "github_inbox" && to.Type == models.AutomationNodeAgentTask && to.Role == "implementation" ||
+		from.Type == models.AutomationNodeAgentTask && from.Role == "github_inbox" && to.Type == models.AutomationNodeAgentTask && (to.Role == "task" || to.Role == "implementation") ||
 		from.Type == models.AutomationNodeAgentTask && from.Role == "implementation" && to.Type == models.AutomationNodeAction && to.Role == "open_pull_request" ||
 		from.Type == models.AutomationNodeAction && from.Role == "open_pull_request" && to.Type == models.AutomationNodeHumanGate && to.Role == "pull_request_review" ||
 		from.Type == models.AutomationNodeHumanGate && from.Role == "pull_request_review" && to.Type == models.AutomationNodeOutcome
@@ -491,7 +562,7 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 		case models.AutomationNodeTrigger:
 		case models.AutomationNodeAgentTask:
 			if node.Role != "task" && node.Role != "github_inbox" && node.Role != "implementation" {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This Agent task role is not executable in custom automations yet."})
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This Task role is not executable in custom automations yet."})
 			}
 		case models.AutomationNodeAction:
 			if node.Role != "create_notification" && node.Role != "create_github_issue" && node.Role != "open_pull_request" {
@@ -545,15 +616,31 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 			}
 		case models.AutomationNodeAgentTask:
 			switch node.Role {
-			case "task":
+			case "task", "implementation":
+				if customAutomationGitHubIssueTask(candidate, node.Key) {
+					break
+				}
 				parents := 0
+				githubConnections := 0
 				for _, edge := range incoming[node.Key] {
-					if customAutomationTaskSource(nodes[edge.From]) {
+					source := nodes[edge.From]
+					if customAutomationTaskSource(source) {
 						parents++
+					}
+					if source.Role == "github_inbox" {
+						githubConnections++
+					}
+				}
+				for _, edge := range outgoing[node.Key] {
+					if nodes[edge.To].Role == "open_pull_request" {
+						githubConnections++
 					}
 				}
 				if parents > 1 {
 					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "task_parents", Message: "A task can have at most one task or Schedule parent because OpenVibely tasks store one parent."})
+				}
+				if githubConnections > 0 {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_task_connections", Message: "A Task between a GitHub inbox and Open pull request must have exactly those two connections."})
 				}
 			case "github_inbox":
 				schedules, assignments := 0, 0
@@ -569,15 +656,8 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 				if schedules != 1 || assignments != 1 {
 					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_inbox_sources", Message: "A GitHub inbox needs one Schedule and one Human assignment source."})
 				}
-				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "implementation" {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_inbox_target", Message: "A GitHub inbox needs one Implementation task template."})
-				}
-			case "implementation":
-				if len(incoming[node.Key]) == 0 {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "implementation_source", Message: "Connect a GitHub inbox to this Implementation task template."})
-				}
-				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "open_pull_request" {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "implementation_target", Message: "An Implementation task template needs one Open pull request action."})
+				if customAutomationGitHubIssueTaskTarget(candidate, node.Key) == nil {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_inbox_target", Message: "A GitHub inbox needs one Task connected to an Open pull request action."})
 				}
 			}
 		case models.AutomationNodeAction:
@@ -609,8 +689,12 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_issue_target", Message: "A Create GitHub issue action needs one Human assignment gate."})
 				}
 			case "open_pull_request":
-				if len(incoming[node.Key]) == 0 {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_source", Message: "Connect an Implementation task template to this Open pull request action."})
+				validTaskSource := false
+				if len(incoming[node.Key]) == 1 {
+					validTaskSource = customAutomationGitHubIssueTask(candidate, incoming[node.Key][0].From)
+				}
+				if !validTaskSource {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_source", Message: "Connect a GitHub inbox through one Task to this Open pull request action."})
 				}
 				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "pull_request_review" {
 					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_target", Message: "An Open pull request action needs one Human review gate."})
@@ -686,10 +770,6 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 	return issues
 }
 
-func validAutomationDraftPort(port string) bool {
-	return port == "" || port == "left" || port == "right"
-}
-
 func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []models.AutomationValidationIssue {
 	allowed := map[string]bool{}
 	switch node.Type {
@@ -744,7 +824,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 		}
 		category, categoryOK := node.Config["category"].(string)
 		if !categoryOK || (category != string(models.CategoryBacklog) && category != string(models.CategoryActive)) {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "Custom Automation Agent task category must be active or backlog."})
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "Custom Automation Task category must be active or backlog."})
 		}
 		priority, priorityOK := draftInt(node.Config["priority"])
 		if !priorityOK || priority < 1 || priority > 4 {
@@ -831,10 +911,14 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 func validateAutomationNodeConfig(adapter AutomationAdapter, canonical AutomationAdapterNode, node models.AutomationDraftNode) []models.AutomationValidationIssue {
 	allowed := map[string]bool{}
 	if canonical.AllowedResources["task"] {
-		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "skills": true, "source_files": true}
+		for _, key := range []string{"prompt", "category", "priority", "agent_ref", "skills", "source_files"} {
+			allowed[key] = true
+		}
 	}
 	if canonical.AllowedResources["schedule"] {
-		allowed = map[string]bool{"target_node_key": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
+		for _, key := range []string{"target_node_key", "run_at", "repeat_type", "repeat_interval", "enabled"} {
+			allowed[key] = true
+		}
 	}
 	var issues []models.AutomationValidationIssue
 	for key, value := range node.Config {
@@ -1047,6 +1131,11 @@ func adapterNodeAccepts(adapter AutomationAdapter, nodeKey, resourceType string)
 }
 
 func adapterScheduleTarget(adapter AutomationAdapter, triggerKey string) string {
+	for _, node := range adapter.Nodes {
+		if node.Key == triggerKey && node.AllowedResources["schedule"] && node.AllowedResources["task"] {
+			return node.Key
+		}
+	}
 	for _, edge := range adapter.Edges {
 		if edge.From != triggerKey {
 			continue
@@ -1095,17 +1184,18 @@ func (s *AutomationDraftService) CreateDraft(ctx context.Context, request Automa
 	}
 	for _, issue := range issues {
 		if automationDraftIssuePreventsPersistence(issue.Code) {
-			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
+			return nil, fmt.Errorf("automation graph validation failed: %s", issue.Message)
 		}
 	}
 	definition, err := s.repo.CreateAutomationDraft(ctx, repository.AutomationDraftWrite{
-		ProjectID: request.ProjectID, StableKey: request.StableKey, Source: request.Source,
+		ProjectID: request.ProjectID, AutomationID: request.AutomationID, VersionID: request.VersionID,
+		StableKey: request.StableKey, Source: request.Source,
 		CreatedVia: request.CreatedVia, Candidate: candidate, ValidationErrors: issues,
 	})
 	if err != nil {
 		return nil, err
 	}
-	automationobs.Event("automation.draft.created",
+	automationobs.Event("automation.save.staged",
 		automationobs.String("project_id", request.ProjectID),
 		automationobs.String("automation_id", definition.Automation.ID),
 		automationobs.String("version_id", definition.Version.ID),
@@ -1114,7 +1204,6 @@ func (s *AutomationDraftService) CreateDraft(ctx context.Context, request Automa
 		Definition: definition, Candidate: candidate, Assumptions: candidate.Assumptions,
 		Warnings: candidate.Warnings, ValidationErrors: issues,
 		Summary: automationDraftSummary(candidate),
-		URL:     fmt.Sprintf("/automations/%s?project_id=%s&view=definition&version=%s", definition.Automation.ID, request.ProjectID, definition.Version.ID),
 	}, nil
 }
 
@@ -1145,7 +1234,7 @@ func (s *AutomationDraftService) GetDraft(ctx context.Context, projectID, automa
 	if err != nil {
 		return nil, err
 	}
-	candidate, err = s.NormalizeCandidate(candidate)
+	candidate, err = s.normalizeReopenedCandidate(candidate)
 	if err != nil {
 		return nil, err
 	}
@@ -1155,14 +1244,13 @@ func (s *AutomationDraftService) GetDraft(ctx context.Context, projectID, automa
 	}
 	for _, issue := range currentIssues {
 		if automationDraftIssuePreventsPersistence(issue.Code) {
-			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
+			return nil, fmt.Errorf("automation graph validation failed: %s", issue.Message)
 		}
 	}
 	result := draftPreviewResult(candidate, definition)
 	result.Assumptions = metadata.Assumptions
 	result.Warnings = metadata.Warnings
 	result.ValidationErrors = currentIssues
-	result.URL = fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, versionID, projectID)
 	return result, nil
 }
 
@@ -1180,7 +1268,7 @@ func (s *AutomationDraftService) UpdateDraft(ctx context.Context, automationID, 
 	}
 	for _, issue := range issues {
 		if automationDraftIssuePreventsPersistence(issue.Code) {
-			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
+			return nil, fmt.Errorf("automation graph validation failed: %s", issue.Message)
 		}
 	}
 	definition, err := s.repo.ReplaceAutomationDraft(ctx, repository.AutomationDraftWrite{
@@ -1191,14 +1279,13 @@ func (s *AutomationDraftService) UpdateDraft(ctx context.Context, automationID, 
 		return nil, err
 	}
 	if definition == nil {
-		return nil, errors.New("automation draft not found")
+		return nil, errors.New("staged Automation graph not found")
 	}
-	automationobs.Event("automation.draft.updated",
+	automationobs.Event("automation.save.staging_updated",
 		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
 		automationobs.String("version_id", versionID), automationobs.String("adapter_key", candidate.AdapterKey))
 	result := draftPreviewResult(candidate, definition)
 	result.ValidationErrors = issues
-	result.URL = fmt.Sprintf("/automations/%s?project_id=%s&view=definition&version=%s", automationID, projectID, versionID)
 	return result, nil
 }
 
@@ -1230,8 +1317,14 @@ func (s *AutomationDraftService) CreateVersionForSave(ctx context.Context, proje
 		return nil, err
 	}
 	preview.Definition = definition
-	preview.URL = fmt.Sprintf("/automations/%s?project_id=%s&view=definition&version=%s", automationID, projectID, definition.Version.ID)
 	return preview, nil
+}
+
+func (s *AutomationDraftService) DiscardUnreservedStagedVersion(ctx context.Context, projectID, automationID, versionID string) (bool, error) {
+	if s == nil || s.repo == nil {
+		return false, errors.New("automation repository is unavailable")
+	}
+	return s.repo.DiscardUnreservedAutomationDraft(ctx, projectID, automationID, versionID)
 }
 
 func (s *AutomationDraftService) DiscardStagedVersion(ctx context.Context, projectID, automationID, versionID string) error {
@@ -1239,6 +1332,56 @@ func (s *AutomationDraftService) DiscardStagedVersion(ctx context.Context, proje
 		return errors.New("automation repository is unavailable")
 	}
 	return s.repo.DiscardAutomationDraft(ctx, projectID, automationID, versionID)
+}
+
+func (s *AutomationDraftService) RecoverableSave(ctx context.Context, projectID, automationID string) (*models.AutomationSaveRecovery, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("automation repository is unavailable")
+	}
+	snapshot, err := s.repo.GetRecoverablePublicationAttempt(ctx, projectID, automationID)
+	if err != nil || snapshot == nil {
+		return nil, err
+	}
+	return s.automationSaveRecovery(ctx, snapshot)
+}
+
+func (s *AutomationDraftService) ListRecoverableSaves(ctx context.Context, projectID string) ([]models.AutomationSaveRecovery, error) {
+	if s == nil || s.repo == nil {
+		return nil, errors.New("automation repository is unavailable")
+	}
+	snapshots, err := s.repo.ListRecoverablePublicationAttempts(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	recoveries := make([]models.AutomationSaveRecovery, 0, len(snapshots))
+	for i := range snapshots {
+		recovery, err := s.automationSaveRecovery(ctx, &snapshots[i])
+		if err != nil {
+			return nil, err
+		}
+		if recovery != nil {
+			recoveries = append(recoveries, *recovery)
+		}
+	}
+	return recoveries, nil
+}
+
+func (s *AutomationDraftService) automationSaveRecovery(ctx context.Context, snapshot *repository.AutomationPublicationSnapshot) (*models.AutomationSaveRecovery, error) {
+	if snapshot == nil {
+		return nil, nil
+	}
+	staged, err := s.GetDraft(ctx, snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID)
+	if err != nil {
+		return nil, err
+	}
+	if staged == nil || staged.Definition == nil || staged.Definition.Version.State != models.AutomationVersionDraft {
+		return nil, nil
+	}
+	return &models.AutomationSaveRecovery{
+		AutomationID: snapshot.Attempt.AutomationID, VersionID: snapshot.Attempt.VersionID,
+		PlanRevision: snapshot.Attempt.PlanRevision, Candidate: staged.Candidate,
+		PublicationSteps: snapshot.Steps,
+	}, nil
 }
 
 func (s *AutomationDraftService) PublishedCandidate(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
@@ -1253,6 +1396,10 @@ func (s *AutomationDraftService) PublishedCandidate(ctx context.Context, project
 		return nil, errors.New("published automation not found")
 	}
 	candidate, err := s.candidateFromDefinition(ctx, projectID, automationID, published)
+	if err != nil {
+		return nil, err
+	}
+	candidate, err = s.normalizeReopenedCandidate(candidate)
 	if err != nil {
 		return nil, err
 	}
@@ -1351,7 +1498,7 @@ func (s *AutomationDraftService) ClonePublishedVersion(ctx context.Context, proj
 				From: nodeKeys[edge.SourceNodeID], To: nodeKeys[edge.TargetNodeID], Label: edge.Label, Condition: condition})
 		}
 	}
-	candidate, err = s.NormalizeCandidate(candidate)
+	candidate, err = s.normalizeReopenedCandidate(candidate)
 	if err != nil {
 		return nil, err
 	}
@@ -1361,7 +1508,7 @@ func (s *AutomationDraftService) ClonePublishedVersion(ctx context.Context, proj
 	}
 	for _, issue := range issues {
 		if automationDraftIssuePreventsPersistence(issue.Code) {
-			return nil, fmt.Errorf("automation draft validation failed: %s", issue.Message)
+			return nil, fmt.Errorf("automation graph validation failed: %s", issue.Message)
 		}
 	}
 	definition, err := s.repo.CreateAutomationDraftVersion(ctx, repository.AutomationDraftWrite{ProjectID: projectID,
@@ -1371,7 +1518,6 @@ func (s *AutomationDraftService) ClonePublishedVersion(ctx context.Context, proj
 	}
 	result := draftPreviewResult(candidate, definition)
 	result.ValidationErrors = issues
-	result.URL = fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", automationID, definition.Version.ID, projectID)
 	return result, nil
 }
 

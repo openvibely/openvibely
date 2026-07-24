@@ -15,6 +15,97 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *testing.T) {
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(nil, registry)
+	discoveryRoles := []string{"offering_manager", "bug_finder", "optimization_finder", "redundancy_finder"}
+
+	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
+		adapter, ok := registry.Get(adapterKey)
+		require.True(t, ok)
+		for _, role := range append(discoveryRoles, "loop_auditor") {
+			node := automationAdapterNodeByRole(t, adapter, role)
+			require.Equal(t, "trigger", node.Type, "%s/%s must be represented as one Schedule node", adapterKey, role)
+			require.True(t, node.AllowedResources["task"], "%s/%s Schedule must own its Task", adapterKey, role)
+			require.True(t, node.AllowedResources["schedule"], "%s/%s Schedule must own its Scheduler row", adapterKey, role)
+		}
+
+		candidate, err := drafts.TemplateCandidate(adapterKey)
+		require.NoError(t, err)
+		require.Empty(t, drafts.ValidateCandidate(candidate))
+		for _, node := range adapter.Nodes {
+			if !node.AllowedResources["schedule"] {
+				continue
+			}
+			require.True(t, node.AllowedResources["task"], "%s/%s must not be an empty scheduler relay", adapterKey, node.Key)
+			require.Equal(t, node.Key, adapterScheduleTarget(adapter, node.Key), "%s/%s scheduler must target its own Task", adapterKey, node.Key)
+			draftNode := automationDraftNodeByKey(t, candidate, node.Key)
+			require.Equal(t, node.Key, draftNode.Config["target_node_key"])
+			require.Equal(t, string(models.CategoryScheduled), draftNode.Config["category"])
+			require.NotEmpty(t, draftNode.Config["prompt"])
+		}
+	}
+}
+
+func TestMaintainedTemplatesLeaveVisibleConnectorRunway(t *testing.T) {
+	registry := NewAutomationAdapterRegistry()
+	const minimumStageSpacing = 220.0 // 170-unit cards plus 50 units of visible connector.
+
+	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC, AutomationAdapterVisionDriver} {
+		adapter, ok := registry.Get(adapterKey)
+		require.True(t, ok)
+		nodes := make(map[string]AutomationAdapterNode, len(adapter.Nodes))
+		for _, node := range adapter.Nodes {
+			nodes[node.Key] = node
+		}
+		for _, edge := range adapter.Edges {
+			source, sourceOK := nodes[edge.From]
+			target, targetOK := nodes[edge.To]
+			require.True(t, sourceOK, "%s edge %s source must exist", adapterKey, edge.Key)
+			require.True(t, targetOK, "%s edge %s target must exist", adapterKey, edge.Key)
+			require.GreaterOrEqual(t, target.X-source.X, minimumStageSpacing,
+				"%s edge %s must leave a visible line between its node cards", adapterKey, edge.Key)
+		}
+	}
+}
+
+func TestVisionDriverTemplateScheduleOwnsItsTask(t *testing.T) {
+	registry := NewAutomationAdapterRegistry()
+	adapter, ok := registry.Get(AutomationAdapterVisionDriver)
+	require.True(t, ok)
+	driver := automationAdapterNodeByRole(t, adapter, "vision_driver")
+	require.Equal(t, "trigger", driver.Type)
+	require.True(t, driver.AllowedResources["task"])
+	require.True(t, driver.AllowedResources["schedule"])
+	require.Equal(t, driver.Key, adapterScheduleTarget(adapter, driver.Key))
+
+	candidate, err := NewAutomationDraftService(nil, registry).TemplateCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	require.Len(t, candidate.Nodes, 5, "Vision Driver must not add a separate empty schedule relay node")
+}
+
+func automationAdapterNodeByRole(t *testing.T, adapter AutomationAdapter, role string) AutomationAdapterNode {
+	t.Helper()
+	for _, node := range adapter.Nodes {
+		if node.Role == role {
+			return node
+		}
+	}
+	t.Fatalf("adapter %s has no %s role", adapter.Key, role)
+	return AutomationAdapterNode{}
+}
+
+func automationDraftNodeByKey(t *testing.T, candidate models.AutomationDraftCandidate, key string) models.AutomationDraftNode {
+	t.Helper()
+	for _, node := range candidate.Nodes {
+		if node.Key == key {
+			return node
+		}
+	}
+	t.Fatalf("candidate has no %s node", key)
+	return models.AutomationDraftNode{}
+}
+
 func TestAutomationDraftServiceNormalizesRegisteredTemplatesDeterministically(t *testing.T) {
 	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 
@@ -67,9 +158,9 @@ func TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoi
 		{Key: "done", Name: "Done", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
 	}
 	candidate.Edges = []models.AutomationDraftEdge{
-		{Key: "schedule_research", From: "schedule", To: "research", Condition: map[string]any{}},
-		{Key: "research_implement", From: "research", To: "implement", Condition: map[string]any{}},
-		{Key: "implement_done", From: "implement", To: "done", Condition: map[string]any{}},
+		{Key: "schedule_research", From: "schedule", To: "research", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "research_implement", From: "research", To: "implement", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "implement_done", From: "implement", To: "done", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
 	}
 
 	require.Empty(t, svc.ValidateCandidate(candidate), "a linear Schedule → Agent task → Agent task → Outcome path must publish")
@@ -103,7 +194,7 @@ func TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoi
 		Config: map[string]any{"prompt": "Review the implementation.", "category": "backlog", "priority": 2},
 	})
 	branch.Edges = append(append([]models.AutomationDraftEdge(nil), candidate.Edges...), models.AutomationDraftEdge{
-		Key: "research_review", From: "research", To: "review", Condition: map[string]any{},
+		Key: "research_review", From: "research", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{},
 	})
 	require.Empty(t, svc.ValidateCandidate(branch), "one completed task may fan out to multiple ordinary tasks through the existing task-chain machinery")
 
@@ -112,7 +203,7 @@ func TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoi
 		Key: "also_done", Name: "Also done", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{},
 	})
 	ambiguousOutcome.Edges = append(append([]models.AutomationDraftEdge(nil), candidate.Edges...), models.AutomationDraftEdge{
-		Key: "implement_also_done", From: "implement", To: "also_done", Condition: map[string]any{},
+		Key: "implement_also_done", From: "implement", To: "also_done", FromPort: "right", ToPort: "left", Condition: map[string]any{},
 	})
 	require.Contains(t, issueCodes(svc.ValidateCandidate(ambiguousOutcome)), "ambiguous_handoff", "a task must not publish duplicate same-kind targets that the existing runtime cannot distinguish")
 
@@ -123,9 +214,9 @@ func TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoi
 
 	cycle := candidate
 	cycle.Edges = []models.AutomationDraftEdge{
-		{Key: "schedule_research", From: "schedule", To: "research", Condition: map[string]any{}},
-		{Key: "research_implement", From: "research", To: "implement", Condition: map[string]any{}},
-		{Key: "implement_research", From: "implement", To: "research", Condition: map[string]any{}},
+		{Key: "schedule_research", From: "schedule", To: "research", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "research_implement", From: "research", To: "implement", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "implement_research", From: "implement", To: "research", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
 	}
 	require.Contains(t, issueCodes(svc.ValidateCandidate(cycle)), "unsupported_cycle")
 
@@ -135,7 +226,7 @@ func TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoi
 		Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "10:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true},
 	})
 	multipleParents.Edges = append(append([]models.AutomationDraftEdge(nil), candidate.Edges...), models.AutomationDraftEdge{
-		Key: "second_implement", From: "second_schedule", To: "implement", Condition: map[string]any{},
+		Key: "second_implement", From: "second_schedule", To: "implement", FromPort: "right", ToPort: "left", Condition: map[string]any{},
 	})
 	require.Contains(t, issueCodes(svc.ValidateCandidate(multipleParents)), "task_parents")
 }
@@ -153,11 +244,11 @@ func TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogous
 		{Key: "declined", Name: "Declined", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
 	}
 	candidate.Edges = []models.AutomationDraftEdge{
-		{Key: "schedule_review", From: "schedule", To: "review", Condition: map[string]any{}},
-		{Key: "review_request", From: "review", To: "request", Condition: map[string]any{}},
-		{Key: "request_human", From: "request", To: "human", Condition: map[string]any{}},
-		{Key: "human_accepted", From: "human", To: "accepted", Label: "approved", Condition: map[string]any{"state": "approved"}},
-		{Key: "human_declined", From: "human", To: "declined", Label: "rejected", Condition: map[string]any{"state": "rejected"}},
+		{Key: "schedule_review", From: "schedule", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "review_request", From: "review", To: "request", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "request_human", From: "request", To: "human", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "human_accepted", From: "human", To: "accepted", FromPort: "right", ToPort: "left", Label: "approved", Condition: map[string]any{"state": "approved"}},
+		{Key: "human_declined", From: "human", To: "declined", FromPort: "right", ToPort: "left", Label: "rejected", Condition: map[string]any{"state": "rejected"}},
 	}
 
 	require.Empty(t, svc.ValidateCandidate(candidate), "a custom native Alert approval path must be publishable")
@@ -175,7 +266,7 @@ func TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogous
 	}
 	multiTask.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
 	multiTask.Edges[0].To = "research"
-	multiTask.Edges = append(multiTask.Edges, models.AutomationDraftEdge{Key: "research_review", From: "research", To: "review", Condition: map[string]any{}})
+	multiTask.Edges = append(multiTask.Edges, models.AutomationDraftEdge{Key: "research_review", From: "research", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}})
 	require.Empty(t, svc.ValidateCandidate(multiTask), "native approval must compose after an existing task-to-task handoff")
 
 	missingRejected := candidate
@@ -185,8 +276,8 @@ func TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogous
 	terminalGate := missingRejected
 	terminalGate.Nodes = []models.AutomationDraftNode{candidate.Nodes[0], candidate.Nodes[2], candidate.Nodes[3]}
 	terminalGate.Edges = []models.AutomationDraftEdge{
-		{Key: "schedule_request", From: "schedule", To: "request", Condition: map[string]any{}},
-		{Key: "request_human", From: "request", To: "human", Condition: map[string]any{}},
+		{Key: "schedule_request", From: "schedule", To: "request", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "request_human", From: "request", To: "human", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
 	}
 	require.Empty(t, svc.ValidateCandidate(terminalGate), "a Schedule is a task and may create a notification whose approval gate is terminal")
 
@@ -195,7 +286,7 @@ func TestCustomAutomationValidatesNativeAlertApprovalHandoffsAndRejectsAnalogous
 		Key: "manual_review", Name: "Manual review", Type: models.AutomationNodeAgentTask, Role: "task",
 		Config: map[string]any{"prompt": "Review on demand.", "category": "active", "priority": 2},
 	})
-	sharedAction.Edges = append(sharedAction.Edges, models.AutomationDraftEdge{Key: "manual_request", From: "manual_review", To: "request", Condition: map[string]any{}})
+	sharedAction.Edges = append(sharedAction.Edges, models.AutomationDraftEdge{Key: "manual_request", From: "manual_review", To: "request", FromPort: "right", ToPort: "left", Condition: map[string]any{}})
 	require.Empty(t, svc.ValidateCandidate(sharedAction), "a real action capability may be reused by multiple valid task producers")
 
 	duplicateApproved := candidate
@@ -225,21 +316,21 @@ func TestCustomAutomationValidatesGitHubHandoffsAndRejectsHumanBoundaryBypasses(
 		{Key: "assignment", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
 		{Key: "inbox_schedule", Name: "Hourly inbox", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:15", "repeat_type": "hours", "repeat_interval": 1, "enabled": true}},
 		{Key: "inbox", Name: "Process assigned issues", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process newly assigned issues.", "category": "backlog", "priority": 3}},
-		{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "implementation", Config: map[string]any{"prompt": "Implement the accepted issue and run relevant validation.", "category": "active", "priority": 3}},
+		{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the accepted issue and run relevant validation.", "category": "active", "priority": 3}},
 		{Key: "open_pr", Name: "Open pull request", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "main", "draft": false}},
 		{Key: "review", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},
 		{Key: "complete", Name: "Merged", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
 	}
 	candidate.Edges = []models.AutomationDraftEdge{
-		{Key: "producer_schedule_to_producer", From: "producer_schedule", To: "producer", Condition: map[string]any{}},
-		{Key: "producer_to_issue", From: "producer", To: "issue", Condition: map[string]any{}},
-		{Key: "issue_to_assignment", From: "issue", To: "assignment", Condition: map[string]any{}},
-		{Key: "inbox_schedule_to_inbox", From: "inbox_schedule", To: "inbox", Condition: map[string]any{}},
-		{Key: "assignment_to_inbox", From: "assignment", To: "inbox", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
-		{Key: "inbox_to_implementation", From: "inbox", To: "implementation", Condition: map[string]any{}},
-		{Key: "implementation_to_pr", From: "implementation", To: "open_pr", Condition: map[string]any{}},
-		{Key: "pr_to_review", From: "open_pr", To: "review", Condition: map[string]any{}},
-		{Key: "review_to_complete", From: "review", To: "complete", Condition: map[string]any{}},
+		{Key: "producer_schedule_to_producer", From: "producer_schedule", To: "producer", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "producer_to_issue", From: "producer", To: "issue", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "issue_to_assignment", From: "issue", To: "assignment", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "inbox_schedule_to_inbox", From: "inbox_schedule", To: "inbox", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "assignment_to_inbox", From: "assignment", To: "inbox", FromPort: "right", ToPort: "left", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
+		{Key: "inbox_to_implementation", From: "inbox", To: "implementation", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "implementation_to_pr", From: "implementation", To: "open_pr", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "pr_to_review", From: "open_pr", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "review_to_complete", From: "review", To: "complete", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
 	}
 
 	require.Empty(t, svc.ValidateCandidate(candidate), "the GitHub graph must map to the existing assignment, inbox, task, PR, and review machinery")
@@ -266,7 +357,49 @@ func TestCustomAutomationValidatesGitHubHandoffsAndRejectsHumanBoundaryBypasses(
 	reviewBypass := candidate
 	reviewBypass.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
 	reviewBypass.Edges[6].To = "complete"
-	require.Contains(t, issueCodes(svc.ValidateCandidate(reviewBypass)), "unsupported_handoff", "opening a PR must not skip human review")
+	require.Contains(t, issueCodes(svc.ValidateCandidate(reviewBypass)), "github_task_connections", "GitHub issue work must retain the pull request and human review boundary")
+}
+
+func TestAutomationDraftNormalizesAndValidatesDirectionalPorts(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	require.NotEmpty(t, candidate.Edges)
+	for _, edge := range candidate.Edges {
+		require.Equal(t, "right", edge.FromPort, "template edges must leave an output port")
+		require.Equal(t, "left", edge.ToPort, "template edges must enter an input port")
+	}
+
+	candidate.Edges[0].FromPort = "left"
+	candidate.Edges[0].ToPort = "right"
+	require.Contains(t, issueCodes(svc.ValidateCandidate(candidate)), "invalid_edge",
+		"explicit input-to-output geometry must fail strict validation")
+
+	normalized, err := svc.NormalizeCandidate(candidate)
+	require.NoError(t, err)
+	require.Equal(t, "left", normalized.Edges[0].FromPort,
+		"strict normalization must preserve an explicitly reversed source port for validation")
+	require.Equal(t, "right", normalized.Edges[0].ToPort,
+		"strict normalization must preserve an explicitly reversed target port for validation")
+	require.Contains(t, issueCodes(svc.ValidateCandidate(normalized)), "invalid_edge")
+
+	missing := candidate
+	missing.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+	missing.Edges[0].FromPort = ""
+	missing.Edges[0].ToPort = ""
+	normalizedMissing, err := svc.NormalizeCandidate(missing)
+	require.NoError(t, err)
+	require.Empty(t, normalizedMissing.Edges[0].FromPort,
+		"strict normalization must not repair a missing source port on a newly submitted candidate")
+	require.Empty(t, normalizedMissing.Edges[0].ToPort,
+		"strict normalization must not repair a missing target port on a newly submitted candidate")
+	require.Contains(t, issueCodes(svc.ValidateCandidate(normalizedMissing)), "invalid_edge")
+
+	reopened, err := svc.normalizeReopenedCandidate(missing)
+	require.NoError(t, err)
+	require.Equal(t, "right", reopened.Edges[0].FromPort, "older saved connector metadata migrates only when reopened")
+	require.Equal(t, "left", reopened.Edges[0].ToPort, "older saved connector metadata migrates only when reopened")
+	require.NotContains(t, issueCodes(svc.ValidateCandidate(reopened)), "invalid_edge")
 }
 
 func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *testing.T) {
@@ -289,13 +422,18 @@ func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *
 
 	issues := svc.ValidateCandidate(candidate)
 	require.Contains(t, issueCodes(issues), "unsupported_capability", "unsupported capability nodes must remain visibly unpublished")
-	require.NotContains(t, issueCodes(issues), "invalid_edge", "a multi-node cycle remains valid saved geometry")
+	require.Contains(t, issueCodes(issues), "invalid_edge", "strict validation must reject the legacy non-directional connector geometry")
+	for i := range candidate.Edges {
+		candidate.Edges[i].FromPort = "right"
+		candidate.Edges[i].ToPort = "left"
+	}
 	created, err := svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	require.Len(t, created.Candidate.Nodes, 3)
 	require.Len(t, created.Candidate.Edges, 3)
-	require.Equal(t, "left", created.Candidate.Edges[0].FromPort, "chosen connector side must survive draft persistence")
-	require.Equal(t, "right", created.Candidate.Edges[0].ToPort, "chosen connector side must survive draft persistence")
+	require.Equal(t, "right", created.Candidate.Edges[0].FromPort)
+	require.Equal(t, "left", created.Candidate.Edges[0].ToPort)
+	require.NotContains(t, issueCodes(created.ValidationErrors), "invalid_edge", "corrected cycles retain valid directional geometry")
 	require.Contains(t, issueCodes(created.ValidationErrors), "unsupported_capability")
 
 	planner := NewAutomationPublicationPlanner(repo, nil, nil, svc.registry, svc)
@@ -369,23 +507,24 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	svc.SetCapabilitySnapshotBuilder(capabilities)
 	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
-	candidate.Nodes[1].Config["agent_ref"] = "project_architect"
-	candidate.Nodes[1].Config["skills"] = []any{"project_architect:project-guidance"}
-	candidate.Nodes[1].Config["source_files"] = []any{"VISION.md"}
+	driverIndex := automationDraftNodeIndexByKey(t, candidate, "vision_driver")
+	candidate.Nodes[driverIndex].Config["agent_ref"] = "project_architect"
+	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:project-guidance"}
+	candidate.Nodes[driverIndex].Config["source_files"] = []any{"VISION.md"}
 	require.Empty(t, svc.ValidateCandidateWithCapabilities(candidate, snapshot))
 
-	candidate.Nodes[1].Config["agent_ref"] = "foreign_architect"
+	candidate.Nodes[driverIndex].Config["agent_ref"] = "foreign_architect"
 	issues := svc.ValidateCandidateWithCapabilities(candidate, snapshot)
 	require.Contains(t, issueCodes(issues), "agent_ref")
 	created, err := svc.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
 	require.NoError(t, err)
 	require.Contains(t, issueCodes(created.ValidationErrors), "agent_ref", "unresolved references must remain visible without being guessed")
 
-	candidate.Nodes[1].Config["agent_ref"] = "project_architect"
-	candidate.Nodes[1].Config["skills"] = []any{"project_architect:missing"}
+	candidate.Nodes[driverIndex].Config["agent_ref"] = "project_architect"
+	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:missing"}
 	require.Contains(t, issueCodes(svc.ValidateCandidateWithCapabilities(candidate, snapshot)), "skill_ref")
-	candidate.Nodes[1].Config["skills"] = []any{"project_architect:project-guidance"}
-	candidate.Nodes[1].Config["source_files"] = []any{"missing.md"}
+	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:project-guidance"}
+	candidate.Nodes[driverIndex].Config["source_files"] = []any{"missing.md"}
 	require.Contains(t, issueCodes(svc.ValidateCandidateWithCapabilities(candidate, snapshot)), "source_file")
 }
 
@@ -417,7 +556,8 @@ func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t 
 	for _, forbidden := range []string{"https://example.com/hook", "```sh\nrm -rf /\n```", "DROP TABLE tasks"} {
 		candidate, err = svc.TemplateCandidate(AutomationAdapterVisionDriver)
 		require.NoError(t, err)
-		candidate.Nodes[1].Config["prompt"] = forbidden
+		driverIndex := automationDraftNodeIndexByKey(t, candidate, "vision_driver")
+		candidate.Nodes[driverIndex].Config["prompt"] = forbidden
 		require.Contains(t, issueCodes(svc.ValidateCandidate(candidate)), "unsafe_config")
 	}
 
@@ -432,8 +572,20 @@ func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t 
 
 	candidate, err = svc.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
-	candidate.Nodes[1].Config["priority"] = math.NaN()
+	driverIndex := automationDraftNodeIndexByKey(t, candidate, "vision_driver")
+	candidate.Nodes[driverIndex].Config["priority"] = math.NaN()
 	require.Contains(t, issueCodes(svc.ValidateCandidate(candidate)), "invalid_json")
+}
+
+func automationDraftNodeIndexByKey(t *testing.T, candidate models.AutomationDraftCandidate, key string) int {
+	t.Helper()
+	for i := range candidate.Nodes {
+		if candidate.Nodes[i].Key == key {
+			return i
+		}
+	}
+	t.Fatalf("candidate has no %s node", key)
+	return -1
 }
 
 func TestAutomationDraftCreationPersistsDefinitionOnly(t *testing.T) {
@@ -450,7 +602,6 @@ func TestAutomationDraftCreationPersistsDefinitionOnly(t *testing.T) {
 	require.NotNil(t, result.Definition)
 	require.Equal(t, models.AutomationVersionDraft, result.Definition.Version.State)
 	require.Nil(t, result.Definition.Automation.PublishedVersionID)
-	require.NotEmpty(t, result.URL)
 
 	for _, table := range []string{"tasks", "schedules", "alerts", "executions", "workflow_executions", "task_pull_requests"} {
 		var count int
@@ -474,8 +625,6 @@ func TestAutomationDraftClonePreservesPublishedVersion(t *testing.T) {
 	drafts := NewAutomationDraftService(automationRepo, registry)
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
-	candidate.Edges[0].FromPort = "left"
-	candidate.Edges[0].ToPort = "right"
 	created, err := drafts.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
 	require.NoError(t, err)
 	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
@@ -485,14 +634,20 @@ func TestAutomationDraftClonePreservesPublishedVersion(t *testing.T) {
 	published, err := compiler.Publish(context.Background(), AutomationPublishRequest{ProjectID: project.ID,
 		AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
 	require.NoError(t, err)
+	candidate.Edges[0].FromPort = "left"
+	candidate.Edges[0].ToPort = "right"
+	legacyJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE automation_draft_metadata SET candidate_json = ? WHERE version_id = ?`, string(legacyJSON), published.Definition.Version.ID)
+	require.NoError(t, err)
 
 	cloned, err := drafts.ClonePublishedVersion(context.Background(), project.ID, published.Definition.Automation.ID)
 	require.NoError(t, err)
 	require.Equal(t, 2, cloned.Definition.Version.Version)
 	require.Equal(t, models.AutomationVersionDraft, cloned.Definition.Version.State)
 	require.NotEqual(t, published.Definition.Version.ID, cloned.Definition.Version.ID)
-	require.Equal(t, "left", cloned.Candidate.Edges[0].FromPort, "editing after apply must preserve the chosen source side")
-	require.Equal(t, "right", cloned.Candidate.Edges[0].ToPort, "editing after apply must preserve the chosen target side")
+	require.Equal(t, "right", cloned.Candidate.Edges[0].FromPort, "editing after apply must migrate the source to its OUT port")
+	require.Equal(t, "left", cloned.Candidate.Edges[0].ToPort, "editing after apply must migrate the target to its IN port")
 	current, err := automationRepo.GetDefinition(context.Background(), project.ID, published.Definition.Automation.ID)
 	require.NoError(t, err)
 	require.Equal(t, published.Definition.Version.ID, current.Version.ID, "cloning must not replace the active topology")

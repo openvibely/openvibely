@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -54,6 +55,16 @@ func TestAutomationPublicationPlanIsDeterministicAndCompilerIsIdempotent(t *test
 	storedSchedule, err := scheduleRepo.GetByID(context.Background(), publishedScheduleID(t, published))
 	require.NoError(t, err)
 	require.True(t, storedSchedule.Enabled, "trigger becomes runnable only with the published version")
+	var scheduledTaskID string
+	for _, resource := range published.Definition.Resources {
+		if resource.NodeKey == "vision_driver" && resource.ResourceType == "task" {
+			scheduledTaskID = resource.ResourceID
+		}
+	}
+	require.NotEmpty(t, scheduledTaskID)
+	require.Equal(t, scheduledTaskID, storedSchedule.TaskID, "the Schedule node's Scheduler row must target the Task owned by that same node")
+	require.Equal(t, 1, tableCount(t, db, "tasks"), "Vision Driver must create one scheduled Task, not a scheduler relay and a second Task")
+	require.Equal(t, 1, tableCount(t, db, "schedules"))
 
 	taskCount, scheduleCount := tableCount(t, db, "tasks"), tableCount(t, db, "schedules")
 	retried, err := compiler.Publish(context.Background(), AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: first.PlanRevision})
@@ -80,8 +91,8 @@ func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *test
 		{Key: "reviewed", Name: "Reviewed", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
 	}
 	candidate.Edges = []models.AutomationDraftEdge{
-		{Key: "schedule_to_review", From: "weekday_schedule", To: "review_support", Condition: map[string]any{}},
-		{Key: "review_to_done", From: "review_support", To: "reviewed", Condition: map[string]any{}},
+		{Key: "schedule_to_review", From: "weekday_schedule", To: "review_support", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "review_to_done", From: "review_support", To: "reviewed", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
 	}
 	created, err := drafts.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
@@ -96,7 +107,7 @@ func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *test
 		effectTypes = append(effectTypes, effect.ResourceType)
 	}
 	require.ElementsMatch(t, []string{"task", "task", "schedule"}, effectTypes,
-		"a Schedule node must own a real scheduled task separately from the ordinary Agent task")
+		"a connected Task is a separate downstream handoff from the Schedule-owned task")
 
 	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
 	published, err := compiler.Publish(context.Background(), AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
@@ -111,28 +122,24 @@ func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *test
 	}
 	scheduleTask, err := taskRepo.GetByID(context.Background(), resources["weekday_schedule:task"])
 	require.NoError(t, err)
-	require.NotNil(t, scheduleTask)
 	require.Contains(t, scheduleTask.Title, "My support review: Weekday schedule")
-	require.Equal(t, "Collect the weekday support summary.", scheduleTask.Prompt)
+	require.Equal(t, "Collect the weekday support summary.\n\nConnected Task handoff:\nDo not create or schedule the connected downstream Task yourself. OpenVibely activates it automatically after this task completes successfully.", scheduleTask.Prompt)
 	require.Equal(t, models.CategoryScheduled, scheduleTask.Category)
+	require.Equal(t, models.StatusPending, scheduleTask.Status)
+	require.Nil(t, scheduleTask.ParentTaskID)
 	require.Equal(t, 1, scheduleTask.Priority)
-	scheduleChain, err := scheduleTask.ParseChainConfig()
-	require.NoError(t, err)
-	require.True(t, scheduleChain.Enabled, "the Schedule task must use the existing task-chain handoff")
-	require.Equal(t, models.CategoryActive, models.TaskCategory(scheduleChain.ChildCategory), "completion activates the ordinary Agent Task without making it scheduled")
-
 	task, err := taskRepo.GetByID(context.Background(), resources["review_support:task"])
 	require.NoError(t, err)
 	require.Contains(t, task.Title, "My support review: Review support queue")
 	require.Equal(t, "Review unresolved support requests and propose the next action.", task.Prompt)
-	require.Equal(t, models.CategoryBacklog, task.Category, "an Agent Task node is an ordinary task, not the Schedule node's scheduled task")
-	require.Equal(t, models.StatusBlocked, task.Status, "the ordinary Agent Task waits for the Schedule task to complete")
-	require.Equal(t, task.ID, scheduleChain.ChildTaskID)
+	require.Equal(t, models.CategoryBacklog, task.Category)
+	require.Equal(t, models.StatusBlocked, task.Status)
+	require.NotNil(t, task.ParentTaskID)
+	require.Equal(t, scheduleTask.ID, *task.ParentTaskID)
 	require.Equal(t, 3, task.Priority)
 	schedule, err := scheduleRepo.GetByID(context.Background(), resources["weekday_schedule:schedule"])
 	require.NoError(t, err)
-	require.Equal(t, scheduleTask.ID, schedule.TaskID, "the Scheduler entry must belong to the Schedule node's scheduled task")
-	require.NotEqual(t, task.ID, schedule.TaskID, "the ordinary Agent Task must remain distinct from the scheduled trigger task")
+	require.Equal(t, scheduleTask.ID, schedule.TaskID, "the Scheduler entry must run the Schedule-owned task")
 	require.Equal(t, models.RepeatDaily, schedule.RepeatType)
 	require.True(t, schedule.Enabled)
 
@@ -150,12 +157,14 @@ func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *test
 	}
 	due := time.Now().UTC().Add(-time.Minute)
 	nextRun := due.Add(24 * time.Hour)
-	_, err = db.Exec(`UPDATE schedules SET task_id = ?, next_run = ? WHERE id = ?`, task.ID, due, schedule.ID)
+	unrelated := &models.Task{ProjectID: project.ID, Title: "Unrelated", Prompt: "Do unrelated work.", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(context.Background(), unrelated))
+	_, err = db.Exec(`UPDATE schedules SET task_id = ?, next_run = ? WHERE id = ?`, unrelated.ID, due, schedule.ID)
 	require.NoError(t, err)
 	tamperedSchedule, err := scheduleRepo.GetByID(context.Background(), schedule.ID)
 	require.NoError(t, err)
 	_, _, err = automationRepo.ClaimScheduledOccurrence(context.Background(), *tamperedSchedule, time.Now().UTC(), &nextRun)
-	require.ErrorIs(t, err, repository.ErrAutomationScheduleChanged, "a custom Schedule must fail closed if its Scheduler row is repointed to the Agent Task")
+	require.ErrorIs(t, err, repository.ErrAutomationScheduleChanged, "a custom Schedule must fail closed if its Scheduler row is repointed outside the immutable edge")
 	var invocationCount int
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE automation_id = ?`, published.Definition.Automation.ID).Scan(&invocationCount))
 	require.Zero(t, invocationCount, "invalid schedule ownership must create no runtime state")
@@ -167,17 +176,12 @@ func TestCustomAutomationPublicationCreatesUserConfiguredTaskAndSchedule(t *test
 	_, dispatch, err := automationRepo.ClaimScheduledOccurrence(context.Background(), *schedule, time.Now().UTC(), &nextRun)
 	require.NoError(t, err)
 	require.NotNil(t, dispatch)
-	require.Equal(t, scheduleTask.ID, dispatch.TaskID, "a due Schedule must execute its own scheduled task and prompt")
-	dispatchedScheduleTask, err := taskRepo.GetByID(context.Background(), scheduleTask.ID)
+	require.Equal(t, scheduleTask.ID, dispatch.TaskID, "a due Schedule must execute its own task before any downstream handoff")
+	dispatchedTask, err := taskRepo.GetByID(context.Background(), scheduleTask.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.CategoryScheduled, dispatchedScheduleTask.Category)
-	require.Equal(t, "Collect the weekday support summary.", dispatchedScheduleTask.Prompt)
-	unchangedAgentTask, err := taskRepo.GetByID(context.Background(), task.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.CategoryBacklog, unchangedAgentTask.Category, "the connected Agent Task remains an ordinary task while it waits for the Schedule task")
-	require.Equal(t, models.StatusBlocked, unchangedAgentTask.Status)
-	require.NotNil(t, unchangedAgentTask.ParentTaskID)
-	require.Equal(t, scheduleTask.ID, *unchangedAgentTask.ParentTaskID, "the immutable Schedule-to-Agent edge must compile as the existing task handoff")
+	require.Equal(t, models.CategoryScheduled, dispatchedTask.Category)
+	require.Contains(t, dispatchedTask.Prompt, "Collect the weekday support summary.")
+	require.Nil(t, dispatchedTask.ParentTaskID)
 
 	execRepo := repository.NewExecutionRepo(db)
 	invocationID := repository.NewID()
@@ -218,7 +222,7 @@ func TestCustomAutomationReplacementDeletesRemovedSchedule(t *testing.T) {
 		{Key: "schedule", Name: "Daily", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run daily.", "category": "scheduled", "priority": 2, "run_at": "08:30", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
 		{Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review work.", "category": "backlog", "priority": 2}},
 	}
-	candidate.Edges = []models.AutomationDraftEdge{{Key: "schedule_review", From: "schedule", To: "review", Condition: map[string]any{}}}
+	candidate.Edges = []models.AutomationDraftEdge{{Key: "schedule_review", From: "schedule", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}}}
 	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
@@ -269,11 +273,11 @@ func TestCustomAutomationPublicationRunsNativeAlertApprovalOnExactUserNodes(t *t
 		{Key: "stop_here", Name: "Rejected", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
 	}
 	candidate.Edges = []models.AutomationDraftEdge{
-		{Key: "morning_research", From: "morning", To: "research", Condition: map[string]any{}},
-		{Key: "research_inspect", From: "research", To: "inspect", Condition: map[string]any{}},
-		{Key: "inspect_ask", From: "inspect", To: "ask_human", Condition: map[string]any{}},
-		{Key: "ask_decision", From: "ask_human", To: "decision", Condition: map[string]any{}},
-		{Key: "decision_yes", From: "decision", To: "go_ahead", Label: "approved", Condition: map[string]any{"state": "approved"}},
+		{Key: "morning_research", From: "morning", To: "research", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "research_inspect", From: "research", To: "inspect", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "inspect_ask", From: "inspect", To: "ask_human", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "ask_decision", From: "ask_human", To: "decision", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "decision_yes", From: "decision", To: "go_ahead", FromPort: "right", ToPort: "left", Label: "approved", Condition: map[string]any{"state": "approved"}},
 	}
 	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
@@ -288,7 +292,7 @@ func TestCustomAutomationPublicationRunsNativeAlertApprovalOnExactUserNodes(t *t
 		effectTypes = append(effectTypes, effect.ResourceType)
 	}
 	require.ElementsMatch(t, []string{"task", "task", "task", "schedule", "alert_configuration", "human_approval"}, effectTypes,
-		"Publication planning must distinguish real resources from the configured runtime Alert handoff")
+		"Publication planning must preserve the Schedule-owned task and distinguish configured runtime Alert handoffs")
 	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
 	published, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
 	require.NoError(t, err)
@@ -422,21 +426,21 @@ func TestCustomAutomationPublicationConfiguresGitHubRuntimeWithoutCrossingHumanG
 		{Key: "assigned", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
 		{Key: "hourly", Name: "Hourly inbox", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:15", "repeat_type": "hours", "repeat_interval": 1, "enabled": true}},
 		{Key: "poll", Name: "Poll assigned issues", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process only actionable assigned issues.", "category": "backlog", "priority": 3}},
-		{Key: "build", Name: "Implement issue", Type: models.AutomationNodeAgentTask, Role: "implementation", Config: map[string]any{"prompt": "Implement the accepted issue and run relevant tests.", "category": "active", "priority": 3}},
+		{Key: "build", Name: "Implement issue", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the accepted issue and run relevant tests.", "category": "active", "priority": 3}},
 		{Key: "publish_pr", Name: "Open PR", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a PR linked to the source issue.", "base": "main", "draft": true}},
 		{Key: "review_pr", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},
 		{Key: "merged", Name: "Merged", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
 	}
 	candidate.Edges = []models.AutomationDraftEdge{
-		{Key: "daily_finder", From: "daily", To: "finder", Condition: map[string]any{}},
-		{Key: "finder_issue", From: "finder", To: "file_issue", Condition: map[string]any{}},
-		{Key: "issue_assigned", From: "file_issue", To: "assigned", Condition: map[string]any{}},
-		{Key: "hourly_poll", From: "hourly", To: "poll", Condition: map[string]any{}},
-		{Key: "assigned_poll", From: "assigned", To: "poll", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
-		{Key: "poll_build", From: "poll", To: "build", Condition: map[string]any{}},
-		{Key: "build_pr", From: "build", To: "publish_pr", Condition: map[string]any{}},
-		{Key: "pr_review", From: "publish_pr", To: "review_pr", Condition: map[string]any{}},
-		{Key: "review_merged", From: "review_pr", To: "merged", Condition: map[string]any{}},
+		{Key: "daily_finder", From: "daily", To: "finder", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "finder_issue", From: "finder", To: "file_issue", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "issue_assigned", From: "file_issue", To: "assigned", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "hourly_poll", From: "hourly", To: "poll", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "assigned_poll", From: "assigned", To: "poll", FromPort: "right", ToPort: "left", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
+		{Key: "poll_build", From: "poll", To: "build", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "build_pr", From: "build", To: "publish_pr", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "pr_review", From: "publish_pr", To: "review_pr", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "review_merged", From: "review_pr", To: "merged", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
 	}
 	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
@@ -458,7 +462,7 @@ func TestCustomAutomationPublicationConfiguresGitHubRuntimeWithoutCrossingHumanG
 	for _, effect := range plan.Effects {
 		effectTypes = append(effectTypes, effect.ResourceType)
 	}
-	require.ElementsMatch(t, []string{"task", "task", "task", "task", "schedule", "schedule", "github_issue_configuration", "github_assignment", "implementation_task_template", "pull_request_configuration", "pull_request_review"}, effectTypes)
+	require.ElementsMatch(t, []string{"task", "task", "task", "task", "schedule", "schedule", "github_issue_configuration", "github_assignment", "github_task_configuration", "pull_request_configuration", "pull_request_review"}, effectTypes)
 
 	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
 	published, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
@@ -471,16 +475,36 @@ func TestCustomAutomationPublicationConfiguresGitHubRuntimeWithoutCrossingHumanG
 	require.NotEmpty(t, resources["poll:task"])
 	require.NotEmpty(t, resources["daily:schedule"])
 	require.NotEmpty(t, resources["hourly:schedule"])
-	require.Empty(t, resources["build:task"], "implementation must remain an issue-specific runtime task, not one shared publication task")
-	require.Equal(t, 4, tableCount(t, db, "tasks"), "each Schedule node owns a scheduled task in addition to the two ordinary Agent tasks")
+	require.NotEmpty(t, resources["daily:task"])
+	require.NotEmpty(t, resources["hourly:task"])
+	require.Empty(t, resources["build:task"], "the GitHub-connected Task must remain issue-specific runtime work, not one shared publication task")
+	require.Equal(t, 4, tableCount(t, db, "tasks"), "each Schedule and persistent Task node must materialize separately")
 	require.Equal(t, 2, tableCount(t, db, "schedules"))
+	dailyTask, err := taskRepo.GetByID(ctx, resources["daily:task"])
+	require.NoError(t, err)
+	dailySchedule, err := scheduleRepo.GetByID(ctx, resources["daily:schedule"])
+	require.NoError(t, err)
+	require.Equal(t, dailyTask.ID, dailySchedule.TaskID)
 	finder, err := taskRepo.GetByID(ctx, resources["finder:task"])
 	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, finder.Category)
+	require.Equal(t, models.StatusBlocked, finder.Status)
+	require.NotNil(t, finder.ParentTaskID)
+	require.Equal(t, dailyTask.ID, *finder.ParentTaskID)
 	require.Contains(t, finder.Prompt, "github_create_issue")
 	require.Contains(t, finder.Prompt, "suggestion")
 	require.NotContains(t, finder.Prompt, "assignees", "the issue producer must not cross the human assignment boundary")
 	poll, err := taskRepo.GetByID(ctx, resources["poll:task"])
 	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, poll.Category)
+	require.Equal(t, models.StatusBlocked, poll.Status)
+	hourlyTask, err := taskRepo.GetByID(ctx, resources["hourly:task"])
+	require.NoError(t, err)
+	hourlySchedule, err := scheduleRepo.GetByID(ctx, resources["hourly:schedule"])
+	require.NoError(t, err)
+	require.Equal(t, hourlyTask.ID, hourlySchedule.TaskID)
+	require.NotNil(t, poll.ParentTaskID)
+	require.Equal(t, hourlyTask.ID, *poll.ParentTaskID)
 	for _, expected := range []string{"github_get_project_inbox", "github_list_assigned_issues", "create_task", "Implement the accepted issue", "github_open_pull_request", "must not approve", "merge, release"} {
 		require.Contains(t, poll.Prompt, expected)
 	}
@@ -611,9 +635,9 @@ func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskCha
 		{Key: "done", Name: "Done", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
 	}
 	candidate.Edges = []models.AutomationDraftEdge{
-		{Key: "schedule_research", From: "schedule", To: "research", Condition: map[string]any{}},
-		{Key: "research_implement", From: "research", To: "implement", Condition: map[string]any{}},
-		{Key: "implement_done", From: "implement", To: "done", Condition: map[string]any{}},
+		{Key: "schedule_research", From: "schedule", To: "research", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "research_implement", From: "research", To: "implement", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "implement_done", From: "implement", To: "done", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
 	}
 	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
@@ -631,25 +655,38 @@ func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskCha
 	for _, resource := range published.Definition.Resources {
 		resources[resource.NodeKey+":"+resource.ResourceType] = resource.ResourceID
 	}
+	scheduleTask, err := taskRepo.GetByID(ctx, resources["schedule:task"])
+	require.NoError(t, err)
+	require.Equal(t, 3, tableCount(t, db, "tasks"), "each visible Schedule and Task node must materialize its own task")
 	research, err := taskRepo.GetByID(ctx, resources["research:task"])
 	require.NoError(t, err)
 	implement, err := taskRepo.GetByID(ctx, resources["implement:task"])
 	require.NoError(t, err)
+	require.NotNil(t, scheduleTask)
 	require.NotNil(t, research)
 	require.NotNil(t, implement)
-	scheduleTask, err := taskRepo.GetByID(ctx, resources["schedule:task"])
-	require.NoError(t, err)
-	require.NotNil(t, scheduleTask)
+	require.Equal(t, models.CategoryScheduled, scheduleTask.Category)
+	require.Equal(t, models.StatusPending, scheduleTask.Status)
+	require.Nil(t, scheduleTask.ParentTaskID)
+	require.Equal(t, models.CategoryBacklog, research.Category)
 	require.Equal(t, models.StatusBlocked, research.Status)
 	require.NotNil(t, research.ParentTaskID)
 	require.Equal(t, scheduleTask.ID, *research.ParentTaskID)
-	scheduleChain, err := scheduleTask.ParseChainConfig()
+	schedule, err := scheduleRepo.GetByID(ctx, resources["schedule:schedule"])
 	require.NoError(t, err)
-	require.Equal(t, research.ID, scheduleChain.ChildTaskID)
-	require.Equal(t, string(models.CategoryActive), scheduleChain.ChildCategory)
+	require.NotNil(t, schedule)
+	require.Equal(t, scheduleTask.ID, schedule.TaskID, "the Scheduler must run the Schedule-owned task")
 	require.Equal(t, models.StatusBlocked, implement.Status)
 	require.NotNil(t, implement.ParentTaskID)
 	require.Equal(t, research.ID, *implement.ParentTaskID)
+	scheduleChain, err := scheduleTask.ParseChainConfig()
+	require.NoError(t, err)
+	require.True(t, scheduleChain.Enabled)
+	require.Equal(t, "on_completion", scheduleChain.Trigger)
+	require.Equal(t, research.ID, scheduleChain.ChildTaskID)
+	require.Equal(t, "research", scheduleChain.ChildAutomationNodeKey)
+	require.Equal(t, string(models.CategoryActive), scheduleChain.ChildCategory)
+	require.Equal(t, "Research the requested change.", scheduleChain.ChildPromptPrefix)
 	chain, err := research.ParseChainConfig()
 	require.NoError(t, err)
 	require.True(t, chain.Enabled)
@@ -659,37 +696,42 @@ func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskCha
 	require.Equal(t, string(models.CategoryActive), chain.ChildCategory)
 	require.Equal(t, "Implement the researched change.", chain.ChildPromptPrefix)
 
-	var scheduleNodeID string
+	var scheduleNodeID, researchNodeID string
 	for _, node := range published.Definition.Nodes {
-		if node.NodeKey == "schedule" {
+		switch node.NodeKey {
+		case "schedule":
 			scheduleNodeID = node.ID
-			break
+		case "research":
+			researchNodeID = node.ID
 		}
 	}
 	require.NotEmpty(t, scheduleNodeID)
+	require.NotEmpty(t, researchNodeID)
+	ordinaryRequest := TaskCreationRequest{Title: "Ordinary child", Prompt: "Keep this model-supplied prompt.", Category: "backlog", Priority: 1}
+	ordinaryContext := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{{AutomationID: published.Definition.Automation.ID, VersionID: published.Definition.Version.ID, NodeID: researchNodeID}}})
+	require.NoError(t, (&LLMService{automationRepo: automationRepo}).prepareAutomationTaskCreation(ordinaryContext, project.ID, &ordinaryRequest))
+	require.Equal(t, "Keep this model-supplied prompt.", ordinaryRequest.Prompt, "an ordinary Task-to-Task edge must not be treated as GitHub issue-linked task configuration")
+	require.Equal(t, "backlog", ordinaryRequest.Category)
+	require.Equal(t, 1, ordinaryRequest.Priority)
 	supported, scheduledChild, scheduledChildTaskID, err := automationRepo.GetCustomTaskHandoff(ctx, project.ID, published.Definition.Automation.ID, published.Definition.Version.ID, scheduleNodeID)
 	require.NoError(t, err)
 	require.True(t, supported)
 	require.NotNil(t, scheduledChild)
 	require.Equal(t, "research", scheduledChild.NodeKey)
-	require.Equal(t, research.ID, scheduledChildTaskID, "runtime must resolve the Schedule completion handoff from immutable graph provenance")
+	require.Equal(t, research.ID, scheduledChildTaskID, "the immutable graph must resolve the Schedule target")
 
-	scheduleExecutionRepo := repository.NewExecutionRepo(db)
-	scheduleExecution := models.Execution{TaskID: scheduleTask.ID, Status: models.ExecCompleted, PromptSent: scheduleTask.Prompt}
-	require.NoError(t, scheduleExecutionRepo.Create(ctx, &scheduleExecution))
-	scheduleBinding := models.AutomationBinding{AutomationID: published.Definition.Automation.ID, VersionID: published.Definition.Version.ID, NodeID: scheduleNodeID}
-	scheduleContext := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{scheduleBinding}})
-	scheduleContext = withAutomationExecution(scheduleContext, scheduleTask.ID, scheduleExecution.ID)
-	scheduleWorker := NewWorkerService(nil, 0, nil)
-	scheduleTaskService := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), scheduleWorker)
-	scheduleLLMService := NewLLMService(repository.NewLLMConfigRepo(db), scheduleExecutionRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, repository.NewAttachmentRepo(db))
-	scheduleLLMService.SetTaskService(scheduleTaskService)
-	scheduleLLMService.SetAutomationRepo(automationRepo)
-	require.NoError(t, scheduleLLMService.triggerTaskChain(scheduleContext, *scheduleTask, "Scheduled work completed"))
-	research, err = taskRepo.GetByID(ctx, research.ID)
+	require.NotNil(t, schedule.NextRun)
+	due := schedule.NextRun.UTC()
+	nextRun := schedule.ComputeNextRun(due)
+	invocation, dispatch, err := automationRepo.ClaimScheduledOccurrence(ctx, *schedule, due, nextRun)
 	require.NoError(t, err)
-	require.Equal(t, models.CategoryActive, research.Category, "Schedule completion must activate the linked ordinary Agent Task")
-	require.Equal(t, models.StatusPending, research.Status)
+	require.NotNil(t, invocation)
+	require.NotNil(t, dispatch)
+	envelope, err := automationRepo.GetDispatchEnvelope(ctx, dispatch.ID)
+	require.NoError(t, err)
+	require.NotNil(t, envelope)
+	require.Equal(t, scheduleTask.ID, envelope.Task.ID, "one schedule tick must execute the Schedule-owned task first")
+	require.Equal(t, scheduleNodeID, envelope.Context.Bindings[0].NodeID)
 
 	chain.ChildTaskID = repository.NewID()
 	chain.ChildAutomationNodeKey = "newer_version_target"
@@ -703,11 +745,9 @@ func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskCha
 	require.NoError(t, err)
 	require.Equal(t, before, tableCount(t, db, "tasks"), "publication retry must reuse the same chained tasks")
 
-	var researchNodeID, implementNodeID, outcomeNodeID string
+	var implementNodeID, outcomeNodeID string
 	for _, node := range published.Definition.Nodes {
 		switch node.NodeKey {
-		case "research":
-			researchNodeID = node.ID
 		case "implement":
 			implementNodeID = node.ID
 		case "done":
@@ -728,6 +768,21 @@ func TestCustomAutomationPublicationCompilesLinearTaskHandoffIntoExistingTaskCha
 	llmSvc := NewLLMService(repository.NewLLMConfigRepo(db), execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, repository.NewAttachmentRepo(db))
 	llmSvc.SetTaskService(taskSvc)
 	llmSvc.SetAutomationRepo(automationRepo)
+	scheduleExecution := models.Execution{TaskID: scheduleTask.ID, Status: models.ExecCompleted, PromptSent: scheduleTask.Prompt}
+	require.NoError(t, execRepo.Create(ctx, &scheduleExecution))
+	scheduleRuntimeContext := WithAutomationContext(ctx, envelope.Context)
+	scheduleRuntimeContext = withAutomationExecution(scheduleRuntimeContext, scheduleTask.ID, scheduleExecution.ID)
+	require.NoError(t, llmSvc.triggerTaskChain(scheduleRuntimeContext, *scheduleTask, "Scheduled findings"))
+	activatedResearch, err := taskRepo.GetByID(ctx, research.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, activatedResearch.Status)
+	require.Equal(t, models.CategoryActive, activatedResearch.Category)
+	require.Equal(t, "Research the requested change.\n\nScheduled findings", activatedResearch.Prompt)
+	var scheduledHandoffs int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ? AND from_node_id = ? AND to_node_id = ?`,
+		published.Definition.Automation.ID, scheduleNodeID, researchNodeID).Scan(&scheduledHandoffs))
+	require.Equal(t, 1, scheduledHandoffs, "Schedule completion must activate its explicit downstream Task once")
+
 	require.NoError(t, llmSvc.triggerTaskChain(runtimeContext, *research, "Research findings"))
 	activated, err := taskRepo.GetByID(ctx, implement.ID)
 	require.NoError(t, err)
@@ -798,8 +853,8 @@ func TestCustomAutomationPublicationSupportsStandaloneTaskFanout(t *testing.T) {
 		{Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Review the findings.", "category": "backlog", "priority": 2}},
 	}
 	candidate.Edges = []models.AutomationDraftEdge{
-		{Key: "research_implement", From: "research", To: "implement", Condition: map[string]any{}},
-		{Key: "research_review", From: "research", To: "review", Condition: map[string]any{}},
+		{Key: "research_implement", From: "research", To: "implement", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "research_review", From: "research", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
 	}
 	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
@@ -809,7 +864,9 @@ func TestCustomAutomationPublicationSupportsStandaloneTaskFanout(t *testing.T) {
 	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
 	require.NoError(t, err)
 	require.Empty(t, plan.Validation)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
+	workerSvc := NewWorkerService(nil, 0, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	compiler := NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, planner)
 	published, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
 	require.NoError(t, err, "an Automation made only of ordinary tasks must not require a Schedule")
 
@@ -824,6 +881,12 @@ func TestCustomAutomationPublicationSupportsStandaloneTaskFanout(t *testing.T) {
 	parent, err := taskRepo.GetByID(ctx, resources["research:task"])
 	require.NoError(t, err)
 	require.NotNil(t, parent)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, parent.ID, submitted.ID, "the root Task must be admitted only after Save commits")
+	default:
+		t.Fatal("saved active root Task was not submitted")
+	}
 	for _, key := range []string{"implement", "review"} {
 		child, childErr := taskRepo.GetByID(ctx, resources[key+":task"])
 		require.NoError(t, childErr)
@@ -833,16 +896,20 @@ func TestCustomAutomationPublicationSupportsStandaloneTaskFanout(t *testing.T) {
 		require.Equal(t, parent.ID, *child.ParentTaskID)
 	}
 
+	resolvedContext, err := automationRepo.ContextForTask(ctx, project.ID, parent.ID)
+	require.NoError(t, err)
+	require.Len(t, resolvedContext.Bindings, 1, "the production worker lookup must resolve root Automation provenance")
+	require.Equal(t, published.Definition.Automation.ID, resolvedContext.Bindings[0].AutomationID)
+	require.Equal(t, published.Definition.Version.ID, resolvedContext.Bindings[0].VersionID)
+	require.Equal(t, nodes["research"], resolvedContext.Bindings[0].NodeID)
 	execRepo := repository.NewExecutionRepo(db)
 	execution := models.Execution{TaskID: parent.ID, Status: models.ExecCompleted, PromptSent: parent.Prompt}
 	require.NoError(t, execRepo.Create(ctx, &execution))
-	binding := models.AutomationBinding{AutomationID: published.Definition.Automation.ID, VersionID: published.Definition.Version.ID, NodeID: nodes["research"]}
-	runtimeContext := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}})
-	runtimeContext = withAutomationExecution(runtimeContext, parent.ID, execution.ID)
-	workerSvc := NewWorkerService(nil, 0, nil)
-	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	runtimeContext := withAutomationExecution(WithAutomationContext(ctx, resolvedContext), parent.ID, execution.ID)
+	chainWorkerSvc := NewWorkerService(nil, 0, nil)
+	chainTaskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), chainWorkerSvc)
 	llmSvc := NewLLMService(repository.NewLLMConfigRepo(db), execRepo, taskRepo, repository.NewProjectRepo(db), scheduleRepo, repository.NewAttachmentRepo(db))
-	llmSvc.SetTaskService(taskSvc)
+	llmSvc.SetTaskService(chainTaskSvc)
 	llmSvc.SetAutomationRepo(automationRepo)
 	require.NoError(t, llmSvc.triggerTaskChain(runtimeContext, *parent, "Research findings"))
 
@@ -911,15 +978,77 @@ func TestAutomationPublicationRejectsStalePlanAndLifecycleTouchesOwnedTriggersOn
 	require.False(t, owned.Enabled)
 	owner, err := automationRepo.GetTriggerOwner(context.Background(), ownedSchedule)
 	require.NoError(t, err)
-	require.Nil(t, owner, "archive must release exclusive trigger ownership after disabling it")
+	require.NotNil(t, owner, "archive must retain exclusive trigger provenance while disabling it")
+	require.Equal(t, "archived", owner.OwnershipState)
 	require.ErrorContains(t, lifecycle.Resume(context.Background(), project.ID, created.Definition.Automation.ID), "archived")
 	metrics := automationobs.Snapshot()
 	require.Equal(t, uint64(1), metrics["automation.lifecycle.paused"].Count)
 	require.Equal(t, uint64(1), metrics["automation.lifecycle.resumed"].Count)
 	require.Equal(t, uint64(1), metrics["automation.lifecycle.archived"].Count)
+	require.NoError(t, lifecycle.Delete(context.Background(), project.ID, created.Definition.Automation.ID))
+	owned, err = scheduleRepo.GetByID(context.Background(), ownedSchedule)
+	require.NoError(t, err)
+	require.Nil(t, owned, "archive then delete must remove the exclusively owned Scheduler row")
 }
 
-func TestAutomationDeleteDisablesOwnedTriggersAndRemovesOnlyAutomationRecords(t *testing.T) {
+func TestAutomationSavePreservesPausedAndArchivedLifecycle(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		state          models.AutomationLifecycleState
+		expectOwner    bool
+		ownershipState string
+	}{
+		{name: "paused", state: models.AutomationPaused, expectOwner: true, ownershipState: "paused"},
+		{name: "archived", state: models.AutomationArchived, expectOwner: true, ownershipState: "archived"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			project := automationTestProject(t, repository.NewProjectRepo(db), "Save "+test.name)
+			automationRepo := repository.NewAutomationRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			registry := NewAutomationAdapterRegistry()
+			drafts := NewAutomationDraftService(automationRepo, registry)
+			candidate, err := drafts.TemplateCandidate(AutomationAdapterVisionDriver)
+			require.NoError(t, err)
+			created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
+			require.NoError(t, err)
+			planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+			compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
+			plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+			require.NoError(t, err)
+			published, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+			require.NoError(t, err)
+			require.NoError(t, automationRepo.SetAutomationLifecycle(ctx, project.ID, published.Definition.Automation.ID, test.state))
+
+			edited, err := drafts.ClonePublishedVersion(ctx, project.ID, published.Definition.Automation.ID)
+			require.NoError(t, err)
+			edited.Candidate.Name += " edited"
+			edited, err = drafts.UpdateDraft(ctx, published.Definition.Automation.ID, edited.Definition.Version.ID, project.ID, edited.Candidate)
+			require.NoError(t, err)
+			replacementPlan, err := planner.Plan(ctx, project.ID, published.Definition.Automation.ID, edited.Definition.Version.ID)
+			require.NoError(t, err)
+			saved, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: published.Definition.Automation.ID, VersionID: edited.Definition.Version.ID, PlanRevision: replacementPlan.PlanRevision})
+			require.NoError(t, err)
+			require.Equal(t, test.state, saved.Definition.Automation.LifecycleState)
+			scheduleID := publishedScheduleID(t, saved)
+			schedule, err := scheduleRepo.GetByID(ctx, scheduleID)
+			require.NoError(t, err)
+			require.False(t, schedule.Enabled, "Save must not enable a trigger while the Automation is "+test.name)
+			owner, err := automationRepo.GetTriggerOwner(ctx, scheduleID)
+			require.NoError(t, err)
+			if test.expectOwner {
+				require.NotNil(t, owner)
+				require.Equal(t, test.ownershipState, owner.OwnershipState)
+			} else {
+				require.Nil(t, owner, "archived Save must not reacquire trigger ownership")
+			}
+		})
+	}
+}
+
+func TestAutomationDeleteRemovesOwnedTriggersAndOnlyAutomationRecords(t *testing.T) {
 	automationobs.ResetForTest()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -936,14 +1065,14 @@ func TestAutomationDeleteDisablesOwnedTriggersAndRemovesOnlyAutomationRecords(t 
 		AdapterKey: AutomationAdapterNativeSDLC,
 		StableKey:  "native-sdlc/delete-test",
 		Resources: []models.AutomationResourceBinding{
-			{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: schedule.ID},
-			{NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: task.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
 		},
 	})
 	require.NoError(t, err)
 	var triggerNodeID string
 	for _, node := range definition.Nodes {
-		if node.NodeKey == "suggestion_trigger" {
+		if node.NodeKey == "vision_suggestions" {
 			triggerNodeID = node.ID
 		}
 	}
@@ -966,10 +1095,10 @@ func TestAutomationDeleteDisablesOwnedTriggersAndRemovesOnlyAutomationRecords(t 
 	require.Zero(t, tableCountWhere(t, db, "automation_versions", "automation_id", definition.Automation.ID))
 	require.Zero(t, tableCountWhere(t, db, "automation_invocations", "automation_id", definition.Automation.ID))
 	require.Equal(t, 1, tableCountWhere(t, db, "tasks", "id", task.ID), "existing tasks remain authoritative")
-	require.Equal(t, 1, tableCountWhere(t, db, "schedules", "id", schedule.ID), "existing schedules remain authoritative")
+	require.Zero(t, tableCountWhere(t, db, "schedules", "id", schedule.ID), "Automation-owned schedules must be deleted")
 	preservedSchedule, err := scheduleRepo.GetByID(ctx, schedule.ID)
 	require.NoError(t, err)
-	require.False(t, preservedSchedule.Enabled)
+	require.Nil(t, preservedSchedule)
 	owner, err := automationRepo.GetTriggerOwner(ctx, schedule.ID)
 	require.NoError(t, err)
 	require.Nil(t, owner)
@@ -1000,7 +1129,7 @@ func TestAutomationPublicationPlanGoldenRevisionExcludesLayoutAndMessages(t *tes
 	planner := NewAutomationPublicationPlanner(automationRepo, repository.NewTaskRepo(db, nil), repository.NewScheduleRepo(db), registry, drafts)
 	first, err := planner.Plan(context.Background(), project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "dcc18caa006c5763aac375e2ecf74efcc442cf1e0bdbb10ab5c7aaa3607c046b", first.PlanRevision)
+	require.Equal(t, "d2449fd613e4c0868ab43ce47817d4788c6549ea40a887958bf3965799a79795", first.PlanRevision)
 
 	candidate.Assumptions = []string{"Layout-only author note"}
 	candidate.Warnings = []string{"Operational observation"}
@@ -1039,7 +1168,7 @@ func TestAutomationPublicationPlanGoldenGitHubDependenciesAndConfigurationChange
 	planner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	first, err := planner.Plan(ctx, project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "58d08936344222476688a88d0447df06f6ef6d80986cf2478a228f23a65d6860", first.PlanRevision)
+	require.Equal(t, "3e6475efa2819261ecdb09f4e9752700a146e0dfda122047c36f92bb65f96a64", first.PlanRevision)
 
 	inbox.Enabled = false
 	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
@@ -1129,7 +1258,7 @@ func TestAutomationPublicationScheduleIsJournaledDisabledBeforePublish(t *testin
 	require.NoError(t, err)
 	created, err := drafts.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
 	require.NoError(t, err)
-	effect := models.AutomationPublicationEffect{StepKey: "schedule:vision_trigger", Operation: "create", TargetKey: "schedule:vision_trigger", ResourceType: "schedule", Name: "Vision Trigger"}
+	effect := models.AutomationPublicationEffect{StepKey: "schedule:vision_driver", Operation: "create", TargetKey: "schedule:vision_driver", ResourceType: "schedule", Name: "Vision Driver"}
 	snapshot, err := automationRepo.ReservePublicationAttempt(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID, "prepublish", []models.AutomationPublicationEffect{effect})
 	require.NoError(t, err)
 	require.NoError(t, automationRepo.MarkPublicationStep(context.Background(), snapshot.Attempt.ID, effect.StepKey, "running", "", ""))
@@ -1189,6 +1318,239 @@ func (s *createThenFailAutomationTaskMutationService) Create(ctx context.Context
 
 func (s *createThenFailAutomationTaskMutationService) Update(ctx context.Context, task *models.Task) error {
 	return s.inner.Update(ctx, task)
+}
+
+func TestMaintainedRegistrationPreservesFailedSaveJournalAndExactRetry(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Maintained Save journal")
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	registration := NewAutomationRegistrationService(automationRepo, registry)
+	registeredTask, registeredSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Registered producer")
+	request := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC,
+		StableKey: "native-sdlc/save-journal", Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: registeredSchedule.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: registeredTask.ID},
+		}}
+	registered, _, err := registration.Register(ctx, request)
+	require.NoError(t, err)
+
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	candidate, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	candidate.Name = "Maintained replacement from Save"
+	staged, err := drafts.CreateVersionForSave(ctx, project.ID, registered.Automation.ID, "template", candidate)
+	require.NoError(t, err)
+	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+	plan, err := planner.Plan(ctx, project.ID, registered.Automation.ID, staged.Definition.Version.ID)
+	require.NoError(t, err)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
+
+	_, err = db.ExecContext(ctx, fmt.Sprintf(`CREATE TRIGGER fail_maintained_save_switch
+		BEFORE UPDATE OF state ON automation_versions
+		WHEN NEW.id = '%s' AND NEW.state = 'published'
+		BEGIN SELECT RAISE(ABORT, 'simulated maintained Save switch failure'); END`, staged.Definition.Version.ID))
+	require.NoError(t, err)
+	publishRequest := AutomationPublishRequest{ProjectID: project.ID, AutomationID: registered.Automation.ID,
+		VersionID: staged.Definition.Version.ID, PlanRevision: plan.PlanRevision}
+	failed, err := compiler.Publish(ctx, publishRequest)
+	require.ErrorContains(t, err, "simulated maintained Save switch failure")
+	require.NotNil(t, failed)
+	require.Equal(t, "failed", failed.Attempt.Status)
+	require.Greater(t, tableCount(t, db, "tasks"), 1, "failed Save must have materialized compiler Tasks for this regression")
+	require.Greater(t, tableCount(t, db, "schedules"), 1, "failed Save must have materialized Scheduler rows for this regression")
+
+	replacementTask, replacementSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Replacement registration resource")
+	changedRequest := request
+	changedRequest.Resources = []models.AutomationResourceBinding{
+		{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: replacementSchedule.ID},
+		{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: replacementTask.ID},
+	}
+	versionsBefore := tableCount(t, db, "automation_versions")
+	attemptsBefore := tableCount(t, db, "automation_publication_attempts")
+	tasksBefore := tableCount(t, db, "tasks")
+	schedulesBefore := tableCount(t, db, "schedules")
+	var materializedRetrySchedules int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_publication_steps step
+		JOIN schedules schedule ON schedule.id = step.resource_id
+		WHERE step.attempt_id = ? AND step.resource_type = 'schedule' AND step.operation <> 'delete'`, failed.Attempt.ID).Scan(&materializedRetrySchedules))
+	require.Greater(t, materializedRetrySchedules, 0)
+	for _, registrationRequest := range []AutomationRegistrationRequest{request, changedRequest} {
+		_, _, registerErr := registration.Register(ctx, registrationRequest)
+		require.ErrorIs(t, registerErr, repository.ErrAutomationSaveJournalExists)
+		require.NotContains(t, strings.ToLower(registerErr.Error()), "discard", "recovery copy must not advertise a nonexistent discard path")
+		require.Equal(t, versionsBefore, tableCount(t, db, "automation_versions"))
+		require.Equal(t, attemptsBefore, tableCount(t, db, "automation_publication_attempts"))
+		require.Equal(t, tasksBefore, tableCount(t, db, "tasks"))
+		require.Equal(t, schedulesBefore, tableCount(t, db, "schedules"))
+	}
+	var attemptStatus string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM automation_publication_attempts WHERE id = ?`, failed.Attempt.ID).Scan(&attemptStatus))
+	require.Equal(t, "failed", attemptStatus, "maintained registration must preserve the exact retry journal")
+
+	laterCandidate := candidate
+	laterCandidate.Name = "Later browser replacement"
+	_, err = drafts.CreateVersionForSave(ctx, project.ID, registered.Automation.ID, "manual", laterCandidate)
+	require.ErrorIs(t, err, repository.ErrAutomationSaveJournalExists,
+		"a later Save must not replace a failed private journal or orphan its materialized resources")
+	require.NotContains(t, strings.ToLower(err.Error()), "discard", "Save recovery copy must direct users only to the supported exact retry")
+	lifecycle := NewAutomationLifecycleService(automationRepo, scheduleRepo)
+	deleteErr := lifecycle.Delete(ctx, project.ID, registered.Automation.ID)
+	require.ErrorIs(t, deleteErr, repository.ErrAutomationSaveJournalExists,
+		"Automation deletion must preserve the failed journal for exact retry")
+	require.NotContains(t, strings.ToLower(deleteErr.Error()), "discard", "deletion recovery copy must not advertise a nonexistent discard path")
+	require.Equal(t, versionsBefore, tableCount(t, db, "automation_versions"))
+	require.Equal(t, attemptsBefore, tableCount(t, db, "automation_publication_attempts"))
+	require.Equal(t, tasksBefore, tableCount(t, db, "tasks"))
+	require.Equal(t, schedulesBefore, tableCount(t, db, "schedules"))
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM automation_publication_attempts WHERE id = ?`, failed.Attempt.ID).Scan(&attemptStatus))
+	require.Equal(t, "failed", attemptStatus)
+
+	_, err = db.ExecContext(ctx, `DROP TRIGGER fail_maintained_save_switch`)
+	require.NoError(t, err)
+	retried, err := compiler.Publish(ctx, publishRequest)
+	require.NoError(t, err)
+	require.Equal(t, staged.Definition.Version.ID, retried.Definition.Version.ID)
+	require.Equal(t, tasksBefore, tableCount(t, db, "tasks"), "exact retry must reuse compiler-created Tasks")
+	require.Equal(t, schedulesBefore-1, tableCount(t, db, "schedules"), "exact retry must reuse compiler-created Scheduler rows while deleting the obsolete current Scheduler")
+	var retainedRetrySchedules int
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_publication_steps step
+		JOIN schedules schedule ON schedule.id = step.resource_id
+		WHERE step.attempt_id = ? AND step.resource_type = 'schedule' AND step.operation <> 'delete'`, failed.Attempt.ID).Scan(&retainedRetrySchedules))
+	require.Equal(t, materializedRetrySchedules, retainedRetrySchedules, "every Scheduler materialized before the failed switch must remain available to exact retry")
+	require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", registered.Automation.ID))
+}
+
+func TestAutomationQueuedRootReloadsReplacementTaskAndCurrentGraphProvenance(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Queued replacement root")
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	agent := models.LLMConfig{Name: "Queued replacement model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
+	execRepo := repository.NewExecutionRepo(db)
+	execRepo.SetAutomationRepo(automationRepo)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, repository.NewAttachmentRepo(db))
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "replacement root completed"
+	mock.TextOnly = mock.Response
+	llmSvc.SetLLMCaller(mock)
+	llmSvc.SetAutomationRepo(automationRepo)
+	worker := NewWorkerService(llmSvc, 0, projectRepo)
+	worker.SetTaskRepo(taskRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetExecutionRepo(execRepo)
+	worker.SetAutomationRepo(automationRepo)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	llmSvc.SetTaskService(taskSvc)
+
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	candidate, err := drafts.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Queued replacement root"
+	candidate.Nodes = []models.AutomationDraftNode{{Key: "root", Name: "Old queued root", Type: models.AutomationNodeAgentTask,
+		Role: "task", Config: map[string]any{"prompt": "OLD QUEUED PROMPT", "category": "active", "priority": 2}}}
+	candidate.Edges = []models.AutomationDraftEdge{}
+	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", Candidate: candidate})
+	require.NoError(t, err)
+	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+	compiler := NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, planner)
+	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	first, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID,
+		VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+	require.NoError(t, err)
+	require.Equal(t, 1, worker.QueueSize(), "the root must remain queued while the worker is not started")
+
+	edited, err := drafts.ClonePublishedVersion(ctx, project.ID, first.Definition.Automation.ID)
+	require.NoError(t, err)
+	edited.Candidate.Nodes[0].Name = "Replacement queued root"
+	edited.Candidate.Nodes[0].Config["prompt"] = "CURRENT REPLACEMENT PROMPT"
+	edited, err = drafts.UpdateDraft(ctx, first.Definition.Automation.ID, edited.Definition.Version.ID, project.ID, edited.Candidate)
+	require.NoError(t, err)
+	replacementPlan, err := planner.Plan(ctx, project.ID, first.Definition.Automation.ID, edited.Definition.Version.ID)
+	require.NoError(t, err)
+	replacement, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: first.Definition.Automation.ID,
+		VersionID: edited.Definition.Version.ID, PlanRevision: replacementPlan.PlanRevision})
+	require.NoError(t, err)
+	require.Equal(t, 1, worker.QueueSize(), "replacement submission must not duplicate the already queued root")
+	require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", first.Definition.Version.ID))
+
+	completedTask := make(chan models.Task, 1)
+	worker.SetOnTaskComplete(func(task models.Task, _ error) { completedTask <- task })
+	worker.Start(ctx)
+	worker.Resize(1)
+	defer worker.Stop()
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 5*time.Second, 20*time.Millisecond)
+	call := mock.LastCall()
+	require.Contains(t, call.Prompt, "CURRENT REPLACEMENT PROMPT")
+	require.NotContains(t, call.Prompt, "OLD QUEUED PROMPT")
+	select {
+	case executed := <-completedTask:
+		require.Contains(t, executed.Title, "Replacement queued root")
+		require.Equal(t, "CURRENT REPLACEMENT PROMPT", executed.Prompt)
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued replacement root did not complete")
+	}
+	var activityVersionID string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT version_id FROM automation_activities
+		WHERE automation_id = ? AND activity_type = 'task_execution' ORDER BY started_at DESC LIMIT 1`, first.Definition.Automation.ID).Scan(&activityVersionID))
+	require.Equal(t, replacement.Definition.Version.ID, activityVersionID, "execution must project only onto the replacement graph")
+	var workItemStatus models.AutomationWorkItemStatus
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM automation_work_items
+		WHERE automation_id = ? AND origin_version_id = ?`, first.Definition.Automation.ID, replacement.Definition.Version.ID).Scan(&workItemStatus))
+	require.Equal(t, models.AutomationWorkItemCompleted, workItemStatus, "standalone root execution must terminalize its Live work item")
+}
+
+func TestAutomationPublicationDoesNotAdmitRootTaskBeforeSaveCommits(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Root publication ordering")
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	candidate, err := drafts.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Root publication ordering"
+	candidate.Nodes = []models.AutomationDraftNode{{
+		Key: "root", Name: "Root", Type: models.AutomationNodeAgentTask, Role: "task",
+		Config: map[string]any{"prompt": "Run only after Save.", "category": "active", "priority": 2},
+	}}
+	candidate.Edges = []models.AutomationDraftEdge{}
+	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+
+	workerSvc := NewWorkerService(nil, 0, nil)
+	realTaskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	compiler := NewAutomationCompiler(automationRepo, &createThenFailAutomationTaskMutationService{inner: realTaskSvc}, taskRepo, scheduleRepo, planner)
+	_, err = compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+	require.ErrorContains(t, err, "response loss")
+	select {
+	case task := <-workerSvc.Submitted():
+		t.Fatalf("unpublished Task %s was submitted before Save committed", task.ID)
+	default:
+	}
+	var category models.TaskCategory
+	var status models.TaskStatus
+	require.NoError(t, db.QueryRow(`SELECT category, status FROM tasks WHERE project_id = ?`, project.ID).Scan(&category, &status))
+	require.Equal(t, models.CategoryBacklog, category)
+	require.Equal(t, models.StatusPending, status)
+	require.Zero(t, tableCount(t, db, "automation_definition_resources"))
+	require.Zero(t, tableCount(t, db, "automation_activities"))
 }
 
 func TestAutomationPublicationLeaseSerializesCompilers(t *testing.T) {
@@ -1266,6 +1628,197 @@ func TestAutomationPublicationAmbiguousTaskCreationReportsAndReconcilesResource(
 	require.Equal(t, models.AutomationVersionPublished, published.Definition.Version.State)
 	require.Equal(t, 1, tableCount(t, db, "tasks"), "retry must reconcile the stable compiler task")
 	require.Equal(t, 1, tableCount(t, db, "schedules"))
+}
+
+func TestAutomationInactiveSaveDoesNotAdmitExistingRootChangedToActive(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		state models.AutomationLifecycleState
+	}{
+		{name: "paused", state: models.AutomationPaused},
+		{name: "archived", state: models.AutomationArchived},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			project := automationTestProject(t, repository.NewProjectRepo(db), "Existing inactive root "+test.name)
+			automationRepo := repository.NewAutomationRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			registry := NewAutomationAdapterRegistry()
+			drafts := NewAutomationDraftService(automationRepo, registry)
+			candidate, err := drafts.BlankCandidate(AutomationAdapterCustom)
+			require.NoError(t, err)
+			candidate.Name = "Existing inactive root " + test.name
+			candidate.Nodes = []models.AutomationDraftNode{{Key: "root", Name: "Existing root", Type: models.AutomationNodeAgentTask,
+				Role: "task", Config: map[string]any{"prompt": "Wait until explicitly admitted.", "category": "backlog", "priority": 2}}}
+			candidate.Edges = []models.AutomationDraftEdge{}
+			created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", Candidate: candidate})
+			require.NoError(t, err)
+			planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+			worker := NewWorkerService(nil, 0, nil)
+			taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+			compiler := NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, planner)
+			plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+			require.NoError(t, err)
+			published, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID,
+				VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+			require.NoError(t, err)
+			require.NoError(t, automationRepo.SetAutomationLifecycle(ctx, project.ID, published.Definition.Automation.ID, test.state))
+
+			edited, err := drafts.ClonePublishedVersion(ctx, project.ID, published.Definition.Automation.ID)
+			require.NoError(t, err)
+			edited.Candidate.Nodes[0].Config["category"] = "active"
+			edited, err = drafts.UpdateDraft(ctx, published.Definition.Automation.ID, edited.Definition.Version.ID, project.ID, edited.Candidate)
+			require.NoError(t, err)
+			replacementPlan, err := planner.Plan(ctx, project.ID, published.Definition.Automation.ID, edited.Definition.Version.ID)
+			require.NoError(t, err)
+			saved, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: published.Definition.Automation.ID,
+				VersionID: edited.Definition.Version.ID, PlanRevision: replacementPlan.PlanRevision})
+			require.NoError(t, err)
+			require.Equal(t, test.state, saved.Definition.Automation.LifecycleState)
+			root, err := automationRepo.FindCompilerTask(ctx, project.ID, published.Definition.Automation.ID, "root")
+			require.NoError(t, err)
+			require.NotNil(t, root)
+			require.Equal(t, models.CategoryBacklog, root.Category, "inactive Save must not admit an existing configured Active root")
+			select {
+			case submitted := <-worker.Submitted():
+				t.Fatalf("inactive Save submitted existing root Task %s", submitted.ID)
+			default:
+			}
+
+			lifecycle := NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)
+			if test.state == models.AutomationArchived {
+				require.ErrorContains(t, lifecycle.Resume(ctx, project.ID, published.Definition.Automation.ID), "archived")
+				return
+			}
+			require.NoError(t, lifecycle.Resume(ctx, project.ID, published.Definition.Automation.ID))
+			root, err = taskRepo.GetByID(ctx, root.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryActive, root.Category)
+			select {
+			case submitted := <-worker.Submitted():
+				require.Equal(t, root.ID, submitted.ID)
+			case <-time.After(time.Second):
+				t.Fatal("Resume did not submit the existing root exactly when it became eligible")
+			}
+		})
+	}
+}
+
+func TestAutomationResumeAdmitsActiveRootAddedWhilePaused(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Paused active root")
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	candidate, err := drafts.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Paused active root"
+	candidate.Nodes = []models.AutomationDraftNode{{Key: "existing", Name: "Existing backlog", Type: models.AutomationNodeAgentTask,
+		Role: "task", Config: map[string]any{"prompt": "Wait in backlog.", "category": "backlog", "priority": 2}}}
+	candidate.Edges = []models.AutomationDraftEdge{}
+	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", Candidate: candidate})
+	require.NoError(t, err)
+	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+	worker := NewWorkerService(nil, 0, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), worker)
+	compiler := NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, planner)
+	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	published, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID,
+		VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+	require.NoError(t, err)
+	require.NoError(t, automationRepo.SetAutomationLifecycle(ctx, project.ID, published.Definition.Automation.ID, models.AutomationPaused))
+
+	edited, err := drafts.ClonePublishedVersion(ctx, project.ID, published.Definition.Automation.ID)
+	require.NoError(t, err)
+	edited.Candidate.Nodes = append(edited.Candidate.Nodes, models.AutomationDraftNode{Key: "new_root", Name: "New active root",
+		Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Run after Resume.", "category": "active", "priority": 2}})
+	edited, err = drafts.UpdateDraft(ctx, published.Definition.Automation.ID, edited.Definition.Version.ID, project.ID, edited.Candidate)
+	require.NoError(t, err)
+	replacementPlan, err := planner.Plan(ctx, project.ID, published.Definition.Automation.ID, edited.Definition.Version.ID)
+	require.NoError(t, err)
+	saved, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: published.Definition.Automation.ID,
+		VersionID: edited.Definition.Version.ID, PlanRevision: replacementPlan.PlanRevision})
+	require.NoError(t, err)
+	require.Equal(t, models.AutomationPaused, saved.Definition.Automation.LifecycleState)
+	root, err := automationRepo.FindCompilerTask(ctx, project.ID, published.Definition.Automation.ID, "new_root")
+	require.NoError(t, err)
+	require.NotNil(t, root)
+	require.Equal(t, models.CategoryBacklog, root.Category, "Save while paused must not admit the root Task")
+	select {
+	case submitted := <-worker.Submitted():
+		t.Fatalf("paused Save submitted root Task %s before Resume", submitted.ID)
+	default:
+	}
+
+	lifecycle := NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)
+	require.NoError(t, lifecycle.Resume(ctx, project.ID, published.Definition.Automation.ID))
+	root, err = taskRepo.GetByID(ctx, root.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, root.Category)
+	select {
+	case submitted := <-worker.Submitted():
+		require.Equal(t, root.ID, submitted.ID)
+	case <-time.After(time.Second):
+		t.Fatal("Resume did not submit the newly admitted active root Task")
+	}
+	runtimeContext, err := automationRepo.ContextForTask(ctx, project.ID, root.ID)
+	require.NoError(t, err)
+	require.Len(t, runtimeContext.Bindings, 1, "resumed root must resolve exact current-graph provenance before execution")
+	require.Equal(t, published.Definition.Automation.ID, runtimeContext.Bindings[0].AutomationID)
+	require.Equal(t, saved.Definition.Version.ID, runtimeContext.Bindings[0].VersionID)
+}
+
+func TestArchivedAutomationSaveRemovingScheduleDeletesOwnedScheduler(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Archived schedule removal")
+	automationRepo := repository.NewAutomationRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	candidate, err := drafts.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Archived schedule removal"
+	candidate.Nodes = []models.AutomationDraftNode{{Key: "scheduled_work", Name: "Scheduled work", Type: models.AutomationNodeTrigger,
+		Role: "fixed_schedule", Config: map[string]any{"prompt": "Run scheduled work.", "category": "scheduled", "priority": 2,
+			"run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}}}
+	candidate.Edges = []models.AutomationDraftEdge{}
+	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", Candidate: candidate})
+	require.NoError(t, err)
+	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	compiler := NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, planner)
+	plan, err := planner.Plan(ctx, project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	require.NoError(t, err)
+	published, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID,
+		VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
+	require.NoError(t, err)
+	scheduleID := publishedScheduleID(t, published)
+	require.NoError(t, automationRepo.SetAutomationLifecycle(ctx, project.ID, published.Definition.Automation.ID, models.AutomationArchived))
+
+	edited, err := drafts.ClonePublishedVersion(ctx, project.ID, published.Definition.Automation.ID)
+	require.NoError(t, err)
+	edited.Candidate.Nodes = []models.AutomationDraftNode{{Key: "manual_followup", Name: "Manual follow-up", Type: models.AutomationNodeAgentTask,
+		Role: "task", Config: map[string]any{"prompt": "Keep this work in backlog.", "category": "backlog", "priority": 2}}}
+	edited.Candidate.Edges = []models.AutomationDraftEdge{}
+	edited, err = drafts.UpdateDraft(ctx, published.Definition.Automation.ID, edited.Definition.Version.ID, project.ID, edited.Candidate)
+	require.NoError(t, err)
+	replacementPlan, err := planner.Plan(ctx, project.ID, published.Definition.Automation.ID, edited.Definition.Version.ID)
+	require.NoError(t, err)
+	saved, err := compiler.Publish(ctx, AutomationPublishRequest{ProjectID: project.ID, AutomationID: published.Definition.Automation.ID,
+		VersionID: edited.Definition.Version.ID, PlanRevision: replacementPlan.PlanRevision})
+	require.NoError(t, err)
+	require.Equal(t, models.AutomationArchived, saved.Definition.Automation.LifecycleState)
+	stored, err := scheduleRepo.GetByID(ctx, scheduleID)
+	require.NoError(t, err)
+	require.Nil(t, stored, "removing a Schedule from an archived Automation must delete its owned Scheduler row")
 }
 
 func TestAutomationResumePreservesConfiguredDisabledTrigger(t *testing.T) {
@@ -1413,7 +1966,7 @@ func TestAutomationReplacementFailureKeepsPriorTaskBehaviorAndSuccessfulRetrySwi
 	require.Equal(t, secondAgent.ID, *updatedTask.AgentDefinitionID, "successful replacement must atomically switch the task Agent")
 	require.NoError(t, db.QueryRowContext(ctx, `SELECT status FROM automation_publication_steps WHERE attempt_id = ? AND step_key LIKE 'task:%'`, second.Attempt.ID).Scan(&stagedTaskStatus))
 	require.Equal(t, "completed", stagedTaskStatus)
-	require.Equal(t, 1, tableCount(t, db, "schedules"), "replacement removes the superseded Scheduler row")
+	require.Equal(t, 1, tableCount(t, db, "schedules"), "replacement removes the obsolete Scheduler row")
 	firstSchedule, err = scheduleRepo.GetByID(ctx, firstScheduleID)
 	require.NoError(t, err)
 	require.Nil(t, firstSchedule)

@@ -24,7 +24,7 @@ CREATE TABLE automation_versions (
     project_id TEXT NOT NULL,
     automation_id TEXT NOT NULL,
     version INTEGER NOT NULL,
-    state TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','published','superseded')),
+    state TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','published')),
     source TEXT NOT NULL DEFAULT 'bootstrap' CHECK (source IN ('manual','template','bootstrap')),
     adapter_key TEXT NOT NULL,
     schema_version INTEGER NOT NULL DEFAULT 1,
@@ -93,7 +93,7 @@ CREATE TABLE automation_trigger_owners (
     automation_id TEXT NOT NULL,
     version_id TEXT NOT NULL,
     node_id TEXT NOT NULL,
-    ownership_state TEXT NOT NULL DEFAULT 'active' CHECK (ownership_state IN ('active','paused')),
+    ownership_state TEXT NOT NULL DEFAULT 'active' CHECK (ownership_state IN ('active','paused','archived')),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (node_id, version_id, automation_id, project_id) REFERENCES automation_nodes(id, version_id, automation_id, project_id) ON DELETE CASCADE

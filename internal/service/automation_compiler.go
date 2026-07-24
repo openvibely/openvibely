@@ -17,6 +17,10 @@ type automationTaskMutationService interface {
 	Update(context.Context, *models.Task) error
 }
 
+type automationTaskSubmissionService interface {
+	SubmitPublishedAutomationTask(models.Task)
+}
+
 type AutomationCompiler struct {
 	automationRepo *repository.AutomationRepo
 	taskSvc        automationTaskMutationService
@@ -80,7 +84,7 @@ func (c *AutomationCompiler) Publish(ctx context.Context, request AutomationPubl
 		return nil, err
 	}
 	if len(plan.Validation) > 0 {
-		return nil, fmt.Errorf("automation draft is invalid: %s", plan.Validation[0].Message)
+		return nil, fmt.Errorf("staged Automation graph is invalid: %s", plan.Validation[0].Message)
 	}
 	if request.PlanRevision == "" || request.PlanRevision != plan.PlanRevision {
 		return nil, errors.New("stale publication plan; preview the publication again")
@@ -101,7 +105,7 @@ func (c *AutomationCompiler) Publish(ctx context.Context, request AutomationPubl
 		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
 	}
 	if metadata == nil {
-		return c.failPublication(ctx, request, snapshot.Attempt.ID, errors.New("automation draft metadata not found"))
+		return c.failPublication(ctx, request, snapshot.Attempt.ID, errors.New("staged Automation graph metadata not found"))
 	}
 	candidate, err := metadata.Candidate()
 	if err != nil {
@@ -112,7 +116,7 @@ func (c *AutomationCompiler) Publish(ctx context.Context, request AutomationPubl
 		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
 	}
 	if definition == nil {
-		return c.failPublication(ctx, request, snapshot.Attempt.ID, errors.New("automation draft not found"))
+		return c.failPublication(ctx, request, snapshot.Attempt.ID, errors.New("staged Automation graph not found"))
 	}
 	effects := publicationEffectMap(plan.Effects)
 	resources := make(map[string]string)
@@ -165,6 +169,21 @@ func (c *AutomationCompiler) Publish(ctx context.Context, request AutomationPubl
 	if err != nil {
 		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
 	}
+	if published.Automation.LifecycleState == models.AutomationActive {
+		if submitter, ok := c.taskSvc.(automationTaskSubmissionService); ok {
+			for _, update := range taskUpdates {
+				effect, exists := effects[update.StepKey]
+				if !exists || effect.Operation != "create" || update.Category != models.CategoryActive || update.ParentTaskID != nil || update.Status == models.StatusBlocked {
+					continue
+				}
+				task, getErr := c.taskRepo.GetByID(ctx, update.TaskID)
+				if getErr != nil || task == nil {
+					continue
+				}
+				submitter.SubmitPublishedAutomationTask(*task)
+			}
+		}
+	}
 	completed, err := c.automationRepo.GetPublicationAttempt(ctx, request.ProjectID, request.AutomationID, request.VersionID, request.PlanRevision)
 	if err != nil {
 		return nil, err
@@ -192,7 +211,7 @@ func (c *AutomationCompiler) compileEffect(ctx context.Context, attemptID string
 	nodeKey := strings.TrimPrefix(effect.TargetKey, effect.ResourceType+":")
 	node, ok := findDraftNode(candidate, nodeKey)
 	if !ok {
-		return "", fmt.Errorf("publication target %q has no draft node", effect.TargetKey)
+		return "", fmt.Errorf("publication target %q has no staged graph node", effect.TargetKey)
 	}
 	switch effect.ResourceType {
 	case "task":
@@ -219,7 +238,7 @@ func (c *AutomationCompiler) compileTask(ctx context.Context, request Automation
 			return "", err
 		}
 	}
-	prompt, category, priority := automationNodeTaskConfiguration(candidate, node)
+	prompt, _, priority := automationNodeTaskConfiguration(candidate, node)
 	agent, err := c.resolveNodeAgent(ctx, request.ProjectID, node)
 	if err != nil {
 		return "", err
@@ -229,16 +248,11 @@ func (c *AutomationCompiler) compileTask(ctx context.Context, request Automation
 		agentDefinitionID = &agent.ID
 	}
 	if task == nil {
-		createCategory := category
-		createStatus := models.StatusPending
-		if candidate.AdapterKey == AutomationAdapterCustom {
-			if parentKey, _ := customAutomationTaskNeighbors(candidate, node.Key); parentKey != "" {
-				createCategory = models.CategoryBacklog
-				createStatus = models.StatusBlocked
-			}
-		}
+		// Compiler-created Tasks must remain non-admitted until the graph and
+		// resource membership commit together. Publication applies the configured
+		// category/status and submits runnable roots afterward.
 		task = &models.Task{ProjectID: request.ProjectID, Title: automationTaskTitle(definition.Automation, node), Prompt: prompt,
-			Category: createCategory, Priority: priority, Status: createStatus, AgentDefinitionID: agentDefinitionID,
+			Category: models.CategoryBacklog, Priority: priority, Status: models.StatusPending, AgentDefinitionID: agentDefinitionID,
 			CreatedVia: repository.AutomationCompilerTaskCreatedVia(request.AutomationID, node.Key)}
 		if err := c.taskSvc.Create(ctx, task); err != nil {
 			if errors.Is(err, ErrDuplicateTask) {
@@ -281,7 +295,7 @@ func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definit
 	for _, node := range candidate.Nodes {
 		stepKey := "task:" + node.Key
 		effect, ok := effects[stepKey]
-		if !ok || effect.ResourceType != "task" || candidate.AdapterKey != AutomationAdapterCustom && effect.Operation != "update" {
+		if !ok || effect.ResourceType != "task" {
 			continue
 		}
 		taskID := resources[stepKey]
@@ -300,6 +314,7 @@ func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definit
 		update := repository.AutomationPublicationTaskUpdate{
 			StepKey: stepKey, TaskID: taskID, Title: automationTaskTitle(definition.Automation, node),
 			Prompt: prompt, Category: category, Priority: priority, AgentDefinitionID: agentDefinitionID,
+			Status: models.StatusPending,
 		}
 		if candidate.AdapterKey == AutomationAdapterCustom {
 			update.ApplyTopology = true
@@ -406,10 +421,15 @@ func publishResult(definition *models.AutomationDefinition, snapshot *repository
 type AutomationLifecycleService struct {
 	repo         *repository.AutomationRepo
 	scheduleRepo *repository.ScheduleRepo
+	taskSvc      automationTaskMutationService
 }
 
-func NewAutomationLifecycleService(repo *repository.AutomationRepo, scheduleRepo *repository.ScheduleRepo) *AutomationLifecycleService {
-	return &AutomationLifecycleService{repo: repo, scheduleRepo: scheduleRepo}
+func NewAutomationLifecycleService(repo *repository.AutomationRepo, scheduleRepo *repository.ScheduleRepo, taskSvc ...automationTaskMutationService) *AutomationLifecycleService {
+	service := &AutomationLifecycleService{repo: repo, scheduleRepo: scheduleRepo}
+	if len(taskSvc) > 0 {
+		service.taskSvc = taskSvc[0]
+	}
+	return service
 }
 
 func (s *AutomationLifecycleService) Pause(ctx context.Context, projectID, automationID string) error {
@@ -423,7 +443,17 @@ func (s *AutomationLifecycleService) Resume(ctx context.Context, projectID, auto
 	if s == nil || s.repo == nil {
 		return errors.New("automation lifecycle service is unavailable")
 	}
-	return s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationActive)
+	roots, err := s.repo.ResumeAutomation(ctx, projectID, automationID)
+	if err != nil {
+		return err
+	}
+	if submitter, ok := s.taskSvc.(automationTaskSubmissionService); ok {
+		for _, task := range roots {
+			task.Category = models.CategoryActive
+			submitter.SubmitPublishedAutomationTask(task)
+		}
+	}
+	return nil
 }
 
 func (s *AutomationLifecycleService) Archive(ctx context.Context, projectID, automationID string) error {

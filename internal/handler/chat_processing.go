@@ -384,8 +384,8 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		if confirmationErr != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s automation confirmation preparation failed: %v", params.ExecID, confirmationErr)
 		} else if pending != nil {
-			controlContext := fmt.Sprintf("Pending Automation publication confirmation was marked affirmative by the Chat host. Call publish_automation_draft with automation_id=%q, version_id=%q, plan_revision=%q, confirmation_token=%q, and confirming_user_input_id=%q. Do not substitute any scope value.",
-				pending.AutomationID, pending.VersionID, pending.PlanRevision, pending.Token, pending.ConfirmingUserInputID)
+			controlContext := fmt.Sprintf("Pending Automation save confirmation was marked affirmative by the Chat host. Call save_automation with confirmation_token=%q and confirming_user_input_id=%q. Do not substitute either value.",
+				pending.Token, pending.ConfirmingUserInputID)
 			params.SystemContext = combineContexts(params.SystemContext, controlContext)
 		}
 	}

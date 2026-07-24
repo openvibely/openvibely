@@ -15,9 +15,11 @@ func (r *AutomationRepo) CreateAutomationConfirmationReceipt(ctx context.Context
 		return errors.New("automation confirmation receipt is required")
 	}
 	_, err := r.db.ExecContext(ctx, `INSERT INTO automation_chat_confirmation_receipts
-		(token_id, project_id, automation_id, version_id, plan_revision, principal_id, thread_id, plan_message_id, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, receipt.TokenID, receipt.ProjectID, receipt.AutomationID,
-		receipt.VersionID, receipt.PlanRevision, receipt.PrincipalID, receipt.ThreadID, receipt.PlanMessageID, receipt.ExpiresAt)
+		(token_id, project_id, automation_id, version_id, plan_revision, principal_id, thread_id, plan_message_id,
+		 automation_name, source, candidate_json, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, receipt.TokenID, receipt.ProjectID, receipt.AutomationID,
+		receipt.VersionID, receipt.PlanRevision, receipt.PrincipalID, receipt.ThreadID, receipt.PlanMessageID,
+		receipt.AutomationName, receipt.Source, receipt.CandidateJSON, receipt.ExpiresAt)
 	return err
 }
 
@@ -29,11 +31,13 @@ func getAutomationConfirmationReceipt(ctx context.Context, q queryer, tokenID st
 	var receipt models.AutomationChatConfirmationReceipt
 	var consumedAttempt, confirmingInput, method sql.NullString
 	err := q.QueryRowContext(ctx, `SELECT token_id, project_id, automation_id, version_id, plan_revision,
-		principal_id, thread_id, plan_message_id, expires_at, consumed_attempt_id, confirming_user_input_id,
-		confirmation_method, created_at, consumed_at FROM automation_chat_confirmation_receipts WHERE token_id = ?`, tokenID).
+		principal_id, thread_id, plan_message_id, automation_name, source, candidate_json, expires_at,
+		consumed_attempt_id, confirming_user_input_id, confirmation_method, created_at, consumed_at
+		FROM automation_chat_confirmation_receipts WHERE token_id = ?`, tokenID).
 		Scan(&receipt.TokenID, &receipt.ProjectID, &receipt.AutomationID, &receipt.VersionID, &receipt.PlanRevision,
-			&receipt.PrincipalID, &receipt.ThreadID, &receipt.PlanMessageID, &receipt.ExpiresAt, &consumedAttempt,
-			&confirmingInput, &method, &receipt.CreatedAt, &receipt.ConsumedAt)
+			&receipt.PrincipalID, &receipt.ThreadID, &receipt.PlanMessageID, &receipt.AutomationName, &receipt.Source,
+			&receipt.CandidateJSON, &receipt.ExpiresAt, &consumedAttempt, &confirmingInput, &method,
+			&receipt.CreatedAt, &receipt.ConsumedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -48,9 +52,8 @@ func getAutomationConfirmationReceipt(ctx context.Context, q queryer, tokenID st
 
 func (r *AutomationRepo) GetPendingAutomationConfirmation(ctx context.Context, projectID, principalID, threadID string, now time.Time) (*models.AutomationChatConfirmationReceipt, string, error) {
 	var tokenID, automationName string
-	err := r.db.QueryRowContext(ctx, `SELECT r.token_id, a.name
+	err := r.db.QueryRowContext(ctx, `SELECT r.token_id, r.automation_name
 		FROM automation_chat_confirmation_receipts r
-		JOIN automations a ON a.id = r.automation_id AND a.project_id = r.project_id
 		JOIN executions e ON e.id = r.plan_message_id AND e.task_id = r.thread_id
 		WHERE r.project_id = ? AND r.principal_id = ? AND r.thread_id = ?
 		  AND r.consumed_at IS NULL AND r.expires_at > ? AND e.status = 'completed'
@@ -172,7 +175,7 @@ func (r *AutomationRepo) ConsumeAutomationConfirmationAndReserve(ctx context.Con
 		return nil, err
 	}
 	if state != models.AutomationVersionDraft {
-		return nil, errors.New("automation version is not a draft")
+		return nil, errors.New("Automation graph is not staged for Save")
 	}
 	var attemptID string
 	err = conn.QueryRowContext(ctx, `SELECT id FROM automation_publication_attempts WHERE project_id = ? AND automation_id = ? AND version_id = ? AND plan_revision = ?`, input.ProjectID, input.AutomationID, input.VersionID, input.PlanRevision).Scan(&attemptID)

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -163,14 +162,14 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 
 	taskID := scheduledTaskID
 	if adapterKey == "custom" {
-		var triggerTaskMemberships int
+		var scheduledTaskMemberships int
 		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_definition_resources
 			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND node_id = ?
 			AND resource_type = 'task' AND resource_id = ?`, owner.ProjectID, owner.AutomationID, owner.VersionID,
-			owner.NodeID, scheduledTaskID).Scan(&triggerTaskMemberships); err != nil {
+			owner.NodeID, scheduledTaskID).Scan(&scheduledTaskMemberships); err != nil {
 			return nil, nil, err
 		}
-		if triggerTaskMemberships != 1 {
+		if scheduledTaskMemberships != 1 {
 			return nil, nil, ErrAutomationScheduleChanged
 		}
 	}
@@ -1298,62 +1297,6 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 	return out, rows.Err()
 }
 
-func (r *AutomationRepo) LiveOlderVersionPositions(ctx context.Context, projectID, automationID, currentVersionID string) (map[string]models.AutomationNodeCounts, []models.AutomationLegacyWorkGroup, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT COALESCE(current_node.id, ''), p.state, old_version.id, old_version.version, COUNT(*)
-		FROM automation_work_item_positions p
-		JOIN automation_nodes old_node ON old_node.id = p.node_id AND old_node.version_id = p.version_id
-		JOIN automation_versions old_version ON old_version.id = p.version_id
-		JOIN automation_versions current_version ON current_version.id = ?
-			AND current_version.project_id = p.project_id AND current_version.automation_id = p.automation_id
-		LEFT JOIN automation_nodes current_node ON current_node.project_id = p.project_id
-			AND current_node.automation_id = p.automation_id AND current_node.version_id = current_version.id
-			AND current_node.node_key = old_node.node_key
-		WHERE p.project_id = ? AND p.automation_id = ? AND p.version_id <> ?
-			AND old_version.adapter_key = current_version.adapter_key
-		GROUP BY current_node.id, p.state, old_version.id, old_version.version
-		ORDER BY old_version.version, old_version.id`, currentVersionID, projectID, automationID, currentVersionID)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
-	mapped := make(map[string]models.AutomationNodeCounts)
-	legacyByVersion := make(map[string]models.AutomationLegacyWorkGroup)
-	for rows.Next() {
-		var currentNodeID, state, versionID string
-		var version, count int
-		if err := rows.Scan(&currentNodeID, &state, &versionID, &version, &count); err != nil {
-			return nil, nil, err
-		}
-		if currentNodeID == "" {
-			group := legacyByVersion[versionID]
-			group.VersionID, group.Version, group.Count = versionID, version, group.Count+count
-			legacyByVersion[versionID] = group
-			continue
-		}
-		value := mapped[currentNodeID]
-		switch models.AutomationPositionState(state) {
-		case models.AutomationPositionActive:
-			value.Running += count
-		case models.AutomationPositionWaiting:
-			value.Waiting += count
-		case models.AutomationPositionBlocked:
-			value.Blocked += count
-		case models.AutomationPositionFailed:
-			value.Failed += count
-		}
-		mapped[currentNodeID] = value
-	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
-	}
-	legacy := make([]models.AutomationLegacyWorkGroup, 0, len(legacyByVersion))
-	for _, group := range legacyByVersion {
-		legacy = append(legacy, group)
-	}
-	sort.Slice(legacy, func(i, j int) bool { return legacy[i].Version < legacy[j].Version })
-	return mapped, legacy, nil
-}
-
 func (r *AutomationRepo) LiveEdgeCounts(ctx context.Context, projectID, automationID, versionID string, recentCutoff time.Time) (map[string][2]int, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT edge_id, COUNT(*),
 		SUM(CASE WHEN occurred_at >= ? THEN 1 ELSE 0 END)
@@ -1424,7 +1367,7 @@ type CustomAutomationTaskHandoff struct {
 func (r *AutomationRepo) ListCustomTaskHandoffs(ctx context.Context, projectID, automationID, versionID, sourceNodeID string) (bool, []CustomAutomationTaskHandoff, error) {
 	var adapterKey string
 	err := r.db.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
-		WHERE project_id = ? AND automation_id = ? AND id = ? AND state IN ('published','superseded')`,
+		WHERE project_id = ? AND automation_id = ? AND id = ? AND state = 'published'`,
 		projectID, automationID, versionID).Scan(&adapterKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil, nil
@@ -1920,15 +1863,27 @@ func (r *AutomationRepo) ContextForTask(ctx context.Context, projectID, taskID s
 		UNION ALL
 		SELECT t.id, t.parent_task_id, l.depth + 1 FROM tasks t JOIN task_lineage l ON t.id = l.parent_task_id
 		WHERE t.project_id = ? AND l.depth < 32
-	)
-		SELECT DISTINCT a.automation_id, a.version_id, COALESCE(a.invocation_id, ''),
-		COALESCE((SELECT p.node_id FROM automation_work_item_positions p
-			WHERE p.work_item_id = a.work_item_id ORDER BY p.entered_at, p.node_id LIMIT 1), a.node_id),
-		COALESCE(a.work_item_id, '')
+	), activity_bindings AS (
+		SELECT DISTINCT a.automation_id, a.version_id, COALESCE(a.invocation_id, '') AS invocation_id,
+			COALESCE((SELECT p.node_id FROM automation_work_item_positions p
+				WHERE p.work_item_id = a.work_item_id ORDER BY p.entered_at, p.node_id LIMIT 1), a.node_id) AS node_id,
+			COALESCE(a.work_item_id, '') AS work_item_id
 		FROM automation_activities a JOIN automation_activity_resources ar ON ar.activity_id = a.id
 		JOIN task_lineage l ON l.id = ar.resource_id
 		WHERE a.project_id = ? AND ar.resource_type = 'task'
-		ORDER BY a.automation_id, a.version_id, a.node_id, a.id`, taskID, projectID, projectID, projectID)
+	), definition_bindings AS (
+		SELECT dr.automation_id, dr.version_id, '' AS invocation_id, dr.node_id, '' AS work_item_id
+		FROM automation_definition_resources dr
+		JOIN automations a ON a.id = dr.automation_id AND a.project_id = dr.project_id
+			AND a.published_version_id = dr.version_id
+		WHERE dr.project_id = ? AND dr.resource_type = 'task' AND dr.resource_id = ?
+			AND NOT EXISTS (SELECT 1 FROM activity_bindings ab
+				WHERE ab.automation_id = dr.automation_id AND ab.version_id = dr.version_id)
+	)
+		SELECT automation_id, version_id, invocation_id, node_id, work_item_id FROM activity_bindings
+		UNION ALL
+		SELECT automation_id, version_id, invocation_id, node_id, work_item_id FROM definition_bindings
+		ORDER BY automation_id, version_id, node_id`, taskID, projectID, projectID, projectID, projectID, taskID)
 	if err != nil {
 		return models.AutomationContext{}, err
 	}

@@ -277,7 +277,9 @@ func (s *LLMService) activatePublishedCustomAutomationChild(ctx context.Context,
 					Key: notificationNode.NodeKey, Name: notificationNode.Name, Type: notificationNode.NodeType,
 					Role: notificationNode.Role, Config: notificationConfig,
 				})
-				promptCandidate.Edges = append(promptCandidate.Edges, models.AutomationDraftEdge{From: targetNode.NodeKey, To: notificationNode.NodeKey})
+				promptCandidate.Edges = append(promptCandidate.Edges, models.AutomationDraftEdge{
+					From: targetNode.NodeKey, To: notificationNode.NodeKey, FromPort: "right", ToPort: "left",
+				})
 			}
 			category, _ := config["category"].(string)
 			if sourceNode.NodeType == models.AutomationNodeTrigger {

@@ -77,8 +77,8 @@ func TestRegistry_AllActionsHaveDescription(t *testing.T) {
 }
 
 func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
-	readActions := []string{"preview_automation_description", "plan_automation_publication"}
-	writeActions := []string{"create_automation_draft", "publish_automation_draft"}
+	readActions := []string{"preview_automation_description"}
+	writeActions := []string{"plan_automation_save", "save_automation"}
 	for _, name := range append(readActions, writeActions...) {
 		def := Get(name)
 		if def == nil || def.Domain != DomainAutomations {
@@ -105,7 +105,7 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 		}
 	}
 
-	create := Get("create_automation_draft")
+	plan := Get("plan_automation_save")
 	var schema struct {
 		Properties struct {
 			Source struct {
@@ -113,19 +113,24 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 			} `json:"source"`
 		} `json:"properties"`
 	}
-	if err := json.Unmarshal(create.Parameters, &schema); err != nil {
-		t.Fatalf("decode create Automation schema: %v", err)
+	if err := json.Unmarshal(plan.Parameters, &schema); err != nil {
+		t.Fatalf("decode Automation save-plan schema: %v", err)
 	}
 	want := []string{"template", "describe", "blank"}
 	if !reflect.DeepEqual(want, schema.Properties.Source.Enum) {
-		t.Fatalf("create Automation source enum = %v, want %v", schema.Properties.Source.Enum, want)
+		t.Fatalf("Automation save-plan source enum = %v, want %v", schema.Properties.Source.Enum, want)
 	}
-	if strings.Contains(string(create.Parameters), `"candidate"`) || strings.Contains(create.Description, "structured candidate") {
-		t.Fatal("public create Automation action must not expose a candidate creation identity")
+	if strings.Contains(string(plan.Parameters), `"candidate"`) || strings.Contains(plan.Description, "structured candidate") {
+		t.Fatal("public Automation save-plan action must not expose a candidate creation identity")
+	}
+	for _, removed := range []string{"create_automation_draft", "plan_automation_publication", "publish_automation_draft"} {
+		if Get(removed) != nil {
+			t.Fatalf("removed draft action %s remains registered", removed)
+		}
 	}
 	preview := Get("preview_automation_description")
 	if preview == nil || !strings.Contains(preview.Description, "custom") || !strings.Contains(preview.Description, "visual builder") ||
-		!strings.Contains(create.Description, "custom") || !strings.Contains(create.Description, "visual builder") {
+		!strings.Contains(plan.Description, "custom") || !strings.Contains(plan.Description, "visual builder") {
 		t.Fatal("Describe It and Chat action descriptions must advertise the shared custom builder contract")
 	}
 }

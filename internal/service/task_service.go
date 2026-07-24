@@ -138,6 +138,15 @@ func (s *TaskService) Create(ctx context.Context, t *models.Task) error {
 	return s.CreateWithGoal(ctx, t, "")
 }
 
+// SubmitPublishedAutomationTask admits a compiler-created root only after its
+// saved graph and Automation provenance are durable.
+func (s *TaskService) SubmitPublishedAutomationTask(task models.Task) {
+	if s == nil || s.workerSvc == nil || task.Category != models.CategoryActive || task.Status == models.StatusBlocked || task.ParentTaskID != nil {
+		return
+	}
+	s.workerSvc.Submit(task)
+}
+
 func (s *TaskService) CreateWithGoal(ctx context.Context, t *models.Task, objective string) error {
 	if t.Status == "" {
 		t.Status = models.StatusPending

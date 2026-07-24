@@ -302,6 +302,14 @@ func (w *WorkerService) dispatchNext() {
 				applog.Infof("[worker] pruned stale task=%s %q from queue", task.ID, task.Title)
 				continue
 			}
+			if !isPrepared {
+				// Ordinary submissions are admission hints keyed by Task ID. The
+				// persisted Task is authoritative at dispatch time so a queued root
+				// cannot run replaced prompt, Agent, or topology data under the
+				// current Automation graph. Prepared dispatches retain their exact
+				// immutable envelope and pre-created execution instead.
+				task = *dbTask
+			}
 
 			// Dependency gating: chained tasks must wait for parent to reach terminal state.
 			// Swarm child tasks are grouped under an active parent and run independently.

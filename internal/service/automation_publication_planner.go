@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	automationAdapterContractVersion  = 8
-	automationCompilerContractVersion = 8
+	automationAdapterContractVersion  = 12
+	automationCompilerContractVersion = 11
 )
 
 type automationGitHubConnectionProvider interface {
@@ -107,14 +107,14 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 		return nil, err
 	}
 	if definition == nil || definition.Version.State != models.AutomationVersionDraft {
-		return nil, errors.New("automation draft not found")
+		return nil, errors.New("staged Automation graph not found")
 	}
 	metadata, err := p.automationRepo.GetAutomationDraftMetadata(ctx, projectID, automationID, versionID)
 	if err != nil {
 		return nil, err
 	}
 	if metadata == nil {
-		return nil, errors.New("automation draft metadata not found")
+		return nil, errors.New("staged Automation graph metadata not found")
 	}
 	candidate, err := metadata.Candidate()
 	if err != nil {
@@ -180,12 +180,12 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 			resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
 			switch node.Type {
 			case models.AutomationNodeAgentTask:
-				if node.Role != "implementation" {
+				if !customAutomationGitHubIssueTask(candidate, node.Key) {
 					resource.AllowedResources["task"] = true
 				}
 			case models.AutomationNodeTrigger:
-				resource.AllowedResources["task"] = true
 				resource.AllowedResources["schedule"] = true
+				resource.AllowedResources["task"] = true
 			}
 			resourceNodes = append(resourceNodes, resource)
 		}
@@ -215,8 +215,8 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 				effect = &models.AutomationPublicationEffect{StepKey: "github_issue_configuration:" + node.Key, Operation: "configure", TargetKey: "github_issue_configuration:" + node.Key, ResourceType: "github_issue_configuration", Name: node.Name}
 			case node.Type == models.AutomationNodeHumanGate && node.Role == "github_assignment":
 				effect = &models.AutomationPublicationEffect{StepKey: "github_assignment:" + node.Key, Operation: "configure", TargetKey: "github_assignment:" + node.Key, ResourceType: "github_assignment", Name: node.Name}
-			case node.Type == models.AutomationNodeAgentTask && node.Role == "implementation":
-				effect = &models.AutomationPublicationEffect{StepKey: "implementation_task_template:" + node.Key, Operation: "configure", TargetKey: "implementation_task_template:" + node.Key, ResourceType: "implementation_task_template", Name: node.Name}
+			case node.Type == models.AutomationNodeAgentTask && customAutomationGitHubIssueTask(candidate, node.Key):
+				effect = &models.AutomationPublicationEffect{StepKey: "github_task_configuration:" + node.Key, Operation: "configure", TargetKey: "github_task_configuration:" + node.Key, ResourceType: "github_task_configuration", Name: node.Name}
 			case node.Type == models.AutomationNodeAction && node.Role == "open_pull_request":
 				effect = &models.AutomationPublicationEffect{StepKey: "pull_request_configuration:" + node.Key, Operation: "configure", TargetKey: "pull_request_configuration:" + node.Key, ResourceType: "pull_request_configuration", Name: node.Name}
 			case node.Type == models.AutomationNodeHumanGate && node.Role == "pull_request_review":
@@ -667,6 +667,11 @@ func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, nod
 	if len(sourceFiles) > 0 {
 		prompt += "\n\nFocus source files:\n- " + strings.Join(sourceFiles, "\n- ")
 	}
+	if node.Type == models.AutomationNodeTrigger {
+		if _, child := customAutomationTaskNeighbors(candidate, node.Key); child != nil {
+			prompt += "\n\nConnected Task handoff:\nDo not create or schedule the connected downstream Task yourself. OpenVibely activates it automatically after this task completes successfully."
+		}
+	}
 	if notification := customAutomationNotificationTarget(candidate, node.Key); notification != nil {
 		notificationType, _ := notification.Config["notification_type"].(string)
 		instructions, _ := notification.Config["instructions"].(string)
@@ -682,11 +687,11 @@ func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, nod
 			". Do not assign the issue. A human assignment in GitHub is the approval signal; creating the issue must not approve, implement, merge, release, or deploy anything."
 	}
 	if node.Role == "github_inbox" {
-		if implementation := customAutomationTargetByRole(candidate, node.Key, "implementation"); implementation != nil {
-			implementationPrompt := automationCompiledImplementationPrompt(candidate, *implementation)
-			category, _ := implementation.Config["category"].(string)
-			priority, _ := draftInt(implementation.Config["priority"])
-			prompt += "\n\nGitHub assignment handoff:\nCall github_get_project_inbox, then github_list_assigned_issues for an authorized configured inbox login. Reconcile existing work with list_tasks before calling create_task. Create at most one visible task per actionable assigned issue and include source_github_issue_number and source_github_repo_url so existing GitHub/Automation provenance is preserved. Use category " + category + " and priority " + fmt.Sprintf("%d", priority) + ". The implementation task prompt must include:\n" + implementationPrompt +
+		if issueTask := customAutomationGitHubIssueTaskTarget(candidate, node.Key); issueTask != nil {
+			issueTaskPrompt := automationCompiledGitHubIssueTaskPrompt(candidate, *issueTask)
+			category, _ := issueTask.Config["category"].(string)
+			priority, _ := draftInt(issueTask.Config["priority"])
+			prompt += "\n\nGitHub assignment handoff:\nCall github_get_project_inbox, then github_list_assigned_issues for an authorized configured inbox login. Reconcile existing work with list_tasks before calling create_task. Create at most one visible task per actionable assigned issue and include source_github_issue_number and source_github_repo_url so existing GitHub/Automation provenance is preserved. Use category " + category + " and priority " + fmt.Sprintf("%d", priority) + ". The task prompt must include:\n" + issueTaskPrompt +
 				"\nAssignment is a human approval signal only. You must not approve an issue, approve a PR, merge, release, or deploy on the human's behalf."
 		}
 	}
@@ -727,7 +732,7 @@ func customAutomationTargetByRole(candidate models.AutomationDraftCandidate, sou
 	return nil
 }
 
-func automationCompiledImplementationPrompt(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) string {
+func automationCompiledGitHubIssueTaskPrompt(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) string {
 	prompt := automationCompiledTaskPrompt(candidate, node)
 	if pullRequest := customAutomationTargetByRole(candidate, node.Key, "open_pull_request"); pullRequest != nil {
 		instructions, _ := pullRequest.Config["instructions"].(string)

@@ -90,7 +90,44 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 		hasTask = hasTask || resources[i].ResourceType == "task"
 	}
 	if !hasSchedule || !hasTask {
-		return nil, false, errors.New("registered automation requires at least one trigger schedule and one visible task")
+		return nil, false, errors.New("registered automation requires at least one scheduled task with task and schedule bindings")
+	}
+	taskByNode := make(map[string]string)
+	scheduleByNode := make(map[string]string)
+	for _, resource := range resources {
+		switch resource.ResourceType {
+		case "task":
+			if _, exists := taskByNode[resource.NodeKey]; exists {
+				return nil, false, fmt.Errorf("automation node %q has more than one task binding", resource.NodeKey)
+			}
+			taskByNode[resource.NodeKey] = resource.ResourceID
+		case "schedule":
+			if _, exists := scheduleByNode[resource.NodeKey]; exists {
+				return nil, false, fmt.Errorf("automation node %q has more than one schedule binding", resource.NodeKey)
+			}
+			scheduleByNode[resource.NodeKey] = resource.ResourceID
+		}
+	}
+	for nodeKey, scheduleID := range scheduleByNode {
+		taskID, ok := taskByNode[nodeKey]
+		if !ok {
+			return nil, false, fmt.Errorf("scheduled automation node %q requires its task binding on that same node", nodeKey)
+		}
+		var scheduledTaskID string
+		if err := s.repo.DB().QueryRowContext(ctx, `SELECT s.task_id FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ? AND t.project_id = ?`, scheduleID, req.ProjectID).Scan(&scheduledTaskID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, false, fmt.Errorf("schedule resource %q does not exist or belongs to another project", scheduleID)
+			}
+			return nil, false, fmt.Errorf("validate scheduled automation node %q: %w", nodeKey, err)
+		}
+		if scheduledTaskID != taskID {
+			return nil, false, fmt.Errorf("schedule for automation node %q must target the task bound to that same node", nodeKey)
+		}
+	}
+	for nodeKey := range taskByNode {
+		if _, ok := scheduleByNode[nodeKey]; !ok {
+			return nil, false, fmt.Errorf("scheduled automation node %q requires its schedule binding on that same node", nodeKey)
+		}
 	}
 	sort.Slice(resources, func(i, j int) bool {
 		left := resources[i].NodeKey + "\x00" + resources[i].ResourceType + "\x00" + resources[i].ResourceID + "\x00" + resources[i].Relation
@@ -200,15 +237,11 @@ func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automat
 	if err != nil {
 		return nil, err
 	}
-	olderCounts, legacyWork, err := s.repo.LiveOlderVersionPositions(ctx, projectID, automationID, definition.Version.ID)
-	if err != nil {
-		return nil, err
-	}
 	edgeCounts, err := s.repo.LiveEdgeCounts(ctx, projectID, automationID, definition.Version.ID, cutoff)
 	if err != nil {
 		return nil, err
 	}
-	resources, err := s.repo.ListResourceSummaries(ctx, projectID, automationID, definition.Version.ID, 50)
+	resources, err := s.repo.ListResourceSummaries(ctx, projectID, automationID, definition.Version.ID, 100)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +251,7 @@ func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automat
 	}
 	graph := &models.AutomationLiveGraph{Automation: definition.Automation, Version: definition.Version,
 		Resources: resources, ActiveInvocations: activeInvocations,
-		ActiveWorkItems: activeWorkItems, RecentCutoff: cutoff, ExternalState: externalState, LegacyWork: legacyWork}
+		ActiveWorkItems: activeWorkItems, RecentCutoff: cutoff, ExternalState: externalState}
 	for _, edge := range definition.Edges {
 		values := edgeCounts[edge.ID]
 		graph.Edges = append(graph.Edges, models.AutomationLiveEdge{AutomationEdge: edge,
@@ -226,11 +259,6 @@ func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automat
 	}
 	for _, node := range definition.Nodes {
 		nodeCounts := counts[node.ID]
-		older := olderCounts[node.ID]
-		nodeCounts.Running += older.Running
-		nodeCounts.Waiting += older.Waiting
-		nodeCounts.Blocked += older.Blocked
-		nodeCounts.Failed += older.Failed
 		display := "idle"
 		switch {
 		case nodeCounts.Failed > 0:

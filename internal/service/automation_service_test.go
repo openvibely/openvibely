@@ -44,7 +44,7 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	project := automationTestProject(t, projectRepo, "Automations")
 	other := automationTestProject(t, projectRepo, "Other")
 	sharedTask, nativeSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Shared Inbox")
-	_, githubSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "GitHub Trigger")
+	githubTask, githubSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "GitHub Trigger")
 	foreignTask, foreignSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, other.ID, "Foreign")
 
 	cards, err := graph.List(ctx, project.ID)
@@ -52,8 +52,8 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	require.Empty(t, cards, "ordinary tasks and schedules must not be inferred as automations")
 
 	nativeReq := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/default", Resources: []models.AutomationResourceBinding{
-		{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: nativeSchedule.ID},
-		{NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: sharedTask.ID},
+		{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: nativeSchedule.ID},
+		{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: sharedTask.ID},
 	}}
 	native, reused, err := service.Register(ctx, nativeReq)
 	require.NoError(t, err)
@@ -68,17 +68,29 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	require.Equal(t, native.Automation.ID, again.Automation.ID)
 	require.Equal(t, native.Version.ID, again.Version.ID, "identical setup reruns must not create versions")
 	require.Equal(t, "Updated Native Automation", again.Automation.Name)
+	var retainedGraphID string
+	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO automation_versions
+		(project_id, automation_id, version, state, source, adapter_key, published_at)
+		VALUES (?, ?, 2, 'published', 'bootstrap', ?, CURRENT_TIMESTAMP) RETURNING id`, project.ID,
+		native.Automation.ID, AutomationAdapterNativeSDLC).Scan(&retainedGraphID))
+	again, reused, err = service.Register(ctx, nativeReq)
+	require.NoError(t, err)
+	require.True(t, reused)
+	require.Equal(t, native.Version.ID, again.Version.ID)
+	require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", retainedGraphID),
+		"unchanged maintained registration must remove pre-existing retained graphs")
+	require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", native.Automation.ID))
 
 	_, _, err = service.Register(ctx, AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC,
 		StableKey: nativeReq.StableKey, Resources: []models.AutomationResourceBinding{
-			{NodeKey: "inbox_trigger", ResourceType: "schedule", ResourceID: githubSchedule.ID},
-			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: sharedTask.ID, Relation: "shared"},
+			{NodeKey: "dev_inbox", ResourceType: "schedule", ResourceID: githubSchedule.ID},
+			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: githubTask.ID},
 		}})
 	require.ErrorContains(t, err, "adapter cannot change")
 
 	githubReq := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/default", Resources: []models.AutomationResourceBinding{
-		{NodeKey: "inbox_trigger", ResourceType: "schedule", ResourceID: githubSchedule.ID},
-		{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: sharedTask.ID, Relation: "shared"},
+		{NodeKey: "dev_inbox", ResourceType: "schedule", ResourceID: githubSchedule.ID},
+		{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: githubTask.ID},
 	}}
 	github, reused, err := service.Register(ctx, githubReq)
 	require.NoError(t, err)
@@ -89,21 +101,104 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cards, 2)
 
-	_, _, err = service.Register(ctx, AutomationRegistrationRequest{ProjectID: other.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/foreign", Resources: []models.AutomationResourceBinding{
-		{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: foreignSchedule.ID},
-		{NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: sharedTask.ID},
-	}})
-	require.ErrorContains(t, err, "another project")
-
-	_, _, err = service.Register(ctx, AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/foreign-task", Resources: []models.AutomationResourceBinding{
-		{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: nativeSchedule.ID},
-		{NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: foreignTask.ID},
+	_, _, err = service.Register(ctx, AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/foreign", Resources: []models.AutomationResourceBinding{
+		{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: foreignSchedule.ID},
+		{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: foreignTask.ID},
 	}})
 	require.ErrorContains(t, err, "another project")
 
 	foreignView, err := automationRepo.GetDefinition(ctx, other.ID, native.Automation.ID)
 	require.NoError(t, err)
 	require.Nil(t, foreignView)
+}
+
+func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecycle(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		state          models.AutomationLifecycleState
+		ownershipState string
+		expectEnabled  bool
+	}{
+		{name: "active", state: models.AutomationActive, ownershipState: "active", expectEnabled: true},
+		{name: "paused", state: models.AutomationPaused, ownershipState: "paused"},
+		{name: "archived", state: models.AutomationArchived, ownershipState: "archived"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			project := automationTestProject(t, repository.NewProjectRepo(db), "Maintained "+test.name)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			automationRepo := repository.NewAutomationRepo(db)
+			registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
+
+			firstTask, firstSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "First maintained schedule")
+			request := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC,
+				StableKey: "native-sdlc/lifecycle-" + test.name, Resources: []models.AutomationResourceBinding{
+					{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: firstSchedule.ID},
+					{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: firstTask.ID},
+				}}
+			first, _, err := registration.Register(ctx, request)
+			require.NoError(t, err)
+			if test.state != models.AutomationActive {
+				require.NoError(t, automationRepo.SetAutomationLifecycle(ctx, project.ID, first.Automation.ID, test.state))
+			}
+			var triggerNodeID string
+			for _, node := range first.Nodes {
+				if node.NodeKey == "vision_suggestions" {
+					triggerNodeID = node.ID
+				}
+			}
+			require.NotEmpty(t, triggerNodeID)
+			_, err = db.ExecContext(ctx, `INSERT INTO automation_invocations
+				(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, completed_at)
+				VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'completed', CURRENT_TIMESTAMP)`, project.ID, first.Automation.ID,
+				first.Version.ID, triggerNodeID, firstSchedule.ID, "old-"+test.name)
+			require.NoError(t, err)
+
+			secondTask, secondSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Replacement maintained schedule")
+			request.Resources = []models.AutomationResourceBinding{
+				{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: secondSchedule.ID},
+				{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: secondTask.ID},
+			}
+			replaced, _, err := registration.Register(ctx, request)
+			require.NoError(t, err)
+			require.Equal(t, test.state, replaced.Automation.LifecycleState)
+			require.NotEqual(t, first.Version.ID, replaced.Version.ID)
+			require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", first.Automation.ID), "maintained replacement must retain exactly one current graph")
+			require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", first.Version.ID))
+			require.Zero(t, tableCountWhere(t, db, "automation_invocations", "automation_id", first.Automation.ID), "prior graph runtime projection must be deleted")
+			require.Zero(t, tableCountWhere(t, db, "schedules", "id", firstSchedule.ID), "obsolete exclusively owned schedules must be deleted")
+			stored, err := scheduleRepo.GetByID(ctx, secondSchedule.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			require.Equal(t, test.expectEnabled, stored.Enabled)
+			owner, err := automationRepo.GetTriggerOwner(ctx, secondSchedule.ID)
+			require.NoError(t, err)
+			require.NotNil(t, owner, "inactive Automations must retain exclusive schedule provenance")
+			require.Equal(t, test.ownershipState, owner.OwnershipState)
+		})
+	}
+}
+
+func TestAutomationRegistrationRejectsScheduleTaskMismatch(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Mismatched scheduled task")
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	firstTask, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Actual scheduled task")
+	secondTask := models.Task{ProjectID: project.ID, Title: "Incorrect visual task", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2, Prompt: "different task"}
+	require.NoError(t, taskRepo.Create(context.Background(), &secondTask))
+
+	_, _, err := NewAutomationRegistrationService(repository.NewAutomationRepo(db), NewAutomationAdapterRegistry()).Register(context.Background(), AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/mismatch",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: secondTask.ID},
+		},
+	})
+	require.ErrorContains(t, err, "must target the task bound to that same node")
+	require.NotEqual(t, firstTask.ID, secondTask.ID)
 }
 
 func TestAutomationRegistrationRejectsUnsupportedAdapterAndExclusiveTriggerReuse(t *testing.T) {
@@ -120,20 +215,20 @@ func TestAutomationRegistrationRejectsUnsupportedAdapterAndExclusiveTriggerReuse
 	_, _, err := service.Register(ctx, AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: "custom", StableKey: "custom/default", Resources: []models.AutomationResourceBinding{{NodeKey: "x", ResourceType: "task", ResourceID: task.ID}}})
 	require.ErrorContains(t, err, "unsupported maintained automation adapter")
 	_, _, err = service.Register(ctx, AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterVisionDriver, StableKey: "vision-driver/default", Resources: []models.AutomationResourceBinding{
-		{NodeKey: "vision_trigger", ResourceType: "schedule", ResourceID: schedule.ID},
+		{NodeKey: "vision_driver", ResourceType: "schedule", ResourceID: schedule.ID},
 		{NodeKey: "vision_driver", ResourceType: "task", ResourceID: task.ID},
 	}})
 	require.ErrorContains(t, err, "unsupported maintained automation adapter", "Vision Driver is publishable from explicit drafts but is not a maintained setup registration path")
 
 	_, _, err = service.Register(ctx, AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/shared-trigger", Resources: []models.AutomationResourceBinding{
-		{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: schedule.ID, Relation: "shared"},
-		{NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: task.ID},
+		{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID, Relation: "shared"},
+		{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
 	}})
 	require.ErrorContains(t, err, "exclusive owned relation")
 
 	base := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, Resources: []models.AutomationResourceBinding{
-		{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: schedule.ID},
-		{NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: task.ID},
+		{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+		{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
 	}}
 	start := make(chan struct{})
 	results := make(chan error, 2)
@@ -189,7 +284,7 @@ func TestAutomationBootstrapRuntimeToolIsSelectedSkillScoped(t *testing.T) {
 	taskRepo := repository.NewTaskRepo(db, nil)
 	scheduleRepo := repository.NewScheduleRepo(db)
 	producer, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Runtime producer")
-	input := fmt.Sprintf(`{"adapter_key":"native_sdlc","stable_key":"native-sdlc/default","resources":[{"node_key":"suggestion_trigger","resource_type":"schedule","resource_id":%q},{"node_key":"suggestion_producer","resource_type":"task","resource_id":%q}]}`, schedule.ID, producer.ID)
+	input := fmt.Sprintf(`{"adapter_key":"native_sdlc","stable_key":"native-sdlc/default","resources":[{"node_key":"vision_suggestions","resource_type":"schedule","resource_id":%q},{"node_key":"vision_suggestions","resource_type":"task","resource_id":%q}]}`, schedule.ID, producer.ID)
 	output, handled, isError, err := runtime.Executor(nativeCtx, "register_automation_resources", []byte(input))
 	require.NoError(t, err)
 	require.True(t, handled)

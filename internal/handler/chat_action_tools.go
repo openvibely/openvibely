@@ -66,8 +66,8 @@ func (c *chatActionSummaryCollector) appendAutomationPlans(output string) string
 			}
 			lines = append(lines, line)
 		}
-		blocks = append(blocks, fmt.Sprintf("Automation publication plan for %s (revision %s):\n%s\nNothing has been created or activated. To confirm after reviewing this stored plan, reply exactly: publish %s",
-			pending.Name, pending.Plan.PlanRevision, strings.Join(lines, "\n"), pending.Name))
+		blocks = append(blocks, fmt.Sprintf("Automation save plan for %s:\n%s\nNothing has been created or activated. To save after reviewing this stored plan, reply exactly: save %s",
+			pending.Name, strings.Join(lines, "\n"), pending.Name))
 	}
 	summary := "\n\n---\n" + strings.Join(blocks, "\n\n")
 	if strings.Contains(output, summary) {
@@ -241,14 +241,11 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"preview_automation_description": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeAutomationPreviewAction(ctx, params, input)
 		},
-		"create_automation_draft": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeAutomationCreateDraftAction(ctx, params, input)
+		"plan_automation_save": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeAutomationPlanSaveAction(ctx, params, input, collector)
 		},
-		"plan_automation_publication": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeAutomationPlanAction(ctx, params, input, collector)
-		},
-		"publish_automation_draft": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeAutomationPublishAction(ctx, params, input)
+		"save_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeAutomationSaveAction(ctx, params, input)
 		},
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeCreateSwarmTaskTool(ctx, params, input, collector)

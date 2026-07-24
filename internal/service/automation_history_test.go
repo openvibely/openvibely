@@ -13,7 +13,7 @@ import (
 
 func createHistoryInvocation(t *testing.T, fixture automationRuntimeFixture, suffix, status string) models.AutomationInvocation {
 	t.Helper()
-	trigger := automationNodeByKey(t, fixture.definition, "suggestion_trigger")
+	trigger := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	var invocation models.AutomationInvocation
 	err := fixture.repo.DB().QueryRow(`INSERT INTO automation_invocations
 		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
@@ -65,7 +65,7 @@ func TestAutomationHistoryInvocationIsolationWorkItemLifetimeAndReplay(t *testin
 	ctx := context.Background()
 	invocationA := createHistoryInvocation(t, fixture, "a", "completed")
 	invocationB := createHistoryInvocation(t, fixture, "b", "completed")
-	producer := automationNodeByKey(t, fixture.definition, "suggestion_producer")
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	gate := automationNodeByKey(t, fixture.definition, "approval")
 
 	bindingA := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocationA.ID, NodeID: producer.ID}
@@ -126,7 +126,7 @@ func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	invocation := createHistoryInvocation(t, fixture, "metrics", "completed")
-	producer := automationNodeByKey(t, fixture.definition, "suggestion_producer")
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	gate := automationNodeByKey(t, fixture.definition, "approval")
 	completedNode := automationNodeByKey(t, fixture.definition, "completed")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: producer.ID}
@@ -192,7 +192,7 @@ func TestAutomationHistoryMetricsAndHealthUsePersistedEvents(t *testing.T) {
 	require.NoError(t, err)
 	var recentTriggerFailures int
 	for _, failure := range metrics.Failures {
-		if failure.NodeID == automationNodeByKey(t, fixture.definition, "suggestion_trigger").ID {
+		if failure.NodeID == automationNodeByKey(t, fixture.definition, "vision_suggestions").ID {
 			recentTriggerFailures = failure.Count
 		}
 	}
@@ -208,7 +208,7 @@ func TestAutomationHistoryReplayPaginationSeedsPersistedPriorState(t *testing.T)
 	ctx := context.Background()
 	invocationA := createHistoryInvocation(t, fixture, "replay-a", "completed")
 	invocationB := createHistoryInvocation(t, fixture, "replay-b", "completed")
-	producer := automationNodeByKey(t, fixture.definition, "suggestion_producer")
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	gate := automationNodeByKey(t, fixture.definition, "approval")
 
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocationA.ID, NodeID: producer.ID}
@@ -247,7 +247,7 @@ func TestAutomationHistoryActivityCursorIsStableAndCollectionBound(t *testing.T)
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
 	invocation := createHistoryInvocation(t, fixture, "activity-pages", "completed")
-	producer := automationNodeByKey(t, fixture.definition, "suggestion_producer")
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: producer.ID}
 	for i := 0; i < 3; i++ {
 		_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
@@ -284,7 +284,7 @@ func TestAutomationHistoryActivityCursorIsStableAndCollectionBound(t *testing.T)
 func TestAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
-	producer := automationNodeByKey(t, fixture.definition, "suggestion_producer")
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: producer.ID}
 	for i := 0; i < 4; i++ {
 		_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{

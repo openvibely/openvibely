@@ -43,9 +43,9 @@ func newAutomationRuntimeFixture(t *testing.T, adapterKey string) automationRunt
 	schedule.RepeatType = models.RepeatHours
 	schedule.RepeatInterval = 1
 	require.NoError(t, scheduleRepo.Update(context.Background(), &schedule))
-	triggerKey, taskKey, stableKey := "suggestion_trigger", "suggestion_producer", "native-sdlc/runtime"
+	triggerKey, taskKey, stableKey := "vision_suggestions", "vision_suggestions", "native-sdlc/runtime"
 	if adapterKey == AutomationAdapterGitHubSDLC {
-		triggerKey, taskKey, stableKey = "inbox_trigger", "dev_inbox", "github-sdlc/runtime"
+		triggerKey, taskKey, stableKey = "dev_inbox", "dev_inbox", "github-sdlc/runtime"
 	}
 	definition, _, err := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry()).Register(context.Background(), AutomationRegistrationRequest{
 		ProjectID: project.ID, AdapterKey: adapterKey, StableKey: stableKey,
@@ -115,7 +115,7 @@ func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.
 	require.Equal(t, execution.ID, sameExecution.ID, "dispatch retry must resolve the prepared execution")
 	require.ErrorIs(t, fixture.repo.RenewDispatchLease(ctx, dispatch.ID, "not-owner", now.Add(4*time.Minute)), repository.ErrAutomationDispatchLease)
 	require.NoError(t, fixture.repo.RenewDispatchLease(ctx, dispatch.ID, "owner", now.Add(4*time.Minute)))
-	producer := automationNodeByKey(t, fixture.definition, "suggestion_producer")
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	pendingBinding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
 		InvocationID: invocation.ID, NodeID: producer.ID}
 	_, pendingActivity, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
@@ -301,9 +301,9 @@ func TestAutomationRuntimeOverlappingInvocationsProjectConcurrently(t *testing.T
 	definition, _, err := NewAutomationRegistrationService(fixture.repo, NewAutomationAdapterRegistry()).Register(ctx, AutomationRegistrationRequest{
 		ProjectID: fixture.project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/runtime",
 		Resources: []models.AutomationResourceBinding{
-			{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: fixture.schedule.ID},
-			{NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: fixture.task.ID},
-			{NodeKey: "inbox_trigger", ResourceType: "schedule", ResourceID: inboxSchedule.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: fixture.schedule.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: fixture.task.ID},
+			{NodeKey: "inbox", ResourceType: "schedule", ResourceID: inboxSchedule.ID},
 			{NodeKey: "inbox", ResourceType: "task", ResourceID: inboxTask.ID},
 		},
 	})
@@ -508,56 +508,70 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 	newTask, newSchedule := automationTestTaskAndSchedule(t, fixture.taskRepo, fixture.schedRepo, fixture.project.ID, "New topology worker")
 	newDefinition, _, err := NewAutomationRegistrationService(fixture.repo, NewAutomationAdapterRegistry()).Register(ctx, AutomationRegistrationRequest{
 		ProjectID: fixture.project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/runtime",
-		Resources: []models.AutomationResourceBinding{{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: newSchedule.ID}, {NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: newTask.ID}},
+		Resources: []models.AutomationResourceBinding{{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: newSchedule.ID}, {NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: newTask.ID}},
 	})
 	require.NoError(t, err)
 	newApproval := automationNodeByKey(t, newDefinition, "approval")
+	newCompleted := automationNodeByKey(t, newDefinition, "completed")
 	newBinding := models.AutomationBinding{AutomationID: newDefinition.Automation.ID, VersionID: newDefinition.Version.ID, NodeID: newApproval.ID}
 	mappedItem, mappedActivity, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{newBinding}}, Binding: newBinding,
-		WorkItemKey: "alert:stable", ActivityKey: "alert:stable:new-version-process", ActivityType: "process_existing", ActivityStatus: models.AutomationActivityCompleted,
+		WorkItemKey: "alert:stable", WorkItemStatus: models.AutomationWorkItemWaiting,
+		ActivityKey: "alert:stable:current-graph-process", ActivityType: "process_existing", ActivityStatus: models.AutomationActivityCompleted,
+		EventKey: "alert:stable:current-graph-waiting", ToNodeID: newApproval.ID, Transition: models.AutomationTransitionWaiting,
 	})
 	require.NoError(t, err)
-	require.Equal(t, item.ID, mappedItem.ID)
-	require.Equal(t, fixture.definition.Version.ID, mappedActivity.VersionID, "old work item activity must retain origin topology version")
-	require.NotEqual(t, newDefinition.Version.ID, mappedActivity.VersionID)
-	liveNewVersion, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
+	require.NotEqual(t, item.ID, mappedItem.ID, "replacement must not map current work onto deleted graph projection")
+	require.Equal(t, newDefinition.Version.ID, mappedActivity.VersionID)
+	var oldProjectionRows int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE id = ?`, item.ID).Scan(&oldProjectionRows))
+	require.Zero(t, oldProjectionRows, "maintained replacement must delete prior graph runtime projection")
+	liveCurrentGraph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
 	require.NoError(t, err)
-	for _, node := range liveNewVersion.Nodes {
+	for _, node := range liveCurrentGraph.Nodes {
 		if node.NodeKey == "approval" {
-			require.Equal(t, 1, node.Counts.Waiting, "compatible old-version positions must map by stable node key")
+			require.Equal(t, 1, node.Counts.Waiting, "Live must count only current-graph positions")
 		}
 	}
 
 	binding.WorkItemID = item.ID
 	binding.NodeID = approval.ID
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
-		Context: projection.Context, Binding: binding, ActivityKey: "alert:stable:complete", ActivityType: "outcome", ActivityStatus: models.AutomationActivityCompleted,
-		EventKey: "alert:stable:completed", FromNodeID: approval.ID, ToNodeID: completed.ID, Transition: models.AutomationTransitionCompleted,
+		Context: projection.Context, Binding: binding, ActivityKey: "alert:stable:deleted-graph-complete", ActivityType: "outcome", ActivityStatus: models.AutomationActivityCompleted,
+		EventKey: "alert:stable:deleted-graph-completed", FromNodeID: approval.ID, ToNodeID: completed.ID, Transition: models.AutomationTransitionCompleted,
+	})
+	require.Error(t, err, "deleted graph bindings must not accept new runtime projection")
+
+	newBinding.WorkItemID = mappedItem.ID
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{newBinding}}, Binding: newBinding,
+		ActivityKey: "alert:stable:current-graph-complete", ActivityType: "outcome", ActivityStatus: models.AutomationActivityCompleted,
+		EventKey: "alert:stable:current-graph-completed", FromNodeID: newApproval.ID, ToNodeID: newCompleted.ID, Transition: models.AutomationTransitionCompleted,
 	})
 	require.NoError(t, err)
 	var itemStatus string
-	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_work_items WHERE id = ?`, item.ID).Scan(&itemStatus))
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_work_items WHERE id = ?`, mappedItem.ID).Scan(&itemStatus))
 	require.Equal(t, "completed", itemStatus)
 	var positions int
-	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = ?`, item.ID).Scan(&positions))
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = ?`, mappedItem.ID).Scan(&positions))
 	require.Zero(t, positions)
 
+	currentContext := models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{newBinding}}
 	otherProject := automationTestProject(t, repository.NewProjectRepo(fixture.repo.DB()), "Foreign runtime")
 	foreignTask := models.Task{ProjectID: otherProject.ID, Title: "Foreign", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, repository.NewTaskRepo(fixture.repo.DB(), nil).Create(ctx, &foreignTask))
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
-		Context: projection.Context, Binding: binding, ActivityKey: "foreign-resource", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted,
+		Context: currentContext, Binding: newBinding, ActivityKey: "foreign-resource", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: foreignTask.ID}},
 	})
 	require.ErrorContains(t, err, "does not belong to project")
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
-		Context: projection.Context, Binding: binding, ActivityKey: "malformed-external", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted,
+		Context: currentContext, Binding: newBinding, ActivityKey: "malformed-external", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "github_issue", ResourceID: "github:not-qualified"}},
 	})
 	require.ErrorContains(t, err, "canonical and repository-qualified")
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
-		Context: projection.Context, Binding: binding, ActivityKey: "unsafe-external", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted,
+		Context: currentContext, Binding: newBinding, ActivityKey: "unsafe-external", ActivityType: "test", ActivityStatus: models.AutomationActivityCompleted,
 		Resources: []models.AutomationActivityResource{{ResourceType: "github_issue", ResourceID: "github:owner/<script>:issue:1"}},
 	})
 	require.ErrorContains(t, err, "valid owner/repository")
@@ -585,7 +599,7 @@ func TestAutomationRuntimeSkippedOneTimeAndSharedTaskReservation(t *testing.T) {
 	require.NoError(t, shared.schedRepo.Create(ctx, &secondSchedule))
 	_, _, err = NewAutomationRegistrationService(shared.repo, NewAutomationAdapterRegistry()).Register(ctx, AutomationRegistrationRequest{
 		ProjectID: shared.project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/shared-second",
-		Resources: []models.AutomationResourceBinding{{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: secondSchedule.ID}, {NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: shared.task.ID}},
+		Resources: []models.AutomationResourceBinding{{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: secondSchedule.ID}, {NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: shared.task.ID}},
 	})
 	require.NoError(t, err)
 	now := time.Now().UTC()
@@ -681,10 +695,10 @@ func TestAutomationRuntimeCompositeConstraintsAndProjectCascade(t *testing.T) {
 	otherTask, otherSchedule := automationTestTaskAndSchedule(t, fixture.taskRepo, fixture.schedRepo, fixture.project.ID, "Other topology")
 	otherDefinition, _, err := NewAutomationRegistrationService(fixture.repo, NewAutomationAdapterRegistry()).Register(ctx, AutomationRegistrationRequest{
 		ProjectID: fixture.project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/other-topology",
-		Resources: []models.AutomationResourceBinding{{NodeKey: "suggestion_trigger", ResourceType: "schedule", ResourceID: otherSchedule.ID}, {NodeKey: "suggestion_producer", ResourceType: "task", ResourceID: otherTask.ID}},
+		Resources: []models.AutomationResourceBinding{{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: otherSchedule.ID}, {NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: otherTask.ID}},
 	})
 	require.NoError(t, err)
-	foreignNode := automationNodeByKey(t, otherDefinition, "suggestion_trigger")
+	foreignNode := automationNodeByKey(t, otherDefinition, "vision_suggestions")
 	_, err = fixture.repo.DB().Exec(`INSERT INTO automation_invocations
 		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key)
 		VALUES (?, ?, ?, ?, 'schedule', ?, 'mismatched-parent')`, fixture.project.ID, fixture.definition.Automation.ID,
@@ -735,7 +749,7 @@ func TestAutomationRuntimeCompositeConstraintsAndProjectCascade(t *testing.T) {
 func TestAutomationRuntimeChildTaskInheritsPersistedParentContext(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
-	producer := automationNodeByKey(t, fixture.definition, "suggestion_producer")
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: producer.ID}
 	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
@@ -790,7 +804,7 @@ func TestAutomationRuntimeSharedInboxExecutionPreservesMultipleBindings(t *testi
 	require.NoError(t, fixture.schedRepo.Create(ctx, &secondSchedule))
 	second, _, err := NewAutomationRegistrationService(fixture.repo, NewAutomationAdapterRegistry()).Register(ctx, AutomationRegistrationRequest{
 		ProjectID: fixture.project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/multi-binding",
-		Resources: []models.AutomationResourceBinding{{NodeKey: "inbox_trigger", ResourceType: "schedule", ResourceID: secondSchedule.ID}, {NodeKey: "inbox", ResourceType: "task", ResourceID: fixture.task.ID}},
+		Resources: []models.AutomationResourceBinding{{NodeKey: "inbox", ResourceType: "schedule", ResourceID: secondSchedule.ID}, {NodeKey: "inbox", ResourceType: "task", ResourceID: fixture.task.ID}},
 	})
 	require.NoError(t, err)
 	definitions := []*models.AutomationDefinition{fixture.definition, second}
@@ -992,7 +1006,7 @@ func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T
 	require.NotNil(t, invocation)
 	require.NotNil(t, dispatch)
 
-	producer := automationNodeByKey(t, fixture.definition, "suggestion_producer")
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: producer.ID}
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
@@ -1133,7 +1147,7 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 
 	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 7, URL: record.PRURL, State: "closed", Merged: true}}
 	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
-	visionTrigger := automationNodeByKey(t, fixture.definition, "vision_trigger")
+	visionTrigger := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_invocations
 		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at, completed_at)
 		VALUES (?, ?, ?, ?, 'schedule', ?, 'external-health', 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
@@ -1193,7 +1207,7 @@ func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
 	defer broadcaster.Unsubscribe(sub)
 	alertRepo.SetAutomationRepo(fixture.repo)
 	alertSvc := NewAlertService(alertRepo, nil)
-	producer := automationNodeByKey(t, fixture.definition, "suggestion_producer")
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: producer.ID}
 	producerExecution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "produce exact suggestion"}
 	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &producerExecution))
@@ -1247,7 +1261,7 @@ func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
 	require.Equal(t, 1, workItems)
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ?`, fixture.definition.Automation.ID).Scan(&transitions))
 	require.GreaterOrEqual(t, transitions, 4)
-	for _, edgeKey := range []string{"producer_to_notification", "notification_to_approval", "approval_to_inbox", "inbox_to_implementation"} {
+	for _, edgeKey := range []string{"vision_to_notification", "notification_to_approval", "approval_to_inbox", "inbox_to_implementation"} {
 		var edgeTransitions int
 		require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_transitions tr
 			JOIN automation_edges e ON e.id = tr.edge_id WHERE tr.automation_id = ? AND e.edge_key = ?`,

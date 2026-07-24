@@ -65,7 +65,6 @@ type AutomationDraftResult struct {
 	Warnings         []string                    `json:"warnings"`
 	ValidationErrors []AutomationValidationIssue `json:"validation_errors"`
 	Summary          string                      `json:"summary"`
-	URL              string                      `json:"url,omitempty"`
 }
 
 type AutomationCapabilityRef struct {
@@ -151,6 +150,9 @@ type AutomationChatConfirmationReceipt struct {
 	PrincipalID           string     `json:"principal_id"`
 	ThreadID              string     `json:"thread_id"`
 	PlanMessageID         string     `json:"plan_message_id"`
+	AutomationName        string     `json:"automation_name"`
+	Source                string     `json:"source"`
+	CandidateJSON         string     `json:"candidate_json"`
 	ExpiresAt             time.Time  `json:"expires_at"`
 	ConsumedAttemptID     string     `json:"consumed_attempt_id,omitempty"`
 	ConfirmingUserInputID string     `json:"confirming_user_input_id,omitempty"`
@@ -159,12 +161,21 @@ type AutomationChatConfirmationReceipt struct {
 	ConsumedAt            *time.Time `json:"consumed_at,omitempty"`
 }
 
+type AutomationSaveRecovery struct {
+	AutomationID     string                      `json:"-"`
+	VersionID        string                      `json:"-"`
+	PlanRevision     string                      `json:"-"`
+	Candidate        AutomationDraftCandidate    `json:"-"`
+	PublicationSteps []AutomationPublicationStep `json:"-"`
+}
+
 type AutomationBuilderPage struct {
 	Result            AutomationDraftResult        `json:"result"`
 	AutomationID      string                       `json:"automation_id,omitempty"`
 	RetryAutomationID string                       `json:"retry_automation_id,omitempty"`
 	RetryVersionID    string                       `json:"retry_version_id,omitempty"`
 	RetryPlanRevision string                       `json:"retry_plan_revision,omitempty"`
+	SaveRecovery      bool                         `json:"save_recovery,omitempty"`
 	Source            string                       `json:"source,omitempty"`
 	PublicationSteps  []AutomationPublicationStep  `json:"publication_steps,omitempty"`
 	NodePalette       []AutomationDraftNode        `json:"node_palette,omitempty"`

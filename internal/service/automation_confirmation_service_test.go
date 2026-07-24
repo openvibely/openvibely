@@ -37,7 +37,7 @@ func TestAutomationChatConfirmationRequiresLaterExactCommandAndIsReplaySafe(t *t
 	confirmation := NewAutomationConfirmationService(automationRepo, execRepo, []byte("test-confirmation-secret"))
 	now := time.Now().UTC()
 	confirmation.now = func() time.Time { return now }
-	token, err := confirmation.Issue(context.Background(), AutomationConfirmationIssue{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: "revision", PrincipalID: "alice", ThreadID: chatTask.ID, PlanMessageID: planExec.ID})
+	token, err := confirmation.Issue(context.Background(), AutomationConfirmationIssue{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: "revision", PrincipalID: "alice", ThreadID: chatTask.ID, PlanMessageID: planExec.ID, AutomationName: candidate.Name, Source: "manual", Candidate: candidate})
 	require.NoError(t, err)
 	require.NotContains(t, token, "alice")
 
@@ -50,9 +50,9 @@ func TestAutomationChatConfirmationRequiresLaterExactCommandAndIsReplaySafe(t *t
 	require.NoError(t, err)
 	require.Nil(t, pending)
 	_, err = confirmation.ConfirmChat(context.Background(), AutomationChatConfirmation{Token: token, ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: "revision", PrincipalID: "alice", ThreadID: chatTask.ID, ConfirmingUserInputID: ambiguous.ID, AutomationName: candidate.Name, Effects: effects})
-	require.ErrorContains(t, err, "exact publish command")
+	require.ErrorContains(t, err, "exact confirmation command")
 
-	confirming := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "publish " + candidate.Name}
+	confirming := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "save " + candidate.Name}
 	require.NoError(t, execRepo.Create(context.Background(), &confirming))
 	_, err = confirmation.ConfirmChat(context.Background(), AutomationChatConfirmation{Token: token, ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: "revision", PrincipalID: "alice", ThreadID: chatTask.ID, ConfirmingUserInputID: confirming.ID, AutomationName: candidate.Name, Effects: effects})
 	require.ErrorContains(t, err, "not marked affirmative")
@@ -83,12 +83,12 @@ func TestAutomationChatConfirmationRequiresLaterExactCommandAndIsReplaySafe(t *t
 	_, err = confirmation.ConfirmChat(context.Background(), AutomationChatConfirmation{Token: token, ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: "revision", PrincipalID: "alice", ThreadID: otherThread.ID, ConfirmingUserInputID: confirming.ID, AutomationName: candidate.Name, Effects: effects})
 	require.ErrorContains(t, err, "scope does not match")
 
-	replayInput := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "publish " + candidate.Name}
+	replayInput := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "save " + candidate.Name}
 	require.NoError(t, execRepo.Create(context.Background(), &replayInput))
 	_, err = confirmation.ConfirmChat(context.Background(), AutomationChatConfirmation{Token: token, ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: "revision", PrincipalID: "alice", ThreadID: chatTask.ID, ConfirmingUserInputID: replayInput.ID, AutomationName: candidate.Name, Effects: effects})
 	require.ErrorContains(t, err, "not marked affirmative")
 
-	expiringToken, err := confirmation.Issue(context.Background(), AutomationConfirmationIssue{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: "revision", PrincipalID: "alice", ThreadID: chatTask.ID, PlanMessageID: planExec.ID})
+	expiringToken, err := confirmation.Issue(context.Background(), AutomationConfirmationIssue{ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: "revision", PrincipalID: "alice", ThreadID: chatTask.ID, PlanMessageID: planExec.ID, AutomationName: candidate.Name, Source: "manual", Candidate: candidate})
 	require.NoError(t, err)
 	now = now.Add(31 * time.Minute)
 	_, err = confirmation.ConfirmChat(context.Background(), AutomationChatConfirmation{Token: expiringToken, ProjectID: project.ID, AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: "revision", PrincipalID: "alice", ThreadID: chatTask.ID, ConfirmingUserInputID: confirming.ID, AutomationName: candidate.Name, Effects: effects})

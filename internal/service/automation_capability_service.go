@@ -44,10 +44,7 @@ func (b *AutomationCapabilitySnapshotBuilder) Build(ctx context.Context, project
 	}
 	snapshot.Project.ID = project.ID
 	snapshot.Project.Name = project.Name
-	snapshot.SupportedNodeTypes = []models.AutomationNodeType{
-		models.AutomationNodeAction, models.AutomationNodeAgentTask, models.AutomationNodeCondition,
-		models.AutomationNodeHumanGate, models.AutomationNodeOutcome, models.AutomationNodeTrigger,
-	}
+	snapshot.SupportedNodeTypes = customAutomationDescriptionNodeTypes()
 	snapshot.SupportedRoles = supportedAutomationRoles()
 	snapshot.Integrations = map[string]models.AutomationIntegrationCapability{
 		"native": {Configured: true, ApprovalModes: []string{"notification_approval"}},
@@ -110,9 +107,7 @@ func capabilityRefLess(a, b models.AutomationCapabilityRef) bool {
 }
 
 func supportedAutomationRoles() []string {
-	roles := []string{"completed", "create_github_issue", "create_notification", "fixed_schedule", "github_assignment", "github_inbox", "implementation", "loop_auditor", "native_approval", "native_inbox", "offering_manager", "open_pull_request", "pull_request_review", "rejected", "suggestion_producer", "task", "vision_driver"}
-	sort.Strings(roles)
-	return roles
+	return customAutomationDescriptionRoles()
 }
 
 func (b *AutomationCapabilitySnapshotBuilder) githubConfigured(ctx context.Context) bool {

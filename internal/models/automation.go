@@ -19,9 +19,8 @@ const (
 	AutomationHealthDegraded  AutomationHealthState = "degraded"
 	AutomationHealthUnhealthy AutomationHealthState = "unhealthy"
 
-	AutomationVersionDraft      AutomationVersionState = "draft"
-	AutomationVersionPublished  AutomationVersionState = "published"
-	AutomationVersionSuperseded AutomationVersionState = "superseded"
+	AutomationVersionDraft     AutomationVersionState = "draft"
+	AutomationVersionPublished AutomationVersionState = "published"
 
 	AutomationNodeTrigger   AutomationNodeType = "trigger"
 	AutomationNodeAgentTask AutomationNodeType = "agent_task"
@@ -385,12 +384,6 @@ type AutomationLiveEdge struct {
 	Highlighted           bool `json:"highlighted"`
 }
 
-type AutomationLegacyWorkGroup struct {
-	VersionID string `json:"version_id"`
-	Version   int    `json:"version"`
-	Count     int    `json:"count"`
-}
-
 type AutomationExternalState struct {
 	TrackedResources int        `json:"tracked_resources"`
 	LastUpdatedAt    *time.Time `json:"last_updated_at,omitempty"`
@@ -407,7 +400,6 @@ type AutomationLiveGraph struct {
 	ActiveWorkItems   int                         `json:"active_work_items"`
 	RecentCutoff      time.Time                   `json:"recent_cutoff"`
 	ExternalState     AutomationExternalState     `json:"external_state"`
-	LegacyWork        []AutomationLegacyWorkGroup `json:"legacy_work,omitempty"`
 }
 
 type AutomationInvocationPage struct {

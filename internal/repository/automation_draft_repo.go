@@ -43,7 +43,7 @@ func (r *AutomationRepo) CreateAutomationDraft(ctx context.Context, in Automatio
 		in.VersionID = NewID()
 	}
 	if in.StableKey == "" {
-		in.StableKey = "draft/" + in.AutomationID
+		in.StableKey = "automation/" + in.AutomationID
 	}
 	if in.Source == "" {
 		in.Source = "manual"
@@ -55,13 +55,13 @@ func (r *AutomationRepo) CreateAutomationDraft(ctx context.Context, in Automatio
 		(id, project_id, stable_key, name, description, automation_type, lifecycle_state, created_via)
 		VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)`, in.AutomationID, in.ProjectID, in.StableKey,
 		in.Candidate.Name, in.Candidate.Description, in.Candidate.AutomationType, in.CreatedVia); err != nil {
-		return nil, fmt.Errorf("creating automation draft: %w", err)
+		return nil, fmt.Errorf("creating staged Automation graph: %w", err)
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO automation_versions
 		(id, project_id, automation_id, version, state, source, adapter_key, schema_version)
 		VALUES (?, ?, ?, 1, 'draft', ?, ?, ?)`, in.VersionID, in.ProjectID, in.AutomationID,
 		in.Source, in.Candidate.AdapterKey, in.Candidate.SchemaVersion); err != nil {
-		return nil, fmt.Errorf("creating automation draft version: %w", err)
+		return nil, fmt.Errorf("creating staged Automation graph record: %w", err)
 	}
 	if err := replaceAutomationDraftGraph(ctx, conn, in); err != nil {
 		return nil, err
@@ -108,6 +108,9 @@ func (r *AutomationRepo) CreateAutomationDraftVersion(ctx context.Context, in Au
 	}
 	if automation.PublishedVersionID == nil || *automation.PublishedVersionID == "" {
 		return nil, errors.New("automation has no published version to clone")
+	}
+	if err := rejectStagedAutomationSave(ctx, conn, in.ProjectID, in.AutomationID, *automation.PublishedVersionID); err != nil {
+		return nil, fmt.Errorf("%w: reopen and retry the pending Save before saving another graph", err)
 	}
 	if in.VersionID == "" {
 		in.VersionID = NewID()
@@ -218,7 +221,7 @@ func replaceAutomationDraftGraph(ctx context.Context, conn *sql.Conn, in Automat
 			(id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json, position_x, position_y)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, nodeID, in.ProjectID, in.AutomationID, in.VersionID,
 			node.Key, node.Name, node.Type, node.Role, string(config), x, y); err != nil {
-			return fmt.Errorf("creating automation draft node %q: %w", node.Key, err)
+			return fmt.Errorf("creating staged Automation graph node %q: %w", node.Key, err)
 		}
 	}
 	for index, edge := range in.Candidate.Edges {
@@ -230,7 +233,7 @@ func replaceAutomationDraftGraph(ctx context.Context, conn *sql.Conn, in Automat
 			(id, project_id, automation_id, version_id, source_node_id, target_node_id, edge_key, label, condition_json, display_order)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, NewID(), in.ProjectID, in.AutomationID, in.VersionID,
 			nodeIDs[edge.From], nodeIDs[edge.To], edge.Key, edge.Label, string(condition), index); err != nil {
-			return fmt.Errorf("creating automation draft edge %q: %w", edge.Key, err)
+			return fmt.Errorf("creating staged Automation graph edge %q: %w", edge.Key, err)
 		}
 	}
 	candidateJSON, _ := json.Marshal(in.Candidate)
@@ -245,6 +248,49 @@ func replaceAutomationDraftGraph(ctx context.Context, conn *sql.Conn, in Automat
 		validation_json = excluded.validation_json, updated_at = CURRENT_TIMESTAMP`, in.VersionID, in.ProjectID,
 		in.AutomationID, string(candidateJSON), string(assumptionsJSON), string(warningsJSON), string(validationJSON))
 	return err
+}
+
+func (r *AutomationRepo) DiscardUnreservedAutomationDraft(ctx context.Context, projectID, automationID, versionID string) (bool, error) {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return false, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	result, err := conn.ExecContext(ctx, `DELETE FROM automation_versions
+		WHERE project_id = ? AND automation_id = ? AND id = ? AND state = 'draft'
+		AND NOT EXISTS (
+			SELECT 1 FROM automation_publication_attempts
+			WHERE project_id = ? AND automation_id = ? AND version_id = ?
+		)`, projectID, automationID, versionID, projectID, automationID, versionID)
+	if err != nil {
+		return false, err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if deleted > 0 {
+		if _, err := conn.ExecContext(ctx, `DELETE FROM automations
+			WHERE project_id = ? AND id = ? AND published_version_id IS NULL
+			AND NOT EXISTS (SELECT 1 FROM automation_versions WHERE project_id = ? AND automation_id = ?)`,
+			projectID, automationID, projectID, automationID); err != nil {
+			return false, err
+		}
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return false, err
+	}
+	committed = true
+	return deleted > 0, nil
 }
 
 func (r *AutomationRepo) DiscardAutomationDraft(ctx context.Context, projectID, automationID, versionID string) error {
@@ -272,7 +318,7 @@ func (r *AutomationRepo) DiscardAutomationDraft(ctx context.Context, projectID, 
 		return err
 	}
 	if deleted == 0 {
-		return errors.New("automation draft not found")
+		return errors.New("staged Automation graph not found")
 	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM automations
 		WHERE project_id = ? AND id = ? AND published_version_id IS NULL
