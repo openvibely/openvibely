@@ -42,23 +42,13 @@ OpenVibely is organized around a selected project. The sidebar project selector 
 | Diff review | See [Tasks User Guide § Diff Review](./tasks-user-guide.md#diff-review) and <a href="https://docs.openvibely.ai/task-diffs-review" target="_blank" rel="noopener noreferrer">Task Diffs & Review (full reference)</a> |
 | Task chaining | <a href="https://docs.openvibely.ai/task-chaining" target="_blank" rel="noopener noreferrer">Task Chaining & Branch Lineage</a> |
 | Chat | [Chat User Guide](./chat-user-guide.md) |
-| Automation Graphs | See [Automation Graphs](#automation-graphs) below. |
+| Automation Graphs | [Automation Graphs User Guide](./automations-user-guide.md) |
 | Schedule | [Schedule User Guide](./schedule-user-guide.md) |
 | Insights | [Insights User Guide](./insights-user-guide.md) |
 | Alerts | <a href="https://docs.openvibely.ai/alerts" target="_blank" rel="noopener noreferrer">Alerts (docs site)</a> |
 | Attachments | <a href="https://docs.openvibely.ai/attachments" target="_blank" rel="noopener noreferrer">Attachments As Context (docs site)</a> |
 | Git worktrees | <a href="https://docs.openvibely.ai/git-worktrees" target="_blank" rel="noopener noreferrer">Git Worktrees & Merge Safety (docs site)</a> |
 | Environment variables | [Environment Variables](./environment.md) |
-
-## Automation Graphs
-
-Automation Graphs turns supported OpenVibely capabilities into one visual, project-scoped automation. Start from a maintained template, describe the behavior, or open a blank canvas. Add and configure Schedule, Task, Native approval, supported GitHub, and Outcome nodes, then connect deterministic handoffs from each node's right output to the next node's left input.
-
-The web builder keeps new and edited graphs only in browser memory until `Save changes`; refreshing or navigating away discards unsaved edits. Save validates the complete graph and immediately creates or replaces the Automation's one current saved graph and required Tasks or Scheduler rows. There are no persisted editable drafts, graph versions, Definition page, or Automation history page.
-
-Open a saved Automation to see its full-width Live graph. Current runtime state appears on the graph itself. Schedule and Task nodes link to their exact bound project Task; other nodes stay visual. Native approval and GitHub review, merge, release, and deployment boundaries remain human-controlled.
-
-Use Schedule when one Task simply needs to run once or repeat. Use Automation Graphs when work needs multiple supported capabilities and visible handoffs. Existing Tasks, schedules, Alerts, or GitHub objects never become Automations automatically.
 
 ## Channels
 
