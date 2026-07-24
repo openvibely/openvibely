@@ -54,11 +54,11 @@ The exact pre-collapse implementation tree remains at `backup/e109ce89-before-ma
 
 - `backup/e109ce89-recovered-43-checkpoints-20260724`, whose 43 direct commits begin at local-main base `600ca2b3` and end at `623649dd`;
 - `backup/e109ce89-recovered-rebase-tip-20260724`, which additionally preserves the next two successfully replayed checkpoints through `0db6521d`;
-- `backup/e109ce89-collapsed-published-tip-20260724`, which preserves the current collapsed tree at `1a3347be`.
+- `backup/e109ce89-collapsed-published-tip-20260724`, which preserves the collapsed tree at `1a3347be`.
 
-The assigned task branch now contains the 43 recovered direct checkpoints, followed by one explicit tree-reconciliation checkpoint with the exact pre-collapse implementation tree and this documentation checkpoint. Base `600ca2b3` and recovered tip `623649dd` are both direct ancestors of the clean task tip, and the final repository tree is unchanged from the tree that passed current validation.
+The assigned task branch contains the 43 recovered direct checkpoints, followed by an explicit tree-reconciliation checkpoint with the exact pre-collapse implementation tree and documentation checkpoints. Base `600ca2b3` and recovered tip `623649dd` remain direct ancestors of the task branch, and the implementation tree is unchanged from the tree that passed current validation.
 
-Shared `main` has not been rewritten. Both `origin/main` and `upstream/main` still point to collapsed checkpoint `1a3347be`, so replacing that already-published ancestry requires explicitly approved shared-history rewriting. Task-branch checkpoint recovery is complete; remote-main history cleanup remains a separate destructive integration decision.
+Shared `main` was not rewritten. Both `origin/main` and `upstream/main` pointed to collapsed checkpoint `1a3347be` at reconciliation time, so replacing that published ancestry requires explicitly approved shared-history rewriting. Task-branch checkpoint recovery is complete; remote-main history cleanup remains a separate destructive integration decision.
 
 ## Validation
 
@@ -72,6 +72,6 @@ Current checkpoint evidence:
 
 The pre-reservation recovery finding from the strict audit of checkpoint `689271e7` is repaired in the current implementation tree. Web Save uses one transactional guard to discard staging only when no publication attempt exists: initial planning and attempt-reservation failures leave no hidden graph, Automation identity, false recovery item, Task, or Scheduler row, while failures after reservation preserve the exact journal and compiler-created resources for retry. First and replacement Save regressions prove later Saves remain unblocked and the current saved behavior is unchanged.
 
-`VISION.md`, `IMPLEMENTATION.md`, this status ledger, and the authoritative `automation_graphs` managed memory now describe the same one-current-graph, direct-Save, Live-only contract. The current runtime exposes managed memory read access but no scoped memory writer; no repository file was edited as a substitute for an authorized managed-memory update. The separate public documentation repository still needs an Automation Graphs page and navigation links, but its checkout contains unrelated uncommitted skill changes and was left untouched.
+`VISION.md`, `IMPLEMENTATION.md`, this status ledger, and both representations of the authoritative `automation_graphs` managed-memory topic describe the same one-current-graph, direct-Save, Live-only contract. The runtime-visible managed view is read-only in this execution; the explicitly requested tracked mirror was reconciled from that verified view. The separate public documentation repository still needs an Automation Graphs page and navigation links, but its checkout contains unrelated uncommitted skill changes and was left untouched.
 
 A new strict read-only full contract audit is the remaining task-branch completion gate. No clean-audit completion is claimed here.
