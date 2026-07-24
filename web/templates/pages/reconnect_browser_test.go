@@ -220,7 +220,7 @@ func runReconnectChromeFixture(t *testing.T, body string) string {
 	)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	if err := cmd.Start(); err != nil {
+	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
 	deadline := time.Now().Add(20 * time.Second)
@@ -234,8 +234,7 @@ func runReconnectChromeFixture(t *testing.T, body string) string {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	_ = cmd.Process.Kill()
-	_, _ = cmd.Process.Wait()
+	stopBrowserProcess(cmd)
 	if !strings.Contains(result, `data-test-result="pass"`) {
 		resultState := ""
 		if start := strings.Index(result, `<main id="reconnect-result"`); start >= 0 {

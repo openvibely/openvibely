@@ -366,7 +366,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 	)
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
-	if err := cmd.Start(); err != nil {
+	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome Chat navigation fixture: %v", err)
 	}
 
@@ -385,10 +385,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 			outcome = "fail:timed out waiting for browser result callback; last progress=" + lastProgress
 		}
 	}
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-	}
-	_ = cmd.Wait()
+	stopBrowserProcess(cmd)
 
 	if outcome != "pass:" {
 		stderr, _ := os.ReadFile(stderrPath)

@@ -231,7 +231,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 		server.URL+"/tasks/task-browser?tab=chat",
 	)
 	cmd.Stderr = stderrFile
-	if err := cmd.Start(); err != nil {
+	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome Task Thread navigation fixture: %v", err)
 	}
 
@@ -241,10 +241,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 	case <-time.After(30 * time.Second):
 		outcome = "fail:timed out waiting for browser result callback"
 	}
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-	}
-	_ = cmd.Wait()
+	stopBrowserProcess(cmd)
 
 	if outcome != "pass:" {
 		stderr, _ := os.ReadFile(stderrPath)
