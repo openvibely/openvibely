@@ -2279,6 +2279,9 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 		{"openai rejects ultra", models.ProviderOpenAI, "gpt-5.6-sol", "ultra", ""},
 		{"anthropic max", models.ProviderAnthropic, "claude-opus-4-6", "max", "max"},
 		{"anthropic rejects xhigh", models.ProviderAnthropic, "claude-opus-4-6", "xhigh", ""},
+		{"anthropic opus 5 low", models.ProviderAnthropic, "claude-opus-5", "low", "low"},
+		{"anthropic rejects effort for sonnet 4.5", models.ProviderAnthropic, "claude-sonnet-4-5-20250929", "low", ""},
+		{"anthropic rejects max for opus 4.5", models.ProviderAnthropic, "claude-opus-4-5-20251101", "max", ""},
 		{"ollama clears effort", models.ProviderOllama, "llama", "high", ""},
 	}
 

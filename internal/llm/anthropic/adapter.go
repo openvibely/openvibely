@@ -35,7 +35,7 @@ type claudeCodeOutputBudget struct {
 func claudeCodeOutputBudgetForModel(model string) claudeCodeOutputBudget {
 	m := strings.ToLower(strings.TrimSpace(model))
 	switch {
-	case strings.Contains(m, "claude-sonnet-5"):
+	case strings.Contains(m, "claude-opus-5"), strings.Contains(m, "claude-sonnet-5"):
 		return claudeCodeOutputBudget{Default: 64000, UpperLimit: 128000}
 	case strings.Contains(m, "claude-fable-5"), strings.Contains(m, "claude-mythos-5"):
 		return claudeCodeOutputBudget{Default: 64000, UpperLimit: 128000}
@@ -523,6 +523,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	opts := &anthropicclient.AgenticOptions{
 		Model:                  agent.Model,
 		MaxTokens:              maxTokens,
+		Effort:                 agent.ReasoningEffort,
 		System:                 systemPrompt,
 		WorkDir:                workDir,
 		Attachments:            mcAttachments,
@@ -586,6 +587,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 	opts := &anthropicclient.AgenticOptions{
 		Model:                  agent.Model,
 		MaxTokens:              maxTokens,
+		Effort:                 agent.ReasoningEffort,
 		EnableThinking:         true,
 		DisableTools:           disableTools,
 		SkipDefaultTools:       skipDefaultTools,
@@ -679,6 +681,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	opts := &anthropicclient.AgenticOptions{
 		Model:                  agent.Model,
 		MaxTokens:              maxTokens,
+		Effort:                 agent.ReasoningEffort,
 		EnableThinking:         true,
 		SkipDefaultTools:       skipDefaultTools,
 		System:                 llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir),

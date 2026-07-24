@@ -18,6 +18,7 @@ import (
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -745,7 +746,7 @@ func normalizeProviderReasoningEffort(provider models.LLMProvider, model, value 
 	case models.ProviderOpenAI:
 		return normalizeOpenAIReasoningEffort(model, value)
 	case models.ProviderAnthropic:
-		return normalizeAnthropicEffort(value)
+		return anthropicclient.NormalizeEffort(model, value)
 	default:
 		return ""
 	}
@@ -757,15 +758,6 @@ func normalizeOpenAIReasoningEffort(model, value string) string {
 		return effort
 	}
 	return ""
-}
-
-func normalizeAnthropicEffort(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low", "medium", "high", "max":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return ""
-	}
 }
 
 func formValueIfPresent(c echo.Context, key string) (string, bool) {

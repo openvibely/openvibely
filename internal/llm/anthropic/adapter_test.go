@@ -68,11 +68,12 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 		ChatMode:          models.ChatModeOrchestrate,
 		ChatSystemContext: "FOLLOWUP_CONTEXT_SENTINEL",
 		Agent: models.LLMConfig{
-			Name:       "Claude API",
-			Provider:   models.ProviderAnthropic,
-			Model:      "claude-test",
-			AuthMethod: models.AuthMethodAPIKey,
-			APIKey:     "test-key",
+			Name:            "Claude API",
+			Provider:        models.ProviderAnthropic,
+			Model:           "claude-opus-5",
+			ReasoningEffort: "low",
+			AuthMethod:      models.AuthMethodAPIKey,
+			APIKey:          "test-key",
 		},
 	}, ".", nil)
 	if err != nil {
@@ -89,10 +90,19 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 	if strings.Contains(payload, "TASK CREATION TOOL MODE") {
 		t.Fatalf("zero-history follow-up received initial-task guidance: %#v", gotBody)
 	}
+	outputConfig, ok := gotBody["output_config"].(map[string]any)
+	if !ok || outputConfig["effort"] != "low" {
+		t.Fatalf("output_config = %#v, want effort low", gotBody["output_config"])
+	}
 }
 
 func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
+	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
 		events := []string{
@@ -115,11 +125,12 @@ func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 
 	adapter := New(nil, nil, nil)
 	output, usage, err := adapter.callDirect(context.Background(), "test", nil, models.LLMConfig{
-		Name:       "Fable",
-		Provider:   models.ProviderAnthropic,
-		Model:      "claude-fable-5",
-		AuthMethod: models.AuthMethodAPIKey,
-		APIKey:     "test-key",
+		Name:            "Sonnet 4.5",
+		Provider:        models.ProviderAnthropic,
+		Model:           "claude-sonnet-4-5-20250929",
+		ReasoningEffort: "low",
+		AuthMethod:      models.AuthMethodAPIKey,
+		APIKey:          "test-key",
 	}, ".", "", nil, nil, nil, true, true, false)
 	if err == nil {
 		t.Fatal("expected refusal stop_reason to return an error")
@@ -132,6 +143,9 @@ func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 	}
 	if usage.OutputTokens != 6 {
 		t.Fatalf("output tokens = %d, want 6", usage.OutputTokens)
+	}
+	if _, ok := gotBody["output_config"]; ok {
+		t.Fatalf("unsupported Sonnet 4.5 effort must be omitted, got %#v", gotBody["output_config"])
 	}
 }
 
@@ -164,11 +178,12 @@ func TestCallDirectRawPromptOmitsOpenVibelySystemTaskPromptAndTools(t *testing.T
 
 	adapter := New(nil, nil, nil)
 	output, _, err := adapter.callDirect(context.Background(), "REFERENCE PROMPT", nil, models.LLMConfig{
-		Name:       "Claude API",
-		Provider:   models.ProviderAnthropic,
-		Model:      "claude-test",
-		AuthMethod: models.AuthMethodAPIKey,
-		APIKey:     "test-key",
+		Name:            "Claude API",
+		Provider:        models.ProviderAnthropic,
+		Model:           "claude-opus-5",
+		ReasoningEffort: "max",
+		AuthMethod:      models.AuthMethodAPIKey,
+		APIKey:          "test-key",
 	}, "/secret/workdir", "project instructions", nil, nil, nil, true, true, true)
 	if err != nil {
 		t.Fatalf("callDirect: %v", err)
@@ -181,6 +196,10 @@ func TestCallDirectRawPromptOmitsOpenVibelySystemTaskPromptAndTools(t *testing.T
 	}
 	if _, ok := gotBody["tools"]; ok {
 		t.Fatalf("raw direct request should omit tools, got %#v", gotBody["tools"])
+	}
+	outputConfig, ok := gotBody["output_config"].(map[string]any)
+	if !ok || outputConfig["effort"] != "max" {
+		t.Fatalf("output_config = %#v, want effort max", gotBody["output_config"])
 	}
 	messages, ok := gotBody["messages"].([]any)
 	if !ok || len(messages) != 1 {
