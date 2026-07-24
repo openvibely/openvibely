@@ -48,6 +48,16 @@ Current regressions cover:
 - Live-only detail, exact Task links, removed auxiliary routes, and absence of version/history compatibility copy.
 - Native Alert and GitHub lifecycle boundaries, project isolation, idempotency, and no inference from existing resources.
 
+## Checkpoint Lineage
+
+The exact pre-collapse implementation tree remains at `backup/e109ce89-before-main-rebase-20260723194351`. Reflog and unreachable-object recovery preserved the replayed checkpoint objects under:
+
+- `backup/e109ce89-recovered-43-checkpoints-20260724`, whose 43 direct commits begin at local-main base `600ca2b3` and end at `623649dd`;
+- `backup/e109ce89-recovered-rebase-tip-20260724`, which additionally preserves the next two successfully replayed checkpoints through `0db6521d`;
+- `backup/e109ce89-collapsed-published-tip-20260724`, which preserves the current collapsed tree at `1a3347be`.
+
+The granular history has not replaced shared `main`. Both `origin/main` and `upstream/main` already point to collapsed checkpoint `1a3347be`, so restoring the recovered ancestry there requires an explicitly approved shared-history force rewrite. The task must not perform that destructive operation implicitly. This lineage gate remains open even though the recovered objects are now protected from garbage collection.
+
 ## Validation
 
 Current checkpoint evidence:
@@ -58,4 +68,8 @@ Current checkpoint evidence:
 - The focused migration/repository/service/handler/template package suite passes.
 - `TMPDIR=/private/tmp go test -p 1 ./... -count=1 -timeout 300s` passes every package.
 
-The pre-reservation recovery finding from the strict audit of checkpoint `689271e7` is repaired and validated in the current worktree. Web Save now uses one transactional guard to discard staging only when no publication attempt exists: initial planning and attempt-reservation failures leave no hidden graph, Automation identity, false recovery item, Task, or Scheduler row, while failures after reservation preserve the exact journal and compiler-created resources for retry. First and replacement Save regressions prove later Saves remain unblocked and the current saved behavior is unchanged. Authoritative `automation_graphs` managed-memory reconciliation remains pending because this runtime exposes no scoped managed-memory mutation action. A new separate strict read-only contract audit must run only after the implementation checkpoint is clean; no clean-audit completion is claimed here.
+The pre-reservation recovery finding from the strict audit of checkpoint `689271e7` is repaired in the current implementation tree. Web Save uses one transactional guard to discard staging only when no publication attempt exists: initial planning and attempt-reservation failures leave no hidden graph, Automation identity, false recovery item, Task, or Scheduler row, while failures after reservation preserve the exact journal and compiler-created resources for retry. First and replacement Save regressions prove later Saves remain unblocked and the current saved behavior is unchanged.
+
+`VISION.md`, `IMPLEMENTATION.md`, this status ledger, and the authoritative `automation_graphs` managed memory now describe the same one-current-graph, direct-Save, Live-only contract. The current runtime exposes managed memory read access but no scoped memory writer; no repository file was edited as a substitute for an authorized managed-memory update. The separate public documentation repository still needs an Automation Graphs page and navigation links, but its checkout contains unrelated uncommitted skill changes and was left untouched.
+
+A new strict read-only full contract audit remains blocked until the checkpoint-lineage decision above is resolved and the resulting tree has fresh validation evidence. No clean-audit completion is claimed here.
