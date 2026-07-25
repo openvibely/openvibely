@@ -81,7 +81,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if !strings.Contains(out, "{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max']") {
 		t.Error("expected GPT-5.6 Sol effort options")
 	}
-	for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"} {
+	for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"} {
 		if !strings.Contains(out, "{ value: '"+model+"'") {
 			t.Errorf("expected current Moonshot model %q in selector", model)
 		}
