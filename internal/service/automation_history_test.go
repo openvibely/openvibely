@@ -307,6 +307,41 @@ func TestAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t *testing.T)
 	require.ErrorIs(t, err, repository.ErrAutomationCursor)
 }
 
+func TestAutomationHistoryHealthReconciliationCoversEverySavedAutomationBeyondOneBatch(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+
+	for i := 0; i < 101; i++ {
+		automationID := fmt.Sprintf("health-batch-automation-%03d", i)
+		versionID := fmt.Sprintf("health-batch-version-%03d", i)
+		_, err := fixture.repo.DB().ExecContext(ctx, `INSERT INTO automations
+			(id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
+			VALUES (?, ?, ?, ?, 'custom', 'active', 'web')`,
+			automationID, fixture.project.ID, automationID, fmt.Sprintf("Health batch %03d", i))
+		require.NoError(t, err)
+		_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_versions
+			(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
+			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', 1, CURRENT_TIMESTAMP)`,
+			versionID, fixture.project.ID, automationID)
+		require.NoError(t, err)
+		_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
+		require.NoError(t, err)
+	}
+	_, err := fixture.repo.DB().ExecContext(ctx, `UPDATE automations SET health_evaluated_at = NULL WHERE project_id = ?`, fixture.project.ID)
+	require.NoError(t, err)
+
+	err = fixture.repo.RecomputeAutomationHealthForAll(ctx, time.Date(2026, time.July, 27, 12, 0, 0, 0, time.UTC), 100)
+	require.NoError(t, err)
+
+	var saved, evaluated int
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automations
+		WHERE project_id = ? AND published_version_id IS NOT NULL`, fixture.project.ID).Scan(&saved))
+	require.Greater(t, saved, 100)
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automations
+		WHERE project_id = ? AND published_version_id IS NOT NULL AND health_evaluated_at IS NOT NULL`, fixture.project.ID).Scan(&evaluated))
+	require.Equal(t, saved, evaluated, "one reconciliation pass must not permanently starve saved Automations beyond the first batch")
+}
+
 func TestAutomationHistoryHealthIgnoresStaleFailureAfterRecentSuccesses(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()

@@ -608,26 +608,38 @@ func (r *AutomationRepo) RecomputeAutomationHealthForAll(ctx context.Context, no
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT project_id, id FROM automations ORDER BY updated_at DESC, id LIMIT ?`, limit)
-	if err != nil {
-		return err
-	}
-	var ids [][2]string
-	for rows.Next() {
-		var value [2]string
-		if err := rows.Scan(&value[0], &value[1]); err != nil {
+	var afterAutomationID string
+	for {
+		rows, err := r.db.QueryContext(ctx, `SELECT project_id, id FROM automations
+			WHERE published_version_id IS NOT NULL AND id > ?
+			ORDER BY id LIMIT ?`, afterAutomationID, limit)
+		if err != nil {
+			return err
+		}
+		var ids [][2]string
+		for rows.Next() {
+			var value [2]string
+			if err := rows.Scan(&value[0], &value[1]); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, value)
+		}
+		if err := rows.Err(); err != nil {
 			rows.Close()
 			return err
 		}
-		ids = append(ids, value)
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	for _, value := range ids {
-		if _, err := r.RecomputeAutomationHealth(ctx, value[0], value[1], now); err != nil {
+		if err := rows.Close(); err != nil {
 			return err
 		}
+		for _, value := range ids {
+			if _, err := r.RecomputeAutomationHealth(ctx, value[0], value[1], now); err != nil {
+				return err
+			}
+		}
+		if len(ids) < limit {
+			return nil
+		}
+		afterAutomationID = ids[len(ids)-1][1]
 	}
-	return nil
 }
