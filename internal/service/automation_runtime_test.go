@@ -931,21 +931,6 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Contains(t, second, `"reused":true`)
 	require.Equal(t, int32(1), createCalls.Load(), "successful issue creation retry must resolve persisted provenance")
 
-	provider.findDuplicateFn = func(_ context.Context, repo *GitHubRepoRef, title string, limit int) (*GitHubIssueDuplicate, error) {
-		require.Equal(t, "example/runtime", repo.FullName)
-		require.Equal(t, "Cross-run duplicate", title)
-		require.Equal(t, 50, limit)
-		return &GitHubIssueDuplicate{Number: 77}, nil
-	}
-	_, err = handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"Cross-run duplicate","body":"UNTRUSTED SECRET BODY"}`))
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "#77")
-	require.Contains(t, err.Error(), "https://github.com/example/runtime/issues/77")
-	require.NotContains(t, err.Error(), "Cross-run duplicate")
-	require.NotContains(t, err.Error(), "UNTRUSTED SECRET BODY")
-	require.Equal(t, int32(1), createCalls.Load(), "a likely cross-run duplicate must not create another issue")
-	provider.findDuplicateFn = nil
-
 	ambiguousInput := githubCreateIssueRuntimeInput{Title: "Ambiguous issue", Body: "body"}
 	repoRef, err := provider.ResolveRepo(ctx, fixture.project.RepoURL, fixture.project.RepoPath)
 	require.NoError(t, err)
@@ -1148,7 +1133,56 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Equal(t, 1, waitingReview)
 }
 
-func TestAutomationGitHubIssueCreationSerializesDuplicateCheckAcrossExecutions(t *testing.T) {
+func TestAutomationGitHubIssueCreationDoesNotReadExistingIssuesForDeduplication(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime.git"
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	bugFinder := automationNodeByKey(t, fixture.definition, "bug_finder")
+	invocation, _, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "safe issue creation"}
+	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
+		InvocationID: invocation.ID, NodeID: bugFinder.ID}
+	ctx = WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
+	ctx = withAutomationExecution(ctx, fixture.task.ID, execution.ID)
+
+	var lookupCalls atomic.Int32
+	var createCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		getIssueFn: func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error) {
+			lookupCalls.Add(1)
+			return nil, errors.New("existing issue read is forbidden during issue creation")
+		},
+		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			lookupCalls.Add(1)
+			return nil, nil, errors.New("existing issue list is forbidden during issue creation")
+		},
+		listAssignedIssuesFn: func(context.Context, *GitHubRepoRef, string) ([]GitHubIssue, error) {
+			lookupCalls.Add(1)
+			return nil, errors.New("assigned issue list is forbidden during issue creation")
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createCalls.Add(1)
+			return &GitHubIssue{Number: 88, URL: "https://github.com/example/runtime/issues/88", Title: req.Title, State: "open"}, nil
+		},
+	}
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
+		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
+
+	output, err := handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"Safe duplicate boundary","body":"body"}`))
+	require.NoError(t, err)
+	require.Contains(t, output, `"Number":88`)
+	require.Zero(t, lookupCalls.Load(), "Automation duplicate protection must not read existing GitHub issues")
+	require.Equal(t, int32(1), createCalls.Load())
+}
+
+func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
@@ -1174,23 +1208,18 @@ func TestAutomationGitHubIssueCreationSerializesDuplicateCheckAcrossExecutions(t
 	firstCtx := newCausalContext("concurrent-first")
 	secondCtx := newCausalContext("concurrent-second")
 
-	lookupStarted := make(chan struct{})
-	releaseLookup := make(chan struct{})
-	var lookupCalls atomic.Int32
+	createStarted := make(chan struct{})
+	releaseCreate := make(chan struct{})
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
 			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
 		},
-		findDuplicateFn: func(context.Context, *GitHubRepoRef, string, int) (*GitHubIssueDuplicate, error) {
-			if lookupCalls.Add(1) == 1 {
-				close(lookupStarted)
-			}
-			<-releaseLookup
-			return nil, nil
-		},
 		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
-			createCalls.Add(1)
+			if createCalls.Add(1) == 1 {
+				close(createStarted)
+			}
+			<-releaseCreate
 			return &GitHubIssue{Number: 88, URL: "https://github.com/example/runtime/issues/88", Title: req.Title, State: "open"}, nil
 		},
 	}
@@ -1207,20 +1236,25 @@ func TestAutomationGitHubIssueCreationSerializesDuplicateCheckAcrossExecutions(t
 		firstResult <- result{output: output, err: err}
 	}()
 	select {
-	case <-lookupStarted:
+	case <-createStarted:
 	case <-time.After(time.Second):
-		t.Fatal("first execution did not enter the bounded duplicate lookup")
+		t.Fatal("first execution did not enter GitHub issue creation")
 	}
 
 	secondOutput, secondErr := handlers["github_create_issue"](secondCtx, json.RawMessage(`{"title":"  concurrent   duplicate  ","body":"second body"}`))
 	require.ErrorContains(t, secondErr, "already checking or creating")
 	require.Empty(t, secondOutput)
-	close(releaseLookup)
+	close(releaseCreate)
 	first := <-firstResult
 	require.NoError(t, first.err)
 	require.Contains(t, first.output, `"Number":88`)
-	require.Equal(t, int32(1), lookupCalls.Load(), "the losing execution must not race through the duplicate lookup")
 	require.Equal(t, int32(1), createCalls.Load(), "concurrent Automation runs must create one canonical issue")
+
+	duplicateOutput, duplicateErr := handlers["github_create_issue"](secondCtx, json.RawMessage(`{"title":"CONCURRENT DUPLICATE","body":"retry body"}`))
+	require.ErrorContains(t, duplicateErr, "#88 was already created by this project")
+	require.Contains(t, duplicateErr.Error(), "https://github.com/example/runtime/issues/88")
+	require.Empty(t, duplicateOutput)
+	require.Equal(t, int32(1), createCalls.Load(), "local deduplication must reject later equivalent runs without reading GitHub")
 }
 
 func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T) {

@@ -1582,21 +1582,21 @@ func (r *AutomationRepo) GetCustomNotificationHandoff(ctx context.Context, proje
 	return &node, err
 }
 
-func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string, now time.Time, leaseDuration time.Duration) error {
+func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string, now time.Time, leaseDuration time.Duration) (int, error) {
 	projectID = strings.TrimSpace(projectID)
 	repositoryFullName = strings.ToLower(strings.TrimSpace(repositoryFullName))
 	titleFingerprint = strings.TrimSpace(titleFingerprint)
 	ownerToken = strings.TrimSpace(ownerToken)
 	if projectID == "" || repositoryFullName == "" || titleFingerprint == "" || ownerToken == "" || leaseDuration <= 0 {
-		return errors.New("complete GitHub issue duplicate lease identity is required")
+		return 0, errors.New("complete GitHub issue duplicate lease identity is required")
 	}
 	conn, err := r.db.Conn(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
+		return 0, err
 	}
 	committed := false
 	defer func() {
@@ -1610,32 +1610,67 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 		VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id, repository_full_name, title_fingerprint) DO NOTHING`,
 		projectID, repositoryFullName, titleFingerprint, ownerToken, expiresAt)
 	if err != nil {
-		return fmt.Errorf("acquiring GitHub issue duplicate lease: %w", err)
+		return 0, fmt.Errorf("acquiring GitHub issue duplicate lease: %w", err)
 	}
 	acquired, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if acquired == 0 {
+		var createdIssueNumber sql.NullInt64
+		if err := conn.QueryRowContext(ctx, `SELECT created_issue_number FROM automation_github_issue_dedup_leases
+			WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?`,
+			projectID, repositoryFullName, titleFingerprint).Scan(&createdIssueNumber); err != nil {
+			return 0, err
+		}
+		if createdIssueNumber.Valid && createdIssueNumber.Int64 > 0 {
+			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+				return 0, err
+			}
+			committed = true
+			return int(createdIssueNumber.Int64), nil
+		}
 		result, err = conn.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
 			SET owner_token = ?, lease_expires_at = ?, updated_at = CURRENT_TIMESTAMP
-			WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND lease_expires_at <= ?`,
+			WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?
+				AND created_issue_number IS NULL AND lease_expires_at <= ?`,
 			ownerToken, expiresAt, projectID, repositoryFullName, titleFingerprint, now.UTC())
 		if err != nil {
-			return fmt.Errorf("reclaiming GitHub issue duplicate lease: %w", err)
+			return 0, fmt.Errorf("reclaiming GitHub issue duplicate lease: %w", err)
 		}
 		acquired, err = result.RowsAffected()
 		if err != nil {
-			return err
+			return 0, err
 		}
 	}
 	if acquired != 1 {
-		return ErrAutomationGitHubIssueDedupBusy
+		return 0, ErrAutomationGitHubIssueDedupBusy
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-		return err
+		return 0, err
 	}
 	committed = true
+	return 0, nil
+}
+
+func (r *AutomationRepo) CompleteGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string, issueNumber int) error {
+	if issueNumber <= 0 {
+		return errors.New("created GitHub issue number is required")
+	}
+	result, err := r.db.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
+		SET created_issue_number = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
+			AND (created_issue_number IS NULL OR created_issue_number = ?)`,
+		issueNumber, strings.TrimSpace(projectID), strings.ToLower(strings.TrimSpace(repositoryFullName)), strings.TrimSpace(titleFingerprint),
+		strings.TrimSpace(ownerToken), issueNumber)
+	if err != nil {
+		return fmt.Errorf("completing GitHub issue duplicate lease: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return errors.New("GitHub issue duplicate lease is not owned")
+	}
 	return nil
 }
 

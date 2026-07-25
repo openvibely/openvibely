@@ -87,10 +87,6 @@ type GitHubIssue struct {
 	Labels    []string
 }
 
-type GitHubIssueDuplicate struct {
-	Number int
-}
-
 type GitHubIssueWithPullRequest struct {
 	Issue       GitHubIssue
 	PullRequest GitHubPullRequest
@@ -1354,43 +1350,6 @@ func (s *GitHubService) CreateIssue(ctx context.Context, repo *GitHubRepoRef, cr
 	}
 	issue := raw.toIssue()
 	return &issue, nil
-}
-
-func (s *GitHubService) FindOpenIssueDuplicate(ctx context.Context, repo *GitHubRepoRef, title string, limit int) (*GitHubIssueDuplicate, error) {
-	if repo == nil {
-		return nil, fmt.Errorf("repository reference is required")
-	}
-	normalizedTitle := strings.ToLower(strings.Join(strings.Fields(title), " "))
-	if normalizedTitle == "" {
-		return nil, fmt.Errorf("issue title is required")
-	}
-	if limit <= 0 || limit > 50 {
-		limit = 50
-	}
-	token, err := s.createOperationAccessToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-	query := url.Values{}
-	query.Set("state", "open")
-	query.Set("per_page", strconv.Itoa(limit))
-	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues?%s", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), query.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	s.applyGitHubHeaders(req, token)
-	var raw []githubIssueAPI
-	if err := s.doGitHubJSON(req, &raw); err != nil {
-		return nil, err
-	}
-	for _, item := range raw {
-		if item.PullRequest != nil || strings.ToLower(strings.Join(strings.Fields(item.Title), " ")) != normalizedTitle {
-			continue
-		}
-		return &GitHubIssueDuplicate{Number: item.Number}, nil
-	}
-	return nil, nil
 }
 
 func (s *GitHubService) GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {

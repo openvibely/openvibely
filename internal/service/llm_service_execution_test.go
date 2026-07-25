@@ -3779,7 +3779,6 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 type fakeGitHubIssueRuntimeProvider struct {
 	resolveRepoFn        func(context.Context, string, string) (*GitHubRepoRef, error)
 	createIssueFn        func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
-	findDuplicateFn      func(context.Context, *GitHubRepoRef, string, int) (*GitHubIssueDuplicate, error)
 	getIssueFn           func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error)
 	findPRFn             func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	addLabelsFn          func(context.Context, *GitHubRepoRef, int, []string) error
@@ -3846,13 +3845,6 @@ func (f *fakeGitHubIssueRuntimeProvider) CreateIssue(ctx context.Context, repo *
 		return f.createIssueFn(ctx, repo, req)
 	}
 	return &GitHubIssue{Number: 1, URL: "https://github.com/openvibely/openvibely/issues/1", Title: req.Title, Labels: req.Labels}, nil
-}
-
-func (f *fakeGitHubIssueRuntimeProvider) FindOpenIssueDuplicate(ctx context.Context, repo *GitHubRepoRef, title string, limit int) (*GitHubIssueDuplicate, error) {
-	if f.findDuplicateFn != nil {
-		return f.findDuplicateFn(ctx, repo, title, limit)
-	}
-	return nil, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {

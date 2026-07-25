@@ -737,38 +737,6 @@ func TestListPullRequestFeedbackTraversesAllPagesAndSortsMergedSources(t *testin
 	}
 }
 
-func TestFindOpenIssueDuplicateIsBoundedAndNormalizesTitleWithoutFollowingPages(t *testing.T) {
-	ctx := context.Background()
-	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		if got := r.URL.Query().Get("state"); got != "open" {
-			t.Fatalf("state = %q, want open", got)
-		}
-		if got := r.URL.Query().Get("per_page"); got != "50" {
-			t.Fatalf("per_page = %q, want 50", got)
-		}
-		w.Header().Set("Link", `<https://api.github.test/repos/openvibely/openvibely/issues?page=2>; rel="next"`)
-		_, _ = w.Write([]byte(`[
-			{"number":11,"title":"Different issue","pull_request":{"url":"https://api.github.test/pulls/11"}},
-			{"number":12,"title":"  SAME   normalized TITLE  ","body":"untrusted body"}
-		]`))
-	}))
-	defer server.Close()
-
-	duplicate, err := newPATGitHubService(t, server.URL).FindOpenIssueDuplicate(ctx,
-		&GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, "same normalized title", 500)
-	if err != nil {
-		t.Fatalf("FindOpenIssueDuplicate: %v", err)
-	}
-	if duplicate == nil || duplicate.Number != 12 {
-		t.Fatalf("duplicate = %#v, want issue #12", duplicate)
-	}
-	if requests != 1 {
-		t.Fatalf("requests = %d, want one bounded page", requests)
-	}
-}
-
 func TestListAssignedIssuesTraversesAllPagesAndFiltersPullRequests(t *testing.T) {
 	ctx := context.Background()
 	var server *httptest.Server

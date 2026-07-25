@@ -1208,11 +1208,6 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 			require.Empty(t, repoPath)
 			return &service.GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
 		},
-		findDuplicateFn: func(_ context.Context, _ *service.GitHubRepoRef, title string, limit int) (*service.GitHubIssueDuplicate, error) {
-			require.Equal(t, "Safe follow-up issue", title)
-			require.Equal(t, 50, limit)
-			return nil, nil
-		},
 		createIssueFn: func(_ context.Context, _ *service.GitHubRepoRef, req service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
 			createCalls++
 			return &service.GitHubIssue{Number: 91, URL: "https://github.com/example/runtime/issues/91", Title: req.Title, State: "open"}, nil

@@ -22,7 +22,6 @@ type fakeGitHubService struct {
 	findPRFn               func(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
 	createPRFn             func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)
 	createIssueFn          func(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
-	findDuplicateFn        func(ctx context.Context, repo *service.GitHubRepoRef, title string, limit int) (*service.GitHubIssueDuplicate, error)
 	getIssueFn             func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error)
 	getAuthenticatedUserFn func(ctx context.Context) (*service.GitHubAuthenticatedUser, error)
 	listMyAssignedIssuesFn func(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error)
@@ -130,13 +129,6 @@ func (f *fakeGitHubService) CreateIssue(ctx context.Context, repo *service.GitHu
 		return f.createIssueFn(ctx, repo, createReq)
 	}
 	return nil, fmt.Errorf("create issue not configured")
-}
-
-func (f *fakeGitHubService) FindOpenIssueDuplicate(ctx context.Context, repo *service.GitHubRepoRef, title string, limit int) (*service.GitHubIssueDuplicate, error) {
-	if f != nil && f.findDuplicateFn != nil {
-		return f.findDuplicateFn(ctx, repo, title, limit)
-	}
-	return nil, nil
 }
 
 func (f *fakeGitHubService) GetIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error) {

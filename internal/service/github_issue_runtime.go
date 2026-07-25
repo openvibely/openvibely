@@ -22,7 +22,6 @@ type GitHubIssueRuntimeProvider interface {
 	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 	CreateIssue(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreateIssueRequest) (*GitHubIssue, error)
-	FindOpenIssueDuplicate(ctx context.Context, repo *GitHubRepoRef, title string, limit int) (*GitHubIssueDuplicate, error)
 	GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error)
 	GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error)
 	ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
@@ -166,30 +165,20 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				}
 				dedupFingerprint = githubIssueTitleFingerprint(req.Title)
 				dedupOwner = activityKey
-				if err := opts.AutomationRepo.AcquireGitHubIssueDedupLease(ctx, opts.ProjectID, repo.FullName, dedupFingerprint,
-					dedupOwner, time.Now().UTC(), automationGitHubIssueDedupLeaseDuration); err != nil {
+				duplicateIssueNumber, leaseErr := opts.AutomationRepo.AcquireGitHubIssueDedupLease(ctx, opts.ProjectID, repo.FullName, dedupFingerprint,
+					dedupOwner, time.Now().UTC(), automationGitHubIssueDedupLeaseDuration)
+				if leaseErr != nil {
 					if releaseErr := releaseGitHubIssueActivityReservations(ctx, opts, reservedBindings, activityKey); releaseErr != nil {
 						return "", releaseErr
 					}
-					return "", err
+					return "", leaseErr
 				}
-				duplicate, duplicateErr := opts.GitHub.FindOpenIssueDuplicate(ctx, repo, req.Title, 50)
-				if duplicateErr != nil {
-					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
-					if releaseErr := releaseGitHubIssueActivityReservations(ctx, opts, reservedBindings, activityKey); releaseErr != nil {
-						return "", releaseErr
-					}
-					return "", duplicateErr
-				}
-				if duplicate != nil && duplicate.Number > 0 {
-					if err := opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner); err != nil {
-						return "", err
-					}
+				if duplicateIssueNumber > 0 {
 					if err := releaseGitHubIssueActivityReservations(ctx, opts, reservedBindings, activityKey); err != nil {
 						return "", err
 					}
-					return "", fmt.Errorf("likely duplicate GitHub issue #%d already exists: https://github.com/%s/%s/issues/%d",
-						duplicate.Number, repo.Owner, repo.Name, duplicate.Number)
+					return "", fmt.Errorf("GitHub issue #%d was already created by this project: https://github.com/%s/%s/issues/%d",
+						duplicateIssueNumber, repo.Owner, repo.Name, duplicateIssueNumber)
 				}
 			}
 			issue, err := opts.GitHub.CreateIssue(ctx, repo, GitHubCreateIssueRequest{Title: req.Title, Body: req.Body, Labels: req.Labels, Assignees: req.Assignees})
@@ -199,16 +188,17 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				}
 				return "", err
 			}
-			if err := recordGitHubIssueCreated(ctx, opts, repo, issue, activityKey); err != nil {
-				if dedupFingerprint != "" {
-					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
-				}
-				return "", err
-			}
 			if dedupFingerprint != "" {
-				if err := opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner); err != nil {
+				if issue == nil {
+					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
+					return "", errors.New("GitHub issue creation returned no issue")
+				}
+				if err := opts.AutomationRepo.CompleteGitHubIssueDedupLease(ctx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner, issue.Number); err != nil {
 					return "", err
 				}
+			}
+			if err := recordGitHubIssueCreated(ctx, opts, repo, issue, activityKey); err != nil {
+				return "", err
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue})
 		},
