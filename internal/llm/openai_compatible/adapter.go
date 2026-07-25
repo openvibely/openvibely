@@ -172,7 +172,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
-	client.SetCompletionsHistory(buildClientHistory(req.ChatHistory))
+	client.SetCompletionsHistory(buildClientHistory(req.ChatHistory, supportsReasoningContentReplay(req.Agent)))
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
 	if req.ChatMode == models.ChatModeOrchestrate {
@@ -224,6 +224,10 @@ func compatibleTemperature(agent models.LLMConfig) float64 {
 		return openaiclient.OmittedTemperature()
 	}
 	return agent.Temperature
+}
+
+func supportsReasoningContentReplay(agent models.LLMConfig) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "kimi-")
 }
 
 func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, client *openaiclient.Client, callErr error) error {
@@ -413,7 +417,7 @@ func planModeAllowsReadOnlyTool(name string) bool {
 	}
 }
 
-func buildClientHistory(chatHistory []models.Execution) []openaiclient.CompletionsHistoryMessage {
+func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent bool) []openaiclient.CompletionsHistoryMessage {
 	history := llmprompt.LimitChatHistory(chatHistory)
 	messages := make([]openaiclient.CompletionsHistoryMessage, 0, len(history)*2)
 	for _, exec := range history {
@@ -421,10 +425,14 @@ func buildClientHistory(chatHistory []models.Execution) []openaiclient.Completio
 			messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: exec.PromptSent})
 		}
 		if replay := llmprompt.ReplayAssistantContent(exec); replay != "" {
+			reasoningContent := ""
+			if preserveReasoningContent {
+				reasoningContent = exec.ReasoningContent
+			}
 			messages = append(messages, openaiclient.CompletionsHistoryMessage{
 				Role:             "assistant",
 				Content:          replay,
-				ReasoningContent: exec.ReasoningContent,
+				ReasoningContent: reasoningContent,
 			})
 		}
 	}

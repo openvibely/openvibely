@@ -489,14 +489,27 @@ func TestAdapterToolCallReplaysToolResult(t *testing.T) {
 }
 
 func TestBuildClientHistoryPreservesReasoningContent(t *testing.T) {
-	history := buildClientHistory([]models.Execution{{
+	executions := []models.Execution{{
 		PromptSent:       "question",
 		Output:           "answer",
 		ReasoningContent: "private thought",
 		Status:           models.ExecCompleted,
-	}})
-	require.Len(t, history, 2)
-	require.Equal(t, "assistant", history[1].Role)
-	require.Equal(t, "answer", history[1].Content)
-	require.Equal(t, "private thought", history[1].ReasoningContent)
+	}}
+
+	kimiHistory := buildClientHistory(executions, true)
+	require.Len(t, kimiHistory, 2)
+	require.Equal(t, "assistant", kimiHistory[1].Role)
+	require.Equal(t, "answer", kimiHistory[1].Content)
+	require.Equal(t, "private thought", kimiHistory[1].ReasoningContent)
+
+	otherHistory := buildClientHistory(executions, false)
+	require.Len(t, otherHistory, 2)
+	require.Empty(t, otherHistory[1].ReasoningContent)
+}
+
+func TestSupportsReasoningContentReplayForKimiOnly(t *testing.T) {
+	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k3"}))
+	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: " KIMI-K2.5 "}))
+	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "glm-5"}))
+	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "gpt-5.6"}))
 }
