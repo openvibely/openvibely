@@ -122,8 +122,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 120 {
-		t.Fatalf("max goose version = %d, want 120", maxVersion)
+	if maxVersion != 122 {
+		t.Fatalf("max goose version = %d, want 122", maxVersion)
 	}
 }
 
@@ -274,8 +274,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 120 {
-		t.Fatalf("max goose version = %d, want 120", maxVersion)
+	if maxVersion != 122 {
+		t.Fatalf("max goose version = %d, want 122", maxVersion)
 	}
 }
 
@@ -761,8 +761,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 120 {
-		t.Fatalf("max goose version = %d, want 120", maxVersion)
+	if maxVersion != 122 {
+		t.Fatalf("max goose version = %d, want 122", maxVersion)
 	}
 }
 
@@ -1113,8 +1113,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 120 {
-		t.Fatalf("max goose version = %d, want 120", maxVersion)
+	if maxVersion != 122 {
+		t.Fatalf("max goose version = %d, want 122", maxVersion)
 	}
 }
 
@@ -1348,7 +1348,7 @@ func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
 	}
 }
 
-func TestMigration118And119LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
+func TestMigration120And121LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-atomic-save.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -1360,7 +1360,7 @@ func TestMigration118And119LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.UpTo(db, ".", 117); err != nil {
+	if err := goose.UpTo(db, ".", 119); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`
