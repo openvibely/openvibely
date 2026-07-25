@@ -98,7 +98,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		ToolExecutor:     toolExecutor(ctx, workDir),
 		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate),
 	})
-	err = a.persistReasoningContent(ctx, req.ExecID, client, err)
+	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
 	}
@@ -154,7 +154,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		OnToolUse:        streamToolUse(sw),
 		OnToolResult:     streamToolResult(sw),
 	})
-	err = a.persistReasoningContent(ctx, req.ExecID, client, err)
+	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
@@ -211,7 +211,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		OnToolUse:        streamToolUse(sw),
 		OnToolResult:     streamToolResult(sw),
 	})
-	err = a.persistReasoningContent(ctx, req.ExecID, client, err)
+	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
@@ -233,8 +233,8 @@ func supportsReasoningContentReplay(agent models.LLMConfig) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "kimi-")
 }
 
-func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, client *openaiclient.Client, callErr error) error {
-	if a.execRepo == nil || strings.TrimSpace(execID) == "" || client == nil {
+func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, agent models.LLMConfig, client *openaiclient.Client, callErr error) error {
+	if !supportsReasoningContentReplay(agent) || a.execRepo == nil || strings.TrimSpace(execID) == "" || client == nil {
 		return callErr
 	}
 	reasoningContent := client.LastCompletionsReasoningContent()
