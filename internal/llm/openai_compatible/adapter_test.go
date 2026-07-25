@@ -130,6 +130,39 @@ func TestCompatibleTemperatureOmitsMoonshotKimiOnly(t *testing.T) {
 	}
 }
 
+func TestAdapterKimiExtraBodyCannotRestoreTemperature(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil, nil)
+	_, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation: llmcontracts.OperationDirect,
+		Message:   "question",
+		Agent: models.LLMConfig{
+			Name:          "Kimi",
+			Provider:      models.ProviderOpenAICompatible,
+			AuthMethod:    models.AuthMethodAPIKey,
+			Model:         "kimi-k2.6",
+			APIKey:        "test-key",
+			BaseURL:       srv.URL + "/v1/",
+			Transport:     "chat_completions",
+			ExtraBodyJSON: `{"temperature":0,"custom":true}`,
+		},
+	}, ".")
+	require.NoError(t, err)
+	require.NotContains(t, gotBody, "temperature")
+	require.Equal(t, true, gotBody["custom"])
+}
+
 func TestCompatibleRequestExtrasAddsKimiK3ReasoningEffort(t *testing.T) {
 	_, body, err := compatibleRequestExtras(models.LLMConfig{
 		Model:            "kimi-k3",
