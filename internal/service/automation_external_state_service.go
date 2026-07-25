@@ -53,7 +53,10 @@ func (s *AutomationExternalStateService) Refresh(ctx context.Context, projectID,
 		return models.AutomationExternalState{}, errors.New("project not found")
 	}
 
-	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	if strings.TrimSpace(project.RepoURL) == "" {
+		return models.AutomationExternalState{}, errors.New("Automation external refresh requires the current project's explicit repository URL")
+	}
+	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, "")
 	if err != nil {
 		return models.AutomationExternalState{}, err
 	}

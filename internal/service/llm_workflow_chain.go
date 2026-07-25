@@ -404,6 +404,16 @@ func (s *LLMService) activateCompiledAutomationChild(ctx context.Context, parent
 	if !activated {
 		return nil
 	}
+	if s.automationHandoffBeforeFinalAdmission != nil {
+		s.automationHandoffBeforeFinalAdmission()
+	}
+	stillAdmitted, err := s.taskRepo.ConfirmAutomationChainedTaskAdmission(ctx, parentTask.ProjectID, targetBinding, child.ID)
+	if err != nil {
+		return fmt.Errorf("confirming Automation task handoff admission: %w", err)
+	}
+	if !stillAdmitted {
+		return nil
+	}
 	if workItem != nil {
 		targetBinding.WorkItemID = workItem.ID
 	}

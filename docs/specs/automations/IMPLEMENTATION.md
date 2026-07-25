@@ -85,7 +85,7 @@ Lifecycle state controls admission of new work and is independent of graph repla
 
 Exclusive schedule provenance survives pause and archive. This allows archived edits, Schedule removal/replacement, and Automation deletion to locate and delete owned Scheduler rows without orphaning them.
 
-A root Task configured Active while the Automation is paused is stored non-admitted in Backlog and is not submitted during Save. Explicit Resume atomically re-enables configured schedules, changes only matching current-graph pending root Tasks to Active, commits lifecycle state, and then submits those exact Tasks. Existing Active roots are not resubmitted merely because the Automation resumes.
+A root Task configured Active while the Automation is paused is stored non-admitted in Backlog and is not submitted during Save. A downstream handoff completed while paused also persists its causal entered transition while leaving the child pending in Backlog. Explicit Resume atomically re-enables configured schedules, admits matching current-graph pending roots and deferred entered children, commits lifecycle state, and then submits those exact Tasks once. Existing Active roots are not resubmitted merely because the Automation resumes. Pause and Archive demote pending Active current-graph roots and children; a final persisted admission check between handoff commit and worker submission prevents a child that loses a concurrent lifecycle race from being submitted.
 
 ## Runtime Projection
 

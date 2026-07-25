@@ -1333,6 +1333,20 @@ func (r *AutomationRepo) GetNodeByKey(ctx context.Context, projectID, automation
 	return &node, err
 }
 
+func (r *AutomationRepo) IsCurrentActiveBinding(ctx context.Context, projectID string, binding models.AutomationBinding) (bool, error) {
+	if r == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(binding.AutomationID) == "" ||
+		strings.TrimSpace(binding.VersionID) == "" || strings.TrimSpace(binding.NodeID) == "" {
+		return false, errors.New("complete automation binding is required")
+	}
+	var current int
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automations a
+		JOIN automation_nodes n ON n.project_id = a.project_id AND n.automation_id = a.id
+			AND n.version_id = a.published_version_id AND n.id = ?
+		WHERE a.project_id = ? AND a.id = ? AND a.published_version_id = ? AND a.lifecycle_state = 'active'`,
+		binding.NodeID, projectID, binding.AutomationID, binding.VersionID).Scan(&current)
+	return current == 1, err
+}
+
 func (r *AutomationRepo) GetConnectedNodeByRole(ctx context.Context, projectID, automationID, versionID, nodeID, role string, outgoing bool) (*models.AutomationNode, error) {
 	anchorColumn := "source.id"
 	selectedAlias := "target"

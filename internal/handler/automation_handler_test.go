@@ -1125,6 +1125,15 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 		InvocationID: invocationID, NodeID: bugFinder.ID}
 	causalCtx := service.WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}})
 	causalCtx = service.WithAutomationExecution(causalCtx, task.ID, execution.ID)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry()))
+	retryItem, _, err := automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "followup-safe:retry", WorkItemKind: "task", ActivityKey: "followup-safe:retry:execution",
+		ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}, {ResourceType: "execution", ResourceID: execution.ID}},
+	})
+	require.NoError(t, err)
+	binding.WorkItemID = retryItem.ID
 
 	var createCalls int
 	github := &fakeGitHubService{
@@ -1146,8 +1155,34 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 	tc.handler.SetGitHubService(github)
 	tc.handler.llmSvc.SetGitHubIssueRuntimeProvider(github)
 	tc.handler.llmSvc.SetAutomationRepo(automationRepo)
-	params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, ExecID: execution.ID, IsTaskFollowup: true, Task: &task}
 	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, false)
+	pathShapes := []struct {
+		name   string
+		params streamingResponseParams
+	}{
+		{name: "idle web", params: streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, ExecID: "idle-web-exec", IsTaskFollowup: true, Task: &task}},
+		{name: "queued channel", params: streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, ExecID: "queued-channel-exec", IsTaskFollowup: true, AutomationContext: &models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}}}},
+		{name: "failed retry", params: streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, ExecID: execution.ID, IsTaskFollowup: true}},
+	}
+	for _, pathShape := range pathShapes {
+		t.Run(pathShape.name, func(t *testing.T) {
+			params := pathShape.params
+			require.NoError(t, tc.handler.prepareAutomationTaskFollowup(ctx, &params))
+			require.NotNil(t, params.Task)
+			require.NotNil(t, params.AutomationContext)
+			require.NotEmpty(t, params.AutomationContext.Bindings)
+			preparedCtx := service.WithAutomationContext(ctx, *params.AutomationContext)
+			preparedCtx = service.WithAutomationExecution(preparedCtx, task.ID, params.ExecID)
+			runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+			_, handled, isError, runtimeErr := runtime.Executor(preparedCtx, "github_create_issue", json.RawMessage(`{"title":"Safe follow-up issue","assignees":["bot"]}`))
+			require.True(t, handled)
+			require.True(t, isError)
+			require.ErrorContains(t, runtimeErr, "human GitHub assignment")
+		})
+	}
+	require.Zero(t, createCalls, "every real task-thread entry shape must use the Automation human gate")
+
+	params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, ExecID: execution.ID, IsTaskFollowup: true, Task: &task}
 	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 
 	_, handled, isError, err := runtime.Executor(causalCtx, "github_create_issue", json.RawMessage(`{"title":"Safe follow-up issue","assignees":["bot"]}`))

@@ -394,6 +394,10 @@ func (s *AutomationGraphService) ContextForExecution(ctx context.Context, projec
 	return s.repo.ContextForExecution(ctx, projectID, executionID)
 }
 
+func (s *AutomationGraphService) ContextForTask(ctx context.Context, projectID, taskID string) (models.AutomationContext, error) {
+	return s.repo.ContextForTask(ctx, projectID, taskID)
+}
+
 func (s *AutomationGraphService) GetDefinition(ctx context.Context, projectID, automationID string) (*models.AutomationDefinition, []models.AutomationResourceSummary, error) {
 	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
 	if err != nil || definition == nil {

@@ -75,6 +75,10 @@ type LLMService struct {
 	githubPRFeedbackRepo      *repository.GitHubPRFeedbackRepo
 	automationRegistrationSvc *AutomationRegistrationService
 	automationRepo            *repository.AutomationRepo
+
+	// automationHandoffBeforeFinalAdmission is a deterministic test barrier for
+	// the commit-to-submission lifecycle race. Production leaves it nil.
+	automationHandoffBeforeFinalAdmission func()
 	// globalSkillRoot is the parent directory holding <root>/agents for global
 	// agents/skills. It is used for catalog construction and bounded skill
 	// mutation writes; agents themselves remain user-managed.

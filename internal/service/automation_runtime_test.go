@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -901,8 +902,10 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	ctx = withAutomationExecution(ctx, fixture.task.ID, execution.ID)
 
 	var createCalls atomic.Int32
+	var resolvedRepoPaths []string
 	provider := &fakeGitHubIssueRuntimeProvider{
-		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+		resolveRepoFn: func(_ context.Context, _ string, repoPath string) (*GitHubRepoRef, error) {
+			resolvedRepoPaths = append(resolvedRepoPaths, repoPath)
 			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
@@ -958,13 +961,16 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	inboxBinding := binding
 	inboxBinding.NodeID = devInbox.ID
 	inboxCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{inboxBinding}})
+	_, err = handlers["github_create_issue"](inboxCtx, json.RawMessage(`{"title":"Unauthorized inbox issue"}`))
+	require.ErrorContains(t, err, "not authorized by the caller's Automation graph")
+	require.Equal(t, int32(1), createCalls.Load(), "an Automation node without a create-issue edge must fail closed")
 	_, err = handlers["github_list_my_assigned_issues"](inboxCtx, json.RawMessage(`{}`))
 	require.NoError(t, err)
 	var issueItems int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND kind = 'github_issue'`, fixture.definition.Automation.ID).Scan(&issueItems))
 	require.Equal(t, 2, issueItems, "one shared inbox execution must preserve distinct issue work items")
 
-	implementationTask := models.Task{ProjectID: fixture.project.ID, Title: "Implement exact issue", Prompt: "opaque implementation prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, WorktreeBranch: "task/issue-42"}
+	implementationTask := models.Task{ProjectID: fixture.project.ID, Title: "Implement exact issue", Prompt: "opaque implementation prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, WorktreePath: t.TempDir(), WorktreeBranch: "task/issue-42"}
 	require.NoError(t, fixture.taskRepo.Create(ctx, &implementationTask))
 	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo}
 	require.NoError(t, llmSvc.recordAutomationTasksCreated(inboxCtx, fixture.project.ID,
@@ -984,9 +990,21 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	unrelatedContext, err := fixture.repo.ContextForTask(ctx, fixture.project.ID, unrelatedTask.ID)
 	require.NoError(t, err)
 	require.Empty(t, unrelatedContext.Bindings, "an undiscovered issue number must not acquire inferred provenance")
+	resolvedRepoPaths = nil
 
+	_, err = handlers["github_open_pull_request"](ctx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"issue_number":42,"pr_title":"PR"}`, fixture.task.ID)))
+	require.ErrorContains(t, err, "not authorized by the caller's Automation graph")
 	_, err = handlers["github_open_pull_request"](ctx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"issue_number":42,"pr_title":"PR"}`, implementationTask.ID)))
+	require.ErrorContains(t, err, "cannot mutate a different task")
+	implementationCtx := WithAutomationContext(context.Background(), implementationContext)
+	implementationCtx = withAutomationExecution(implementationCtx, implementationTask.ID, execution.ID)
+	_, err = handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"issue_number":42,"pr_title":"PR"}`, implementationTask.ID)))
 	require.NoError(t, err)
+	for _, repoPath := range resolvedRepoPaths {
+		require.Empty(t, repoPath, "Automation GitHub repository resolution must never receive repo_path")
+	}
+	_, err = handlers["github_replace_pull_request_branch"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"expected_head_sha":%q,"confirm_history_rewrite":true}`, unrelatedTask.ID, strings.Repeat("a", 40))))
+	require.ErrorContains(t, err, "cannot mutate a different task")
 	var prResources int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activity_resources WHERE resource_type = 'pull_request' AND resource_id = 'github:example/runtime:pull:7'`).Scan(&prResources))
 	require.Equal(t, 1, prResources)
@@ -1190,12 +1208,18 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 }
 
 type fakeAutomationPullRequestProvider struct {
-	calls int
-	pull  GitHubPullRequest
-	err   error
+	calls        int
+	resolveCalls int
+	resolvedURL  string
+	resolvedPath string
+	pull         GitHubPullRequest
+	err          error
 }
 
-func (f *fakeAutomationPullRequestProvider) ResolveRepo(context.Context, string, string) (*GitHubRepoRef, error) {
+func (f *fakeAutomationPullRequestProvider) ResolveRepo(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+	f.resolveCalls++
+	f.resolvedURL = repoURL
+	f.resolvedPath = repoPath
 	return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
 }
 
@@ -1254,6 +1278,8 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 
 	state, err := external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
 	require.NoError(t, err)
+	require.Equal(t, fixture.project.RepoURL, provider.resolvedURL)
+	require.Empty(t, provider.resolvedPath, "Automation external refresh must not allow Git remote inference")
 	require.Equal(t, 1, provider.calls)
 	require.False(t, state.Stale)
 	stored, err := pullRequests.GetByTaskID(ctx, fixture.task.ID)
@@ -1283,6 +1309,13 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	graph, err = NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
 	require.NoError(t, err)
 	require.True(t, graph.ExternalState.Stale, "a failed external refresh must retain stale persisted freshness")
+
+	fixture.project.RepoURL = ""
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	resolveCalls := provider.resolveCalls
+	_, err = external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
+	require.ErrorContains(t, err, "explicit repository URL")
+	require.Equal(t, resolveCalls, provider.resolveCalls, "missing repo_url must fail before provider resolution can infer a Git remote")
 }
 
 func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {

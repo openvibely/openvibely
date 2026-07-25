@@ -143,6 +143,43 @@ func (h *Handler) prepareChatMemoryRecall(ctx context.Context, task models.Task)
 	return h.workerSvc.PrepareRecallOnlyLifecycleTurn(ctx, task).Ctx
 }
 
+func (h *Handler) prepareAutomationTaskFollowup(ctx context.Context, params *streamingResponseParams) error {
+	if params == nil || !params.IsTaskFollowup || strings.TrimSpace(params.TaskID) == "" {
+		return nil
+	}
+	if params.Task == nil {
+		task, err := h.taskRepo.GetByID(ctx, params.TaskID)
+		if err != nil {
+			return fmt.Errorf("loading task-thread follow-up task: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task-thread follow-up task not found: %s", params.TaskID)
+		}
+		params.Task = task
+	}
+	if params.AutomationContext != nil || h.automationGraphSvc == nil {
+		return nil
+	}
+	var automationContext models.AutomationContext
+	var err error
+	if strings.TrimSpace(params.ExecID) != "" {
+		automationContext, err = h.automationGraphSvc.ContextForExecution(ctx, params.ProjectID, params.ExecID)
+		if err != nil {
+			return fmt.Errorf("loading task-thread Automation execution context: %w", err)
+		}
+	}
+	if len(automationContext.Bindings) == 0 {
+		automationContext, err = h.automationGraphSvc.ContextForTask(ctx, params.ProjectID, params.TaskID)
+		if err != nil {
+			return fmt.Errorf("loading task-thread Automation task context: %w", err)
+		}
+	}
+	if len(automationContext.Bindings) > 0 {
+		params.AutomationContext = &automationContext
+	}
+	return nil
+}
+
 func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// Memory recall is injected for task-thread followups through the full task
 	// lifecycle path below. Interactive chat uses a recall-only lifecycle path so
@@ -283,6 +320,12 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	}
 
 	startRuntimeCancellation()
+	if err := h.prepareAutomationTaskFollowup(ctx, &params); err != nil {
+		applog.Infof("[handler] processStreamingResponse exec=%s task=%s Automation follow-up context error: %v", params.ExecID, params.TaskID, err)
+		h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), 0, params.ChannelReply)
+		h.finalizeStreamingTurn(params, "")
+		return
+	}
 	if params.AutomationContext != nil {
 		ctx = service.WithAutomationContext(ctx, *params.AutomationContext)
 		if params.TaskID != "" && params.ExecID != "" {
@@ -1485,18 +1528,28 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
 		return nil
 	}
+	var automationContext *models.AutomationContext
+	if h.automationGraphSvc != nil {
+		if value, contextErr := h.automationGraphSvc.ContextForExecution(ctx, task.ProjectID, failed.ID); contextErr != nil {
+			return contextErr
+		} else if len(value.Bindings) > 0 {
+			automationContext = &value
+		}
+	}
 	go h.processStreamingResponse(streamingResponseParams{
-		ExecID:          exec.ID,
-		TaskID:          taskID,
-		Message:         failed.PromptSent,
-		Agent:           *agent,
-		AgentDefinition: agentDef,
-		ChatHistory:     priorHistory,
-		ProjectID:       task.ProjectID,
-		SystemContext:   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:         workDir,
-		IsTaskFollowup:  true,
-		InputOrigin:     models.TaskOriginWeb,
+		ExecID:            exec.ID,
+		TaskID:            taskID,
+		Message:           failed.PromptSent,
+		Agent:             *agent,
+		AgentDefinition:   agentDef,
+		ChatHistory:       priorHistory,
+		ProjectID:         task.ProjectID,
+		SystemContext:     combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:           workDir,
+		IsTaskFollowup:    true,
+		InputOrigin:       models.TaskOriginWeb,
+		Task:              task,
+		AutomationContext: automationContext,
 	})
 	return nil
 }
@@ -1633,6 +1686,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		ChannelReply:      channelReplyFromThreadInput(input),
 		InputOrigin:       string(input.Source),
 		InputOriginAgent:  input.OriginAgent,
+		Task:              task,
 		AutomationContext: automationContext,
 	})
 	return nil

@@ -372,6 +372,81 @@ func TestAutomationInactiveLifecycleDefersCompiledChildHandoff(t *testing.T) {
 	}
 }
 
+func TestAutomationPauseOrArchiveAfterChildActivationPreventsSubmission(t *testing.T) {
+	for _, state := range []models.AutomationLifecycleState{models.AutomationPaused, models.AutomationArchived} {
+		t.Run(string(state), func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Post-activation handoff "+string(state))
+			ctx := context.Background()
+			candidate := customScheduledTaskCandidate("Post-activation handoff", "Produce parent output.")
+			candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: "downstream", Name: "Downstream", Type: models.AutomationNodeAgentTask, Role: "task",
+				Config: map[string]any{"prompt": "Continue after the producer.", "category": string(models.CategoryActive), "priority": 2}, Position: &models.AutomationDraftPoint{X: 480, Y: 0}})
+			candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: "followup_downstream", From: "followup", To: "downstream", FromPort: "right", ToPort: "left", Condition: map[string]any{}})
+			saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err)
+			parent, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "followup", "task"))
+			require.NoError(t, err)
+			childID := automationResourceID(t, saved.Definition, "downstream", "task")
+			schedule, err := h.scheduleRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "schedule", "schedule"))
+			require.NoError(t, err)
+			due := schedule.NextRun.UTC()
+			invocation, _, err := h.automationRepo.ClaimScheduledOccurrence(ctx, *schedule, due, schedule.ComputeNextRun(due))
+			require.NoError(t, err)
+			require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
+			execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
+			require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+			sourceNode := automationNodeByKey(t, saved.Definition, "followup")
+			binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, InvocationID: invocation.ID, NodeID: sourceNode.ID}
+			causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{binding}})
+			causalCtx = withAutomationExecution(causalCtx, parent.ID, execution.ID)
+			config, err := parent.ParseChainConfig()
+			require.NoError(t, err)
+
+			worker := NewWorkerService(nil, 1, repository.NewProjectRepo(h.db))
+			worker.SetTaskRepo(h.taskRepo)
+			taskSvc := NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), worker)
+			llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo, taskSvc: taskSvc}
+			activated := make(chan struct{})
+			release := make(chan struct{})
+			llmSvc.automationHandoffBeforeFinalAdmission = func() {
+				close(activated)
+				<-release
+			}
+			done := make(chan error, 1)
+			go func() {
+				done <- llmSvc.activateCompiledAutomationChild(causalCtx, *parent, "parent result\n[STATUS: SUCCESS]", config)
+			}()
+			<-activated
+			if state == models.AutomationPaused {
+				require.NoError(t, h.lifecycle.Pause(ctx, h.project.ID, saved.Definition.Automation.ID))
+			} else {
+				require.NoError(t, h.lifecycle.Archive(ctx, h.project.ID, saved.Definition.Automation.ID))
+			}
+			close(release)
+			require.NoError(t, <-done)
+			select {
+			case submitted := <-worker.Submitted():
+				t.Fatalf("inactive Automation submitted downstream task %s", submitted.ID)
+			default:
+			}
+			child, err := h.taskRepo.GetByID(ctx, childID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryBacklog, child.Category)
+			require.Equal(t, models.StatusPending, child.Status)
+
+			recorder := &recordingAutomationTaskService{TaskService: taskSvc}
+			resume := NewAutomationLifecycleService(h.automationRepo, h.scheduleRepo, recorder)
+			if state == models.AutomationPaused {
+				require.NoError(t, resume.Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
+				require.Len(t, recorder.submitted, 1)
+				require.Equal(t, childID, recorder.submitted[0].ID)
+			} else {
+				require.ErrorContains(t, resume.Resume(ctx, h.project.ID, saved.Definition.Automation.ID), "archived automation cannot be resumed")
+				require.Empty(t, recorder.submitted)
+			}
+		})
+	}
+}
+
 func TestAutomationDeleteRemovesOwnedScheduleAndPreservesTask(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic delete")
 	ctx := context.Background()

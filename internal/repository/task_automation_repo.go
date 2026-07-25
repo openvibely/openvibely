@@ -144,6 +144,33 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 	return workItem, activity, admitted, nil
 }
 
+// ConfirmAutomationChainedTaskAdmission is the final persisted admission gate
+// between a committed handoff and its in-memory worker submission. Pause and
+// Archive demote pending graph tasks in the same database serialization domain,
+// so a handoff that lost the race is returned as non-admitted.
+func (r *TaskRepo) ConfirmAutomationChainedTaskAdmission(ctx context.Context, projectID string, binding models.AutomationBinding, taskID string) (bool, error) {
+	if r == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(binding.AutomationID) == "" ||
+		strings.TrimSpace(binding.VersionID) == "" || strings.TrimSpace(taskID) == "" {
+		return false, errors.New("complete automation task admission is required")
+	}
+	var admitted int
+	err := r.db.QueryRowContext(ctx, `SELECT CASE WHEN a.lifecycle_state = 'active'
+		AND a.published_version_id = ? AND t.category = 'active' AND t.status = 'pending' THEN 1 ELSE 0 END
+		FROM automations a
+		JOIN automation_definition_resources resource ON resource.project_id = a.project_id
+			AND resource.automation_id = a.id AND resource.version_id = a.published_version_id
+			AND resource.resource_type = 'task' AND resource.resource_id = ?
+		JOIN tasks t ON t.id = resource.resource_id AND t.project_id = resource.project_id
+		WHERE a.project_id = ? AND a.id = ?`, binding.VersionID, taskID, projectID, binding.AutomationID).Scan(&admitted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return admitted == 1, nil
+}
+
 // ClaimAutomationDispatch consumes a leased Automation reservation, applies the
 // existing pending-to-running task transition, and creates or resolves exactly
 // one execution by dispatch ID in one BEGIN IMMEDIATE transaction.

@@ -370,25 +370,34 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			if err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req); err != nil {
+			automationBound, err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req)
+			if err != nil {
 				return "", err
 			}
 			var issueNumber *int
 			if req.IssueNumber > 0 {
 				issueNumber = &req.IssueNumber
 			}
-			result, err := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo).OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{
-				Title:       req.PRTitle,
-				Body:        req.PRBody,
-				Base:        req.Base,
-				Draft:       req.Draft,
-				IssueNumber: issueNumber,
-				IssueURL:    req.IssueURL,
-			})
+			pullRequestService := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo)
+			var result *OpenTaskPullRequestResult
+			if automationBound {
+				result, err = pullRequestService.OpenForAutomationTask(ctx, project, task, OpenTaskPullRequestOptions{
+					Title: req.PRTitle, Body: req.PRBody, Base: req.Base, Draft: req.Draft, IssueNumber: issueNumber, IssueURL: req.IssueURL,
+				})
+			} else {
+				result, err = pullRequestService.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{
+					Title: req.PRTitle, Body: req.PRBody, Base: req.Base, Draft: req.Draft, IssueNumber: issueNumber, IssueURL: req.IssueURL,
+				})
+			}
 			if err != nil {
 				return "", err
 			}
-			repoRef, err := opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+			var repoRef *GitHubRepoRef
+			if automationBound {
+				repoRef, err = opts.GitHub.ResolveRepo(ctx, project.RepoURL, "")
+			} else {
+				repoRef, err = opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+			}
 			if err != nil {
 				return "", err
 			}
@@ -419,7 +428,17 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			record, err := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
+			automationBound, err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req)
+			if err != nil {
+				return "", err
+			}
+			pullRequestService := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo)
+			var record *models.TaskPullRequest
+			if automationBound {
+				record, err = pullRequestService.ReplaceBranchHeadForAutomationTask(ctx, project, task, req.ExpectedHeadSHA)
+			} else {
+				record, err = pullRequestService.ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
+			}
 			if err != nil {
 				return "", err
 			}
@@ -463,25 +482,32 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 }
 
 func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, req *githubCreateIssueRuntimeInput) (bool, error) {
-	if opts.AutomationRepo == nil || req == nil {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound || automationContext.ProjectID != opts.ProjectID {
 		return false, nil
 	}
-	automationContext, ok := AutomationContextFromContext(ctx)
-	if !ok || automationContext.ProjectID != opts.ProjectID {
-		return false, nil
+	if opts.AutomationRepo == nil || req == nil {
+		return false, errors.New("Automation GitHub issue authorization is unavailable")
 	}
 	var configuredLabels []string
 	configured := false
-	automationBound := false
+	actionAuthorized := false
 	for _, binding := range automationContext.Bindings {
+		current, err := opts.AutomationRepo.IsCurrentActiveBinding(ctx, opts.ProjectID, binding)
+		if err != nil {
+			return false, err
+		}
+		if !current {
+			return false, errors.New("github_create_issue is not authorized by the caller's current active Automation graph")
+		}
 		issueNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, binding.AutomationID, binding.VersionID, binding.NodeID, "create_github_issue", true)
 		if err != nil {
 			return false, err
 		}
 		if issueNode == nil {
-			continue
+			return false, errors.New("github_create_issue is not authorized by the caller's Automation graph: every causal binding must authorize the action")
 		}
-		automationBound = true
+		actionAuthorized = true
 		assignmentNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, binding.AutomationID, binding.VersionID, issueNode.ID, "github_assignment", true)
 		if err != nil {
 			return false, err
@@ -508,23 +534,31 @@ func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIss
 		configuredLabels = parsed
 		configured = true
 	}
-	if automationBound {
-		req.RepoURL = ""
+	if !actionAuthorized {
+		return false, errors.New("github_create_issue is not authorized by the caller's Automation graph")
 	}
+	req.RepoURL = ""
 	if configured {
 		req.Labels = configuredLabels
 		req.Assignees = nil
 	}
-	return automationBound, nil
+	return true, nil
 }
 
-func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task, req *githubIssueRuntimeInput) error {
-	if opts.AutomationRepo == nil || task == nil || req == nil {
-		return nil
+func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task, req *githubIssueRuntimeInput) (bool, error) {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound || automationContext.ProjectID != opts.ProjectID {
+		return false, nil
 	}
-	automationContext, err := opts.AutomationRepo.ContextForTask(ctx, opts.ProjectID, task.ID)
-	if err != nil {
-		return err
+	if opts.AutomationRepo == nil || task == nil || req == nil {
+		return false, errors.New("Automation pull request authorization is unavailable")
+	}
+	callerTaskID, _, hasExecution := AutomationExecutionFromContext(ctx)
+	if !hasExecution || strings.TrimSpace(callerTaskID) == "" {
+		return false, errors.New("Automation pull request action requires exact causal task provenance")
+	}
+	if callerTaskID != task.ID {
+		return false, errors.New("Automation pull request action cannot mutate a different task")
 	}
 	type pullRequestConfig struct {
 		base  string
@@ -532,33 +566,52 @@ func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIss
 	}
 	var configured *pullRequestConfig
 	for _, binding := range automationContext.Bindings {
+		currentBinding, currentErr := opts.AutomationRepo.IsCurrentActiveBinding(ctx, opts.ProjectID, binding)
+		if currentErr != nil {
+			return false, currentErr
+		}
+		if !currentBinding {
+			return false, errors.New("github pull request action is not authorized by the caller's current active Automation graph")
+		}
 		node, nodeErr := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, binding.AutomationID, binding.VersionID, binding.NodeID, "open_pull_request", true)
 		if nodeErr != nil {
-			return nodeErr
+			return false, nodeErr
 		}
 		if node == nil {
-			continue
+			return false, errors.New("github pull request action is not authorized by the caller's Automation graph: every causal binding must authorize the action")
 		}
 		var config map[string]any
 		if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
-			return fmt.Errorf("decoding pull request node configuration: %w", err)
+			return false, fmt.Errorf("decoding pull request node configuration: %w", err)
 		}
-		base, hasBase := config["base"].(string)
-		draft, hasDraft := config["draft"].(bool)
-		if !hasBase || !hasDraft {
-			continue
+		base := strings.TrimSpace(req.Base)
+		if rawBase, exists := config["base"]; exists {
+			parsedBase, valid := rawBase.(string)
+			if !valid {
+				return false, errors.New("published pull request base configuration is invalid")
+			}
+			base = strings.TrimSpace(parsedBase)
 		}
-		current := pullRequestConfig{base: strings.TrimSpace(base), draft: draft}
+		draft := req.Draft
+		if rawDraft, exists := config["draft"]; exists {
+			parsedDraft, valid := rawDraft.(bool)
+			if !valid {
+				return false, errors.New("published pull request draft configuration is invalid")
+			}
+			draft = parsedDraft
+		}
+		current := pullRequestConfig{base: base, draft: draft}
 		if configured != nil && *configured != current {
-			return errors.New("Automation bindings have conflicting pull request configuration")
+			return false, errors.New("Automation bindings have conflicting pull request configuration")
 		}
 		configured = &current
 	}
-	if configured != nil {
-		req.Base = configured.base
-		req.Draft = configured.draft
+	if configured == nil {
+		return false, errors.New("github pull request action is not authorized by the caller's Automation graph")
 	}
-	return nil
+	req.Base = configured.base
+	req.Draft = configured.draft
+	return true, nil
 }
 
 func resolveGitHubRuntimeProject(ctx context.Context, opts githubIssueRuntimeOptions) (*models.Project, error) {
