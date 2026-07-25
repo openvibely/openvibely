@@ -1141,9 +1141,25 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var model = document.getElementById('model_id').value;
 					var selectedEffort = document.getElementById('model_reasoning_effort').value;
 					setReasoningEffortOptions(canonicalProvider(provider), model, selectedEffort);
+					updateTemperatureField(provider, model);
 					if (isOpenAICompatibleProvider(provider)) {
 						document.getElementById('model_openai_compatible_custom_model').value = model;
 					}
+				}
+
+				function modelSupportsTemperature(provider, model) {
+					if (provider === 'mixture') return false;
+					if (!isOpenAICompatibleProvider(provider)) return true;
+					var preset = document.getElementById('model_openai_compatible_preset').value || 'custom';
+					return !(preset === 'moonshot' && (model || '').trim().toLowerCase().indexOf('kimi-') === 0);
+				}
+
+				function updateTemperatureField(provider, model) {
+					var supported = modelSupportsTemperature(provider, model);
+					var field = document.getElementById('model_temperature_field');
+					var input = document.getElementById('model_temperature');
+					if (field) field.classList.toggle('hidden', !supported);
+					if (input) input.disabled = !supported;
 				}
 				var openAICompatiblePresetDefaults = {
 					openrouter: 'https://openrouter.ai/api/v1/',
@@ -1424,6 +1440,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						if (selectModel !== false) {
 							modelSelect.value = modelID;
 							document.getElementById('model_openai_compatible_custom_model').value = modelID;
+							updateTemperatureField(document.getElementById('model_provider').value, modelID);
 						}
 					}
 
@@ -1649,8 +1666,6 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				var provider = document.getElementById('model_provider').value;
 				var effectiveProvider = canonicalProvider(provider);
 				var modelField = document.getElementById('model_field');
-				var temperatureField = document.getElementById('model_temperature_field');
-				var temperatureInput = document.getElementById('model_temperature');
 				var apiKeyField = document.getElementById('api_key_field');
 				var apiKeyInput = document.getElementById('model_api_key');
 				var anthropicAuthTypeField = document.getElementById('anthropic_auth_type_field');
@@ -1664,8 +1679,6 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				hideAllInfoBoxes();
 				var activeModel = setModelOptions(provider, selectedModel);
 				if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');
-				if (temperatureField) temperatureField.classList.toggle('hidden', provider === 'mixture');
-				if (temperatureInput) temperatureInput.disabled = provider === 'mixture';
 				if (provider === 'anthropic') {
 					anthropicAuthTypeField.classList.remove('hidden');
 					openaiAuthTypeField.classList.add('hidden');
@@ -1720,7 +1733,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_auth_method').disabled = true;
 					document.getElementById('model_openai_connection_method').disabled = true;
 				}
-						setReasoningEffortOptions(effectiveProvider, activeModel, selectedReasoningEffort);				}
+						setReasoningEffortOptions(effectiveProvider, activeModel, selectedReasoningEffort);
+						updateTemperatureField(provider, activeModel);
+					}
 
 				function isEditingModelForm() {
 					return document.getElementById('model_form').dataset.mode === 'edit';
