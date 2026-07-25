@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -48,8 +47,8 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 	}
 }
 
-func TestGitHubSDLCTemplateUsesCanonicalBootstrapPrompts(t *testing.T) {
-	canonical := githubBootstrapPromptsForTest(t)
+func TestGitHubSDLCTemplateUsesMaintainedAutomationPrompts(t *testing.T) {
+	maintained := githubAutomationPromptsForTest(t)
 	candidate, err := NewAutomationDraftService(nil, NewAutomationAdapterRegistry()).TemplateCandidate(AutomationAdapterGitHubSDLC)
 	require.NoError(t, err)
 
@@ -72,21 +71,28 @@ func TestGitHubSDLCTemplateUsesCanonicalBootstrapPrompts(t *testing.T) {
 		"dev_inbox":           {repeatType: string(models.RepeatHours), interval: 1},
 		"auditor":             {repeatType: string(models.RepeatWeekly), interval: 1},
 	}
+	requiredBehavior := map[string]string{
+		"vision_suggestions":  "repository-wide current issue listing or search",
+		"bug_finder":          "Do not modify code, generate artifacts, install dependencies, create implementation tasks, set goals, or open PRs.",
+		"optimization_finder": "Do not modify code, generate artifacts, install dependencies, create implementation tasks, set goals, or open PRs.",
+		"redundancy_finder":   "Do not modify code, generate artifacts, install dependencies, create implementation tasks, set goals, or open PRs.",
+		"dev_inbox":           "github_forward_pr_feedback_to_tasks",
+		"auditor":             "Keep the workspace read-only.",
+	}
 	for nodeKey, section := range sectionsByNode {
 		node := automationDraftNodeByKey(t, candidate, nodeKey)
-		require.Equal(t, canonical[section], node.Config["prompt"], "%s must use the bootstrap skill's canonical %s prompt", nodeKey, section)
-		require.Equal(t, canonical[section], automationCompiledTaskPrompt(candidate, node), "%s must persist the exact canonical prompt without custom-graph additions", nodeKey)
+		require.Equal(t, maintained[section], node.Config["prompt"], "%s must use the maintained %s prompt", nodeKey, section)
+		require.Equal(t, maintained[section], automationCompiledTaskPrompt(candidate, node), "%s must persist the exact maintained prompt without custom-graph additions", nodeKey)
+		require.Contains(t, node.Config["prompt"], requiredBehavior[nodeKey])
 		require.NotContains(t, node.Config["prompt"], "Run the ", "maintained GitHub tasks must not use generic role filler")
 		require.Equal(t, expectedCadence[nodeKey].repeatType, node.Config["repeat_type"], "%s cadence must match bootstrap setup", nodeKey)
 		require.EqualValues(t, expectedCadence[nodeKey].interval, node.Config["repeat_interval"])
 	}
 }
 
-func githubBootstrapPromptsForTest(t *testing.T) map[string]string {
+func githubAutomationPromptsForTest(t *testing.T) map[string]string {
 	t.Helper()
-	data, err := builtinskills.FS.ReadFile("builtin/skills/openvibely_github_autonomous_sdlc_bootstrap/templates/github-loop-prompts.md")
-	require.NoError(t, err, "the bootstrap skill must bundle its canonical prompt templates")
-	body := string(data)
+	body := githubSDLCPromptTemplates
 	sections := []string{"Loop Auditor", "Dev Inbox", "Offering Manager", "Bug Finder / Optimization Finder / Redundancy Finder"}
 	out := make(map[string]string, len(sections))
 	for _, section := range sections {

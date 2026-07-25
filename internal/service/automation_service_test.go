@@ -122,8 +122,8 @@ func TestGitHubSDLCRegistrationHydratesBoundTaskPromptAcrossPause(t *testing.T) 
 	automationRepo := repository.NewAutomationRepo(db)
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 
-	canonical := githubBootstrapPromptsForTest(t)["Dev Inbox"]
-	task := models.Task{ProjectID: project.ID, Title: "GitHub Dev Inbox", Category: models.CategoryScheduled, Priority: 3, Status: models.StatusPending, Prompt: canonical}
+	maintainedPrompt := githubAutomationPromptsForTest(t)["Dev Inbox"]
+	task := models.Task{ProjectID: project.ID, Title: "GitHub Dev Inbox", Category: models.CategoryScheduled, Priority: 3, Status: models.StatusPending, Prompt: maintainedPrompt}
 	require.NoError(t, taskRepo.Create(ctx, &task))
 	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true}
 	require.NoError(t, scheduleRepo.Create(ctx, &schedule))
@@ -159,7 +159,7 @@ func TestGitHubSDLCRegistrationHydratesBoundTaskPromptAcrossPause(t *testing.T) 
 			require.NoError(t, json.Unmarshal([]byte(node.ConfigJSON), &config))
 		}
 	}
-	require.Equal(t, canonical, config["prompt"], "registration must show the real skill-created Task prompt in the graph")
+	require.Equal(t, maintainedPrompt, config["prompt"], "registration must show the real bound Task prompt in the graph")
 	require.Equal(t, string(models.CategoryScheduled), config["category"])
 	require.EqualValues(t, task.Priority, config["priority"])
 	require.Equal(t, string(models.RepeatHours), config["repeat_type"])
@@ -168,10 +168,10 @@ func TestGitHubSDLCRegistrationHydratesBoundTaskPromptAcrossPause(t *testing.T) 
 	require.NoError(t, automationRepo.SetAutomationLifecycle(ctx, project.ID, definition.Automation.ID, models.AutomationPaused))
 	storedTask, err := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
-	require.Equal(t, canonical, storedTask.Prompt, "pausing must not alter the runtime Task prompt")
+	require.Equal(t, maintainedPrompt, storedTask.Prompt, "pausing must not alter the runtime Task prompt")
 	reopened, err := NewAutomationDraftService(automationRepo, NewAutomationAdapterRegistry()).PublishedCandidate(ctx, project.ID, definition.Automation.ID)
 	require.NoError(t, err)
-	require.Equal(t, canonical, automationDraftNodeByKey(t, reopened.Candidate, "dev_inbox").Config["prompt"])
+	require.Equal(t, maintainedPrompt, automationDraftNodeByKey(t, reopened.Candidate, "dev_inbox").Config["prompt"])
 }
 
 func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecycle(t *testing.T) {

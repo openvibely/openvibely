@@ -27,8 +27,6 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 		filepath.Join(root, "agents", "memory_curator", "skills", "recall_memory", "SKILL.md"),
 		filepath.Join(root, "skills", "SKILLS.md"),
 		filepath.Join(root, "skills", "openvibely_github_autonomous_sdlc_bootstrap", "SKILL.md"),
-		filepath.Join(root, "skills", "openvibely_github_autonomous_sdlc_bootstrap", "templates", "github-loop-prompts.md"),
-		filepath.Join(root, "skills", "openvibely_github_autonomous_sdlc_bootstrap", "references", "dev-inbox-execution-invariants.md"),
 		filepath.Join(root, "skills", "openvibely_native_autonomous_sdlc_bootstrap", "SKILL.md"),
 	}
 	for _, p := range mustExist {
@@ -243,12 +241,8 @@ func TestSyncTo_OverwritesSkillBodies(t *testing.T) {
 	}
 
 	skillPath := filepath.Join(root, "agents", "skill_curator", "skills", "route_task", "SKILL.md")
-	promptPath := filepath.Join(root, "skills", "openvibely_github_autonomous_sdlc_bootstrap", "templates", "github-loop-prompts.md")
 	if err := os.WriteFile(skillPath, []byte("stale content"), 0o644); err != nil {
 		t.Fatalf("write stale SKILL.md: %v", err)
-	}
-	if err := os.WriteFile(promptPath, []byte("stale prompt"), 0o644); err != nil {
-		t.Fatalf("write stale prompt template: %v", err)
 	}
 
 	if err := SyncTo(root); err != nil {
@@ -261,13 +255,6 @@ func TestSyncTo_OverwritesSkillBodies(t *testing.T) {
 	}
 	if string(got) == "stale content" {
 		t.Fatalf("SKILL.md not refreshed by SyncTo; still contains stale content")
-	}
-	prompt, err := os.ReadFile(promptPath)
-	if err != nil {
-		t.Fatalf("re-read prompt template: %v", err)
-	}
-	if string(prompt) == "stale prompt" {
-		t.Fatalf("prompt template not refreshed by SyncTo; still contains stale content")
 	}
 }
 
