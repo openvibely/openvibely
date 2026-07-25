@@ -53,9 +53,10 @@ type CompletionsOptions struct {
 
 // completionsMessage represents a message in the /v1/chat/completions format.
 type completionsMessage struct {
-	Role      string      `json:"role"`
-	Content   interface{} `json:"content"` // string or array of content blocks
-	ToolCalls []struct {
+	Role             string      `json:"role"`
+	Content          interface{} `json:"content"` // string or array of content blocks
+	ReasoningContent string      `json:"reasoning_content,omitempty"`
+	ToolCalls        []struct {
 		ID       string `json:"id"`
 		Type     string `json:"type"`
 		Function struct {
@@ -190,9 +191,10 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		// Add assistant message to history
 		if len(turnResult.toolCalls) > 0 {
 			messages = append(messages, completionsMessage{
-				Role:      "assistant",
-				Content:   turnResult.text,
-				ToolCalls: turnResult.toolCalls,
+				Role:             "assistant",
+				Content:          turnResult.text,
+				ReasoningContent: turnResult.reasoningContent,
+				ToolCalls:        turnResult.toolCalls,
 			})
 		} else {
 			messages = append(messages, completionsMessage{
@@ -286,8 +288,9 @@ func isProtectedCompletionsBodyField(key string) bool {
 }
 
 type completionsTurnResult struct {
-	text      string
-	toolCalls []struct {
+	text             string
+	reasoningContent string
+	toolCalls        []struct {
 		ID       string `json:"id"`
 		Type     string `json:"type"`
 		Function struct {
@@ -446,6 +449,9 @@ func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*c
 			if onText != nil {
 				onText(content)
 			}
+		}
+		if reasoning, ok := delta["reasoning_content"].(string); ok && reasoning != "" {
+			result.reasoningContent += reasoning
 		}
 
 		// Handle tool calls

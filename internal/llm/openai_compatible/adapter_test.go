@@ -414,7 +414,7 @@ func TestAdapterToolCallReplaysToolResult(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		if requests == 1 {
 			_, _ = w.Write([]byte(
-				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"memory_view\",\"arguments\":\"{\\\"handle\\\":\"}}]}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Need memory.\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"memory_view\",\"arguments\":\"{\\\"handle\\\":\"}}]}}]}\n\n" +
 					"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"usage.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n" +
 					"data: [DONE]\n\n",
 			))
@@ -463,13 +463,20 @@ func TestAdapterToolCallReplaysToolResult(t *testing.T) {
 		t.Fatalf("output = %q", res.Output)
 	}
 	foundToolMessage := false
+	foundReasoningMessage := false
 	for _, raw := range secondMessages {
 		msg, _ := raw.(map[string]any)
 		if msg["role"] == "tool" && msg["tool_call_id"] == "call_1" && msg["content"] == "memory contents" {
 			foundToolMessage = true
 		}
+		if msg["role"] == "assistant" && msg["reasoning_content"] == "Need memory." {
+			foundReasoningMessage = true
+		}
 	}
 	if !foundToolMessage {
 		t.Fatalf("tool result message not replayed: %#v", secondMessages)
+	}
+	if !foundReasoningMessage {
+		t.Fatalf("assistant reasoning content not replayed: %#v", secondMessages)
 	}
 }
