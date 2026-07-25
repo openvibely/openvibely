@@ -122,40 +122,6 @@ func (r *ScheduleRepo) Create(ctx context.Context, s *models.Schedule) error {
 	return nil
 }
 
-func (r *ScheduleRepo) CreateForAutomationPublication(ctx context.Context, s *models.Schedule, attemptID, stepKey string) error {
-	if s == nil || attemptID == "" || stepKey == "" {
-		return fmt.Errorf("automation publication schedule context is required")
-	}
-	if s.NextRun == nil {
-		next := s.RunAt
-		s.NextRun = &next
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := tx.QueryRowContext(ctx,
-		`INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
-		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, 0, ?)
-		 RETURNING id, created_at, updated_at`,
-		s.TaskID, s.RunAt, s.RepeatType, s.RepeatInterval, s.NextRun).
-		Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt); err != nil {
-		return fmt.Errorf("creating automation publication schedule: %w", err)
-	}
-	s.Enabled = false
-	result, err := tx.ExecContext(ctx, `UPDATE automation_publication_steps
-		SET resource_id = ?, updated_at = CURRENT_TIMESTAMP
-		WHERE attempt_id = ? AND step_key = ? AND status = 'running'`, s.ID, attemptID, stepKey)
-	if err != nil {
-		return fmt.Errorf("journaling automation publication schedule: %w", err)
-	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return fmt.Errorf("automation publication step not found")
-	}
-	return tx.Commit()
-}
-
 func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE schedules SET run_at = ?, repeat_type = ?, repeat_interval = ?,

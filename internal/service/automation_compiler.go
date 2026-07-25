@@ -18,7 +18,7 @@ type automationTaskMutationService interface {
 }
 
 type automationTaskSubmissionService interface {
-	SubmitPublishedAutomationTask(models.Task)
+	SubmitSavedAutomationTask(models.Task)
 }
 
 type AutomationCompiler struct {
@@ -27,252 +27,239 @@ type AutomationCompiler struct {
 	taskRepo       *repository.TaskRepo
 	agentRepo      *repository.AgentRepo
 	scheduleRepo   *repository.ScheduleRepo
-	planner        *AutomationPublicationPlanner
+	validator      *AutomationSaveValidator
 	now            func() time.Time
 }
 
-type AutomationPublishRequest struct {
-	ProjectID    string
-	AutomationID string
-	VersionID    string
-	PlanRevision string
+type AutomationSaveRequest struct {
+	ProjectID             string
+	AutomationID          string
+	StableKey             string
+	Source                string
+	CreatedVia            string
+	Candidate             models.AutomationDraftCandidate
+	ConfirmationTokenID   string
+	ConfirmationPrincipal string
+	ConfirmationThreadID  string
+	ConfirmingUserInputID string
 }
 
-type AutomationPublishResult struct {
-	Definition *models.AutomationDefinition        `json:"definition"`
-	Attempt    models.AutomationPublicationAttempt `json:"attempt"`
-	Resources  []models.AutomationPublicationStep  `json:"resources"`
+type AutomationSaveResult struct {
+	Definition *models.AutomationDefinition `json:"definition"`
 }
 
-func NewAutomationCompiler(automationRepo *repository.AutomationRepo, taskSvc automationTaskMutationService, taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, planner *AutomationPublicationPlanner) *AutomationCompiler {
-	return &AutomationCompiler{automationRepo: automationRepo, taskSvc: taskSvc, taskRepo: taskRepo, scheduleRepo: scheduleRepo, planner: planner, now: time.Now}
+func NewAutomationCompiler(automationRepo *repository.AutomationRepo, taskSvc automationTaskMutationService, taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, validator *AutomationSaveValidator) *AutomationCompiler {
+	return &AutomationCompiler{automationRepo: automationRepo, taskSvc: taskSvc, taskRepo: taskRepo, scheduleRepo: scheduleRepo, validator: validator, now: time.Now}
 }
 
 func (c *AutomationCompiler) SetAgentRepository(agentRepo *repository.AgentRepo) {
 	c.agentRepo = agentRepo
 }
 
-func (c *AutomationCompiler) Retry(ctx context.Context, request AutomationPublishRequest) (*AutomationPublishResult, error) {
-	if c == nil || c.automationRepo == nil {
-		return nil, errors.New("automation compiler is unavailable")
+func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (*models.AutomationSavePlan, models.AutomationDraftCandidate, error) {
+	if c == nil || c.validator == nil || c.validator.drafts == nil || c.validator.registry == nil {
+		return nil, candidate, errors.New("automation save is unavailable")
 	}
-	existing, err := c.automationRepo.GetPublicationAttempt(ctx, request.ProjectID, request.AutomationID, request.VersionID, request.PlanRevision)
+	normalized, err := c.validator.drafts.NormalizeCandidate(candidate)
+	if err != nil {
+		return nil, candidate, err
+	}
+	issues, err := c.validator.drafts.validateCandidateForProject(ctx, projectID, normalized)
+	if err != nil {
+		return nil, normalized, err
+	}
+	capabilityIssues, err := c.validator.capabilityIssues(ctx, projectID, normalized)
+	if err != nil {
+		return nil, normalized, err
+	}
+	agentIssues, err := c.validator.agentIssues(ctx, projectID, normalized)
+	if err != nil {
+		return nil, normalized, err
+	}
+	issues = append(issues, capabilityIssues...)
+	issues = append(issues, agentIssues...)
+	plan := &models.AutomationSavePlan{Validation: issues, WillNot: []string{"merge pull requests", "release software", "deploy software"}}
+	if len(issues) > 0 {
+		automationobs.Event("automation.save.validation_failure", automationobs.String("project_id", projectID), automationobs.String("adapter_key", normalized.AdapterKey))
+		return plan, normalized, nil
+	}
+	adapter, _ := c.validator.registry.Get(normalized.AdapterKey)
+	resourceNodes := adapter.Nodes
+	if adapter.DynamicTopology {
+		resourceNodes = nil
+		for _, node := range normalized.Nodes {
+			allowed := map[string]bool{}
+			if node.Type == models.AutomationNodeTrigger {
+				allowed["task"], allowed["schedule"] = true, true
+			} else if node.Type == models.AutomationNodeAgentTask && !customAutomationGitHubIssueTask(normalized, node.Key) {
+				allowed["task"] = true
+			}
+			resourceNodes = append(resourceNodes, AutomationAdapterNode{Key: node.Key, Name: node.Name, AllowedResources: allowed})
+		}
+	}
+	for _, node := range resourceNodes {
+		if node.AllowedResources["task"] {
+			plan.Effects = append(plan.Effects, models.AutomationSaveEffect{Operation: "create", ResourceType: "task", Name: node.Name})
+		}
+		if node.AllowedResources["schedule"] {
+			plan.Effects = append(plan.Effects, models.AutomationSaveEffect{Operation: "create", ResourceType: "schedule", Name: node.Name})
+		}
+	}
+	return plan, normalized, nil
+}
+
+// Save validates and applies one complete Automation graph in a single SQLite
+// transaction. It creates no intermediate persistent state.
+func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveRequest) (*AutomationSaveResult, error) {
+	if c == nil || c.automationRepo == nil || c.validator == nil || c.validator.drafts == nil || c.validator.registry == nil || c.taskRepo == nil || c.scheduleRepo == nil {
+		return nil, errors.New("automation save is unavailable")
+	}
+	if strings.TrimSpace(request.ProjectID) == "" {
+		return nil, errors.New("project is required")
+	}
+	candidate, err := c.validator.drafts.NormalizeCandidate(request.Candidate)
 	if err != nil {
 		return nil, err
 	}
-	if existing == nil || (existing.Attempt.Status != "failed" && existing.Attempt.Status != "completed") {
-		return nil, errors.New("automation publication retry not found")
-	}
-	return c.Publish(ctx, request)
-}
-
-func (c *AutomationCompiler) Publish(ctx context.Context, request AutomationPublishRequest) (*AutomationPublishResult, error) {
-	if c == nil || c.automationRepo == nil || c.planner == nil || c.taskSvc == nil || c.taskRepo == nil || c.scheduleRepo == nil {
-		return nil, errors.New("automation compiler is unavailable")
-	}
-	if existing, err := c.automationRepo.GetPublicationAttempt(ctx, request.ProjectID, request.AutomationID, request.VersionID, request.PlanRevision); err != nil {
+	issues, err := c.validator.drafts.validateCandidateForProject(ctx, request.ProjectID, candidate)
+	if err != nil {
 		return nil, err
-	} else if existing != nil && existing.Attempt.Status == "completed" {
-		definition, err := c.automationRepo.GetDefinitionVersion(ctx, request.ProjectID, request.AutomationID, request.VersionID)
+	}
+	capabilityIssues, err := c.validator.capabilityIssues(ctx, request.ProjectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	agentIssues, err := c.validator.agentIssues(ctx, request.ProjectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	issues = append(issues, capabilityIssues...)
+	issues = append(issues, agentIssues...)
+	if len(issues) > 0 {
+		return nil, fmt.Errorf("automation graph validation failed: %s", issues[0].Message)
+	}
+
+	automationID := strings.TrimSpace(request.AutomationID)
+	if automationID == "" {
+		automationID = repository.NewID()
+	}
+	current, err := c.automationRepo.GetDefinition(ctx, request.ProjectID, automationID)
+	if err != nil {
+		return nil, err
+	}
+	expectedGraphID := ""
+	automation := models.Automation{ID: automationID, ProjectID: request.ProjectID, Name: candidate.Name,
+		Description: candidate.Description, AutomationType: candidate.AutomationType, LifecycleState: models.AutomationActive}
+	existingResources := map[string]models.AutomationDefinitionResource{}
+	if current != nil {
+		automation = current.Automation
+		expectedGraphID = current.Version.ID
+		for _, resource := range current.Resources {
+			existingResources[resource.NodeKey+"\x00"+resource.ResourceType] = resource
+		}
+	}
+
+	adapter, ok := c.validator.registry.Get(candidate.AdapterKey)
+	if !ok {
+		return nil, fmt.Errorf("unsupported automation adapter %q", candidate.AdapterKey)
+	}
+	candidateNodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		candidateNodes[node.Key] = node
+	}
+	resourceNodes := adapter.Nodes
+	if adapter.DynamicTopology {
+		resourceNodes = make([]AutomationAdapterNode, 0, len(candidate.Nodes))
+		for _, node := range candidate.Nodes {
+			resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
+			switch node.Type {
+			case models.AutomationNodeAgentTask:
+				if !customAutomationGitHubIssueTask(candidate, node.Key) {
+					resource.AllowedResources["task"] = true
+				}
+			case models.AutomationNodeTrigger:
+				resource.AllowedResources["task"] = true
+				resource.AllowedResources["schedule"] = true
+			}
+			resourceNodes = append(resourceNodes, resource)
+		}
+	}
+
+	write := repository.AutomationSaveWrite{ProjectID: request.ProjectID, AutomationID: automationID, GraphID: repository.NewID(),
+		ExpectedCurrentGraphID: expectedGraphID, StableKey: request.StableKey, Source: request.Source,
+		CreatedVia: request.CreatedVia, Candidate: candidate, ConfirmationTokenID: request.ConfirmationTokenID,
+		ConfirmationPrincipal: request.ConfirmationPrincipal, ConfirmationThreadID: request.ConfirmationThreadID,
+		ConfirmingUserInputID: request.ConfirmingUserInputID}
+	for _, resourceNode := range resourceNodes {
+		if !resourceNode.AllowedResources["task"] {
+			continue
+		}
+		node := candidateNodes[resourceNode.Key]
+		prompt, category, priority := automationNodeTaskConfiguration(candidate, node)
+		agent, err := c.resolveNodeAgent(ctx, request.ProjectID, node)
 		if err != nil {
 			return nil, err
 		}
-		return publishResult(definition, existing), nil
-	}
-	plan, err := c.planner.Plan(ctx, request.ProjectID, request.AutomationID, request.VersionID)
-	if err != nil {
-		return nil, err
-	}
-	if len(plan.Validation) > 0 {
-		return nil, fmt.Errorf("staged Automation graph is invalid: %s", plan.Validation[0].Message)
-	}
-	if request.PlanRevision == "" || request.PlanRevision != plan.PlanRevision {
-		return nil, errors.New("stale publication plan; preview the publication again")
-	}
-	snapshot, err := c.automationRepo.ReservePublicationAttempt(ctx, request.ProjectID, request.AutomationID, request.VersionID, request.PlanRevision, plan.Effects)
-	if err != nil {
-		return nil, err
-	}
-	claimOwner := repository.NewID()
-	if err := c.automationRepo.AcquirePublicationAttempt(ctx, snapshot.Attempt.ID, claimOwner, c.now().UTC(), 2*time.Minute); err != nil {
-		return nil, err
-	}
-	defer func() {
-		_ = c.automationRepo.ReleasePublicationAttempt(context.Background(), snapshot.Attempt.ID, claimOwner)
-	}()
-	metadata, err := c.automationRepo.GetAutomationDraftMetadata(ctx, request.ProjectID, request.AutomationID, request.VersionID)
-	if err != nil {
-		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
-	}
-	if metadata == nil {
-		return c.failPublication(ctx, request, snapshot.Attempt.ID, errors.New("staged Automation graph metadata not found"))
-	}
-	candidate, err := metadata.Candidate()
-	if err != nil {
-		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
-	}
-	definition, err := c.automationRepo.GetDefinitionVersion(ctx, request.ProjectID, request.AutomationID, request.VersionID)
-	if err != nil {
-		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
-	}
-	if definition == nil {
-		return c.failPublication(ctx, request, snapshot.Attempt.ID, errors.New("staged Automation graph not found"))
-	}
-	effects := publicationEffectMap(plan.Effects)
-	resources := make(map[string]string)
-	for _, step := range snapshot.Steps {
-		if step.ResourceID != "" {
-			resources[step.StepKey] = step.ResourceID
+		var agentID *string
+		if agent != nil {
+			agentID = &agent.ID
 		}
+		taskWrite := repository.AutomationSaveTask{NodeKey: node.Key, Title: automationTaskTitle(automation, node), Prompt: prompt,
+			Category: category, Priority: priority, AgentDefinitionID: agentID}
+		if existing := existingResources[node.Key+"\x00task"]; existing.ResourceID != "" {
+			taskWrite.ExistingTaskID = existing.ResourceID
+		}
+		if candidate.AdapterKey == AutomationAdapterCustom {
+			taskWrite.ApplyTopology = true
+			taskWrite.ParentNodeKey, _ = customAutomationTaskNeighbors(candidate, node.Key)
+			if _, child := customAutomationTaskNeighbors(candidate, node.Key); child != nil {
+				taskWrite.ChildNodeKey = child.Key
+				taskWrite.ChildTitle = automationTaskTitle(automation, *child)
+				taskWrite.ChildPromptPrefix = automationCompiledTaskPrompt(candidate, *child)
+				childCategory, _ := child.Config["category"].(string)
+				taskWrite.ChildCategory = models.TaskCategory(childCategory)
+				if parentKey, _ := customAutomationTaskNeighbors(candidate, child.Key); parentKey != "" {
+					if parent := candidateNodes[parentKey]; parent.Type == models.AutomationNodeTrigger {
+						taskWrite.ChildCategory = models.CategoryActive
+					}
+				}
+			}
+		}
+		write.Tasks = append(write.Tasks, taskWrite)
 	}
-	for _, step := range snapshot.Steps {
-		if step.Status == "completed" {
+	for _, resourceNode := range resourceNodes {
+		if !resourceNode.AllowedResources["schedule"] {
 			continue
 		}
-		effect, ok := effects[step.StepKey]
-		if !ok {
-			err := fmt.Errorf("publication step %q is absent from the confirmed plan", step.StepKey)
-			return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
+		node := candidateNodes[resourceNode.Key]
+		taskNodeKey := node.Key
+		if candidate.AdapterKey != AutomationAdapterCustom {
+			taskNodeKey, _ = node.Config["target_node_key"].(string)
 		}
-		if err := c.automationRepo.MarkPublicationStep(ctx, snapshot.Attempt.ID, step.StepKey, "running", step.ResourceID, ""); err != nil {
-			return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
+		schedule, err := c.scheduleFromNode("", node)
+		if err != nil {
+			return nil, err
 		}
-		if effect.ResourceID == "" {
-			effect.ResourceID = step.ResourceID
+		scheduleWrite := repository.AutomationSaveSchedule{NodeKey: node.Key, TaskNodeKey: taskNodeKey, RunAt: schedule.RunAt,
+			RepeatType: schedule.RepeatType, RepeatInterval: schedule.RepeatInterval, Enabled: schedule.Enabled}
+		if existing := existingResources[node.Key+"\x00schedule"]; existing.ResourceID != "" {
+			scheduleWrite.ExistingScheduleID = existing.ResourceID
 		}
-		resourceID, compileErr := c.compileEffect(ctx, snapshot.Attempt.ID, request, definition, candidate, effect, resources)
-		if compileErr != nil {
-			ambiguousResourceID := step.ResourceID
-			if ambiguousResourceID == "" && effect.ResourceType == "task" {
-				nodeKey := strings.TrimPrefix(effect.TargetKey, "task:")
-				if reconciled, reconcileErr := c.automationRepo.FindCompilerTask(ctx, request.ProjectID, request.AutomationID, nodeKey); reconcileErr == nil && reconciled != nil {
-					ambiguousResourceID = reconciled.ID
-				}
-			}
-			_ = c.automationRepo.MarkPublicationStep(ctx, snapshot.Attempt.ID, step.StepKey, "ambiguous", ambiguousResourceID, compileErr.Error())
-			return c.failPublication(ctx, request, snapshot.Attempt.ID, compileErr)
-		}
-		completedStatus := "completed"
-		if effect.ResourceType == "task" && effect.Operation == "update" {
-			completedStatus = "running"
-		}
-		if err := c.automationRepo.MarkPublicationStep(ctx, snapshot.Attempt.ID, step.StepKey, completedStatus, resourceID, ""); err != nil {
-			return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
-		}
-		resources[step.StepKey] = resourceID
+		write.Schedules = append(write.Schedules, scheduleWrite)
 	}
-	taskUpdates, err := c.publicationTaskUpdates(ctx, definition, candidate, effects, resources)
-	if err != nil {
-		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
-	}
-	published, err := c.automationRepo.PublishDraftVersion(ctx, snapshot.Attempt.ID, taskUpdates)
-	if err != nil {
-		return c.failPublication(ctx, request, snapshot.Attempt.ID, err)
-	}
-	if published.Automation.LifecycleState == models.AutomationActive {
-		if submitter, ok := c.taskSvc.(automationTaskSubmissionService); ok {
-			for _, update := range taskUpdates {
-				effect, exists := effects[update.StepKey]
-				if !exists || effect.Operation != "create" || update.Category != models.CategoryActive || update.ParentTaskID != nil || update.Status == models.StatusBlocked {
-					continue
-				}
-				task, getErr := c.taskRepo.GetByID(ctx, update.TaskID)
-				if getErr != nil || task == nil {
-					continue
-				}
-				submitter.SubmitPublishedAutomationTask(*task)
-			}
-		}
-	}
-	completed, err := c.automationRepo.GetPublicationAttempt(ctx, request.ProjectID, request.AutomationID, request.VersionID, request.PlanRevision)
+
+	definition, runnable, err := c.automationRepo.SaveCurrentGraph(ctx, write)
 	if err != nil {
 		return nil, err
 	}
-	automationobs.Event("automation.publication.completed",
-		automationobs.String("project_id", request.ProjectID), automationobs.String("automation_id", request.AutomationID),
-		automationobs.String("version_id", request.VersionID), automationobs.String("attempt_id", snapshot.Attempt.ID))
-	return publishResult(published, completed), nil
-}
-
-func (c *AutomationCompiler) failPublication(ctx context.Context, request AutomationPublishRequest, attemptID string, cause error) (*AutomationPublishResult, error) {
-	_ = c.automationRepo.MarkPublicationAttemptFailed(ctx, attemptID, cause)
-	automationobs.Event("automation.publication.failed",
-		automationobs.String("project_id", request.ProjectID), automationobs.String("automation_id", request.AutomationID),
-		automationobs.String("version_id", request.VersionID), automationobs.String("attempt_id", attemptID))
-	snapshot, snapshotErr := c.automationRepo.GetPublicationAttempt(ctx, request.ProjectID, request.AutomationID, request.VersionID, request.PlanRevision)
-	if snapshotErr != nil {
-		return nil, cause
-	}
-	definition, _ := c.automationRepo.GetDefinitionVersion(ctx, request.ProjectID, request.AutomationID, request.VersionID)
-	return publishResult(definition, snapshot), cause
-}
-
-func (c *AutomationCompiler) compileEffect(ctx context.Context, attemptID string, request AutomationPublishRequest, definition *models.AutomationDefinition, candidate models.AutomationDraftCandidate, effect models.AutomationPublicationEffect, resources map[string]string) (string, error) {
-	nodeKey := strings.TrimPrefix(effect.TargetKey, effect.ResourceType+":")
-	node, ok := findDraftNode(candidate, nodeKey)
-	if !ok {
-		return "", fmt.Errorf("publication target %q has no staged graph node", effect.TargetKey)
-	}
-	switch effect.ResourceType {
-	case "task":
-		return c.compileTask(ctx, request, definition, candidate, node, effect)
-	case "schedule":
-		return c.compileSchedule(ctx, attemptID, request, definition, node, effect, resources)
-	default:
-		return effect.ResourceID, nil
-	}
-}
-
-func (c *AutomationCompiler) compileTask(ctx context.Context, request AutomationPublishRequest, definition *models.AutomationDefinition, candidate models.AutomationDraftCandidate, node models.AutomationDraftNode, effect models.AutomationPublicationEffect) (string, error) {
-	task := (*models.Task)(nil)
-	var err error
-	if effect.ResourceID != "" {
-		task, err = c.taskRepo.GetByID(ctx, effect.ResourceID)
-		if err != nil {
-			return "", err
+	if submitter, ok := c.taskSvc.(automationTaskSubmissionService); ok {
+		for _, task := range runnable {
+			submitter.SubmitSavedAutomationTask(task)
 		}
 	}
-	if task == nil {
-		task, err = c.automationRepo.FindCompilerTask(ctx, request.ProjectID, request.AutomationID, node.Key)
-		if err != nil {
-			return "", err
-		}
-	}
-	prompt, _, priority := automationNodeTaskConfiguration(candidate, node)
-	agent, err := c.resolveNodeAgent(ctx, request.ProjectID, node)
-	if err != nil {
-		return "", err
-	}
-	var agentDefinitionID *string
-	if agent != nil {
-		agentDefinitionID = &agent.ID
-	}
-	if task == nil {
-		// Compiler-created Tasks must remain non-admitted until the graph and
-		// resource membership commit together. Publication applies the configured
-		// category/status and submits runnable roots afterward.
-		task = &models.Task{ProjectID: request.ProjectID, Title: automationTaskTitle(definition.Automation, node), Prompt: prompt,
-			Category: models.CategoryBacklog, Priority: priority, Status: models.StatusPending, AgentDefinitionID: agentDefinitionID,
-			CreatedVia: repository.AutomationCompilerTaskCreatedVia(request.AutomationID, node.Key)}
-		if err := c.taskSvc.Create(ctx, task); err != nil {
-			if errors.Is(err, ErrDuplicateTask) {
-				return "", errors.New("automation task title conflicts with existing visible work")
-			}
-			return "", err
-		}
-		return task.ID, nil
-	}
-	if task.ProjectID != request.ProjectID || task.CreatedVia != repository.AutomationCompilerTaskCreatedVia(request.AutomationID, node.Key) && effect.Operation == "create" {
-		return "", errors.New("publication task reconciliation found unrelated work")
-	}
-	if effect.Operation == "update" {
-		// Existing task behavior belongs to the active published version until the
-		// replacement version is durable. The desired fields are applied inside
-		// PublishDraftVersion's transaction after every external resource step has
-		// completed, so a failed or crashed attempt cannot partially switch behavior.
-		return task.ID, nil
-	}
-	return task.ID, nil
+	automationobs.Event("automation.saved", automationobs.String("project_id", request.ProjectID),
+		automationobs.String("automation_id", automationID), automationobs.String("graph_id", write.GraphID))
+	return &AutomationSaveResult{Definition: definition}, nil
 }
 
 func (c *AutomationCompiler) resolveNodeAgent(ctx context.Context, projectID string, node models.AutomationDraftNode) (*models.Agent, error) {
@@ -290,98 +277,6 @@ func (c *AutomationCompiler) resolveNodeAgent(ctx context.Context, projectID str
 	return agent, nil
 }
 
-func (c *AutomationCompiler) publicationTaskUpdates(ctx context.Context, definition *models.AutomationDefinition, candidate models.AutomationDraftCandidate, effects map[string]models.AutomationPublicationEffect, resources map[string]string) ([]repository.AutomationPublicationTaskUpdate, error) {
-	var updates []repository.AutomationPublicationTaskUpdate
-	for _, node := range candidate.Nodes {
-		stepKey := "task:" + node.Key
-		effect, ok := effects[stepKey]
-		if !ok || effect.ResourceType != "task" {
-			continue
-		}
-		taskID := resources[stepKey]
-		if taskID == "" {
-			return nil, fmt.Errorf("publication task update %q has no reconciled resource", stepKey)
-		}
-		prompt, category, priority := automationNodeTaskConfiguration(candidate, node)
-		agent, err := c.resolveNodeAgent(ctx, definition.Automation.ProjectID, node)
-		if err != nil {
-			return nil, err
-		}
-		var agentDefinitionID *string
-		if agent != nil {
-			agentDefinitionID = &agent.ID
-		}
-		update := repository.AutomationPublicationTaskUpdate{
-			StepKey: stepKey, TaskID: taskID, Title: automationTaskTitle(definition.Automation, node),
-			Prompt: prompt, Category: category, Priority: priority, AgentDefinitionID: agentDefinitionID,
-			Status: models.StatusPending,
-		}
-		if candidate.AdapterKey == AutomationAdapterCustom {
-			update.ApplyTopology = true
-			update.Status = models.StatusPending
-			parentKey, childNode := customAutomationTaskNeighbors(candidate, node.Key)
-			if parentKey != "" {
-				parentID := resources["task:"+parentKey]
-				if parentID == "" {
-					return nil, fmt.Errorf("custom task node %q has no compiled parent task", node.Key)
-				}
-				update.ParentTaskID = &parentID
-				update.Status = models.StatusBlocked
-			}
-			if childNode != nil {
-				childID := resources["task:"+childNode.Key]
-				if childID == "" {
-					return nil, fmt.Errorf("custom task node %q has no compiled child task", node.Key)
-				}
-				update.ChainConfig, err = customAutomationTaskChainConfig(definition.Automation, candidate, *childNode, childID)
-				if err != nil {
-					return nil, err
-				}
-			} else {
-				update.ChainConfig = "{}"
-			}
-		}
-		updates = append(updates, update)
-	}
-	return updates, nil
-}
-
-func (c *AutomationCompiler) compileSchedule(ctx context.Context, attemptID string, request AutomationPublishRequest, definition *models.AutomationDefinition, node models.AutomationDraftNode, effect models.AutomationPublicationEffect, resources map[string]string) (string, error) {
-	if effect.Operation == "reuse" && effect.ResourceID != "" {
-		return effect.ResourceID, nil
-	}
-	taskKey := node.Key
-	if definition.Version.AdapterKey != AutomationAdapterCustom {
-		taskKey, _ = node.Config["target_node_key"].(string)
-	}
-	taskID := resources["task:"+taskKey]
-	if taskID == "" {
-		return "", fmt.Errorf("trigger node %q has no compiled task target", node.Key)
-	}
-	desired, err := c.scheduleFromNode(taskID, node)
-	if err != nil {
-		return "", err
-	}
-	// A new trigger remains disabled until PublishDraftVersion atomically claims
-	// ownership and publishes the immutable version. This prevents an ordinary
-	// scheduler poll from firing an unpublished Automation trigger.
-	desired.Enabled = false
-	if effect.ResourceID != "" {
-		existing, getErr := c.scheduleRepo.GetByID(ctx, effect.ResourceID)
-		if getErr != nil {
-			return "", getErr
-		}
-		if existing == nil || !schedulesMatchConfiguration(*existing, desired) {
-			return "", fmt.Errorf("publication schedule reconciliation found unrelated work")
-		}
-		return existing.ID, nil
-	}
-	if err := c.scheduleRepo.CreateForAutomationPublication(ctx, &desired, attemptID, effect.StepKey); err != nil {
-		return "", err
-	}
-	return desired.ID, nil
-}
-
 func (c *AutomationCompiler) scheduleFromNode(taskID string, node models.AutomationDraftNode) (models.Schedule, error) {
 	runAtText, _ := node.Config["run_at"].(string)
 	clock, err := time.ParseInLocation("15:04", runAtText, time.Local)
@@ -397,25 +292,6 @@ func (c *AutomationCompiler) scheduleFromNode(taskID string, node models.Automat
 	interval, _ := draftInt(node.Config["repeat_interval"])
 	enabled, _ := node.Config["enabled"].(bool)
 	return models.Schedule{TaskID: taskID, RunAt: runAt.UTC(), RepeatType: models.RepeatType(repeat), RepeatInterval: interval, Enabled: enabled}, nil
-}
-
-func schedulesMatchConfiguration(existing, desired models.Schedule) bool {
-	return existing.TaskID == desired.TaskID && existing.RunAt.Format("15:04") == desired.RunAt.Format("15:04") &&
-		existing.RepeatType == desired.RepeatType && existing.RepeatInterval == desired.RepeatInterval && existing.Enabled == desired.Enabled
-}
-
-func publishResult(definition *models.AutomationDefinition, snapshot *repository.AutomationPublicationSnapshot) *AutomationPublishResult {
-	result := &AutomationPublishResult{Definition: definition}
-	if snapshot == nil {
-		return result
-	}
-	result.Attempt = snapshot.Attempt
-	for _, step := range snapshot.Steps {
-		if step.ResourceID != "" && step.Operation != "delete" {
-			result.Resources = append(result.Resources, step)
-		}
-	}
-	return result
 }
 
 type AutomationLifecycleService struct {
@@ -450,7 +326,7 @@ func (s *AutomationLifecycleService) Resume(ctx context.Context, projectID, auto
 	if submitter, ok := s.taskSvc.(automationTaskSubmissionService); ok {
 		for _, task := range roots {
 			task.Category = models.CategoryActive
-			submitter.SubmitPublishedAutomationTask(task)
+			submitter.SubmitSavedAutomationTask(task)
 		}
 	}
 	return nil

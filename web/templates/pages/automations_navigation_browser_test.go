@@ -32,7 +32,7 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := AutomationsContent(cards, nil, "project-search").Render(context.Background(), &out); err != nil {
+	if err := AutomationsContent(cards, "project-search").Render(context.Background(), &out); err != nil {
 		t.Fatalf("render Automation portfolio: %v", err)
 	}
 	body := out.String()
@@ -272,7 +272,7 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 	}
 	renderPortfolio := func() string {
 		var out bytes.Buffer
-		if err := AutomationsContent(cards, nil, projectID).Render(context.Background(), &out); err != nil {
+		if err := AutomationsContent(cards, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Automation portfolio: %v", err)
 		}
 		return out.String()

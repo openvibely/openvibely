@@ -47,11 +47,14 @@ type AutomationValidationIssue struct {
 	Message string `json:"message"`
 }
 
-type AutomationDraftMetadata struct {
+type AutomationGraphMetadata struct {
 	ProjectID        string                      `json:"project_id"`
 	AutomationID     string                      `json:"automation_id"`
-	VersionID        string                      `json:"version_id"`
+	GraphID          string                      `json:"graph_id"`
 	CandidateJSON    string                      `json:"candidate_json"`
+	AssumptionsJSON  string                      `json:"-"`
+	WarningsJSON     string                      `json:"-"`
+	ValidationJSON   string                      `json:"-"`
 	Assumptions      []string                    `json:"assumptions"`
 	Warnings         []string                    `json:"warnings"`
 	ValidationErrors []AutomationValidationIssue `json:"validation_errors"`
@@ -93,60 +96,21 @@ type AutomationCapabilitySnapshot struct {
 	SafetyBoundaries   map[string]bool                            `json:"safety_boundaries"`
 }
 
-type AutomationPublicationEffect struct {
-	StepKey      string `json:"step_key"`
+type AutomationSaveEffect struct {
 	Operation    string `json:"operation"`
-	TargetKey    string `json:"target_key"`
 	ResourceType string `json:"resource_type"`
 	Name         string `json:"name"`
-	ResourceID   string `json:"resource_id,omitempty"`
 }
 
-type AutomationPublicationPlan struct {
-	ProjectID    string                        `json:"project_id"`
-	AutomationID string                        `json:"automation_id"`
-	VersionID    string                        `json:"version_id"`
-	PlanRevision string                        `json:"plan_revision"`
-	Effects      []AutomationPublicationEffect `json:"effects"`
-	Validation   []AutomationValidationIssue   `json:"validation_errors"`
-	WillNot      []string                      `json:"will_not"`
-}
-
-type AutomationPublicationAttempt struct {
-	ID             string     `json:"id"`
-	ProjectID      string     `json:"project_id"`
-	AutomationID   string     `json:"automation_id"`
-	VersionID      string     `json:"version_id"`
-	PlanRevision   string     `json:"plan_revision"`
-	Status         string     `json:"status"`
-	ErrorMessage   string     `json:"error_message"`
-	ClaimOwner     string     `json:"-"`
-	ClaimExpiresAt *time.Time `json:"-"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	CompletedAt    *time.Time `json:"completed_at,omitempty"`
-}
-
-type AutomationPublicationStep struct {
-	ID           string    `json:"id"`
-	AttemptID    string    `json:"attempt_id"`
-	StepKey      string    `json:"step_key"`
-	Operation    string    `json:"operation"`
-	TargetKey    string    `json:"target_key"`
-	DisplayOrder int       `json:"display_order"`
-	Status       string    `json:"status"`
-	ResourceType string    `json:"resource_type"`
-	ResourceID   string    `json:"resource_id"`
-	ErrorMessage string    `json:"error_message"`
-	UpdatedAt    time.Time `json:"updated_at"`
+type AutomationSavePlan struct {
+	Effects    []AutomationSaveEffect      `json:"effects"`
+	Validation []AutomationValidationIssue `json:"validation_errors"`
+	WillNot    []string                    `json:"will_not"`
 }
 
 type AutomationChatConfirmationReceipt struct {
 	TokenID               string     `json:"token_id"`
 	ProjectID             string     `json:"project_id"`
-	AutomationID          string     `json:"automation_id"`
-	VersionID             string     `json:"version_id"`
-	PlanRevision          string     `json:"plan_revision"`
 	PrincipalID           string     `json:"principal_id"`
 	ThreadID              string     `json:"thread_id"`
 	PlanMessageID         string     `json:"plan_message_id"`
@@ -154,37 +118,23 @@ type AutomationChatConfirmationReceipt struct {
 	Source                string     `json:"source"`
 	CandidateJSON         string     `json:"candidate_json"`
 	ExpiresAt             time.Time  `json:"expires_at"`
-	ConsumedAttemptID     string     `json:"consumed_attempt_id,omitempty"`
 	ConfirmingUserInputID string     `json:"confirming_user_input_id,omitempty"`
 	ConfirmationMethod    string     `json:"confirmation_method,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	ConsumedAt            *time.Time `json:"consumed_at,omitempty"`
 }
 
-type AutomationSaveRecovery struct {
-	AutomationID     string                      `json:"-"`
-	VersionID        string                      `json:"-"`
-	PlanRevision     string                      `json:"-"`
-	Candidate        AutomationDraftCandidate    `json:"-"`
-	PublicationSteps []AutomationPublicationStep `json:"-"`
-}
-
 type AutomationBuilderPage struct {
-	Result            AutomationDraftResult        `json:"result"`
-	AutomationID      string                       `json:"automation_id,omitempty"`
-	RetryAutomationID string                       `json:"retry_automation_id,omitempty"`
-	RetryVersionID    string                       `json:"retry_version_id,omitempty"`
-	RetryPlanRevision string                       `json:"retry_plan_revision,omitempty"`
-	SaveRecovery      bool                         `json:"save_recovery,omitempty"`
-	Source            string                       `json:"source,omitempty"`
-	PublicationSteps  []AutomationPublicationStep  `json:"publication_steps,omitempty"`
-	NodePalette       []AutomationDraftNode        `json:"node_palette,omitempty"`
-	EdgePalette       []AutomationDraftEdge        `json:"edge_palette,omitempty"`
-	Capabilities      AutomationCapabilitySnapshot `json:"capabilities"`
-	Error             string                       `json:"error,omitempty"`
+	Result       AutomationDraftResult        `json:"result"`
+	AutomationID string                       `json:"automation_id,omitempty"`
+	Source       string                       `json:"source,omitempty"`
+	NodePalette  []AutomationDraftNode        `json:"node_palette,omitempty"`
+	EdgePalette  []AutomationDraftEdge        `json:"edge_palette,omitempty"`
+	Capabilities AutomationCapabilitySnapshot `json:"capabilities"`
+	Error        string                       `json:"error,omitempty"`
 }
 
-func (m AutomationDraftMetadata) Candidate() (AutomationDraftCandidate, error) {
+func (m AutomationGraphMetadata) Candidate() (AutomationDraftCandidate, error) {
 	var candidate AutomationDraftCandidate
 	err := json.Unmarshal([]byte(m.CandidateJSON), &candidate)
 	return candidate, err

@@ -50,9 +50,6 @@ type AutomationConfirmationService struct {
 
 type AutomationConfirmationIssue struct {
 	ProjectID      string
-	AutomationID   string
-	VersionID      string
-	PlanRevision   string
 	PrincipalID    string
 	ThreadID       string
 	PlanMessageID  string
@@ -63,9 +60,7 @@ type AutomationConfirmationIssue struct {
 
 type AutomationChatConfirmationContext struct {
 	Token                 string
-	AutomationID          string
-	VersionID             string
-	PlanRevision          string
+	TokenID               string
 	ConfirmingUserInputID string
 	AutomationName        string
 	Source                string
@@ -81,7 +76,7 @@ func (s *AutomationConfirmationService) PrepareChatConfirmation(ctx context.Cont
 	if err != nil || receipt == nil {
 		return nil, err
 	}
-	if normalizeAutomationPublishCommand(message) != normalizeAutomationPublishCommand("save "+automationName) {
+	if normalizeAutomationSaveCommand(message) != normalizeAutomationSaveCommand("save "+automationName) {
 		return nil, nil
 	}
 	inputExecution, err := s.execRepo.GetByID(ctx, inputID)
@@ -93,14 +88,12 @@ func (s *AutomationConfirmationService) PrepareChatConfirmation(ctx context.Cont
 		return nil, errors.New("automation save requires a completed plan and later user input")
 	}
 	marker := repository.AutomationConfirmationInputMarker{InputID: inputID, TokenID: receipt.TokenID,
-		ProjectID: projectID, AutomationID: receipt.AutomationID, VersionID: receipt.VersionID,
-		PrincipalID: principalID, ThreadID: threadID, Method: "command"}
+		ProjectID: projectID, PrincipalID: principalID, ThreadID: threadID, Method: "command"}
 	if err := s.repo.MarkAutomationConfirmationInput(ctx, marker); err != nil {
 		return nil, err
 	}
-	return &AutomationChatConfirmationContext{Token: s.signToken(receipt.TokenID), AutomationID: receipt.AutomationID,
-		VersionID: receipt.VersionID, PlanRevision: receipt.PlanRevision, ConfirmingUserInputID: inputID,
-		AutomationName: automationName}, nil
+	return &AutomationChatConfirmationContext{Token: s.signToken(receipt.TokenID), TokenID: receipt.TokenID,
+		ConfirmingUserInputID: inputID, AutomationName: automationName, Source: receipt.Source}, nil
 }
 
 func (s *AutomationConfirmationService) ResolveChatConfirmation(ctx context.Context, token, projectID, principalID, threadID string) (*AutomationChatConfirmationContext, error) {
@@ -128,22 +121,17 @@ func (s *AutomationConfirmationService) ResolveChatConfirmation(ctx context.Cont
 	if err := json.Unmarshal([]byte(receipt.CandidateJSON), &candidate); err != nil {
 		return nil, errors.New("pending Automation save is invalid")
 	}
-	return &AutomationChatConfirmationContext{Token: token, AutomationID: receipt.AutomationID,
-		VersionID: receipt.VersionID, PlanRevision: receipt.PlanRevision, AutomationName: receipt.AutomationName,
+	return &AutomationChatConfirmationContext{Token: token, TokenID: tokenID, AutomationName: receipt.AutomationName,
 		Source: receipt.Source, Candidate: candidate}, nil
 }
 
 type AutomationChatConfirmation struct {
 	Token                 string
 	ProjectID             string
-	AutomationID          string
-	VersionID             string
-	PlanRevision          string
 	PrincipalID           string
 	ThreadID              string
 	ConfirmingUserInputID string
 	AutomationName        string
-	Effects               []models.AutomationPublicationEffect
 }
 
 func NewAutomationConfirmationService(repo *repository.AutomationRepo, execRepo *repository.ExecutionRepo, secret []byte) *AutomationConfirmationService {
@@ -154,7 +142,7 @@ func (s *AutomationConfirmationService) Issue(ctx context.Context, input Automat
 	if s == nil || s.repo == nil || len(s.secret) < 16 {
 		return "", errors.New("automation confirmation service is unavailable")
 	}
-	if strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.AutomationID) == "" || strings.TrimSpace(input.VersionID) == "" || strings.TrimSpace(input.PlanRevision) == "" || strings.TrimSpace(input.PrincipalID) == "" || strings.TrimSpace(input.ThreadID) == "" || strings.TrimSpace(input.PlanMessageID) == "" || strings.TrimSpace(input.AutomationName) == "" || strings.TrimSpace(input.Source) == "" {
+	if strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.PrincipalID) == "" || strings.TrimSpace(input.ThreadID) == "" || strings.TrimSpace(input.PlanMessageID) == "" || strings.TrimSpace(input.AutomationName) == "" || strings.TrimSpace(input.Source) == "" {
 		return "", errors.New("automation confirmation receipt scope is incomplete")
 	}
 	candidateJSON, err := json.Marshal(input.Candidate)
@@ -164,7 +152,6 @@ func (s *AutomationConfirmationService) Issue(ctx context.Context, input Automat
 	tokenID := repository.NewID()
 	now := s.now().UTC()
 	receipt := &models.AutomationChatConfirmationReceipt{TokenID: tokenID, ProjectID: input.ProjectID,
-		AutomationID: input.AutomationID, VersionID: input.VersionID, PlanRevision: input.PlanRevision,
 		PrincipalID: input.PrincipalID, ThreadID: input.ThreadID, PlanMessageID: input.PlanMessageID,
 		AutomationName: input.AutomationName, Source: input.Source, CandidateJSON: string(candidateJSON),
 		ExpiresAt: now.Add(automationConfirmationTTL)}
@@ -174,80 +161,70 @@ func (s *AutomationConfirmationService) Issue(ctx context.Context, input Automat
 	return s.signToken(tokenID), nil
 }
 
-func (s *AutomationConfirmationService) ConfirmChat(ctx context.Context, input AutomationChatConfirmation) (snapshot *repository.AutomationPublicationSnapshot, returnErr error) {
+func (s *AutomationConfirmationService) ValidateChatConfirmation(ctx context.Context, input AutomationChatConfirmation) (tokenID string, returnErr error) {
 	defer func() {
 		if returnErr != nil {
 			automationobs.Event("automation.confirmation.rejected",
-				automationobs.String("project_id", input.ProjectID), automationobs.String("automation_id", input.AutomationID),
-				automationobs.String("version_id", input.VersionID), automationobs.String("thread_id", input.ThreadID),
+				automationobs.String("project_id", input.ProjectID), automationobs.String("thread_id", input.ThreadID),
 				automationobs.String("confirming_input_id", input.ConfirmingUserInputID))
 		}
 	}()
 	if s == nil || s.repo == nil || s.execRepo == nil || len(s.secret) < 16 {
-		return nil, errors.New("automation confirmation service is unavailable")
+		return "", errors.New("automation confirmation service is unavailable")
 	}
 	tokenID, err := s.verifyToken(input.Token)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	receipt, err := s.repo.GetAutomationConfirmationReceipt(ctx, tokenID)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if receipt == nil {
-		return nil, errors.New("automation confirmation receipt not found")
+		return "", errors.New("automation confirmation receipt not found")
 	}
-	if receipt.ProjectID != input.ProjectID || receipt.AutomationID != input.AutomationID || receipt.VersionID != input.VersionID || receipt.PlanRevision != input.PlanRevision || receipt.PrincipalID != input.PrincipalID || receipt.ThreadID != input.ThreadID {
-		return nil, errors.New("automation confirmation receipt scope does not match")
+	if receipt.ProjectID != input.ProjectID || receipt.PrincipalID != input.PrincipalID || receipt.ThreadID != input.ThreadID {
+		return "", errors.New("automation confirmation receipt scope does not match")
 	}
 	now := s.now().UTC()
 	if !now.Before(receipt.ExpiresAt) {
-		return nil, errors.New("automation confirmation receipt expired")
+		return "", errors.New("automation confirmation receipt expired")
+	}
+	if receipt.ConsumedAt != nil {
+		return "", errors.New("automation confirmation receipt was already used")
 	}
 	if input.ConfirmingUserInputID == receipt.PlanMessageID {
-		return nil, errors.New("automation save requires a later user input")
+		return "", errors.New("automation save requires a later user input")
 	}
 	planExecution, err := s.execRepo.GetByID(ctx, receipt.PlanMessageID)
 	if err != nil || planExecution == nil {
-		return nil, errors.New("stored automation plan message not found")
+		return "", errors.New("stored automation plan message not found")
 	}
 	confirmingExecution, err := s.execRepo.GetByID(ctx, input.ConfirmingUserInputID)
 	if err != nil || confirmingExecution == nil {
-		return nil, errors.New("confirming user input not found")
+		return "", errors.New("confirming user input not found")
 	}
 	if planExecution.TaskID != input.ThreadID || confirmingExecution.TaskID != input.ThreadID || !confirmingExecution.StartedAt.After(planExecution.StartedAt) {
-		return nil, errors.New("automation save requires a later user input in the same thread")
+		return "", errors.New("automation save requires a later user input in the same thread")
 	}
-	expected := normalizeAutomationPublishCommand("save " + input.AutomationName)
-	if normalizeAutomationPublishCommand(confirmingExecution.PromptSent) != expected {
-		return nil, fmt.Errorf("automation save requires the exact confirmation command %q", "save "+input.AutomationName)
+	expected := normalizeAutomationSaveCommand("save " + input.AutomationName)
+	if normalizeAutomationSaveCommand(confirmingExecution.PromptSent) != expected {
+		return "", fmt.Errorf("automation save requires the exact confirmation command %q", "save "+input.AutomationName)
 	}
 	marked, err := s.repo.HasAutomationConfirmationInput(ctx, repository.AutomationConfirmationInputMarker{
 		InputID: input.ConfirmingUserInputID, TokenID: tokenID, ProjectID: input.ProjectID,
-		AutomationID: input.AutomationID, VersionID: input.VersionID, PrincipalID: input.PrincipalID,
-		ThreadID: input.ThreadID, Method: "command",
+		PrincipalID: input.PrincipalID, ThreadID: input.ThreadID, Method: "command",
 	})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if !marked {
-		return nil, errors.New("confirming user input was not marked affirmative by the Chat host")
+		return "", errors.New("confirming user input was not marked affirmative by the Chat host")
 	}
-	if receipt.ConsumedAt != nil {
-		automationobs.Event("automation.confirmation.replayed",
-			automationobs.String("project_id", input.ProjectID), automationobs.String("automation_id", input.AutomationID),
-			automationobs.String("version_id", input.VersionID), automationobs.String("thread_id", input.ThreadID),
-			automationobs.String("confirming_input_id", input.ConfirmingUserInputID))
-	}
-	snapshot, returnErr = s.repo.ConsumeAutomationConfirmationAndReserve(ctx, repository.AutomationConfirmationConsume{
-		TokenID: tokenID, ProjectID: input.ProjectID, AutomationID: input.AutomationID, VersionID: input.VersionID,
-		PlanRevision: input.PlanRevision, PrincipalID: input.PrincipalID, ThreadID: input.ThreadID,
-		ConfirmingUserInputID: input.ConfirmingUserInputID, Method: "command", Now: now, Effects: input.Effects,
-	})
-	return snapshot, returnErr
+	return tokenID, nil
 }
 
-func normalizeAutomationPublishCommand(value string) string {
+func normalizeAutomationSaveCommand(value string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(value))), " ")
 }
 

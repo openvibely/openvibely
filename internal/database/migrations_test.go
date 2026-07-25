@@ -1348,6 +1348,75 @@ func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
 	}
 }
 
+func TestMigration118And119LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automations-atomic-save.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 117); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('atomic-project', 'Atomic', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state)
+			VALUES ('atomic-automation', 'atomic-project', 'atomic/test', 'Atomic', 'draft');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('atomic-version', 'atomic-project', 'atomic-automation', 1, 'draft', 'manual', 'vision_driver');
+		INSERT INTO automation_publication_attempts (id, project_id, automation_id, version_id, plan_revision, status)
+			VALUES ('atomic-attempt', 'atomic-project', 'atomic-automation', 'atomic-version', 'obsolete-revision', 'completed');
+		INSERT INTO automation_chat_confirmation_receipts
+			(token_id, project_id, automation_id, version_id, plan_revision, principal_id, thread_id,
+			 plan_message_id, automation_name, source, candidate_json, expires_at, consumed_attempt_id,
+			 confirming_user_input_id, confirmation_method, consumed_at)
+			VALUES ('atomic-token', 'atomic-project', 'atomic-automation', 'atomic-version', 'obsolete-revision',
+			 'principal', 'thread', 'plan-message', 'Atomic', 'manual', '{"schema_version":1}',
+			 datetime('now', '+30 minutes'), 'atomic-attempt', 'confirmation-input', 'button', CURRENT_TIMESTAMP);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatal(err)
+	}
+
+	var confirmationMethod string
+	if err := db.QueryRow(`SELECT confirmation_method FROM automation_chat_confirmation_receipts WHERE token_id = 'atomic-token'`).Scan(&confirmationMethod); err != nil {
+		t.Fatal(err)
+	}
+	if confirmationMethod != "command" {
+		t.Fatalf("migrated confirmation method = %q, want command", confirmationMethod)
+	}
+
+	for _, table := range []string{"automation_graph_metadata", "automation_chat_confirmation_receipts", "automation_chat_confirmation_inputs"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("expected atomic Save table %s: count=%d err=%v", table, count, err)
+		}
+	}
+	for _, table := range []string{"automation_draft_metadata", "automation_publication_attempts", "automation_publication_steps"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("obsolete Save table %s still exists: count=%d err=%v", table, count, err)
+		}
+	}
+	for _, column := range []string{"automation_id", "version_id", "plan_revision", "consumed_attempt_id"} {
+		if tableHasColumn(t, db, "automation_chat_confirmation_receipts", column) {
+			t.Fatalf("obsolete confirmation column automation_chat_confirmation_receipts.%s still exists", column)
+		}
+	}
+	for _, column := range []string{"automation_id", "version_id"} {
+		if tableHasColumn(t, db, "automation_chat_confirmation_inputs", column) {
+			t.Fatalf("obsolete confirmation column automation_chat_confirmation_inputs.%s still exists", column)
+		}
+	}
+}
+
 func TestMigration115AutomationPublicationUpAndDown(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-115.db")
 	db, err := sql.Open("sqlite", dbPath)

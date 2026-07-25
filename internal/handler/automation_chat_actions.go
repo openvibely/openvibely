@@ -39,7 +39,7 @@ func (h *Handler) executeAutomationPreviewAction(ctx context.Context, params str
 }
 
 func (h *Handler) executeAutomationPlanSaveAction(ctx context.Context, params streamingResponseParams, input json.RawMessage, collector *chatActionSummaryCollector) (string, error) {
-	if h.automationDraftSvc == nil || h.automationPlanner == nil || h.automationConfirmationSvc == nil {
+	if h.automationDraftSvc == nil || h.automationCompiler == nil || h.automationConfirmationSvc == nil {
 		return "", errors.New("automation save planning is unavailable")
 	}
 	if strings.TrimSpace(params.TaskID) == "" || strings.TrimSpace(params.ExecID) == "" || collector == nil {
@@ -76,46 +76,26 @@ func (h *Handler) executeAutomationPlanSaveAction(ctx context.Context, params st
 	default:
 		return "", errors.New("automation source must be template, describe, or blank")
 	}
-	staged, err := h.automationDraftSvc.CreateDraft(ctx, service.AutomationDraftCreateRequest{ProjectID: params.ProjectID, Source: source, CreatedVia: "chat", Candidate: candidate})
-	if err != nil {
-		return "", err
-	}
-	if staged == nil || staged.Definition == nil {
-		return "", errors.New("automation save plan could not be staged")
-	}
-	automationID := staged.Definition.Automation.ID
-	versionID := staged.Definition.Version.ID
-	stagingRemoved := false
-	defer func() {
-		if !stagingRemoved {
-			_ = h.automationDraftSvc.DiscardStagedVersion(context.Background(), params.ProjectID, automationID, versionID)
-		}
-	}()
-	plan, err := h.automationPlanner.Plan(ctx, params.ProjectID, automationID, versionID)
+	plan, candidate, err := h.automationCompiler.PreviewSave(ctx, params.ProjectID, candidate)
 	if err != nil {
 		return "", err
 	}
 	if len(plan.Validation) > 0 {
-		return marshalAutomationActionResult(map[string]any{"candidate": staged.Candidate, "assumptions": staged.Assumptions, "warnings": staged.Warnings, "validation_errors": plan.Validation, "plan": automationSavePlanForChat(plan), "active": false, "confirmation_required": false})
+		return marshalAutomationActionResult(map[string]any{"candidate": candidate, "assumptions": candidate.Assumptions, "warnings": candidate.Warnings, "validation_errors": plan.Validation, "plan": automationSavePlanForChat(plan), "active": false, "confirmation_required": false})
 	}
-	if err := h.automationDraftSvc.DiscardStagedVersion(ctx, params.ProjectID, automationID, versionID); err != nil {
-		return "", err
-	}
-	stagingRemoved = true
 	principal := automationActionPrincipal(params)
-	name := staged.Candidate.Name
+	name := candidate.Name
 	collector.addAutomationPlan(pendingAutomationPlanConfirmation{
-		Issue: service.AutomationConfirmationIssue{ProjectID: params.ProjectID, AutomationID: automationID,
-			VersionID: versionID, PlanRevision: plan.PlanRevision, PrincipalID: principal,
+		Issue: service.AutomationConfirmationIssue{ProjectID: params.ProjectID, PrincipalID: principal,
 			ThreadID: params.TaskID, PlanMessageID: params.ExecID, AutomationName: name, Source: source,
-			Candidate: staged.Candidate},
+			Candidate: candidate},
 		Plan: *plan, Name: name,
 	})
-	return marshalAutomationActionResult(map[string]any{"candidate": staged.Candidate, "assumptions": staged.Assumptions, "warnings": staged.Warnings, "validation_errors": staged.ValidationErrors, "summary": staged.Summary, "plan": automationSavePlanForChat(plan), "confirmation_required": true, "confirmation_command": "save " + name, "active": false, "message": "Review this save plan. Nothing has been created or activated yet. The Chat host will enable Save only after this plan message is durably stored."})
+	return marshalAutomationActionResult(map[string]any{"candidate": candidate, "assumptions": candidate.Assumptions, "warnings": candidate.Warnings, "validation_errors": plan.Validation, "summary": "Ready to save " + name, "plan": automationSavePlanForChat(plan), "confirmation_required": true, "confirmation_command": "save " + name, "active": false, "message": "Review this save plan. Nothing has been created or activated yet. The Chat host will enable Save only after this plan message is durably stored."})
 }
 
 func (h *Handler) executeAutomationSaveAction(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	if h.automationDraftSvc == nil || h.automationPlanner == nil || h.automationConfirmationSvc == nil || h.automationCompiler == nil {
+	if h.automationConfirmationSvc == nil || h.automationCompiler == nil {
 		return "", errors.New("automation save is unavailable")
 	}
 	var request automationSaveActionInput
@@ -127,48 +107,23 @@ func (h *Handler) executeAutomationSaveAction(ctx context.Context, params stream
 	if err != nil {
 		return "", err
 	}
-	staged, err := h.automationDraftSvc.GetDraft(ctx, params.ProjectID, pending.AutomationID, pending.VersionID)
-	createdStaging := false
-	if err == nil && staged == nil {
-		staged, err = h.automationDraftSvc.CreateDraft(ctx, service.AutomationDraftCreateRequest{
-			ProjectID: params.ProjectID, AutomationID: pending.AutomationID, VersionID: pending.VersionID,
-			Source: pending.Source, CreatedVia: "chat", Candidate: pending.Candidate,
-		})
-		createdStaging = err == nil
-	}
+	tokenID, err := h.automationConfirmationSvc.ValidateChatConfirmation(ctx, service.AutomationChatConfirmation{
+		Token: request.ConfirmationToken, ProjectID: params.ProjectID, PrincipalID: principal, ThreadID: params.TaskID,
+		ConfirmingUserInputID: request.ConfirmingUserInputID, AutomationName: pending.AutomationName,
+	})
 	if err != nil {
 		return "", err
 	}
-	if staged == nil || staged.Definition == nil {
-		return "", errors.New("pending Automation save could not be staged")
-	}
-	reserved := false
-	defer func() {
-		if createdStaging && !reserved {
-			_ = h.automationDraftSvc.DiscardStagedVersion(context.Background(), params.ProjectID, pending.AutomationID, pending.VersionID)
-		}
-	}()
-	plan, err := h.automationPlanner.Plan(ctx, params.ProjectID, pending.AutomationID, pending.VersionID)
+	saved, err := h.automationCompiler.Save(ctx, service.AutomationSaveRequest{ProjectID: params.ProjectID,
+		Source: pending.Source, CreatedVia: "chat", Candidate: pending.Candidate, ConfirmationTokenID: tokenID,
+		ConfirmationPrincipal: principal, ConfirmationThreadID: params.TaskID,
+		ConfirmingUserInputID: request.ConfirmingUserInputID})
 	if err != nil {
 		return "", err
 	}
-	if plan.PlanRevision != pending.PlanRevision {
-		return "", errors.New("the Automation save plan changed; review a new plan before saving")
-	}
-	name := pending.AutomationName
-	_, err = h.automationConfirmationSvc.ConfirmChat(ctx, service.AutomationChatConfirmation{Token: request.ConfirmationToken, ProjectID: params.ProjectID, AutomationID: pending.AutomationID, VersionID: pending.VersionID, PlanRevision: pending.PlanRevision, PrincipalID: principal, ThreadID: params.TaskID, ConfirmingUserInputID: request.ConfirmingUserInputID, AutomationName: name, Effects: plan.Effects})
-	if err != nil {
-		return "", err
-	}
-	reserved = true
-	saved, saveErr := h.automationCompiler.Publish(ctx, service.AutomationPublishRequest{ProjectID: params.ProjectID, AutomationID: pending.AutomationID, VersionID: pending.VersionID, PlanRevision: pending.PlanRevision})
-	if saveErr != nil {
-		if saved != nil {
-			return marshalAutomationActionResult(map[string]any{"active": false, "error": saveErr.Error(), "resources": saved.Resources, "message": "Save failed. The current Automation remains unchanged."})
-		}
-		return "", saveErr
-	}
-	return marshalAutomationActionResult(map[string]any{"automation_id": saved.Definition.Automation.ID, "status": saved.Definition.Automation.LifecycleState, "resources": saved.Resources, "url": fmt.Sprintf("/automations/%s?project_id=%s", saved.Definition.Automation.ID, params.ProjectID), "active": true})
+	return marshalAutomationActionResult(map[string]any{"automation_id": saved.Definition.Automation.ID,
+		"status": saved.Definition.Automation.LifecycleState,
+		"url":    fmt.Sprintf("/automations/%s?project_id=%s", saved.Definition.Automation.ID, params.ProjectID), "active": true})
 }
 
 func (h *Handler) previewAutomationDescription(ctx context.Context, projectID, description string) (*models.AutomationDraftResult, error) {
@@ -197,11 +152,11 @@ func automationActionPrincipal(params streamingResponseParams) string {
 	return "local"
 }
 
-func automationSavePlanForChat(plan *models.AutomationPublicationPlan) map[string]any {
+func automationSavePlanForChat(plan *models.AutomationSavePlan) map[string]any {
 	if plan == nil {
 		return map[string]any{}
 	}
-	effects := append([]models.AutomationPublicationEffect(nil), plan.Effects...)
+	effects := append([]models.AutomationSaveEffect(nil), plan.Effects...)
 	for i := range effects {
 		effects[i].Name = automationSavePlanDisplayName(effects[i].Name)
 	}

@@ -199,7 +199,7 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 			}
 		}
 		if adapter.DynamicTopology {
-			// Older custom publications exposed GitHub issue work as a separate
+			// Older saved custom graphs exposed GitHub issue work as a separate
 			// implementation role. Tasks are generic now; the surrounding inbox and
 			// pull-request connections determine issue-linked materialization.
 			if node.Type == models.AutomationNodeAgentTask && node.Role == "implementation" {
@@ -386,7 +386,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "invalid_node", Message: "Node type is not supported by the graph editor."})
 				continue
 			}
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Custom graph nodes can be saved, but publication requires a registered runtime adapter."})
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Custom graph nodes can be saved only when they use supported runtime capabilities."})
 			issues = append(issues, validateCustomAutomationNodeConfig(node)...)
 			continue
 		}
@@ -397,7 +397,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 	}
 	for key := range canonicalNodes {
 		if !seenNodes[key] {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "missing_node", Message: "Add this required node before publication."})
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "missing_node", Message: "Add this required node before saving."})
 		}
 	}
 
@@ -446,7 +446,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		}
 		canonical, isCanonical := canonicalEdges[edge.Key]
 		if !isCanonical || edge.From != canonical.From || edge.To != canonical.To {
-			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_topology", Message: "Custom graph connections can be saved, but publication requires a registered runtime adapter."})
+			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_topology", Message: "Custom graph connections can be saved only when they use supported runtime handoffs."})
 			if len(edge.Condition) != 0 {
 				issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Custom edge conditions are not executable by the registered adapter."})
 			}
@@ -469,7 +469,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 	}
 	for key := range canonicalEdges {
 		if !seenCanonicalEdges[key] {
-			issues = append(issues, models.AutomationValidationIssue{Code: "missing_edge", Message: "Add every required transition before publication."})
+			issues = append(issues, models.AutomationValidationIssue{Code: "missing_edge", Message: "Add every required transition before saving."})
 		}
 	}
 	if adapter.DynamicTopology {
@@ -557,7 +557,7 @@ func customAutomationHandoffSupported(from, to models.AutomationDraftNode) bool 
 
 func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate) []models.AutomationValidationIssue {
 	if len(candidate.Nodes) == 0 {
-		return []models.AutomationValidationIssue{{Code: "empty_graph", Message: "Add a capability node before publication."}}
+		return []models.AutomationValidationIssue{{Code: "empty_graph", Message: "Add a capability node before saving."}}
 	}
 	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
 	incoming := make(map[string][]models.AutomationDraftEdge, len(candidate.Nodes))
@@ -827,7 +827,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	if node.Type == models.AutomationNodeAgentTask {
 		prompt, promptOK := node.Config["prompt"].(string)
 		if !promptOK || strings.TrimSpace(prompt) == "" {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Task nodes require a prompt before publication."})
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Task nodes require a prompt before saving."})
 		}
 		category, categoryOK := node.Config["category"].(string)
 		if !categoryOK || (category != string(models.CategoryBacklog) && category != string(models.CategoryActive)) {
@@ -842,7 +842,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	if node.Type == models.AutomationNodeTrigger {
 		prompt, promptOK := node.Config["prompt"].(string)
 		if !promptOK || strings.TrimSpace(prompt) == "" {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Schedule nodes require a task prompt before publication."})
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Schedule nodes require a task prompt before saving."})
 		}
 		category, categoryOK := node.Config["category"].(string)
 		if !categoryOK || category != string(models.CategoryScheduled) {
@@ -940,7 +940,7 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 	if canonical.AllowedResources["task"] {
 		prompt, promptOK := node.Config["prompt"].(string)
 		if !promptOK || strings.TrimSpace(prompt) == "" {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Task nodes require a prompt before publication."})
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Task nodes require a prompt before saving."})
 		}
 		category, categoryOK := node.Config["category"].(string)
 		if !categoryOK || (category != string(models.CategoryBacklog) && category != string(models.CategoryScheduled)) {
@@ -1177,70 +1177,18 @@ func (s *AutomationDraftService) PreviewCandidate(ctx context.Context, projectID
 	return result, nil
 }
 
-func (s *AutomationDraftService) CreateDraft(ctx context.Context, request AutomationDraftCreateRequest) (*models.AutomationDraftResult, error) {
-	if s.repo == nil {
-		return nil, errors.New("automation repository is unavailable")
-	}
-	if strings.TrimSpace(request.ProjectID) == "" {
-		return nil, errors.New("project is required")
-	}
-	candidate, err := s.NormalizeCandidate(request.Candidate)
-	if err != nil {
-		return nil, err
-	}
-	issues, err := s.validateCandidateForProject(ctx, request.ProjectID, candidate)
-	if err != nil {
-		return nil, err
-	}
-	for _, issue := range issues {
-		if automationDraftIssuePreventsPersistence(issue.Code) {
-			return nil, fmt.Errorf("automation graph validation failed: %s", issue.Message)
-		}
-	}
-	definition, err := s.repo.CreateAutomationDraft(ctx, repository.AutomationDraftWrite{
-		ProjectID: request.ProjectID, AutomationID: request.AutomationID, VersionID: request.VersionID,
-		StableKey: request.StableKey, Source: request.Source,
-		CreatedVia: request.CreatedVia, Candidate: candidate, ValidationErrors: issues,
-	})
-	if err != nil {
-		return nil, err
-	}
-	automationobs.Event("automation.save.staged",
-		automationobs.String("project_id", request.ProjectID),
-		automationobs.String("automation_id", definition.Automation.ID),
-		automationobs.String("version_id", definition.Version.ID),
-		automationobs.String("adapter_key", candidate.AdapterKey))
-	return &models.AutomationDraftResult{
-		Definition: definition, Candidate: candidate, Assumptions: candidate.Assumptions,
-		Warnings: candidate.Warnings, ValidationErrors: issues,
-		Summary: automationDraftSummary(candidate),
-	}, nil
-}
-
-func (s *AutomationDraftService) GetCurrentDraft(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
+func (s *AutomationDraftService) CurrentCandidate(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
 	if s == nil || s.repo == nil {
 		return nil, errors.New("automation repository is unavailable")
 	}
-	metadata, err := s.repo.GetLatestAutomationDraftMetadata(ctx, projectID, automationID)
-	if err != nil || metadata == nil {
+	current, err := s.repo.GetDefinition(ctx, projectID, automationID)
+	if err != nil {
 		return nil, err
 	}
-	return s.GetDraft(ctx, projectID, automationID, metadata.VersionID)
-}
-
-func (s *AutomationDraftService) GetDraft(ctx context.Context, projectID, automationID, versionID string) (*models.AutomationDraftResult, error) {
-	if s == nil || s.repo == nil {
-		return nil, errors.New("automation repository is unavailable")
+	if current == nil || current.Version.State != models.AutomationVersionPublished {
+		return nil, errors.New("saved automation not found")
 	}
-	definition, err := s.repo.GetDefinitionVersion(ctx, projectID, automationID, versionID)
-	if err != nil || definition == nil {
-		return nil, err
-	}
-	metadata, err := s.repo.GetAutomationDraftMetadata(ctx, projectID, automationID, versionID)
-	if err != nil || metadata == nil {
-		return nil, err
-	}
-	candidate, err := metadata.Candidate()
+	candidate, err := s.candidateFromDefinition(ctx, projectID, automationID, current)
 	if err != nil {
 		return nil, err
 	}
@@ -1248,188 +1196,23 @@ func (s *AutomationDraftService) GetDraft(ctx context.Context, projectID, automa
 	if err != nil {
 		return nil, err
 	}
-	currentIssues, err := s.validateCandidateForProject(ctx, projectID, candidate)
-	if err != nil {
-		return nil, err
-	}
-	for _, issue := range currentIssues {
-		if automationDraftIssuePreventsPersistence(issue.Code) {
-			return nil, fmt.Errorf("automation graph validation failed: %s", issue.Message)
-		}
-	}
-	result := draftPreviewResult(candidate, definition)
-	result.Assumptions = metadata.Assumptions
-	result.Warnings = metadata.Warnings
-	result.ValidationErrors = currentIssues
-	return result, nil
+	return s.PreviewCandidate(ctx, projectID, candidate, current)
 }
 
-func (s *AutomationDraftService) UpdateDraft(ctx context.Context, automationID, versionID, projectID string, candidate models.AutomationDraftCandidate) (*models.AutomationDraftResult, error) {
-	if s.repo == nil {
-		return nil, errors.New("automation repository is unavailable")
-	}
-	candidate, err := s.NormalizeCandidate(candidate)
-	if err != nil {
-		return nil, err
-	}
-	issues, err := s.validateCandidateForProject(ctx, projectID, candidate)
-	if err != nil {
-		return nil, err
-	}
-	for _, issue := range issues {
-		if automationDraftIssuePreventsPersistence(issue.Code) {
-			return nil, fmt.Errorf("automation graph validation failed: %s", issue.Message)
-		}
-	}
-	definition, err := s.repo.ReplaceAutomationDraft(ctx, repository.AutomationDraftWrite{
-		ProjectID: projectID, AutomationID: automationID, VersionID: versionID,
-		Candidate: candidate, ValidationErrors: issues,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if definition == nil {
-		return nil, errors.New("staged Automation graph not found")
-	}
-	automationobs.Event("automation.save.staging_updated",
-		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
-		automationobs.String("version_id", versionID), automationobs.String("adapter_key", candidate.AdapterKey))
-	result := draftPreviewResult(candidate, definition)
-	result.ValidationErrors = issues
-	return result, nil
-}
-
-func automationDraftIssuePreventsPersistence(code string) bool {
-	switch code {
-	case "unsupported_adapter", "schema_version", "graph_size", "invalid_json", "invalid_node", "invalid_edge", "unsupported_condition", "unknown_config", "unsafe_config":
-		return true
-	default:
-		return false
-	}
-}
-
-func (s *AutomationDraftService) CreateVersionForSave(ctx context.Context, projectID, automationID, source string, candidate models.AutomationDraftCandidate) (*models.AutomationDraftResult, error) {
-	if s == nil || s.repo == nil {
-		return nil, errors.New("automation repository is unavailable")
-	}
-	preview, err := s.PreviewCandidate(ctx, projectID, candidate, nil)
-	if err != nil {
-		return nil, err
-	}
-	if len(preview.ValidationErrors) > 0 {
-		return preview, nil
-	}
-	definition, err := s.repo.CreateAutomationDraftVersion(ctx, repository.AutomationDraftWrite{
-		ProjectID: projectID, AutomationID: automationID, Source: source,
-		Candidate: preview.Candidate, ValidationErrors: preview.ValidationErrors,
-	})
-	if err != nil {
-		return nil, err
-	}
-	preview.Definition = definition
-	return preview, nil
-}
-
-func (s *AutomationDraftService) DiscardUnreservedStagedVersion(ctx context.Context, projectID, automationID, versionID string) (bool, error) {
-	if s == nil || s.repo == nil {
-		return false, errors.New("automation repository is unavailable")
-	}
-	return s.repo.DiscardUnreservedAutomationDraft(ctx, projectID, automationID, versionID)
-}
-
-func (s *AutomationDraftService) DiscardStagedVersion(ctx context.Context, projectID, automationID, versionID string) error {
-	if s == nil || s.repo == nil {
-		return errors.New("automation repository is unavailable")
-	}
-	return s.repo.DiscardAutomationDraft(ctx, projectID, automationID, versionID)
-}
-
-func (s *AutomationDraftService) RecoverableSave(ctx context.Context, projectID, automationID string) (*models.AutomationSaveRecovery, error) {
-	if s == nil || s.repo == nil {
-		return nil, errors.New("automation repository is unavailable")
-	}
-	snapshot, err := s.repo.GetRecoverablePublicationAttempt(ctx, projectID, automationID)
-	if err != nil || snapshot == nil {
-		return nil, err
-	}
-	return s.automationSaveRecovery(ctx, snapshot)
-}
-
-func (s *AutomationDraftService) ListRecoverableSaves(ctx context.Context, projectID string) ([]models.AutomationSaveRecovery, error) {
-	if s == nil || s.repo == nil {
-		return nil, errors.New("automation repository is unavailable")
-	}
-	snapshots, err := s.repo.ListRecoverablePublicationAttempts(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	recoveries := make([]models.AutomationSaveRecovery, 0, len(snapshots))
-	for i := range snapshots {
-		recovery, err := s.automationSaveRecovery(ctx, &snapshots[i])
-		if err != nil {
-			return nil, err
-		}
-		if recovery != nil {
-			recoveries = append(recoveries, *recovery)
-		}
-	}
-	return recoveries, nil
-}
-
-func (s *AutomationDraftService) automationSaveRecovery(ctx context.Context, snapshot *repository.AutomationPublicationSnapshot) (*models.AutomationSaveRecovery, error) {
-	if snapshot == nil {
-		return nil, nil
-	}
-	staged, err := s.GetDraft(ctx, snapshot.Attempt.ProjectID, snapshot.Attempt.AutomationID, snapshot.Attempt.VersionID)
-	if err != nil {
-		return nil, err
-	}
-	if staged == nil || staged.Definition == nil || staged.Definition.Version.State != models.AutomationVersionDraft {
-		return nil, nil
-	}
-	return &models.AutomationSaveRecovery{
-		AutomationID: snapshot.Attempt.AutomationID, VersionID: snapshot.Attempt.VersionID,
-		PlanRevision: snapshot.Attempt.PlanRevision, Candidate: staged.Candidate,
-		PublicationSteps: snapshot.Steps,
-	}, nil
-}
-
-func (s *AutomationDraftService) PublishedCandidate(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
-	if s == nil || s.repo == nil {
-		return nil, errors.New("automation repository is unavailable")
-	}
-	published, err := s.repo.GetDefinition(ctx, projectID, automationID)
-	if err != nil {
-		return nil, err
-	}
-	if published == nil || published.Version.State != models.AutomationVersionPublished {
-		return nil, errors.New("published automation not found")
-	}
-	candidate, err := s.candidateFromDefinition(ctx, projectID, automationID, published)
-	if err != nil {
-		return nil, err
-	}
-	candidate, err = s.normalizeReopenedCandidate(candidate)
-	if err != nil {
-		return nil, err
-	}
-	return s.PreviewCandidate(ctx, projectID, candidate, published)
-}
-
-func (s *AutomationDraftService) candidateFromDefinition(ctx context.Context, projectID, automationID string, published *models.AutomationDefinition) (models.AutomationDraftCandidate, error) {
+func (s *AutomationDraftService) candidateFromDefinition(ctx context.Context, projectID, automationID string, current *models.AutomationDefinition) (models.AutomationDraftCandidate, error) {
 	var candidate models.AutomationDraftCandidate
-	publishedMetadata, err := s.repo.GetAutomationDraftMetadata(ctx, projectID, automationID, published.Version.ID)
+	currentMetadata, err := s.repo.GetAutomationGraphMetadata(ctx, projectID, automationID, current.Version.ID)
 	if err != nil {
 		return candidate, err
 	}
-	if publishedMetadata != nil {
-		return publishedMetadata.Candidate()
+	if currentMetadata != nil {
+		return currentMetadata.Candidate()
 	}
 	candidate = models.AutomationDraftCandidate{SchemaVersion: automationDraftSchemaVersion,
-		Name: published.Automation.Name, Description: published.Automation.Description,
-		AutomationType: published.Automation.AutomationType, AdapterKey: published.Version.AdapterKey}
-	nodeKeys := make(map[string]string, len(published.Nodes))
-	for _, node := range published.Nodes {
+		Name: current.Automation.Name, Description: current.Automation.Description,
+		AutomationType: current.Automation.AutomationType, AdapterKey: current.Version.AdapterKey}
+	nodeKeys := make(map[string]string, len(current.Nodes))
+	for _, node := range current.Nodes {
 		var config map[string]any
 		if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
 			return candidate, err
@@ -1442,7 +1225,7 @@ func (s *AutomationDraftService) candidateFromDefinition(ctx context.Context, pr
 			Type: node.NodeType, Role: node.Role, Config: config,
 			Position: &models.AutomationDraftPoint{X: node.PositionX, Y: node.PositionY}})
 	}
-	for _, edge := range published.Edges {
+	for _, edge := range current.Edges {
 		var condition map[string]any
 		if err := json.Unmarshal([]byte(edge.ConditionJSON), &condition); err != nil {
 			return candidate, err
@@ -1451,84 +1234,6 @@ func (s *AutomationDraftService) candidateFromDefinition(ctx context.Context, pr
 			From: nodeKeys[edge.SourceNodeID], To: nodeKeys[edge.TargetNodeID], Label: edge.Label, Condition: condition})
 	}
 	return candidate, nil
-}
-
-func (s *AutomationDraftService) ClonePublishedVersion(ctx context.Context, projectID, automationID string) (*models.AutomationDraftResult, error) {
-	if s == nil || s.repo == nil {
-		return nil, errors.New("automation repository is unavailable")
-	}
-	existing, err := s.repo.GetLatestAutomationDraftMetadata(ctx, projectID, automationID)
-	if err != nil {
-		return nil, err
-	}
-	if existing != nil {
-		return s.GetDraft(ctx, projectID, automationID, existing.VersionID)
-	}
-	published, err := s.repo.GetDefinition(ctx, projectID, automationID)
-	if err != nil {
-		return nil, err
-	}
-	if published == nil || published.Version.State != models.AutomationVersionPublished {
-		return nil, errors.New("published automation not found")
-	}
-	var candidate models.AutomationDraftCandidate
-	publishedMetadata, err := s.repo.GetAutomationDraftMetadata(ctx, projectID, automationID, published.Version.ID)
-	if err != nil {
-		return nil, err
-	}
-	if publishedMetadata != nil {
-		candidate, err = publishedMetadata.Candidate()
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		candidate = models.AutomationDraftCandidate{SchemaVersion: automationDraftSchemaVersion,
-			Name: published.Automation.Name, Description: published.Automation.Description,
-			AutomationType: published.Automation.AutomationType, AdapterKey: published.Version.AdapterKey}
-		nodeKeys := make(map[string]string, len(published.Nodes))
-		for _, node := range published.Nodes {
-			var config map[string]any
-			if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
-				return nil, err
-			}
-			if config == nil {
-				config = map[string]any{}
-			}
-			nodeKeys[node.ID] = node.NodeKey
-			candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: node.NodeKey, Name: node.Name,
-				Type: node.NodeType, Role: node.Role, Config: config,
-				Position: &models.AutomationDraftPoint{X: node.PositionX, Y: node.PositionY}})
-		}
-		for _, edge := range published.Edges {
-			var condition map[string]any
-			if err := json.Unmarshal([]byte(edge.ConditionJSON), &condition); err != nil {
-				return nil, err
-			}
-			candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: edge.EdgeKey,
-				From: nodeKeys[edge.SourceNodeID], To: nodeKeys[edge.TargetNodeID], Label: edge.Label, Condition: condition})
-		}
-	}
-	candidate, err = s.normalizeReopenedCandidate(candidate)
-	if err != nil {
-		return nil, err
-	}
-	issues, err := s.validateCandidateForProject(ctx, projectID, candidate)
-	if err != nil {
-		return nil, err
-	}
-	for _, issue := range issues {
-		if automationDraftIssuePreventsPersistence(issue.Code) {
-			return nil, fmt.Errorf("automation graph validation failed: %s", issue.Message)
-		}
-	}
-	definition, err := s.repo.CreateAutomationDraftVersion(ctx, repository.AutomationDraftWrite{ProjectID: projectID,
-		AutomationID: automationID, Source: "manual", Candidate: candidate, ValidationErrors: issues})
-	if err != nil {
-		return nil, err
-	}
-	result := draftPreviewResult(candidate, definition)
-	result.ValidationErrors = issues
-	return result, nil
 }
 
 func automationDraftSummary(candidate models.AutomationDraftCandidate) string {

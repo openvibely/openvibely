@@ -169,7 +169,7 @@ func TestGitHubSDLCRegistrationHydratesBoundTaskPromptAcrossPause(t *testing.T) 
 	storedTask, err := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, maintainedPrompt, storedTask.Prompt, "pausing must not alter the runtime Task prompt")
-	reopened, err := NewAutomationDraftService(automationRepo, NewAutomationAdapterRegistry()).PublishedCandidate(ctx, project.ID, definition.Automation.ID)
+	reopened, err := NewAutomationDraftService(automationRepo, NewAutomationAdapterRegistry()).CurrentCandidate(ctx, project.ID, definition.Automation.ID)
 	require.NoError(t, err)
 	require.Equal(t, maintainedPrompt, automationDraftNodeByKey(t, reopened.Candidate, "dev_inbox").Config["prompt"])
 }

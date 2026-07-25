@@ -138,9 +138,9 @@ func (s *TaskService) Create(ctx context.Context, t *models.Task) error {
 	return s.CreateWithGoal(ctx, t, "")
 }
 
-// SubmitPublishedAutomationTask admits a compiler-created root only after its
+// SubmitSavedAutomationTask admits a newly created root only after its
 // saved graph and Automation provenance are durable.
-func (s *TaskService) SubmitPublishedAutomationTask(task models.Task) {
+func (s *TaskService) SubmitSavedAutomationTask(task models.Task) {
 	if s == nil || s.workerSvc == nil || task.Category != models.CategoryActive || task.Status == models.StatusBlocked || task.ParentTaskID != nil {
 		return
 	}

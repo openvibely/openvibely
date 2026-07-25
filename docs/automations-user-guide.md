@@ -20,7 +20,7 @@ Open `/automations`, select `New Automation`, and choose how to start:
 | Describe It | Describe the result you want and review a generated browser-local graph. |
 | Blank | Build a custom graph from an empty canvas. |
 
-Templates provide supported starting points, but Blank and Describe It use the same configurable graph builder and Save rules. The GitHub SDLC template owns complete Offering Manager, finder, Dev Inbox, and Loop Auditor prompts plus their cadences; it works without the bootstrap skill and adds saved graph identity, lifecycle controls, and Live visualization over the Tasks and Schedules it creates.
+Templates provide supported starting points. Selecting `Use template` validates the maintained graph, creates the Automation and its required Tasks and schedules in one operation, and opens its Live graph; invalid setup creates nothing. Blank and Describe It use the same configurable graph builder and Save rules. The GitHub SDLC template owns complete Offering Manager, finder, Dev Inbox, and Loop Auditor prompts plus their cadences; it works without the bootstrap skill and adds saved graph identity, lifecycle controls, and Live visualization over the Tasks and Schedules it creates.
 
 ## Build the Graph
 
@@ -43,7 +43,7 @@ New and edited web graphs exist only in browser memory until you select `Save ch
 
 Save validates the complete graph and immediately creates or replaces the Automation's one current saved graph and required resources. A replacement keeps the same Automation identity, removes runtime projection tied to the replaced graph, and does not retain selectable or restorable graph versions.
 
-There is no persisted editable Automation draft, separate Publish step, Definition page, or Automation history page. If a Save fails after resource application has started, `/automations` shows `Save needs attention` so you can reopen and retry the exact graph safely.
+There is no persisted editable Automation draft, separate Publish step, Definition page, Automation history page, or failed-Save recovery item. Save writes the graph, Tasks, and schedules in one database transaction. If anything fails, the whole Save is rolled back: a first Save creates nothing, and an edited Automation keeps running its previous graph.
 
 ## Use the Live Graph
 

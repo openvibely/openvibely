@@ -8,7 +8,7 @@ Each Automation has one stable identity and exactly one current saved graph. The
 
 New and edited web graphs exist only in browser memory until `Save changes`. Refresh or navigation discards unsaved changes. Save validates the complete submitted graph and immediately creates or replaces the current graph under the same Automation identity. Save is allowed while Automation work is running. Successful replacement deletes the prior graph and its Automation runtime projection in the same transaction; failure leaves the current graph and behavior unchanged.
 
-Internal graph IDs and short-lived Save journals remain implementation details for atomic application and exact retry. They are not user-selectable history, editable Automations, or pre-Save Automation identity.
+Internal graph IDs support current-graph runtime identity only. Save does not create a journal, staged graph, compiler contract version, candidate hash, or retry record.
 
 ## Creation Surfaces
 
@@ -19,7 +19,7 @@ The supported creation paths are:
 - `Blank`, using the open custom builder.
 - Chat, using `plan_automation_save` followed by later-confirmed `save_automation`.
 
-Template, Describe It, Blank, Edit, and Chat use the same candidate schema, capability validation, publication planner, compiler, and safety boundaries. Maintained setup registration is restricted to Native and GitHub adapters. Vision Driver remains available through explicit creation and Save.
+Template creation is direct: `Use template` validates the canonical candidate, atomically creates the Automation and resources, and redirects to Live. Describe It, Blank, and Edit open browser-local graphs and apply them only on `Save changes`. All surfaces use the same candidate schema, capability validation, atomic Save service, and safety boundaries. Maintained setup registration is restricted to Native and GitHub adapters. Vision Driver remains available through explicit template creation and Save.
 
 Opening a web builder creates no Automation, graph row, Task, Scheduler row, Alert, GitHub issue, execution, or other runtime resource. An invalid Save returns the submitted browser-local candidate with visible setup errors and no resource effects.
 
@@ -62,13 +62,13 @@ Save follows one shared sequence:
 
 1. Strictly decode and normalize non-semantic formatting without overwriting explicit invalid values.
 2. Validate schema, limits, node configuration, ports, topology, project scope, integration readiness, and human boundaries.
-3. Build a deterministic resource plan from the complete graph.
-4. Stage newly created runnable Tasks in non-admitted Backlog state.
-5. Apply Task configuration, Scheduler rows, graph resource membership, lifecycle state, and current-graph identity in one publication transaction.
-6. Delete the replaced graph and runtime projection tied to it.
+3. Build exact Task, Schedule, binding, and graph writes from the complete candidate.
+4. Begin one SQLite transaction and create new runnable Tasks in non-admitted Backlog state.
+5. Apply Task configuration, Scheduler rows, resource membership, lifecycle-compatible admission state, and current-graph identity.
+6. Delete the replaced graph and runtime projection tied to it, then commit.
 7. After commit, submit newly admitted Active root Tasks through the existing `TaskService` and worker queue.
 
-A compiler failure cannot run an unpublished root Task or create Automation runtime effects. Exact failed-application journals may be retried only with the same project, candidate, plan revision, and application identity. They are private recovery state, not an Automation workflow.
+Any error before commit rolls back every Save write. A failed first Save creates no Automation or resources; a failed edit leaves the prior graph active. No failed-application journal or retry path exists.
 
 Removing or reconfiguring a Schedule deletes its obsolete exclusively owned Scheduler row. Domain Tasks remain ordinary OpenVibely resources unless their normal lifecycle deletes them independently.
 
@@ -113,7 +113,7 @@ Issue assignment is human approval to begin implementation. Pull requests are op
 
 `plan_automation_save` generates or accepts a candidate, validates it, and returns a user-readable plan plus the exact later confirmation command. Before Save it exposes no Automation ID, graph identity, URL, runtime resource identity, or draft terminology, and leaves zero Automation, Task, or Scheduler rows.
 
-Private signed confirmation state may durably retain the candidate, project, plan revision, and expiry. This state is not web-addressable and is not an Automation. Only a later exact `save <automation-name>` confirmation may invoke `save_automation`. Successful Save creates one Automation and returns its real Live URL.
+Private signed confirmation state durably retains the exact candidate, project, principal, thread, plan message, Automation name, and expiry. It contains no Automation ID, graph ID, plan revision, hash, or resource identity. Validation does not consume it; the later exact `save <automation-name>` confirmation consumes it inside the same transaction that saves the graph. Successful Save creates one Automation and returns its real Live URL.
 
 The removed `create_automation_draft`, `plan_automation_publication`, and `publish_automation_draft` actions and `/automations/drafts` route are not compatibility surfaces.
 

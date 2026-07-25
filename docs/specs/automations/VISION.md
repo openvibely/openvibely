@@ -16,9 +16,9 @@ Every saved Automation has one stable project-owned identity and exactly one cur
 
 ### Portfolio
 
-The project-level Automations page presents one compact searchable card for each saved Automation. A card opens its Live graph; its actions allow browser-local editing or confirmed deletion when lifecycle and recovery boundaries permit it.
+The project-level Automations page presents one compact searchable card for each saved Automation. A card opens its Live graph; its actions allow browser-local editing or confirmed deletion when lifecycle boundaries permit it.
 
-A failed Save that has already reserved a private application attempt may appear separately as `Save needs attention`. It is recovery state for an exact retry, not a saved Automation, draft, version, or historical graph.
+A failed Save creates no separate portfolio item or persistent recovery state. A failed first Save creates nothing, and a failed edit leaves the previously saved Automation active.
 
 Existing tasks, schedules, Alerts, GitHub objects, prompts, names, or lineage never cause an Automation to appear implicitly. An Automation exists only after an explicit successful Save or maintained Native/GitHub registration.
 
@@ -40,11 +40,11 @@ New and edited web graphs live only in browser memory until `Save changes`. Refr
 
 ### Save
 
-Save submits the complete browser graph through shared schema validation, capability checks, deterministic planning, compilation, and application. A successful first Save creates the Automation and its real resources. A successful edit immediately replaces the current graph under the same Automation identity, including while Automation work is running.
+Save submits the complete browser graph through shared schema validation, capability checks, and atomic application. A successful first Save creates the Automation and its real resources. A successful edit immediately replaces the current graph under the same Automation identity, including while Automation work is running.
 
 Replacement removes runtime projection tied to the replaced graph. Existing domain resources continue according to their own lifecycle, but an old graph cannot remain selectable, restorable, or visible as Automation history. If Save fails, the current saved graph and behavior remain active.
 
-Private Save journals exist only to make resource application atomic and an exact failed application retryable. Failures before an application attempt or resource effect exists discard their private staging. Failures after reservation preserve the exact candidate and compiler-created resources for recovery without exposing public draft or version concepts.
+Save writes the Automation identity, complete current graph, Task changes, Scheduler rows, resource bindings, and replaced-graph cleanup in one SQLite transaction. Any error rolls back the entire transaction, so no journal, staged graph, retry state, or partially created Save resources remain.
 
 ### Live Graph
 
@@ -63,11 +63,11 @@ The supported creation paths are:
 - `Blank`, using the full supported custom builder;
 - Chat, using `plan_automation_save` followed by later-confirmed `save_automation`.
 
-Template, Describe It, Blank, Edit, and Chat share the same graph schema, project capability snapshot, validation, planning, compilation, and safety boundaries.
+Template creation is direct: choosing a maintained template and selecting `Use template` validates and atomically creates it, then opens Live. Describe It and Blank remain browser-local until `Save changes`.
 
 Describe It receives only surfaced, project-scoped, secret-free capabilities and no mutation tools. Invalid or unsupported generated graphs remain visible as errors and create no resources.
 
-Chat preserves a separate displayed-plan and later-confirmation experience. Before Save, Chat exposes no Automation or graph identity, URL, runtime resource, or draft terminology. Durable confirmation state may privately retain an exact candidate and plan, but it is not an Automation. Only the later explicit Save creates the Automation and returns its Live URL.
+Chat preserves a separate displayed-plan and later-confirmation experience. Before Save, Chat exposes no Automation or graph identity, URL, runtime resource, or draft terminology. Private signed confirmation state retains only the exact candidate and request scope needed to verify the later command; it is not an Automation. Confirmation consumption and graph application occur in the same transaction. Only successful Save creates the Automation and returns its Live URL.
 
 ## Runtime Model
 
@@ -94,7 +94,7 @@ GitHub publication creates only configured producer or inbox Tasks and Scheduler
 
 Approval authorizes only the configured downstream handoff. GitHub assignment, pull-request review, merge, release, and deployment remain human-controlled. Automation configuration never grants automatic merge, release, deployment, rollback, or arbitrary execution authority.
 
-Every read, write, resource reference, retry, and idempotency decision remains project-scoped. A retry cannot adopt an Alert, Task, issue, or pull request created outside the exact Automation source.
+Every read, write, resource reference, and idempotency decision remains project-scoped. Runtime idempotency cannot adopt an Alert, Task, issue, or pull request created outside the exact Automation source.
 
 ## Lifecycle And Replacement
 
@@ -116,7 +116,7 @@ The product earns trust through explicit intent and real resources:
 - unsupported graphs fail before resource effects;
 - successful Save creates or replaces one current graph atomically;
 - failed replacement leaves current behavior active;
-- exact post-reservation recovery does not duplicate compiler-created resources;
+- failed Save rolls back without partial resources or persistent recovery state;
 - project isolation applies to definitions, runtime bindings, and external objects;
 - graph payloads omit secrets and private execution content;
 - shared resources are allowed only where an adapter explicitly permits them;
@@ -140,7 +140,7 @@ The product earns trust through explicit intent and real resources:
 2. The current graph is copied into browser memory.
 3. Work continues against the current saved graph while the user edits.
 4. Save atomically installs the replacement graph, removes the old Automation runtime projection, and preserves the Automation identity and lifecycle.
-5. A failed Save leaves the prior graph active and offers exact recovery only when durable resource application had begun.
+5. A failed Save leaves the prior graph active and no partial Save resources.
 
 ### Describe From Chat
 
@@ -173,6 +173,6 @@ The vision is realized when users can:
 3. Save once and receive real resources or a clear no-effects validation error.
 4. Replace the one current graph without creating public drafts or retained versions.
 5. See current runtime state on a full-width Live graph and navigate to exact bound Tasks.
-6. Recover exact post-reservation Save failures without duplicate resources or false Automation identities.
+6. Trust that failed Saves roll back completely without duplicate or partial resources.
 7. Trust project isolation and human review, merge, release, and deployment boundaries.
 8. Use Template, Describe It, Blank, Edit, and Chat through one deterministic contract.

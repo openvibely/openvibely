@@ -1022,10 +1022,9 @@ func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T
 	drafts := NewAutomationDraftService(fixture.repo, NewAutomationAdapterRegistry())
 	blank, err := drafts.BlankCandidate(AutomationAdapterVisionDriver)
 	require.NoError(t, err)
-	created, err := drafts.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: fixture.project.ID, Source: "manual", CreatedVia: "web", Candidate: blank})
-	require.NoError(t, err)
-	planner := NewAutomationPublicationPlanner(fixture.repo, fixture.taskRepo, fixture.schedRepo, NewAutomationAdapterRegistry(), drafts)
-	plan, err := planner.Plan(ctx, fixture.project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
+	planner := NewAutomationSaveValidator(NewAutomationAdapterRegistry(), drafts)
+	compiler := NewAutomationCompiler(fixture.repo, NewTaskService(fixture.taskRepo, repository.NewAttachmentRepo(fixture.repo.DB()), nil), fixture.taskRepo, fixture.schedRepo, planner)
+	plan, _, err := compiler.PreviewSave(ctx, fixture.project.ID, blank)
 	require.NoError(t, err)
 	require.NotEmpty(t, plan.Validation)
 
@@ -1034,7 +1033,7 @@ func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T
 		"automation.registration.validation_failure",
 		"automation.invocation.created",
 		"automation.transition.append_failure",
-		"automation.publication.validation_failure",
+		"automation.save.validation_failure",
 		"automation.graph.query_duration_ms",
 		"automation.graph.payload_bytes",
 	} {

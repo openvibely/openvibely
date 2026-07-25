@@ -13,24 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-var (
-	ErrAutomationTriggerOwned      = errors.New("automation trigger schedule is already owned")
-	ErrAutomationSaveJournalExists = errors.New("automation has a staged Save journal")
-)
-
-func rejectStagedAutomationSave(ctx context.Context, conn *sql.Conn, projectID, automationID, currentVersionID string) error {
-	var stagedVersionID string
-	err := conn.QueryRowContext(ctx, `SELECT id FROM automation_versions
-		WHERE project_id = ? AND automation_id = ? AND id <> ? AND state = 'draft' LIMIT 1`,
-		projectID, automationID, currentVersionID).Scan(&stagedVersionID)
-	if err == nil {
-		return ErrAutomationSaveJournalExists
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	return fmt.Errorf("checking staged Automation Save journal: %w", err)
-}
+var ErrAutomationTriggerOwned = errors.New("automation trigger schedule is already owned")
 
 type AutomationRepo struct {
 	db          *sql.DB
@@ -116,15 +99,6 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 	a, err := getAutomationByStableKeyQuery(ctx, conn, in.ProjectID, in.StableKey)
 	if err != nil {
 		return nil, false, err
-	}
-	if a != nil {
-		currentVersionID := ""
-		if a.PublishedVersionID != nil {
-			currentVersionID = *a.PublishedVersionID
-		}
-		if err := rejectStagedAutomationSave(ctx, conn, in.ProjectID, a.ID, currentVersionID); err != nil {
-			return nil, false, fmt.Errorf("%w: reopen and retry the pending Save before maintained registration", err)
-		}
 	}
 	if a != nil && a.PublishedVersionID != nil {
 		var publishedAdapter string

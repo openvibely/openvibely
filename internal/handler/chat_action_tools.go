@@ -28,7 +28,7 @@ func (h *Handler) supportsChatActionTools(ctx context.Context, agent models.LLMC
 
 type pendingAutomationPlanConfirmation struct {
 	Issue service.AutomationConfirmationIssue
-	Plan  models.AutomationPublicationPlan
+	Plan  models.AutomationSavePlan
 	Name  string
 }
 
@@ -60,11 +60,7 @@ func (c *chatActionSummaryCollector) appendAutomationPlans(output string) string
 	for _, pending := range c.pendingAutomationPlan {
 		var lines []string
 		for _, effect := range pending.Plan.Effects {
-			line := fmt.Sprintf("- %s %s: %s", effect.Operation, effect.ResourceType, effect.Name)
-			if effect.ResourceID != "" {
-				line += " (" + effect.ResourceID + ")"
-			}
-			lines = append(lines, line)
+			lines = append(lines, fmt.Sprintf("- %s %s: %s", effect.Operation, effect.ResourceType, effect.Name))
 		}
 		blocks = append(blocks, fmt.Sprintf("Automation save plan for %s:\n%s\nNothing has been created or activated. To save after reviewing this stored plan, reply exactly: save %s",
 			pending.Name, strings.Join(lines, "\n"), pending.Name))

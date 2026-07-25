@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
@@ -167,31 +166,6 @@ func TestAutomationDraftServiceNormalizesRegisteredTemplatesDeterministically(t 
 			require.NotNil(t, node.Position, "layout must be server-owned for %s/%s", adapterKey, node.Key)
 		}
 	}
-}
-
-func TestAutomationBlankDraftStartsEmptyAndPersistsUserLayout(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	project := automationTestProject(t, repository.NewProjectRepo(db), "Visual blank")
-	repo := repository.NewAutomationRepo(db)
-	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
-
-	blank, err := svc.BlankCandidate("")
-	require.NoError(t, err)
-	require.Equal(t, AutomationAdapterCustom, blank.AdapterKey)
-	require.Empty(t, blank.Nodes, "Blank must start with an empty custom canvas")
-	require.Empty(t, blank.Edges)
-	require.Contains(t, issueCodes(svc.ValidateCandidate(blank)), "empty_graph")
-
-	created, err := svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: blank})
-	require.NoError(t, err)
-	require.Empty(t, created.Candidate.Nodes)
-	require.NotEmpty(t, created.ValidationErrors)
-
-	dragged := models.AutomationDraftNode{Key: "my_schedule", Name: "My schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{X: 37, Y: 83}}
-	created.Candidate.Nodes = append(created.Candidate.Nodes, dragged)
-	updated, err := svc.UpdateDraft(context.Background(), created.Definition.Automation.ID, created.Definition.Version.ID, project.ID, created.Candidate)
-	require.NoError(t, err)
-	require.Equal(t, &models.AutomationDraftPoint{X: 37, Y: 83}, updated.Candidate.Nodes[0].Position, "normalization must preserve user-positioned nodes")
 }
 
 func TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoinsOrCycles(t *testing.T) {
@@ -449,47 +423,6 @@ func TestAutomationDraftNormalizesAndValidatesDirectionalPorts(t *testing.T) {
 	require.NotContains(t, issueCodes(svc.ValidateCandidate(reopened)), "invalid_edge")
 }
 
-func TestAutomationFreeformDraftPersistsCustomNodesAndCyclesButCannotPublish(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	project := automationTestProject(t, repository.NewProjectRepo(db), "Freeform draft")
-	repo := repository.NewAutomationRepo(db)
-	svc := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
-	candidate, err := svc.BlankCandidate(AutomationAdapterCustom)
-	require.NoError(t, err)
-	candidate.Nodes = []models.AutomationDraftNode{
-		{Key: "alpha", Name: "Alpha", Type: models.AutomationNodeAgentTask, Role: "custom_agent_task", Config: map[string]any{"prompt": "Do alpha work", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
-		{Key: "beta", Name: "Beta", Type: models.AutomationNodeCondition, Role: "custom_condition", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 260, Y: 0}},
-		{Key: "gamma", Name: "Gamma", Type: models.AutomationNodeAction, Role: "custom_action", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
-	}
-	candidate.Edges = []models.AutomationDraftEdge{
-		{Key: "edge_alpha_beta", From: "alpha", To: "beta", FromPort: "left", ToPort: "right", Condition: map[string]any{}},
-		{Key: "edge_beta_gamma", From: "beta", To: "gamma", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
-		{Key: "edge_gamma_alpha", From: "gamma", To: "alpha", FromPort: "left", ToPort: "right", Condition: map[string]any{}},
-	}
-
-	issues := svc.ValidateCandidate(candidate)
-	require.Contains(t, issueCodes(issues), "unsupported_capability", "unsupported capability nodes must remain visibly unpublished")
-	require.Contains(t, issueCodes(issues), "invalid_edge", "strict validation must reject the legacy non-directional connector geometry")
-	for i := range candidate.Edges {
-		candidate.Edges[i].FromPort = "right"
-		candidate.Edges[i].ToPort = "left"
-	}
-	created, err := svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
-	require.NoError(t, err)
-	require.Len(t, created.Candidate.Nodes, 3)
-	require.Len(t, created.Candidate.Edges, 3)
-	require.Equal(t, "right", created.Candidate.Edges[0].FromPort)
-	require.Equal(t, "left", created.Candidate.Edges[0].ToPort)
-	require.NotContains(t, issueCodes(created.ValidationErrors), "invalid_edge", "corrected cycles retain valid directional geometry")
-	require.Contains(t, issueCodes(created.ValidationErrors), "unsupported_capability")
-
-	planner := NewAutomationPublicationPlanner(repo, nil, nil, svc.registry, svc)
-	plan, err := planner.Plan(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
-	require.NoError(t, err)
-	require.Contains(t, issueCodes(plan.Validation), "unsupported_capability", "unsupported capability graphs must not publish")
-	require.Empty(t, plan.Effects, "unsupported topology must not produce runtime resource mutations")
-}
-
 func TestAutomationDraftRejectsMissingAndUnsupportedSchemaVersions(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Schema versions")
@@ -504,25 +437,10 @@ func TestAutomationDraftRejectsMissingAndUnsupportedSchemaVersions(t *testing.T)
 		require.NoError(t, err)
 		require.Equal(t, version, normalized.SchemaVersion, "normalization must preserve the supplied schema version")
 		require.Contains(t, issueCodes(svc.ValidateCandidate(normalized)), "schema_version")
-		_, err = svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
-		require.ErrorContains(t, err, "schema version")
+		preview, err := svc.PreviewCandidate(context.Background(), project.ID, candidate, nil)
+		require.NoError(t, err)
+		require.Contains(t, issueCodes(preview.ValidationErrors), "schema_version")
 	}
-
-	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
-	require.NoError(t, err)
-	created, err := svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
-	require.NoError(t, err)
-	candidate.SchemaVersion = 2
-	_, err = svc.UpdateDraft(context.Background(), created.Definition.Automation.ID, created.Definition.Version.ID, project.ID, candidate)
-	require.ErrorContains(t, err, "schema version")
-	unsupportedJSON, err := json.Marshal(candidate)
-	require.NoError(t, err)
-	_, err = db.Exec(`UPDATE automation_draft_metadata SET candidate_json = ? WHERE version_id = ?`, string(unsupportedJSON), created.Definition.Version.ID)
-	require.NoError(t, err)
-	_, err = svc.GetDraft(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
-	require.ErrorContains(t, err, "schema version")
-	_, err = svc.ClonePublishedVersion(context.Background(), project.ID, created.Definition.Automation.ID)
-	require.ErrorContains(t, err, "schema version")
 }
 
 func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
@@ -563,9 +481,9 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	candidate.Nodes[driverIndex].Config["agent_ref"] = "foreign_architect"
 	issues := svc.ValidateCandidateWithCapabilities(candidate, snapshot)
 	require.Contains(t, issueCodes(issues), "agent_ref")
-	created, err := svc.CreateDraft(ctx, AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
+	preview, err := svc.PreviewCandidate(ctx, project.ID, candidate, nil)
 	require.NoError(t, err)
-	require.Contains(t, issueCodes(created.ValidationErrors), "agent_ref", "unresolved references must remain visible without being guessed")
+	require.Contains(t, issueCodes(preview.ValidationErrors), "agent_ref", "unresolved references must remain visible without being guessed")
 
 	candidate.Nodes[driverIndex].Config["agent_ref"] = "project_architect"
 	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:missing"}
@@ -633,85 +551,6 @@ func automationDraftNodeIndexByKey(t *testing.T, candidate models.AutomationDraf
 	}
 	t.Fatalf("candidate has no %s node", key)
 	return -1
-}
-
-func TestAutomationDraftCreationPersistsDefinitionOnly(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	projectRepo := repository.NewProjectRepo(db)
-	project := automationTestProject(t, projectRepo, "Draft only")
-	automationRepo := repository.NewAutomationRepo(db)
-	svc := NewAutomationDraftService(automationRepo, NewAutomationAdapterRegistry())
-	candidate, err := svc.TemplateCandidate(AutomationAdapterVisionDriver)
-	require.NoError(t, err)
-
-	result, err := svc.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
-	require.NoError(t, err)
-	require.NotNil(t, result.Definition)
-	require.Equal(t, models.AutomationVersionDraft, result.Definition.Version.State)
-	require.Nil(t, result.Definition.Automation.PublishedVersionID)
-
-	for _, table := range []string{"tasks", "schedules", "alerts", "executions", "workflow_executions", "task_pull_requests"} {
-		var count int
-		require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM `+table).Scan(&count))
-		require.Zero(t, count, "draft creation must not mutate %s", table)
-	}
-
-	metadata, err := automationRepo.GetAutomationDraftMetadata(context.Background(), project.ID, result.Definition.Automation.ID, result.Definition.Version.ID)
-	require.NoError(t, err)
-	require.NotNil(t, metadata)
-	require.Equal(t, candidate.AdapterKey, result.Candidate.AdapterKey)
-}
-
-func TestAutomationDraftClonePreservesPublishedVersion(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	project := automationTestProject(t, repository.NewProjectRepo(db), "Clone")
-	automationRepo := repository.NewAutomationRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	registry := NewAutomationAdapterRegistry()
-	drafts := NewAutomationDraftService(automationRepo, registry)
-	candidate, err := drafts.TemplateCandidate(AutomationAdapterVisionDriver)
-	require.NoError(t, err)
-	created, err := drafts.CreateDraft(context.Background(), AutomationDraftCreateRequest{ProjectID: project.ID, Source: "template", Candidate: candidate})
-	require.NoError(t, err)
-	planner := NewAutomationPublicationPlanner(automationRepo, taskRepo, scheduleRepo, registry, drafts)
-	plan, err := planner.Plan(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
-	require.NoError(t, err)
-	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, planner)
-	published, err := compiler.Publish(context.Background(), AutomationPublishRequest{ProjectID: project.ID,
-		AutomationID: created.Definition.Automation.ID, VersionID: created.Definition.Version.ID, PlanRevision: plan.PlanRevision})
-	require.NoError(t, err)
-	candidate.Edges[0].FromPort = "left"
-	candidate.Edges[0].ToPort = "right"
-	legacyJSON, err := json.Marshal(candidate)
-	require.NoError(t, err)
-	_, err = db.Exec(`UPDATE automation_draft_metadata SET candidate_json = ? WHERE version_id = ?`, string(legacyJSON), published.Definition.Version.ID)
-	require.NoError(t, err)
-
-	cloned, err := drafts.ClonePublishedVersion(context.Background(), project.ID, published.Definition.Automation.ID)
-	require.NoError(t, err)
-	require.Equal(t, 2, cloned.Definition.Version.Version)
-	require.Equal(t, models.AutomationVersionDraft, cloned.Definition.Version.State)
-	require.NotEqual(t, published.Definition.Version.ID, cloned.Definition.Version.ID)
-	require.Equal(t, "right", cloned.Candidate.Edges[0].FromPort, "editing after apply must migrate the source to its OUT port")
-	require.Equal(t, "left", cloned.Candidate.Edges[0].ToPort, "editing after apply must migrate the target to its IN port")
-	current, err := automationRepo.GetDefinition(context.Background(), project.ID, published.Definition.Automation.ID)
-	require.NoError(t, err)
-	require.Equal(t, published.Definition.Version.ID, current.Version.ID, "cloning must not replace the active topology")
-
-	cloned.Candidate.Nodes[0].Name = "Draft-only name"
-	_, err = drafts.UpdateDraft(context.Background(), cloned.Definition.Automation.ID, cloned.Definition.Version.ID, project.ID, cloned.Candidate)
-	require.NoError(t, err)
-	reopened, err := drafts.ClonePublishedVersion(context.Background(), project.ID, published.Definition.Automation.ID)
-	require.NoError(t, err)
-	require.Equal(t, cloned.Definition.Version.ID, reopened.Definition.Version.ID, "Edit must reopen the current working design instead of creating another draft")
-	require.Equal(t, "Draft-only name", reopened.Candidate.Nodes[0].Name, "saved edits must be reopened on the same Automation")
-	var editableCount int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE automation_id = ? AND state = 'draft'`, published.Definition.Automation.ID).Scan(&editableCount))
-	require.Equal(t, 1, editableCount)
-	original, err := automationRepo.GetDefinitionVersion(context.Background(), project.ID, published.Definition.Automation.ID, published.Definition.Version.ID)
-	require.NoError(t, err)
-	require.NotEqual(t, "Draft-only name", original.Nodes[0].Name)
 }
 
 func issueCodes(issues []models.AutomationValidationIssue) []string {

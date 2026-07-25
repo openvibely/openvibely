@@ -130,7 +130,7 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
@@ -277,365 +277,6 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	require.Equal(t, "Review using the replacement instructions.", savedTaskPrompt)
 }
 
-func TestAutomationWebSaveDiscardsUnreservedStagingAfterEarlyFailure(t *testing.T) {
-	for _, test := range []struct {
-		name               string
-		plannerUnavailable bool
-		installSQL         string
-		dropSQL            string
-		errorText          string
-	}{
-		{
-			name:               "initial planning failure",
-			plannerUnavailable: true,
-			errorText:          "automation publication planner is unavailable",
-		},
-		{
-			name: "publication attempt reservation failure",
-			installSQL: `CREATE TRIGGER fail_web_automation_reservation
-				BEFORE INSERT ON automation_publication_attempts BEGIN
-					SELECT RAISE(ABORT, 'simulated publication reservation failure');
-				END`,
-			dropSQL:   `DROP TRIGGER fail_web_automation_reservation`,
-			errorText: "simulated publication reservation failure",
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			tc := NewTestContext(t)
-			project := tc.CreateProject().WithName("Unreserved Save Cleanup Project").Build()
-			automationRepo := repository.NewAutomationRepo(tc.db)
-			registry := service.NewAutomationAdapterRegistry()
-			drafts := service.NewAutomationDraftService(automationRepo, registry)
-			validPlanner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
-			planner := validPlanner
-			if test.plannerUnavailable {
-				planner = service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, nil, drafts)
-			}
-			compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
-			tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-			tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
-
-			candidate, err := drafts.BlankCandidate("")
-			require.NoError(t, err)
-			candidate.Name = "Retry browser-local design"
-			candidate.Nodes = []models.AutomationDraftNode{{
-				Key: "review", Name: "Review request", Type: models.AutomationNodeAgentTask, Role: "task",
-				Config: map[string]any{"prompt": "Review one request.", "category": "backlog", "priority": 2},
-			}}
-			rawCandidate := automationDraftCandidateJSONForTest(t, candidate)
-			if test.installSQL != "" {
-				_, err := tc.db.Exec(test.installSQL)
-				require.NoError(t, err)
-			}
-
-			failed := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-				"project_id": {project.ID}, "candidate_json": {rawCandidate}, "save_changes": {"true"},
-			}).Execute()
-			require.Equal(t, http.StatusOK, failed.Code, "%s (automations=%d versions=%d attempts=%d)", failed.Body.String(), tableCountHandler(t, tc, "automations"), tableCountHandler(t, tc, "automation_versions"), tableCountHandler(t, tc, "automation_publication_attempts"))
-			require.Contains(t, failed.Body.String(), test.errorText)
-			require.Empty(t, automationHiddenValueFromResponse(t, failed, "retry_automation_id"))
-			require.Empty(t, automationHiddenValueFromResponse(t, failed, "retry_version_id"))
-			require.Empty(t, automationHiddenValueFromResponse(t, failed, "retry_plan_revision"))
-			require.Zero(t, tableCountHandler(t, tc, "automations"), "a failed first Save without a reserved attempt must not expose a durable Automation")
-			require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "unreserved staging must be compensated")
-			require.Zero(t, tableCountHandler(t, tc, "automation_publication_attempts"))
-			require.Zero(t, tableCountHandler(t, tc, "tasks"))
-			require.Zero(t, tableCountHandler(t, tc, "schedules"))
-			portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
-			require.Equal(t, http.StatusOK, portfolio.Code, portfolio.Body.String())
-			require.NotContains(t, portfolio.Body.String(), "Save needs attention", "unreserved staging is not a recoverable Save journal")
-
-			if test.dropSQL != "" {
-				_, err := tc.db.Exec(test.dropSQL)
-				require.NoError(t, err)
-			}
-			if test.plannerUnavailable {
-				validCompiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validPlanner)
-				tc.handler.SetAutomationBuilderServices(drafts, nil, validPlanner, validCompiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
-			}
-			retried := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-				"project_id": {project.ID}, "candidate_json": {rawCandidate}, "save_changes": {"true"},
-			}).Execute()
-			require.Equal(t, http.StatusNoContent, retried.Code, retried.Body.String())
-			require.Contains(t, retried.Header().Get("HX-Redirect"), "/automations/")
-			require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
-			require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"))
-			require.Equal(t, 1, tableCountHandler(t, tc, "automation_publication_attempts"))
-			require.Equal(t, 1, tableCountHandler(t, tc, "tasks"))
-			require.Zero(t, tableCountHandler(t, tc, "schedules"))
-
-			var automationID, savedPrompt string
-			require.NoError(t, tc.db.QueryRow(`SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
-			require.NoError(t, tc.db.QueryRow(`SELECT prompt FROM tasks WHERE project_id = ?`, project.ID).Scan(&savedPrompt))
-			require.Equal(t, "Review one request.", savedPrompt)
-			candidate.Nodes[0].Config["prompt"] = "Review the replacement request."
-			replacementJSON := automationDraftCandidateJSONForTest(t, candidate)
-			if test.installSQL != "" {
-				_, err := tc.db.Exec(test.installSQL)
-				require.NoError(t, err)
-			}
-			if test.plannerUnavailable {
-				failedPlanner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, nil, drafts)
-				failedCompiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, failedPlanner)
-				tc.handler.SetAutomationBuilderServices(drafts, nil, failedPlanner, failedCompiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
-			}
-			failedReplacement := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
-				"project_id": {project.ID}, "candidate_json": {replacementJSON}, "save_changes": {"true"},
-			}).Execute()
-			require.Equal(t, http.StatusOK, failedReplacement.Code, failedReplacement.Body.String())
-			require.Contains(t, failedReplacement.Body.String(), test.errorText)
-			require.Empty(t, automationHiddenValueFromResponse(t, failedReplacement, "retry_automation_id"))
-			require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
-			require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "an unreserved replacement must leave only the current saved graph")
-			require.Equal(t, 1, tableCountHandler(t, tc, "automation_publication_attempts"), "an unreserved replacement must not add a journal")
-			require.Equal(t, 1, tableCountHandler(t, tc, "tasks"), "an unreserved replacement must not create resources")
-			require.NoError(t, tc.db.QueryRow(`SELECT prompt FROM tasks WHERE project_id = ?`, project.ID).Scan(&savedPrompt))
-			require.Equal(t, "Review one request.", savedPrompt, "the current saved behavior must remain active")
-			replacementPortfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
-			require.Equal(t, http.StatusOK, replacementPortfolio.Code, replacementPortfolio.Body.String())
-			require.NotContains(t, replacementPortfolio.Body.String(), "Save needs attention")
-
-			if test.dropSQL != "" {
-				_, err := tc.db.Exec(test.dropSQL)
-				require.NoError(t, err)
-			}
-			if test.plannerUnavailable {
-				validCompiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validPlanner)
-				tc.handler.SetAutomationBuilderServices(drafts, nil, validPlanner, validCompiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
-			}
-			retriedReplacement := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
-				"project_id": {project.ID}, "candidate_json": {replacementJSON}, "save_changes": {"true"},
-			}).Execute()
-			require.Equal(t, http.StatusNoContent, retriedReplacement.Code, retriedReplacement.Body.String())
-			require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"))
-			require.Equal(t, 1, tableCountHandler(t, tc, "tasks"))
-			require.NoError(t, tc.db.QueryRow(`SELECT prompt FROM tasks WHERE project_id = ?`, project.ID).Scan(&savedPrompt))
-			require.Equal(t, "Review the replacement request.", savedPrompt)
-		})
-	}
-}
-
-func TestAutomationWebSaveRetriesExactFailedPublicationJournal(t *testing.T) {
-	tc := NewTestContext(t)
-	project := tc.CreateProject().WithName("Web Publication Retry Project").Build()
-	other := tc.CreateProject().WithName("Web Publication Retry Other").Build()
-	automationRepo := repository.NewAutomationRepo(tc.db)
-	registry := service.NewAutomationAdapterRegistry()
-	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
-	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
-	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
-
-	candidate, err := drafts.BlankCandidate("")
-	require.NoError(t, err)
-	candidate.Name = "Retry scheduled review"
-	candidate.Nodes = []models.AutomationDraftNode{{
-		Key: "review_schedule", Name: "Review schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule",
-		Config:   map[string]any{"prompt": "Review one request.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true},
-		Position: &models.AutomationDraftPoint{X: 0, Y: 0},
-	}}
-	rawCandidate := automationDraftCandidateJSONForTest(t, candidate)
-	require.NoError(t, func() error {
-		_, execErr := tc.db.Exec(`CREATE TRIGGER fail_web_automation_schedule
-			BEFORE INSERT ON schedules BEGIN SELECT RAISE(ABORT, 'simulated web schedule failure'); END`)
-		return execErr
-	}())
-
-	failed := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {rawCandidate}, "save_changes": {"true"},
-		"node_review_schedule_enabled": {"true"},
-	}).Execute()
-	require.Equal(t, http.StatusOK, failed.Code, failed.Body.String())
-	require.Empty(t, failed.Header().Get("HX-Redirect"))
-	require.Contains(t, failed.Body.String(), "simulated web schedule failure")
-	require.Contains(t, failed.Body.String(), "Save attempt resources")
-	retryAutomationID := automationHiddenValueFromResponse(t, failed, "retry_automation_id")
-	retryVersionID := automationHiddenValueFromResponse(t, failed, "retry_version_id")
-	retryPlanRevision := automationHiddenValueFromResponse(t, failed, "retry_plan_revision")
-	require.NotEmpty(t, retryAutomationID)
-	require.NotEmpty(t, retryVersionID)
-	require.NotEmpty(t, retryPlanRevision)
-	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_publication_attempts"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "tasks"), "the failed attempt must retain its already-created scheduled task")
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
-	var attemptID string
-	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automation_publication_attempts WHERE automation_id = ? AND version_id = ?`, retryAutomationID, retryVersionID).Scan(&attemptID))
-
-	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
-	require.Equal(t, http.StatusOK, portfolio.Code, portfolio.Body.String())
-	require.Contains(t, portfolio.Body.String(), "Save needs attention")
-	require.Contains(t, portfolio.Body.String(), candidate.Name)
-	require.NotContains(t, portfolio.Body.String(), retryVersionID, "private journal identity must not be displayed in the portfolio")
-	require.NotContains(t, strings.ToLower(portfolio.Body.String()), "draft")
-	foreignPortfolio := tc.HTTP().Get("/automations?project_id=" + other.ID).Execute()
-	require.Equal(t, http.StatusOK, foreignPortfolio.Code, foreignPortfolio.Body.String())
-	require.NotContains(t, foreignPortfolio.Body.String(), "Save needs attention")
-	require.NotContains(t, foreignPortfolio.Body.String(), candidate.Name)
-
-	recovered := tc.HTMX().Post("/automations/" + retryAutomationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID},
-	}).Execute()
-	require.Equal(t, http.StatusOK, recovered.Code, recovered.Body.String())
-	firstSaveRecoveryURL := recovered.Header().Get("HX-Push-Url")
-	require.Equal(t, "/automations?project_id="+project.ID, firstSaveRecoveryURL, "first-Save recovery must keep browser history on a refreshable recovery surface")
-	refreshedFirstSaveRecovery := tc.HTTP().Get(firstSaveRecoveryURL).Execute()
-	require.Equal(t, http.StatusOK, refreshedFirstSaveRecovery.Code, refreshedFirstSaveRecovery.Body.String())
-	require.Contains(t, refreshedFirstSaveRecovery.Body.String(), "Save needs attention")
-	require.Contains(t, recovered.Body.String(), "Retry Save changes")
-	require.Contains(t, recovered.Body.String(), "Save needs attention")
-	require.NotContains(t, recovered.Body.String(), `data-delete-automation-open`)
-	require.NotContains(t, recovered.Body.String(), "reopen the builder to start over")
-	require.Equal(t, retryAutomationID, automationHiddenValueFromResponse(t, recovered, "retry_automation_id"))
-	require.Equal(t, retryVersionID, automationHiddenValueFromResponse(t, recovered, "retry_version_id"))
-	require.Equal(t, retryPlanRevision, automationHiddenValueFromResponse(t, recovered, "retry_plan_revision"))
-	require.Equal(t, candidate.Name, automationCandidateFromResponse(t, recovered).Name)
-
-	require.NoError(t, func() error { _, execErr := tc.db.Exec(`DROP TRIGGER fail_web_automation_schedule`); return execErr }())
-	retryCandidate := automationCandidateFromResponse(t, recovered)
-	retried := tc.HTMX().Post("/automations/" + retryAutomationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {automationDraftCandidateJSONForTest(t, retryCandidate)}, "save_changes": {"true"},
-		"retry_automation_id": {retryAutomationID}, "retry_version_id": {retryVersionID}, "retry_plan_revision": {retryPlanRevision},
-		"node_review_schedule_enabled": {"true"},
-	}).Execute()
-	require.Equal(t, http.StatusNoContent, retried.Code, retried.Body.String())
-	require.Contains(t, retried.Header().Get("HX-Redirect"), "/automations/"+retryAutomationID)
-	require.Equal(t, 1, tableCountHandler(t, tc, "automations"), "retry must not stage a duplicate Automation")
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "retry must publish the exact staged version")
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_publication_attempts"), "retry must resume the exact journal")
-	require.Equal(t, 1, tableCountHandler(t, tc, "tasks"), "retry must reconcile the existing task")
-	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
-	var completedAttemptID, versionState string
-	require.NoError(t, tc.db.QueryRow(`SELECT id FROM automation_publication_attempts WHERE automation_id = ? AND version_id = ? AND status = 'completed'`, retryAutomationID, retryVersionID).Scan(&completedAttemptID))
-	require.Equal(t, attemptID, completedAttemptID)
-	require.NoError(t, tc.db.QueryRow(`SELECT state FROM automation_versions WHERE id = ?`, retryVersionID).Scan(&versionState))
-	require.Equal(t, string(models.AutomationVersionPublished), versionState)
-
-	candidate.Nodes[0].Config["run_at"] = "10:00"
-	replacementJSON := automationDraftCandidateJSONForTest(t, candidate)
-	require.NoError(t, func() error {
-		_, execErr := tc.db.Exec(`CREATE TRIGGER fail_web_automation_replacement_schedule
-			BEFORE INSERT ON schedules BEGIN SELECT RAISE(ABORT, 'simulated replacement schedule failure'); END`)
-		return execErr
-	}())
-	failedReplacement := tc.HTMX().Post("/automations/" + retryAutomationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {replacementJSON}, "save_changes": {"true"},
-		"node_review_schedule_enabled": {"true"},
-	}).Execute()
-	require.Equal(t, http.StatusOK, failedReplacement.Code, failedReplacement.Body.String())
-	require.Contains(t, failedReplacement.Body.String(), "simulated replacement schedule failure")
-	replacementVersionID := automationHiddenValueFromResponse(t, failedReplacement, "retry_version_id")
-	replacementRevision := automationHiddenValueFromResponse(t, failedReplacement, "retry_plan_revision")
-	require.NotEqual(t, retryVersionID, replacementVersionID)
-	require.Equal(t, 2, tableCountHandler(t, tc, "automation_versions"), "the current graph and private Save journal coexist only until retry completes")
-
-	replacementPortfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
-	require.Equal(t, http.StatusOK, replacementPortfolio.Code, replacementPortfolio.Body.String())
-	require.Contains(t, replacementPortfolio.Body.String(), "Save needs attention")
-	require.Contains(t, replacementPortfolio.Body.String(), fmt.Sprintf(`data-automation-edit-url="/automations/%s/builder?project_id=%s"`, retryAutomationID, project.ID))
-	require.NotContains(t, replacementPortfolio.Body.String(), fmt.Sprintf(`data-automation-delete-url="/automations/%s/delete?project_id=%s"`, retryAutomationID, project.ID), "a saved Automation with a recoverable replacement must not expose deletion")
-	foreignReplacementPortfolio := tc.HTTP().Get("/automations?project_id=" + other.ID).Execute()
-	require.Equal(t, http.StatusOK, foreignReplacementPortfolio.Code, foreignReplacementPortfolio.Body.String())
-	require.NotContains(t, foreignReplacementPortfolio.Body.String(), candidate.Name)
-
-	reopenedReplacement := tc.HTMX().Post("/automations/" + retryAutomationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID},
-	}).Execute()
-	require.Equal(t, http.StatusOK, reopenedReplacement.Code, reopenedReplacement.Body.String())
-	replacementRecoveryURL := reopenedReplacement.Header().Get("HX-Push-Url")
-	require.Equal(t, "/automations/"+retryAutomationID+"?project_id="+project.ID, replacementRecoveryURL, "replacement recovery must retain the saved Automation URL")
-	refreshedReplacement := tc.HTTP().Get(replacementRecoveryURL).Execute()
-	require.Equal(t, http.StatusOK, refreshedReplacement.Code, refreshedReplacement.Body.String())
-	require.NotContains(t, refreshedReplacement.Body.String(), "Save needs attention", "the valid Live URL must continue showing the current saved graph")
-	require.NotContains(t, refreshedReplacement.Body.String(), fmt.Sprintf("/automations/%s/delete?project_id=%s", retryAutomationID, project.ID), "a refreshed Live page must not expose deletion while replacement recovery is pending")
-	require.NotContains(t, refreshedReplacement.Body.String(), `id="delete-automation-modal"`)
-	require.NotContains(t, reopenedReplacement.Body.String(), `data-delete-automation-open`)
-	require.Equal(t, replacementVersionID, automationHiddenValueFromResponse(t, reopenedReplacement, "retry_version_id"))
-	recoveredReplacement := automationCandidateFromResponse(t, reopenedReplacement)
-	require.Equal(t, "10:00", recoveredReplacement.Nodes[0].Config["run_at"], "reopen must restore the failed replacement rather than the current published graph")
-
-	require.NoError(t, func() error {
-		_, execErr := tc.db.Exec(`DROP TRIGGER fail_web_automation_replacement_schedule`)
-		return execErr
-	}())
-	retriedReplacement := tc.HTMX().Post("/automations/" + retryAutomationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {automationDraftCandidateJSONForTest(t, recoveredReplacement)}, "save_changes": {"true"},
-		"retry_automation_id": {retryAutomationID}, "retry_version_id": {replacementVersionID}, "retry_plan_revision": {replacementRevision},
-		"node_review_schedule_enabled": {"true"},
-	}).Execute()
-	require.Equal(t, http.StatusNoContent, retriedReplacement.Code, retriedReplacement.Body.String())
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "successful retry must leave exactly one current saved graph")
-	require.Equal(t, 1, tableCountHandler(t, tc, "tasks"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
-	savedSchedules, err := tc.scheduleRepo.ListByProject(context.Background(), project.ID)
-	require.NoError(t, err)
-	require.Len(t, savedSchedules, 1)
-	require.Equal(t, "10:00", savedSchedules[0].RunAt.In(time.Local).Format("15:04"))
-
-	recoveredPortfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
-	require.Equal(t, http.StatusOK, recoveredPortfolio.Code, recoveredPortfolio.Body.String())
-	require.NotContains(t, recoveredPortfolio.Body.String(), "Save needs attention")
-	require.Contains(t, recoveredPortfolio.Body.String(), fmt.Sprintf(`data-automation-delete-url="/automations/%s/delete?project_id=%s"`, retryAutomationID, project.ID), "deletion must return after exact retry succeeds")
-	recoveredLive := tc.HTTP().Get("/automations/" + retryAutomationID + "?project_id=" + project.ID).Execute()
-	require.Equal(t, http.StatusOK, recoveredLive.Code, recoveredLive.Body.String())
-	require.Contains(t, recoveredLive.Body.String(), `id="delete-automation-modal"`, "Live deletion must return after exact retry succeeds")
-}
-
-func TestAutomationChatDraftIsNotExposedAsEditableWebState(t *testing.T) {
-	tc := NewTestContext(t)
-	project := tc.CreateProject().WithName("Chat Draft Isolation Project").Build()
-	other := tc.CreateProject().WithName("Chat Draft Isolation Other").Build()
-	automationRepo := repository.NewAutomationRepo(tc.db)
-	registry := service.NewAutomationAdapterRegistry()
-	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
-	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
-	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, nil)
-
-	candidate, err := drafts.BlankCandidate("")
-	require.NoError(t, err)
-	candidate.Name = "Customer Intake"
-	candidate.Nodes = []models.AutomationDraftNode{{
-		Key: "review", Name: "Review request", Type: models.AutomationNodeAgentTask, Role: "task",
-		Config:   map[string]any{"prompt": "Review the request", "category": "backlog", "priority": 2},
-		Position: &models.AutomationDraftPoint{X: 0, Y: 0},
-	}}
-	created, err := drafts.CreateDraft(context.Background(), service.AutomationDraftCreateRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "chat", Candidate: candidate})
-	require.NoError(t, err)
-	draftURL := fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", created.Definition.Automation.ID, created.Definition.Version.ID, project.ID)
-
-	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
-	require.Equal(t, http.StatusOK, portfolio.Code)
-	require.NotContains(t, portfolio.Body.String(), created.Definition.Automation.ID)
-	require.NotContains(t, portfolio.Body.String(), candidate.Name, "Chat's persisted candidate must not become a web draft card")
-
-	direct := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", created.Definition.Automation.ID, project.ID)).Execute()
-	require.Equal(t, http.StatusNotFound, direct.Code, direct.Body.String())
-	require.Equal(t, http.StatusNotFound, tc.HTTP().Get(draftURL).Execute().Code)
-	require.Equal(t, http.StatusNotFound, tc.HTMX().Post(draftURL).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {automationDraftCandidateJSONForTest(t, candidate)}, "automation_name": {"Support Triage"},
-	}).Execute().Code)
-	require.Equal(t, http.StatusNotFound, tc.HTTP().Get(fmt.Sprintf("/automations/%s/drafts/%s?project_id=%s", created.Definition.Automation.ID, created.Definition.Version.ID, other.ID)).Execute().Code)
-
-	stored, err := drafts.GetDraft(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
-	require.NoError(t, err)
-	require.Equal(t, "Customer Intake", stored.Candidate.Name, "web requests must not mutate Chat's persisted candidate")
-	plan, err := planner.Plan(context.Background(), project.ID, created.Definition.Automation.ID, created.Definition.Version.ID)
-	require.NoError(t, err)
-	require.Empty(t, plan.Validation, "Chat must retain its separate persisted candidate and planning path")
-	fabricatedRetry := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "candidate_json": {automationDraftCandidateJSONForTest(t, stored.Candidate)}, "save_changes": {"true"},
-		"retry_automation_id": {created.Definition.Automation.ID}, "retry_version_id": {created.Definition.Version.ID}, "retry_plan_revision": {plan.PlanRevision},
-	}).Execute()
-	require.Equal(t, http.StatusOK, fabricatedRetry.Code, fabricatedRetry.Body.String())
-	require.Contains(t, fabricatedRetry.Body.String(), "automation publication retry not found")
-	require.Zero(t, tableCountHandler(t, tc, "automation_publication_attempts"), "web retry fields cannot create a publication attempt for an unconfirmed Chat draft")
-	require.Zero(t, tableCountHandler(t, tc, "tasks"))
-}
-
 func TestAutomationBlankBuilderIsEmptyInteractiveAndKeepsNodeActionsTransient(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Blank Builder Project").Build()
@@ -724,7 +365,7 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, nil, nil, nil)
 
@@ -781,11 +422,8 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	require.Len(t, candidate.Edges, 1)
 	require.Equal(t, candidate.Nodes[1].Key, candidate.Nodes[0].Config["target_node_key"])
 	require.Empty(t, drafts.ValidateCandidate(candidate), "a user-defined Schedule → Agent task graph must be publishable")
-	staged, err := drafts.CreateDraft(context.Background(), service.AutomationDraftCreateRequest{
-		ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
-	})
-	require.NoError(t, err)
-	plan, err := planner.Plan(context.Background(), project.ID, staged.Definition.Automation.ID, staged.Definition.Version.ID)
+	compiler := service.NewAutomationCompiler(nil, nil, nil, nil, planner)
+	plan, _, err := compiler.PreviewSave(context.Background(), project.ID, candidate)
 	require.NoError(t, err)
 	require.Empty(t, plan.Validation)
 	require.Len(t, plan.Effects, 3)
@@ -843,7 +481,7 @@ func TestAutomationBlankAppliedStandaloneScheduleUsesScheduleNodeNameOnScheduleP
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("schedule-projection-secret-32bytes"))
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
@@ -908,7 +546,7 @@ func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, nil)
@@ -994,7 +632,7 @@ func TestAutomationBuilderWebSavePublishesImmediatelyAndIsProjectScoped(t *testi
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("handler-confirmation-secret-32-bytes"))
 	lifecycle := service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo)
@@ -1023,51 +661,15 @@ func TestAutomationBuilderWebSavePublishesImmediatelyAndIsProjectScoped(t *testi
 	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterVisionDriver},
 	}).Execute()
-	require.Equal(t, 200, created.Code)
-	require.Contains(t, created.Body.String(), `id="automation-builder"`)
-	require.Contains(t, created.Body.String(), "Saving validates and applies this Automation immediately")
-	require.Contains(t, created.Body.String(), `name="save_changes" value="true"`)
-	require.NotContains(t, created.Body.String(), "Review and apply")
-	require.NotContains(t, created.Body.String(), "Apply changes")
-	require.Contains(t, created.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
-	require.Contains(t, created.Body.String(), `class="automation-node-content"`)
-	require.Contains(t, created.Body.String(), `class="automation-draft-node`)
-	require.Contains(t, created.Body.String(), `name="node_vision_driver_agent_ref"`)
-	require.Contains(t, created.Body.String(), `value="builder_architect"`)
-	require.Contains(t, created.Body.String(), `name="node_vision_driver_skills"`)
-	require.Contains(t, created.Body.String(), `value="builder_architect:project-guidance"`)
-	require.Contains(t, created.Body.String(), `name="node_vision_driver_source_files"`)
-	require.NotContains(t, created.Body.String(), "fill-base-content")
-	require.NotContains(t, created.Body.String(), "fill-base-200")
-	require.Zero(t, tableCountHandler(t, tc, "tasks"))
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
-
-	require.Zero(t, tableCountHandler(t, tc, "automations"), "opening a template must not persist an editable draft")
-	configuredCandidate := automationCandidateFromResponse(t, created)
-	configuredCandidate.Nodes[0].Config["agent_ref"] = "builder_architect"
-	configuredCandidate.Nodes[0].Config["skills"] = []string{"builder_architect:project-guidance"}
-	require.Equal(t, "builder_architect", configuredCandidate.Nodes[0].Config["agent_ref"])
-	require.Zero(t, tableCountHandler(t, tc, "tasks"), "editing the canvas must remain resource-free before Save")
-	configuredJSON, err := json.Marshal(configuredCandidate)
-	require.NoError(t, err)
-	published := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "builder_source": {"template"}, "candidate_json": {string(configuredJSON)}, "save_changes": {"true"},
-		"node_vision_driver_agent_ref": {"builder_architect"}, "node_vision_driver_skills": {"builder_architect:project-guidance"},
-		"node_vision_driver_enabled": {"true"},
-	}).Execute()
-	require.Equal(t, http.StatusNoContent, published.Code, published.Body.String())
+	require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
 	var automationID, versionID string
 	require.NoError(t, tc.db.QueryRow(`SELECT id, published_version_id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &versionID))
-	require.Equal(t, fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID), published.Header().Get("HX-Redirect"))
+	require.Equal(t, fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID), created.Header().Get("HX-Redirect"))
 	require.NotZero(t, tableCountHandler(t, tc, "tasks"))
 	require.NotZero(t, tableCountHandler(t, tc, "schedules"))
 	compiledTasks, err := tc.taskRepo.ListByProject(context.Background(), project.ID, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, compiledTasks)
-	for _, task := range compiledTasks {
-		require.NotNil(t, task.AgentDefinitionID)
-		require.Equal(t, architect.ID, *task.AgentDefinitionID)
-	}
 
 	live := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID)).Execute()
 	require.Equal(t, 200, live.Code)
@@ -1159,7 +761,7 @@ func TestAutomationBrowserSaveRejectsMalformedConnectorPorts(t *testing.T) {
 			automationRepo := repository.NewAutomationRepo(tc.db)
 			registry := service.NewAutomationAdapterRegistry()
 			drafts := service.NewAutomationDraftService(automationRepo, registry)
-			planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
+			planner := service.NewAutomationSaveValidator(registry, drafts)
 			compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 			tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 			candidate, err := drafts.BlankCandidate(service.AutomationAdapterCustom)
@@ -1192,7 +794,7 @@ func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) 
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	candidates := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, candidates)
+	planner := service.NewAutomationSaveValidator(registry, candidates)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
 	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("pending-save-contract-secret-32-bytes"))
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
@@ -1243,7 +845,6 @@ func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) 
 	require.NotContains(t, strings.ToLower(output), "draft")
 	require.Contains(t, output, `"confirmation_required":true`)
 	require.Len(t, collector.pendingAutomationPlan, 1)
-	require.NotContains(t, output, collector.pendingAutomationPlan[0].Issue.AutomationID[:8], "the displayed plan must not leak the hidden staging identity")
 	require.Zero(t, tableCountHandler(t, tc, "automations"), "planning must not create an Automation before Save")
 	require.Zero(t, tableCountHandler(t, tc, "tasks")-1, "planning must not create Automation runtime tasks")
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
@@ -1256,9 +857,10 @@ func TestAutomationChatSavePlanRejectsCandidateIdentity(t *testing.T) {
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	candidates := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, candidates)
+	planner := service.NewAutomationSaveValidator(registry, candidates)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("candidate-identity-secret-32-bytes"))
-	tc.handler.SetAutomationBuilderServices(candidates, nil, planner, nil, confirmation, nil)
+	tc.handler.SetAutomationBuilderServices(candidates, nil, planner, compiler, confirmation, nil)
 	candidate, err := candidates.TemplateCandidate(service.AutomationAdapterVisionDriver)
 	require.NoError(t, err)
 	raw, err := json.Marshal(candidate)
@@ -1312,7 +914,7 @@ func TestAutomationChatActionsUseCanonicalPipelineAndDeferConfirmationReceipt(t 
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	candidates := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, candidates)
+	planner := service.NewAutomationSaveValidator(registry, candidates)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
 	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("chat-confirmation-secret-32-bytes"))
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
@@ -1388,7 +990,7 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewPlanAndConfirmedSave(t *te
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationPublicationPlanner(automationRepo, tc.taskRepo, tc.scheduleRepo, registry, drafts)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
 	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("runtime-confirmation-secret-32-bytes"))
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)

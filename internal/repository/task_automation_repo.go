@@ -14,6 +14,10 @@ import (
 
 var ErrAutomationChainChildBusy = errors.New("automation chained task is already running")
 
+func AutomationCompilerTaskCreatedVia(automationID, nodeKey string) string {
+	return "automation:" + automationID + ":" + nodeKey
+}
+
 // ActivateAutomationChainedTask reuses the existing Task state transition and
 // records the connected Automation handoff in the same local transaction.
 func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent models.Task, child *models.Task, event AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, bool, error) {

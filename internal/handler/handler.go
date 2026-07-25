@@ -39,7 +39,7 @@ type Handler struct {
 	automationRegistrationSvc  *service.AutomationRegistrationService
 	automationDraftSvc         *service.AutomationDraftService
 	automationCapabilitySvc    *service.AutomationCapabilitySnapshotBuilder
-	automationPlanner          *service.AutomationPublicationPlanner
+	automationSaveValidator    *service.AutomationSaveValidator
 	automationCompiler         *service.AutomationCompiler
 	automationConfirmationSvc  *service.AutomationConfirmationService
 	automationLifecycleSvc     *service.AutomationLifecycleService

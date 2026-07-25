@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
-	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -19,10 +18,10 @@ func (h *Handler) SetAutomationExternalStateService(external *service.Automation
 	h.automationExternalStateSvc = external
 }
 
-func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftService, capabilities *service.AutomationCapabilitySnapshotBuilder, planner *service.AutomationPublicationPlanner, compiler *service.AutomationCompiler, confirmation *service.AutomationConfirmationService, lifecycle *service.AutomationLifecycleService) {
+func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftService, capabilities *service.AutomationCapabilitySnapshotBuilder, validator *service.AutomationSaveValidator, compiler *service.AutomationCompiler, confirmation *service.AutomationConfirmationService, lifecycle *service.AutomationLifecycleService) {
 	h.automationDraftSvc = drafts
 	h.automationCapabilitySvc = capabilities
-	h.automationPlanner = planner
+	h.automationSaveValidator = validator
 	h.automationCompiler = compiler
 	h.automationConfirmationSvc = confirmation
 	h.automationLifecycleSvc = lifecycle
@@ -30,8 +29,8 @@ func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftSe
 		drafts.SetCapabilitySnapshotBuilder(capabilities)
 	}
 	if h.agentRepo != nil {
-		if planner != nil {
-			planner.SetAgentRepository(h.agentRepo)
+		if validator != nil {
+			validator.SetAgentRepository(h.agentRepo)
 		}
 		if compiler != nil {
 			compiler.SetAgentRepository(h.agentRepo)
@@ -52,18 +51,11 @@ func (h *Handler) ListAutomations(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	var recoveries []models.AutomationSaveRecovery
-	if h.automationDraftSvc != nil {
-		recoveries, err = h.automationDraftSvc.ListRecoverableSaves(ctx, projectID)
-		if err != nil {
-			return err
-		}
-	}
 	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.AutomationsContent(cards, recoveries, projectID))
+		return render(c, http.StatusOK, pages.AutomationsContent(cards, projectID))
 	}
 	projects, _ := h.projectSvc.List(ctx)
-	return render(c, http.StatusOK, pages.Automations(projects, projectID, cards, recoveries))
+	return render(c, http.StatusOK, pages.Automations(projects, projectID, cards))
 }
 
 func (h *Handler) GetAutomationLive(c echo.Context) error {
@@ -83,13 +75,6 @@ func (h *Handler) GetAutomationLive(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "automation not found")
 	}
 	deleteAvailable := true
-	if h.automationDraftSvc != nil {
-		recovery, recoveryErr := h.automationDraftSvc.RecoverableSave(ctx, projectID, graph.Automation.ID)
-		if recoveryErr != nil {
-			return recoveryErr
-		}
-		deleteAvailable = recovery == nil
-	}
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationLiveContent(*graph, projectID, deleteAvailable))
 	}

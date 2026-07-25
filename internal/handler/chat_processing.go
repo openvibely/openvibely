@@ -662,7 +662,7 @@ func (h *Handler) issueStoredAutomationPlanConfirmations(ctx context.Context, co
 	}
 	for _, pending := range collector.pendingAutomationPlan {
 		if _, err := h.automationConfirmationSvc.Issue(ctx, pending.Issue); err != nil {
-			applog.Infof("[handler] automation plan receipt issue failed automation=%s version=%s: %v", pending.Issue.AutomationID, pending.Issue.VersionID, err)
+			applog.Infof("[handler] automation plan receipt issue failed name=%q: %v", pending.Issue.AutomationName, err)
 		}
 	}
 }
