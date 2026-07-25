@@ -122,7 +122,7 @@ func TestGitHubSDLCRegistrationHydratesBoundTaskPromptAcrossPause(t *testing.T) 
 	automationRepo := repository.NewAutomationRepo(db)
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 
-	maintainedPrompt := githubAutomationPromptsForTest(t)["Dev Inbox"]
+	maintainedPrompt := shippedGitHubBootstrapPromptsForTest(t)["dev_inbox"]
 	task := models.Task{ProjectID: project.ID, Title: "GitHub Dev Inbox", Category: models.CategoryScheduled, Priority: 3, Status: models.StatusPending, Prompt: maintainedPrompt}
 	require.NoError(t, taskRepo.Create(ctx, &task))
 	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true}

@@ -47,18 +47,18 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 	}
 }
 
-func TestGitHubSDLCTemplateUsesMaintainedAutomationPrompts(t *testing.T) {
-	maintained := githubAutomationPromptsForTest(t)
+func TestGitHubSDLCTemplateUsesShippedBootstrapSkillPrompts(t *testing.T) {
+	shipped := shippedGitHubBootstrapPromptsForTest(t)
 	candidate, err := NewAutomationDraftService(nil, NewAutomationAdapterRegistry()).TemplateCandidate(AutomationAdapterGitHubSDLC)
 	require.NoError(t, err)
 
-	sectionsByNode := map[string]string{
-		"vision_suggestions":  "Offering Manager",
-		"bug_finder":          "Bug Finder / Optimization Finder / Redundancy Finder",
-		"optimization_finder": "Bug Finder / Optimization Finder / Redundancy Finder",
-		"redundancy_finder":   "Bug Finder / Optimization Finder / Redundancy Finder",
-		"dev_inbox":           "Dev Inbox",
-		"auditor":             "Loop Auditor",
+	rolesByNode := map[string]string{
+		"vision_suggestions":  "offering_manager",
+		"bug_finder":          "finder",
+		"optimization_finder": "finder",
+		"redundancy_finder":   "finder",
+		"dev_inbox":           "dev_inbox",
+		"auditor":             "loop_auditor",
 	}
 	expectedCadence := map[string]struct {
 		repeatType string
@@ -71,42 +71,50 @@ func TestGitHubSDLCTemplateUsesMaintainedAutomationPrompts(t *testing.T) {
 		"dev_inbox":           {repeatType: string(models.RepeatHours), interval: 1},
 		"auditor":             {repeatType: string(models.RepeatWeekly), interval: 1},
 	}
-	requiredBehavior := map[string]string{
-		"vision_suggestions":  "repository-wide current issue listing or search",
-		"bug_finder":          "Do not modify code, generate artifacts, install dependencies, create implementation tasks, set goals, or open PRs.",
-		"optimization_finder": "Do not modify code, generate artifacts, install dependencies, create implementation tasks, set goals, or open PRs.",
-		"redundancy_finder":   "Do not modify code, generate artifacts, install dependencies, create implementation tasks, set goals, or open PRs.",
-		"dev_inbox":           "github_forward_pr_feedback_to_tasks",
-		"auditor":             "Keep the workspace read-only.",
-	}
-	for nodeKey, section := range sectionsByNode {
+	for nodeKey, role := range rolesByNode {
 		node := automationDraftNodeByKey(t, candidate, nodeKey)
-		require.Equal(t, maintained[section], node.Config["prompt"], "%s must use the maintained %s prompt", nodeKey, section)
-		require.Equal(t, maintained[section], automationCompiledTaskPrompt(candidate, node), "%s must persist the exact maintained prompt without custom-graph additions", nodeKey)
-		require.Contains(t, node.Config["prompt"], requiredBehavior[nodeKey])
-		require.NotContains(t, node.Config["prompt"], "Run the ", "maintained GitHub tasks must not use generic role filler")
+		require.Equal(t, shipped[role], node.Config["prompt"], "%s must use the prompt shipped in the bootstrap skill", nodeKey)
+		require.Equal(t, shipped[role], automationCompiledTaskPrompt(candidate, node), "%s must persist the exact shipped prompt without custom-graph additions", nodeKey)
+		require.NotContains(t, node.Config["prompt"], "references/dev-inbox-execution-invariants.md")
+		require.NotContains(t, node.Config["prompt"], "repository-wide current issue listing or search")
 		require.Equal(t, expectedCadence[nodeKey].repeatType, node.Config["repeat_type"], "%s cadence must match bootstrap setup", nodeKey)
 		require.EqualValues(t, expectedCadence[nodeKey].interval, node.Config["repeat_interval"])
 	}
 }
 
-func githubAutomationPromptsForTest(t *testing.T) map[string]string {
+func shippedGitHubBootstrapPromptsForTest(t *testing.T) map[string]string {
 	t.Helper()
-	body := githubSDLCPromptTemplates
-	sections := []string{"Loop Auditor", "Dev Inbox", "Offering Manager", "Bug Finder / Optimization Finder / Redundancy Finder"}
-	out := make(map[string]string, len(sections))
-	for _, section := range sections {
-		marker := "## " + section + "\n"
+	path := filepath.Join("..", "builtinskills", "builtin", "skills", "openvibely_github_autonomous_sdlc_bootstrap", "SKILL.md")
+	data, err := os.ReadFile(path)
+	require.NoError(t, err, "read the GitHub bootstrap skill shipped by OpenVibely")
+	body := string(data)
+
+	extractFence := func(heading string) string {
+		t.Helper()
+		marker := "## " + heading + "\n"
 		start := strings.Index(body, marker)
-		require.NotEqual(t, -1, start, "missing canonical prompt section %s", section)
+		require.NotEqual(t, -1, start, "missing shipped skill section %s", heading)
 		fenceStart := strings.Index(body[start+len(marker):], "```text\n")
-		require.NotEqual(t, -1, fenceStart, "missing prompt fence for %s", section)
+		require.NotEqual(t, -1, fenceStart, "missing shipped prompt fence for %s", heading)
 		promptStart := start + len(marker) + fenceStart + len("```text\n")
 		fenceEnd := strings.Index(body[promptStart:], "\n```")
-		require.NotEqual(t, -1, fenceEnd, "missing closing prompt fence for %s", section)
-		out[section] = strings.TrimSpace(body[promptStart : promptStart+fenceEnd])
+		require.NotEqual(t, -1, fenceEnd, "missing shipped prompt closing fence for %s", heading)
+		return strings.TrimSpace(body[promptStart : promptStart+fenceEnd])
 	}
-	return out
+
+	const auditorPrefix = "- `GitHub Loop Auditor`, weekly. "
+	auditorStart := strings.Index(body, auditorPrefix)
+	require.NotEqual(t, -1, auditorStart, "missing shipped Loop Auditor task description")
+	auditorStart += len(auditorPrefix)
+	auditorEnd := strings.IndexByte(body[auditorStart:], '\n')
+	require.NotEqual(t, -1, auditorEnd, "unterminated shipped Loop Auditor task description")
+
+	return map[string]string{
+		"dev_inbox":        extractFence("Prompt Pattern For Dev Inbox"),
+		"offering_manager": extractFence("Prompt Pattern For Offering Manager"),
+		"finder":           extractFence("Prompt Pattern For Bug / Optimization / Redundancy Finders"),
+		"loop_auditor":     strings.TrimSpace(body[auditorStart : auditorStart+auditorEnd]),
+	}
 }
 
 func TestMaintainedTemplatesLeaveVisibleConnectorRunway(t *testing.T) {

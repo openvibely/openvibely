@@ -20,7 +20,7 @@ Open `/automations`, select `New Automation`, and choose how to start:
 | Describe It | Describe the result you want and review a generated browser-local graph. |
 | Blank | Build a custom graph from an empty canvas. |
 
-Templates provide supported starting points, but Blank and Describe It use the same configurable graph builder and Save rules. The GitHub SDLC template mirrors the established Offering Manager, finder, Dev Inbox, and Loop Auditor prompts and cadences used by the GitHub autonomous SDLC bootstrap skill; the Automation adds saved graph identity, lifecycle controls, and Live visualization over those Tasks and Schedules without changing the skill.
+Templates provide supported starting points, but Blank and Describe It use the same configurable graph builder and Save rules. The GitHub SDLC template reads the Offering Manager, finder, Dev Inbox, and Loop Auditor prompt patterns directly from the GitHub autonomous SDLC bootstrap skill shipped with OpenVibely; the Automation adds saved graph identity, lifecycle controls, and Live visualization over those Tasks and Schedules without changing the skill.
 
 ## Build the Graph
 

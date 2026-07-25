@@ -1129,7 +1129,7 @@ func TestAutomationPublicationPlanGoldenRevisionExcludesLayoutAndMessages(t *tes
 	planner := NewAutomationPublicationPlanner(automationRepo, repository.NewTaskRepo(db, nil), repository.NewScheduleRepo(db), registry, drafts)
 	first, err := planner.Plan(context.Background(), project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "e99d760ed033fcb5a1d6ab0422a4ce7d80323512e55f5f6be264d6323e0035eb", first.PlanRevision)
+	require.Equal(t, "4b29e4bfbbfd3aca37340952fdc65ac309116298266be7c1fd1a694c0376e4df", first.PlanRevision)
 
 	candidate.Assumptions = []string{"Layout-only author note"}
 	candidate.Warnings = []string{"Operational observation"}
@@ -1168,7 +1168,7 @@ func TestAutomationPublicationPlanGoldenGitHubDependenciesAndConfigurationChange
 	planner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	first, err := planner.Plan(ctx, project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "5f8d8ee34e559833557c29cb76a1877e13f12d80b0f2800edb0328c39c4ea2cd", first.PlanRevision)
+	require.Equal(t, "9e7fa179ec02dc48cddef76f47ceb7aac923ef1de6bd432d05b15ab1b727f0ae", first.PlanRevision)
 
 	inbox.Enabled = false
 	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
