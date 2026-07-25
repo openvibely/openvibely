@@ -685,6 +685,101 @@ func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) 
 	require.Len(t, recorder.submitted, 1, "the deferred Schedule handoff must be admitted exactly once")
 }
 
+func TestAutomationCustomTaskFanoutContinuesAfterBusyBranch(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		busyNodeKey  string
+		busyStatus   models.TaskStatus
+		eligibleNode string
+	}{
+		{name: "busy first", busyNodeKey: "first", busyStatus: models.StatusQueued, eligibleNode: "second"},
+		{name: "busy last", busyNodeKey: "second", busyStatus: models.StatusRunning, eligibleNode: "first"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Independent fanout "+test.name)
+			ctx := context.Background()
+			candidate := models.AutomationDraftCandidate{
+				SchemaVersion: 1, Name: "Independent fanout", Description: "Activate every eligible child",
+				AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
+				Nodes: []models.AutomationDraftNode{
+					{Key: "parent", Name: "Parent", Type: models.AutomationNodeAgentTask, Role: "task",
+						Config: map[string]any{"prompt": "Produce the shared result.", "category": "active", "priority": 2}},
+					{Key: "first", Name: "First child", Type: models.AutomationNodeAgentTask, Role: "task",
+						Config: map[string]any{"prompt": "Handle the first branch.", "category": "active", "priority": 2}},
+					{Key: "second", Name: "Second child", Type: models.AutomationNodeAgentTask, Role: "task",
+						Config: map[string]any{"prompt": "Handle the second branch.", "category": "active", "priority": 2}},
+				},
+				Edges: []models.AutomationDraftEdge{
+					{Key: "parent_first", From: "parent", To: "first", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+					{Key: "parent_second", From: "parent", To: "second", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				},
+			}
+			saved, err := h.compiler.Save(ctx, AutomationSaveRequest{
+				ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+			})
+			require.NoError(t, err)
+			parent, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "parent", "task"))
+			require.NoError(t, err)
+			busy, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, test.busyNodeKey, "task"))
+			require.NoError(t, err)
+			eligible, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, test.eligibleNode, "task"))
+			require.NoError(t, err)
+			require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
+			require.NoError(t, h.taskRepo.UpdateStatus(ctx, busy.ID, test.busyStatus))
+
+			execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
+			require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+			sourceNode := automationNodeByKey(t, saved.Definition, "parent")
+			binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: sourceNode.ID}
+			causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{binding}})
+			causalCtx = withAutomationExecution(causalCtx, parent.ID, execution.ID)
+
+			worker := NewWorkerService(nil, 1, repository.NewProjectRepo(h.db))
+			worker.SetTaskRepo(h.taskRepo)
+			taskSvc := NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), worker)
+			llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo, taskSvc: taskSvc}
+			handled, err := llmSvc.activatePublishedCustomAutomationChild(causalCtx, *parent, "shared parent result\n[STATUS: SUCCESS]")
+			require.True(t, handled)
+			require.ErrorIs(t, err, repository.ErrAutomationChainChildBusy)
+
+			unchangedBusy, err := h.taskRepo.GetByID(ctx, busy.ID)
+			require.NoError(t, err)
+			require.Equal(t, test.busyStatus, unchangedBusy.Status)
+			activated, err := h.taskRepo.GetByID(ctx, eligible.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryActive, activated.Category)
+			require.Equal(t, models.StatusPending, activated.Status)
+			require.Contains(t, activated.Prompt, "shared parent result")
+
+			select {
+			case submitted := <-worker.Submitted():
+				require.Equal(t, eligible.ID, submitted.ID)
+			default:
+				t.Fatal("eligible fanout child was not submitted")
+			}
+			var blockedTransitions int
+			require.NoError(t, h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions
+				WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND to_node_id = ? AND state = 'blocked'`,
+				h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, sourceNode.ID,
+				automationNodeByKey(t, saved.Definition, test.busyNodeKey).ID).Scan(&blockedTransitions))
+			require.Equal(t, 1, blockedTransitions)
+
+			handled, err = llmSvc.activatePublishedCustomAutomationChild(causalCtx, *parent, "shared parent result\n[STATUS: SUCCESS]")
+			require.True(t, handled)
+			require.ErrorIs(t, err, repository.ErrAutomationChainChildBusy)
+			select {
+			case duplicate := <-worker.Submitted():
+				t.Fatalf("fanout retry submitted child %s more than once", duplicate.ID)
+			default:
+			}
+			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions
+				WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND to_node_id = ? AND state = 'blocked'`,
+				h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, sourceNode.ID,
+				automationNodeByKey(t, saved.Definition, test.busyNodeKey).ID))
+		})
+	}
+}
+
 func TestAutomationInactiveLifecycleDefersCompiledChildHandoff(t *testing.T) {
 	for _, state := range []models.AutomationLifecycleState{models.AutomationPaused, models.AutomationArchived} {
 		t.Run(string(state), func(t *testing.T) {

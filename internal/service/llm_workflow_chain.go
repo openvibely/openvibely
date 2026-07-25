@@ -256,6 +256,7 @@ func (s *LLMService) activatePublishedCustomAutomationChild(ctx context.Context,
 		if !custom {
 			return false, nil
 		}
+		var busyErr error
 		for _, handoff := range handoffs {
 			targetNode := &handoff.Node
 			var config map[string]any
@@ -290,10 +291,14 @@ func (s *LLMService) activatePublishedCustomAutomationChild(ctx context.Context,
 				ChildCategory: category, ChildPromptPrefix: automationCompiledTaskPrompt(promptCandidate, targetDraft),
 			}
 			if err := s.activateCompiledAutomationChild(ctx, parentTask, parentOutput, chain); err != nil {
+				if errors.Is(err, repository.ErrAutomationChainChildBusy) {
+					busyErr = errors.Join(busyErr, err)
+					continue
+				}
 				return true, err
 			}
 		}
-		return true, nil
+		return true, busyErr
 	}
 	return false, nil
 }
