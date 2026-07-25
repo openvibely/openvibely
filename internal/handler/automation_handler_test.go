@@ -124,6 +124,56 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Equal(t, 404, foreign.Code)
 }
 
+func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*models.AutomationDraftCandidate)
+	}{
+		{name: "Task category", mutate: func(candidate *models.AutomationDraftCandidate) {
+			candidate.Nodes[1].Config["category"] = "scheduled"
+		}},
+		{name: "Schedule category", mutate: func(candidate *models.AutomationDraftCandidate) {
+			candidate.Nodes[0].Config["category"] = "active"
+		}},
+		{name: "custom Schedule target", mutate: func(candidate *models.AutomationDraftCandidate) {
+			candidate.Nodes[0].Config["target_node_key"] = "different_task"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().WithName("Strict browser Save " + test.name).Build()
+			automationRepo := repository.NewAutomationRepo(tc.db)
+			registry := service.NewAutomationAdapterRegistry()
+			drafts := service.NewAutomationDraftService(automationRepo, registry)
+			validator := service.NewAutomationSaveValidator(registry, drafts)
+			compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+			tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+			tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+			candidate, err := drafts.BlankCandidate(service.AutomationAdapterCustom)
+			require.NoError(t, err)
+			candidate.Name = "Strict browser Save"
+			candidate.Nodes = []models.AutomationDraftNode{
+				{Key: "schedule", Name: "Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+				{Key: "followup", Name: "Follow up", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Run after the schedule.", "category": "backlog", "priority": 2}},
+			}
+			candidate.Edges = []models.AutomationDraftEdge{{Key: "schedule_followup", From: "schedule", To: "followup", FromPort: "right", ToPort: "left", Condition: map[string]any{}}}
+			test.mutate(&candidate)
+			raw, err := json.Marshal(candidate)
+			require.NoError(t, err)
+
+			response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+				"project_id": {project.ID}, "candidate_json": {string(raw)}, "save_changes": {"true"},
+			}).Execute()
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			require.Empty(t, response.Header().Get("HX-Redirect"))
+			require.Zero(t, tableCountHandler(t, tc, "automations"))
+			require.Zero(t, tableCountHandler(t, tc, "tasks"))
+			require.Zero(t, tableCountHandler(t, tc, "schedules"))
+		})
+	}
+}
+
 func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Browser Local Builder Project").Build()
@@ -420,7 +470,9 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {candidate.Nodes[0].Key}, "to_key": {candidate.Nodes[1].Key}})
 
 	require.Len(t, candidate.Edges, 1)
-	require.Equal(t, candidate.Nodes[1].Key, candidate.Nodes[0].Config["target_node_key"])
+	require.NotContains(t, candidate.Nodes[0].Config, "target_node_key", "custom Schedule handoffs are represented only by graph edges")
+	require.Equal(t, "scheduled", candidate.Nodes[0].Config["category"])
+	require.Equal(t, "backlog", candidate.Nodes[1].Config["category"])
 	require.Empty(t, drafts.ValidateCandidate(candidate), "a user-defined Schedule → Agent task graph must be publishable")
 	compiler := service.NewAutomationCompiler(nil, nil, nil, nil, planner)
 	plan, _, err := compiler.PreviewSave(context.Background(), project.ID, candidate)

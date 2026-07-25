@@ -423,6 +423,32 @@ func TestAutomationDraftNormalizesAndValidatesDirectionalPorts(t *testing.T) {
 	require.NotContains(t, issueCodes(svc.ValidateCandidate(reopened)), "invalid_edge")
 }
 
+func TestAutomationDraftReopenLimitsLegacySemanticCleanupToTrustedSavedGraphs(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := svc.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Name = "Legacy custom graph"
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "schedule", Name: "Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run scheduled work.", "category": "scheduled", "priority": 2, "target_node_key": "implementation", "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "implementation", Config: map[string]any{"prompt": "Implement the work.", "category": "backlog", "priority": 2}},
+	}
+	candidate.Edges = []models.AutomationDraftEdge{{Key: "schedule_implementation", From: "schedule", To: "implementation", Condition: map[string]any{}}}
+
+	strict, err := svc.NormalizeCandidate(candidate)
+	require.NoError(t, err)
+	require.Equal(t, "implementation", strict.Nodes[0].Config["target_node_key"], "strict submitted-candidate normalization must preserve explicit semantic values for validation")
+	require.Equal(t, "implementation", strict.Nodes[1].Role)
+	require.Empty(t, strict.Edges[0].FromPort)
+	require.Empty(t, strict.Edges[0].ToPort)
+
+	reopened, err := svc.normalizeReopenedCandidate(candidate)
+	require.NoError(t, err)
+	require.NotContains(t, reopened.Nodes[0].Config, "target_node_key")
+	require.Equal(t, "task", reopened.Nodes[1].Role)
+	require.Equal(t, "right", reopened.Edges[0].FromPort)
+	require.Equal(t, "left", reopened.Edges[0].ToPort)
+}
+
 func TestAutomationDraftRejectsMissingAndUnsupportedSchemaVersions(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Schema versions")

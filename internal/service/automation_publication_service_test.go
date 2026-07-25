@@ -50,6 +50,76 @@ func newAutomationSaveHarness(t *testing.T, name string) automationSaveHarness {
 		lifecycle: NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)}
 }
 
+func TestAutomationSaveRejectsSemanticRepairsAndPreservesSelectedTaskCategories(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*models.AutomationDraftCandidate)
+	}{
+		{name: "invalid Task category", mutate: func(candidate *models.AutomationDraftCandidate) {
+			candidate.Nodes[1].Config["category"] = "scheduled"
+		}},
+		{name: "invalid Schedule category", mutate: func(candidate *models.AutomationDraftCandidate) {
+			candidate.Nodes[0].Config["category"] = "active"
+		}},
+		{name: "explicit custom Schedule target", mutate: func(candidate *models.AutomationDraftCandidate) {
+			candidate.Nodes[0].Config["target_node_key"] = "different_task"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Strict semantic Save "+test.name)
+			candidate := customScheduledTaskCandidate("Strict semantic Save", "Review one request.")
+			test.mutate(&candidate)
+
+			_, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
+				ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+			})
+			require.ErrorContains(t, err, "automation graph validation failed")
+			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
+			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
+			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+		})
+	}
+
+	for _, test := range []struct {
+		name      string
+		candidate models.AutomationDraftCandidate
+		nodeKey   string
+		want      models.TaskCategory
+	}{
+		{name: "Schedule child remains active", candidate: func() models.AutomationDraftCandidate {
+			candidate := customScheduledTaskCandidate("Active scheduled follow-up", "Review one request.")
+			candidate.Nodes[1].Config["category"] = string(models.CategoryActive)
+			return candidate
+		}(), nodeKey: "followup", want: models.CategoryActive},
+		{name: "Task child remains backlog", candidate: models.AutomationDraftCandidate{
+			SchemaVersion: 1, Name: "Backlog task follow-up", Description: "Preserve the selected category",
+			AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
+			Nodes: []models.AutomationDraftNode{
+				{Key: "parent", Name: "Parent", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Run first.", "category": "active", "priority": 2}},
+				{Key: "child", Name: "Child", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Wait in backlog.", "category": "backlog", "priority": 2}},
+			},
+			Edges: []models.AutomationDraftEdge{{Key: "parent_child", From: "parent", To: "child", FromPort: "right", ToPort: "left", Condition: map[string]any{}}},
+		}, nodeKey: "child", want: models.CategoryBacklog},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newAutomationSaveHarness(t, test.name)
+			saved, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
+				ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: test.candidate,
+			})
+			require.NoError(t, err)
+			task, err := h.taskRepo.GetByID(context.Background(), automationResourceID(t, saved.Definition, test.nodeKey, "task"))
+			require.NoError(t, err)
+			require.Equal(t, test.want, task.Category)
+
+			var candidateJSON string
+			require.NoError(t, h.db.QueryRow(`SELECT candidate_json FROM automation_graph_metadata WHERE automation_id = ?`, saved.Definition.Automation.ID).Scan(&candidateJSON))
+			var stored models.AutomationDraftCandidate
+			require.NoError(t, json.Unmarshal([]byte(candidateJSON), &stored))
+			require.Equal(t, string(test.want), automationDraftNodeByKey(t, stored, test.nodeKey).Config["category"])
+		})
+	}
+}
+
 func TestAutomationSaveCreatesCurrentGraphTaskAndScheduleAtomically(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic custom Save")
 	ctx := context.Background()

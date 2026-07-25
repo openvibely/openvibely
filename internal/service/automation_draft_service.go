@@ -198,14 +198,6 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 				}
 			}
 		}
-		if adapter.DynamicTopology {
-			// Older saved custom graphs exposed GitHub issue work as a separate
-			// implementation role. Tasks are generic now; the surrounding inbox and
-			// pull-request connections determine issue-linked materialization.
-			if node.Type == models.AutomationNodeAgentTask && node.Role == "implementation" {
-				node.Role = "task"
-			}
-		}
 		if canonical, exists := adapterNodes[node.Key]; exists {
 			if node.Name == "" {
 				node.Name = canonical.Name
@@ -224,48 +216,35 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 			candidate.Edges[i].Condition = map[string]any{}
 		}
 	}
-	if adapter.DynamicTopology {
-		nodeTypes := make(map[string]models.AutomationNodeType, len(candidate.Nodes))
-		incoming := make(map[string][]string, len(candidate.Nodes))
-		for _, node := range candidate.Nodes {
-			nodeTypes[node.Key] = node.Type
-		}
-		for _, edge := range candidate.Edges {
-			incoming[edge.To] = append(incoming[edge.To], edge.From)
-		}
-		for i := range candidate.Nodes {
-			if candidate.Nodes[i].Type == models.AutomationNodeAgentTask {
-				for _, parentKey := range incoming[candidate.Nodes[i].Key] {
-					switch nodeTypes[parentKey] {
-					case models.AutomationNodeTrigger:
-						candidate.Nodes[i].Config["category"] = string(models.CategoryBacklog)
-					case models.AutomationNodeAgentTask:
-						candidate.Nodes[i].Config["category"] = string(models.CategoryActive)
-					}
-				}
-			}
-			if candidate.Nodes[i].Type != models.AutomationNodeTrigger {
-				continue
-			}
-			candidate.Nodes[i].Config["category"] = string(models.CategoryScheduled)
-			delete(candidate.Nodes[i].Config, "target_node_key")
-			for _, edge := range candidate.Edges {
-				if edge.From == candidate.Nodes[i].Key && nodeTypes[edge.To] == models.AutomationNodeAgentTask {
-					candidate.Nodes[i].Config["target_node_key"] = edge.To
-					break
-				}
-			}
-		}
-	}
 	candidate.Assumptions = normalizeDraftMessages(candidate.Assumptions)
 	candidate.Warnings = normalizeDraftMessages(candidate.Warnings)
 	return candidate, nil
 }
 
 func (s *AutomationDraftService) normalizeReopenedCandidate(candidate models.AutomationDraftCandidate) (models.AutomationDraftCandidate, error) {
+	adapter, ok := s.registry.Get(strings.TrimSpace(candidate.AdapterKey))
+	if !ok {
+		return candidate, fmt.Errorf("unsupported automation adapter %q", candidate.AdapterKey)
+	}
 	for i := range candidate.Edges {
 		candidate.Edges[i].FromPort = "right"
 		candidate.Edges[i].ToPort = "left"
+	}
+	if adapter.DynamicTopology {
+		for i := range candidate.Nodes {
+			node := &candidate.Nodes[i]
+			// Older saved custom graphs exposed GitHub issue work as a separate
+			// implementation role. Tasks are generic now; the surrounding inbox and
+			// pull-request connections determine issue-linked materialization.
+			if node.Type == models.AutomationNodeAgentTask && node.Role == "implementation" {
+				node.Role = "task"
+			}
+			// A custom Schedule is its own task. Its downstream handoff is represented
+			// only by graph edges, so remove topology-derived metadata from older saves.
+			if node.Type == models.AutomationNodeTrigger {
+				delete(node.Config, "target_node_key")
+			}
+		}
 	}
 	return s.NormalizeCandidate(candidate)
 }
@@ -783,7 +762,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	case models.AutomationNodeAgentTask:
 		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true}
 	case models.AutomationNodeTrigger:
-		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "target_node_key": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
+		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
 	case models.AutomationNodeAction:
 		switch node.Role {
 		case "create_notification":
