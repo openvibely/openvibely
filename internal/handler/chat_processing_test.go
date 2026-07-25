@@ -3507,6 +3507,52 @@ func TestProcessStreamingResponse_AppliesPendingSteeringBeforeModelCall(t *testi
 	}
 }
 
+func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Reasoning Steering Project")
+	task := createTask(t, h, project.ID, "Reasoning Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "current private reasoning"))
+
+	steering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "continue with this constraint",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	params := streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+	}
+	batch, err := h.preparePendingSteeringInputs(ctx, &params, "assistant answer")
+	require.NoError(t, err)
+	require.Equal(t, 1, batch.count())
+	require.Len(t, params.ChatHistory, 1)
+	require.Equal(t, "assistant answer", params.ChatHistory[0].Output)
+	require.Equal(t, "current private reasoning", params.ChatHistory[0].ReasoningContent)
+}
+
 func TestClaimPendingTextSteeringInputsSkipsAttachmentSteering(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

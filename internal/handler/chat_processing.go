@@ -778,13 +778,22 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 			assistantDelta = previousAssistantOutput[len(params.steeringOutputCursor):]
 		}
 		if strings.TrimSpace(params.Message) != "" || strings.TrimSpace(assistantDelta) != "" {
+			reasoningContent := ""
+			if h.execRepo != nil && strings.TrimSpace(params.ExecID) != "" {
+				if exec, execErr := h.execRepo.GetByID(ctx, params.ExecID); execErr == nil && exec != nil {
+					reasoningContent = exec.ReasoningContent
+				} else if execErr != nil {
+					applog.Infof("[handler] preparePendingSteeringInputs exec=%s error loading reasoning context: %v", params.ExecID, execErr)
+				}
+			}
 			params.ChatHistory = append(params.ChatHistory, models.Execution{
-				ID:         fmt.Sprintf("%s-steering-context-%d", params.ExecID, len(params.ChatHistory)+1),
-				TaskID:     params.TaskID,
-				Status:     models.ExecCompleted,
-				PromptSent: params.Message,
-				Output:     assistantDelta,
-				IsFollowup: params.IsTaskFollowup,
+				ID:               fmt.Sprintf("%s-steering-context-%d", params.ExecID, len(params.ChatHistory)+1),
+				TaskID:           params.TaskID,
+				Status:           models.ExecCompleted,
+				PromptSent:       params.Message,
+				Output:           assistantDelta,
+				IsFollowup:       params.IsTaskFollowup,
+				ReasoningContent: reasoningContent,
 			})
 		}
 		params.Message = steeringInstruction
