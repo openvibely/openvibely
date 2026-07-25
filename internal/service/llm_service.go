@@ -409,6 +409,9 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		PrepareTaskCreation: func(ctx context.Context, request *TaskCreationRequest) error {
 			return s.prepareAutomationTaskCreation(ctx, task.ProjectID, request)
 		},
+		CreatePreparedTask: func(ctx context.Context, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
+			return s.createPreparedAutomationTask(ctx, task.ProjectID, request, agents)
+		},
 		OnTasksCreated: func(ctx context.Context, requests []TaskCreationRequest, tasks []models.Task) error {
 			return s.recordAutomationTasksCreated(ctx, task.ProjectID, requests, tasks)
 		},
@@ -485,8 +488,16 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 		selectedNode = node
 	}
 	if selectedNode == nil {
+		if request.SourceGitHubIssueNumber > 0 || strings.TrimSpace(request.SourceGitHubRepoURL) != "" {
+			return errors.New("GitHub source issue task creation is not authorized by the caller's exact Automation graph")
+		}
 		return nil
 	}
+	if request.SourceGitHubIssueNumber <= 0 {
+		return errors.New("Automation GitHub inbox task creation requires source_github_issue_number from this execution")
+	}
+	request.SourceGitHubRepoURL = ""
+	request.Chain = nil
 	var config map[string]any
 	if err := json.Unmarshal([]byte(selectedNode.ConfigJSON), &config); err != nil {
 		return fmt.Errorf("decoding GitHub task configuration: %w", err)
@@ -546,6 +557,168 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 	return nil
 }
 
+type automationGitHubTaskCreationPlan struct {
+	sourceBinding   models.AutomationBinding
+	targetNode      models.AutomationNode
+	issueResourceID string
+	executionID     string
+}
+
+func (s *LLMService) automationGitHubTaskCreationPlan(ctx context.Context, projectID string, request TaskCreationRequest) (*automationGitHubTaskCreationPlan, error) {
+	if s == nil || s.automationRepo == nil {
+		return nil, nil
+	}
+	automationContext, ok := AutomationContextFromContext(ctx)
+	if !ok || automationContext.ProjectID != projectID {
+		return nil, nil
+	}
+	_, executionID, executionOK := AutomationExecutionFromContext(ctx)
+	if !executionOK || strings.TrimSpace(executionID) == "" {
+		return nil, errors.New("Automation GitHub inbox task creation requires an exact current execution")
+	}
+	if request.SourceGitHubIssueNumber <= 0 {
+		return nil, errors.New("Automation GitHub inbox task creation requires source_github_issue_number from this execution")
+	}
+	if s.githubIssueRuntime == nil || s.projectRepo == nil {
+		return nil, errors.New("Automation GitHub issue provenance is unavailable")
+	}
+	project, err := s.projectRepo.GetByID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("loading Automation project repository: %w", err)
+	}
+	if project == nil || strings.TrimSpace(project.RepoURL) == "" {
+		return nil, errors.New("Automation project repository URL is unavailable")
+	}
+	repo, err := s.githubIssueRuntime.ResolveRepo(ctx, strings.TrimSpace(project.RepoURL), "")
+	if err != nil {
+		return nil, fmt.Errorf("resolving Automation project repository: %w", err)
+	}
+	issueResourceID := githubIssueResourceID(repo, request.SourceGitHubIssueNumber)
+	discovered, err := s.automationRepo.BindingsForExecutionResource(ctx, projectID, executionID, "github_issue", issueResourceID)
+	if err != nil {
+		return nil, fmt.Errorf("loading exact Automation issue discovery: %w", err)
+	}
+
+	var plan *automationGitHubTaskCreationPlan
+	for _, causalBinding := range automationContext.Bindings {
+		targetNode, err := s.connectedAutomationGitHubTask(ctx, projectID, causalBinding.AutomationID, causalBinding.VersionID, causalBinding.NodeID)
+		if err != nil {
+			return nil, err
+		}
+		if targetNode == nil {
+			continue
+		}
+		current, err := s.automationRepo.IsCurrentActiveBinding(ctx, projectID, causalBinding)
+		if err != nil {
+			return nil, err
+		}
+		if !current {
+			return nil, errors.New("Automation GitHub inbox task creation is not authorized by the current active graph")
+		}
+		for _, discoveredBinding := range discovered.Bindings {
+			if discoveredBinding.AutomationID != causalBinding.AutomationID || discoveredBinding.VersionID != causalBinding.VersionID ||
+				discoveredBinding.InvocationID != causalBinding.InvocationID || strings.TrimSpace(discoveredBinding.WorkItemID) == "" {
+				continue
+			}
+			sourceBinding := causalBinding
+			sourceBinding.WorkItemID = discoveredBinding.WorkItemID
+			candidate := &automationGitHubTaskCreationPlan{sourceBinding: sourceBinding,
+				targetNode: *targetNode, issueResourceID: issueResourceID, executionID: executionID}
+			if plan != nil && (plan.sourceBinding.AutomationID != candidate.sourceBinding.AutomationID ||
+				plan.sourceBinding.VersionID != candidate.sourceBinding.VersionID || plan.sourceBinding.WorkItemID != candidate.sourceBinding.WorkItemID ||
+				plan.targetNode.ID != candidate.targetNode.ID) {
+				return nil, errors.New("source GitHub issue has conflicting Automation task provenance")
+			}
+			plan = candidate
+		}
+	}
+	if plan == nil {
+		return nil, errors.New("source GitHub issue was not discovered by this exact current Automation execution")
+	}
+	return plan, nil
+}
+
+func (s *LLMService) createPreparedAutomationTask(ctx context.Context, projectID string, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound || automationContext.ProjectID != projectID {
+		return nil, "", false, nil
+	}
+	githubInboxTopology := false
+	for _, binding := range automationContext.Bindings {
+		target, err := s.connectedAutomationGitHubTask(ctx, projectID, binding.AutomationID, binding.VersionID, binding.NodeID)
+		if err != nil {
+			return nil, "", true, err
+		}
+		if target != nil {
+			githubInboxTopology = true
+			break
+		}
+	}
+	if !githubInboxTopology {
+		return nil, "", false, nil
+	}
+	plan, err := s.automationGitHubTaskCreationPlan(ctx, projectID, request)
+	if err != nil {
+		return nil, "", true, err
+	}
+	if plan == nil {
+		return nil, "", false, nil
+	}
+	if s.taskSvc == nil || s.taskRepo == nil {
+		return nil, "", true, errors.New("Automation task service unavailable")
+	}
+
+	selectedAgentID, _ := selectTaskCreationAgent(request, agents)
+	category := resolveTaskCreationCategory(request, selectedAgentID, agents)
+	task := &models.Task{ProjectID: projectID, Title: request.Title, Prompt: request.Prompt,
+		Status: models.StatusPending, Category: category, Priority: request.Priority}
+	if selectedAgentID != "" {
+		task.AgentID = &selectedAgentID
+	}
+	agentDefinitionID, err := resolveTaskCreationAgentDefinition(ctx, request, projectID, s.taskSvc)
+	if err != nil {
+		return nil, "", true, err
+	}
+	if agentDefinitionID != "" {
+		task.AgentDefinitionID = &agentDefinitionID
+	}
+	objective := strings.TrimSpace(request.Goal)
+	if len(objective) > MaxTaskGoalLength {
+		return nil, "", true, ErrTaskGoalTooLong
+	}
+	var goal *models.TaskGoal
+	if objective != "" {
+		goal = &models.TaskGoal{GoalID: repository.NewID(), Objective: objective,
+			Status: models.TaskGoalStatusActive, Reason: "set at task creation"}
+	}
+	canonical, created, err := s.automationRepo.CreateOrGetGitHubIssueTask(ctx, s.taskRepo, repository.AutomationGitHubIssueTaskCreation{
+		ProjectID: projectID, ExecutionID: plan.executionID, IssueResourceID: plan.issueResourceID,
+		SourceBinding: plan.sourceBinding, TargetNodeID: plan.targetNode.ID, Task: task, Goal: goal,
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrDuplicateTask) {
+			return nil, "", true, ErrDuplicateTask
+		}
+		return nil, "", true, err
+	}
+	if created {
+		if goal != nil && s.taskSvc.goalSvc != nil {
+			s.taskSvc.goalSvc.publishGoalEvent(events.TaskGoalUpdated, goal)
+		}
+		s.taskSvc.SubmitSavedAutomationTask(*canonical)
+	}
+	action := "Created"
+	if !created {
+		action = "Reused"
+	}
+	summary := fmt.Sprintf("\n\n---\n%s 1 task(s):\n- \"%s\" (%s) [TASK_ID:%s]", action,
+		canonical.Title, canonical.Category, canonical.ID)
+	if strings.TrimSpace(request.Goal) != "" && created {
+		summary += " [goal:set]"
+	}
+	return []models.Task{*canonical}, summary, true, nil
+}
+
 func (s *LLMService) recordAutomationTasksCreated(ctx context.Context, projectID string, requests []TaskCreationRequest, tasks []models.Task) error {
 	if s == nil || s.automationRepo == nil {
 		return nil
@@ -557,32 +730,8 @@ func (s *LLMService) recordAutomationTasksCreated(ctx context.Context, projectID
 	_, executionID, _ := AutomationExecutionFromContext(ctx)
 	for i, created := range tasks {
 		bindings := automationContext
-		var sourceIssueResource string
-		if i < len(requests) && requests[i].SourceGitHubIssueNumber > 0 {
-			if s.githubIssueRuntime == nil || s.projectRepo == nil || executionID == "" {
-				applog.Infof("[agent-svc] automation GitHub task provenance unavailable task=%s", created.ID)
-				continue
-			}
-			project, err := s.projectRepo.GetByID(ctx, projectID)
-			if err != nil || project == nil {
-				applog.Infof("[agent-svc] automation GitHub task project lookup failed task=%s: %v", created.ID, err)
-				continue
-			}
-			repoURL := strings.TrimSpace(requests[i].SourceGitHubRepoURL)
-			if repoURL == "" {
-				repoURL = project.RepoURL
-			}
-			repo, err := s.githubIssueRuntime.ResolveRepo(ctx, repoURL, project.RepoPath)
-			if err != nil {
-				applog.Infof("[agent-svc] automation GitHub source repository resolve failed task=%s: %v", created.ID, err)
-				continue
-			}
-			sourceIssueResource = githubIssueResourceID(repo, requests[i].SourceGitHubIssueNumber)
-			bindings, err = s.automationRepo.BindingsForExecutionResource(ctx, projectID, executionID, "github_issue", sourceIssueResource)
-			if err != nil || len(bindings.Bindings) == 0 {
-				applog.Infof("[agent-svc] automation GitHub source issue was not discovered by this execution task=%s issue=%d: %v", created.ID, requests[i].SourceGitHubIssueNumber, err)
-				continue
-			}
+		if i < len(requests) && (requests[i].SourceGitHubIssueNumber > 0 || strings.TrimSpace(requests[i].SourceGitHubRepoURL) != "") {
+			return errors.New("Automation GitHub issue tasks must use atomic exact-provenance creation")
 		}
 		for _, binding := range bindings.Bindings {
 			event := repository.AutomationProjectionEvent{
@@ -590,19 +739,6 @@ func (s *LLMService) recordAutomationTasksCreated(ctx context.Context, projectID
 				ActivityKey:  "execution:" + executionID + ":create-task:" + created.ID,
 				ActivityType: "create_task", ActivityStatus: models.AutomationActivityCompleted,
 				Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: created.ID, Relation: "child"}},
-			}
-			if sourceIssueResource != "" && binding.WorkItemID != "" {
-				githubTaskNode, err := s.connectedAutomationGitHubTask(ctx, projectID, binding.AutomationID, binding.VersionID, binding.NodeID)
-				if err != nil || githubTaskNode == nil {
-					applog.Infof("[agent-svc] automation GitHub task node lookup failed task=%s: %v", created.ID, err)
-					continue
-				}
-				event.Resources = append(event.Resources, models.AutomationActivityResource{ResourceType: "github_issue", ResourceID: sourceIssueResource})
-				event.EventKey = "work-item:" + binding.WorkItemID + ":task:" + created.ID
-				event.FromNodeID = binding.NodeID
-				event.ToNodeID = githubTaskNode.ID
-				event.Transition = models.AutomationTransitionEntered
-				event.Binding.NodeID = githubTaskNode.ID
 			}
 			if _, _, err := s.automationRepo.RecordProjectionEvent(ctx, event); err != nil {
 				applog.Infof("[agent-svc] automation child task provenance failed task=%s: %v", created.ID, err)

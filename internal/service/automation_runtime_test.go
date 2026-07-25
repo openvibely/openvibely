@@ -902,9 +902,14 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	ctx = withAutomationExecution(ctx, fixture.task.ID, execution.ID)
 
 	var createCalls atomic.Int32
+	var resolvedRepoMu sync.Mutex
+	var resolvedRepoURLs []string
 	var resolvedRepoPaths []string
 	provider := &fakeGitHubIssueRuntimeProvider{
-		resolveRepoFn: func(_ context.Context, _ string, repoPath string) (*GitHubRepoRef, error) {
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+			resolvedRepoMu.Lock()
+			defer resolvedRepoMu.Unlock()
+			resolvedRepoURLs = append(resolvedRepoURLs, repoURL)
 			resolvedRepoPaths = append(resolvedRepoPaths, repoPath)
 			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
@@ -970,32 +975,154 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND kind = 'github_issue'`, fixture.definition.Automation.ID).Scan(&issueItems))
 	require.Equal(t, 2, issueItems, "one shared inbox execution must preserve distinct issue work items")
 
-	implementationTask := models.Task{ProjectID: fixture.project.ID, Title: "Implement exact issue", Prompt: "opaque implementation prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, WorktreePath: t.TempDir(), WorktreeBranch: "task/issue-42"}
-	require.NoError(t, fixture.taskRepo.Create(ctx, &implementationTask))
-	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo}
-	require.NoError(t, llmSvc.recordAutomationTasksCreated(inboxCtx, fixture.project.ID,
-		[]TaskCreationRequest{{SourceGitHubIssueNumber: 42}}, []models.Task{implementationTask}))
+	taskSvc := NewTaskService(fixture.taskRepo, nil, nil)
+	implementationNode := automationNodeByKey(t, fixture.definition, "implementation")
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `UPDATE automation_nodes SET config_json = ? WHERE id = ? RETURNING id`,
+		`{"prompt":"Implement the exact assigned GitHub issue and open a pull request.","category":"backlog","priority":2}`, implementationNode.ID).Scan(&implementationNode.ID))
+	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
+		taskRepo: fixture.taskRepo, taskSvc: taskSvc}
+	runtime := llmSvc.taskControlRuntimeTools(fixture.task)
+	require.NotNil(t, runtime)
+
+	resolvedRepoURLs = nil
+	resolvedRepoPaths = nil
+	beforeTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
+	require.NoError(t, err)
+	invalidOutput, handled, isErr, invalidErr := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
+		"title":"Undiscovered issue task","prompt":"must not persist","category":"active",
+		"source_github_issue_number":999,"source_github_repo_url":"https://github.com/attacker/override"
+	}`))
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Error(t, invalidErr)
+	require.Empty(t, invalidOutput)
+	afterInvalidTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, afterInvalidTasks, len(beforeTasks), "an undiscovered issue must fail before any task is persisted")
+
+	configuredRepoURL := fixture.project.RepoURL
+	fixture.project.RepoURL = ""
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	_, handled, isErr, missingRepoErr := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
+		"title":"Missing repository issue task","prompt":"must not persist",
+		"source_github_issue_number":42,"source_github_repo_url":"https://github.com/attacker/fallback"
+	}`))
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.ErrorContains(t, missingRepoErr, "repository URL is unavailable")
+	afterMissingRepoTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, afterMissingRepoTasks, len(beforeTasks), "missing explicit project repo_url must fail before task persistence")
+	fixture.project.RepoURL = configuredRepoURL
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+
+	firstOutput, handled, isErr, err := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
+		"title":"Implement exact issue","prompt":"opaque implementation prompt","category":"backlog",
+		"source_github_issue_number":42,"source_github_repo_url":"https://github.com/attacker/override"
+	}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+	implementationTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Implement exact issue")
+	require.NoError(t, err)
+	require.NotNil(t, implementationTask)
+	require.Contains(t, firstOutput, implementationTask.ID)
 	implementationContext, err := fixture.repo.ContextForTask(ctx, fixture.project.ID, implementationTask.ID)
 	require.NoError(t, err)
 	require.Len(t, implementationContext.Bindings, 1)
 	issue42Context, err := fixture.repo.BindingsForWorkItemKey(ctx, fixture.project.ID, "github:example/runtime:issue:42")
 	require.NoError(t, err)
 	require.Equal(t, issue42Context.Bindings[0].WorkItemID, implementationContext.Bindings[0].WorkItemID,
-		"implementation task must bind to the exact persisted issue selected by source_github_issue_number")
+		"implementation task must bind atomically to the exact persisted issue selected by source_github_issue_number")
 
-	unrelatedTask := models.Task{ProjectID: fixture.project.ID, Title: "Unrelated issue", Prompt: "no inference", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
-	require.NoError(t, fixture.taskRepo.Create(ctx, &unrelatedTask))
-	require.NoError(t, llmSvc.recordAutomationTasksCreated(inboxCtx, fixture.project.ID,
-		[]TaskCreationRequest{{SourceGitHubIssueNumber: 999}}, []models.Task{unrelatedTask}))
-	unrelatedContext, err := fixture.repo.ContextForTask(ctx, fixture.project.ID, unrelatedTask.ID)
+	secondOutput, handled, isErr, err := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
+		"title":"Duplicate model title for issue 42","prompt":"must reuse canonical task","category":"backlog",
+		"source_github_issue_number":42,"source_github_repo_url":"https://github.com/another/override"
+	}`))
 	require.NoError(t, err)
-	require.Empty(t, unrelatedContext.Bindings, "an undiscovered issue number must not acquire inferred provenance")
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.Contains(t, secondOutput, implementationTask.ID)
+	afterDuplicateTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, afterDuplicateTasks, len(beforeTasks)+1, "one issue work item must have at most one implementation task")
+
+	telegram := &TelegramService{taskSvc: taskSvc, taskRepo: fixture.taskRepo, llmSvc: llmSvc}
+	telegramHandlers := telegram.telegramActionHandlersForTask(fixture.project.ID, fixture.task.ID, 123, 456, nil)
+	channelOutput, err := telegramHandlers["create_task"](inboxCtx, json.RawMessage(`{
+		"title":"Channel duplicate title for issue 42","prompt":"must reuse canonical task",
+		"source_github_issue_number":42,"source_github_repo_url":"https://github.com/channel/override"
+	}`))
+	require.NoError(t, err)
+	require.Contains(t, channelOutput, implementationTask.ID)
+	afterChannelTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, afterChannelTasks, len(beforeTasks)+1, "task-bound channel create_task must use exact Automation provenance")
+
+	type taskCreationCallResult struct {
+		output  string
+		handled bool
+		isErr   bool
+		err     error
+	}
+	startConcurrentCreation := make(chan struct{})
+	concurrentResults := make(chan taskCreationCallResult, 2)
+	for _, title := range []string{"First concurrent title for issue 43", "Second concurrent title for issue 43"} {
+		title := title
+		go func() {
+			<-startConcurrentCreation
+			payload, marshalErr := json.Marshal(TaskCreationRequest{Title: title, Prompt: "implement issue 43",
+				Category: string(models.CategoryBacklog), SourceGitHubIssueNumber: 43, SourceGitHubRepoURL: "https://github.com/attacker/concurrent"})
+			if marshalErr != nil {
+				concurrentResults <- taskCreationCallResult{err: marshalErr}
+				return
+			}
+			output, handled, isErr, callErr := runtime.Executor(inboxCtx, "create_task", payload)
+			concurrentResults <- taskCreationCallResult{output: output, handled: handled, isErr: isErr, err: callErr}
+		}()
+	}
+	close(startConcurrentCreation)
+	concurrentOutputs := make([]string, 0, 2)
+	for range 2 {
+		result := <-concurrentResults
+		require.NoError(t, result.err)
+		require.True(t, result.handled)
+		require.False(t, result.isErr)
+		concurrentOutputs = append(concurrentOutputs, result.output)
+	}
+	afterConcurrentTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, afterConcurrentTasks, len(beforeTasks)+2, "concurrent creation must persist one canonical task for issue 43")
+	var issue43Task *models.Task
+	for i := range afterConcurrentTasks {
+		if strings.Contains(afterConcurrentTasks[i].Title, "concurrent title for issue 43") {
+			issue43Task = &afterConcurrentTasks[i]
+			break
+		}
+	}
+	require.NotNil(t, issue43Task)
+	for _, output := range concurrentOutputs {
+		require.Contains(t, output, issue43Task.ID)
+	}
+	resolvedRepoMu.Lock()
+	for _, repoURL := range resolvedRepoURLs {
+		require.Equal(t, fixture.project.RepoURL, repoURL, "Automation task provenance must ignore model repository overrides")
+	}
+	for _, repoPath := range resolvedRepoPaths {
+		require.Empty(t, repoPath, "Automation task provenance must never receive repo_path")
+	}
+	resolvedRepoMu.Unlock()
 	resolvedRepoPaths = nil
 
 	_, err = handlers["github_open_pull_request"](ctx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"issue_number":42,"pr_title":"PR"}`, fixture.task.ID)))
 	require.ErrorContains(t, err, "not authorized by the caller's Automation graph")
 	_, err = handlers["github_open_pull_request"](ctx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"issue_number":42,"pr_title":"PR"}`, implementationTask.ID)))
 	require.ErrorContains(t, err, "cannot mutate a different task")
+	implementationWorktree := t.TempDir()
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `UPDATE tasks SET worktree_path = ?, worktree_branch = ? WHERE id = ? RETURNING id`,
+		implementationWorktree, "task/issue-42", implementationTask.ID).Scan(&implementationTask.ID))
+	implementationTask.WorktreePath = implementationWorktree
+	implementationTask.WorktreeBranch = "task/issue-42"
 	implementationCtx := WithAutomationContext(context.Background(), implementationContext)
 	implementationCtx = withAutomationExecution(implementationCtx, implementationTask.ID, execution.ID)
 	_, err = handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"issue_number":42,"pr_title":"PR"}`, implementationTask.ID)))
@@ -1003,14 +1130,14 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	for _, repoPath := range resolvedRepoPaths {
 		require.Empty(t, repoPath, "Automation GitHub repository resolution must never receive repo_path")
 	}
-	_, err = handlers["github_replace_pull_request_branch"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"expected_head_sha":%q,"confirm_history_rewrite":true}`, unrelatedTask.ID, strings.Repeat("a", 40))))
+	_, err = handlers["github_replace_pull_request_branch"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"expected_head_sha":%q,"confirm_history_rewrite":true}`, fixture.task.ID, strings.Repeat("a", 40))))
 	require.ErrorContains(t, err, "cannot mutate a different task")
 	var prResources int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activity_resources WHERE resource_type = 'pull_request' AND resource_id = 'github:example/runtime:pull:7'`).Scan(&prResources))
 	require.Equal(t, 1, prResources)
 	edgeExpectations := map[string]int{
 		"bug_to_issue": 1, "issue_to_assignment": 1, "assignment_to_inbox": 2,
-		"inbox_to_implementation": 1, "implementation_to_pr": 1, "pr_to_review": 1,
+		"inbox_to_implementation": 2, "implementation_to_pr": 1, "pr_to_review": 1,
 	}
 	for edgeKey, expected := range edgeExpectations {
 		var edgeTransitions int

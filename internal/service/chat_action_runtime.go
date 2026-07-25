@@ -65,6 +65,7 @@ type channelTaskActionHandlerOptions struct {
 	LLMConfigRepo       *repository.LLMConfigRepo
 	Collector           *channelActionSummaryCollector
 	PrepareTaskCreation func(context.Context, *TaskCreationRequest) error
+	CreatePreparedTask  func(context.Context, TaskCreationRequest, []models.LLMConfig) ([]models.Task, string, bool, error)
 	OnTasksCreated      func(context.Context, []TaskCreationRequest, []models.Task) error
 }
 
@@ -166,8 +167,20 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			if opts.LLMConfigRepo != nil {
 				agents, _ = opts.LLMConfigRepo.List(ctx)
 			}
-			createdTasks, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, opts.ProjectID, opts.TaskSvc, agents)
-			if opts.OnTasksCreated != nil && len(createdTasks) > 0 {
+			createdTasks := []models.Task(nil)
+			summary := ""
+			creationHandled := false
+			if opts.CreatePreparedTask != nil {
+				var err error
+				createdTasks, summary, creationHandled, err = opts.CreatePreparedTask(ctx, req, agents)
+				if err != nil {
+					return "", err
+				}
+			}
+			if !creationHandled {
+				createdTasks, summary = ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, opts.ProjectID, opts.TaskSvc, agents)
+			}
+			if !creationHandled && opts.OnTasksCreated != nil && len(createdTasks) > 0 {
 				if err := opts.OnTasksCreated(ctx, []TaskCreationRequest{req}, createdTasks); err != nil {
 					return "", err
 				}

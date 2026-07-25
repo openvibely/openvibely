@@ -238,8 +238,12 @@ func (r *TaskRepo) GetByProjectAndTitle(ctx context.Context, projectID, title st
 }
 
 func (r *TaskRepo) getOne(ctx context.Context, query string, args ...any) (*models.Task, error) {
+	return getTaskWithExecutor(ctx, r.db, query, args...)
+}
+
+func getTaskWithExecutor(ctx context.Context, exec sqlExecutor, query string, args ...any) (*models.Task, error) {
 	var t models.Task
-	err := r.db.QueryRowContext(ctx, query, args...).
+	err := exec.QueryRowContext(ctx, query, args...).
 		Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
 			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
 	if err == sql.ErrNoRows {
@@ -270,23 +274,27 @@ func (r *TaskRepo) CreateWithGoal(ctx context.Context, t *models.Task, goal *mod
 		if err := r.createWithExecutor(ctx, exec, t); err != nil {
 			return err
 		}
-		goal.TaskID = t.ID
-		if goal.GoalID == "" {
-			goal.GoalID = NewID()
-		}
-		if goal.Status == "" {
-			goal.Status = models.TaskGoalStatusActive
-		}
-		created, err := scanTaskGoal(exec.QueryRowContext(ctx, `
-			INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at)
-			VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL)
-			RETURNING `+taskGoalSelectColumns, goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason))
-		if err != nil {
-			return fmt.Errorf("creating task goal: %w", err)
-		}
-		*goal = *created
-		return nil
+		return createTaskGoalWithExecutor(ctx, exec, t.ID, goal)
 	})
+}
+
+func createTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID string, goal *models.TaskGoal) error {
+	goal.TaskID = taskID
+	if goal.GoalID == "" {
+		goal.GoalID = NewID()
+	}
+	if goal.Status == "" {
+		goal.Status = models.TaskGoalStatusActive
+	}
+	created, err := scanTaskGoal(exec.QueryRowContext(ctx, `
+		INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at)
+		VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL)
+		RETURNING `+taskGoalSelectColumns, goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason))
+	if err != nil {
+		return fmt.Errorf("creating task goal: %w", err)
+	}
+	*goal = *created
+	return nil
 }
 
 func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *models.Task) error {

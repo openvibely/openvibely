@@ -747,6 +747,132 @@ func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projec
 	return nil
 }
 
+type AutomationGitHubIssueTaskCreation struct {
+	ProjectID       string
+	ExecutionID     string
+	IssueResourceID string
+	SourceBinding   models.AutomationBinding
+	TargetNodeID    string
+	Task            *models.Task
+	Goal            *models.TaskGoal
+}
+
+// CreateOrGetGitHubIssueTask validates the exact current inbox discovery and
+// atomically creates its canonical implementation task plus Automation
+// provenance. The stable work-item activity is the durable one-task claim.
+func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRepo *TaskRepo, in AutomationGitHubIssueTaskCreation) (*models.Task, bool, error) {
+	if r == nil || taskRepo == nil || in.Task == nil || strings.TrimSpace(in.ProjectID) == "" ||
+		strings.TrimSpace(in.ExecutionID) == "" || strings.TrimSpace(in.IssueResourceID) == "" ||
+		strings.TrimSpace(in.SourceBinding.AutomationID) == "" || strings.TrimSpace(in.SourceBinding.VersionID) == "" ||
+		strings.TrimSpace(in.SourceBinding.InvocationID) == "" || strings.TrimSpace(in.SourceBinding.NodeID) == "" ||
+		strings.TrimSpace(in.SourceBinding.WorkItemID) == "" || strings.TrimSpace(in.TargetNodeID) == "" {
+		return nil, false, errors.New("complete Automation GitHub issue task provenance is required")
+	}
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, false, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	binding := in.SourceBinding
+	var valid int
+	err = conn.QueryRowContext(ctx, `SELECT COUNT(*)
+		FROM automations automation
+		JOIN automation_nodes source ON source.project_id = automation.project_id AND source.automation_id = automation.id
+			AND source.version_id = automation.published_version_id AND source.id = ? AND source.role = 'github_inbox'
+		JOIN automation_edges handoff ON handoff.project_id = source.project_id AND handoff.automation_id = source.automation_id
+			AND handoff.version_id = source.version_id AND handoff.source_node_id = source.id
+		JOIN automation_nodes target ON target.project_id = handoff.project_id AND target.automation_id = handoff.automation_id
+			AND target.version_id = handoff.version_id AND target.id = handoff.target_node_id
+			AND target.id = ? AND target.role IN ('implementation', 'task')
+		JOIN automation_edges delivery ON delivery.project_id = target.project_id AND delivery.automation_id = target.automation_id
+			AND delivery.version_id = target.version_id AND delivery.source_node_id = target.id
+		JOIN automation_nodes pull_request ON pull_request.project_id = delivery.project_id AND pull_request.automation_id = delivery.automation_id
+			AND pull_request.version_id = delivery.version_id AND pull_request.id = delivery.target_node_id AND pull_request.role = 'open_pull_request'
+		JOIN automation_work_items work_item ON work_item.project_id = automation.project_id AND work_item.automation_id = automation.id
+			AND work_item.origin_version_id = source.version_id AND work_item.id = ? AND work_item.origin_invocation_id = ?
+		JOIN automation_activities discovery ON discovery.project_id = automation.project_id AND discovery.automation_id = automation.id
+			AND discovery.version_id = source.version_id AND discovery.node_id = source.id
+			AND discovery.invocation_id = ? AND discovery.work_item_id = work_item.id AND discovery.activity_type = 'discover_assigned_issue'
+		JOIN automation_activity_resources execution_resource ON execution_resource.activity_id = discovery.id
+			AND execution_resource.resource_type = 'execution' AND execution_resource.resource_id = ?
+		JOIN automation_activity_resources issue_resource ON issue_resource.activity_id = discovery.id
+			AND issue_resource.resource_type = 'github_issue' AND issue_resource.resource_id = ?
+		WHERE automation.project_id = ? AND automation.id = ? AND automation.published_version_id = ?
+			AND automation.lifecycle_state = 'active'`, binding.NodeID, in.TargetNodeID, binding.WorkItemID,
+		binding.InvocationID, binding.InvocationID, in.ExecutionID, in.IssueResourceID, in.ProjectID,
+		binding.AutomationID, binding.VersionID).Scan(&valid)
+	if err != nil {
+		return nil, false, fmt.Errorf("validating Automation GitHub issue task provenance: %w", err)
+	}
+	if valid != 1 {
+		return nil, false, errors.New("source GitHub issue was not discovered by this exact current Automation execution")
+	}
+
+	existing, err := getTaskWithExecutor(ctx, conn, `SELECT `+taskSelectColumns+`
+		FROM tasks WHERE project_id = ? AND id = (
+			SELECT resource.resource_id FROM automation_activity_resources resource
+			JOIN automation_activities activity ON activity.id = resource.activity_id
+			WHERE resource.resource_type = 'task' AND activity.project_id = ? AND activity.automation_id = ?
+				AND activity.version_id = ? AND activity.work_item_id = ? AND activity.node_id = ?
+				AND activity.activity_type = 'create_task'
+			ORDER BY activity.started_at, activity.id LIMIT 1
+		)`, in.ProjectID, in.ProjectID, binding.AutomationID,
+		binding.VersionID, binding.WorkItemID, in.TargetNodeID)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing != nil {
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		committed = true
+		return existing, false, nil
+	}
+
+	in.Task.ProjectID = in.ProjectID
+	if err := taskRepo.createWithExecutor(ctx, conn, in.Task); err != nil {
+		return nil, false, err
+	}
+	if in.Goal != nil && strings.TrimSpace(in.Goal.Objective) != "" {
+		if err := createTaskGoalWithExecutor(ctx, conn, in.Task.ID, in.Goal); err != nil {
+			return nil, false, err
+		}
+	}
+	targetBinding := binding
+	targetBinding.NodeID = in.TargetNodeID
+	activityKey := "work-item:" + binding.WorkItemID + ":implementation-task"
+	_, _, err = recordProjectionEventWithExecutor(ctx, conn, AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: in.ProjectID, Bindings: []models.AutomationBinding{targetBinding}},
+		Binding: targetBinding, ActivityKey: activityKey, ActivityType: "create_task",
+		ActivityStatus: models.AutomationActivityCompleted,
+		Resources: []models.AutomationActivityResource{
+			{ResourceType: "task", ResourceID: in.Task.ID, Relation: "child"},
+			{ResourceType: "github_issue", ResourceID: in.IssueResourceID},
+		},
+		EventKey:   "work-item:" + binding.WorkItemID + ":implementation-task-entered",
+		FromNodeID: binding.NodeID, ToNodeID: in.TargetNodeID, Transition: models.AutomationTransitionEntered,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, false, err
+	}
+	committed = true
+	r.PublishInvalidation(events.AutomationTransitionCreated, in.ProjectID, targetBinding)
+	return in.Task, true, nil
+}
+
 func (r *AutomationRepo) RecordProjectionEvent(ctx context.Context, in AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, error) {
 	if in.Context.ProjectID == "" || in.Binding.AutomationID == "" || in.Binding.VersionID == "" || in.Binding.NodeID == "" {
 		return nil, nil, errors.New("complete automation binding is required")
