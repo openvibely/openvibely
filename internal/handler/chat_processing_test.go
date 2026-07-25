@@ -3522,7 +3522,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 		ex.PromptSent = "active prompt"
 		ex.IsFollowup = true
 	})
-	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "current private reasoning"))
+	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "first private reasoningcurrent private reasoning"))
 
 	steering := &models.ThreadInput{
 		Scope:          models.ThreadInputScopeTask,
@@ -3544,13 +3544,23 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 		Agent:          *agent,
 		ProjectID:      project.ID,
 		IsTaskFollowup: true,
+		ChatHistory: []models.Execution{{
+			ID:               exec.ID + "-steering-context-1",
+			ReasoningContent: "first private reasoning",
+		}},
 	}
 	batch, err := h.preparePendingSteeringInputs(ctx, &params, "assistant answer")
 	require.NoError(t, err)
 	require.Equal(t, 1, batch.count())
-	require.Len(t, params.ChatHistory, 1)
-	require.Equal(t, "assistant answer", params.ChatHistory[0].Output)
-	require.Equal(t, "current private reasoning", params.ChatHistory[0].ReasoningContent)
+	require.Len(t, params.ChatHistory, 2)
+	require.Equal(t, "assistant answer", params.ChatHistory[1].Output)
+	require.Equal(t, "current private reasoning", params.ChatHistory[1].ReasoningContent)
+
+	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "final private reasoning"))
+	require.NoError(t, h.persistSteeringReasoningHistory(ctx, params))
+	stored, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, "first private reasoningcurrent private reasoningfinal private reasoning", stored.ReasoningContent)
 }
 
 func TestClaimPendingTextSteeringInputsSkipsAttachmentSteering(t *testing.T) {

@@ -585,6 +585,13 @@ modelLoop:
 	applog.Infof("[handler] processStreamingResponse exec=%s task=%s success tokens=%d duration=%dms output_len=%d",
 		params.ExecID, params.TaskID, tokensUsed, durationMs, len(output))
 
+	if reasoningErr := h.persistSteeringReasoningHistory(ctx, params); reasoningErr != nil {
+		finalizeLifecycle(reasoningErr, result.ChatContext)
+		applog.Infof("[handler] processStreamingResponse exec=%s error preserving steering reasoning history: %v", params.ExecID, reasoningErr)
+		h.completeWithFailure(ctx, params.ExecID, params.TaskID, reasoningErr.Error(), durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+		h.finalizeStreamingTurn(params, output)
+		return
+	}
 	completionOutcome := h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 	if completionOutcome == repository.CompleteSuccessCompleted {
 		h.issueStoredAutomationPlanConfirmations(ctx, actionCollector)
@@ -782,6 +789,9 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 			if h.execRepo != nil && strings.TrimSpace(params.ExecID) != "" {
 				if exec, execErr := h.execRepo.GetByID(ctx, params.ExecID); execErr == nil && exec != nil {
 					reasoningContent = exec.ReasoningContent
+					if prefix := steeringReasoningHistory(*params); prefix != "" && strings.HasPrefix(reasoningContent, prefix) {
+						reasoningContent = strings.TrimPrefix(reasoningContent, prefix)
+					}
 				} else if execErr != nil {
 					applog.Infof("[handler] preparePendingSteeringInputs exec=%s error loading reasoning context: %v", params.ExecID, execErr)
 				}
@@ -805,6 +815,42 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 	params.steeringHistoryStarted = true
 	params.steeringOutputCursor = previousAssistantOutput
 	return batch, nil
+}
+
+func steeringReasoningHistory(params streamingResponseParams) string {
+	prefix := strings.TrimSpace(params.ExecID) + "-steering-context-"
+	if prefix == "-steering-context-" {
+		return ""
+	}
+	var reasoning strings.Builder
+	for _, exec := range params.ChatHistory {
+		if strings.HasPrefix(exec.ID, prefix) {
+			reasoning.WriteString(exec.ReasoningContent)
+		}
+	}
+	return reasoning.String()
+}
+
+func (h *Handler) persistSteeringReasoningHistory(ctx context.Context, params streamingResponseParams) error {
+	priorReasoning := steeringReasoningHistory(params)
+	if priorReasoning == "" || h.execRepo == nil || strings.TrimSpace(params.ExecID) == "" {
+		return nil
+	}
+	exec, err := h.execRepo.GetByID(ctx, params.ExecID)
+	if err != nil {
+		return fmt.Errorf("load current reasoning content: %w", err)
+	}
+	if exec == nil {
+		return fmt.Errorf("load current reasoning content: execution %s not found", params.ExecID)
+	}
+	reasoningContent := exec.ReasoningContent
+	if !strings.HasPrefix(reasoningContent, priorReasoning) {
+		reasoningContent = priorReasoning + reasoningContent
+	}
+	if err := h.execRepo.UpdateReasoningContent(context.WithoutCancel(ctx), params.ExecID, reasoningContent); err != nil {
+		return fmt.Errorf("persist steering reasoning history: %w", err)
+	}
+	return nil
 }
 
 func (h *Handler) publishThreadInputAppliedEvents(params streamingResponseParams, inputs []models.ThreadInput) {
