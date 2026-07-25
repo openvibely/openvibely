@@ -485,6 +485,27 @@ func TestAutomationSaveReplacesLegacyRetainedDraftGraph(t *testing.T) {
 		(id, project_id, automation_id, version, state, source, adapter_key)
 		VALUES ('legacy-failed-draft', ?, ?, 2, 'draft', 'manual', 'custom')`, h.project.ID, first.Definition.Automation.ID)
 	require.NoError(t, err)
+	retainedTask := models.Task{ProjectID: h.project.ID, Title: "Legacy failed draft schedule task", Category: models.CategoryScheduled,
+		Priority: 2, Status: models.StatusPending, Prompt: "Preserve this domain task."}
+	require.NoError(t, h.taskRepo.Create(ctx, &retainedTask))
+	retainedSchedule := models.Schedule{TaskID: retainedTask.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily,
+		RepeatInterval: 1, Enabled: false}
+	require.NoError(t, h.scheduleRepo.Create(ctx, &retainedSchedule))
+	_, err = h.db.ExecContext(ctx, `INSERT INTO automation_nodes
+		(id, project_id, automation_id, version_id, node_key, name, node_type, role)
+		VALUES ('legacy-failed-schedule-node', ?, ?, 'legacy-failed-draft', 'legacy_schedule', 'Legacy schedule', 'trigger', 'schedule')`,
+		h.project.ID, first.Definition.Automation.ID)
+	require.NoError(t, err)
+	_, err = h.db.ExecContext(ctx, `INSERT INTO automation_definition_resources
+		(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+		VALUES (?, ?, 'legacy-failed-draft', 'legacy-failed-schedule-node', 'schedule', ?, 'owned')`,
+		h.project.ID, first.Definition.Automation.ID, retainedSchedule.ID)
+	require.NoError(t, err)
+	_, err = h.db.ExecContext(ctx, `INSERT INTO automation_trigger_owners
+		(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+		VALUES (?, ?, ?, 'legacy-failed-draft', 'legacy-failed-schedule-node', 'active')`,
+		retainedSchedule.ID, h.project.ID, first.Definition.Automation.ID)
+	require.NoError(t, err)
 
 	candidate.Description = "Replacement behavior."
 	replacement, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID,
@@ -493,6 +514,10 @@ func TestAutomationSaveReplacesLegacyRetainedDraftGraph(t *testing.T) {
 	require.NotEqual(t, first.Definition.Version.ID, replacement.Definition.Version.ID)
 	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE automation_id = ?`, first.Definition.Automation.ID))
 	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE id = 'legacy-failed-draft'`))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules WHERE id = ?`, retainedSchedule.ID),
+		"replacement Save must remove schedules exclusively owned by every discarded graph")
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE id = ?`, retainedTask.ID),
+		"replacement Save must preserve the backing domain Task")
 	require.Equal(t, 1, replacement.Definition.Version.Version)
 }
 

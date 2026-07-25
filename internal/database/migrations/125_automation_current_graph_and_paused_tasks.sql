@@ -1,4 +1,38 @@
 -- +goose Up
+-- Remove exclusively owned Scheduler rows while retained draft/current-version
+-- provenance still identifies them. Schedules reference preserved domain Tasks,
+-- so deleting graph rows alone would otherwise orphan runnable schedules.
+DELETE FROM schedules
+WHERE id IN (
+    SELECT owner.schedule_id
+    FROM automation_trigger_owners owner
+    JOIN automations automation
+      ON automation.id = owner.automation_id
+     AND automation.project_id = owner.project_id
+    WHERE automation.published_version_id IS NULL
+       OR owner.version_id <> automation.published_version_id
+    UNION
+    SELECT resource.resource_id
+    FROM automation_definition_resources resource
+    JOIN automations automation
+      ON automation.id = resource.automation_id
+     AND automation.project_id = resource.project_id
+    WHERE resource.resource_type = 'schedule'
+      AND resource.relation = 'owned'
+      AND (automation.published_version_id IS NULL
+       OR resource.version_id <> automation.published_version_id)
+)
+AND NOT EXISTS (
+    SELECT 1
+    FROM automation_definition_resources current_resource
+    JOIN automations current_automation
+      ON current_automation.id = current_resource.automation_id
+     AND current_automation.project_id = current_resource.project_id
+    WHERE current_resource.resource_type = 'schedule'
+      AND current_resource.resource_id = schedules.id
+      AND current_automation.published_version_id = current_resource.version_id
+);
+
 -- Remove persisted publication-era drafts. Automation Graphs now retain exactly
 -- one current saved graph and browser-local unsaved candidates are not database
 -- identities.

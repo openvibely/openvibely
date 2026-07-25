@@ -1,4 +1,38 @@
 -- +goose Up
+-- Failed publication attempts could create disabled Scheduler rows before the
+-- final graph transaction established trigger ownership. Consume the exact
+-- create-step journal before dropping it, while protecting any schedule that
+-- became part of the current published graph.
+DELETE FROM schedules
+WHERE id IN (
+    SELECT step.resource_id
+    FROM automation_publication_steps step
+    JOIN automation_publication_attempts attempt ON attempt.id = step.attempt_id
+    WHERE attempt.status <> 'completed'
+      AND step.operation = 'create'
+      AND step.resource_type = 'schedule'
+      AND trim(step.resource_id) <> ''
+)
+AND NOT EXISTS (
+    SELECT 1
+    FROM automation_trigger_owners owner
+    JOIN automations automation
+      ON automation.id = owner.automation_id
+     AND automation.project_id = owner.project_id
+    WHERE owner.schedule_id = schedules.id
+      AND automation.published_version_id = owner.version_id
+)
+AND NOT EXISTS (
+    SELECT 1
+    FROM automation_definition_resources resource
+    JOIN automations automation
+      ON automation.id = resource.automation_id
+     AND automation.project_id = resource.project_id
+    WHERE resource.resource_type = 'schedule'
+      AND resource.resource_id = schedules.id
+      AND automation.published_version_id = resource.version_id
+);
+
 DROP INDEX IF EXISTS idx_automation_publication_steps_status;
 DROP INDEX IF EXISTS idx_automation_publication_attempts_parent;
 DROP TABLE IF EXISTS automation_publication_steps;

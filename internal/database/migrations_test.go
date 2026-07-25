@@ -12,6 +12,84 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestMigration122DeletesFailedPublicationCreatedSchedulesBeforeDroppingJournal(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automation-publication-schedules-122.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 121); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-122', 'Migration 122', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+			VALUES ('automation-122', 'project-122', 'automation-122', 'Automation 122', 'custom', 'active');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key, published_at)
+			VALUES ('published-version-122', 'project-122', 'automation-122', 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP);
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('failed-version-122', 'project-122', 'automation-122', 2, 'draft', 'manual', 'custom');
+		UPDATE automations SET published_version_id = 'published-version-122' WHERE id = 'automation-122';
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('published-node-122', 'project-122', 'automation-122', 'published-version-122', 'published', 'Published', 'trigger', 'schedule');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('published-task-122', 'project-122', 'Published task', 'scheduled', 2, 'pending', 'published');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('failed-task-122', 'project-122', 'Failed task', 'scheduled', 2, 'pending', 'failed');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('ordinary-task-122', 'project-122', 'Ordinary task', 'scheduled', 2, 'pending', 'ordinary');
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('published-schedule-122', 'published-task-122', CURRENT_TIMESTAMP, 'daily', 1, 1, CURRENT_TIMESTAMP);
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('failed-schedule-122', 'failed-task-122', CURRENT_TIMESTAMP, 'daily', 1, 0, CURRENT_TIMESTAMP);
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('ordinary-schedule-122', 'ordinary-task-122', CURRENT_TIMESTAMP, 'daily', 1, 1, CURRENT_TIMESTAMP);
+		INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES ('project-122', 'automation-122', 'published-version-122', 'published-node-122', 'schedule', 'published-schedule-122', 'owned');
+		INSERT INTO automation_trigger_owners
+			(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+			VALUES ('published-schedule-122', 'project-122', 'automation-122', 'published-version-122', 'published-node-122', 'active');
+		INSERT INTO automation_publication_attempts
+			(id, project_id, automation_id, version_id, plan_revision, status)
+			VALUES ('failed-attempt-122', 'project-122', 'automation-122', 'failed-version-122', 'failed-revision', 'failed');
+		INSERT INTO automation_publication_steps
+			(attempt_id, step_key, operation, target_key, status, resource_type, resource_id)
+			VALUES ('failed-attempt-122', 'schedule:failed', 'create', 'schedule:failed', 'completed', 'schedule', 'failed-schedule-122');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 122); err != nil {
+		t.Fatal(err)
+	}
+
+	for scheduleID, want := range map[string]int{
+		"failed-schedule-122":    0,
+		"published-schedule-122": 1,
+		"ordinary-schedule-122":  1,
+	} {
+		var got int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE id = ?`, scheduleID).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("schedule %s count = %d, want %d", scheduleID, got, want)
+		}
+	}
+	var tasks int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE id IN ('published-task-122','failed-task-122','ordinary-task-122')`).Scan(&tasks); err != nil {
+		t.Fatal(err)
+	}
+	if tasks != 3 {
+		t.Fatalf("backing task count = %d, want 3", tasks)
+	}
+}
+
 func TestMigration124_BackfillsOnlyFeatureOwnedAutomationIssueTasks(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-issue-origin-124.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -115,6 +193,43 @@ func TestMigration125_RemovesLegacyDraftGraphsAndUnsavedAutomationShells(t *test
 			VALUES ('draft-shell-version-125', 'project-125', 'draft-shell-125', 1, 'draft', 'manual', 'custom');
 		INSERT INTO automation_graph_metadata (version_id, project_id, automation_id, candidate_json)
 			VALUES ('draft-shell-version-125', 'project-125', 'draft-shell-125', '{"schema_version":1}');
+
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('published-node-125', 'project-125', 'saved-automation-125', 'published-version-125', 'published', 'Published', 'trigger', 'schedule');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('failed-node-125', 'project-125', 'saved-automation-125', 'failed-draft-version-125', 'failed', 'Failed', 'trigger', 'schedule');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('shell-node-125', 'project-125', 'draft-shell-125', 'draft-shell-version-125', 'shell', 'Shell', 'trigger', 'schedule');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('published-task-125', 'project-125', 'Published task', 'scheduled', 2, 'pending', 'published');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('failed-task-125', 'project-125', 'Failed task', 'scheduled', 2, 'pending', 'failed');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('shell-task-125', 'project-125', 'Shell task', 'scheduled', 2, 'pending', 'shell');
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('published-schedule-125', 'published-task-125', CURRENT_TIMESTAMP, 'daily', 1, 1, CURRENT_TIMESTAMP);
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('failed-schedule-125', 'failed-task-125', CURRENT_TIMESTAMP, 'daily', 1, 0, CURRENT_TIMESTAMP);
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('shell-schedule-125', 'shell-task-125', CURRENT_TIMESTAMP, 'daily', 1, 0, CURRENT_TIMESTAMP);
+		INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES ('project-125', 'saved-automation-125', 'published-version-125', 'published-node-125', 'schedule', 'published-schedule-125', 'owned');
+		INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES ('project-125', 'saved-automation-125', 'failed-draft-version-125', 'failed-node-125', 'schedule', 'failed-schedule-125', 'owned');
+		INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES ('project-125', 'draft-shell-125', 'draft-shell-version-125', 'shell-node-125', 'schedule', 'shell-schedule-125', 'owned');
+		INSERT INTO automation_trigger_owners
+			(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+			VALUES ('published-schedule-125', 'project-125', 'saved-automation-125', 'published-version-125', 'published-node-125', 'active');
+		INSERT INTO automation_trigger_owners
+			(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+			VALUES ('failed-schedule-125', 'project-125', 'saved-automation-125', 'failed-draft-version-125', 'failed-node-125', 'active');
+		INSERT INTO automation_trigger_owners
+			(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+			VALUES ('shell-schedule-125', 'project-125', 'draft-shell-125', 'draft-shell-version-125', 'shell-node-125', 'active');
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +255,26 @@ func TestMigration125_RemovesLegacyDraftGraphsAndUnsavedAutomationShells(t *test
 	}
 	if retainedMetadata != 0 {
 		t.Fatalf("retained legacy draft metadata = %d, want 0", retainedMetadata)
+	}
+	for scheduleID, want := range map[string]int{
+		"published-schedule-125": 1,
+		"failed-schedule-125":    0,
+		"shell-schedule-125":     0,
+	} {
+		var got int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE id = ?`, scheduleID).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("schedule %s count = %d, want %d", scheduleID, got, want)
+		}
+	}
+	var preservedTasks int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE id IN ('published-task-125','failed-task-125','shell-task-125')`).Scan(&preservedTasks); err != nil {
+		t.Fatal(err)
+	}
+	if preservedTasks != 3 {
+		t.Fatalf("backing task count = %d, want 3", preservedTasks)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'automation_paused_task_admissions'`).Scan(&admissionTable); err != nil {
 		t.Fatal(err)

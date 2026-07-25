@@ -289,7 +289,6 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		}
 	}
 
-	retainedSchedules := make(map[string]bool, len(in.Schedules))
 	for _, write := range in.Schedules {
 		taskID := taskIDs[write.TaskNodeKey]
 		if taskID == "" {
@@ -325,7 +324,6 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 				return nil, nil, fmt.Errorf("updating schedule for node %q: %w", write.NodeKey, err)
 			}
 		}
-		retainedSchedules[scheduleID] = true
 		nodeID := nodeIDs[write.NodeKey]
 		if nodeID == "" {
 			return nil, nil, fmt.Errorf("schedule node %q is unavailable", write.NodeKey)
@@ -350,32 +348,8 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		}
 	}
 
-	if in.ExpectedCurrentGraphID != "" {
-		oldRows, err := conn.QueryContext(ctx, `SELECT resource_id FROM automation_definition_resources
-			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND resource_type = 'schedule'`,
-			in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID)
-		if err != nil {
-			return nil, nil, err
-		}
-		var obsolete []string
-		for oldRows.Next() {
-			var id string
-			if err := oldRows.Scan(&id); err != nil {
-				oldRows.Close()
-				return nil, nil, err
-			}
-			if !retainedSchedules[id] {
-				obsolete = append(obsolete, id)
-			}
-		}
-		if err := oldRows.Close(); err != nil {
-			return nil, nil, err
-		}
-		for _, id := range obsolete {
-			if _, err := conn.ExecContext(ctx, `DELETE FROM schedules WHERE id = ?`, id); err != nil {
-				return nil, nil, err
-			}
-		}
+	if err := deleteObsoleteOwnedAutomationSchedules(ctx, conn, in.ProjectID, in.AutomationID, in.GraphID); err != nil {
+		return nil, nil, err
 	}
 
 	if _, err := conn.ExecContext(ctx, `UPDATE automations SET name = ?, description = ?, automation_type = ?, lifecycle_state = ?,

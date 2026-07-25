@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -226,6 +227,33 @@ func TestGitHubSDLCRegistrationHydratesBoundTaskPromptAcrossPause(t *testing.T) 
 	require.Equal(t, maintainedPrompt, automationDraftNodeByKey(t, reopened.Candidate, "dev_inbox").Config["prompt"])
 }
 
+func seedRetainedAutomationSchedule(t *testing.T, db *sql.DB, taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo,
+	projectID, automationID, versionID, label string) (models.Task, models.Schedule) {
+	t.Helper()
+	ctx := context.Background()
+	task := models.Task{ProjectID: projectID, Title: "Retained schedule task " + label, Category: models.CategoryScheduled,
+		Priority: 2, Status: models.StatusPending, Prompt: "Preserve this domain Task."}
+	require.NoError(t, taskRepo.Create(ctx, &task))
+	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily,
+		RepeatInterval: 1, Enabled: false}
+	require.NoError(t, scheduleRepo.Create(ctx, &schedule))
+	nodeID := repository.NewID()
+	_, err := db.ExecContext(ctx, `INSERT INTO automation_nodes
+		(id, project_id, automation_id, version_id, node_key, name, node_type, role)
+		VALUES (?, ?, ?, ?, ?, ?, 'trigger', 'schedule')`, nodeID, projectID, automationID, versionID,
+		"retained_schedule_"+label, "Retained schedule "+label)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_definition_resources
+		(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+		VALUES (?, ?, ?, ?, 'schedule', ?, 'owned')`, projectID, automationID, versionID, nodeID, schedule.ID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_trigger_owners
+		(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+		VALUES (?, ?, ?, ?, ?, 'active')`, schedule.ID, projectID, automationID, versionID, nodeID)
+	require.NoError(t, err)
+	return task, schedule
+}
+
 func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecycle(t *testing.T) {
 	for _, test := range []struct {
 		name           string
@@ -275,6 +303,8 @@ func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecyc
 				VALUES (?, ?, ?, 2, 'draft', 'bootstrap', ?)`, retainedDraftID, project.ID,
 				first.Automation.ID, AutomationAdapterNativeSDLC)
 			require.NoError(t, err)
+			retainedTask, retainedSchedule := seedRetainedAutomationSchedule(t, db, taskRepo, scheduleRepo, project.ID,
+				first.Automation.ID, retainedDraftID, test.name)
 
 			secondTask, secondSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Replacement maintained schedule")
 			request.Resources = []models.AutomationResourceBinding{
@@ -290,6 +320,8 @@ func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecyc
 			require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", retainedDraftID))
 			require.Zero(t, tableCountWhere(t, db, "automation_invocations", "automation_id", first.Automation.ID), "prior graph runtime projection must be deleted")
 			require.Zero(t, tableCountWhere(t, db, "schedules", "id", firstSchedule.ID), "obsolete exclusively owned schedules must be deleted")
+			require.Zero(t, tableCountWhere(t, db, "schedules", "id", retainedSchedule.ID), "retained graph schedule must be deleted before its owner row")
+			require.Equal(t, 1, tableCountWhere(t, db, "tasks", "id", retainedTask.ID), "retained graph backing Task must survive")
 			stored, err := scheduleRepo.GetByID(ctx, secondSchedule.ID)
 			require.NoError(t, err)
 			require.NotNil(t, stored)
@@ -300,6 +332,43 @@ func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecyc
 			require.Equal(t, test.ownershipState, owner.OwnershipState)
 		})
 	}
+}
+
+func TestMaintainedAutomationRegistrationUnchangedCleansRetainedGraphSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Unchanged maintained retained schedule")
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
+	currentTask, currentSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Current maintained schedule")
+	request := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC,
+		StableKey: "native-sdlc/unchanged-retained", Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: currentSchedule.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: currentTask.ID},
+		}}
+	current, _, err := registration.Register(ctx, request)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+		(id, project_id, automation_id, version, state, source, adapter_key)
+		VALUES ('unchanged-retained-draft', ?, ?, 2, 'draft', 'bootstrap', ?)`, project.ID,
+		current.Automation.ID, AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	retainedTask, retainedSchedule := seedRetainedAutomationSchedule(t, db, taskRepo, scheduleRepo, project.ID,
+		current.Automation.ID, "unchanged-retained-draft", "unchanged")
+
+	reconciled, unchanged, err := registration.Register(ctx, request)
+	require.NoError(t, err)
+	require.True(t, unchanged)
+	require.Equal(t, current.Version.ID, reconciled.Version.ID)
+	require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", current.Automation.ID))
+	require.Zero(t, tableCountWhere(t, db, "schedules", "id", retainedSchedule.ID),
+		"unchanged registration must delete a discarded graph's exclusively owned schedule")
+	require.Equal(t, 1, tableCountWhere(t, db, "tasks", "id", retainedTask.ID),
+		"unchanged registration must preserve the backing domain Task")
+	require.Equal(t, 1, tableCountWhere(t, db, "schedules", "id", currentSchedule.ID),
+		"unchanged registration must preserve the current graph schedule")
 }
 
 func TestMaintainedAutomationRegistrationPreservesIndividuallyDisabledSchedule(t *testing.T) {

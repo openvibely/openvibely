@@ -135,8 +135,11 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 			return nil, false, err
 		}
 		if same {
+			if err := deleteObsoleteOwnedAutomationSchedules(ctx, conn, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
+				return nil, false, err
+			}
 			if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions
-							WHERE project_id = ? AND automation_id = ? AND id <> ?`, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
+				WHERE project_id = ? AND automation_id = ? AND id <> ?`, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
 				return nil, false, fmt.Errorf("removing retained automation graphs: %w", err)
 			}
 			if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET version = 1, state = 'published'
@@ -297,26 +300,8 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		return nil, false, errors.New("registered automation requires at least one trigger schedule")
 	}
 
-	rows, err := conn.QueryContext(ctx, `SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?`, a.ID)
-	if err != nil {
+	if err := deleteObsoleteOwnedAutomationSchedules(ctx, conn, in.ProjectID, a.ID, versionID); err != nil {
 		return nil, false, err
-	}
-	var oldTriggerIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, false, err
-		}
-		if _, keep := newTriggerIDs[id]; !keep {
-			oldTriggerIDs = append(oldTriggerIDs, id)
-		}
-	}
-	rows.Close()
-	for _, scheduleID := range oldTriggerIDs {
-		if _, err := conn.ExecContext(ctx, `DELETE FROM schedules WHERE id = ?`, scheduleID); err != nil {
-			return nil, false, fmt.Errorf("deleting obsolete owned trigger: %w", err)
-		}
 	}
 
 	if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET state = 'published', published_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'draft'`, versionID); err != nil {
@@ -350,6 +335,30 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 	committed = true
 	r.PublishInvalidation(events.AutomationDefinitionUpdated, in.ProjectID, models.AutomationBinding{AutomationID: def.Automation.ID, VersionID: def.Version.ID})
 	return def, false, nil
+}
+
+func deleteObsoleteOwnedAutomationSchedules(ctx context.Context, exec SQLExecutor, projectID, automationID, retainedVersionID string) error {
+	_, err := exec.ExecContext(ctx, `DELETE FROM schedules
+		WHERE id IN (
+			SELECT owner.schedule_id
+			FROM automation_trigger_owners owner
+			WHERE owner.project_id = ? AND owner.automation_id = ? AND owner.version_id <> ?
+			UNION
+			SELECT resource.resource_id
+			FROM automation_definition_resources resource
+			WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id <> ?
+				AND resource.resource_type = 'schedule' AND resource.relation = 'owned'
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM automation_definition_resources retained
+			WHERE retained.project_id = ? AND retained.automation_id = ? AND retained.version_id = ?
+				AND retained.resource_type = 'schedule' AND retained.resource_id = schedules.id
+		)`, projectID, automationID, retainedVersionID, projectID, automationID, retainedVersionID,
+		projectID, automationID, retainedVersionID)
+	if err != nil {
+		return fmt.Errorf("deleting obsolete owned Automation schedules: %w", err)
+	}
+	return nil
 }
 
 func (r *AutomationRepo) ListResourceSummaries(ctx context.Context, projectID, automationID, versionID string, limit int) ([]models.AutomationResourceSummary, error) {
