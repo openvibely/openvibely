@@ -603,7 +603,7 @@ modelLoop:
 		return
 	}
 	if completionOutcome == repository.CompleteSuccessPendingSteering {
-		prepared, steeringErr := h.preparePendingSteeringInputs(ctx, &params, output)
+		prepared, steeringErr := h.preparePendingSteeringInputsFromPersistedReplay(ctx, &params, output)
 		if steeringErr != nil {
 			finalizeLifecycle(steeringErr, result.ChatContext)
 			applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering after deferred completion: %v", params.ExecID, steeringErr)
@@ -801,7 +801,7 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 				}
 			}
 			params.ChatHistory = append(params.ChatHistory, models.Execution{
-				ID:               fmt.Sprintf("%s-steering-context-%d", params.ExecID, len(params.ChatHistory)+1),
+				ID:               nextSteeringContextID(*params),
 				TaskID:           params.TaskID,
 				Status:           models.ExecCompleted,
 				PromptSent:       params.Message,
@@ -820,6 +820,54 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 	params.steeringHistoryStarted = true
 	params.steeringOutputCursor = previousAssistantOutput
 	return batch, nil
+}
+
+func (h *Handler) preparePendingSteeringInputsFromPersistedReplay(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
+	batch, err := h.preparePendingSteeringInputs(ctx, params, previousAssistantOutput)
+	if err != nil || batch.count() == 0 {
+		return batch, err
+	}
+	// Completion persists one replay containing every synthetic steering turn.
+	// Keep only the newly appended context that owns that replay, or the prior
+	// turns would be sent both individually and through the combined replay.
+	collapseSteeringContextsCoveredByLatestReplay(params)
+	return batch, nil
+}
+
+func nextSteeringContextID(params streamingResponseParams) string {
+	prefix := strings.TrimSpace(params.ExecID) + "-steering-context-"
+	used := make(map[string]struct{}, len(params.ChatHistory))
+	for _, exec := range params.ChatHistory {
+		used[exec.ID] = struct{}{}
+	}
+	for suffix := len(params.ChatHistory) + 1; ; suffix++ {
+		id := fmt.Sprintf("%s%d", prefix, suffix)
+		if _, exists := used[id]; !exists {
+			return id
+		}
+	}
+}
+
+func collapseSteeringContextsCoveredByLatestReplay(params *streamingResponseParams) {
+	prefix := strings.TrimSpace(params.ExecID) + "-steering-context-"
+	latestIndex := -1
+	for i := range params.ChatHistory {
+		if strings.HasPrefix(params.ChatHistory[i].ID, prefix) {
+			latestIndex = i
+		}
+	}
+	if latestIndex < 0 || len(params.ChatHistory[latestIndex].ReplayMessages) == 0 {
+		return
+	}
+
+	history := params.ChatHistory[:0]
+	for i, exec := range params.ChatHistory {
+		if strings.HasPrefix(exec.ID, prefix) && i != latestIndex {
+			continue
+		}
+		history = append(history, exec)
+	}
+	params.ChatHistory = history
 }
 
 func steeringContextHistory(params streamingResponseParams) []models.Execution {

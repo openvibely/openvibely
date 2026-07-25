@@ -3583,6 +3583,26 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 			ReasoningContent: "final private reasoning",
 		},
 	}, replay[exec.ID])
+
+	lateSteering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "late completion constraint",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, lateSteering, exec.ID))
+
+	batch, err = h.preparePendingSteeringInputsFromPersistedReplay(ctx, &params, "assistant answerfinal answer")
+	require.NoError(t, err)
+	require.Equal(t, 1, batch.count())
+	require.Len(t, params.ChatHistory, 1)
+	require.Equal(t, replay[exec.ID], params.ChatHistory[0].ReplayMessages)
+	require.Equal(t, formatSteeringInstruction("late completion constraint"), params.Message)
 }
 
 func TestClaimPendingTextSteeringInputsSkipsAttachmentSteering(t *testing.T) {
