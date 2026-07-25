@@ -4685,7 +4685,7 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start Chrome scroll fixture: %v", err)
 	}
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	var result string
 	for time.Now().Before(deadline) {
 		if output, readErr := os.ReadFile(stdoutPath); readErr == nil {

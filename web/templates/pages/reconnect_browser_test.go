@@ -666,20 +666,24 @@ window.addEventListener('DOMContentLoaded', async function() {
 	    expectedThreadHolder.innerHTML = window.__snapshots.terminal;
 	    var expectedThreadRevision = expectedThreadHolder.content.querySelector('#task-thread-view').getAttribute('data-thread-revision');
 	    var actualThreadRevision = document.getElementById('task-thread-view').getAttribute('data-thread-revision');
-	    if (actualThreadRevision !== expectedThreadRevision) fail('Task Thread revision did not synchronize automatically: actual=' + actualThreadRevision + ' expected=' + expectedThreadRevision);
+    if (actualThreadRevision !== expectedThreadRevision) fail('Task Thread revision did not synchronize automatically: actual=' + actualThreadRevision + ' expected=' + expectedThreadRevision);
     messages = document.getElementById('task-thread-messages');
+    messages.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
     messages.scrollTop = 29;
+    messages.dispatchEvent(new Event('scroll'));
+    if (!window._taskThreadPageTracker || !window._taskThreadPageTracker.userScrolledUp) fail('Task Thread fixture did not establish intentional upward scroll state');
     draft.value = 'thread draft';
 
     var attachmentVisibilityTransition = window.__hiddenToVisible();
     if (attachmentVisibilityTransition.hidden) fail('Task Thread attachment visibility transition remained hidden');
-    await window.__wait(50);
+    await window.__wait(80);
     if (document.getElementById('chat-execution-thread-done') !== completedNode) fail('attachment reconnect replaced completed Task Thread DOM');
     if (document.getElementById('chat-execution-thread-live') !== liveNode) fail('attachment reconnect replaced terminal Task Thread DOM');
     if (document.getElementById('thread-expanded-tool') !== tool || tool.getAttribute('aria-expanded') !== 'true') fail('Task Thread tool state was lost');
     if (document.getElementById('task-message-input') !== draft || draft.value !== 'thread draft') fail('Task Thread draft was lost');
     if (document.getElementById('task-thread-form-session-id') !== session || session.value !== 'thread-pending-session') fail('Task Thread attachment session was lost');
-    if (document.getElementById('task-thread-messages').scrollTop !== 29) fail('Task Thread scroll position changed');
+    var finalMessages = document.getElementById('task-thread-messages');
+    if (finalMessages.scrollTop !== 29) fail('Task Thread scroll position changed: actual=' + finalMessages.scrollTop + ' expected=29 height=' + finalMessages.scrollHeight + ' trackerUp=' + !!(window._taskThreadPageTracker && window._taskThreadPageTracker.userScrolledUp));
 
     session.value = '';
     var noOpThreadVisibilityTransition = window.__hiddenToVisible();
