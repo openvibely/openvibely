@@ -857,6 +857,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				}
 
 				var reasoningEffortOptions = {
+					none: 'None',
 					low: 'Low',
 					medium: 'Medium',
 					high: 'High',
@@ -876,9 +877,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'max'] }
 				],				openai: [
-					{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-5.6-luna', label: 'gpt-5.6-luna', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+					{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
+					{ value: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
+					{ value: 'gpt-5.6-luna', label: 'gpt-5.6-luna', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
 					{ value: 'gpt-5.5', label: 'gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.5-pro', label: 'gpt-5.5-pro', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.4', label: 'gpt-5.4', efforts: ['low', 'medium', 'high', 'xhigh'] },
@@ -942,7 +943,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							{ value: 'deepseek-reasoner', label: 'DeepSeek Reasoner', efforts: [] }
 						],
 						openai_compatible_moonshot: [
-							{ value: 'kimi-k2-0711-preview', label: 'Moonshot Kimi K2', efforts: [] },
+							{ value: 'kimi-k3', label: 'Kimi K3', efforts: [] },
+							{ value: 'kimi-k2.7-code', label: 'Kimi K2.7 Code', efforts: [] },
+							{ value: 'kimi-k2.7-code-highspeed', label: 'Kimi K2.7 Code High-Speed', efforts: [] },
+							{ value: 'kimi-k2.6', label: 'Kimi K2.6', efforts: [] },
 							{ value: 'moonshot-v1-128k', label: 'Moonshot v1 128k', efforts: [] }
 						],
 						openai_compatible_dashscope: [

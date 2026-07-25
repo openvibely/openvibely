@@ -886,6 +886,12 @@ func TestSend_OAuthGPT56Live(t *testing.T) {
 	}
 }
 
+func TestNormalizeReasoningEffort_PreservesNone(t *testing.T) {
+	if got := normalizeReasoningEffort(" NONE "); got != "none" {
+		t.Fatalf("normalizeReasoningEffort = %q, want none", got)
+	}
+}
+
 func TestSend_StreamingPreservesSpacesInDeltas(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

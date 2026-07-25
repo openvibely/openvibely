@@ -78,6 +78,17 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if !strings.Contains(out, "{ value: 'claude-opus-5', label: 'Claude Opus 5', efforts: ['low', 'medium', 'high', 'max']") {
 		t.Error("expected Claude Opus 5 effort options")
 	}
+	if !strings.Contains(out, "{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max']") {
+		t.Error("expected GPT-5.6 Sol effort options")
+	}
+	for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"} {
+		if !strings.Contains(out, "{ value: '"+model+"'") {
+			t.Errorf("expected current Moonshot model %q in selector", model)
+		}
+	}
+	if strings.Contains(out, "{ value: 'kimi-k2-0711-preview'") {
+		t.Error("did not expect discontinued Kimi K2 preview in selector")
+	}
 	if !strings.Contains(out, "{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max']") {
 		t.Error("expected Claude Fable 5 effort options")
 	}

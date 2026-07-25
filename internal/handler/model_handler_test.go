@@ -2273,6 +2273,7 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 		input    string
 		want     string
 	}{
+		{"openai none", models.ProviderOpenAI, "gpt-5.6-sol", "none", "none"},
 		{"openai xhigh", models.ProviderOpenAI, "gpt-5.6-sol", "xhigh", "xhigh"},
 		{"openai max", models.ProviderOpenAI, "gpt-5.6-sol", "max", "max"},
 		{"openai rejects max for older model", models.ProviderOpenAI, "gpt-5.4-mini", "max", ""},
