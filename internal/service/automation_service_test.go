@@ -71,15 +71,15 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	require.Equal(t, "Updated Native Automation", again.Automation.Name)
 	var retainedGraphID string
 	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO automation_versions
-		(project_id, automation_id, version, state, source, adapter_key, published_at)
-		VALUES (?, ?, 2, 'published', 'bootstrap', ?, CURRENT_TIMESTAMP) RETURNING id`, project.ID,
+		(project_id, automation_id, version, state, source, adapter_key)
+		VALUES (?, ?, 2, 'draft', 'bootstrap', ?) RETURNING id`, project.ID,
 		native.Automation.ID, AutomationAdapterNativeSDLC).Scan(&retainedGraphID))
 	again, reused, err = service.Register(ctx, nativeReq)
 	require.NoError(t, err)
 	require.True(t, reused)
 	require.Equal(t, native.Version.ID, again.Version.ID)
 	require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", retainedGraphID),
-		"unchanged maintained registration must remove pre-existing retained graphs")
+		"unchanged maintained registration must remove pre-existing retained draft graphs")
 	require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", native.Automation.ID))
 
 	_, _, err = service.Register(ctx, AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC,
@@ -111,6 +111,58 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	foreignView, err := automationRepo.GetDefinition(ctx, other.ID, native.Automation.ID)
 	require.NoError(t, err)
 	require.Nil(t, foreignView)
+}
+
+func TestAutomationPortfolioListsEverySavedAutomationBeyondOneHundred(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Large Automation portfolio")
+	other := automationTestProject(t, repository.NewProjectRepo(db), "Other Automation portfolio")
+
+	for i := 0; i < 5; i++ {
+		_, err := db.ExecContext(ctx, `INSERT INTO automations
+			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, updated_at)
+			VALUES (?, ?, ?, ?, '', 'custom', 'draft', datetime('now', ?))`,
+			fmt.Sprintf("draft-%03d", i), project.ID, fmt.Sprintf("draft/%03d", i), fmt.Sprintf("Draft %03d", i), fmt.Sprintf("+%d seconds", 1000+i))
+		require.NoError(t, err)
+	}
+	for i := 0; i < 101; i++ {
+		automationID := fmt.Sprintf("saved-%03d", i)
+		versionID := fmt.Sprintf("saved-version-%03d", i)
+		_, err := db.ExecContext(ctx, `INSERT INTO automations
+			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, updated_at)
+			VALUES (?, ?, ?, ?, ?, 'custom', 'active', datetime('now', ?))`,
+			automationID, project.ID, "saved/"+automationID, fmt.Sprintf("Saved Automation %03d", i), "searchable saved automation", fmt.Sprintf("+%d seconds", i))
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+			(id, project_id, automation_id, version, state, source, adapter_key, published_at)
+			VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP)`, versionID, project.ID, automationID)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, project.ID)
+		require.NoError(t, err)
+	}
+	_, err := db.ExecContext(ctx, `INSERT INTO automations
+		(id, project_id, stable_key, name, description, automation_type, lifecycle_state)
+		VALUES ('foreign-saved', ?, 'saved/foreign', 'Foreign saved Automation', '', 'custom', 'active')`, other.ID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+		(id, project_id, automation_id, version, state, source, adapter_key, published_at)
+		VALUES ('foreign-version', ?, 'foreign-saved', 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP)`, other.ID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = 'foreign-version' WHERE id = 'foreign-saved'`)
+	require.NoError(t, err)
+
+	cards, err := NewAutomationGraphService(repository.NewAutomationRepo(db)).List(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, cards, 101)
+	seen := make(map[string]bool, len(cards))
+	for _, card := range cards {
+		seen[card.Automation.ID] = true
+		require.NotNil(t, card.Automation.PublishedVersionID)
+	}
+	require.True(t, seen["saved-000"])
+	require.True(t, seen["saved-100"])
+	require.False(t, seen["foreign-saved"])
 }
 
 func TestGitHubSDLCRegistrationHydratesBoundTaskPromptAcrossPause(t *testing.T) {
@@ -217,6 +269,12 @@ func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecyc
 				VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'completed', CURRENT_TIMESTAMP)`, project.ID, first.Automation.ID,
 				first.Version.ID, triggerNodeID, firstSchedule.ID, "old-"+test.name)
 			require.NoError(t, err)
+			retainedDraftID := "retained-draft-" + test.name
+			_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+				(id, project_id, automation_id, version, state, source, adapter_key)
+				VALUES (?, ?, ?, 2, 'draft', 'bootstrap', ?)`, retainedDraftID, project.ID,
+				first.Automation.ID, AutomationAdapterNativeSDLC)
+			require.NoError(t, err)
 
 			secondTask, secondSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Replacement maintained schedule")
 			request.Resources = []models.AutomationResourceBinding{
@@ -229,6 +287,7 @@ func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecyc
 			require.NotEqual(t, first.Version.ID, replaced.Version.ID)
 			require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", first.Automation.ID), "maintained replacement must retain exactly one current graph")
 			require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", first.Version.ID))
+			require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", retainedDraftID))
 			require.Zero(t, tableCountWhere(t, db, "automation_invocations", "automation_id", first.Automation.ID), "prior graph runtime projection must be deleted")
 			require.Zero(t, tableCountWhere(t, db, "schedules", "id", firstSchedule.ID), "obsolete exclusively owned schedules must be deleted")
 			stored, err := scheduleRepo.GetByID(ctx, secondSchedule.ID)

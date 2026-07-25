@@ -368,6 +368,134 @@ func TestAutomationPauseAndArchiveDemotePendingActiveRoots(t *testing.T) {
 	}
 }
 
+func seedActivityOnlyAutomationIssueTask(t *testing.T, h automationSaveHarness, definition *models.AutomationDefinition, nodeKey string, category models.TaskCategory) models.Task {
+	t.Helper()
+	ctx := context.Background()
+	node := automationNodeByKey(t, definition, nodeKey)
+	task := models.Task{ProjectID: h.project.ID, Title: "Issue-specific task " + repository.NewID(), Category: category,
+		Priority: 2, Status: models.StatusPending, Prompt: "Implement the approved issue.",
+		CreatedVia: repository.AutomationCompilerTaskCreatedVia(definition.Automation.ID, node.NodeKey)}
+	require.NoError(t, h.taskRepo.Create(ctx, &task))
+	workItemID := repository.NewID()
+	activityID := repository.NewID()
+	_, err := h.db.ExecContext(ctx, `INSERT INTO automation_work_items
+		(id, project_id, automation_id, origin_version_id, work_item_key)
+		VALUES (?, ?, ?, ?, ?)`, workItemID, h.project.ID, definition.Automation.ID, definition.Version.ID, "issue-work-item:"+workItemID)
+	require.NoError(t, err)
+	_, err = h.db.ExecContext(ctx, `INSERT INTO automation_activities
+		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'create_task', 'completed')`, activityID, h.project.ID, definition.Automation.ID,
+		definition.Version.ID, node.ID, workItemID, "work-item:"+workItemID+":implementation-task")
+	require.NoError(t, err)
+	_, err = h.db.ExecContext(ctx, `INSERT INTO automation_activity_resources
+		(activity_id, resource_type, resource_id, relation) VALUES (?, 'task', ?, 'child')`, activityID, task.ID)
+	require.NoError(t, err)
+	return task
+}
+
+func TestAutomationPauseArchiveAndResumeActivityOnlyIssueTasks(t *testing.T) {
+	for _, state := range []models.AutomationLifecycleState{models.AutomationPaused, models.AutomationArchived} {
+		t.Run(string(state), func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Activity issue lifecycle "+string(state))
+			ctx := context.Background()
+			saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web",
+				Candidate: customTaskOnlyCandidate("Activity issue lifecycle", "Keep the definition task in Backlog.", models.CategoryBacklog)})
+			require.NoError(t, err)
+			issueTask := seedActivityOnlyAutomationIssueTask(t, h, saved.Definition, "root", models.CategoryActive)
+
+			if state == models.AutomationPaused {
+				require.NoError(t, h.lifecycle.Pause(ctx, h.project.ID, saved.Definition.Automation.ID))
+			} else {
+				require.NoError(t, h.lifecycle.Archive(ctx, h.project.ID, saved.Definition.Automation.ID))
+			}
+			stored, err := h.taskRepo.GetByID(ctx, issueTask.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryBacklog, stored.Category)
+			require.Equal(t, models.StatusPending, stored.Status)
+
+			recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+			lifecycle := NewAutomationLifecycleService(h.automationRepo, h.scheduleRepo, recorder)
+			if state == models.AutomationPaused {
+				require.NoError(t, lifecycle.Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
+				require.Len(t, recorder.submitted, 1)
+				require.Equal(t, issueTask.ID, recorder.submitted[0].ID)
+				require.Equal(t, models.CategoryActive, recorder.submitted[0].Category)
+				require.NoError(t, lifecycle.Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
+				require.Len(t, recorder.submitted, 1, "activity-only issue Task must be resumed exactly once")
+			} else {
+				require.ErrorContains(t, lifecycle.Resume(ctx, h.project.ID, saved.Definition.Automation.ID), "archived automation cannot be resumed")
+				require.Empty(t, recorder.submitted)
+			}
+		})
+	}
+}
+
+func TestAutomationPauseAndResumeGenericActivityOnlyCreatedTask(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Generic activity child lifecycle")
+	ctx := context.Background()
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web",
+		Candidate: customTaskOnlyCandidate("Generic activity child lifecycle", "Keep the definition task in Backlog.", models.CategoryBacklog)})
+	require.NoError(t, err)
+	child := seedActivityOnlyAutomationIssueTask(t, h, saved.Definition, "root", models.CategoryActive)
+	_, err = h.db.ExecContext(ctx, `UPDATE automation_activities SET activity_key = 'execution:generic:create-task'
+		WHERE id = (SELECT activity_id FROM automation_activity_resources WHERE resource_type = 'task' AND resource_id = ?)`, child.ID)
+	require.NoError(t, err)
+
+	require.NoError(t, h.lifecycle.Pause(ctx, h.project.ID, saved.Definition.Automation.ID))
+	stored, err := h.taskRepo.GetByID(ctx, child.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, stored.Category)
+	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	require.NoError(t, NewAutomationLifecycleService(h.automationRepo, h.scheduleRepo, recorder).Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
+	require.Len(t, recorder.submitted, 1)
+	require.Equal(t, child.ID, recorder.submitted[0].ID)
+}
+
+func TestAutomationDispatchClaimRejectsCurrentActivityTaskAfterLifecycleDeactivation(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Activity issue dispatch gate")
+	ctx := context.Background()
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web",
+		Candidate: customTaskOnlyCandidate("Activity issue dispatch gate", "Keep the definition task in Backlog.", models.CategoryBacklog)})
+	require.NoError(t, err)
+	issueTask := seedActivityOnlyAutomationIssueTask(t, h, saved.Definition, "root", models.CategoryActive)
+
+	// Simulate Pause winning the lifecycle/claim serialization point while an
+	// already queued Task still carries its pre-Pause Active snapshot. The final
+	// dispatch gate must fail closed even without relying on queue pruning.
+	_, err = h.db.ExecContext(ctx, `UPDATE automations SET lifecycle_state = 'paused' WHERE id = ? AND project_id = ?`,
+		saved.Definition.Automation.ID, h.project.ID)
+	require.NoError(t, err)
+	claim, claimed, err := h.taskRepo.ClaimTaskForDispatch(ctx, issueTask.ID)
+	require.NoError(t, err)
+	require.False(t, claimed)
+	require.NotNil(t, claim)
+	stored, err := h.taskRepo.GetByID(ctx, issueTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, stored.Category)
+	require.Equal(t, models.StatusPending, stored.Status)
+}
+
+func TestAutomationSaveReplacesLegacyRetainedDraftGraph(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Legacy retained draft Save")
+	ctx := context.Background()
+	candidate := customTaskOnlyCandidate("Legacy retained draft Save", "Run current behavior.", models.CategoryBacklog)
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	_, err = h.db.ExecContext(ctx, `INSERT INTO automation_versions
+		(id, project_id, automation_id, version, state, source, adapter_key)
+		VALUES ('legacy-failed-draft', ?, ?, 2, 'draft', 'manual', 'custom')`, h.project.ID, first.Definition.Automation.ID)
+	require.NoError(t, err)
+
+	candidate.Description = "Replacement behavior."
+	replacement, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID,
+		AutomationID: first.Definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.NotEqual(t, first.Definition.Version.ID, replacement.Definition.Version.ID)
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE automation_id = ?`, first.Definition.Automation.ID))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE id = 'legacy-failed-draft'`))
+	require.Equal(t, 1, replacement.Definition.Version.Version)
+}
+
 func TestAutomationSavePreservesScheduleTimingWhenCadenceIsUnchanged(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Preserve schedule timing")
 	ctx := context.Background()

@@ -83,6 +83,72 @@ func TestMigration124_BackfillsOnlyFeatureOwnedAutomationIssueTasks(t *testing.T
 	}
 }
 
+func TestMigration125_RemovesLegacyDraftGraphsAndUnsavedAutomationShells(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automation-current-graph-125.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 124); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-125', 'Migration 125', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+			VALUES ('saved-automation-125', 'project-125', 'saved-125', 'Saved', 'custom', 'active');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key, published_at)
+			VALUES ('published-version-125', 'project-125', 'saved-automation-125', 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP);
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('failed-draft-version-125', 'project-125', 'saved-automation-125', 2, 'draft', 'manual', 'custom');
+		UPDATE automations SET published_version_id = 'published-version-125' WHERE id = 'saved-automation-125';
+		INSERT INTO automation_graph_metadata (version_id, project_id, automation_id, candidate_json)
+			VALUES ('failed-draft-version-125', 'project-125', 'saved-automation-125', '{"schema_version":1}');
+
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+			VALUES ('draft-shell-125', 'project-125', 'draft-125', 'Unsaved draft', 'custom', 'draft');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('draft-shell-version-125', 'project-125', 'draft-shell-125', 1, 'draft', 'manual', 'custom');
+		INSERT INTO automation_graph_metadata (version_id, project_id, automation_id, candidate_json)
+			VALUES ('draft-shell-version-125', 'project-125', 'draft-shell-125', '{"schema_version":1}');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 125); err != nil {
+		t.Fatal(err)
+	}
+
+	var graphCount, version, draftShells, retainedMetadata, admissionTable int
+	if err := db.QueryRow(`SELECT COUNT(*), MIN(version) FROM automation_versions WHERE automation_id = 'saved-automation-125'`).Scan(&graphCount, &version); err != nil {
+		t.Fatal(err)
+	}
+	if graphCount != 1 || version != 1 {
+		t.Fatalf("saved Automation graphs = %d at version %d, want exactly one current graph at version 1", graphCount, version)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automations WHERE id = 'draft-shell-125'`).Scan(&draftShells); err != nil {
+		t.Fatal(err)
+	}
+	if draftShells != 0 {
+		t.Fatalf("unsaved draft Automation shells = %d, want 0", draftShells)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_graph_metadata WHERE version_id IN ('failed-draft-version-125','draft-shell-version-125')`).Scan(&retainedMetadata); err != nil {
+		t.Fatal(err)
+	}
+	if retainedMetadata != 0 {
+		t.Fatalf("retained legacy draft metadata = %d, want 0", retainedMetadata)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'automation_paused_task_admissions'`).Scan(&admissionTable); err != nil {
+		t.Fatal(err)
+	}
+	if admissionTable != 1 {
+		t.Fatal("automation_paused_task_admissions table was not created")
+	}
+}
+
 func TestMigration112_BackfillsOperationalAlertsWithoutInferringProject(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "alerts-112.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -193,8 +259,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 124 {
-		t.Fatalf("max goose version = %d, want 124", maxVersion)
+	if maxVersion != 125 {
+		t.Fatalf("max goose version = %d, want 125", maxVersion)
 	}
 }
 
@@ -345,8 +411,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 124 {
-		t.Fatalf("max goose version = %d, want 124", maxVersion)
+	if maxVersion != 125 {
+		t.Fatalf("max goose version = %d, want 125", maxVersion)
 	}
 }
 
@@ -832,8 +898,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 124 {
-		t.Fatalf("max goose version = %d, want 124", maxVersion)
+	if maxVersion != 125 {
+		t.Fatalf("max goose version = %d, want 125", maxVersion)
 	}
 }
 
@@ -1184,8 +1250,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 124 {
-		t.Fatalf("max goose version = %d, want 124", maxVersion)
+	if maxVersion != 125 {
+		t.Fatalf("max goose version = %d, want 125", maxVersion)
 	}
 }
 

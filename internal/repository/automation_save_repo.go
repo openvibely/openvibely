@@ -161,7 +161,10 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 
 	graphSequence := 1
 	if in.ExpectedCurrentGraphID != "" {
-		graphSequence = 2
+		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) + 1
+			FROM automation_versions WHERE project_id = ? AND automation_id = ?`, in.ProjectID, in.AutomationID).Scan(&graphSequence); err != nil {
+			return nil, nil, fmt.Errorf("selecting current Automation graph sequence: %w", err)
+		}
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO automation_versions
 		(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
@@ -385,8 +388,8 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		if err := backfillLegacyGitHubIssueTaskOrigins(ctx, conn, in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID); err != nil {
 			return nil, nil, err
 		}
-		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions WHERE id = ? AND automation_id = ? AND project_id = ?`,
-			in.ExpectedCurrentGraphID, in.AutomationID, in.ProjectID); err != nil {
+		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions WHERE id <> ? AND automation_id = ? AND project_id = ?`,
+			in.GraphID, in.AutomationID, in.ProjectID); err != nil {
 			return nil, nil, err
 		}
 		if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET version = 1 WHERE id = ? AND automation_id = ? AND project_id = ?`,

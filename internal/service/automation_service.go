@@ -261,7 +261,7 @@ func NewAutomationGraphService(repo *repository.AutomationRepo) *AutomationGraph
 }
 
 func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]models.AutomationCard, error) {
-	automations, err := s.repo.ListByProject(ctx, projectID, 100)
+	automations, err := s.repo.ListSavedByProject(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}

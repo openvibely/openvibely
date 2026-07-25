@@ -585,6 +585,54 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 	if len(automationContext.Bindings) == 0 && IsAutomationTaskCreatedVia(task.CreatedVia) {
 		automationContext = models.AutomationContext{ProjectID: task.ProjectID, OriginTask: true}
 	}
+	checkedBindings := map[string]bool{}
+	for _, binding := range automationContext.Bindings {
+		bindingKey := binding.AutomationID + "\x00" + binding.VersionID
+		if checkedBindings[bindingKey] {
+			continue
+		}
+		checkedBindings[bindingKey] = true
+		var lifecycle models.AutomationLifecycleState
+		err := conn.QueryRowContext(ctx, `SELECT lifecycle_state FROM automations
+			WHERE project_id = ? AND id = ? AND published_version_id = ?`, task.ProjectID, binding.AutomationID, binding.VersionID).Scan(&lifecycle)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, false, fmt.Errorf("loading Automation lifecycle for dispatch claim: %w", err)
+		}
+		if lifecycle == models.AutomationActive {
+			continue
+		}
+		if lifecycle == models.AutomationPaused && task.Category == models.CategoryActive {
+			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_paused_task_admissions
+				(task_id, project_id, automation_id, version_id)
+				SELECT ?, ?, ?, ? WHERE EXISTS (
+					SELECT 1 FROM automation_activity_resources resource
+					JOIN automation_activities activity ON activity.id = resource.activity_id
+					WHERE resource.resource_type = 'task' AND resource.resource_id = ? AND resource.relation = 'child'
+						AND activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+						AND activity.activity_type = 'create_task')
+				ON CONFLICT(task_id) DO NOTHING`, task.ID, task.ProjectID, binding.AutomationID, binding.VersionID,
+				task.ID, task.ProjectID, binding.AutomationID, binding.VersionID); err != nil {
+				return nil, false, fmt.Errorf("preserving paused Automation task admission: %w", err)
+			}
+		} else if lifecycle == models.AutomationArchived {
+			if _, err := conn.ExecContext(ctx, `DELETE FROM automation_paused_task_admissions WHERE task_id = ?`, task.ID); err != nil {
+				return nil, false, fmt.Errorf("removing archived Automation task admission: %w", err)
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'backlog', updated_at = datetime('now')
+			WHERE id = ? AND project_id = ? AND status = 'pending' AND category IN ('active','scheduled')`, task.ID, task.ProjectID); err != nil {
+			return nil, false, fmt.Errorf("demoting inactive Automation task before dispatch: %w", err)
+		}
+		task.Category = models.CategoryBacklog
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		committed = true
+		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
+	}
 	result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'running', updated_at = datetime('now')
 		WHERE id = ? AND status = 'pending' AND category IN ('active','scheduled')
 		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`, id)

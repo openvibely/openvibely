@@ -136,6 +136,7 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 	}
 
 	admittedTaskIDs := []string{}
+	admittedTaskSet := map[string]bool{}
 	nodesByKey := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
 	for _, node := range candidate.Nodes {
 		nodesByKey[node.Key] = node
@@ -186,7 +187,53 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 			WHERE id = ? AND project_id = ? AND category = 'backlog' AND status = 'pending'`, taskID, projectID); err != nil {
 			return nil, err
 		}
-		admittedTaskIDs = append(admittedTaskIDs, taskID)
+		if !admittedTaskSet[taskID] {
+			admittedTaskSet[taskID] = true
+			admittedTaskIDs = append(admittedTaskIDs, taskID)
+		}
+	}
+
+	activityRows, err := conn.QueryContext(ctx, `SELECT admission.task_id
+		FROM automation_paused_task_admissions admission
+		JOIN tasks task ON task.id = admission.task_id AND task.project_id = admission.project_id
+		WHERE admission.project_id = ? AND admission.automation_id = ? AND admission.version_id = ?
+			AND task.category = 'backlog' AND task.status = 'pending'
+			AND EXISTS (
+				SELECT 1 FROM automation_activity_resources resource
+				JOIN automation_activities activity ON activity.id = resource.activity_id
+				WHERE resource.resource_type = 'task' AND resource.resource_id = admission.task_id AND resource.relation = 'child'
+					AND activity.project_id = admission.project_id AND activity.automation_id = admission.automation_id
+					AND activity.version_id = admission.version_id AND activity.activity_type = 'create_task')
+		ORDER BY admission.created_at, admission.task_id`, projectID, automationID, versionID.String)
+	if err != nil {
+		return nil, err
+	}
+	var activityTaskIDs []string
+	for activityRows.Next() {
+		var taskID string
+		if err := activityRows.Scan(&taskID); err != nil {
+			activityRows.Close()
+			return nil, err
+		}
+		activityTaskIDs = append(activityTaskIDs, taskID)
+	}
+	if err := activityRows.Close(); err != nil {
+		return nil, err
+	}
+	for _, taskID := range activityTaskIDs {
+		result, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'active', updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND project_id = ? AND category = 'backlog' AND status = 'pending'`, taskID, projectID)
+		if err != nil {
+			return nil, err
+		}
+		if affected, _ := result.RowsAffected(); affected == 1 && !admittedTaskSet[taskID] {
+			admittedTaskSet[taskID] = true
+			admittedTaskIDs = append(admittedTaskIDs, taskID)
+		}
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM automation_paused_task_admissions
+		WHERE project_id = ? AND automation_id = ?`, projectID, automationID); err != nil {
+		return nil, err
 	}
 	if _, err := conn.ExecContext(ctx, `UPDATE automation_trigger_owners SET ownership_state = 'active', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND automation_id = ?`, projectID, automationID); err != nil {
@@ -262,11 +309,34 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 		WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ?)`, projectID, automationID); err != nil {
 		return err
 	}
+	if state == models.AutomationPaused {
+		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_paused_task_admissions
+			(task_id, project_id, automation_id, version_id)
+			SELECT DISTINCT task.id, task.project_id, activity.automation_id, activity.version_id
+			FROM tasks task
+			JOIN automation_activity_resources resource ON resource.resource_type = 'task'
+				AND resource.resource_id = task.id AND resource.relation = 'child'
+			JOIN automation_activities activity ON activity.id = resource.activity_id
+			WHERE task.project_id = ? AND task.category = 'active' AND task.status = 'pending'
+				AND activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+				AND activity.activity_type = 'create_task'
+			ON CONFLICT(task_id) DO NOTHING`, projectID, projectID, automationID, published.String); err != nil {
+			return err
+		}
+	} else if _, err := conn.ExecContext(ctx, `DELETE FROM automation_paused_task_admissions
+		WHERE project_id = ? AND automation_id = ?`, projectID, automationID); err != nil {
+		return err
+	}
 	if _, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'backlog', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND category = 'active' AND status = 'pending'
-		  AND id IN (SELECT resource_id FROM automation_definition_resources
-			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND resource_type = 'task')`,
-		projectID, projectID, automationID, published.String); err != nil {
+		  AND (id IN (SELECT resource_id FROM automation_definition_resources
+			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND resource_type = 'task')
+		  OR id IN (SELECT resource.resource_id FROM automation_activity_resources resource
+			JOIN automation_activities activity ON activity.id = resource.activity_id
+			WHERE resource.resource_type = 'task' AND resource.relation = 'child'
+				AND activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+				AND activity.activity_type = 'create_task'))`,
+		projectID, projectID, automationID, published.String, projectID, automationID, published.String); err != nil {
 		return err
 	}
 	if state == models.AutomationArchived {

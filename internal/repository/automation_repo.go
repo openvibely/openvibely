@@ -49,6 +49,27 @@ func (r *AutomationRepo) ListByProject(ctx context.Context, projectID string, li
 	return out, rows.Err()
 }
 
+func (r *AutomationRepo) ListSavedByProject(ctx context.Context, projectID string) ([]models.Automation, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		created_via, created_at, updated_at, archived_at
+		FROM automations WHERE project_id = ? AND published_version_id IS NOT NULL
+		ORDER BY updated_at DESC, id`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing saved automations: %w", err)
+	}
+	defer rows.Close()
+	var out []models.Automation
+	for rows.Next() {
+		var a models.Automation
+		if err := scanAutomation(rows, &a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 func (r *AutomationRepo) GetByStableKey(ctx context.Context, projectID, stableKey string) (*models.Automation, error) {
 	var a models.Automation
 	err := scanAutomation(r.db.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
@@ -115,7 +136,7 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		}
 		if same {
 			if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions
-						WHERE project_id = ? AND automation_id = ? AND id <> ? AND state = 'published'`, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
+							WHERE project_id = ? AND automation_id = ? AND id <> ?`, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
 				return nil, false, fmt.Errorf("removing retained automation graphs: %w", err)
 			}
 			if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET version = 1, state = 'published'
@@ -306,7 +327,7 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		WHERE id = ? AND project_id = ?`, effectiveLifecycle, versionID, effectiveLifecycle, a.ID, in.ProjectID); err != nil {
 		return nil, false, err
 	}
-	if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions WHERE project_id = ? AND automation_id = ? AND id <> ? AND state = 'published'`, in.ProjectID, a.ID, versionID); err != nil {
+	if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions WHERE project_id = ? AND automation_id = ? AND id <> ?`, in.ProjectID, a.ID, versionID); err != nil {
 		return nil, false, err
 	}
 	if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET version = 1 WHERE project_id = ? AND automation_id = ? AND id = ?`, in.ProjectID, a.ID, versionID); err != nil {
