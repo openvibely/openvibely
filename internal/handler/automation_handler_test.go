@@ -625,7 +625,7 @@ func issueCodesHandler(candidate models.AutomationDraftCandidate, drafts *servic
 	return codes
 }
 
-func TestAutomationBuilderWebSavePublishesImmediatelyAndIsProjectScoped(t *testing.T) {
+func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Builder Project").Build()
 	other := tc.CreateProject().WithName("Builder Other").Build()
@@ -658,9 +658,29 @@ func TestAutomationBuilderWebSavePublishesImmediatelyAndIsProjectScoped(t *testi
 	require.Contains(t, newPartial.Body.String(), `id="automation-new"`)
 	require.NotContains(t, newPartial.Body.String(), "<!DOCTYPE html>")
 
-	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterVisionDriver},
 	}).Execute()
+	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+	require.Contains(t, preview.Body.String(), `id="automation-builder"`)
+	require.Contains(t, preview.Body.String(), "This template design is browser-local")
+	require.Empty(t, preview.Header().Get("HX-Redirect"), "selecting a template must remain browser-local until Save changes")
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Zero(t, tableCountHandler(t, tc, "tasks"))
+	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+
+	candidate := automationCandidateFromResponse(t, preview)
+	rawCandidate, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	saveValues := url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"}, "candidate_json": {string(rawCandidate)}, "save_changes": {"true"},
+	}
+	for _, node := range candidate.Nodes {
+		if enabled, ok := node.Config["enabled"].(bool); ok && enabled {
+			saveValues.Set("node_"+node.Key+"_enabled", "true")
+		}
+	}
+	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(saveValues).Execute()
 	require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
 	var automationID, versionID string
 	require.NoError(t, tc.db.QueryRow(`SELECT id, published_version_id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &versionID))

@@ -63,7 +63,7 @@ The supported creation paths are:
 - `Blank`, using the full supported custom builder;
 - Chat, using `plan_automation_save` followed by later-confirmed `save_automation`.
 
-Template creation is direct: choosing a maintained template and selecting `Use template` validates and atomically creates it, then opens Live. Describe It and Blank remain browser-local until `Save changes`.
+Template, Describe It, and Blank all load a graph into browser memory and create nothing until `Save changes`. `Use template` opens the canonical maintained graph in the same builder so the user can review or customize it before the atomic Save.
 
 Describe It receives only surfaced, project-scoped, secret-free capabilities and no mutation tools. Invalid or unsupported generated graphs remain visible as errors and create no resources.
 

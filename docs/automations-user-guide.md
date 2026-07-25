@@ -20,7 +20,7 @@ Open `/automations`, select `New Automation`, and choose how to start:
 | Describe It | Describe the result you want and review a generated browser-local graph. |
 | Blank | Build a custom graph from an empty canvas. |
 
-Templates provide supported starting points. Selecting `Use template` validates the maintained graph, creates the Automation and its required Tasks and schedules in one operation, and opens its Live graph; invalid setup creates nothing. Blank and Describe It use the same configurable graph builder and Save rules. The GitHub SDLC template owns complete Offering Manager, finder, Dev Inbox, and Loop Auditor prompts plus their cadences; it works without the bootstrap skill and adds saved graph identity, lifecycle controls, and Live visualization over the Tasks and Schedules it creates.
+Templates provide supported starting points. Selecting `Use template` loads the maintained graph into the browser-local builder without creating an Automation, Task, or schedule. Review or customize it, then select `Save changes`; Template, Blank, and Describe It use the same builder and atomic Save rules. The GitHub SDLC template owns complete Offering Manager, finder, Dev Inbox, and Loop Auditor prompts plus their cadences; it works without the bootstrap skill and adds saved graph identity, lifecycle controls, and Live visualization over the Tasks and Schedules it creates on Save.
 
 ## Build the Graph
 

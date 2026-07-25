@@ -19,7 +19,7 @@ The supported creation paths are:
 - `Blank`, using the open custom builder.
 - Chat, using `plan_automation_save` followed by later-confirmed `save_automation`.
 
-Template creation is direct: `Use template` validates the canonical candidate, atomically creates the Automation and resources, and redirects to Live. Describe It, Blank, and Edit open browser-local graphs and apply them only on `Save changes`. All surfaces use the same candidate schema, capability validation, atomic Save service, and safety boundaries. Maintained setup registration is restricted to Native and GitHub adapters. Vision Driver remains available through explicit template creation and Save.
+Template, Describe It, Blank, and Edit all open browser-local graphs and apply them only on `Save changes`. `Use template` loads the canonical maintained candidate into the same builder without creating durable rows. All surfaces use the same candidate schema, capability validation, atomic Save service, and safety boundaries. Maintained setup registration is restricted to Native and GitHub adapters. Vision Driver remains available through explicit template creation and Save.
 
 Opening a web builder creates no Automation, graph row, Task, Scheduler row, Alert, GitHub issue, execution, or other runtime resource. An invalid Save returns the submitted browser-local candidate with visible setup errors and no resource effects.
 

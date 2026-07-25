@@ -81,9 +81,6 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		return err
 	}
 	page := models.AutomationBuilderPage{Result: *result, Source: source}
-	if source == "template" && !hasPostedCandidate {
-		return h.saveAutomationBuilderCandidate(c, projectID, page)
-	}
 	if !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
