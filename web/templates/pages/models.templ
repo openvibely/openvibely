@@ -1375,15 +1375,19 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							});
 						}
 
-							function applyMixtureConfig(raw) {
-								var cfg = {};
-								try { cfg = raw ? JSON.parse(raw) : {}; } catch(e) { cfg = {}; }
-								document.getElementById('model_mixture_enabled').checked = cfg.enabled !== false;
-								document.getElementById('model_mixture_aggregator').value = (cfg.aggregator && cfg.aggregator.agent_config_id) || '';
-								var selectedIDs = [];
-								(cfg.reference_models || []).forEach(function(ref) { if (ref.agent_config_id) selectedIDs.push(ref.agent_config_id); });
-								renderMixtureReferenceOptions(selectedIDs);
-								document.getElementById('model_mixture_reference_temperature').value = (cfg.reference_temperature || 0.6).toString();							document.getElementById('model_mixture_aggregator_temperature').value = (cfg.aggregator_temperature || 0.4).toString();
+								function mixtureConfigValue(value, fallback) {
+									return value === undefined || value === null ? fallback : value;
+								}
+
+								function applyMixtureConfig(raw) {
+									var cfg = {};
+									try { cfg = raw ? JSON.parse(raw) : {}; } catch(e) { cfg = {}; }
+									document.getElementById('model_mixture_enabled').checked = cfg.enabled !== false;
+									document.getElementById('model_mixture_aggregator').value = (cfg.aggregator && cfg.aggregator.agent_config_id) || '';
+									var selectedIDs = [];
+									(cfg.reference_models || []).forEach(function(ref) { if (ref.agent_config_id) selectedIDs.push(ref.agent_config_id); });
+									renderMixtureReferenceOptions(selectedIDs);
+									document.getElementById('model_mixture_reference_temperature').value = mixtureConfigValue(cfg.reference_temperature, 0.6).toString();							document.getElementById('model_mixture_aggregator_temperature').value = mixtureConfigValue(cfg.aggregator_temperature, 0.4).toString();
 							document.getElementById('model_mixture_timeout').value = (cfg.reference_timeout_seconds || 90).toString();
 							document.getElementById('model_mixture_max_workers').value = (cfg.max_reference_workers || Math.min(8, Math.max(1, (cfg.reference_models || []).length))).toString();
 							updateMixtureCostWarning();
