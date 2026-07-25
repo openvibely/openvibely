@@ -98,6 +98,10 @@ type streamingResponseParams struct {
 	steeringHistoryStarted bool
 	steeringOutputCursor   string
 	lifecycleUserMessage   string
+
+	// Tests that inspect steering recovery before a later queued turn starts
+	// suppress the asynchronous promotion launched during finalization.
+	suppressQueuedTurnPromotion bool
 }
 
 func streamingTransportScope(params streamingResponseParams) string {
@@ -1096,7 +1100,9 @@ func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output s
 			IsTaskFollowup:  params.IsTaskFollowup,
 		})
 	}
-	go h.startNextQueuedTurnAfter(context.Background(), params, "")
+	if !params.suppressQueuedTurnPromotion {
+		go h.startNextQueuedTurnAfter(context.Background(), params, "")
+	}
 }
 
 func (h *Handler) resolveTaskAgentDefinitionForTask(ctx context.Context, taskID string, current *models.Agent) *models.Agent {
