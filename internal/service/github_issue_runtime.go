@@ -240,7 +240,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				if _, projectionErr := repairAutomationGitHubIssueProjection(opts, repo, req.Title, dedupClaim); projectionErr != nil {
 					return "", fmt.Errorf("%w: recording created GitHub issue #%d projection: %v", repository.ErrAutomationExternalReconciliation, issue.Number, projectionErr)
 				}
-			} else if err := recordGitHubIssueCreated(ctx, opts, repo, issue, activityKey); err != nil {
+			} else if _, err := recordGitHubIssueCreated(ctx, opts, repo, issue, activityKey); err != nil {
 				return "", err
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue})
@@ -736,8 +736,12 @@ func repairAutomationGitHubIssueProjection(opts githubIssueRuntimeOptions, repo 
 	defer cancel()
 	projectionIssue := githubIssueFromCanonicalResource(githubIssueResourceID(repo, claim.IssueNumber))
 	projectionIssue.Title = strings.TrimSpace(title)
-	if err := recordGitHubIssueCreated(ctx, opts, repo, projectionIssue, claim.OwnerToken); err != nil {
+	recordedBindings, err := recordGitHubIssueCreated(ctx, opts, repo, projectionIssue, claim.OwnerToken)
+	if err != nil {
 		return nil, err
+	}
+	if recordedBindings != len(claim.Source.Context.Bindings) {
+		return nil, fmt.Errorf("expected GitHub issue projection for %d source binding(s), recorded %d", len(claim.Source.Context.Bindings), recordedBindings)
 	}
 	return githubIssueFromCanonicalResource(githubIssueResourceID(repo, claim.IssueNumber)), nil
 }
@@ -773,27 +777,31 @@ func githubIssueFromCanonicalResource(resourceID string) *GitHubIssue {
 	return &GitHubIssue{Number: number, URL: fmt.Sprintf("https://github.com/%s/issues/%d", parts[1], number)}
 }
 
-func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, issue *GitHubIssue, activityKey string) error {
+func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, issue *GitHubIssue, activityKey string) (int, error) {
 	if opts.AutomationRepo == nil || issue == nil {
-		return nil
+		return 0, nil
 	}
 	automationContext, ok := AutomationContextFromContext(ctx)
 	if !ok || automationContext.ProjectID != opts.ProjectID {
-		return nil
+		return 0, nil
 	}
 	taskID, executionID, _ := AutomationExecutionFromContext(ctx)
 	resourceID := githubIssueResourceID(repo, issue.Number)
+	recordedBindings := 0
 	for _, sourceBinding := range automationContext.Bindings {
 		issueNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, sourceBinding.NodeID, "create_github_issue", true)
 		if err != nil {
-			return err
+			return recordedBindings, err
 		}
 		if issueNode == nil {
 			continue
 		}
 		assignmentNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, issueNode.ID, "github_assignment", true)
-		if err != nil || assignmentNode == nil {
-			return err
+		if err != nil {
+			return recordedBindings, err
+		}
+		if assignmentNode == nil {
+			return recordedBindings, errors.New("expected GitHub issue assignment projection node is unavailable")
 		}
 		binding := sourceBinding
 		binding.NodeID = issueNode.ID
@@ -812,7 +820,7 @@ func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOption
 			ToNodeID: issueNode.ID, Transition: models.AutomationTransitionEntered,
 		})
 		if err != nil {
-			return err
+			return recordedBindings, err
 		}
 		binding.WorkItemID = item.ID
 		if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
@@ -821,10 +829,11 @@ func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOption
 			Resources: resources, EventKey: resourceID + ":created:assignment", FromNodeID: issueNode.ID,
 			ToNodeID: assignmentNode.ID, Transition: models.AutomationTransitionWaiting,
 		}); err != nil {
-			return err
+			return recordedBindings, err
 		}
+		recordedBindings++
 	}
-	return nil
+	return recordedBindings, nil
 }
 
 func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, issues []GitHubIssue) error {

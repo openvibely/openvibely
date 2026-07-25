@@ -40,6 +40,27 @@ type AutomationGitHubIssueDedupClaim struct {
 	Source      AutomationGitHubIssueDedupSource
 }
 
+func sameAutomationGitHubIssueDedupSource(left, right AutomationGitHubIssueDedupSource) bool {
+	if strings.TrimSpace(left.Context.ProjectID) != strings.TrimSpace(right.Context.ProjectID) ||
+		strings.TrimSpace(left.TaskID) != strings.TrimSpace(right.TaskID) ||
+		len(left.Context.Bindings) != len(right.Context.Bindings) {
+		return false
+	}
+	bindingCounts := make(map[string]int, len(left.Context.Bindings))
+	for _, binding := range left.Context.Bindings {
+		key := strings.TrimSpace(binding.AutomationID) + "\x00" + strings.TrimSpace(binding.VersionID) + "\x00" + strings.TrimSpace(binding.NodeID)
+		bindingCounts[key]++
+	}
+	for _, binding := range right.Context.Bindings {
+		key := strings.TrimSpace(binding.AutomationID) + "\x00" + strings.TrimSpace(binding.VersionID) + "\x00" + strings.TrimSpace(binding.NodeID)
+		if bindingCounts[key] == 0 {
+			return false
+		}
+		bindingCounts[key]--
+	}
+	return true
+}
+
 type AutomationProjectionEvent struct {
 	Context        models.AutomationContext
 	Binding        models.AutomationBinding
@@ -1660,6 +1681,9 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 			claim.Source = AutomationGitHubIssueDedupSource{}
 		}
 		if createdIssueNumber.Valid && createdIssueNumber.Int64 > 0 {
+			if !sameAutomationGitHubIssueDedupSource(claim.Source, source) {
+				return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("%w: completed GitHub issue belongs to a different Automation source", ErrAutomationExternalReconciliation)
+			}
 			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 				return AutomationGitHubIssueDedupClaim{}, err
 			}

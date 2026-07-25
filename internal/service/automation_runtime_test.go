@@ -1134,6 +1134,23 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Equal(t, 1, waitingReview)
 }
 
+func newAutomationGitHubIssueCausalContext(t *testing.T, fixture automationRuntimeFixture, definition *models.AutomationDefinition, task models.Task, nodeKey, occurrence string) context.Context {
+	t.Helper()
+	ctx := context.Background()
+	sourceNode := automationNodeByKey(t, definition, nodeKey)
+	var invocationID string
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `INSERT INTO automation_invocations
+		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
+		VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
+		definition.Automation.ID, definition.Version.ID, sourceNode.ID, fixture.schedule.ID, occurrence).Scan(&invocationID))
+	execution := models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: occurrence}
+	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+	binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
+		InvocationID: invocationID, NodeID: sourceNode.ID}
+	causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
+	return withAutomationExecution(causalCtx, task.ID, execution.ID)
+}
+
 func newAutomationGitHubIssueDedupHarness(t *testing.T, provider GitHubIssueRuntimeProvider) (automationRuntimeFixture, func(string) context.Context, func(context.Context, json.RawMessage) (string, error)) {
 	t.Helper()
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
@@ -1142,20 +1159,9 @@ func newAutomationGitHubIssueDedupHarness(t *testing.T, provider GitHubIssueRunt
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	fixture.project.RepoPath = t.TempDir()
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
-	bugFinder := automationNodeByKey(t, fixture.definition, "bug_finder")
 	newCausalContext := func(occurrence string) context.Context {
 		t.Helper()
-		var invocationID string
-		require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `INSERT INTO automation_invocations
-			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
-			VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
-			fixture.definition.Automation.ID, fixture.definition.Version.ID, bugFinder.ID, fixture.schedule.ID, occurrence).Scan(&invocationID))
-		execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: occurrence}
-		require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
-		binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
-			InvocationID: invocationID, NodeID: bugFinder.ID}
-		causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
-		return withAutomationExecution(causalCtx, fixture.task.ID, execution.ID)
+		return newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "bug_finder", occurrence)
 	}
 	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
 		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
@@ -1208,6 +1214,135 @@ func assertAutomationGitHubIssueProjection(t *testing.T, fixture automationRunti
 			AND p.state = 'waiting' AND wi.work_item_key = ?`, fixture.project.ID, fixture.definition.Automation.ID,
 		fixture.definition.Version.ID, resourceID).Scan(&waitingAssignment))
 	require.Equal(t, 1, waitingAssignment, "the issue must wait at the human assignment gate")
+}
+
+func replaceAutomationGitHubIssueGraph(t *testing.T, fixture automationRuntimeFixture) *models.AutomationDefinition {
+	t.Helper()
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	settingsRepo := repository.NewSettingsRepo(fixture.repo.DB())
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
+	githubAuthRepo := repository.NewGitHubAuthRepo(fixture.repo.DB())
+	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{
+		ProjectID: fixture.project.ID, GitHubLogin: "automation-bot", Enabled: true,
+	}))
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(fixture.repo, registry)
+	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+	validator := NewAutomationSaveValidator(registry, drafts)
+	validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
+	taskSvc := NewTaskService(fixture.taskRepo, repository.NewAttachmentRepo(fixture.repo.DB()), nil)
+	compiler := NewAutomationCompiler(fixture.repo, taskSvc, fixture.taskRepo, fixture.schedRepo, validator)
+	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: fixture.project.ID,
+		AutomationID: fixture.definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.NotEqual(t, fixture.definition.Version.ID, saved.Definition.Version.ID)
+	return saved.Definition
+}
+
+func TestAutomationGitHubIssueCreationRejectsCompletedClaimFromDifferentAutomation(t *testing.T) {
+	var createCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createCalls.Add(1)
+			return &GitHubIssue{Number: 93, URL: "https://github.com/example/runtime/issues/93", Title: req.Title, State: "open"}, nil
+		},
+	}
+	fixture, newFirstContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
+	ctx := context.Background()
+	secondTask, secondSchedule := automationTestTaskAndSchedule(t, fixture.taskRepo, fixture.schedRepo, fixture.project.ID, "Second GitHub Automation")
+	secondDefinition, _, err := NewAutomationRegistrationService(fixture.repo, NewAutomationAdapterRegistry()).Register(ctx, AutomationRegistrationRequest{
+		ProjectID: fixture.project.ID, AdapterKey: AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/runtime-second",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "dev_inbox", ResourceType: "schedule", ResourceID: secondSchedule.ID},
+			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: secondTask.ID},
+		},
+	})
+	require.NoError(t, err)
+	input := json.RawMessage(`{"title":"Cross Automation collision","body":"body"}`)
+
+	firstOutput, firstErr := createIssue(newFirstContext("cross-automation-first"), input)
+	require.NoError(t, firstErr)
+	require.Contains(t, firstOutput, `"Number":93`)
+	secondCtx := newAutomationGitHubIssueCausalContext(t, fixture, secondDefinition, secondTask, "bug_finder", "cross-automation-second")
+	_, secondErr := createIssue(secondCtx, json.RawMessage(`{"title":"  cross   automation COLLISION ","body":"different"}`))
+	require.ErrorIs(t, secondErr, repository.ErrAutomationExternalReconciliation)
+	require.ErrorContains(t, secondErr, "different Automation source")
+	require.Equal(t, int32(1), createCalls.Load(), "a source collision must neither reuse nor recreate the issue")
+	var secondActivities int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activities
+		WHERE project_id = ? AND automation_id = ? AND activity_type = 'create_github_issue'`,
+		fixture.project.ID, secondDefinition.Automation.ID).Scan(&secondActivities))
+	require.Zero(t, secondActivities, "the colliding Automation must not adopt the original issue projection")
+}
+
+func TestAutomationGitHubIssueCreationRejectsCompletedClaimAfterGraphReplacement(t *testing.T) {
+	var createCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createCalls.Add(1)
+			return &GitHubIssue{Number: 94, URL: "https://github.com/example/runtime/issues/94", Title: req.Title, State: "open"}, nil
+		},
+	}
+	fixture, newOriginalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
+	input := json.RawMessage(`{"title":"Replaced graph collision","body":"body"}`)
+	_, firstErr := createIssue(newOriginalContext("replacement-first"), input)
+	require.NoError(t, firstErr)
+	oldVersionID := fixture.definition.Version.ID
+	replacement := replaceAutomationGitHubIssueGraph(t, fixture)
+	var oldVersions int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_versions WHERE id = ?`, oldVersionID).Scan(&oldVersions))
+	require.Zero(t, oldVersions, "Save must delete the original graph before the retry")
+	replacementTaskID := automationResourceID(t, replacement, "bug_finder", "task")
+	replacementTask, err := fixture.taskRepo.GetByID(context.Background(), replacementTaskID)
+	require.NoError(t, err)
+	require.NotNil(t, replacementTask)
+
+	replacementCtx := newAutomationGitHubIssueCausalContext(t, fixture, replacement, *replacementTask, "bug_finder", "replacement-second")
+	_, retryErr := createIssue(replacementCtx, input)
+	require.ErrorIs(t, retryErr, repository.ErrAutomationExternalReconciliation)
+	require.ErrorContains(t, retryErr, "different Automation source")
+	require.Equal(t, int32(1), createCalls.Load(), "graph replacement must neither adopt nor recreate the original issue")
+}
+
+func TestAutomationGitHubIssueProjectionRepairRejectsDeletedSourceGraph(t *testing.T) {
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			return &GitHubIssue{Number: 95, URL: "https://github.com/example/runtime/issues/95", Title: req.Title, State: "open"}, nil
+		},
+	}
+	fixture, newOriginalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
+	title := "Deleted projection source"
+	_, firstErr := createIssue(newOriginalContext("deleted-source-first"), json.RawMessage(`{"title":"Deleted projection source","body":"body"}`))
+	require.NoError(t, firstErr)
+	fingerprint := githubIssueTitleFingerprint(title)
+	var ownerToken, sourceJSON string
+	var issueNumber int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT owner_token, projection_source_json, created_issue_number
+		FROM automation_github_issue_dedup_leases
+		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?`, fixture.project.ID, "example/runtime", fingerprint).
+		Scan(&ownerToken, &sourceJSON, &issueNumber))
+	var source repository.AutomationGitHubIssueDedupSource
+	require.NoError(t, json.Unmarshal([]byte(sourceJSON), &source))
+	replaceAutomationGitHubIssueGraph(t, fixture)
+
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
+		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider}
+	_, repairErr := repairAutomationGitHubIssueProjection(opts, &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, title,
+		repository.AutomationGitHubIssueDedupClaim{IssueNumber: issueNumber, OwnerToken: ownerToken, Source: source})
+	require.ErrorContains(t, repairErr, "expected GitHub issue projection")
 }
 
 func TestAutomationGitHubIssueCreationFailsClosedAfterAmbiguousProviderOutcome(t *testing.T) {
