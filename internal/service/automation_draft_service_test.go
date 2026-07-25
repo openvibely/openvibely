@@ -47,18 +47,30 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 	}
 }
 
-func TestGitHubSDLCTemplateUsesShippedBootstrapSkillPrompts(t *testing.T) {
-	shipped := shippedGitHubBootstrapPromptsForTest(t)
+func TestGitHubSDLCTemplateOwnsItsPrompts(t *testing.T) {
+	source, err := os.ReadFile("automation_github_sdlc_prompts.go")
+	require.NoError(t, err)
+	sourceText := string(source)
+	require.Contains(t, sourceText, "const githubSDLCDevInboxPrompt")
+	require.Contains(t, sourceText, "const githubSDLCOfferingManagerPrompt")
+	require.Contains(t, sourceText, "const githubSDLCFinderPrompt")
+	require.Contains(t, sourceText, "const githubSDLCLoopAuditorPrompt")
+	require.NotContains(t, sourceText, "builtinskills")
+	require.NotContains(t, sourceText, "SKILL.md")
+	require.NotContains(t, sourceText, "dev-inbox-execution-invariants.md")
+}
+
+func TestGitHubSDLCTemplateUsesAutomationOwnedPrompts(t *testing.T) {
 	candidate, err := NewAutomationDraftService(nil, NewAutomationAdapterRegistry()).TemplateCandidate(AutomationAdapterGitHubSDLC)
 	require.NoError(t, err)
 
-	rolesByNode := map[string]string{
-		"vision_suggestions":  "offering_manager",
-		"bug_finder":          "finder",
-		"optimization_finder": "finder",
-		"redundancy_finder":   "finder",
-		"dev_inbox":           "dev_inbox",
-		"auditor":             "loop_auditor",
+	promptsByNode := map[string]string{
+		"vision_suggestions":  githubSDLCOfferingManagerPrompt,
+		"bug_finder":          githubSDLCFinderPrompt,
+		"optimization_finder": githubSDLCFinderPrompt,
+		"redundancy_finder":   githubSDLCFinderPrompt,
+		"dev_inbox":           githubSDLCDevInboxPrompt,
+		"auditor":             githubSDLCLoopAuditorPrompt,
 	}
 	expectedCadence := map[string]struct {
 		repeatType string
@@ -71,49 +83,14 @@ func TestGitHubSDLCTemplateUsesShippedBootstrapSkillPrompts(t *testing.T) {
 		"dev_inbox":           {repeatType: string(models.RepeatHours), interval: 1},
 		"auditor":             {repeatType: string(models.RepeatWeekly), interval: 1},
 	}
-	for nodeKey, role := range rolesByNode {
+	for nodeKey, prompt := range promptsByNode {
 		node := automationDraftNodeByKey(t, candidate, nodeKey)
-		require.Equal(t, shipped[role], node.Config["prompt"], "%s must use the prompt shipped in the bootstrap skill", nodeKey)
-		require.Equal(t, shipped[role], automationCompiledTaskPrompt(candidate, node), "%s must persist the exact shipped prompt without custom-graph additions", nodeKey)
+		require.Equal(t, prompt, node.Config["prompt"], "%s must use the Automation template prompt", nodeKey)
+		require.Equal(t, prompt, automationCompiledTaskPrompt(candidate, node), "%s must persist the exact Automation template prompt without custom-graph additions", nodeKey)
 		require.NotContains(t, node.Config["prompt"], "references/dev-inbox-execution-invariants.md")
 		require.NotContains(t, node.Config["prompt"], "repository-wide current issue listing or search")
-		require.Equal(t, expectedCadence[nodeKey].repeatType, node.Config["repeat_type"], "%s cadence must match bootstrap setup", nodeKey)
+		require.Equal(t, expectedCadence[nodeKey].repeatType, node.Config["repeat_type"], "%s cadence must match the maintained template", nodeKey)
 		require.EqualValues(t, expectedCadence[nodeKey].interval, node.Config["repeat_interval"])
-	}
-}
-
-func shippedGitHubBootstrapPromptsForTest(t *testing.T) map[string]string {
-	t.Helper()
-	path := filepath.Join("..", "builtinskills", "builtin", "skills", "openvibely_github_autonomous_sdlc_bootstrap", "SKILL.md")
-	data, err := os.ReadFile(path)
-	require.NoError(t, err, "read the GitHub bootstrap skill shipped by OpenVibely")
-	body := string(data)
-
-	extractFence := func(heading string) string {
-		t.Helper()
-		marker := "## " + heading + "\n"
-		start := strings.Index(body, marker)
-		require.NotEqual(t, -1, start, "missing shipped skill section %s", heading)
-		fenceStart := strings.Index(body[start+len(marker):], "```text\n")
-		require.NotEqual(t, -1, fenceStart, "missing shipped prompt fence for %s", heading)
-		promptStart := start + len(marker) + fenceStart + len("```text\n")
-		fenceEnd := strings.Index(body[promptStart:], "\n```")
-		require.NotEqual(t, -1, fenceEnd, "missing shipped prompt closing fence for %s", heading)
-		return strings.TrimSpace(body[promptStart : promptStart+fenceEnd])
-	}
-
-	const auditorPrefix = "- `GitHub Loop Auditor`, weekly. "
-	auditorStart := strings.Index(body, auditorPrefix)
-	require.NotEqual(t, -1, auditorStart, "missing shipped Loop Auditor task description")
-	auditorStart += len(auditorPrefix)
-	auditorEnd := strings.IndexByte(body[auditorStart:], '\n')
-	require.NotEqual(t, -1, auditorEnd, "unterminated shipped Loop Auditor task description")
-
-	return map[string]string{
-		"dev_inbox":        extractFence("Prompt Pattern For Dev Inbox"),
-		"offering_manager": extractFence("Prompt Pattern For Offering Manager"),
-		"finder":           extractFence("Prompt Pattern For Bug / Optimization / Redundancy Finders"),
-		"loop_auditor":     strings.TrimSpace(body[auditorStart : auditorStart+auditorEnd]),
 	}
 }
 
