@@ -189,6 +189,44 @@ func TestSendCompletions_CompatibleBaseURLAuthAndUsage(t *testing.T) {
 	}
 }
 
+func TestSendCompletionsPreservesReasoningAcrossRequests(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"current thought\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	client := NewWithCompatibleAPIKey("test-key", srv.URL+"/v1", "", "")
+	client.SetCompletionsHistory([]CompletionsHistoryMessage{
+		{Role: "user", Content: "prior question"},
+		{Role: "assistant", Content: "prior answer", ReasoningContent: "prior thought"},
+	})
+	_, err := client.SendCompletions(context.Background(), "next question", &CompletionsOptions{DisableTools: true})
+	if err != nil {
+		t.Fatalf("SendCompletions: %v", err)
+	}
+
+	messages, _ := gotBody["messages"].([]any)
+	if len(messages) < 3 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	assistant, _ := messages[1].(map[string]any)
+	if assistant["reasoning_content"] != "prior thought" {
+		t.Fatalf("reasoning_content = %#v, want prior thought", assistant["reasoning_content"])
+	}
+	if got := client.LastCompletionsReasoningContent(); got != "current thought" {
+		t.Fatalf("LastCompletionsReasoningContent() = %q", got)
+	}
+}
+
 func TestSendCompletions_CompatibleBaseURLAllowsMissingAPIKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "" {

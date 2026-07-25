@@ -43,6 +43,9 @@ func TestExecutionRepo_CreateAndComplete(t *testing.T) {
 	if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "output text", "", 100, 500); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
+	if err := execRepo.UpdateReasoningContent(ctx, exec.ID, "private reasoning"); err != nil {
+		t.Fatalf("UpdateReasoningContent: %v", err)
+	}
 
 	// Verify
 	got, err := execRepo.GetByID(ctx, exec.ID)
@@ -54,6 +57,9 @@ func TestExecutionRepo_CreateAndComplete(t *testing.T) {
 	}
 	if got.Output != "output text" {
 		t.Errorf("expected Output=output text, got %q", got.Output)
+	}
+	if got.ReasoningContent != "private reasoning" {
+		t.Errorf("expected ReasoningContent=private reasoning, got %q", got.ReasoningContent)
 	}
 	if got.TokensUsed != 100 {
 		t.Errorf("expected TokensUsed=100, got %d", got.TokensUsed)

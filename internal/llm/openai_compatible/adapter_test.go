@@ -406,7 +406,6 @@ func TestAdapterToolCallReplaysToolResult(t *testing.T) {
 		if requests == 2 {
 			secondMessages, _ = reqBody["messages"].([]any)
 		}
-
 		w.Header().Set("Content-Type", "text/event-stream")
 		if requests == 1 {
 			_, _ = w.Write([]byte(
@@ -475,4 +474,17 @@ func TestAdapterToolCallReplaysToolResult(t *testing.T) {
 	if !foundReasoningMessage {
 		t.Fatalf("assistant reasoning content not replayed: %#v", secondMessages)
 	}
+}
+
+func TestBuildClientHistoryPreservesReasoningContent(t *testing.T) {
+	history := buildClientHistory([]models.Execution{{
+		PromptSent:       "question",
+		Output:           "answer",
+		ReasoningContent: "private thought",
+		Status:           models.ExecCompleted,
+	}})
+	require.Len(t, history, 2)
+	require.Equal(t, "assistant", history[1].Role)
+	require.Equal(t, "answer", history[1].Content)
+	require.Equal(t, "private thought", history[1].ReasoningContent)
 }

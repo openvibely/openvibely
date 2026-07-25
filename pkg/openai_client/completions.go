@@ -77,6 +77,7 @@ type completionsMessage struct {
 // SendCompletions sends a message using the /v1/chat/completions API with tool use.
 // This is the standard OpenAI API format (not Responses API).
 func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *CompletionsOptions) (*AgenticResponse, error) {
+	c.lastCompletionsReasoning = ""
 	if opts == nil {
 		opts = &CompletionsOptions{}
 	}
@@ -126,10 +127,11 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 			Content: opts.System,
 		})
 	}
-	for _, msg := range c.History {
+	for i, msg := range c.History {
 		messages = append(messages, completionsMessage{
-			Role:    msg.Role,
-			Content: msg.Content,
+			Role:             msg.Role,
+			Content:          msg.Content,
+			ReasoningContent: c.completionsReasoningByIndex[i],
 		})
 	}
 
@@ -176,6 +178,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
+	finalReasoningContent := ""
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		turnResult, err := c.sendCompletionsTurn(ctx, messages, tools, opts)
@@ -194,6 +197,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 		}
 
 		allText.WriteString(turnResult.text)
+		finalReasoningContent = turnResult.reasoningContent
 
 		// Add assistant message to history
 		if len(turnResult.toolCalls) > 0 {
@@ -271,6 +275,13 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	// Update client history
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
+	if c.completionsReasoningByIndex == nil {
+		c.completionsReasoningByIndex = make(map[int]string)
+	}
+	if finalReasoningContent != "" {
+		c.completionsReasoningByIndex[len(c.History)-1] = finalReasoningContent
+	}
+	c.lastCompletionsReasoning = finalReasoningContent
 
 	return result, nil
 }

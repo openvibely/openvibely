@@ -98,6 +98,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		ToolExecutor:     toolExecutor(ctx, workDir),
 		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate),
 	})
+	err = a.persistReasoningContent(ctx, req.ExecID, client, err)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
 	}
@@ -153,6 +154,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		OnToolUse:        streamToolUse(sw),
 		OnToolResult:     streamToolResult(sw),
 	})
+	err = a.persistReasoningContent(ctx, req.ExecID, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
@@ -170,7 +172,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
-	client.History = append(client.History, buildClientHistory(req.ChatHistory)...)
+	client.SetCompletionsHistory(buildClientHistory(req.ChatHistory))
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
 	if req.ChatMode == models.ChatModeOrchestrate {
@@ -205,6 +207,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		OnToolUse:        streamToolUse(sw),
 		OnToolResult:     streamToolResult(sw),
 	})
+	err = a.persistReasoningContent(ctx, req.ExecID, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
@@ -221,6 +224,24 @@ func compatibleTemperature(agent models.LLMConfig) float64 {
 		return openaiclient.OmittedTemperature()
 	}
 	return agent.Temperature
+}
+
+func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, client *openaiclient.Client, callErr error) error {
+	if a.execRepo == nil || strings.TrimSpace(execID) == "" || client == nil {
+		return callErr
+	}
+	reasoningContent := client.LastCompletionsReasoningContent()
+	if reasoningContent == "" {
+		return callErr
+	}
+	if err := a.execRepo.UpdateReasoningContent(context.WithoutCancel(ctx), execID, reasoningContent); err != nil {
+		if callErr != nil {
+			applog.Infof("[openai-compatible] preserve reasoning content after call error execution=%s: %v", execID, err)
+			return callErr
+		}
+		return fmt.Errorf("persist reasoning content: %w", err)
+	}
+	return callErr
 }
 
 func compatibleRequestExtras(agent models.LLMConfig) (map[string]string, map[string]interface{}, error) {
@@ -374,15 +395,19 @@ func planModeAllowsReadOnlyTool(name string) bool {
 	}
 }
 
-func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
+func buildClientHistory(chatHistory []models.Execution) []openaiclient.CompletionsHistoryMessage {
 	history := llmprompt.LimitChatHistory(chatHistory)
-	messages := make([]openaiclient.Message, 0, len(history)*2)
+	messages := make([]openaiclient.CompletionsHistoryMessage, 0, len(history)*2)
 	for _, exec := range history {
 		if exec.PromptSent != "" {
-			messages = append(messages, openaiclient.Message{Role: "user", Content: exec.PromptSent})
+			messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: exec.PromptSent})
 		}
 		if replay := llmprompt.ReplayAssistantContent(exec); replay != "" {
-			messages = append(messages, openaiclient.Message{Role: "assistant", Content: replay})
+			messages = append(messages, openaiclient.CompletionsHistoryMessage{
+				Role:             "assistant",
+				Content:          replay,
+				ReasoningContent: exec.ReasoningContent,
+			})
 		}
 	}
 	return messages

@@ -129,6 +129,14 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// CompletionsHistoryMessage is a conversation message for Chat Completions
+// providers that require reasoning content to be replayed verbatim.
+type CompletionsHistoryMessage struct {
+	Role             string
+	Content          string
+	ReasoningContent string
+}
+
 // SendOptions configures a single Send call.
 type SendOptions struct {
 	Model               string
@@ -163,11 +171,32 @@ type Client struct {
 	oauthRefreshExternallyManaged bool
 	responsesTransportState       *ResponsesTransportState
 	History                       []Message
+	completionsReasoningByIndex   map[int]string
+	lastCompletionsReasoning      string
 }
 
 // NewWithAPIKey creates a client using an API key.
 func NewWithAPIKey(apiKey string) *Client {
 	return newClient(&StoredAuth{APIKey: apiKey})
+}
+
+// SetCompletionsHistory replaces the client's conversation history, preserving
+// provider reasoning content for subsequent Chat Completions requests.
+func (c *Client) SetCompletionsHistory(messages []CompletionsHistoryMessage) {
+	c.History = make([]Message, 0, len(messages))
+	c.completionsReasoningByIndex = make(map[int]string)
+	for _, message := range messages {
+		c.History = append(c.History, Message{Role: message.Role, Content: message.Content})
+		if message.ReasoningContent != "" {
+			c.completionsReasoningByIndex[len(c.History)-1] = message.ReasoningContent
+		}
+	}
+}
+
+// LastCompletionsReasoningContent returns the reasoning content from the final
+// assistant turn of the most recent SendCompletions call.
+func (c *Client) LastCompletionsReasoningContent() string {
+	return c.lastCompletionsReasoning
 }
 
 // NewWithCompatibleAPIKey creates a client for an OpenAI-compatible endpoint.

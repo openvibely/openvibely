@@ -31,17 +31,17 @@ func (r *ExecutionRepo) DB() *sql.DB {
 	return r.db
 }
 
-const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
+const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, reasoning_content, error_message,
 		tokens_used, duration_ms, is_followup, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
 // executionSelectColumnsLight omits diff_output (substituting an empty string) so that
 // list/pagination queries don't load the potentially very large diff blob on every request.
 // The scan shape matches executionSelectColumns, so scanExecutionRow still works; the
 // resulting Execution will have DiffOutput == "".
-const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
+const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, reasoning_content, error_message,
 		tokens_used, duration_ms, is_followup, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
-const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.error_message,
+const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.reasoning_content, e.error_message,
 		e.tokens_used, e.duration_ms, e.is_followup, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
 
 func scanExecutionRow(scanner interface {
@@ -49,7 +49,7 @@ func scanExecutionRow(scanner interface {
 }) (models.Execution, error) {
 	var e models.Execution
 	err := scanner.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
-		&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup,
+		&e.Output, &e.ReasoningContent, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup,
 		&e.DiffOutput, &e.CliSessionID, &e.DispatchID, &e.StartedAt, &e.CompletedAt)
 	return e, err
 }
@@ -243,6 +243,15 @@ func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output stri
 		`UPDATE executions SET output = ? WHERE id = ?`, output, id)
 	if err != nil {
 		return fmt.Errorf("updating execution output: %w", err)
+	}
+	return nil
+}
+
+func (r *ExecutionRepo) UpdateReasoningContent(ctx context.Context, id, reasoningContent string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE executions SET reasoning_content = ? WHERE id = ?`, reasoningContent, id)
+	if err != nil {
+		return fmt.Errorf("updating execution reasoning content: %w", err)
 	}
 	return nil
 }
