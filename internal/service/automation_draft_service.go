@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/automationobs"
+	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -92,7 +93,11 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 	for _, node := range adapter.Nodes {
 		config := map[string]any{}
 		if node.AllowedResources["task"] {
-			config["prompt"] = defaultAutomationNodePrompt(adapter.Key, node.Role)
+			prompt, err := defaultAutomationNodePrompt(adapter.Key, node.Role)
+			if err != nil {
+				return models.AutomationDraftCandidate{}, err
+			}
+			config["prompt"] = prompt
 			config["category"] = string(models.CategoryBacklog)
 			config["priority"] = 2
 		}
@@ -105,7 +110,10 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 			if node.AllowedResources["task"] {
 				config["category"] = string(models.CategoryScheduled)
 			}
-			if strings.Contains(node.Key, "inbox") {
+			if node.Role == "loop_auditor" {
+				config["repeat_type"] = string(models.RepeatWeekly)
+				config["repeat_interval"] = 1
+			} else if strings.Contains(node.Key, "inbox") {
 				config["repeat_type"] = string(models.RepeatHours)
 				config["repeat_interval"] = 1
 			}
@@ -1149,8 +1157,11 @@ func adapterScheduleTarget(adapter AutomationAdapter, triggerKey string) string 
 	return ""
 }
 
-func defaultAutomationNodePrompt(adapterKey, role string) string {
-	return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " "))
+func defaultAutomationNodePrompt(adapterKey, role string) (string, error) {
+	if adapterKey == AutomationAdapterGitHubSDLC {
+		return builtinskills.GitHubSDLCRolePrompt(role)
+	}
+	return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " ")), nil
 }
 
 func (s *AutomationDraftService) PreviewCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {

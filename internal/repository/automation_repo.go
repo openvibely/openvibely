@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -134,7 +135,7 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		if publishedAdapter != in.AdapterKey {
 			return nil, false, fmt.Errorf("published automation adapter cannot change from %q to %q", publishedAdapter, in.AdapterKey)
 		}
-		same, err := registeredPublicationMatches(ctx, conn, *a.PublishedVersionID, in.AdapterKey, in.Resources)
+		same, err := registeredPublicationMatches(ctx, conn, *a.PublishedVersionID, in)
 		if err != nil {
 			return nil, false, err
 		}
@@ -452,12 +453,68 @@ func getAutomationByStableKeyQuery(ctx context.Context, q queryer, projectID, st
 	return &a, nil
 }
 
-func registeredPublicationMatches(ctx context.Context, q queryer, versionID, adapterKey string, bindings []models.AutomationResourceBinding) (bool, error) {
+func canonicalAutomationConfigJSON(value string) (string, error) {
+	if strings.TrimSpace(value) == "" {
+		value = "{}"
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(decoded)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func registeredPublicationMatches(ctx context.Context, q queryer, versionID string, publication models.AutomationRegisteredPublication) (bool, error) {
 	var existingAdapter string
 	if err := q.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions WHERE id = ?`, versionID).Scan(&existingAdapter); err != nil {
 		return false, err
 	}
-	if existingAdapter != adapterKey {
+	if existingAdapter != publication.AdapterKey {
+		return false, nil
+	}
+	desiredConfig := make(map[string]string, len(publication.Nodes))
+	for _, node := range publication.Nodes {
+		config, err := canonicalAutomationConfigJSON(node.ConfigJSON)
+		if err != nil {
+			return false, fmt.Errorf("normalize registered node %q configuration: %w", node.Key, err)
+		}
+		desiredConfig[node.Key] = config
+	}
+	nodeRows, err := q.QueryContext(ctx, `SELECT node_key, config_json FROM automation_nodes WHERE version_id = ? ORDER BY node_key`, versionID)
+	if err != nil {
+		return false, err
+	}
+	seenNodes := 0
+	for nodeRows.Next() {
+		var nodeKey, configJSON string
+		if err := nodeRows.Scan(&nodeKey, &configJSON); err != nil {
+			nodeRows.Close()
+			return false, err
+		}
+		expected, ok := desiredConfig[nodeKey]
+		if !ok {
+			nodeRows.Close()
+			return false, nil
+		}
+		actual, err := canonicalAutomationConfigJSON(configJSON)
+		if err != nil {
+			nodeRows.Close()
+			return false, err
+		}
+		if actual != expected {
+			nodeRows.Close()
+			return false, nil
+		}
+		seenNodes++
+	}
+	if err := nodeRows.Close(); err != nil {
+		return false, err
+	}
+	if seenNodes != len(desiredConfig) {
 		return false, nil
 	}
 	rows, err := q.QueryContext(ctx, `SELECT n.node_key, r.resource_type, r.resource_id, r.relation
@@ -475,8 +532,8 @@ func registeredPublicationMatches(ctx context.Context, q queryer, versionID, ada
 		}
 		existing = append(existing, strings.Join([]string{nodeKey, resourceType, resourceID, relation}, "\x00"))
 	}
-	requested := make([]string, 0, len(bindings))
-	for _, b := range bindings {
+	requested := make([]string, 0, len(publication.Resources))
+	for _, b := range publication.Resources {
 		relation := b.Relation
 		if relation == "" {
 			relation = "owned"

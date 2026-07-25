@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -45,6 +46,61 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 			require.NotEmpty(t, draftNode.Config["prompt"])
 		}
 	}
+}
+
+func TestGitHubSDLCTemplateUsesCanonicalBootstrapPrompts(t *testing.T) {
+	canonical := githubBootstrapPromptsForTest(t)
+	candidate, err := NewAutomationDraftService(nil, NewAutomationAdapterRegistry()).TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+
+	sectionsByNode := map[string]string{
+		"vision_suggestions":  "Offering Manager",
+		"bug_finder":          "Bug Finder / Optimization Finder / Redundancy Finder",
+		"optimization_finder": "Bug Finder / Optimization Finder / Redundancy Finder",
+		"redundancy_finder":   "Bug Finder / Optimization Finder / Redundancy Finder",
+		"dev_inbox":           "Dev Inbox",
+		"auditor":             "Loop Auditor",
+	}
+	expectedCadence := map[string]struct {
+		repeatType string
+		interval   int
+	}{
+		"vision_suggestions":  {repeatType: string(models.RepeatDaily), interval: 1},
+		"bug_finder":          {repeatType: string(models.RepeatDaily), interval: 1},
+		"optimization_finder": {repeatType: string(models.RepeatDaily), interval: 1},
+		"redundancy_finder":   {repeatType: string(models.RepeatDaily), interval: 1},
+		"dev_inbox":           {repeatType: string(models.RepeatHours), interval: 1},
+		"auditor":             {repeatType: string(models.RepeatWeekly), interval: 1},
+	}
+	for nodeKey, section := range sectionsByNode {
+		node := automationDraftNodeByKey(t, candidate, nodeKey)
+		require.Equal(t, canonical[section], node.Config["prompt"], "%s must use the bootstrap skill's canonical %s prompt", nodeKey, section)
+		require.Equal(t, canonical[section], automationCompiledTaskPrompt(candidate, node), "%s must persist the exact canonical prompt without custom-graph additions", nodeKey)
+		require.NotContains(t, node.Config["prompt"], "Run the ", "maintained GitHub tasks must not use generic role filler")
+		require.Equal(t, expectedCadence[nodeKey].repeatType, node.Config["repeat_type"], "%s cadence must match bootstrap setup", nodeKey)
+		require.EqualValues(t, expectedCadence[nodeKey].interval, node.Config["repeat_interval"])
+	}
+}
+
+func githubBootstrapPromptsForTest(t *testing.T) map[string]string {
+	t.Helper()
+	data, err := builtinskills.FS.ReadFile("builtin/skills/openvibely_github_autonomous_sdlc_bootstrap/templates/github-loop-prompts.md")
+	require.NoError(t, err, "the bootstrap skill must bundle its canonical prompt templates")
+	body := string(data)
+	sections := []string{"Loop Auditor", "Dev Inbox", "Offering Manager", "Bug Finder / Optimization Finder / Redundancy Finder"}
+	out := make(map[string]string, len(sections))
+	for _, section := range sections {
+		marker := "## " + section + "\n"
+		start := strings.Index(body, marker)
+		require.NotEqual(t, -1, start, "missing canonical prompt section %s", section)
+		fenceStart := strings.Index(body[start+len(marker):], "```text\n")
+		require.NotEqual(t, -1, fenceStart, "missing prompt fence for %s", section)
+		promptStart := start + len(marker) + fenceStart + len("```text\n")
+		fenceEnd := strings.Index(body[promptStart:], "\n```")
+		require.NotEqual(t, -1, fenceEnd, "missing closing prompt fence for %s", section)
+		out[section] = strings.TrimSpace(body[promptStart : promptStart+fenceEnd])
+	}
+	return out
 }
 
 func TestMaintainedTemplatesLeaveVisibleConnectorRunway(t *testing.T) {

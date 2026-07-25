@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -110,6 +111,67 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	foreignView, err := automationRepo.GetDefinition(ctx, other.ID, native.Automation.ID)
 	require.NoError(t, err)
 	require.Nil(t, foreignView)
+}
+
+func TestGitHubSDLCRegistrationHydratesBoundTaskPromptAcrossPause(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Registered GitHub prompt parity")
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
+
+	canonical := githubBootstrapPromptsForTest(t)["Dev Inbox"]
+	task := models.Task{ProjectID: project.ID, Title: "GitHub Dev Inbox", Category: models.CategoryScheduled, Priority: 3, Status: models.StatusPending, Prompt: canonical}
+	require.NoError(t, taskRepo.Create(ctx, &task))
+	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, &schedule))
+
+	definition, _, err := registration.Register(ctx, AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/prompt-parity",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: task.ID},
+			{NodeKey: "dev_inbox", ResourceType: "schedule", ResourceID: schedule.ID},
+		},
+	})
+	require.NoError(t, err)
+	request := AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/prompt-parity",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: task.ID},
+			{NodeKey: "dev_inbox", ResourceType: "schedule", ResourceID: schedule.ID},
+		},
+	}
+
+	// Simulate a graph registered by an older build, which bound the right Task
+	// but did not persist its behavior in the graph node configuration.
+	_, err = db.ExecContext(ctx, `UPDATE automation_nodes SET config_json = '{}' WHERE version_id = ? AND node_key = 'dev_inbox'`, definition.Version.ID)
+	require.NoError(t, err)
+	reconciled, _, err := registration.Register(ctx, request)
+	require.NoError(t, err)
+	require.NotEqual(t, definition.Version.ID, reconciled.Version.ID, "registration must replace an old empty graph config even when resource IDs are unchanged")
+	definition = reconciled
+
+	var config map[string]any
+	for _, node := range definition.Nodes {
+		if node.NodeKey == "dev_inbox" {
+			require.NoError(t, json.Unmarshal([]byte(node.ConfigJSON), &config))
+		}
+	}
+	require.Equal(t, canonical, config["prompt"], "registration must show the real skill-created Task prompt in the graph")
+	require.Equal(t, string(models.CategoryScheduled), config["category"])
+	require.EqualValues(t, task.Priority, config["priority"])
+	require.Equal(t, string(models.RepeatHours), config["repeat_type"])
+	require.EqualValues(t, 1, config["repeat_interval"])
+
+	require.NoError(t, automationRepo.SetAutomationLifecycle(ctx, project.ID, definition.Automation.ID, models.AutomationPaused))
+	storedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, canonical, storedTask.Prompt, "pausing must not alter the runtime Task prompt")
+	reopened, err := NewAutomationDraftService(automationRepo, NewAutomationAdapterRegistry()).PublishedCandidate(ctx, project.ID, definition.Automation.ID)
+	require.NoError(t, err)
+	require.Equal(t, canonical, automationDraftNodeByKey(t, reopened.Candidate, "dev_inbox").Config["prompt"])
 }
 
 func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecycle(t *testing.T) {

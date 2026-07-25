@@ -212,49 +212,50 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 		t.Fatalf("get working directory: %v", err)
 	}
 	repoRoot := filepath.Clean(filepath.Join(wd, "..", ".."))
-	skillPath := filepath.Join(repoRoot, "internal", "builtinskills", "builtin", SkillsDir, "openvibely_github_autonomous_sdlc_bootstrap", SkillFile)
-	body, err := os.ReadFile(skillPath)
+	skillRoot := filepath.Join(repoRoot, "internal", "builtinskills", "builtin", SkillsDir, "openvibely_github_autonomous_sdlc_bootstrap")
+	skillBody, err := os.ReadFile(filepath.Join(skillRoot, SkillFile))
 	if err != nil {
 		t.Fatalf("read built-in GitHub bootstrap skill: %v", err)
 	}
-	text := string(body)
+	promptBody, err := os.ReadFile(filepath.Join(skillRoot, "templates", "github-loop-prompts.md"))
+	if err != nil {
+		t.Fatalf("read canonical GitHub loop prompts: %v", err)
+	}
+
+	skillText := string(skillBody)
 	for _, want := range []string{
 		"visible scheduled OpenVibely tasks",
-		"generic GitHub runtime tools",
 		"Do not create hidden daemon or poller services",
+		"templates/github-loop-prompts.md",
+		"use the exact fenced prompt for each maintained role",
+		"usually daily for suggestion/finder/scanner tasks, hourly for Dev Inbox, and weekly for auditor tasks",
+		"register_automation_resources",
+		"vision_suggestions",
+		"dev_inbox",
+		"auditor",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("GitHub bootstrap skill missing %q", want)
+		}
+	}
+
+	promptText := string(promptBody)
+	for _, want := range []string{
+		"## Offering Manager",
+		"## Bug Finder / Optimization Finder / Redundancy Finder",
+		"## Dev Inbox",
+		"## Loop Auditor",
+		"github_forward_pr_feedback_to_tasks",
 		"github_list_my_assigned_issues",
 		"github_list_assigned_issues",
 		"github_list_assigned_issues_with_prs",
+		"source_github_issue_number",
 		"github_open_pull_request",
-		"github_forward_pr_feedback_to_tasks",
-		"Never use labels beginning with `openvibely:`",
-		"Assignment to the configured OpenVibely GitHub inbox identity is the default human approval signal to start work",
-		"Assigned issues do not need an existing PR before automation may create OpenVibely implementation tasks",
-		"Create one visible OpenVibely task per loop role; do not create separate one-off setup/runner tasks in addition to the scheduled loop tasks",
-		"Do not call `set_task_goal` for recurring loop tasks during bootstrap",
-		"Create `GitHub Offering Manager: Vision Suggestions` first and make it run immediately before creating downstream implementation schedules",
-		"do not set a persisted goal on this recurring loop task",
-		"attach their recurring schedules without setting persisted task goals",
-		"Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues",
-		"do not add persisted goals to recurring loop tasks",
-		"implementation-task goals for per-issue work records",
-		"Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass",
-		"GitHub Bug Finder`",
-		"GitHub Optimization Finder`",
-		"GitHub Redundancy Finder`",
-		"Offering/finder/scanner tasks open GitHub issues only",
-		"Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs",
-		"The Dev Inbox is the default implementation gateway",
-		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
-		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
-		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
-		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
-		"then call `set_task_goal` for the created task so it implements the issue",
-		"For PAT setups, use `github_list_my_assigned_issues` to find open issues assigned to the authenticated PAT user",
-		"For GitHub App setups, do not treat the installation owner or organization as an issue assignee",
+		"Do not modify code, generate artifacts, install dependencies, create implementation tasks, set goals, or open PRs",
+		"Keep the workspace read-only",
 	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("GitHub bootstrap skill missing %q", want)
+		if !strings.Contains(promptText, want) {
+			t.Fatalf("canonical GitHub loop prompts missing %q", want)
 		}
 	}
 }
@@ -271,82 +272,23 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read built-in GitHub bootstrap skill: %v", err)
 	}
-	skillText := string(skillBody)
-
 	guidePath := filepath.Join(repoRoot, "docs", "github-autonomous-sdlc-user-guide.md")
 	guideBody, err := os.ReadFile(guidePath)
 	if err != nil {
 		t.Fatalf("read GitHub autonomous SDLC guide: %v", err)
 	}
-	guideText := string(guideBody)
 
-	for _, want := range []string{
-		"visible scheduled OpenVibely tasks",
-		"generic GitHub runtime tools",
-		"Do not create hidden daemon or poller services",
-		"github_list_my_assigned_issues",
-		"github_list_assigned_issues",
-		"github_list_assigned_issues_with_prs",
-		"github_open_pull_request",
-		"github_forward_pr_feedback_to_tasks",
-		"Never use labels beginning with `openvibely:`",
-		"Assignment to the configured OpenVibely GitHub inbox identity is the default human approval signal to start work",
-		"Assigned issues do not need an existing PR before automation may create OpenVibely implementation tasks",
-		"Create one visible OpenVibely task per loop role; do not create separate one-off setup/runner tasks in addition to the scheduled loop tasks",
-		"Do not call `set_task_goal` for recurring loop tasks during bootstrap",
-		"Create `GitHub Offering Manager: Vision Suggestions` first and make it run immediately before creating downstream implementation schedules",
-		"do not set a persisted goal on this recurring loop task",
-		"attach their recurring schedules without setting persisted task goals",
-		"Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues",
-		"do not add persisted goals to recurring loop tasks",
-		"implementation-task goals for per-issue work records",
-		"Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass",
-		"GitHub Bug Finder`",
-		"GitHub Optimization Finder`",
-		"GitHub Redundancy Finder`",
-		"Offering/finder/scanner tasks open GitHub issues only",
-		"Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs",
-		"The Dev Inbox is the default implementation gateway",
-		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
-		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
-		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
-		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
-		"then call `set_task_goal` for the created task so it implements the issue",
-	} {
-		if !strings.Contains(skillText, want) {
-			t.Fatalf("GitHub bootstrap skill missing %q", want)
-		}
+	if !strings.Contains(string(skillBody), "templates/github-loop-prompts.md") {
+		t.Fatal("GitHub bootstrap skill does not reference the canonical prompt template")
 	}
-
+	guideText := string(guideBody)
 	for _, want := range []string{
 		"There is no hidden GitHub poller daemon",
-		"GitHub Runtime Settings",
-		"github_list_my_assigned_issues",
-		"github_list_assigned_issues",
-		"github_list_assigned_issues_with_prs",
-		"A PAT identifies a real GitHub user",
-		"A GitHub App installation may be installed on an organization",
-		"github_open_pull_request",
-		"github_forward_pr_feedback_to_tasks",
-		"Never use labels beginning with `openvibely:`",
-		"Assignment to the PAT owner or configured Authorized User is the default approval signal",
-		"assigned issues do not need an existing PR first",
-		"Setup should create one visible task per loop role and schedule that same task",
-		"Do not set persisted goals on recurring loop tasks; schedules drive the loop",
-		"Create `GitHub Offering Manager: Vision Suggestions` first and run that same task immediately",
-		"attach their recurring schedules without setting persisted task goals",
-		"Do not create separate standalone one-off runner tasks in addition to the scheduled loop tasks",
-		"Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues",
-		"Do not set a persisted goal on the Dev Inbox scheduled task itself",
-		"Do not immediately start Dev Inbox or scanner/finder tasks during bootstrap unless the user explicitly asks for an immediate poll/scan pass",
-		"Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks",
-		"These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks",
-		"Offering, Bug Finder, Optimization Finder, and Redundancy Finder tasks should open issues only",
-		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
-		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
-		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
-		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
-		"then call `set_task_goal` for the created task so it implements the issue",
+		"The bundled bootstrap skill owns the maintained prompt templates",
+		"The GitHub SDLC Automation template reads those exact same prompts",
+		"daily finder, hourly inbox, and weekly auditor cadences",
+		"visual builder",
+		"Dev Inbox is the gateway that creates issue-specific work after assignment",
 	} {
 		if !strings.Contains(guideText, want) {
 			t.Fatalf("GitHub autonomous SDLC guide missing %q", want)

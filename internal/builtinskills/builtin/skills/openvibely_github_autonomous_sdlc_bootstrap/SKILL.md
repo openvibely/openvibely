@@ -33,7 +33,7 @@ Keep the setup generic. Use existing OpenVibely tasks, schedules, task threads, 
 3. Create `GitHub Offering Manager: Vision Suggestions` first and make it run immediately before creating downstream implementation schedules. If the current runtime cannot explicitly execute an existing task, create this task as `active` for its first run, wait for that setup action to be accepted, then attach its daily recurring schedule to the same task. Do not create a second standalone Vision Suggestions task for the immediate run, and do not set a persisted goal on this recurring loop task.
 4. After the Vision Suggestions task is created for its immediate first run, create the Dev Inbox, Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor as the scheduled loop tasks themselves and attach their recurring schedules without setting persisted task goals. Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass.
 5. Create recurring schedules with `schedule_task`; usually daily for suggestion/finder/scanner tasks, hourly for Dev Inbox, and weekly for auditor tasks. Reuse the same task IDs/titles for schedules rather than duplicating tasks.
-6. Put the behavior in each task prompt. Prompts should tell the agent which generic GitHub tools to call, which labels/auth checks to apply, what to skip, and what visible task/comment/PR updates to make.
+6. Load `templates/github-loop-prompts.md` from this skill with `skill_view` and use the exact fenced prompt for each maintained role. Those templates are shared with the GitHub SDLC Automation builder; do not shorten or independently rewrite them.
 7. Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues, or when the user explicitly asks for a goal-driven task. Do not use persisted goals to make scheduled loop tasks recur.
 8. After all maintained setup tasks and schedules exist, call `register_automation_resources` once with `adapter_key: github_sdlc`, stable key `github-sdlc/default`, and their actual IDs. Bind both the task and its schedule to the same node key: `vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `dev_inbox`, and `auditor`. Do not use separate trigger node keys. Mark intentionally reused worker tasks as `shared`. Do not pass topology JSON or infer pre-feature resources. A setup rerun reuses the same Automation identity.
 9. Report exactly which tasks, schedules, labels, and GitHub credential/settings dependencies were created or still need user action, plus the returned Automation URL.
@@ -47,52 +47,16 @@ Keep the setup generic. Use existing OpenVibely tasks, schedules, task threads, 
 - `GitHub Redundancy Finder`, daily. Chooses a focused project component, looks for duplicated/redundant code that could become a generic abstraction, and opens GitHub duplication issues only.
 - `GitHub Loop Auditor`, weekly. Reviews stale labels, blocked work, duplicate tasks, missing issue/task/PR links, and unexpected GitHub assignments.
 
-## Prompt Pattern For Dev Inbox
+## Canonical Role Prompts
 
-Use a prompt like this when creating the Dev Inbox scheduled task:
+Load `templates/github-loop-prompts.md` with `skill_view` before creating the maintained scheduled Tasks. Use these exact sections:
 
-```text
-Check GitHub for implementation mailbox work and PR review feedback for this project.
+- `Offering Manager` for `GitHub Offering Manager: Vision Suggestions`.
+- `Bug Finder / Optimization Finder / Redundancy Finder` for all three focused finder Tasks; each Task title identifies its scope.
+- `Dev Inbox` for `GitHub Dev Inbox`.
+- `Loop Auditor` for `GitHub Loop Auditor`.
 
-First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users on OpenVibely-created task PRs. This tool forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback. If the tool reports missing feedback dependencies, report that PR feedback routing is unavailable but continue normal issue inbox polling.
-
-If this project uses a PAT, call `github_list_my_assigned_issues` to list open issues assigned to the PAT owner. If this project uses GitHub App mode or custom mailbox accounts, call `github_get_project_inbox` to get Authorized Users; pass each returned assignee login to `github_list_assigned_issues`. If GitHub credentials or Authorized Users are missing, stop and explain the missing configuration.
-
-For each returned issue, inspect it with `github_get_issue`. Treat assignment to the PAT owner or configured Authorized User as the user's approval to start implementation work, even when the issue has no associated PR yet. Do not call `github_list_assigned_issues_with_prs` as a default eligibility gate; use it only if the user explicitly asks for a PR-associated-issues-only workflow.
-
-Treat an eligible issue as actionable when it is assigned to the PAT owner or configured Authorized Users. Optional labels such as `approved`, `feature`, `bug`, `performance`, or `duplication` may refine priority/scope, but do not require an `approved` label unless the user's workflow explicitly says to require one.
-
-Before creating anything, call `list_tasks` (a read-only, current-project task discovery tool) with the GitHub issue number and/or URL as the `query` to reconcile existing implementation work; if it returns a matching task, continue that task instead of creating a duplicate. For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue. If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR. Set `source_github_issue_number` to the exact issue number returned by this inbox execution and set `source_github_repo_url` when polling a non-default repository; these fields let the server bind the new task to the persisted discovered issue without prompt/title inference. Include the GitHub issue number, URL, title, and acceptance notes in the task prompt, then call `set_task_goal` for the created task so it implements the issue and opens/reuses a PR with `github_open_pull_request` when done. Comment concise status on the issue with `github_comment_on_issue` and add `task-created` / `in-progress` labels when work is started.
-
-Use unprefixed labels only, such as `task-created`, `in-progress`, `blocked`, `needs-human`, and `pr-opened`. Never use labels beginning with `openvibely:`.
-
-When implementation work is complete in a task branch, use `github_open_pull_request` for that task and include issue metadata so the task PR record stays linked. Do not use local `git push` or GitHub CLI as a fallback if the tool fails; report the tool error so GitHub token/API publication can be fixed.
-```
-
-## Prompt Pattern For Offering Manager
-
-```text
-Review the configured project vision/source files and identify small, reviewable feature gaps.
-
-Open GitHub suggestion issues only. Use `github_create_issue` with unprefixed labels such as `suggestion` and `feature`. Do not create implementation tasks and do not modify code.
-
-Include enough context for a human to approve, reject, or assign the issue. Avoid duplicates by searching/inspecting existing visible work when the available tools allow it.
-```
-
-## Prompt Pattern For Bug / Optimization / Redundancy Finders
-
-```text
-Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
-
-Look only for issues in this task's scope:
-- Bug Finder: likely defects, edge-case failures, broken behavior, or missing tests that indicate a bug.
-- Optimization Finder: measurable performance, latency, memory, build, or workflow efficiency improvements.
-- Redundancy Finder: duplicated or redundant code that could be made generic without over-engineering.
-
-Open GitHub issues only using `github_create_issue` with unprefixed labels matching the scope, such as `bug`, `performance`, or `duplication`. Include the inspected component, evidence, risk, and suggested acceptance criteria.
-
-Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.
-```
+The GitHub SDLC Automation template reads the same bundled file. Do not use the shorter examples formerly embedded in this skill, because that would recreate prompt drift between bootstrap-created Tasks and Automation-created Tasks.
 
 ## Common Pitfalls
 

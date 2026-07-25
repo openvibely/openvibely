@@ -20,12 +20,58 @@ import (
 //go:embed builtin/agents/*/skills/*/SKILL.md
 //go:embed builtin/skills/SKILLS.md
 //go:embed builtin/skills/*/SKILL.md
+//go:embed builtin/skills/*/templates/*.md
+//go:embed builtin/skills/*/references/*.md
 var FS embed.FS
+
+const githubSDLCPromptTemplatePath = "builtin/skills/openvibely_github_autonomous_sdlc_bootstrap/templates/github-loop-prompts.md"
+
+var githubSDLCPromptSectionByRole = map[string]string{
+	"offering_manager":    "Offering Manager",
+	"bug_finder":          "Bug Finder / Optimization Finder / Redundancy Finder",
+	"optimization_finder": "Bug Finder / Optimization Finder / Redundancy Finder",
+	"redundancy_finder":   "Bug Finder / Optimization Finder / Redundancy Finder",
+	"github_inbox":        "Dev Inbox",
+	"loop_auditor":        "Loop Auditor",
+}
+
+// GitHubSDLCRolePrompt returns the exact maintained prompt used by both the
+// bootstrap skill and the GitHub SDLC Automation template.
+func GitHubSDLCRolePrompt(role string) (string, error) {
+	section, ok := githubSDLCPromptSectionByRole[strings.TrimSpace(role)]
+	if !ok {
+		return "", fmt.Errorf("unsupported GitHub SDLC prompt role %q", role)
+	}
+	data, err := FS.ReadFile(githubSDLCPromptTemplatePath)
+	if err != nil {
+		return "", fmt.Errorf("read GitHub SDLC prompt templates: %w", err)
+	}
+	body := string(data)
+	marker := "## " + section + "\n"
+	sectionStart := strings.Index(body, marker)
+	if sectionStart < 0 {
+		return "", fmt.Errorf("GitHub SDLC prompt section %q is missing", section)
+	}
+	fenceOffset := strings.Index(body[sectionStart+len(marker):], "```text\n")
+	if fenceOffset < 0 {
+		return "", fmt.Errorf("GitHub SDLC prompt section %q has no text fence", section)
+	}
+	promptStart := sectionStart + len(marker) + fenceOffset + len("```text\n")
+	fenceEnd := strings.Index(body[promptStart:], "\n```")
+	if fenceEnd < 0 {
+		return "", fmt.Errorf("GitHub SDLC prompt section %q has no closing fence", section)
+	}
+	prompt := strings.TrimSpace(body[promptStart : promptStart+fenceEnd])
+	if prompt == "" {
+		return "", fmt.Errorf("GitHub SDLC prompt section %q is empty", section)
+	}
+	return prompt, nil
+}
 
 // SyncTo writes the embedded built-in files under root.
 //
-// SKILL.md bodies are always overwritten: those are the app's source of
-// truth and travel with the binary. AGENTS.md and user-managed per-agent
+// Bundled skill package files are always overwritten: those are the app's source
+// of truth and travel with the binary. AGENTS.md and user-managed per-agent
 // SKILLS.md files are only written when missing. Protected built-in system
 // agent root declarations are also overwritten because they carry system policy
 // and permission grants, not user narrative. The reusable standalone skills

@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	automationAdapterContractVersion  = 12
+	automationAdapterContractVersion  = 13
 	automationCompilerContractVersion = 11
 )
 

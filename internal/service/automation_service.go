@@ -144,7 +144,11 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 	}
 	nodes := make([]models.AutomationNodeSpec, 0, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
-		nodes = append(nodes, models.AutomationNodeSpec{Key: node.Key, Name: node.Name, Type: models.AutomationNodeType(node.Type), Role: node.Role, ConfigJSON: "{}", PositionX: node.X, PositionY: node.Y})
+		configJSON, err := s.registeredNodeConfig(ctx, req.ProjectID, adapter, node, taskByNode[node.Key], scheduleByNode[node.Key])
+		if err != nil {
+			return nil, false, err
+		}
+		nodes = append(nodes, models.AutomationNodeSpec{Key: node.Key, Name: node.Name, Type: models.AutomationNodeType(node.Type), Role: node.Role, ConfigJSON: configJSON, PositionX: node.X, PositionY: node.Y})
 	}
 	edges := make([]models.AutomationEdgeSpec, 0, len(adapter.Edges))
 	for i, edge := range adapter.Edges {
@@ -167,6 +171,48 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 			automationobs.String("created", fmt.Sprintf("%t", created)))
 	}
 	return definition, created, returnErr
+}
+
+func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context, projectID string, adapter AutomationAdapter, node AutomationAdapterNode, taskID, scheduleID string) (string, error) {
+	config := map[string]any{}
+	if taskID != "" {
+		var prompt string
+		var category models.TaskCategory
+		var priority int
+		if err := s.repo.DB().QueryRowContext(ctx, `SELECT prompt, category, priority FROM tasks WHERE id = ? AND project_id = ?`, taskID, projectID).Scan(&prompt, &category, &priority); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", fmt.Errorf("task resource %q does not exist or belongs to another project", taskID)
+			}
+			return "", fmt.Errorf("load registered task configuration for node %q: %w", node.Key, err)
+		}
+		config["prompt"] = prompt
+		config["category"] = string(category)
+		config["priority"] = priority
+	}
+	if scheduleID != "" {
+		var runAt time.Time
+		var repeatType models.RepeatType
+		var repeatInterval int
+		var enabled bool
+		if err := s.repo.DB().QueryRowContext(ctx, `SELECT s.run_at, s.repeat_type, s.repeat_interval, s.enabled
+			FROM schedules s JOIN tasks t ON t.id = s.task_id
+			WHERE s.id = ? AND t.project_id = ?`, scheduleID, projectID).Scan(&runAt, &repeatType, &repeatInterval, &enabled); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", fmt.Errorf("schedule resource %q does not exist or belongs to another project", scheduleID)
+			}
+			return "", fmt.Errorf("load registered schedule configuration for node %q: %w", node.Key, err)
+		}
+		config["target_node_key"] = adapterScheduleTarget(adapter, node.Key)
+		config["run_at"] = runAt.Local().Format("15:04")
+		config["repeat_type"] = string(repeatType)
+		config["repeat_interval"] = repeatInterval
+		config["enabled"] = enabled
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("encode registered node %q configuration: %w", node.Key, err)
+	}
+	return string(raw), nil
 }
 
 const automationExternalRefreshCache = time.Minute
