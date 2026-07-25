@@ -16,10 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
-const (
-	automationAdapterContractVersion  = 14
-	automationCompilerContractVersion = 11
-)
+const automationCompilerContractVersion = 11
 
 type automationGitHubConnectionProvider interface {
 	GetConnectionStatus(context.Context) (GitHubConnectionStatus, error)
@@ -59,7 +56,6 @@ func (p *AutomationPublicationPlanner) SetGitHubConnectionProvider(provider auto
 type automationPlanCanonical struct {
 	SchemaVersion       int                                  `json:"schema_version"`
 	AdapterKey          string                               `json:"adapter_key"`
-	AdapterVersion      int                                  `json:"adapter_version"`
 	CompilerVersion     int                                  `json:"compiler_version"`
 	Candidate           automationPlanCandidateCanonical     `json:"candidate"`
 	Effects             []models.AutomationPublicationEffect `json:"effects"`
@@ -295,8 +291,8 @@ func (p *AutomationPublicationPlanner) Plan(ctx context.Context, projectID, auto
 		return dependencies[i].ID < dependencies[j].ID
 	})
 	canonical := automationPlanCanonical{SchemaVersion: candidate.SchemaVersion, AdapterKey: candidate.AdapterKey,
-		AdapterVersion: automationAdapterContractVersion, CompilerVersion: automationCompilerContractVersion,
-		Candidate: canonicalAutomationPlanCandidate(candidate), Effects: plan.Effects, DependencySnapshots: dependencies}
+		CompilerVersion: automationCompilerContractVersion,
+		Candidate:       canonicalAutomationPlanCandidate(candidate), Effects: plan.Effects, DependencySnapshots: dependencies}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return nil, err

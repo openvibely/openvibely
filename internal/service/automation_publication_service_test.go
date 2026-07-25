@@ -1113,6 +1113,13 @@ func tableCountWhere(t *testing.T, db *sql.DB, table, column, value string) int 
 	return count
 }
 
+func TestAutomationPublicationPlanCanonicalUsesOnlyCompilerContractVersion(t *testing.T) {
+	encoded, err := json.Marshal(automationPlanCanonical{})
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"compiler_version"`)
+	require.NotContains(t, string(encoded), `"adapter_version"`)
+}
+
 func TestAutomationPublicationPlanGoldenRevisionExcludesLayoutAndMessages(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Golden")
@@ -1129,7 +1136,7 @@ func TestAutomationPublicationPlanGoldenRevisionExcludesLayoutAndMessages(t *tes
 	planner := NewAutomationPublicationPlanner(automationRepo, repository.NewTaskRepo(db, nil), repository.NewScheduleRepo(db), registry, drafts)
 	first, err := planner.Plan(context.Background(), project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "4b29e4bfbbfd3aca37340952fdc65ac309116298266be7c1fd1a694c0376e4df", first.PlanRevision)
+	require.Equal(t, "aa705bdcdddfce3182ffea074c79346f2f7638f41f37854f30027332c4dc53d9", first.PlanRevision)
 
 	candidate.Assumptions = []string{"Layout-only author note"}
 	candidate.Warnings = []string{"Operational observation"}
@@ -1168,7 +1175,7 @@ func TestAutomationPublicationPlanGoldenGitHubDependenciesAndConfigurationChange
 	planner.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	first, err := planner.Plan(ctx, project.ID, definition.Automation.ID, definition.Version.ID)
 	require.NoError(t, err)
-	require.Equal(t, "9e7fa179ec02dc48cddef76f47ceb7aac923ef1de6bd432d05b15ab1b727f0ae", first.PlanRevision)
+	require.Equal(t, "12b3143f55a0b47b160075f8a3ed2282ebb9ec9a794fe3800d61b6f6ed02c04a", first.PlanRevision)
 
 	inbox.Enabled = false
 	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, inbox))
