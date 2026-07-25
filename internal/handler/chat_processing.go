@@ -285,6 +285,9 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	startRuntimeCancellation()
 	if params.AutomationContext != nil {
 		ctx = service.WithAutomationContext(ctx, *params.AutomationContext)
+		if params.TaskID != "" && params.ExecID != "" {
+			ctx = service.WithAutomationExecution(ctx, params.TaskID, params.ExecID)
+		}
 	}
 	defer cleanupRuntimeCancellation()
 	if ctx.Err() != nil {
@@ -357,21 +360,22 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				defs = filterAssignedAgentRuntimeToolDefs(defs, agentDef)
 			}
 		}
+		var hardenedAutomationGitHubRT *llmcontracts.RuntimeTools
+		if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
+			hardenedAutomationGitHubRT = h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs)
+		}
 		if params.RuntimeTools != nil && len(params.RuntimeTools.Definitions) > 0 {
-			// Channel-provided runtime takes priority over the handler's generic tools.
-			// Channel-sensitive tools (e.g. switch_project with active-project
-			// persistence) are resolved by the channel service handler; any tools not
-			// covered by the channel runtime fall through to the handler's generic
-			// executor. This correctly handles both complete channel runtimes
-			// (Discord, Slack, Telegram) and partial ones (Email: project tools only).
+			// Automation-specific GitHub handlers take priority over channel and
+			// generic handlers. Channel-specific handlers retain priority for all
+			// other tools and generic handlers remain the final fallback.
 			genericRT := h.buildChatActionToolRuntimeFromDefs(params, actionCollector, defs, chatMode, surface)
-			merged := llmcontracts.CompositeRuntimeTools(params.RuntimeTools, genericRT)
-			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), merged))
+			merged := llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, genericRT)
+			ctx = llmcontracts.WithRuntimeTools(ctx, merged)
 			applog.Infof("[handler] processStreamingResponse exec=%s injected channel+generic runtime action tools surface=%s followup=%v channel_defs=%d generic_defs=%d",
 				params.ExecID, surface, params.IsTaskFollowup, len(params.RuntimeTools.Definitions), len(defs))
 		} else if len(defs) > 0 {
 			rt := h.buildChatActionToolRuntimeFromDefs(params, actionCollector, defs, chatMode, surface)
-			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), rt))
+			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), rt))
 			applog.Infof("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
 				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
 		}

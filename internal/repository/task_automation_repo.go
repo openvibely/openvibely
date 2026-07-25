@@ -81,6 +81,15 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 	if publishedHandoff != 1 {
 		return nil, nil, false, errors.New("automation task handoff is not connected in the published topology")
 	}
+	var lifecycle models.AutomationLifecycleState
+	var currentVersionID string
+	if err := conn.QueryRowContext(ctx, `SELECT lifecycle_state, COALESCE(published_version_id, '') FROM automations
+		WHERE project_id = ? AND id = ?`, event.Context.ProjectID, event.Binding.AutomationID).Scan(&lifecycle, &currentVersionID); err != nil {
+		return nil, nil, false, fmt.Errorf("loading automation lifecycle for task handoff: %w", err)
+	}
+	if currentVersionID != event.Binding.VersionID {
+		return nil, nil, false, errors.New("automation task handoff no longer belongs to the current saved graph")
+	}
 	var existingEvent int
 	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions
 		WHERE automation_id = ? AND version_id = ? AND event_key = ?`, event.Binding.AutomationID, event.Binding.VersionID, event.EventKey).Scan(&existingEvent); err != nil {
@@ -98,9 +107,14 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 	if previousStatus == models.StatusRunning || previousStatus == models.StatusQueued {
 		return nil, nil, false, ErrAutomationChainChildBusy
 	}
+	effectiveCategory := child.Category
+	admitted := lifecycle == models.AutomationActive
+	if !admitted && effectiveCategory == models.CategoryActive {
+		effectiveCategory = models.CategoryBacklog
+	}
 	result, err := conn.ExecContext(ctx, `UPDATE tasks SET prompt = ?, category = ?, status = 'pending', base_branch = ?, base_commit_sha = ?,
 		lineage_depth = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ? AND parent_task_id = ?`,
-		child.Prompt, child.Category, child.BaseBranch, child.BaseCommitSHA, child.LineageDepth, child.ID, child.ProjectID, parent.ID)
+		child.Prompt, effectiveCategory, child.BaseBranch, child.BaseCommitSHA, child.LineageDepth, child.ID, child.ProjectID, parent.ID)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("activating automation chain child: %w", err)
 	}
@@ -116,6 +130,7 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 	}
 	committed = true
 	child.Status = models.StatusPending
+	child.Category = effectiveCategory
 	if r.broadcaster != nil {
 		if previousStatus != models.StatusPending {
 			r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, ProjectID: child.ProjectID, TaskID: child.ID,
@@ -126,7 +141,7 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 				TaskName: child.Title, Status: string(models.StatusPending), Category: string(child.Category), OldCategory: string(previousCategory)})
 		}
 	}
-	return workItem, activity, true, nil
+	return workItem, activity, admitted, nil
 }
 
 // ClaimAutomationDispatch consumes a leased Automation reservation, applies the

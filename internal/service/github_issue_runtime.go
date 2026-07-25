@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -32,6 +33,8 @@ type GitHubIssueRuntimeProvider interface {
 	CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error
 }
+
+const automationGitHubIssueDedupLeaseDuration = 2 * time.Minute
 
 type githubIssueRuntimeOptions struct {
 	ProjectID                string
@@ -156,19 +159,34 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					}
 				}
 			}
+			var dedupFingerprint, dedupOwner string
 			if automationBound {
+				if opts.AutomationRepo == nil {
+					return "", errors.New("automation repository unavailable for GitHub issue duplicate protection")
+				}
+				dedupFingerprint = githubIssueTitleFingerprint(req.Title)
+				dedupOwner = activityKey
+				if err := opts.AutomationRepo.AcquireGitHubIssueDedupLease(ctx, opts.ProjectID, repo.FullName, dedupFingerprint,
+					dedupOwner, time.Now().UTC(), automationGitHubIssueDedupLeaseDuration); err != nil {
+					if releaseErr := releaseGitHubIssueActivityReservations(ctx, opts, reservedBindings, activityKey); releaseErr != nil {
+						return "", releaseErr
+					}
+					return "", err
+				}
 				duplicate, duplicateErr := opts.GitHub.FindOpenIssueDuplicate(ctx, repo, req.Title, 50)
 				if duplicateErr != nil {
-					for _, binding := range reservedBindings {
-						_ = opts.AutomationRepo.ReleaseExternalActivityReservation(ctx, opts.ProjectID, binding, activityKey)
+					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
+					if releaseErr := releaseGitHubIssueActivityReservations(ctx, opts, reservedBindings, activityKey); releaseErr != nil {
+						return "", releaseErr
 					}
 					return "", duplicateErr
 				}
 				if duplicate != nil && duplicate.Number > 0 {
-					for _, binding := range reservedBindings {
-						if releaseErr := opts.AutomationRepo.ReleaseExternalActivityReservation(ctx, opts.ProjectID, binding, activityKey); releaseErr != nil {
-							return "", releaseErr
-						}
+					if err := opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner); err != nil {
+						return "", err
+					}
+					if err := releaseGitHubIssueActivityReservations(ctx, opts, reservedBindings, activityKey); err != nil {
+						return "", err
 					}
 					return "", fmt.Errorf("likely duplicate GitHub issue #%d already exists: https://github.com/%s/%s/issues/%d",
 						duplicate.Number, repo.Owner, repo.Name, duplicate.Number)
@@ -176,10 +194,21 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			}
 			issue, err := opts.GitHub.CreateIssue(ctx, repo, GitHubCreateIssueRequest{Title: req.Title, Body: req.Body, Labels: req.Labels, Assignees: req.Assignees})
 			if err != nil {
+				if dedupFingerprint != "" {
+					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
+				}
 				return "", err
 			}
 			if err := recordGitHubIssueCreated(ctx, opts, repo, issue, activityKey); err != nil {
+				if dedupFingerprint != "" {
+					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
+				}
 				return "", err
+			}
+			if dedupFingerprint != "" {
+				if err := opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner); err != nil {
+					return "", err
+				}
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue})
 		},
@@ -540,6 +569,9 @@ func resolveGitHubRuntimeProject(ctx context.Context, opts githubIssueRuntimeOpt
 	if project == nil {
 		return nil, fmt.Errorf("current project not found")
 	}
+	if automationContext, ok := AutomationContextFromContext(ctx); ok && automationContext.ProjectID == opts.ProjectID && strings.TrimSpace(project.RepoURL) == "" {
+		return nil, fmt.Errorf("Automation GitHub runtime requires the current project's explicit repository URL")
+	}
 	return project, nil
 }
 
@@ -555,6 +587,9 @@ func resolveGitHubRepoForRuntimeToolURL(ctx context.Context, opts githubIssueRun
 	project, err := resolveGitHubRuntimeProject(ctx, opts)
 	if err != nil {
 		return nil, err
+	}
+	if automationBound && automationContext.ProjectID == opts.ProjectID {
+		return opts.GitHub.ResolveRepo(ctx, project.RepoURL, "")
 	}
 	return opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
 }
@@ -584,6 +619,24 @@ func resolveGitHubRuntimeTask(ctx context.Context, taskRepo *repository.TaskRepo
 		return task, nil
 	}
 	return nil, fmt.Errorf("task_id or title is required")
+}
+
+func releaseGitHubIssueActivityReservations(ctx context.Context, opts githubIssueRuntimeOptions, bindings []models.AutomationBinding, activityKey string) error {
+	if opts.AutomationRepo == nil {
+		return nil
+	}
+	for _, binding := range bindings {
+		if err := opts.AutomationRepo.ReleaseExternalActivityReservation(ctx, opts.ProjectID, binding, activityKey); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func githubIssueTitleFingerprint(title string) string {
+	normalized := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(title))), " ")
+	hash := sha256.Sum256([]byte(normalized))
+	return fmt.Sprintf("%x", hash[:])
 }
 
 func githubIssueCreationActivityKey(ctx context.Context, repo *GitHubRepoRef, req githubCreateIssueRuntimeInput) string {

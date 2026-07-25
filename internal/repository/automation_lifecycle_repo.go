@@ -68,9 +68,35 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 		}
 	}
 	enabledByNode := make(map[string]bool, len(candidate.Nodes))
-	for _, node := range candidate.Nodes {
-		if enabled, ok := node.Config["enabled"].(bool); ok {
-			enabledByNode[node.Key] = enabled
+	if hasCandidate {
+		for _, node := range candidate.Nodes {
+			if enabled, ok := node.Config["enabled"].(bool); ok {
+				enabledByNode[node.Key] = enabled
+			}
+		}
+	} else {
+		rows, err := conn.QueryContext(ctx, `SELECT node_key, config_json FROM automation_nodes
+			WHERE project_id = ? AND automation_id = ? AND version_id = ?`, projectID, automationID, versionID.String)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var nodeKey, configJSON string
+			if err := rows.Scan(&nodeKey, &configJSON); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			var config map[string]any
+			if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if enabled, ok := config["enabled"].(bool); ok {
+				enabledByNode[nodeKey] = enabled
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
 		}
 	}
 	rows, err := conn.QueryContext(ctx, `SELECT o.schedule_id, n.node_key
@@ -101,8 +127,8 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 	}
 	for _, schedule := range ownedSchedules {
 		enabled := true
-		if hasCandidate {
-			enabled = enabledByNode[schedule.nodeKey]
+		if configured, ok := enabledByNode[schedule.nodeKey]; ok {
+			enabled = configured
 		}
 		if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, enabled, schedule.id); err != nil {
 			return nil, err
@@ -121,7 +147,15 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 			JOIN tasks t ON t.id = resource.resource_id AND t.project_id = resource.project_id
 			WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ?
 				AND resource.resource_type = 'task' AND n.node_key = ? AND t.category = 'backlog'
-				AND t.parent_task_id IS NULL AND t.status = 'pending'`, projectID, automationID, versionID.String, node.Key).Scan(&taskID)
+				AND t.status = 'pending' AND (t.parent_task_id IS NULL OR EXISTS (
+					SELECT 1 FROM automation_transitions transition
+					JOIN automation_definition_resources parent_resource ON parent_resource.project_id = transition.project_id
+						AND parent_resource.automation_id = transition.automation_id AND parent_resource.version_id = transition.version_id
+						AND parent_resource.node_id = transition.from_node_id AND parent_resource.resource_type = 'task'
+						AND parent_resource.resource_id = t.parent_task_id
+					WHERE transition.project_id = resource.project_id AND transition.automation_id = resource.automation_id
+						AND transition.version_id = resource.version_id AND transition.to_node_id = n.id AND transition.state = 'entered'
+				))`, projectID, automationID, versionID.String, node.Key).Scan(&taskID)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -129,7 +163,7 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 			return nil, err
 		}
 		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'active', updated_at = CURRENT_TIMESTAMP
-			WHERE id = ? AND project_id = ? AND category = 'backlog' AND parent_task_id IS NULL AND status = 'pending'`, taskID, projectID); err != nil {
+			WHERE id = ? AND project_id = ? AND category = 'backlog' AND status = 'pending'`, taskID, projectID); err != nil {
 			return nil, err
 		}
 		admittedTaskIDs = append(admittedTaskIDs, taskID)

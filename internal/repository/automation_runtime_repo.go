@@ -21,6 +21,7 @@ var (
 	ErrAutomationDispatchLease          = errors.New("automation dispatch lease is not owned")
 	ErrAutomationTaskBusy               = errors.New("automation task is not available")
 	ErrAutomationExternalReconciliation = errors.New("automation external mutation requires reconciliation")
+	ErrAutomationGitHubIssueDedupBusy   = errors.New("another Automation run is already checking or creating this GitHub issue")
 	githubResourceNamePattern           = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 )
 
@@ -1439,6 +1440,78 @@ func (r *AutomationRepo) GetCustomNotificationHandoff(ctx context.Context, proje
 		return nil, nil
 	}
 	return &node, err
+}
+
+func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string, now time.Time, leaseDuration time.Duration) error {
+	projectID = strings.TrimSpace(projectID)
+	repositoryFullName = strings.ToLower(strings.TrimSpace(repositoryFullName))
+	titleFingerprint = strings.TrimSpace(titleFingerprint)
+	ownerToken = strings.TrimSpace(ownerToken)
+	if projectID == "" || repositoryFullName == "" || titleFingerprint == "" || ownerToken == "" || leaseDuration <= 0 {
+		return errors.New("complete GitHub issue duplicate lease identity is required")
+	}
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	expiresAt := now.UTC().Add(leaseDuration)
+	result, err := conn.ExecContext(ctx, `INSERT INTO automation_github_issue_dedup_leases
+		(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at)
+		VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id, repository_full_name, title_fingerprint) DO NOTHING`,
+		projectID, repositoryFullName, titleFingerprint, ownerToken, expiresAt)
+	if err != nil {
+		return fmt.Errorf("acquiring GitHub issue duplicate lease: %w", err)
+	}
+	acquired, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if acquired == 0 {
+		result, err = conn.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
+			SET owner_token = ?, lease_expires_at = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND lease_expires_at <= ?`,
+			ownerToken, expiresAt, projectID, repositoryFullName, titleFingerprint, now.UTC())
+		if err != nil {
+			return fmt.Errorf("reclaiming GitHub issue duplicate lease: %w", err)
+		}
+		acquired, err = result.RowsAffected()
+		if err != nil {
+			return err
+		}
+	}
+	if acquired != 1 {
+		return ErrAutomationGitHubIssueDedupBusy
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func (r *AutomationRepo) ReleaseGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string) error {
+	result, err := r.db.ExecContext(ctx, `DELETE FROM automation_github_issue_dedup_leases
+		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?`,
+		strings.TrimSpace(projectID), strings.ToLower(strings.TrimSpace(repositoryFullName)), strings.TrimSpace(titleFingerprint), strings.TrimSpace(ownerToken))
+	if err != nil {
+		return fmt.Errorf("releasing GitHub issue duplicate lease: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return errors.New("GitHub issue duplicate lease is not owned")
+	}
+	return nil
 }
 
 func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID string, binding models.AutomationBinding, activityKey, activityType, resourceType string) (string, error) {

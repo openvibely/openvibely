@@ -1006,6 +1006,81 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Equal(t, 1, waitingReview)
 }
 
+func TestAutomationGitHubIssueCreationSerializesDuplicateCheckAcrossExecutions(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime.git"
+	fixture.project.RepoPath = t.TempDir()
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	bugFinder := automationNodeByKey(t, fixture.definition, "bug_finder")
+
+	newCausalContext := func(occurrence string) context.Context {
+		t.Helper()
+		var invocationID string
+		require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `INSERT INTO automation_invocations
+			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
+			VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
+			fixture.definition.Automation.ID, fixture.definition.Version.ID, bugFinder.ID, fixture.schedule.ID, occurrence).Scan(&invocationID))
+		execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: occurrence}
+		require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+		binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
+			InvocationID: invocationID, NodeID: bugFinder.ID}
+		value := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
+		return withAutomationExecution(value, fixture.task.ID, execution.ID)
+	}
+	firstCtx := newCausalContext("concurrent-first")
+	secondCtx := newCausalContext("concurrent-second")
+
+	lookupStarted := make(chan struct{})
+	releaseLookup := make(chan struct{})
+	var lookupCalls atomic.Int32
+	var createCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		findDuplicateFn: func(context.Context, *GitHubRepoRef, string, int) (*GitHubIssueDuplicate, error) {
+			if lookupCalls.Add(1) == 1 {
+				close(lookupStarted)
+			}
+			<-releaseLookup
+			return nil, nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createCalls.Add(1)
+			return &GitHubIssue{Number: 88, URL: "https://github.com/example/runtime/issues/88", Title: req.Title, State: "open"}, nil
+		},
+	}
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
+		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
+	input := json.RawMessage(`{"title":"Concurrent duplicate","body":"first body"}`)
+	type result struct {
+		output string
+		err    error
+	}
+	firstResult := make(chan result, 1)
+	go func() {
+		output, err := handlers["github_create_issue"](firstCtx, input)
+		firstResult <- result{output: output, err: err}
+	}()
+	select {
+	case <-lookupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first execution did not enter the bounded duplicate lookup")
+	}
+
+	secondOutput, secondErr := handlers["github_create_issue"](secondCtx, json.RawMessage(`{"title":"  concurrent   duplicate  ","body":"second body"}`))
+	require.ErrorContains(t, secondErr, "already checking or creating")
+	require.Empty(t, secondOutput)
+	close(releaseLookup)
+	first := <-firstResult
+	require.NoError(t, first.err)
+	require.Contains(t, first.output, `"Number":88`)
+	require.Equal(t, int32(1), lookupCalls.Load(), "the losing execution must not race through the duplicate lookup")
+	require.Equal(t, int32(1), createCalls.Load(), "concurrent Automation runs must create one canonical issue")
+}
+
 func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T) {
 	automationobs.ResetForTest()
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)

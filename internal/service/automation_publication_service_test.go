@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -271,6 +272,102 @@ func TestAutomationSaveSubmitsExistingRootsThatBecomePendingActive(t *testing.T)
 			require.Equal(t, taskID, recorder.submitted[0].ID)
 			require.Equal(t, models.CategoryActive, recorder.submitted[0].Category)
 			require.Equal(t, models.StatusPending, recorder.submitted[0].Status)
+		})
+	}
+}
+
+func TestAutomationInactiveLifecycleDefersCompiledChildHandoff(t *testing.T) {
+	for _, state := range []models.AutomationLifecycleState{models.AutomationPaused, models.AutomationArchived} {
+		t.Run(string(state), func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Deferred child handoff "+string(state))
+			ctx := context.Background()
+			candidate := customScheduledTaskCandidate("Deferred handoff", "Produce parent output.")
+			candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: "downstream", Name: "Downstream", Type: models.AutomationNodeAgentTask, Role: "task",
+				Config: map[string]any{"prompt": "Continue after the producer.", "category": string(models.CategoryActive), "priority": 2}, Position: &models.AutomationDraftPoint{X: 480, Y: 0}})
+			candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: "followup_downstream", From: "followup", To: "downstream", FromPort: "right", ToPort: "left", Condition: map[string]any{}})
+			saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err)
+			parentID := automationResourceID(t, saved.Definition, "followup", "task")
+			childID := automationResourceID(t, saved.Definition, "downstream", "task")
+			scheduleID := automationResourceID(t, saved.Definition, "schedule", "schedule")
+			parent, err := h.taskRepo.GetByID(ctx, parentID)
+			require.NoError(t, err)
+			child, err := h.taskRepo.GetByID(ctx, childID)
+			require.NoError(t, err)
+			schedule, err := h.scheduleRepo.GetByID(ctx, scheduleID)
+			require.NoError(t, err)
+			due := schedule.NextRun.UTC()
+			invocation, _, err := h.automationRepo.ClaimScheduledOccurrence(ctx, *schedule, due, schedule.ComputeNextRun(due))
+			require.NoError(t, err)
+			require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
+			execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
+			require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+			sourceNode := automationNodeByKey(t, saved.Definition, "followup")
+			binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID,
+				InvocationID: invocation.ID, NodeID: sourceNode.ID}
+			causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{binding}})
+			causalCtx = withAutomationExecution(causalCtx, parent.ID, execution.ID)
+
+			if state == models.AutomationPaused {
+				require.NoError(t, h.lifecycle.Pause(ctx, h.project.ID, saved.Definition.Automation.ID))
+			} else {
+				require.NoError(t, h.lifecycle.Archive(ctx, h.project.ID, saved.Definition.Automation.ID))
+			}
+			config, err := parent.ParseChainConfig()
+			require.NoError(t, err)
+			taskSvc := NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)
+			llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo, taskSvc: taskSvc}
+			require.NoError(t, llmSvc.activateCompiledAutomationChild(causalCtx, *parent, "parent result\n[STATUS: SUCCESS]", config))
+
+			deferred, err := h.taskRepo.GetByID(ctx, child.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryBacklog, deferred.Category)
+			require.Equal(t, models.StatusPending, deferred.Status)
+			require.Contains(t, deferred.Prompt, "parent result")
+			var enteredTransitions int
+			require.NoError(t, h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions
+				WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND to_node_id = ? AND state = 'entered'`,
+				h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, sourceNode.ID, automationNodeByKey(t, saved.Definition, "downstream").ID).Scan(&enteredTransitions))
+			require.Equal(t, 1, enteredTransitions, "inactive handoff must retain its causal transition for Resume")
+			followupNode := automationNodeByKey(t, saved.Definition, "downstream")
+			var resumableChildren int
+			require.NoError(t, h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_definition_resources resource
+				JOIN automation_nodes n ON n.id = resource.node_id AND n.version_id = resource.version_id
+				JOIN tasks t ON t.id = resource.resource_id AND t.project_id = resource.project_id
+				WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ?
+					AND resource.resource_type = 'task' AND n.node_key = ? AND t.category = 'backlog'
+					AND t.status = 'pending' AND t.parent_task_id = ? AND EXISTS (
+						SELECT 1 FROM automation_transitions transition
+						WHERE transition.project_id = resource.project_id AND transition.automation_id = resource.automation_id
+							AND transition.version_id = resource.version_id AND transition.from_node_id = ?
+							AND transition.to_node_id = n.id AND transition.state = 'entered')`,
+				h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, followupNode.NodeKey, parent.ID, sourceNode.ID).Scan(&resumableChildren))
+			require.Equal(t, 1, resumableChildren, "deferred child must remain eligible through the exact current graph handoff")
+			var savedCandidateJSON string
+			require.NoError(t, h.db.QueryRowContext(ctx, `SELECT candidate_json FROM automation_graph_metadata
+				WHERE project_id = ? AND automation_id = ? AND version_id = ?`, h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID).Scan(&savedCandidateJSON))
+			var savedCandidate models.AutomationDraftCandidate
+			require.NoError(t, json.Unmarshal([]byte(savedCandidateJSON), &savedCandidate))
+			var savedFollowup models.AutomationDraftNode
+			for _, node := range savedCandidate.Nodes {
+				if node.Key == "downstream" {
+					savedFollowup = node
+				}
+			}
+			require.Equal(t, models.AutomationNodeAgentTask, savedFollowup.Type)
+			require.Equal(t, "task", savedFollowup.Role)
+			require.Equal(t, string(models.CategoryActive), savedFollowup.Config["category"])
+
+			recorder := &recordingAutomationTaskService{TaskService: taskSvc}
+			if state == models.AutomationPaused {
+				resume := NewAutomationLifecycleService(h.automationRepo, h.scheduleRepo, recorder)
+				require.NoError(t, resume.Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
+				require.Len(t, recorder.submitted, 1, "Resume must admit the deferred completed-parent handoff exactly once")
+				require.Equal(t, child.ID, recorder.submitted[0].ID)
+			} else {
+				require.ErrorContains(t, h.lifecycle.Resume(ctx, h.project.ID, saved.Definition.Automation.ID), "archived automation cannot be resumed")
+				require.Empty(t, recorder.submitted)
+			}
 		})
 	}
 }

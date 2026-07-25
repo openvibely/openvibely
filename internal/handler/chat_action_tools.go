@@ -546,7 +546,21 @@ func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, re
 	if project == nil {
 		return nil, fmt.Errorf("current project not found")
 	}
+	if automationBound && automationContext.ProjectID == projectID {
+		if strings.TrimSpace(project.RepoURL) == "" {
+			return nil, fmt.Errorf("Automation GitHub runtime requires the current project's explicit repository URL")
+		}
+		return h.githubSvc.ResolveRepo(ctx, project.RepoURL, "")
+	}
 	return h.githubSvc.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+}
+
+func requireAutomationExplicitGitHubRepo(ctx context.Context, projectID string, project *models.Project) error {
+	if automationContext, ok := service.AutomationContextFromContext(ctx); ok && automationContext.ProjectID == projectID &&
+		(project == nil || strings.TrimSpace(project.RepoURL) == "") {
+		return fmt.Errorf("Automation GitHub runtime requires the current project's explicit repository URL")
+	}
+	return nil
 }
 
 func (h *Handler) executeGitHubCreateIssueTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
@@ -759,6 +773,9 @@ func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params s
 	if project == nil {
 		return "", fmt.Errorf("current project not found")
 	}
+	if err := requireAutomationExplicitGitHubRepo(ctx, params.ProjectID, project); err != nil {
+		return "", err
+	}
 	var issueNumber *int
 	if req.IssueNumber > 0 {
 		issueNumber = &req.IssueNumber
@@ -805,6 +822,9 @@ func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context,
 	}
 	if project == nil {
 		return "", fmt.Errorf("current project not found")
+	}
+	if err := requireAutomationExplicitGitHubRepo(ctx, params.ProjectID, project); err != nil {
+		return "", err
 	}
 	record, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
 	if err != nil {
@@ -1004,9 +1024,19 @@ func decodeChatActionInput(input json.RawMessage, dst any) error {
 // definitions and the shared executor. Used by processStreamingResponse which
 // computes defs from the registry before calling this.
 func (h *Handler) buildChatActionToolRuntimeFromDefs(params streamingResponseParams, collector *chatActionSummaryCollector, defs []llmcontracts.RuntimeToolDefinition, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
+	genericExecutor := h.chatActionExecutor(params, collector, mode, surface)
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
-		Executor:    h.chatActionExecutor(params, collector, mode, surface),
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
+				if hardened := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs); hardened != nil {
+					if output, handled, isError, err := hardened.Executor(ctx, name, input); handled {
+						return output, true, isError, err
+					}
+				}
+			}
+			return genericExecutor(ctx, name, input)
+		},
 	}
 }
 

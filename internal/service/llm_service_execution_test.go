@@ -3938,8 +3938,25 @@ func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *te
 	_, err := resolveGitHubRepoForRuntimeToolURL(automationCtx, opts, "https://github.com/attacker/other")
 	require.NoError(t, err)
 	require.Equal(t, project.RepoURL, resolvedURL)
-	require.Equal(t, project.RepoPath, resolvedPath)
+	require.Empty(t, resolvedPath, "Automation issue tools must never pass the local checkout as a repository inference fallback")
 
+	project.RepoURL = ""
+	require.NoError(t, projectRepo.Update(ctx, project))
+	resolveCalls := 0
+	provider.resolveRepoFn = func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+		resolveCalls++
+		return nil, fmt.Errorf("unexpected repository resolution url=%q path=%q", repoURL, repoPath)
+	}
+	_, err = resolveGitHubRepoForRuntimeToolURL(automationCtx, opts, "https://github.com/attacker/other")
+	require.ErrorContains(t, err, "explicit repository URL")
+	require.Zero(t, resolveCalls, "Automation runtime must fail before local Git remote inference")
+
+	project.RepoURL = "https://github.com/openvibely/project.git"
+	require.NoError(t, projectRepo.Update(ctx, project))
+	provider.resolveRepoFn = func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+		resolvedURL, resolvedPath = repoURL, repoPath
+		return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
+	}
 	_, err = resolveGitHubRepoForRuntimeToolURL(ctx, opts, "https://github.com/example/other")
 	require.NoError(t, err)
 	require.Equal(t, "https://github.com/example/other", resolvedURL, "ordinary Chat must retain explicit repository selection")

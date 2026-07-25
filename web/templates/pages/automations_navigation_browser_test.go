@@ -414,6 +414,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	    window.openVibelyAutomationLiveRefresh('GET', '/automations/automation-a?project_id=project-browser&refresh_order=older');
 	    window.openVibelyAutomationLiveRefresh('GET', '/automations/automation-a?project_id=project-browser&refresh_order=newer');
 	    await waitFor(function() { return document.getElementById('automation-live') && document.getElementById('automation-live').textContent.includes('Newest Live response'); }, 'newest concurrent Live response');
+	    await fetch('/release-older-live-response', {method: 'POST'});
 	    await wait(350);
 	    if (!document.getElementById('automation-live').textContent.includes('Newest Live response')) fail('an older concurrent Live response overwrote the newest state');
 	    await report('progress', 'live-refresh-order-guarded');
@@ -662,6 +663,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	.hidden { display: none !important; }
 	</style>`
 	browserResult := make(chan string, 16)
+	olderLiveStarted := make(chan struct{})
+	releaseOlderLive := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.Header.Get("HX-Request") == "true" {
@@ -684,13 +687,27 @@ window.addEventListener('DOMContentLoaded', function() {
 		case "/automations/automation-a":
 			switch r.URL.Query().Get("refresh_order") {
 			case "older":
-				time.Sleep(250 * time.Millisecond)
+				close(olderLiveStarted)
+				select {
+				case <-releaseOlderLive:
+				case <-time.After(5 * time.Second):
+					http.Error(w, "newer Live request never overlapped the older request", http.StatusGatewayTimeout)
+					return
+				}
 				_, _ = w.Write([]byte(renderLive("automation-a", "Older Live response")))
 			case "newer":
-				_, _ = w.Write([]byte(renderLive("automation-a", "Newest Live response")))
+				select {
+				case <-olderLiveStarted:
+					_, _ = w.Write([]byte(renderLive("automation-a", "Newest Live response")))
+				case <-time.After(time.Second):
+					http.Error(w, "newer Live request arrived before the older request started", http.StatusConflict)
+				}
 			default:
 				_, _ = w.Write([]byte(renderLive("automation-a", "Automation A")))
 			}
+		case "/release-older-live-response":
+			close(releaseOlderLive)
+			w.WriteHeader(http.StatusNoContent)
 		case "/automations/automation-a/builder":
 			_, _ = w.Write([]byte(renderBlankBuilder(true)))
 		case "/automations/automation-b":

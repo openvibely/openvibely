@@ -262,6 +262,46 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
 }
 
+func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task models.Task, defs []llmcontracts.RuntimeToolDefinition) *llmcontracts.RuntimeTools {
+	if s == nil || s.automationRepo == nil || s.githubIssueRuntime == nil || strings.TrimSpace(task.ProjectID) == "" {
+		return nil
+	}
+	automationContext, ok := AutomationContextFromContext(ctx)
+	if !ok || automationContext.ProjectID != task.ProjectID {
+		return nil
+	}
+	allowed := make(map[string]bool, len(defs))
+	for _, def := range defs {
+		allowed[strings.ToLower(strings.TrimSpace(def.Name))] = true
+	}
+	runtime := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
+		ProjectID:                task.ProjectID,
+		ProjectRepo:              s.projectRepo,
+		TaskRepo:                 s.taskRepo,
+		TaskPullRequestRepo:      s.taskPullRequestRepo,
+		GitHubPRFeedbackRepo:     s.githubPRFeedbackRepo,
+		GitHubAuthRepo:           s.githubAuthRepo,
+		ThreadInputRepo:          s.threadInputRepo,
+		AutomationRepo:           s.automationRepo,
+		GitHub:                   s.githubIssueRuntime,
+		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
+	})
+	if runtime == nil {
+		return nil
+	}
+	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, len(runtime.Definitions))
+	for _, def := range runtime.Definitions {
+		if allowed[strings.ToLower(strings.TrimSpace(def.Name))] {
+			filtered = append(filtered, def)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	runtime.Definitions = filtered
+	return runtime
+}
+
 func (s *LLMService) AutomationBootstrapRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
 	return s.automationBootstrapRuntimeTools(ctx, task)
 }

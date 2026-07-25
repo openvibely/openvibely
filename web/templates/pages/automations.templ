@@ -269,7 +269,12 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						state.automationId = root.dataset.automationId;
 					}
 					var generation = ++state.generation;
-					return window.htmx.ajax(method || 'GET', url || root.dataset.refreshUrl, {
+					var source = document.createElement('span');
+					source.hidden = true;
+					source.setAttribute('data-automation-live-request-source', String(generation));
+					document.body.appendChild(source);
+					var request = window.htmx.ajax(method || 'GET', url || root.dataset.refreshUrl, {
+						source: source,
 						target: '#automation-live',
 						swap: 'outerHTML',
 						headers: {
@@ -277,6 +282,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 							'X-OpenVibely-Automation-ID': root.dataset.automationId
 						}
 					});
+					return Promise.resolve(request).finally(function() { source.remove(); });
 				};
 				if (!window._automationLiveSwapGuardBound) {
 					window._automationLiveSwapGuardBound = true;

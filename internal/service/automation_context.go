@@ -38,8 +38,15 @@ func AutomationExecutionFromContext(ctx context.Context) (taskID, executionID st
 	return value.TaskID, value.ExecutionID, ok && value.TaskID != "" && value.ExecutionID != ""
 }
 
-func withAutomationExecution(ctx context.Context, taskID, executionID string) context.Context {
+func WithAutomationExecution(ctx context.Context, taskID, executionID string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return context.WithValue(ctx, automationExecutionKey{}, automationExecutionIdentity{TaskID: taskID, ExecutionID: executionID})
+}
+
+func withAutomationExecution(ctx context.Context, taskID, executionID string) context.Context {
+	return WithAutomationExecution(ctx, taskID, executionID)
 }
 
 func withPreparedAutomationExecution(ctx context.Context, executionID string) context.Context {

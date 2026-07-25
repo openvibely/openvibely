@@ -135,6 +135,35 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 		return left < right
 	})
 
+	configuredScheduleEnabled := map[string]bool{}
+	if existing, err := s.repo.GetByStableKey(ctx, req.ProjectID, stableKey); err != nil {
+		return nil, false, err
+	} else if existing != nil && existing.LifecycleState != models.AutomationActive {
+		current, err := s.repo.GetDefinition(ctx, req.ProjectID, existing.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		if current != nil {
+			currentScheduleByNode := map[string]string{}
+			for _, resource := range current.Resources {
+				if resource.ResourceType == "schedule" {
+					currentScheduleByNode[resource.NodeKey] = resource.ResourceID
+				}
+			}
+			for _, currentNode := range current.Nodes {
+				if currentScheduleByNode[currentNode.NodeKey] == "" || currentScheduleByNode[currentNode.NodeKey] != scheduleByNode[currentNode.NodeKey] {
+					continue
+				}
+				var config map[string]any
+				if err := json.Unmarshal([]byte(currentNode.ConfigJSON), &config); err != nil {
+					return nil, false, fmt.Errorf("decode current registered node %q configuration: %w", currentNode.NodeKey, err)
+				}
+				if enabled, ok := config["enabled"].(bool); ok {
+					configuredScheduleEnabled[currentNode.NodeKey] = enabled
+				}
+			}
+		}
+	}
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		name = adapter.DefaultName
@@ -144,7 +173,12 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 	}
 	nodes := make([]models.AutomationNodeSpec, 0, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
-		configJSON, err := s.registeredNodeConfig(ctx, req.ProjectID, adapter, node, taskByNode[node.Key], scheduleByNode[node.Key])
+		var configuredEnabled *bool
+		if value, ok := configuredScheduleEnabled[node.Key]; ok {
+			valueCopy := value
+			configuredEnabled = &valueCopy
+		}
+		configJSON, err := s.registeredNodeConfig(ctx, req.ProjectID, adapter, node, taskByNode[node.Key], scheduleByNode[node.Key], configuredEnabled)
 		if err != nil {
 			return nil, false, err
 		}
@@ -173,7 +207,7 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 	return definition, created, returnErr
 }
 
-func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context, projectID string, adapter AutomationAdapter, node AutomationAdapterNode, taskID, scheduleID string) (string, error) {
+func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context, projectID string, adapter AutomationAdapter, node AutomationAdapterNode, taskID, scheduleID string, configuredEnabled *bool) (string, error) {
 	config := map[string]any{}
 	if taskID != "" {
 		var prompt string
@@ -206,6 +240,9 @@ func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context
 		config["run_at"] = runAt.Local().Format("15:04")
 		config["repeat_type"] = string(repeatType)
 		config["repeat_interval"] = repeatInterval
+		if configuredEnabled != nil {
+			enabled = *configuredEnabled
+		}
 		config["enabled"] = enabled
 	}
 	raw, err := json.Marshal(config)

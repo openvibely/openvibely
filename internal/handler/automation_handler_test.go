@@ -1088,6 +1088,86 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewPlanAndConfirmedSave(t *te
 	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
 }
 
+func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation follow-up GitHub safety").Build()
+	project.RepoURL = "https://github.com/example/runtime.git"
+	project.RepoPath = t.TempDir()
+	require.NoError(t, tc.projectRepo.Update(ctx, project))
+	task := models.Task{ProjectID: project.ID, Title: "Automation bug finder", Category: models.CategoryScheduled,
+		Priority: 2, Status: models.StatusPending, Prompt: "find bugs"}
+	require.NoError(t, tc.taskRepo.Create(ctx, &task))
+	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, tc.scheduleRepo.Create(ctx, &schedule))
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	definition, _, err := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry()).Register(ctx,
+		service.AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: service.AutomationAdapterGitHubSDLC,
+			StableKey: "github-sdlc/followup-safe", Resources: []models.AutomationResourceBinding{
+				{NodeKey: "bug_finder", ResourceType: "task", ResourceID: task.ID},
+				{NodeKey: "bug_finder", ResourceType: "schedule", ResourceID: schedule.ID},
+			}})
+	require.NoError(t, err)
+	bugFinder := definition.Nodes[0]
+	for _, node := range definition.Nodes {
+		if node.NodeKey == "bug_finder" {
+			bugFinder = node
+		}
+	}
+	var invocationID string
+	require.NoError(t, tc.db.QueryRowContext(ctx, `INSERT INTO automation_invocations
+		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
+		VALUES (?, ?, ?, ?, 'schedule', ?, 'followup-safe', 'running', CURRENT_TIMESTAMP) RETURNING id`, project.ID,
+		definition.Automation.ID, definition.Version.ID, bugFinder.ID, schedule.ID).Scan(&invocationID))
+	execution := models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "follow-up"}
+	require.NoError(t, tc.execRepo.Create(ctx, &execution))
+	binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
+		InvocationID: invocationID, NodeID: bugFinder.ID}
+	causalCtx := service.WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}})
+	causalCtx = service.WithAutomationExecution(causalCtx, task.ID, execution.ID)
+
+	var createCalls int
+	github := &fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
+			require.Equal(t, project.RepoURL, repoURL)
+			require.Empty(t, repoPath)
+			return &service.GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		findDuplicateFn: func(_ context.Context, _ *service.GitHubRepoRef, title string, limit int) (*service.GitHubIssueDuplicate, error) {
+			require.Equal(t, "Safe follow-up issue", title)
+			require.Equal(t, 50, limit)
+			return nil, nil
+		},
+		createIssueFn: func(_ context.Context, _ *service.GitHubRepoRef, req service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
+			createCalls++
+			return &service.GitHubIssue{Number: 91, URL: "https://github.com/example/runtime/issues/91", Title: req.Title, State: "open"}, nil
+		},
+	}
+	tc.handler.SetGitHubService(github)
+	tc.handler.llmSvc.SetGitHubIssueRuntimeProvider(github)
+	tc.handler.llmSvc.SetAutomationRepo(automationRepo)
+	params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, ExecID: execution.ID, IsTaskFollowup: true, Task: &task}
+	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, false)
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+	_, handled, isError, err := runtime.Executor(causalCtx, "github_create_issue", json.RawMessage(`{"title":"Safe follow-up issue","assignees":["bot"]}`))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "human GitHub assignment")
+	require.Zero(t, createCalls, "generic follow-up handler must not bypass the Automation human gate")
+
+	output, handled, isError, err := runtime.Executor(causalCtx, "github_create_issue", json.RawMessage(`{"title":"Safe follow-up issue","body":"body"}`))
+	require.True(t, handled)
+	require.False(t, isError)
+	require.NoError(t, err)
+	require.Contains(t, output, `"Number":91`)
+	require.Equal(t, 1, createCalls)
+	var provenance int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_activity_resources
+		WHERE resource_type = 'github_issue' AND resource_id = 'github:example/runtime:issue:91'`).Scan(&provenance))
+	require.Equal(t, 1, provenance, "follow-up issue creation must retain Automation provenance")
+}
+
 func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
