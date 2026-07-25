@@ -20,13 +20,15 @@ import (
 type CompletionsOptions struct {
 	Model           string
 	MaxOutputTokens int
-	// Temperature is omitted when nil. A non-nil pointer preserves explicit
-	// zero, which many providers treat differently from their default.
-	Temperature  *float64
-	System       string
-	WorkDir      string
-	MaxTurns     int
-	DisableTools bool
+	// Temperature preserves explicit zero, which many providers treat
+	// differently from their default. Set OmitTemperature for models that do
+	// not accept the parameter.
+	Temperature     float64
+	OmitTemperature bool
+	System          string
+	WorkDir         string
+	MaxTurns        int
+	DisableTools    bool
 	// SkipDefaultTools suppresses built-in local tools while still allowing
 	// ExtraTools (for example request-scoped runtime tools) to be sent.
 	SkipDefaultTools bool
@@ -333,8 +335,8 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 		"messages": messages,
 		"stream":   true,
 	}
-	if opts.Temperature != nil {
-		payload["temperature"] = *opts.Temperature
+	if !opts.OmitTemperature {
+		payload["temperature"] = opts.Temperature
 	}
 
 	if opts.MaxOutputTokens > 0 {

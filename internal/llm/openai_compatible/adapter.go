@@ -86,7 +86,8 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
 		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
-		Temperature:      compatibleTemperature(req.Agent),
+		Temperature:      req.Agent.Temperature,
+		OmitTemperature:  omitCompatibleTemperature(req.Agent),
 		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
@@ -138,7 +139,8 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
 		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
-		Temperature:      compatibleTemperature(req.Agent),
+		Temperature:      req.Agent.Temperature,
+		OmitTemperature:  omitCompatibleTemperature(req.Agent),
 		System:           llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)),
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
@@ -190,7 +192,8 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
 		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
-		Temperature:      compatibleTemperature(req.Agent),
+		Temperature:      req.Agent.Temperature,
+		OmitTemperature:  omitCompatibleTemperature(req.Agent),
 		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     disableTools,
@@ -213,15 +216,11 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	return sw.String(), usageFromResponse(resp), stopError(resp.StopReason)
 }
 
-func compatibleTemperature(agent models.LLMConfig) *float64 {
+func omitCompatibleTemperature(agent models.LLMConfig) bool {
 	// Moonshot's Kimi models use model-defined fixed temperatures. Omitting the
 	// field lets each Kimi variant select its required value.
-	if strings.EqualFold(strings.TrimSpace(agent.PresetSlug), "moonshot") &&
-		strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "kimi-") {
-		return nil
-	}
-	temperature := agent.Temperature
-	return &temperature
+	return strings.EqualFold(strings.TrimSpace(agent.PresetSlug), "moonshot") &&
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "kimi-")
 }
 
 func compatibleRequestExtras(agent models.LLMConfig) (map[string]string, map[string]interface{}, error) {

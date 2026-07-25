@@ -99,11 +99,11 @@ func TestCompletionsOptions_DefaultMaxTurnsNoLimit(t *testing.T) {
 func TestSendCompletionsDistinguishesZeroFromOmittedTemperature(t *testing.T) {
 	tests := []struct {
 		name        string
-		temperature *float64
+		omit        bool
 		wantPresent bool
 	}{
-		{name: "omitted"},
-		{name: "explicit zero", temperature: float64Pointer(0), wantPresent: true},
+		{name: "omitted", omit: true},
+		{name: "explicit zero", wantPresent: true},
 	}
 
 	for _, tt := range tests {
@@ -120,8 +120,9 @@ func TestSendCompletionsDistinguishesZeroFromOmittedTemperature(t *testing.T) {
 
 			client := NewWithCompatibleAPIKey("test-key", srv.URL+"/v1", "", "")
 			_, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
-				DisableTools: true,
-				Temperature:  tt.temperature,
+				DisableTools:    true,
+				Temperature:     0,
+				OmitTemperature: tt.omit,
 			})
 			if err != nil {
 				t.Fatalf("SendCompletions: %v", err)
@@ -135,10 +136,6 @@ func TestSendCompletionsDistinguishesZeroFromOmittedTemperature(t *testing.T) {
 			}
 		})
 	}
-}
-
-func float64Pointer(value float64) *float64 {
-	return &value
 }
 
 func TestSendCompletions_CompatibleBaseURLAuthAndUsage(t *testing.T) {

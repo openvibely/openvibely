@@ -88,44 +88,33 @@ func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
 
 func TestCompatibleTemperatureOmitsMoonshotKimiOnly(t *testing.T) {
 	tests := []struct {
-		name      string
-		agent     models.LLMConfig
-		wantNil   bool
-		wantValue float64
+		name     string
+		agent    models.LLMConfig
+		wantOmit bool
 	}{
 		{
-			name:    "moonshot kimi",
-			agent:   models.LLMConfig{PresetSlug: "moonshot", Model: "kimi-k2.5", Temperature: 0},
-			wantNil: true,
+			name:     "moonshot kimi",
+			agent:    models.LLMConfig{PresetSlug: "moonshot", Model: "kimi-k2.5", Temperature: 0},
+			wantOmit: true,
 		},
 		{
-			name:      "moonshot non-kimi",
-			agent:     models.LLMConfig{PresetSlug: "moonshot", Model: "moonshot-v1-128k", Temperature: 0},
-			wantValue: 0,
+			name:  "moonshot non-kimi",
+			agent: models.LLMConfig{PresetSlug: "moonshot", Model: "moonshot-v1-128k", Temperature: 0},
 		},
 		{
-			name:      "glm explicit zero",
-			agent:     models.LLMConfig{PresetSlug: "zai", Model: "glm-5", Temperature: 0},
-			wantValue: 0,
+			name:  "glm explicit zero",
+			agent: models.LLMConfig{PresetSlug: "zai", Model: "glm-5", Temperature: 0},
 		},
 		{
-			name:      "custom kimi-compatible endpoint",
-			agent:     models.LLMConfig{Model: "kimi-k2.5", Temperature: 0.2},
-			wantValue: 0.2,
+			name:  "custom kimi-compatible endpoint",
+			agent: models.LLMConfig{Model: "kimi-k2.5", Temperature: 0.2},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := compatibleTemperature(tt.agent)
-			if tt.wantNil {
-				if got != nil {
-					t.Fatalf("temperature = %v, want nil", *got)
-				}
-				return
-			}
-			if got == nil || *got != tt.wantValue {
-				t.Fatalf("temperature = %v, want %v", got, tt.wantValue)
+			if got := omitCompatibleTemperature(tt.agent); got != tt.wantOmit {
+				t.Fatalf("omitCompatibleTemperature() = %v, want %v", got, tt.wantOmit)
 			}
 		})
 	}
