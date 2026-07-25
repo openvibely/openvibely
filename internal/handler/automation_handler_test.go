@@ -126,9 +126,19 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 
 func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *testing.T) {
 	for _, test := range []struct {
-		name   string
-		mutate func(*models.AutomationDraftCandidate)
+		name       string
+		maintained bool
+		mutate     func(*models.AutomationDraftCandidate)
 	}{
+		{name: "empty maintained node name", maintained: true, mutate: func(candidate *models.AutomationDraftCandidate) {
+			candidate.Nodes[0].Name = ""
+		}},
+		{name: "automation type", mutate: func(candidate *models.AutomationDraftCandidate) {
+			candidate.AutomationType = "github_sdlc"
+		}},
+		{name: "compatibility-only Task role", mutate: func(candidate *models.AutomationDraftCandidate) {
+			candidate.Nodes[1].Role = "implementation"
+		}},
 		{name: "Task category", mutate: func(candidate *models.AutomationDraftCandidate) {
 			candidate.Nodes[1].Config["category"] = "scheduled"
 		}},
@@ -158,6 +168,10 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 				{Key: "followup", Name: "Follow up", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Run after the schedule.", "category": "backlog", "priority": 2}},
 			}
 			candidate.Edges = []models.AutomationDraftEdge{{Key: "schedule_followup", From: "schedule", To: "followup", FromPort: "right", ToPort: "left", Condition: map[string]any{}}}
+			if test.maintained {
+				candidate, err = drafts.TemplateCandidate(service.AutomationAdapterVisionDriver)
+				require.NoError(t, err)
+			}
 			test.mutate(&candidate)
 			raw, err := json.Marshal(candidate)
 			require.NoError(t, err)

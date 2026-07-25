@@ -19,11 +19,16 @@ type AutomationCapabilitySnapshotBuilder struct {
 	agentRepo        *repository.AgentRepo
 	taskRepo         *repository.TaskRepo
 	settingsRepo     *repository.SettingsRepo
+	githubAuthRepo   *repository.GitHubAuthRepo
 	githubConnection automationGitHubConnectionProvider
 }
 
 func NewAutomationCapabilitySnapshotBuilder(projectRepo *repository.ProjectRepo, agentRepo *repository.AgentRepo, taskRepo *repository.TaskRepo, settingsRepo *repository.SettingsRepo) *AutomationCapabilitySnapshotBuilder {
 	return &AutomationCapabilitySnapshotBuilder{projectRepo: projectRepo, agentRepo: agentRepo, taskRepo: taskRepo, settingsRepo: settingsRepo}
+}
+
+func (b *AutomationCapabilitySnapshotBuilder) SetGitHubAuthRepository(githubAuthRepo *repository.GitHubAuthRepo) {
+	b.githubAuthRepo = githubAuthRepo
 }
 
 func (b *AutomationCapabilitySnapshotBuilder) SetGitHubConnectionProvider(provider automationGitHubConnectionProvider) {
@@ -48,7 +53,7 @@ func (b *AutomationCapabilitySnapshotBuilder) Build(ctx context.Context, project
 	snapshot.SupportedRoles = supportedAutomationRoles()
 	snapshot.Integrations = map[string]models.AutomationIntegrationCapability{
 		"native": {Configured: true, ApprovalModes: []string{"notification_approval"}},
-		"github": {Configured: b.githubConfigured(ctx), ApprovalModes: []string{"assignment", "pull_request_review"}},
+		"github": {Configured: b.githubConfigured(ctx, project), ApprovalModes: []string{"assignment", "pull_request_review"}},
 	}
 	snapshot.SafetyBoundaries = map[string]bool{
 		"human_approval_required": true, "merge_requires_separate_authorization": true,
@@ -110,8 +115,12 @@ func supportedAutomationRoles() []string {
 	return customAutomationDescriptionRoles()
 }
 
-func (b *AutomationCapabilitySnapshotBuilder) githubConfigured(ctx context.Context) bool {
-	if b == nil || b.settingsRepo == nil || b.githubConnection == nil {
+func (b *AutomationCapabilitySnapshotBuilder) githubConfigured(ctx context.Context, project *models.Project) bool {
+	if b == nil || b.settingsRepo == nil || b.githubAuthRepo == nil || b.githubConnection == nil || project == nil || strings.TrimSpace(project.RepoURL) == "" {
+		return false
+	}
+	inbox, err := b.githubAuthRepo.GetProjectInbox(ctx, project.ID)
+	if err != nil || inbox == nil || !inbox.Enabled || strings.TrimSpace(inbox.GitHubLogin) == "" {
 		return false
 	}
 	mode, err := b.settingsRepo.Get(ctx, GitHubSettingAuthMode)

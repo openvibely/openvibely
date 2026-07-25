@@ -414,7 +414,9 @@ func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testin
 	projectRepo := repository.NewProjectRepo(db)
 	project := automationTestProject(t, projectRepo, "GitHub snapshot")
 	settingsRepo := repository.NewSettingsRepo(db)
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 	builder := NewAutomationCapabilitySnapshotBuilder(projectRepo, nil, nil, settingsRepo)
+	builder.SetGitHubAuthRepository(githubAuthRepo)
 
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	snapshot, err := builder.Build(ctx, project.ID)
@@ -428,6 +430,20 @@ func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testin
 	require.False(t, snapshot.Integrations["github"].Configured, "usable credentials without a connected status are not configured")
 
 	builder.SetGitHubConnectionProvider(automationCapabilityGitHubStatusStub{status: GitHubConnectionStatus{AuthMode: GitHubAuthModePAT, Configured: true, Connected: true, HasPAT: true}})
+	snapshot, err = builder.Build(ctx, project.ID)
+	require.NoError(t, err)
+	require.False(t, snapshot.Integrations["github"].Configured, "GitHub readiness also requires an explicit project repository")
+
+	project.RepoURL = "https://github.com/openvibely/snapshot.git"
+	require.NoError(t, projectRepo.Update(ctx, &project))
+	snapshot, err = builder.Build(ctx, project.ID)
+	require.NoError(t, err)
+	require.False(t, snapshot.Integrations["github"].Configured, "GitHub readiness also requires an enabled approval inbox")
+	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "automation-bot", Enabled: false}))
+	snapshot, err = builder.Build(ctx, project.ID)
+	require.NoError(t, err)
+	require.False(t, snapshot.Integrations["github"].Configured, "a disabled approval inbox is not ready")
+	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "automation-bot", Enabled: true}))
 	snapshot, err = builder.Build(ctx, project.ID)
 	require.NoError(t, err)
 	require.True(t, snapshot.Integrations["github"].Configured)

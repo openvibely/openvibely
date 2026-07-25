@@ -52,9 +52,21 @@ func newAutomationSaveHarness(t *testing.T, name string) automationSaveHarness {
 
 func TestAutomationSaveRejectsSemanticRepairsAndPreservesSelectedTaskCategories(t *testing.T) {
 	for _, test := range []struct {
-		name   string
-		mutate func(*models.AutomationDraftCandidate)
+		name      string
+		candidate func(*automationSaveHarness) models.AutomationDraftCandidate
+		mutate    func(*models.AutomationDraftCandidate)
 	}{
+		{name: "invalid automation type", candidate: func(_ *automationSaveHarness) models.AutomationDraftCandidate {
+			candidate := customScheduledTaskCandidate("Strict semantic Save", "Review one request.")
+			candidate.AutomationType = "github_sdlc"
+			return candidate
+		}},
+		{name: "empty maintained node name", candidate: func(h *automationSaveHarness) models.AutomationDraftCandidate {
+			candidate, err := h.drafts.TemplateCandidate(AutomationAdapterVisionDriver)
+			require.NoError(t, err)
+			candidate.Nodes[0].Name = ""
+			return candidate
+		}},
 		{name: "invalid Task category", mutate: func(candidate *models.AutomationDraftCandidate) {
 			candidate.Nodes[1].Config["category"] = "scheduled"
 		}},
@@ -68,7 +80,12 @@ func TestAutomationSaveRejectsSemanticRepairsAndPreservesSelectedTaskCategories(
 		t.Run(test.name, func(t *testing.T) {
 			h := newAutomationSaveHarness(t, "Strict semantic Save "+test.name)
 			candidate := customScheduledTaskCandidate("Strict semantic Save", "Review one request.")
-			test.mutate(&candidate)
+			if test.candidate != nil {
+				candidate = test.candidate(&h)
+			}
+			if test.mutate != nil {
+				test.mutate(&candidate)
+			}
 
 			_, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
 				ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,

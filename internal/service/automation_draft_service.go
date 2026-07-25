@@ -172,7 +172,6 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 	}
 	candidate.Name = strings.TrimSpace(candidate.Name)
 	candidate.Description = strings.TrimSpace(candidate.Description)
-	candidate.AutomationType = adapter.AutomationType
 	candidate.AdapterKey = adapter.Key
 	adapterNodes := make(map[string]AutomationAdapterNode, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
@@ -199,9 +198,6 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 			}
 		}
 		if canonical, exists := adapterNodes[node.Key]; exists {
-			if node.Name == "" {
-				node.Name = canonical.Name
-			}
 			if node.Position == nil {
 				node.Position = &models.AutomationDraftPoint{X: canonical.X, Y: canonical.Y}
 			}
@@ -225,6 +221,16 @@ func (s *AutomationDraftService) normalizeReopenedCandidate(candidate models.Aut
 	adapter, ok := s.registry.Get(strings.TrimSpace(candidate.AdapterKey))
 	if !ok {
 		return candidate, fmt.Errorf("unsupported automation adapter %q", candidate.AdapterKey)
+	}
+	candidate.AutomationType = adapter.AutomationType
+	adapterNodes := make(map[string]AutomationAdapterNode, len(adapter.Nodes))
+	for _, node := range adapter.Nodes {
+		adapterNodes[node.Key] = node
+	}
+	for i := range candidate.Nodes {
+		if canonical, exists := adapterNodes[candidate.Nodes[i].Key]; exists && strings.TrimSpace(candidate.Nodes[i].Name) == "" {
+			candidate.Nodes[i].Name = canonical.Name
+		}
 	}
 	for i := range candidate.Edges {
 		candidate.Edges[i].FromPort = "right"
@@ -318,6 +324,9 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 	}
 	if candidate.SchemaVersion != automationDraftSchemaVersion {
 		issues = append(issues, models.AutomationValidationIssue{Code: "schema_version", Message: "Unsupported automation graph schema version."})
+	}
+	if candidate.AutomationType != adapter.AutomationType {
+		issues = append(issues, models.AutomationValidationIssue{Code: "automation_type", Message: "Automation type must match the selected adapter."})
 	}
 	if candidate.Name == "" || len(candidate.Name) > 200 {
 		issues = append(issues, models.AutomationValidationIssue{Code: "name", Message: "Automation name must be between 1 and 200 characters."})
@@ -476,7 +485,7 @@ func customAutomationGitHubIssueTask(candidate models.AutomationDraftCandidate, 
 		nodes[node.Key] = node
 	}
 	node, ok := nodes[nodeKey]
-	if !ok || node.Type != models.AutomationNodeAgentTask || (node.Role != "task" && node.Role != "implementation") {
+	if !ok || node.Type != models.AutomationNodeAgentTask || node.Role != "task" {
 		return false
 	}
 	inboxSources := 0
@@ -528,8 +537,7 @@ func customAutomationHandoffSupported(from, to models.AutomationDraftNode) bool 
 		from.Type == models.AutomationNodeHumanGate && from.Role == "native_approval" && to.Type == models.AutomationNodeOutcome ||
 		from.Type == models.AutomationNodeAction && from.Role == "create_github_issue" && to.Type == models.AutomationNodeHumanGate && to.Role == "github_assignment" ||
 		from.Type == models.AutomationNodeHumanGate && from.Role == "github_assignment" && to.Type == models.AutomationNodeAgentTask && to.Role == "github_inbox" ||
-		from.Type == models.AutomationNodeAgentTask && from.Role == "github_inbox" && to.Type == models.AutomationNodeAgentTask && (to.Role == "task" || to.Role == "implementation") ||
-		from.Type == models.AutomationNodeAgentTask && from.Role == "implementation" && to.Type == models.AutomationNodeAction && to.Role == "open_pull_request" ||
+		from.Type == models.AutomationNodeAgentTask && from.Role == "github_inbox" && to.Type == models.AutomationNodeAgentTask && to.Role == "task" ||
 		from.Type == models.AutomationNodeAction && from.Role == "open_pull_request" && to.Type == models.AutomationNodeHumanGate && to.Role == "pull_request_review" ||
 		from.Type == models.AutomationNodeHumanGate && from.Role == "pull_request_review" && to.Type == models.AutomationNodeOutcome
 }
@@ -547,7 +555,7 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 		switch node.Type {
 		case models.AutomationNodeTrigger:
 		case models.AutomationNodeAgentTask:
-			if node.Role != "task" && node.Role != "github_inbox" && node.Role != "implementation" {
+			if node.Role != "task" && node.Role != "github_inbox" {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This Task role is not executable in custom automations yet."})
 			}
 		case models.AutomationNodeAction:
@@ -602,7 +610,7 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 			}
 		case models.AutomationNodeAgentTask:
 			switch node.Role {
-			case "task", "implementation":
+			case "task":
 				if customAutomationGitHubIssueTask(candidate, node.Key) {
 					break
 				}
@@ -783,7 +791,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	case models.AutomationNodeTrigger:
 		validRole = node.Role == "fixed_schedule"
 	case models.AutomationNodeAgentTask:
-		validRole = node.Role == "task" || node.Role == "github_inbox" || node.Role == "implementation"
+		validRole = node.Role == "task" || node.Role == "github_inbox"
 	case models.AutomationNodeAction:
 		validRole = node.Role == "create_notification" || node.Role == "create_github_issue" || node.Role == "open_pull_request"
 	case models.AutomationNodeHumanGate:

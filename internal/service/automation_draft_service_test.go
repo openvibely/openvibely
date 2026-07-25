@@ -438,6 +438,7 @@ func TestAutomationDraftReopenLimitsLegacySemanticCleanupToTrustedSavedGraphs(t 
 	require.NoError(t, err)
 	require.Equal(t, "implementation", strict.Nodes[0].Config["target_node_key"], "strict submitted-candidate normalization must preserve explicit semantic values for validation")
 	require.Equal(t, "implementation", strict.Nodes[1].Role)
+	require.Contains(t, issueCodes(svc.ValidateCandidate(strict)), "unsupported_capability", "new public custom candidates must reject the compatibility-only implementation role")
 	require.Empty(t, strict.Edges[0].FromPort)
 	require.Empty(t, strict.Edges[0].ToPort)
 

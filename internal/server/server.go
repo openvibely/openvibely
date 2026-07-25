@@ -568,6 +568,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	taskPullRequestRepo := repository.NewTaskPullRequestRepo(db)
 	githubPRFeedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	automationCapabilitySvc.SetGitHubAuthRepository(githubAuthRepo)
 	automationSaveValidator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	webhookRepo := repository.NewWebhookRepo(db)
 

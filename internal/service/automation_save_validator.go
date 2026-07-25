@@ -170,7 +170,7 @@ func customAutomationUsesGitHub(candidate models.AutomationDraftCandidate) bool 
 	}
 	for _, node := range candidate.Nodes {
 		switch node.Role {
-		case "create_github_issue", "github_assignment", "github_inbox", "implementation", "open_pull_request", "pull_request_review":
+		case "create_github_issue", "github_assignment", "github_inbox", "open_pull_request", "pull_request_review":
 			return true
 		}
 	}
