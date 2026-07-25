@@ -789,9 +789,6 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 			if h.execRepo != nil && strings.TrimSpace(params.ExecID) != "" {
 				if exec, execErr := h.execRepo.GetByID(ctx, params.ExecID); execErr == nil && exec != nil {
 					reasoningContent = exec.ReasoningContent
-					if prefix := steeringReasoningHistory(*params); prefix != "" && strings.HasPrefix(reasoningContent, prefix) {
-						reasoningContent = strings.TrimPrefix(reasoningContent, prefix)
-					}
 				} else if execErr != nil {
 					applog.Infof("[handler] preparePendingSteeringInputs exec=%s error loading reasoning context: %v", params.ExecID, execErr)
 				}
@@ -843,10 +840,7 @@ func (h *Handler) persistSteeringReasoningHistory(ctx context.Context, params st
 	if exec == nil {
 		return fmt.Errorf("load current reasoning content: execution %s not found", params.ExecID)
 	}
-	reasoningContent := exec.ReasoningContent
-	if !strings.HasPrefix(reasoningContent, priorReasoning) {
-		reasoningContent = priorReasoning + reasoningContent
-	}
+	reasoningContent := priorReasoning + exec.ReasoningContent
 	if err := h.execRepo.UpdateReasoningContent(context.WithoutCancel(ctx), params.ExecID, reasoningContent); err != nil {
 		return fmt.Errorf("persist steering reasoning history: %w", err)
 	}

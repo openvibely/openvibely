@@ -3522,7 +3522,7 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 		ex.PromptSent = "active prompt"
 		ex.IsFollowup = true
 	})
-	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "first private reasoningcurrent private reasoning"))
+	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "first private reasoning plus detail"))
 
 	steering := &models.ThreadInput{
 		Scope:          models.ThreadInputScopeTask,
@@ -3554,13 +3554,13 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 	require.Equal(t, 1, batch.count())
 	require.Len(t, params.ChatHistory, 2)
 	require.Equal(t, "assistant answer", params.ChatHistory[1].Output)
-	require.Equal(t, "current private reasoning", params.ChatHistory[1].ReasoningContent)
+	require.Equal(t, "first private reasoning plus detail", params.ChatHistory[1].ReasoningContent)
 
 	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "final private reasoning"))
 	require.NoError(t, h.persistSteeringReasoningHistory(ctx, params))
 	stored, err := h.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
-	require.Equal(t, "first private reasoningcurrent private reasoningfinal private reasoning", stored.ReasoningContent)
+	require.Equal(t, "first private reasoningfirst private reasoning plus detailfinal private reasoning", stored.ReasoningContent)
 }
 
 func TestClaimPendingTextSteeringInputsSkipsAttachmentSteering(t *testing.T) {
