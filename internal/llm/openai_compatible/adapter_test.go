@@ -144,7 +144,7 @@ func TestCompatibleRequestExtrasAddsKimiK3ReasoningEffort(t *testing.T) {
 func TestCompatibleRequestExtrasEnablesKimiK26PreservedThinking(t *testing.T) {
 	_, body, err := compatibleRequestExtras(models.LLMConfig{
 		Model:         " KIMI-K2.6 ",
-		ExtraBodyJSON: `{"thinking":{"type":"enabled","custom":true}}`,
+		ExtraBodyJSON: `{"thinking":{"custom":true}}`,
 	})
 	require.NoError(t, err)
 	thinking, ok := body["thinking"].(map[string]interface{})
