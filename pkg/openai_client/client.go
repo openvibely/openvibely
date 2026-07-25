@@ -412,6 +412,8 @@ func RefreshToken(refreshToken string) (*StoredAuth, error) {
 // ClearHistory clears accumulated conversation history.
 func (c *Client) ClearHistory() {
 	c.History = nil
+	c.completionsReasoningByIndex = nil
+	c.lastCompletionsReasoning = ""
 }
 
 // Send sends a prompt and returns the model response.
