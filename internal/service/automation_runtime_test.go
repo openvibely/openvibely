@@ -154,6 +154,37 @@ func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.
 	require.Zero(t, reservations)
 }
 
+func TestAutomationDeleteAllowsOrphanedRunningInvocationAfterTaskDeletion(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	invocation, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, now, fixture.schedule.ComputeNextRun(now))
+	require.NoError(t, err)
+	require.NotNil(t, dispatch)
+	leased, err := fixture.repo.LeaseNextDispatch(ctx, "task-deleting-process", now, time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, dispatch.ID, leased.ID)
+	_, err = fixture.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "task-deleting-process")
+	require.NoError(t, err)
+
+	require.NoError(t, fixture.taskRepo.Delete(ctx, fixture.task.ID), "ordinary task deletion reproduces the orphaned invocation in existing databases")
+	var invocationStatus string
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_invocations WHERE id = ?`, invocation.ID).Scan(&invocationStatus))
+	require.Equal(t, "running", invocationStatus)
+	var dispatchRows, executionRows int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_dispatch_outbox WHERE invocation_id = ?`, invocation.ID).Scan(&dispatchRows))
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM executions WHERE dispatch_id = ?`, dispatch.ID).Scan(&executionRows))
+	require.Zero(t, dispatchRows)
+	require.Zero(t, executionRows)
+
+	lifecycle := NewAutomationLifecycleService(fixture.repo, fixture.schedRepo)
+	require.NoError(t, lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID),
+		"a running invocation with no surviving dispatch or execution cannot own in-flight work")
+	definition, err := fixture.repo.GetDefinition(ctx, fixture.project.ID, fixture.definition.Automation.ID)
+	require.NoError(t, err)
+	require.Nil(t, definition)
+}
+
 func TestAutomationDeleteRejectsInFlightDispatchAndPreservesRestartRecovery(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()

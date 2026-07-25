@@ -1002,7 +1002,7 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 	if candidate.AdapterKey == AutomationAdapterGitHubSDLC || customAutomationUsesGitHub(candidate) {
 		github, configured := snapshot.Integrations["github"]
 		if !configured || !github.Configured {
-			issues = append(issues, models.AutomationValidationIssue{Code: "github_unavailable", Message: "GitHub is unavailable for this project; generate a graph that uses only configured capabilities."})
+			issues = append(issues, models.AutomationValidationIssue{Code: "github_unavailable", Message: "GitHub is not ready for this project. Configure connected GitHub authentication, an explicit project GitHub repository, and an enabled project GitHub approval inbox before saving this Automation."})
 		}
 	}
 	agents := make(map[string]bool, len(snapshot.Agents))

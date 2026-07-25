@@ -400,7 +400,7 @@ func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automa
 		FROM automation_invocations i
 		LEFT JOIN automation_dispatch_outbox d ON d.invocation_id = i.id
 		WHERE i.project_id = ? AND i.automation_id = ?
-		  AND (i.status IN ('claimed','dispatched','running')
+		  AND ((i.status IN ('claimed','dispatched','running') AND d.id IS NOT NULL)
 		    OR d.status IN ('pending','processing','submitted')
 		    OR EXISTS (SELECT 1 FROM executions e WHERE e.dispatch_id = d.id AND e.status = 'running'))`, projectID, automationID).Scan(&inFlight); err != nil {
 		return err

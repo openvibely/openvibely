@@ -460,7 +460,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			</div>
 		}
 			if len(page.Result.ValidationErrors) > 0 {
-				<details class="mb-3 rounded-box border border-base-300 bg-base-200/40 px-4 py-3" data-automation-validation-summary>
+				<details class="mb-3 rounded-box border border-base-300 bg-base-200/40 px-4 py-3" data-automation-validation-summary open?={ page.Error != "" }>
 					<summary class="cursor-pointer text-sm font-medium">{ fmt.Sprintf("%d setup items before this design can run", len(automationValidationMessages(page.Result.ValidationErrors, page.NodePalette))) }</summary>
 					<ul class="mt-2 list-disc pl-5 text-sm text-base-content/70">
 						for _, message := range automationValidationMessages(page.Result.ValidationErrors, page.NodePalette) {

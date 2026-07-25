@@ -21,7 +21,7 @@ The supported creation paths are:
 
 Template, Describe It, Blank, and Edit all open browser-local graphs and apply them only on `Save changes`. `Use template` loads the canonical maintained candidate into the same builder without creating durable rows. All surfaces use the same candidate schema, capability validation, atomic Save service, and safety boundaries. Maintained setup registration is restricted to Native and GitHub adapters. Vision Driver remains available through explicit template creation and Save.
 
-Opening a web builder creates no Automation, graph row, Task, Scheduler row, Alert, GitHub issue, execution, or other runtime resource. An invalid Save returns the submitted browser-local candidate with visible setup errors and no resource effects.
+Opening a web builder creates no Automation, graph row, Task, Scheduler row, Alert, GitHub issue, execution, or other runtime resource. An invalid Save returns the submitted browser-local candidate with a prominent `Save did not apply` error, expands the visible setup issues, and creates no resources. An unready GitHub graph names the required connected authentication, explicit project repository, and enabled project approval inbox instead of appearing to ignore the Save action.
 
 ## Custom Graph
 
@@ -83,7 +83,7 @@ Lifecycle state controls admission of new work and is independent of graph repla
 - `Archived` Save remains archived, leaves schedules disabled, and keeps ownership marked archived.
 - Save or maintained registration never resumes paused work or bypasses the archived non-resumable boundary.
 
-Exclusive schedule provenance survives pause and archive. This allows archived edits, Schedule removal/replacement, and Automation deletion to locate and delete owned Scheduler rows without orphaning them.
+Exclusive schedule provenance survives pause and archive. This allows archived edits, Schedule removal/replacement, and Automation deletion to locate and delete owned Scheduler rows without orphaning them. Deletion remains blocked while a surviving dispatch or execution owns in-flight work. A stale nonterminal invocation whose dispatch and execution were already removed by ordinary Task deletion does not represent recoverable in-flight work and cannot permanently prevent Automation deletion.
 
 A root Task configured Active while the Automation is paused is stored non-admitted in Backlog and is not submitted during Save. A downstream handoff completed while paused also persists its causal entered transition while leaving the child pending in Backlog. Explicit Resume atomically re-enables configured schedules, admits matching current-graph pending roots and deferred entered children, commits lifecycle state, and then submits those exact Tasks once. Existing Active roots are not resubmitted merely because the Automation resumes. Pause and Archive demote pending Active current-graph roots and children; a final persisted admission check between handoff commit and worker submission prevents a child that loses a concurrent lifecycle race from being submitted.
 

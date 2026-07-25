@@ -691,6 +691,43 @@ func issueCodesHandler(candidate models.AutomationDraftCandidate, drafts *servic
 	return codes
 }
 
+func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("GitHub template without setup").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	githubAuthRepo := repository.NewGitHubAuthRepo(tc.db)
+	validator.SetCapabilityDependencies(tc.projectRepo, tc.settingsRepo, githubAuthRepo)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	capabilities.SetGitHubAuthRepository(githubAuthRepo)
+	drafts.SetCapabilitySnapshotBuilder(capabilities)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterGitHubSDLC},
+	}).Execute()
+	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+	candidate := automationCandidateFromResponse(t, preview)
+
+	saved := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"},
+		"candidate_json": {automationDraftCandidateJSONForTest(t, candidate)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, saved.Code, saved.Body.String())
+	require.Empty(t, saved.Header().Get("HX-Redirect"))
+	require.Contains(t, saved.Body.String(), "Save did not apply")
+	require.Regexp(t, `(?s)<details[^>]*data-automation-validation-summary[^>]*open`, saved.Body.String())
+	require.Contains(t, saved.Body.String(), "Configure connected GitHub authentication")
+	require.Contains(t, saved.Body.String(), "an explicit project GitHub repository")
+	require.Contains(t, saved.Body.String(), "an enabled project GitHub approval inbox")
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Zero(t, tableCountHandler(t, tc, "tasks"))
+	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+}
+
 func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Builder Project").Build()

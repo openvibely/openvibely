@@ -139,6 +139,7 @@ func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID strin
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation save unavailable")
 	}
 	if len(page.Result.ValidationErrors) > 0 {
+		page.Error = "Save did not apply. Resolve the setup items below and try again."
 		return h.renderAutomationBuilder(c, page)
 	}
 	source := "manual"
