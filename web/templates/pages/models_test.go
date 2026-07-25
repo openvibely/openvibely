@@ -100,6 +100,12 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 			t.Errorf("expected current Z.AI model %q in selector", model)
 		}
 	}
+	if !strings.Contains(out, "{ value: 'glm-5.2', label: 'GLM 5.2', efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']") {
+		t.Error("expected GLM 5.2 reasoning effort options")
+	}
+	if !strings.Contains(out, "GLM Reasoning Effort") {
+		t.Error("expected GLM reasoning effort label")
+	}
 	if !strings.Contains(out, "{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max']") {
 		t.Error("expected Claude Fable 5 effort options")
 	}

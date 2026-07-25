@@ -287,15 +287,21 @@ func compatibleRequestExtras(agent models.LLMConfig) (map[string]string, map[str
 }
 
 func compatibleReasoningEffort(agent models.LLMConfig) string {
-	if !strings.EqualFold(strings.TrimSpace(agent.Model), "kimi-k3") {
-		return ""
+	model := strings.ToLower(strings.TrimSpace(agent.Model))
+	effort := strings.ToLower(strings.TrimSpace(agent.ReasoningEffort))
+	switch model {
+	case "kimi-k3":
+		switch effort {
+		case "low", "high", "max":
+			return effort
+		}
+	case "glm-5.2":
+		switch effort {
+		case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+			return effort
+		}
 	}
-	switch effort := strings.ToLower(strings.TrimSpace(agent.ReasoningEffort)); effort {
-	case "low", "high", "max":
-		return effort
-	default:
-		return ""
-	}
+	return ""
 }
 
 func parseStringMapJSON(raw string) (map[string]string, error) {

@@ -858,6 +858,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 
 				var reasoningEffortOptions = {
 					none: 'None',
+					minimal: 'Minimal',
 					low: 'Low',
 					medium: 'Medium',
 					high: 'High',
@@ -962,7 +963,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						openai_compatible_alibaba_coding_plan: [
 						],
 						openai_compatible_zai_glm: [
-							{ value: 'glm-5.2', label: 'GLM 5.2', efforts: [] },
+							{ value: 'glm-5.2', label: 'GLM 5.2', efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
 							{ value: 'glm-5.1', label: 'GLM 5.1', efforts: [] },
 							{ value: 'glm-5-turbo', label: 'GLM 5 Turbo', efforts: [] },
 							{ value: 'glm-5', label: 'GLM 5', efforts: [] },
@@ -1048,7 +1049,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 			}
 
 				function preferredReasoningEffort(supportedEfforts, provider, model) {
-					if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'kimi-k3' && supportedEfforts.indexOf('max') !== -1) {
+					var normalizedModel = (model || '').trim().toLowerCase();
+					if (isOpenAICompatibleProvider(provider) && (normalizedModel === 'kimi-k3' || normalizedModel === 'glm-5.2') && supportedEfforts.indexOf('max') !== -1) {
 						return 'max';
 					}
 					var preferred = ['medium', 'high', 'low', 'xhigh', 'max'];				for (var i = 0; i < preferred.length; i++) {
@@ -1088,6 +1090,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					} else if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'kimi-k3') {
 						reasoningLabel.textContent = 'Kimi Reasoning Effort';
 						reasoningHelp.textContent = 'Controls Kimi K3 reasoning effort: low, high, or max.';
+					} else if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'glm-5.2') {
+						reasoningLabel.textContent = 'GLM Reasoning Effort';
+						reasoningHelp.textContent = 'Controls GLM 5.2 reasoning effort from none through max.';
 					} else {
 						reasoningLabel.textContent = 'Codex Reasoning Effort';
 						reasoningHelp.textContent = 'Matches Codex reasoning effort for supported OpenAI models.';

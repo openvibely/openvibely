@@ -2287,6 +2287,10 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 		{"kimi k3 max", models.ProviderOpenAICompatible, " KIMI-K3 ", "max", "max"},
 		{"kimi k3 rejects medium", models.ProviderOpenAICompatible, "kimi-k3", "medium", ""},
 		{"kimi k2.7 rejects effort", models.ProviderOpenAICompatible, "kimi-k2.7-code", "high", ""},
+		{"glm 5.2 minimal", models.ProviderOpenAICompatible, "glm-5.2", "minimal", "minimal"},
+		{"glm 5.2 max", models.ProviderOpenAICompatible, " GLM-5.2 ", "max", "max"},
+		{"glm 5.2 rejects ultra", models.ProviderOpenAICompatible, "glm-5.2", "ultra", ""},
+		{"glm 5.1 rejects effort", models.ProviderOpenAICompatible, "glm-5.1", "high", ""},
 		{"ollama clears effort", models.ProviderOllama, "llama", "high", ""},
 	}
 

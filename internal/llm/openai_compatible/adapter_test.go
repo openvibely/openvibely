@@ -141,6 +141,18 @@ func TestCompatibleRequestExtrasAddsKimiK3ReasoningEffort(t *testing.T) {
 	require.Equal(t, true, body["custom"])
 }
 
+func TestCompatibleRequestExtrasAddsGLM52ReasoningEffort(t *testing.T) {
+	_, body, err := compatibleRequestExtras(models.LLMConfig{
+		Model:            "glm-5.2",
+		ReasoningEffort:  "minimal",
+		ExtraBodyJSON:    `{"reasoning_effort":"high","custom":true}`,
+		ExtraHeadersJSON: "",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "minimal", body["reasoning_effort"])
+	require.Equal(t, true, body["custom"])
+}
+
 func TestCompatibleRequestExtrasEnablesKimiK26PreservedThinking(t *testing.T) {
 	_, body, err := compatibleRequestExtras(models.LLMConfig{
 		Model:         " KIMI-K2.6 ",
