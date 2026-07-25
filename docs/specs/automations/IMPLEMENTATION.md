@@ -109,7 +109,7 @@ GitHub actions remain constrained by configured project/integration readiness an
 
 Issue assignment is human approval to begin implementation. Pull requests are opened or reused but never automatically approved or merged. Review, merge, release, and deployment remain human-controlled. Runtime idempotency cannot adopt a GitHub object created outside the exact Automation source.
 
-Automation issue-creation duplicate protection never lists, searches, fetches, or compares existing GitHub issues. It uses a durable local record keyed by project, repository, and a normalized-title fingerprint. The record contains only the issue number returned after OpenVibely successfully creates the issue; a short local lease serializes concurrent equivalent runs. Assigned-issue inbox reads remain a separate human-gated path and do not participate in issue-creation deduplication.
+Automation issue-creation duplicate protection never lists, searches, fetches, or compares existing GitHub issues. It uses a durable local record keyed by project, repository, and a normalized-title fingerprint. A short-lived `reserved` state serializes concurrent equivalent runs before provider dispatch. Immediately before calling GitHub, the record becomes `dispatched`; that state is never expiry-reclaimable, so an ambiguous provider outcome remains durably fail-closed without reading GitHub. A successful provider response stores only the returned issue number and marks the record `completed` using a bounded persistence context independent of caller cancellation. Only a record that is still definitively pre-dispatch may expire or be released. Assigned-issue inbox reads remain a separate human-gated path and do not participate in issue-creation deduplication.
 
 ## Chat Contract
 

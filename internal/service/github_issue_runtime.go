@@ -33,7 +33,10 @@ type GitHubIssueRuntimeProvider interface {
 	AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error
 }
 
-const automationGitHubIssueDedupLeaseDuration = 2 * time.Minute
+const (
+	automationGitHubIssueDedupLeaseDuration      = 2 * time.Minute
+	automationGitHubIssueDedupPersistenceTimeout = 5 * time.Second
+)
 
 type githubIssueRuntimeOptions struct {
 	ProjectID                string
@@ -180,21 +183,32 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					return "", fmt.Errorf("GitHub issue #%d was already created by this project: https://github.com/%s/%s/issues/%d",
 						duplicateIssueNumber, repo.Owner, repo.Name, duplicateIssueNumber)
 				}
+				if err := opts.AutomationRepo.MarkGitHubIssueDedupDispatched(ctx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner); err != nil {
+					releaseCtx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
+					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(releaseCtx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
+					cancel()
+					if releaseErr := releaseGitHubIssueActivityReservations(ctx, opts, reservedBindings, activityKey); releaseErr != nil {
+						return "", releaseErr
+					}
+					return "", err
+				}
 			}
 			issue, err := opts.GitHub.CreateIssue(ctx, repo, GitHubCreateIssueRequest{Title: req.Title, Body: req.Body, Labels: req.Labels, Assignees: req.Assignees})
 			if err != nil {
 				if dedupFingerprint != "" {
-					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
+					return "", fmt.Errorf("%w: GitHub issue creation outcome is uncertain: %v", repository.ErrAutomationExternalReconciliation, err)
 				}
 				return "", err
 			}
 			if dedupFingerprint != "" {
 				if issue == nil {
-					_ = opts.AutomationRepo.ReleaseGitHubIssueDedupLease(context.Background(), opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner)
-					return "", errors.New("GitHub issue creation returned no issue")
+					return "", fmt.Errorf("%w: GitHub issue creation returned no issue", repository.ErrAutomationExternalReconciliation)
 				}
-				if err := opts.AutomationRepo.CompleteGitHubIssueDedupLease(ctx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner, issue.Number); err != nil {
-					return "", err
+				persistenceCtx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
+				completeErr := opts.AutomationRepo.CompleteGitHubIssueDedupLease(persistenceCtx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner, issue.Number)
+				cancel()
+				if completeErr != nil {
+					return "", fmt.Errorf("%w: recording created GitHub issue #%d locally: %v", repository.ErrAutomationExternalReconciliation, issue.Number, completeErr)
 				}
 			}
 			if err := recordGitHubIssueCreated(ctx, opts, repo, issue, activityKey); err != nil {

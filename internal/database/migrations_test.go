@@ -161,6 +161,60 @@ func TestMigration124_BackfillsOnlyFeatureOwnedAutomationIssueTasks(t *testing.T
 	}
 }
 
+func TestMigration127FailsClosedForExistingGitHubIssueClaims(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automation-github-issue-dedup-127.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 126); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-127', 'Migration 127', '', '');
+		INSERT INTO automation_github_issue_dedup_leases
+			(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at)
+			VALUES ('project-127', 'example/runtime', 'uncertain', 'uncertain-owner', '2020-01-01 00:00:00');
+		INSERT INTO automation_github_issue_dedup_leases
+			(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at, created_issue_number)
+			VALUES ('project-127', 'example/runtime', 'completed', 'completed-owner', '2020-01-01 00:00:00', 91);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 127); err != nil {
+		t.Fatal(err)
+	}
+
+	for fingerprint, want := range map[string]string{"uncertain": "dispatched", "completed": "completed"} {
+		var got string
+		if err := db.QueryRow(`SELECT mutation_state FROM automation_github_issue_dedup_leases
+			WHERE project_id = 'project-127' AND repository_full_name = 'example/runtime' AND title_fingerprint = ?`, fingerprint).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("claim %s mutation_state = %q, want %q", fingerprint, got, want)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO automation_github_issue_dedup_leases
+		(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at)
+		VALUES ('project-127', 'example/runtime', 'new-reservation', 'new-owner', CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	var newState string
+	if err := db.QueryRow(`SELECT mutation_state FROM automation_github_issue_dedup_leases
+		WHERE project_id = 'project-127' AND title_fingerprint = 'new-reservation'`).Scan(&newState); err != nil {
+		t.Fatal(err)
+	}
+	if newState != "reserved" {
+		t.Fatalf("new claim mutation_state = %q, want reserved", newState)
+	}
+}
+
 func TestMigration125_RemovesLegacyDraftGraphsAndUnsavedAutomationShells(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-current-graph-125.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -394,8 +448,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 126 {
-		t.Fatalf("max goose version = %d, want 126", maxVersion)
+	if maxVersion != 127 {
+		t.Fatalf("max goose version = %d, want 127", maxVersion)
 	}
 }
 
@@ -546,8 +600,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 126 {
-		t.Fatalf("max goose version = %d, want 126", maxVersion)
+	if maxVersion != 127 {
+		t.Fatalf("max goose version = %d, want 127", maxVersion)
 	}
 }
 
@@ -1033,8 +1087,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 126 {
-		t.Fatalf("max goose version = %d, want 126", maxVersion)
+	if maxVersion != 127 {
+		t.Fatalf("max goose version = %d, want 127", maxVersion)
 	}
 }
 
@@ -1385,8 +1439,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 126 {
-		t.Fatalf("max goose version = %d, want 126", maxVersion)
+	if maxVersion != 127 {
+		t.Fatalf("max goose version = %d, want 127", maxVersion)
 	}
 }
 

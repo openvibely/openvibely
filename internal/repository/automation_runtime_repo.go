@@ -1606,8 +1606,8 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 	}()
 	expiresAt := now.UTC().Add(leaseDuration)
 	result, err := conn.ExecContext(ctx, `INSERT INTO automation_github_issue_dedup_leases
-		(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at)
-		VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id, repository_full_name, title_fingerprint) DO NOTHING`,
+		(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at, mutation_state)
+		VALUES (?, ?, ?, ?, ?, 'reserved') ON CONFLICT(project_id, repository_full_name, title_fingerprint) DO NOTHING`,
 		projectID, repositoryFullName, titleFingerprint, ownerToken, expiresAt)
 	if err != nil {
 		return 0, fmt.Errorf("acquiring GitHub issue duplicate lease: %w", err)
@@ -1618,9 +1618,11 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 	}
 	if acquired == 0 {
 		var createdIssueNumber sql.NullInt64
-		if err := conn.QueryRowContext(ctx, `SELECT created_issue_number FROM automation_github_issue_dedup_leases
+		var mutationState string
+		var leaseExpiresAt time.Time
+		if err := conn.QueryRowContext(ctx, `SELECT created_issue_number, mutation_state, lease_expires_at FROM automation_github_issue_dedup_leases
 			WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?`,
-			projectID, repositoryFullName, titleFingerprint).Scan(&createdIssueNumber); err != nil {
+			projectID, repositoryFullName, titleFingerprint).Scan(&createdIssueNumber, &mutationState, &leaseExpiresAt); err != nil {
 			return 0, err
 		}
 		if createdIssueNumber.Valid && createdIssueNumber.Int64 > 0 {
@@ -1630,10 +1632,16 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 			committed = true
 			return int(createdIssueNumber.Int64), nil
 		}
+		if mutationState != "reserved" {
+			if mutationState == "dispatched" && leaseExpiresAt.After(now.UTC()) {
+				return 0, ErrAutomationGitHubIssueDedupBusy
+			}
+			return 0, fmt.Errorf("%w: prior GitHub issue creation outcome is uncertain", ErrAutomationExternalReconciliation)
+		}
 		result, err = conn.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
 			SET owner_token = ?, lease_expires_at = ?, updated_at = CURRENT_TIMESTAMP
 			WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?
-				AND created_issue_number IS NULL AND lease_expires_at <= ?`,
+				AND mutation_state = 'reserved' AND created_issue_number IS NULL AND lease_expires_at <= ?`,
 			ownerToken, expiresAt, projectID, repositoryFullName, titleFingerprint, now.UTC())
 		if err != nil {
 			return 0, fmt.Errorf("reclaiming GitHub issue duplicate lease: %w", err)
@@ -1653,14 +1661,31 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 	return 0, nil
 }
 
+func (r *AutomationRepo) MarkGitHubIssueDedupDispatched(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string) error {
+	result, err := r.db.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
+		SET mutation_state = 'dispatched', updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
+			AND mutation_state = 'reserved' AND created_issue_number IS NULL`,
+		strings.TrimSpace(projectID), strings.ToLower(strings.TrimSpace(repositoryFullName)), strings.TrimSpace(titleFingerprint), strings.TrimSpace(ownerToken))
+	if err != nil {
+		return fmt.Errorf("marking GitHub issue duplicate lease dispatched: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected != 1 {
+		return errors.New("GitHub issue duplicate lease is not reserved by this owner")
+	}
+	return nil
+}
+
 func (r *AutomationRepo) CompleteGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string, issueNumber int) error {
 	if issueNumber <= 0 {
 		return errors.New("created GitHub issue number is required")
 	}
 	result, err := r.db.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
-		SET created_issue_number = ?, updated_at = CURRENT_TIMESTAMP
+		SET created_issue_number = ?, mutation_state = 'completed', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
-			AND (created_issue_number IS NULL OR created_issue_number = ?)`,
+			AND (mutation_state = 'dispatched' OR (mutation_state = 'completed' AND created_issue_number = ?))`,
 		issueNumber, strings.TrimSpace(projectID), strings.ToLower(strings.TrimSpace(repositoryFullName)), strings.TrimSpace(titleFingerprint),
 		strings.TrimSpace(ownerToken), issueNumber)
 	if err != nil {
@@ -1669,14 +1694,15 @@ func (r *AutomationRepo) CompleteGitHubIssueDedupLease(ctx context.Context, proj
 	if affected, err := result.RowsAffected(); err != nil {
 		return err
 	} else if affected != 1 {
-		return errors.New("GitHub issue duplicate lease is not owned")
+		return errors.New("GitHub issue duplicate lease is not dispatched by this owner")
 	}
 	return nil
 }
 
 func (r *AutomationRepo) ReleaseGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string) error {
 	result, err := r.db.ExecContext(ctx, `DELETE FROM automation_github_issue_dedup_leases
-		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?`,
+		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
+			AND mutation_state = 'reserved' AND created_issue_number IS NULL`,
 		strings.TrimSpace(projectID), strings.ToLower(strings.TrimSpace(repositoryFullName)), strings.TrimSpace(titleFingerprint), strings.TrimSpace(ownerToken))
 	if err != nil {
 		return fmt.Errorf("releasing GitHub issue duplicate lease: %w", err)
@@ -1684,7 +1710,7 @@ func (r *AutomationRepo) ReleaseGitHubIssueDedupLease(ctx context.Context, proje
 	if affected, err := result.RowsAffected(); err != nil {
 		return err
 	} else if affected != 1 {
-		return errors.New("GitHub issue duplicate lease is not owned")
+		return errors.New("GitHub issue duplicate lease is not releasable by this owner")
 	}
 	return nil
 }

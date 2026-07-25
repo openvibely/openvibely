@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1131,6 +1132,114 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	var waitingReview int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions p JOIN automation_nodes n ON n.id = p.node_id WHERE p.automation_id = ? AND n.node_key = 'review' AND p.state = 'waiting'`, fixture.definition.Automation.ID).Scan(&waitingReview))
 	require.Equal(t, 1, waitingReview)
+}
+
+func newAutomationGitHubIssueDedupHarness(t *testing.T, provider GitHubIssueRuntimeProvider) (automationRuntimeFixture, func(string) context.Context, func(context.Context, json.RawMessage) (string, error)) {
+	t.Helper()
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime.git"
+	fixture.project.RepoPath = t.TempDir()
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	bugFinder := automationNodeByKey(t, fixture.definition, "bug_finder")
+	newCausalContext := func(occurrence string) context.Context {
+		t.Helper()
+		var invocationID string
+		require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `INSERT INTO automation_invocations
+			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
+			VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
+			fixture.definition.Automation.ID, fixture.definition.Version.ID, bugFinder.ID, fixture.schedule.ID, occurrence).Scan(&invocationID))
+		execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: occurrence}
+		require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+		binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
+			InvocationID: invocationID, NodeID: bugFinder.ID}
+		causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
+		return withAutomationExecution(causalCtx, fixture.task.ID, execution.ID)
+	}
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
+		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
+	return fixture, newCausalContext, handlers["github_create_issue"]
+}
+
+func TestAutomationGitHubIssueCreationFailsClosedAfterAmbiguousProviderOutcome(t *testing.T) {
+	var createCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		createIssueFn: func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createCalls.Add(1)
+			return nil, errors.New("provider timeout after request dispatch")
+		},
+	}
+	fixture, newCausalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
+	input := json.RawMessage(`{"title":"Ambiguous post-mutation issue","body":"body"}`)
+
+	_, firstErr := createIssue(newCausalContext("ambiguous-first"), input)
+	require.ErrorContains(t, firstErr, "provider timeout")
+	fingerprint := githubIssueTitleFingerprint("Ambiguous post-mutation issue")
+	_, err := fixture.repo.DB().Exec(`UPDATE automation_github_issue_dedup_leases SET lease_expires_at = ?
+		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?`, time.Now().UTC().Add(-time.Hour),
+		fixture.project.ID, "example/runtime", fingerprint)
+	require.NoError(t, err)
+
+	_, retryErr := createIssue(newCausalContext("ambiguous-retry"), input)
+	require.ErrorIs(t, retryErr, repository.ErrAutomationExternalReconciliation)
+	require.Equal(t, int32(1), createCalls.Load(), "lease expiry must not retry a create whose external outcome is uncertain")
+	var mutationState string
+	var recordedNumber sql.NullInt64
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT mutation_state, created_issue_number FROM automation_github_issue_dedup_leases
+		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?`, fixture.project.ID, "example/runtime", fingerprint).
+		Scan(&mutationState, &recordedNumber))
+	require.Equal(t, "dispatched", mutationState)
+	require.False(t, recordedNumber.Valid, "an uncertain external outcome must remain numberless and fail closed")
+}
+
+func TestAutomationGitHubIssueCreationRecordsSuccessDespiteRequestCancellation(t *testing.T) {
+	var createCalls atomic.Int32
+	var cancelFirst context.CancelFunc
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			if createCalls.Add(1) == 1 {
+				cancelFirst()
+			}
+			return &GitHubIssue{Number: 91, URL: "https://github.com/example/runtime/issues/91", Title: req.Title, State: "open"}, nil
+		},
+	}
+	fixture, newCausalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
+	firstCtx, cancel := context.WithCancel(newCausalContext("canceled-success-first"))
+	cancelFirst = cancel
+	defer cancel()
+	input := json.RawMessage(`{"title":"Canceled successful issue","body":"body"}`)
+
+	_, firstErr := createIssue(firstCtx, input)
+	require.ErrorIs(t, firstErr, context.Canceled)
+	fingerprint := githubIssueTitleFingerprint("Canceled successful issue")
+	var mutationState string
+	var recordedNumber sql.NullInt64
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT mutation_state, created_issue_number FROM automation_github_issue_dedup_leases
+		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?`, fixture.project.ID, "example/runtime", fingerprint).
+		Scan(&mutationState, &recordedNumber))
+	if !recordedNumber.Valid || recordedNumber.Int64 != 91 {
+		t.Errorf("created issue number after canceled request = %v, want 91", recordedNumber)
+	}
+	require.Equal(t, "completed", mutationState)
+	_, err := fixture.repo.DB().Exec(`UPDATE automation_github_issue_dedup_leases SET lease_expires_at = ?
+		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?`, time.Now().UTC().Add(-time.Hour),
+		fixture.project.ID, "example/runtime", fingerprint)
+	require.NoError(t, err)
+
+	_, retryErr := createIssue(newCausalContext("canceled-success-retry"), input)
+	if retryErr == nil {
+		t.Error("retry after canceled local completion succeeded, want local duplicate rejection")
+	} else {
+		require.ErrorContains(t, retryErr, "#91 was already created by this project")
+	}
+	require.Equal(t, int32(1), createCalls.Load(), "request cancellation after provider success must not allow a second create")
 }
 
 func TestAutomationGitHubIssueCreationDoesNotReadExistingIssuesForDeduplication(t *testing.T) {
