@@ -179,6 +179,19 @@ func TestCompatibleRequestExtrasPreservesDisabledKimiK26Thinking(t *testing.T) {
 	require.NotContains(t, thinking, "keep")
 }
 
+func TestCompatibleRequestExtrasPreservesKimiK26KeepOptOut(t *testing.T) {
+	_, body, err := compatibleRequestExtras(models.LLMConfig{
+		Model:         "kimi-k2.6",
+		ExtraBodyJSON: `{"thinking":{"type":"enabled","keep":null}}`,
+	})
+	require.NoError(t, err)
+	thinking, ok := body["thinking"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "enabled", thinking["type"])
+	require.Contains(t, thinking, "keep")
+	require.Nil(t, thinking["keep"])
+}
+
 func TestAdapterCallDirectRawPromptOmitsOpenVibelySystemPrompt(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -550,6 +563,9 @@ func TestBuildClientHistoryPreservesReasoningContent(t *testing.T) {
 func TestSupportsReasoningContentReplayForKimiOnly(t *testing.T) {
 	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k3"}))
 	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: " KIMI-K2.6 "}))
+	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.6", ExtraBodyJSON: `{"thinking":{"keep":"all"}}`}))
+	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.6", ExtraBodyJSON: `{"thinking":{"type":"disabled"}}`}))
+	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.6", ExtraBodyJSON: `{"thinking":{"type":"enabled","keep":null}}`}))
 	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.7-code"}))
 	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.7-code-highspeed"}))
 	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.5"}))

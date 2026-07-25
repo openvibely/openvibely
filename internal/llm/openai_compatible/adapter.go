@@ -231,7 +231,25 @@ func compatibleTemperature(agent models.LLMConfig) float64 {
 
 func supportsReasoningContentReplay(agent models.LLMConfig) bool {
 	switch strings.ToLower(strings.TrimSpace(agent.Model)) {
-	case "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6":
+	case "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed":
+		return true
+	case "kimi-k2.6":
+		body, err := parseObjectJSON(agent.ExtraBodyJSON)
+		if err != nil {
+			return false
+		}
+		thinking, _ := body["thinking"].(map[string]interface{})
+		if thinking == nil {
+			return true
+		}
+		thinkingType, _ := thinking["type"].(string)
+		if strings.EqualFold(strings.TrimSpace(thinkingType), "disabled") {
+			return false
+		}
+		if keep, exists := thinking["keep"]; exists {
+			keepValue, ok := keep.(string)
+			return ok && strings.EqualFold(strings.TrimSpace(keepValue), "all")
+		}
 		return true
 	default:
 		return false
@@ -280,9 +298,14 @@ func compatibleRequestExtras(agent models.LLMConfig) (map[string]string, map[str
 			thinking = make(map[string]interface{})
 		}
 		thinkingType, _ := thinking["type"].(string)
-		if !strings.EqualFold(strings.TrimSpace(thinkingType), "disabled") {
+		if _, exists := thinking["type"]; !exists {
 			thinking["type"] = "enabled"
-			thinking["keep"] = "all"
+			thinkingType = "enabled"
+		}
+		if !strings.EqualFold(strings.TrimSpace(thinkingType), "disabled") {
+			if _, exists := thinking["keep"]; !exists {
+				thinking["keep"] = "all"
+			}
 		}
 		body["thinking"] = thinking
 	}
