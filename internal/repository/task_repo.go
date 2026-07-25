@@ -536,6 +536,86 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 	return claimed, nil
 }
 
+// TaskDispatchClaim is the authoritative ordinary-worker dispatch state loaded
+// in the same write transaction that promotes its Task to running.
+type TaskDispatchClaim struct {
+	Task              models.Task
+	AutomationContext models.AutomationContext
+}
+
+// ClaimTaskForDispatch atomically validates worker admission, claims the Task,
+// and loads its exact persisted behavior plus current Automation bindings. This
+// prevents a concurrent Automation Save from mixing a stale queued snapshot
+// with a replacement graph.
+func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDispatchClaim, bool, error) {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, false, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	task, err := getTaskWithExecutor(ctx, conn, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading task for dispatch claim: %w", err)
+	}
+	if task == nil {
+		return nil, false, fmt.Errorf("task not found: %s", id)
+	}
+	if task.Status != models.StatusPending || (task.Category != models.CategoryActive && task.Category != models.CategoryScheduled) {
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		committed = true
+		return &TaskDispatchClaim{Task: *task}, false, nil
+	}
+
+	automationContext, err := contextForTaskWithExecutor(ctx, conn, task.ProjectID, task.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading task Automation context for dispatch claim: %w", err)
+	}
+	if len(automationContext.Bindings) == 0 && IsAutomationTaskCreatedVia(task.CreatedVia) {
+		automationContext = models.AutomationContext{ProjectID: task.ProjectID, OriginTask: true}
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'running', updated_at = datetime('now')
+		WHERE id = ? AND status = 'pending' AND category IN ('active','scheduled')
+		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("claiming task for dispatch: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, fmt.Errorf("dispatch claim rows affected: %w", err)
+	}
+	if rows != 1 {
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		committed = true
+		return &TaskDispatchClaim{Task: *task}, false, nil
+	}
+	task.Status = models.StatusRunning
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, false, err
+	}
+	committed = true
+
+	if r.broadcaster != nil {
+		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: task.ID, TaskName: task.Title,
+			ProjectID: task.ProjectID, Status: string(models.StatusRunning), OldStatus: string(models.StatusPending),
+			Category: string(task.Category)})
+	}
+	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
+}
+
 // SearchByTitle searches for non-chat tasks matching a title substring within a project.
 // Returns tasks ordered by relevance: exact match first, then prefix match, then contains.
 // Excludes chat tasks (CategoryChat) since those are internal chat messages, not user tasks.

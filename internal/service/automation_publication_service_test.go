@@ -137,6 +137,90 @@ func TestAutomationSaveRejectsSemanticRepairsAndPreservesSelectedTaskCategories(
 	}
 }
 
+func TestAutomationQueuedRootClaimsReplacementDispatchStateAtomically(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Atomic queued root dispatch")
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(h.db)
+	staleAgent := models.Agent{Name: "Stale dispatch agent", Key: "stale_dispatch_agent", Scope: models.AgentScopeProject,
+		ProjectID: h.project.ID, Enabled: true, SelectableAsPrimary: true, SystemPrompt: "stale agent must not execute"}
+	replacementAgent := models.Agent{Name: "Replacement dispatch agent", Key: "replacement_dispatch_agent", Scope: models.AgentScopeProject,
+		ProjectID: h.project.ID, Enabled: true, SelectableAsPrimary: true, SystemPrompt: "replacement agent executes"}
+	require.NoError(t, agentRepo.Create(ctx, &staleAgent))
+	require.NoError(t, agentRepo.Create(ctx, &replacementAgent))
+	h.drafts.SetCapabilitySnapshotBuilder(NewAutomationCapabilitySnapshotBuilder(
+		repository.NewProjectRepo(h.db), agentRepo, h.taskRepo, repository.NewSettingsRepo(h.db)))
+	h.compiler.SetAgentRepository(agentRepo)
+	h.compiler.validator.SetAgentRepository(agentRepo)
+	initial := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Queued root", Description: "Initial graph",
+		AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
+		Nodes: []models.AutomationDraftNode{{Key: "root", Name: "Root task", Type: models.AutomationNodeAgentTask, Role: "task",
+			Config: map[string]any{"prompt": "stale prompt must not execute", "category": "active", "priority": 2, "agent_ref": staleAgent.Key}}}}
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: initial})
+	require.NoError(t, err)
+	taskID := automationResourceID(t, first.Definition, "root", "task")
+	queuedTask, err := h.taskRepo.GetByID(ctx, taskID)
+	require.NoError(t, err)
+
+	llmConfigRepo := repository.NewLLMConfigRepo(h.db)
+	agent := &models.LLMConfig{Name: "Atomic dispatch agent", Provider: models.ProviderTest, Model: "test-model",
+		MaxTokens: 4096, AuthMethod: models.AuthMethodCLI, IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	execRepo := repository.NewExecutionRepo(h.db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, h.taskRepo, repository.NewProjectRepo(h.db), h.scheduleRepo, repository.NewAttachmentRepo(h.db))
+	llmSvc.SetAgentRepo(agentRepo)
+	caller := testutil.NewMockLLMCaller()
+	called := make(chan models.AutomationContext, 1)
+	caller.OnCall = func(callCtx context.Context, _ testutil.MockLLMCall) {
+		automationContext, _ := AutomationContextFromContext(callCtx)
+		called <- automationContext
+	}
+	llmSvc.SetLLMCaller(caller)
+	worker := NewWorkerService(llmSvc, 1, repository.NewProjectRepo(h.db))
+	worker.SetTaskRepo(h.taskRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetAutomationRepo(h.automationRepo)
+	beforeClaim := make(chan struct{})
+	releaseClaim := make(chan struct{})
+	worker.beforeOrdinaryTaskClaim = func(models.Task) {
+		close(beforeClaim)
+		<-releaseClaim
+	}
+	worker.Start(ctx)
+	defer worker.Stop()
+
+	worker.Submit(*queuedTask)
+	select {
+	case <-beforeClaim:
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker did not reach the post-reload claim barrier")
+	}
+
+	replacement := initial
+	replacement.Description = "Replacement graph"
+	replacement.Nodes = append(append([]models.AutomationDraftNode(nil), initial.Nodes...),
+		models.AutomationDraftNode{Key: "done", Name: "Done", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}})
+	replacement.Nodes[0].Config = map[string]any{"prompt": "replacement prompt executes", "category": "active", "priority": 2,
+		"agent_ref": replacementAgent.Key}
+	replacement.Edges = []models.AutomationDraftEdge{{Key: "root_done", From: "root", To: "done", FromPort: "right", ToPort: "left", Condition: map[string]any{}}}
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: replacement})
+	require.NoError(t, err)
+	close(releaseClaim)
+
+	select {
+	case dispatchContext := <-called:
+		require.Len(t, dispatchContext.Bindings, 1)
+		require.Equal(t, saved.Definition.Version.ID, dispatchContext.Bindings[0].VersionID)
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker did not execute the claimed queued root")
+	}
+	require.Contains(t, caller.LastCall().Prompt, "replacement prompt executes")
+	require.NotContains(t, caller.LastCall().Prompt, "stale prompt must not execute")
+	require.NotNil(t, caller.LastAgentRequest().AgentDefinition)
+	require.Equal(t, replacementAgent.ID, caller.LastAgentRequest().AgentDefinition.ID)
+	require.NotEqual(t, staleAgent.ID, caller.LastAgentRequest().AgentDefinition.ID)
+}
+
 func TestAutomationSaveCreatesCurrentGraphTaskAndScheduleAtomically(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic custom Save")
 	ctx := context.Background()

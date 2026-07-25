@@ -382,6 +382,9 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		return nil, nil, err
 	}
 	if in.ExpectedCurrentGraphID != "" {
+		if err := backfillLegacyGitHubIssueTaskOrigins(ctx, conn, in.ProjectID, in.AutomationID, in.ExpectedCurrentGraphID); err != nil {
+			return nil, nil, err
+		}
 		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions WHERE id = ? AND automation_id = ? AND project_id = ?`,
 			in.ExpectedCurrentGraphID, in.AutomationID, in.ProjectID); err != nil {
 			return nil, nil, err
@@ -408,4 +411,38 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 
 	r.PublishInvalidation(events.AutomationDefinitionUpdated, in.ProjectID, models.AutomationBinding{AutomationID: in.AutomationID, VersionID: in.GraphID})
 	return definition, runnable, nil
+}
+
+func backfillLegacyGitHubIssueTaskOrigins(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID string) error {
+	_, err := exec.ExecContext(ctx, `UPDATE tasks
+		SET created_via = (
+			SELECT 'automation:' || activity.automation_id || ':' || node.node_key
+			FROM automation_activity_resources resource
+			JOIN automation_activities activity ON activity.id = resource.activity_id
+			JOIN automation_nodes node ON node.id = activity.node_id
+				AND node.version_id = activity.version_id AND node.automation_id = activity.automation_id
+				AND node.project_id = activity.project_id
+			WHERE resource.resource_type = 'task' AND resource.resource_id = tasks.id AND resource.relation = 'child'
+				AND activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+				AND activity.activity_type = 'create_task' AND activity.work_item_id IS NOT NULL
+				AND activity.activity_key = 'work-item:' || activity.work_item_id || ':implementation-task'
+				AND node.node_type = 'agent_task' AND node.role IN ('task', 'implementation')
+			ORDER BY activity.started_at, activity.id LIMIT 1)
+		WHERE project_id = ? AND trim(COALESCE(created_via, '')) = ''
+			AND EXISTS (
+				SELECT 1 FROM automation_activity_resources resource
+				JOIN automation_activities activity ON activity.id = resource.activity_id
+				JOIN automation_nodes node ON node.id = activity.node_id
+					AND node.version_id = activity.version_id AND node.automation_id = activity.automation_id
+					AND node.project_id = activity.project_id
+				WHERE resource.resource_type = 'task' AND resource.resource_id = tasks.id AND resource.relation = 'child'
+					AND activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+					AND activity.activity_type = 'create_task' AND activity.work_item_id IS NOT NULL
+					AND activity.activity_key = 'work-item:' || activity.work_item_id || ':implementation-task'
+					AND node.node_type = 'agent_task' AND node.role IN ('task', 'implementation'))`,
+		projectID, automationID, versionID, projectID, projectID, automationID, versionID)
+	if err != nil {
+		return fmt.Errorf("backfilling legacy Automation GitHub issue task origins: %w", err)
+	}
+	return nil
 }

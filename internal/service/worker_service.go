@@ -75,7 +75,8 @@ type WorkerService struct {
 	taskGoalSvc                      *TaskGoalService
 	automationRepo                   *repository.AutomationRepo
 	afterCompleteRuntimeToolProvider func(context.Context, models.Task) *llmcontracts.RuntimeTools
-	currentCatalog                   atomic.Value // stores *agentskills.Catalog for hook skill resolution
+	beforeOrdinaryTaskClaim          func(models.Task) // deterministic dispatch-race test barrier
+	currentCatalog                   atomic.Value      // stores *agentskills.Catalog for hook skill resolution
 }
 
 // SetLifecycleRunner attaches the lifecycle runner so the worker can invoke
@@ -358,12 +359,6 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		taskCtx = WithAutomationContext(taskCtx, prepared.Envelope.Context)
 		taskCtx = withPreparedAutomationExecution(taskCtx, prepared.ExecutionID)
 		taskCtx = withTaskPreClaimed(taskCtx)
-	} else if w.automationRepo != nil {
-		if automationContext, err := w.automationRepo.ContextForTask(taskCtx, task.ProjectID, task.ID); err != nil {
-			applog.Infof("[worker] task=%s automation context load failed: %v", task.ID, err)
-		} else if len(automationContext.Bindings) > 0 {
-			taskCtx = WithAutomationContext(taskCtx, automationContext)
-		}
 	}
 	w.RegisterCancel(task.ID, taskCancel)
 
@@ -451,27 +446,48 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	// reflects the task as "running" while route_task/before_run hooks
 	// execute. Without this pre-claim the task would stay visually stuck in
 	// the queued sub-zone of the active dropzone during early lifecycle
-	// hooks (which may call the LLM and take noticeable time). ClaimTask
-	// publishes a TaskStatusChanged event so the Tasks page updates live.
+	// hooks (which may call the LLM and take noticeable time). The atomic
+	// dispatch claim publishes a TaskStatusChanged event so Tasks updates live,
+	// while returning the exact Task/current-graph state admitted by that claim.
 	// If claim fails (task already running/completed/cancelled), skip — the
 	// task either was already promoted or shouldn't run.
 	if w.taskRepo != nil && !isPrepared {
-		claimedTask, claimErr := w.taskRepo.ClaimTask(taskCtx, task.ID)
+		if w.beforeOrdinaryTaskClaim != nil {
+			w.beforeOrdinaryTaskClaim(task)
+		}
+		dispatchClaim, claimedTask, claimErr := w.taskRepo.ClaimTaskForDispatch(taskCtx, task.ID)
 		if claimErr != nil {
 			applog.Infof("[worker] task=%s claim failed: %v", task.ID, claimErr)
 			logOutcome = false
 			return
 		}
 		if !claimedTask {
-			applog.Infof("[worker] task=%s not pending at dispatch (already running/terminal), skipping", task.ID)
+			applog.Infof("[worker] task=%s not admitted at dispatch (already running, terminal, or no longer runnable), skipping", task.ID)
 			logOutcome = false
 			return
 		}
 		claimed = true
 		completionAttempted = true
-		// Reflect the new running status in the in-memory copy passed to
-		// lifecycle hooks so they observe the post-claim state.
-		task.Status = models.StatusRunning
+		task = dispatchClaim.Task
+		if len(dispatchClaim.AutomationContext.Bindings) > 0 || dispatchClaim.AutomationContext.OriginTask {
+			taskCtx = WithAutomationContext(taskCtx, dispatchClaim.AutomationContext)
+		}
+		// Capacity was reserved from the preliminary queue snapshot. If Save
+		// changed the selected Agent before the atomic claim, transfer that
+		// reservation before executing the authoritative Task.
+		claimedAgentConfigID := w.resolveAgentConfigID(taskCtx, task)
+		if claimedAgentConfigID != agentConfigID {
+			w.releaseModelSlot(agentConfigID)
+			agentConfigID = ""
+			if err := w.AcquireModelSlot(taskCtx, claimedAgentConfigID); err != nil {
+				executionErr = fmt.Errorf("acquiring claimed task model capacity: %w", err)
+				if updateErr := w.taskRepo.UpdateStatus(context.Background(), task.ID, models.StatusFailed); updateErr != nil {
+					applog.Infof("[worker] task=%s failed status update after model capacity error: %v", task.ID, updateErr)
+				}
+				return
+			}
+			agentConfigID = claimedAgentConfigID
+		}
 		// Tag the context so executeTaskWithAgent knows the task has
 		// already been claimed and won't skip it as "already running".
 		taskCtx = withTaskPreClaimed(taskCtx)

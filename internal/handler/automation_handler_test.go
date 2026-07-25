@@ -1308,6 +1308,40 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 	require.NotEmpty(t, originalNodeID)
 	oldBinding := models.AutomationBinding{AutomationID: first.Definition.Automation.ID, VersionID: first.Definition.Version.ID, NodeID: originalNodeID}
 
+	// Simulate an issue-specific Task persisted by the first atomic create_task
+	// implementation before it wrote the durable CreatedVia marker. The exact
+	// work-item activity key and child relation are feature-owned compatibility
+	// evidence; a generic create_task activity must not be backfilled.
+	legacyWorkItemID := "legacy-issue-work-item"
+	require.NoError(t, tc.db.QueryRowContext(ctx, `INSERT INTO automation_work_items
+		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status)
+		VALUES (?, ?, ?, ?, 'github:example/runtime:issue:17', 'github_issue', 'Issue 17', 'active') RETURNING id`,
+		legacyWorkItemID, project.ID, first.Definition.Automation.ID, first.Definition.Version.ID).Scan(&legacyWorkItemID))
+	legacyActivityID := "legacy-issue-create-task"
+	require.NoError(t, tc.db.QueryRowContext(ctx, `INSERT INTO automation_activities
+		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'create_task', 'completed', CURRENT_TIMESTAMP) RETURNING id`, legacyActivityID,
+		project.ID, first.Definition.Automation.ID, first.Definition.Version.ID, originalNodeID, legacyWorkItemID,
+		"work-item:"+legacyWorkItemID+":implementation-task").Scan(&legacyActivityID))
+	_, err = tc.db.ExecContext(ctx, `INSERT INTO automation_activity_resources
+		(activity_id, resource_type, resource_id, relation) VALUES (?, 'task', ?, 'child')`, legacyActivityID, originalTask.ID)
+	require.NoError(t, err)
+	_, err = tc.db.ExecContext(ctx, `UPDATE tasks SET created_via = '' WHERE id = ?`, originalTask.ID)
+	require.NoError(t, err)
+	originalTask.CreatedVia = ""
+
+	unrelatedTask := models.Task{ProjectID: project.ID, Title: "Unrelated pre-feature task", Category: models.CategoryBacklog,
+		Priority: 2, Status: models.StatusPending, Prompt: "Remain unrelated."}
+	require.NoError(t, tc.taskRepo.Create(ctx, &unrelatedTask))
+	genericActivityID := "generic-create-task"
+	require.NoError(t, tc.db.QueryRowContext(ctx, `INSERT INTO automation_activities
+		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'execution:legacy:create-task:unrelated', 'create_task', 'completed', CURRENT_TIMESTAMP) RETURNING id`,
+		genericActivityID, project.ID, first.Definition.Automation.ID, first.Definition.Version.ID, originalNodeID, legacyWorkItemID).Scan(&genericActivityID))
+	_, err = tc.db.ExecContext(ctx, `INSERT INTO automation_activity_resources
+		(activity_id, resource_type, resource_id, relation) VALUES (?, 'task', ?, 'child')`, genericActivityID, unrelatedTask.ID)
+	require.NoError(t, err)
+
 	replacement := candidate
 	replacement.Description = "Replacement graph"
 	replacement.Nodes = []models.AutomationDraftNode{{Key: "replacement", Name: "Replacement task", Type: models.AutomationNodeAgentTask, Role: "task",
@@ -1315,6 +1349,12 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 	_, err = compiler.Save(ctx, service.AutomationSaveRequest{ProjectID: project.ID, AutomationID: first.Definition.Automation.ID,
 		Source: "manual", CreatedVia: "web", Candidate: replacement})
 	require.NoError(t, err)
+	originalTask, err = tc.taskRepo.GetByID(ctx, originalTask.ID)
+	require.NoError(t, err)
+	require.True(t, repository.IsAutomationTaskCreatedVia(originalTask.CreatedVia), "legacy issue-specific task must gain durable origin before projection deletion")
+	unrelatedTaskAfter, err := tc.taskRepo.GetByID(ctx, unrelatedTask.ID)
+	require.NoError(t, err)
+	require.Empty(t, unrelatedTaskAfter.CreatedVia, "generic pre-feature create_task resources must not be registered as Automation origins")
 	staleContext, err := automationRepo.ContextForTask(ctx, project.ID, originalTask.ID)
 	require.NoError(t, err)
 	require.Empty(t, staleContext.Bindings, "replacement removes old causal projection but preserves the domain Task")

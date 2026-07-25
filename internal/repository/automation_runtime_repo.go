@@ -2086,7 +2086,11 @@ func (r *AutomationRepo) BindThreadInput(ctx context.Context, inputID string, au
 }
 
 func (r *AutomationRepo) ContextForTask(ctx context.Context, projectID, taskID string) (models.AutomationContext, error) {
-	rows, err := r.db.QueryContext(ctx, `WITH RECURSIVE task_lineage(id, parent_task_id, depth) AS (
+	return contextForTaskWithExecutor(ctx, r.db, projectID, taskID)
+}
+
+func contextForTaskWithExecutor(ctx context.Context, exec SQLExecutor, projectID, taskID string) (models.AutomationContext, error) {
+	rows, err := exec.QueryContext(ctx, `WITH RECURSIVE task_lineage(id, parent_task_id, depth) AS (
 		SELECT id, parent_task_id, 0 FROM tasks WHERE id = ? AND project_id = ?
 		UNION ALL
 		SELECT t.id, t.parent_task_id, l.depth + 1 FROM tasks t JOIN task_lineage l ON t.id = l.parent_task_id

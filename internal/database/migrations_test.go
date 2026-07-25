@@ -12,6 +12,77 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestMigration124_BackfillsOnlyFeatureOwnedAutomationIssueTasks(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automation-issue-origin-124.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 123); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-124', 'Migration 124', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+			VALUES ('automation-124', 'project-124', 'automation-124', 'Automation 124', 'custom', 'active');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-124', 'project-124', 'automation-124', 1, 'published', 'manual', 'custom');
+		UPDATE automations SET published_version_id = 'version-124' WHERE id = 'automation-124';
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('task-node-124', 'project-124', 'automation-124', 'version-124', 'implementation', 'Implementation', 'agent_task', 'task');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('action-node-124', 'project-124', 'automation-124', 'version-124', 'create-task', 'Create task', 'action', 'create_task');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, created_via)
+			VALUES ('feature-task-124', 'project-124', 'Feature issue task', 'backlog', 2, 'pending', 'feature', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, created_via)
+			VALUES ('generic-task-124', 'project-124', 'Generic task', 'backlog', 2, 'pending', 'generic', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, created_via)
+			VALUES ('wrong-node-task-124', 'project-124', 'Wrong node task', 'backlog', 2, 'pending', 'wrong node', '');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
+			VALUES ('feature-work-124', 'project-124', 'automation-124', 'version-124', 'feature-work-124');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
+			VALUES ('generic-work-124', 'project-124', 'automation-124', 'version-124', 'generic-work-124');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
+			VALUES ('wrong-node-work-124', 'project-124', 'automation-124', 'version-124', 'wrong-node-work-124');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+			VALUES ('feature-activity-124', 'project-124', 'automation-124', 'version-124', 'task-node-124', 'feature-work-124', 'work-item:feature-work-124:implementation-task', 'create_task', 'completed');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+			VALUES ('generic-activity-124', 'project-124', 'automation-124', 'version-124', 'task-node-124', 'generic-work-124', 'execution:generic:create-task', 'create_task', 'completed');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+			VALUES ('wrong-node-activity-124', 'project-124', 'automation-124', 'version-124', 'action-node-124', 'wrong-node-work-124', 'work-item:wrong-node-work-124:implementation-task', 'create_task', 'completed');
+		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
+			VALUES ('feature-activity-124', 'task', 'feature-task-124', 'child');
+		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
+			VALUES ('generic-activity-124', 'task', 'generic-task-124', 'child');
+		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
+			VALUES ('wrong-node-activity-124', 'task', 'wrong-node-task-124', 'child');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 124); err != nil {
+		t.Fatal(err)
+	}
+
+	for taskID, want := range map[string]string{
+		"feature-task-124":    "automation:automation-124:implementation",
+		"generic-task-124":    "",
+		"wrong-node-task-124": "",
+	} {
+		var got string
+		if err := db.QueryRow(`SELECT created_via FROM tasks WHERE id = ?`, taskID).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("task %s created_via = %q, want %q", taskID, got, want)
+		}
+	}
+}
+
 func TestMigration112_BackfillsOperationalAlertsWithoutInferringProject(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "alerts-112.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -122,8 +193,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 123 {
-		t.Fatalf("max goose version = %d, want 123", maxVersion)
+	if maxVersion != 124 {
+		t.Fatalf("max goose version = %d, want 124", maxVersion)
 	}
 }
 
@@ -274,8 +345,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 123 {
-		t.Fatalf("max goose version = %d, want 123", maxVersion)
+	if maxVersion != 124 {
+		t.Fatalf("max goose version = %d, want 124", maxVersion)
 	}
 }
 
@@ -761,8 +832,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 123 {
-		t.Fatalf("max goose version = %d, want 123", maxVersion)
+	if maxVersion != 124 {
+		t.Fatalf("max goose version = %d, want 124", maxVersion)
 	}
 }
 
@@ -1113,8 +1184,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 123 {
-		t.Fatalf("max goose version = %d, want 123", maxVersion)
+	if maxVersion != 124 {
+		t.Fatalf("max goose version = %d, want 124", maxVersion)
 	}
 }
 
