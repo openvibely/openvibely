@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -88,9 +89,10 @@ func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
 
 func TestCompatibleTemperatureOmitsMoonshotKimiOnly(t *testing.T) {
 	tests := []struct {
-		name     string
-		agent    models.LLMConfig
-		wantOmit bool
+		name      string
+		agent     models.LLMConfig
+		wantOmit  bool
+		wantValue float64
 	}{
 		{
 			name:     "moonshot kimi",
@@ -106,15 +108,20 @@ func TestCompatibleTemperatureOmitsMoonshotKimiOnly(t *testing.T) {
 			agent: models.LLMConfig{PresetSlug: "zai", Model: "glm-5", Temperature: 0},
 		},
 		{
-			name:  "custom kimi-compatible endpoint",
-			agent: models.LLMConfig{Model: "kimi-k2.5", Temperature: 0.2},
+			name:      "custom kimi-compatible endpoint",
+			agent:     models.LLMConfig{Model: "kimi-k2.5", Temperature: 0.2},
+			wantValue: 0.2,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := omitCompatibleTemperature(tt.agent); got != tt.wantOmit {
-				t.Fatalf("omitCompatibleTemperature() = %v, want %v", got, tt.wantOmit)
+			got := compatibleTemperature(tt.agent)
+			if math.IsNaN(got) != tt.wantOmit {
+				t.Fatalf("compatibleTemperature() = %v, want omit %v", got, tt.wantOmit)
+			}
+			if !tt.wantOmit && got != tt.wantValue {
+				t.Fatalf("compatibleTemperature() = %v, want %v", got, tt.wantValue)
 			}
 		})
 	}

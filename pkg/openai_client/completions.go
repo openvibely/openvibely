@@ -21,14 +21,13 @@ type CompletionsOptions struct {
 	Model           string
 	MaxOutputTokens int
 	// Temperature preserves explicit zero, which many providers treat
-	// differently from their default. Set OmitTemperature for models that do
-	// not accept the parameter.
-	Temperature     float64
-	OmitTemperature bool
-	System          string
-	WorkDir         string
-	MaxTurns        int
-	DisableTools    bool
+	// differently from their default. Use OmittedTemperature for models that
+	// do not accept the parameter.
+	Temperature  float64
+	System       string
+	WorkDir      string
+	MaxTurns     int
+	DisableTools bool
 	// SkipDefaultTools suppresses built-in local tools while still allowing
 	// ExtraTools (for example request-scoped runtime tools) to be sent.
 	SkipDefaultTools bool
@@ -51,6 +50,12 @@ type CompletionsOptions struct {
 	OnText       func(text string)
 	OnToolUse    func(name string, input json.RawMessage)
 	OnToolResult func(name string, output string, isError bool)
+}
+
+// OmittedTemperature returns a sentinel that causes SendCompletions to omit
+// the temperature field from the request.
+func OmittedTemperature() float64 {
+	return math.NaN()
 }
 
 // completionsMessage represents a message in the /v1/chat/completions format.
@@ -335,7 +340,7 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 		"messages": messages,
 		"stream":   true,
 	}
-	if !opts.OmitTemperature {
+	if !math.IsNaN(opts.Temperature) {
 		payload["temperature"] = opts.Temperature
 	}
 
