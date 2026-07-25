@@ -562,7 +562,7 @@ func openAIModelContextWindow(model string) (int, bool) {
 	case "gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna":
-		return 1050000, true
+		return 272000, true
 	case "gpt-5.5",
 		"gpt-5.5-pro",
 		"gpt-5.4",
