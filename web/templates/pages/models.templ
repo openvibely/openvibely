@@ -943,7 +943,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							{ value: 'deepseek-reasoner', label: 'DeepSeek Reasoner', efforts: [] }
 						],
 						openai_compatible_moonshot: [
-							{ value: 'kimi-k3', label: 'Kimi K3', efforts: [] },
+							{ value: 'kimi-k3', label: 'Kimi K3', efforts: ['low', 'high', 'max'] },
 							{ value: 'kimi-k2.7-code', label: 'Kimi K2.7 Code', efforts: [] },
 							{ value: 'kimi-k2.7-code-highspeed', label: 'Kimi K2.7 Code High-Speed', efforts: [] },
 							{ value: 'kimi-k2.6', label: 'Kimi K2.6', efforts: [] },
@@ -1046,7 +1046,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				return null;
 			}
 
-				function preferredReasoningEffort(supportedEfforts) {
+				function preferredReasoningEffort(supportedEfforts, provider, model) {
+					if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'kimi-k3' && supportedEfforts.indexOf('max') !== -1) {
+						return 'max';
+					}
 					var preferred = ['medium', 'high', 'low', 'xhigh', 'max'];				for (var i = 0; i < preferred.length; i++) {
 					if (supportedEfforts.indexOf(preferred[i]) !== -1) {
 						return preferred[i];
@@ -1081,6 +1084,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					if (provider === 'anthropic') {
 						reasoningLabel.textContent = 'Claude Effort';
 						reasoningHelp.textContent = 'Matches Claude Code effort: low, medium, high, or max. Blank saved configs keep the provider default.';
+					} else if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'kimi-k3') {
+						reasoningLabel.textContent = 'Kimi Reasoning Effort';
+						reasoningHelp.textContent = 'Controls Kimi K3 reasoning effort: low, high, or max.';
 					} else {
 						reasoningLabel.textContent = 'Codex Reasoning Effort';
 						reasoningHelp.textContent = 'Matches Codex reasoning effort for supported OpenAI models.';
@@ -1098,7 +1104,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					reasoningSelect.value = normalizedSelected;
 					return;
 				}
-				reasoningSelect.value = preferredReasoningEffort(supportedEfforts);
+				reasoningSelect.value = preferredReasoningEffort(supportedEfforts, provider, model);
 			}
 
 				function setModelOptions(provider, selectedModel) {
@@ -1140,7 +1146,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var provider = document.getElementById('model_provider').value;
 					var model = document.getElementById('model_id').value;
 					var selectedEffort = document.getElementById('model_reasoning_effort').value;
-					setReasoningEffortOptions(canonicalProvider(provider), model, selectedEffort);
+					setReasoningEffortOptions(provider, model, selectedEffort);
 					updateTemperatureField(provider, model);
 					if (isOpenAICompatibleProvider(provider)) {
 						document.getElementById('model_openai_compatible_custom_model').value = model;
@@ -1737,7 +1743,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_auth_method').disabled = true;
 					document.getElementById('model_openai_connection_method').disabled = true;
 				}
-						setReasoningEffortOptions(effectiveProvider, activeModel, selectedReasoningEffort);
+						setReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);
 						updateTemperatureField(provider, activeModel);
 					}
 

@@ -127,6 +127,18 @@ func TestCompatibleTemperatureOmitsMoonshotKimiOnly(t *testing.T) {
 	}
 }
 
+func TestCompatibleRequestExtrasAddsKimiK3ReasoningEffort(t *testing.T) {
+	_, body, err := compatibleRequestExtras(models.LLMConfig{
+		Model:            "kimi-k3",
+		ReasoningEffort:  "high",
+		ExtraBodyJSON:    `{"reasoning_effort":"low","custom":true}`,
+		ExtraHeadersJSON: "",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "high", body["reasoning_effort"])
+	require.Equal(t, true, body["custom"])
+}
+
 func TestAdapterCallDirectRawPromptOmitsOpenVibelySystemPrompt(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

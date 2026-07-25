@@ -2283,6 +2283,10 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 		{"anthropic opus 5 low", models.ProviderAnthropic, "claude-opus-5", "low", "low"},
 		{"anthropic rejects effort for sonnet 4.5", models.ProviderAnthropic, "claude-sonnet-4-5-20250929", "low", ""},
 		{"anthropic rejects max for opus 4.5", models.ProviderAnthropic, "claude-opus-4-5-20251101", "max", ""},
+		{"kimi k3 low", models.ProviderOpenAICompatible, "kimi-k3", "low", "low"},
+		{"kimi k3 max", models.ProviderOpenAICompatible, " KIMI-K3 ", "max", "max"},
+		{"kimi k3 rejects medium", models.ProviderOpenAICompatible, "kimi-k3", "medium", ""},
+		{"kimi k2.7 rejects effort", models.ProviderOpenAICompatible, "kimi-k2.7-code", "high", ""},
 		{"ollama clears effort", models.ProviderOllama, "llama", "high", ""},
 	}
 

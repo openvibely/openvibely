@@ -253,7 +253,25 @@ func compatibleRequestExtras(agent models.LLMConfig) (map[string]string, map[str
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse extra body JSON: %w", err)
 	}
+	if effort := compatibleReasoningEffort(agent); effort != "" {
+		if body == nil {
+			body = make(map[string]interface{})
+		}
+		body["reasoning_effort"] = effort
+	}
 	return headers, body, nil
+}
+
+func compatibleReasoningEffort(agent models.LLMConfig) string {
+	if !strings.EqualFold(strings.TrimSpace(agent.Model), "kimi-k3") {
+		return ""
+	}
+	switch effort := strings.ToLower(strings.TrimSpace(agent.ReasoningEffort)); effort {
+	case "low", "high", "max":
+		return effort
+	default:
+		return ""
+	}
 }
 
 func parseStringMapJSON(raw string) (map[string]string, error) {

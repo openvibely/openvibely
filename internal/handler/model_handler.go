@@ -746,6 +746,20 @@ func normalizeProviderReasoningEffort(provider models.LLMProvider, model, value 
 		return normalizeOpenAIReasoningEffort(model, value)
 	case models.ProviderAnthropic:
 		return anthropicclient.NormalizeEffort(model, value)
+	case models.ProviderOpenAICompatible:
+		return normalizeKimiReasoningEffort(model, value)
+	default:
+		return ""
+	}
+}
+
+func normalizeKimiReasoningEffort(model, value string) string {
+	if !strings.EqualFold(strings.TrimSpace(model), "kimi-k3") {
+		return ""
+	}
+	switch effort := strings.ToLower(strings.TrimSpace(value)); effort {
+	case "low", "high", "max":
+		return effort
 	default:
 		return ""
 	}

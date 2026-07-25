@@ -86,6 +86,12 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 			t.Errorf("expected current Moonshot model %q in selector", model)
 		}
 	}
+	if !strings.Contains(out, "{ value: 'kimi-k3', label: 'Kimi K3', efforts: ['low', 'high', 'max']") {
+		t.Error("expected Kimi K3 reasoning effort options")
+	}
+	if !strings.Contains(out, "Kimi Reasoning Effort") {
+		t.Error("expected Kimi reasoning effort label")
+	}
 	if strings.Contains(out, "{ value: 'kimi-k2-0711-preview'") {
 		t.Error("did not expect discontinued Kimi K2 preview in selector")
 	}
