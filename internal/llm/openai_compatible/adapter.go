@@ -279,8 +279,11 @@ func compatibleRequestExtras(agent models.LLMConfig) (map[string]string, map[str
 		if thinking == nil {
 			thinking = make(map[string]interface{})
 		}
-		thinking["type"] = "enabled"
-		thinking["keep"] = "all"
+		thinkingType, _ := thinking["type"].(string)
+		if !strings.EqualFold(strings.TrimSpace(thinkingType), "disabled") {
+			thinking["type"] = "enabled"
+			thinking["keep"] = "all"
+		}
 		body["thinking"] = thinking
 	}
 	return headers, body, nil

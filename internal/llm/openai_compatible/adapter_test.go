@@ -166,6 +166,19 @@ func TestCompatibleRequestExtrasEnablesKimiK26PreservedThinking(t *testing.T) {
 	require.Equal(t, "all", thinking["keep"])
 }
 
+func TestCompatibleRequestExtrasPreservesDisabledKimiK26Thinking(t *testing.T) {
+	_, body, err := compatibleRequestExtras(models.LLMConfig{
+		Model:         "kimi-k2.6",
+		ExtraBodyJSON: `{"thinking":{"type":"disabled","custom":true}}`,
+	})
+	require.NoError(t, err)
+	thinking, ok := body["thinking"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "disabled", thinking["type"])
+	require.Equal(t, true, thinking["custom"])
+	require.NotContains(t, thinking, "keep")
+}
+
 func TestAdapterCallDirectRawPromptOmitsOpenVibelySystemPrompt(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
