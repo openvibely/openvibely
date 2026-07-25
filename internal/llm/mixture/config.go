@@ -43,8 +43,15 @@ type ReferenceResult struct {
 	Usage    llmcontracts.Usage
 }
 
+func DefaultConfig() Config {
+	return Config{
+		ReferenceTemperature:  DefaultReferenceTemperature,
+		AggregatorTemperature: DefaultAggregatorTemperature,
+	}
+}
+
 func ParseConfig(raw string) (Config, error) {
-	var cfg Config
+	cfg := DefaultConfig()
 	if strings.TrimSpace(raw) == "" {
 		return cfg, fmt.Errorf("mixture config is empty")
 	}
@@ -55,12 +62,6 @@ func ParseConfig(raw string) (Config, error) {
 }
 
 func NormalizeConfig(cfg Config) (Config, error) {
-	if cfg.ReferenceTemperature == 0 {
-		cfg.ReferenceTemperature = DefaultReferenceTemperature
-	}
-	if cfg.AggregatorTemperature == 0 {
-		cfg.AggregatorTemperature = DefaultAggregatorTemperature
-	}
 	if cfg.ReferenceTimeoutSeconds <= 0 {
 		cfg.ReferenceTimeoutSeconds = DefaultReferenceTimeoutSeconds
 	}

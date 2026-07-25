@@ -9,15 +9,15 @@ import (
 )
 
 func TestNormalizeConfigDefaultsAndClamps(t *testing.T) {
-	cfg, err := NormalizeConfig(Config{
-		Enabled: true,
-		ReferenceModels: []ModelSlot{
-			{AgentConfigID: "ref-1", Provider: "openai"},
-			{AgentConfigID: "ref-2", Provider: "anthropic"},
-		},
-		Aggregator:          ModelSlot{AgentConfigID: "agg", Provider: "openai"},
-		MaxReferenceWorkers: 99,
-	})
+	input := DefaultConfig()
+	input.Enabled = true
+	input.ReferenceModels = []ModelSlot{
+		{AgentConfigID: "ref-1", Provider: "openai"},
+		{AgentConfigID: "ref-2", Provider: "anthropic"},
+	}
+	input.Aggregator = ModelSlot{AgentConfigID: "agg", Provider: "openai"}
+	input.MaxReferenceWorkers = 99
+	cfg, err := NormalizeConfig(input)
 	if err != nil {
 		t.Fatalf("NormalizeConfig: %v", err)
 	}
@@ -29,6 +29,31 @@ func TestNormalizeConfigDefaultsAndClamps(t *testing.T) {
 	}
 	if cfg.ReferenceTemperature != 0.6 || cfg.AggregatorTemperature != 0.4 {
 		t.Fatalf("temperatures = %.1f/%.1f", cfg.ReferenceTemperature, cfg.AggregatorTemperature)
+	}
+}
+
+func TestParseConfigPreservesExplicitZeroTemperatures(t *testing.T) {
+	cfg, err := ParseConfig(`{
+		"enabled": true,
+		"reference_temperature": 0,
+		"aggregator_temperature": 0,
+		"aggregator": {"provider": "openai"}
+	}`)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if cfg.ReferenceTemperature != 0 || cfg.AggregatorTemperature != 0 {
+		t.Fatalf("temperatures = %v/%v, want 0/0", cfg.ReferenceTemperature, cfg.AggregatorTemperature)
+	}
+}
+
+func TestParseConfigDefaultsMissingTemperatures(t *testing.T) {
+	cfg, err := ParseConfig(`{"enabled":true,"aggregator":{"provider":"openai"}}`)
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if cfg.ReferenceTemperature != DefaultReferenceTemperature || cfg.AggregatorTemperature != DefaultAggregatorTemperature {
+		t.Fatalf("temperatures = %v/%v, want defaults", cfg.ReferenceTemperature, cfg.AggregatorTemperature)
 	}
 }
 

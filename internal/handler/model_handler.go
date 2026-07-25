@@ -246,10 +246,9 @@ func parseMixtureConfigForm(c echo.Context) (llmmixture.Config, error) {
 	if raw != "" {
 		return llmmixture.ParseConfig(raw)
 	}
-	cfg := llmmixture.Config{
-		Enabled:    c.FormValue("mixture_enabled") != "" && c.FormValue("mixture_enabled") != "false" && c.FormValue("mixture_enabled") != "0",
-		Aggregator: llmmixture.ModelSlot{AgentConfigID: strings.TrimSpace(c.FormValue("mixture_aggregator_id"))},
-	}
+	cfg := llmmixture.DefaultConfig()
+	cfg.Enabled = c.FormValue("mixture_enabled") != "" && c.FormValue("mixture_enabled") != "false" && c.FormValue("mixture_enabled") != "0"
+	cfg.Aggregator = llmmixture.ModelSlot{AgentConfigID: strings.TrimSpace(c.FormValue("mixture_aggregator_id"))}
 	if cfg.Enabled == false && c.FormValue("mixture_enabled") == "" {
 		cfg.Enabled = true
 	}

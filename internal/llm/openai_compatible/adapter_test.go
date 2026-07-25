@@ -71,6 +71,9 @@ func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
 	if gotBody["model"] != "provider/model" || gotBody["stream"] != true {
 		t.Fatalf("unexpected body: %#v", gotBody)
 	}
+	if gotBody["temperature"] != float64(0) {
+		t.Fatalf("temperature = %#v, want explicit 0", gotBody["temperature"])
+	}
 	if _, ok := gotBody["provider"].(map[string]any); !ok {
 		t.Fatalf("expected allowed provider extra body, got %#v", gotBody["provider"])
 	}
@@ -80,6 +83,51 @@ func TestAdapterCallDirectUsesConfiguredChatCompletionsEndpoint(t *testing.T) {
 	}
 	if res.Output != "Hello" || res.Usage.InputTokens != 8 || res.Usage.OutputTokens != 2 || res.Usage.TotalTokens != 11 || res.Usage.CachedInputTokens != 3 {
 		t.Fatalf("unexpected result: %+v", res)
+	}
+}
+
+func TestCompatibleTemperatureOmitsMoonshotKimiOnly(t *testing.T) {
+	tests := []struct {
+		name      string
+		agent     models.LLMConfig
+		wantNil   bool
+		wantValue float64
+	}{
+		{
+			name:    "moonshot kimi",
+			agent:   models.LLMConfig{PresetSlug: "moonshot", Model: "kimi-k2.5", Temperature: 0},
+			wantNil: true,
+		},
+		{
+			name:      "moonshot non-kimi",
+			agent:     models.LLMConfig{PresetSlug: "moonshot", Model: "moonshot-v1-128k", Temperature: 0},
+			wantValue: 0,
+		},
+		{
+			name:      "glm explicit zero",
+			agent:     models.LLMConfig{PresetSlug: "zai", Model: "glm-5", Temperature: 0},
+			wantValue: 0,
+		},
+		{
+			name:      "custom kimi-compatible endpoint",
+			agent:     models.LLMConfig{Model: "kimi-k2.5", Temperature: 0.2},
+			wantValue: 0.2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := compatibleTemperature(tt.agent)
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("temperature = %v, want nil", *got)
+				}
+				return
+			}
+			if got == nil || *got != tt.wantValue {
+				t.Fatalf("temperature = %v, want %v", got, tt.wantValue)
+			}
+		})
 	}
 }
 

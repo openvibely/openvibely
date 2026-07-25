@@ -149,4 +149,7 @@ func TestCallStreamingZeroHistoryFollowupUsesChatAssembly(t *testing.T) {
 	if len(doer.request.Tools) != 0 {
 		t.Fatalf("Ollama follow-up advertised unavailable tools: %#v", doer.request.Tools)
 	}
+	if doer.request.Options == nil || doer.request.Options.Temperature == nil || *doer.request.Options.Temperature != 0 {
+		t.Fatalf("Ollama request did not preserve explicit zero temperature: %#v", doer.request.Options)
+	}
 }

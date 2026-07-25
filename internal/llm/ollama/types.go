@@ -56,14 +56,14 @@ type ModelDetails struct {
 
 // chatRequest is the request body for /api/chat.
 type chatRequest struct {
-	Model     string        `json:"model"`
-	Messages  []chatMessage `json:"messages"`
-	Stream    bool          `json:"stream"`
-	Options   *options      `json:"options,omitempty"`
+	Model     string          `json:"model"`
+	Messages  []chatMessage   `json:"messages"`
+	Stream    bool            `json:"stream"`
+	Options   *options        `json:"options,omitempty"`
 	Format    json.RawMessage `json:"format,omitempty"`     // structured output ("json" or JSON schema)
-	Tools     []Tool        `json:"tools,omitempty"`      // available tools for function calling
-	Think     bool          `json:"think,omitempty"`      // enable thinking/reasoning
-	KeepAlive string        `json:"keep_alive,omitempty"` // how long to keep model loaded
+	Tools     []Tool          `json:"tools,omitempty"`      // available tools for function calling
+	Think     bool            `json:"think,omitempty"`      // enable thinking/reasoning
+	KeepAlive string          `json:"keep_alive,omitempty"` // how long to keep model loaded
 }
 
 // chatMessage represents a message in the Ollama chat format.
@@ -77,7 +77,7 @@ type chatMessage struct {
 
 // options are optional model parameters.
 type options struct {
-	Temperature      float64  `json:"temperature,omitempty"`
+	Temperature      *float64 `json:"temperature,omitempty"`
 	NumPredict       int      `json:"num_predict,omitempty"`       // Ollama equivalent of max_tokens
 	TopK             int      `json:"top_k,omitempty"`             // top-K sampling
 	TopP             float64  `json:"top_p,omitempty"`             // nucleus sampling

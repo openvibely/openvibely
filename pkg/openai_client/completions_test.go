@@ -96,6 +96,51 @@ func TestCompletionsOptions_DefaultMaxTurnsNoLimit(t *testing.T) {
 	}
 }
 
+func TestSendCompletionsDistinguishesZeroFromOmittedTemperature(t *testing.T) {
+	tests := []struct {
+		name        string
+		temperature *float64
+		wantPresent bool
+	}{
+		{name: "omitted"},
+		{name: "explicit zero", temperature: float64Pointer(0), wantPresent: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Fatalf("decode body: %v", err)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+			}))
+			defer srv.Close()
+
+			client := NewWithCompatibleAPIKey("test-key", srv.URL+"/v1", "", "")
+			_, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+				DisableTools: true,
+				Temperature:  tt.temperature,
+			})
+			if err != nil {
+				t.Fatalf("SendCompletions: %v", err)
+			}
+			gotTemperature, present := gotBody["temperature"]
+			if present != tt.wantPresent {
+				t.Fatalf("temperature present = %v, want %v; body=%#v", present, tt.wantPresent, gotBody)
+			}
+			if present && gotTemperature != float64(0) {
+				t.Fatalf("temperature = %#v, want 0", gotTemperature)
+			}
+		})
+	}
+}
+
+func float64Pointer(value float64) *float64 {
+	return &value
+}
+
 func TestSendCompletions_CompatibleBaseURLAuthAndUsage(t *testing.T) {
 	var gotPath string
 	var gotAuth string

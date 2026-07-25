@@ -102,10 +102,7 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callDirect model=%s base_url=%s prompt_len=%d attachments=%d", agent.Model, baseURL, len(prompt), len(attachments))
 
-	opts := &options{}
-	if agent.Temperature > 0 {
-		opts.Temperature = agent.Temperature
-	}
+	opts := &options{Temperature: &agent.Temperature}
 
 	userMsg := chatMessage{Role: "user", Content: prompt}
 	if images := encodeImageAttachments(attachments); len(images) > 0 {
@@ -168,10 +165,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 	}
 	messages = append(messages, userMsg)
 
-	opts := &options{}
-	if agent.Temperature > 0 {
-		opts.Temperature = agent.Temperature
-	}
+	opts := &options{Temperature: &agent.Temperature}
 
 	reqBody := chatRequest{
 		Model:    agent.Model,
@@ -212,10 +206,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callStreaming model=%s base_url=%s prompt_len=%d attachments=%d exec=%s", agent.Model, baseURL, len(prompt), len(attachments), execID)
 
-	opts := &options{}
-	if agent.Temperature > 0 {
-		opts.Temperature = agent.Temperature
-	}
+	opts := &options{Temperature: &agent.Temperature}
 
 	var messages []chatMessage
 	// Inject system prompt with project instructions for task execution

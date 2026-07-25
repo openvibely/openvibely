@@ -20,11 +20,13 @@ import (
 type CompletionsOptions struct {
 	Model           string
 	MaxOutputTokens int
-	Temperature     float64
-	System          string
-	WorkDir         string
-	MaxTurns        int
-	DisableTools    bool
+	// Temperature is omitted when nil. A non-nil pointer preserves explicit
+	// zero, which many providers treat differently from their default.
+	Temperature  *float64
+	System       string
+	WorkDir      string
+	MaxTurns     int
+	DisableTools bool
 	// SkipDefaultTools suppresses built-in local tools while still allowing
 	// ExtraTools (for example request-scoped runtime tools) to be sent.
 	SkipDefaultTools bool
@@ -83,10 +85,6 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	if opts.WorkDir == "" {
 		opts.WorkDir = "."
 	}
-	if opts.Temperature == 0 {
-		opts.Temperature = 0.7
-	}
-
 	if err := c.ensureValidToken(); err != nil {
 		return nil, err
 	}
@@ -328,10 +326,12 @@ func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completions
 
 func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
 	payload := map[string]interface{}{
-		"model":       opts.Model,
-		"messages":    messages,
-		"stream":      true,
-		"temperature": opts.Temperature,
+		"model":    opts.Model,
+		"messages": messages,
+		"stream":   true,
+	}
+	if opts.Temperature != nil {
+		payload["temperature"] = *opts.Temperature
 	}
 
 	if opts.MaxOutputTokens > 0 {
