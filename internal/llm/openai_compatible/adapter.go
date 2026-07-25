@@ -266,6 +266,17 @@ func compatibleRequestExtras(agent models.LLMConfig) (map[string]string, map[str
 		}
 		body["reasoning_effort"] = effort
 	}
+	if strings.EqualFold(strings.TrimSpace(agent.Model), "kimi-k2.6") {
+		if body == nil {
+			body = make(map[string]interface{})
+		}
+		thinking, _ := body["thinking"].(map[string]interface{})
+		if thinking == nil {
+			thinking = make(map[string]interface{})
+		}
+		thinking["keep"] = "all"
+		body["thinking"] = thinking
+	}
 	return headers, body, nil
 }
 
