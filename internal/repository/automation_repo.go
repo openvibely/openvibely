@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/events"
@@ -130,42 +129,26 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		if publishedAdapter != in.AdapterKey {
 			return nil, false, fmt.Errorf("published automation adapter cannot change from %q to %q", publishedAdapter, in.AdapterKey)
 		}
-		same, err := registeredPublicationMatches(ctx, conn, *a.PublishedVersionID, in)
+		if err := deleteObsoleteOwnedAutomationSchedules(ctx, conn, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
+			return nil, false, err
+		}
+		if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions
+			WHERE project_id = ? AND automation_id = ? AND id <> ?`, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
+			return nil, false, fmt.Errorf("removing retained automation graphs: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET version = 1, state = 'published'
+				WHERE project_id = ? AND automation_id = ? AND id = ?`, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
+			return nil, false, fmt.Errorf("normalizing current automation graph: %w", err)
+		}
+		def, err := r.loadDefinition(ctx, conn, *a, *a.PublishedVersionID)
 		if err != nil {
 			return nil, false, err
 		}
-		if same {
-			if err := deleteObsoleteOwnedAutomationSchedules(ctx, conn, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
-				return nil, false, err
-			}
-			if _, err := conn.ExecContext(ctx, `DELETE FROM automation_versions
-				WHERE project_id = ? AND automation_id = ? AND id <> ?`, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
-				return nil, false, fmt.Errorf("removing retained automation graphs: %w", err)
-			}
-			if _, err := conn.ExecContext(ctx, `UPDATE automation_versions SET version = 1, state = 'published'
-					WHERE project_id = ? AND automation_id = ? AND id = ?`, in.ProjectID, a.ID, *a.PublishedVersionID); err != nil {
-				return nil, false, fmt.Errorf("normalizing current automation graph: %w", err)
-			}
-			if _, err := conn.ExecContext(ctx, `UPDATE automations SET name = ?, description = ?, automation_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`, in.Name, in.Description, in.AutomationType, a.ID, in.ProjectID); err != nil {
-				return nil, false, fmt.Errorf("updating automation identity: %w", err)
-			}
-			a, err = getAutomationByStableKeyQuery(ctx, conn, in.ProjectID, in.StableKey)
-			if err != nil {
-				return nil, false, fmt.Errorf("reloading automation identity: %w", err)
-			}
-			if a == nil || a.PublishedVersionID == nil {
-				return nil, false, errors.New("published automation identity is missing")
-			}
-			def, err := r.loadDefinition(ctx, conn, *a, *a.PublishedVersionID)
-			if err != nil {
-				return nil, false, err
-			}
-			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
-				return nil, false, err
-			}
-			committed = true
-			return def, true, nil
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
 		}
+		committed = true
+		return def, true, nil
 	}
 	if a == nil {
 		a = &models.Automation{}
@@ -473,105 +456,6 @@ func getAutomationByStableKeyQuery(ctx context.Context, q queryer, projectID, st
 		return nil, fmt.Errorf("getting automation identity: %w", err)
 	}
 	return &a, nil
-}
-
-func canonicalAutomationConfigJSON(value string) (string, error) {
-	if strings.TrimSpace(value) == "" {
-		value = "{}"
-	}
-	var decoded any
-	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
-		return "", err
-	}
-	raw, err := json.Marshal(decoded)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
-}
-
-func registeredPublicationMatches(ctx context.Context, q queryer, versionID string, publication models.AutomationRegisteredPublication) (bool, error) {
-	var existingAdapter string
-	if err := q.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions WHERE id = ?`, versionID).Scan(&existingAdapter); err != nil {
-		return false, err
-	}
-	if existingAdapter != publication.AdapterKey {
-		return false, nil
-	}
-	desiredConfig := make(map[string]string, len(publication.Nodes))
-	for _, node := range publication.Nodes {
-		config, err := canonicalAutomationConfigJSON(node.ConfigJSON)
-		if err != nil {
-			return false, fmt.Errorf("normalize registered node %q configuration: %w", node.Key, err)
-		}
-		desiredConfig[node.Key] = config
-	}
-	nodeRows, err := q.QueryContext(ctx, `SELECT node_key, config_json FROM automation_nodes WHERE version_id = ? ORDER BY node_key`, versionID)
-	if err != nil {
-		return false, err
-	}
-	seenNodes := 0
-	for nodeRows.Next() {
-		var nodeKey, configJSON string
-		if err := nodeRows.Scan(&nodeKey, &configJSON); err != nil {
-			nodeRows.Close()
-			return false, err
-		}
-		expected, ok := desiredConfig[nodeKey]
-		if !ok {
-			nodeRows.Close()
-			return false, nil
-		}
-		actual, err := canonicalAutomationConfigJSON(configJSON)
-		if err != nil {
-			nodeRows.Close()
-			return false, err
-		}
-		if actual != expected {
-			nodeRows.Close()
-			return false, nil
-		}
-		seenNodes++
-	}
-	if err := nodeRows.Close(); err != nil {
-		return false, err
-	}
-	if seenNodes != len(desiredConfig) {
-		return false, nil
-	}
-	rows, err := q.QueryContext(ctx, `SELECT n.node_key, r.resource_type, r.resource_id, r.relation
-		FROM automation_definition_resources r JOIN automation_nodes n ON n.id = r.node_id
-		WHERE r.version_id = ? ORDER BY n.node_key, r.resource_type, r.resource_id, r.relation`, versionID)
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	var existing []string
-	for rows.Next() {
-		var nodeKey, resourceType, resourceID, relation string
-		if err := rows.Scan(&nodeKey, &resourceType, &resourceID, &relation); err != nil {
-			return false, err
-		}
-		existing = append(existing, strings.Join([]string{nodeKey, resourceType, resourceID, relation}, "\x00"))
-	}
-	requested := make([]string, 0, len(publication.Resources))
-	for _, b := range publication.Resources {
-		relation := b.Relation
-		if relation == "" {
-			relation = "owned"
-		}
-		requested = append(requested, strings.Join([]string{b.NodeKey, b.ResourceType, b.ResourceID, relation}, "\x00"))
-	}
-	sort.Strings(requested)
-	if len(existing) != len(requested) {
-		return false, nil
-	}
-	for i := range existing {
-		if existing[i] != requested[i] {
-			return false, nil
-		}
-	}
-	return true, nil
 }
 
 func validateAutomationResource(ctx context.Context, q queryer, projectID, resourceType, resourceID string) error {

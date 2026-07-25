@@ -107,7 +107,7 @@ Automation lifecycle is independent from graph replacement:
 
 Compiler-created Tasks remain non-admitted until the graph and resource bindings commit. Eligible active roots enter the existing worker queue only after commit. Removing or replacing Schedule nodes deletes obsolete exclusively owned Scheduler rows while preserving ordinary domain Tasks.
 
-Maintained Native and GitHub setup registration follows the same one-current-graph replacement contract. It preserves Automation identity and lifecycle and never infers an Automation from resources that already exist.
+Maintained Native and GitHub setup registration copies the bundled template only when it first creates an Automation. It is not an upgrade path and stores no bundled-template version or migration state: later software releases and registration reruns leave every existing saved graph, resource binding, lifecycle state, and runtime projection unchanged. A user may explicitly Edit and Save their existing Automation, or delete it and create a new snapshot from the newer bundled template.
 
 ## Safety And Trust
 

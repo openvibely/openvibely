@@ -68,8 +68,8 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, reused)
 	require.Equal(t, native.Automation.ID, again.Automation.ID)
-	require.Equal(t, native.Version.ID, again.Version.ID, "identical setup reruns must not create versions")
-	require.Equal(t, "Updated Native Automation", again.Automation.Name)
+	require.Equal(t, native.Version.ID, again.Version.ID, "setup reruns must not replace the point-in-time snapshot")
+	require.Equal(t, native.Automation.Name, again.Automation.Name, "setup reruns must not rename the saved Automation")
 	var retainedGraphID string
 	require.NoError(t, db.QueryRowContext(ctx, `INSERT INTO automation_versions
 		(project_id, automation_id, version, state, source, adapter_key)
@@ -166,7 +166,7 @@ func TestAutomationPortfolioListsEverySavedAutomationBeyondOneHundred(t *testing
 	require.False(t, seen["foreign-saved"])
 }
 
-func TestGitHubSDLCRegistrationHydratesBoundTaskPromptAcrossPause(t *testing.T) {
+func TestGitHubSDLCRegistrationHydratesInitialSnapshotAcrossPause(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Registered GitHub prompt parity")
@@ -189,22 +189,6 @@ func TestGitHubSDLCRegistrationHydratesBoundTaskPromptAcrossPause(t *testing.T) 
 		},
 	})
 	require.NoError(t, err)
-	request := AutomationRegistrationRequest{
-		ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/prompt-parity",
-		Resources: []models.AutomationResourceBinding{
-			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: task.ID},
-			{NodeKey: "dev_inbox", ResourceType: "schedule", ResourceID: schedule.ID},
-		},
-	}
-
-	// Simulate a graph registered by an older build, which bound the right Task
-	// but did not persist its behavior in the graph node configuration.
-	_, err = db.ExecContext(ctx, `UPDATE automation_nodes SET config_json = '{}' WHERE version_id = ? AND node_key = 'dev_inbox'`, definition.Version.ID)
-	require.NoError(t, err)
-	reconciled, _, err := registration.Register(ctx, request)
-	require.NoError(t, err)
-	require.NotEqual(t, definition.Version.ID, reconciled.Version.ID, "registration must replace an old empty graph config even when resource IDs are unchanged")
-	definition = reconciled
 
 	var config map[string]any
 	for _, node := range definition.Nodes {
@@ -254,7 +238,77 @@ func seedRetainedAutomationSchedule(t *testing.T, db *sql.DB, taskRepo *reposito
 	return task, schedule
 }
 
-func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecycle(t *testing.T) {
+func TestMaintainedAutomationRegistrationPreservesPointInTimeSnapshot(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Point-in-time maintained template")
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	registration := NewAutomationRegistrationService(automationRepo, registry)
+
+	originalTask, originalSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Original maintained schedule")
+	request := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC,
+		StableKey: "native-sdlc/point-in-time", Name: "User's saved Automation", Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: originalSchedule.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: originalTask.ID},
+		}}
+	original, reused, err := registration.Register(ctx, request)
+	require.NoError(t, err)
+	require.False(t, reused)
+
+	var triggerNodeID string
+	for _, node := range original.Nodes {
+		if node.NodeKey == "vision_suggestions" {
+			triggerNodeID = node.ID
+			break
+		}
+	}
+	require.NotEmpty(t, triggerNodeID)
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_invocations
+		(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status)
+		VALUES (?, ?, ?, ?, 'schedule', ?, 'point-in-time-runtime', 'running')`, project.ID, original.Automation.ID,
+		original.Version.ID, triggerNodeID, originalSchedule.ID)
+	require.NoError(t, err)
+
+	upgraded := registry.adapters[AutomationAdapterNativeSDLC]
+	upgraded.Nodes = append([]AutomationAdapterNode(nil), upgraded.Nodes...)
+	upgraded.Edges = append([]AutomationAdapterEdge(nil), upgraded.Edges...)
+	upgraded.Nodes[0].Key = "vision_suggestions_v2"
+	upgraded.Nodes[0].Name = "Renamed Vision Suggestions"
+	upgraded.Nodes[0].Type = "agent_task"
+	upgraded.Nodes[0].Role = "bug_finder"
+	upgraded.Nodes[0].X = 999
+	upgraded.Edges[0].From = "vision_suggestions_v2"
+	upgraded.Edges[4].To = "rejected"
+	upgraded.Edges[4].Label = "new release boundary"
+	upgraded.Edges[4].Condition = `{"state":"changed"}`
+	registry.adapters[AutomationAdapterNativeSDLC] = upgraded
+
+	replacementTask, replacementSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "New release schedule")
+	request.Name = "New bundled template name"
+	request.Resources = []models.AutomationResourceBinding{
+		{NodeKey: "vision_suggestions_v2", ResourceType: "schedule", ResourceID: replacementSchedule.ID},
+		{NodeKey: "vision_suggestions_v2", ResourceType: "task", ResourceID: replacementTask.ID},
+	}
+	preserved, reused, err := registration.Register(ctx, request)
+	require.NoError(t, err)
+	require.True(t, reused)
+	require.Equal(t, original.Automation.ID, preserved.Automation.ID)
+	require.Equal(t, original.Automation.Name, preserved.Automation.Name)
+	require.Equal(t, original.Version.ID, preserved.Version.ID)
+	require.Equal(t, original.Nodes, preserved.Nodes)
+	require.Equal(t, original.Edges, preserved.Edges)
+	require.Equal(t, original.Resources, preserved.Resources)
+	require.Equal(t, 1, tableCountWhere(t, db, "schedules", "id", originalSchedule.ID))
+	require.Equal(t, 1, tableCountWhere(t, db, "schedules", "id", replacementSchedule.ID),
+		"newly supplied resources remain ordinary domain resources and must not replace the saved snapshot")
+	require.Equal(t, 1, tableCountWhere(t, db, "automation_invocations", "version_id", original.Version.ID),
+		"re-registration must not delete current runtime projection")
+}
+
+func TestMaintainedAutomationRegistrationPreservesCurrentGraphAndLifecycle(t *testing.T) {
 	for _, test := range []struct {
 		name           string
 		state          models.AutomationLifecycleState
@@ -311,25 +365,32 @@ func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecyc
 				{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: secondSchedule.ID},
 				{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: secondTask.ID},
 			}
-			replaced, _, err := registration.Register(ctx, request)
+			preserved, reused, err := registration.Register(ctx, request)
 			require.NoError(t, err)
-			require.Equal(t, test.state, replaced.Automation.LifecycleState)
-			require.NotEqual(t, first.Version.ID, replaced.Version.ID)
-			require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", first.Automation.ID), "maintained replacement must retain exactly one current graph")
-			require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", first.Version.ID))
+			require.True(t, reused)
+			require.Equal(t, test.state, preserved.Automation.LifecycleState)
+			require.Equal(t, first.Version.ID, preserved.Version.ID)
+			require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "automation_id", first.Automation.ID), "registration must retain exactly one current graph")
+			require.Equal(t, 1, tableCountWhere(t, db, "automation_versions", "id", first.Version.ID))
 			require.Zero(t, tableCountWhere(t, db, "automation_versions", "id", retainedDraftID))
-			require.Zero(t, tableCountWhere(t, db, "automation_invocations", "automation_id", first.Automation.ID), "prior graph runtime projection must be deleted")
-			require.Zero(t, tableCountWhere(t, db, "schedules", "id", firstSchedule.ID), "obsolete exclusively owned schedules must be deleted")
-			require.Zero(t, tableCountWhere(t, db, "schedules", "id", retainedSchedule.ID), "retained graph schedule must be deleted before its owner row")
+			require.Equal(t, 1, tableCountWhere(t, db, "automation_invocations", "automation_id", first.Automation.ID), "registration must preserve current runtime projection")
+			require.Equal(t, 1, tableCountWhere(t, db, "schedules", "id", firstSchedule.ID), "registration must preserve the current exclusively owned schedule")
+			require.Zero(t, tableCountWhere(t, db, "schedules", "id", retainedSchedule.ID), "retained draft schedule must be deleted before its owner row")
 			require.Equal(t, 1, tableCountWhere(t, db, "tasks", "id", retainedTask.ID), "retained graph backing Task must survive")
-			stored, err := scheduleRepo.GetByID(ctx, secondSchedule.ID)
+			stored, err := scheduleRepo.GetByID(ctx, firstSchedule.ID)
 			require.NoError(t, err)
 			require.NotNil(t, stored)
 			require.Equal(t, test.expectEnabled, stored.Enabled)
-			owner, err := automationRepo.GetTriggerOwner(ctx, secondSchedule.ID)
+			owner, err := automationRepo.GetTriggerOwner(ctx, firstSchedule.ID)
 			require.NoError(t, err)
 			require.NotNil(t, owner, "inactive Automations must retain exclusive schedule provenance")
 			require.Equal(t, test.ownershipState, owner.OwnershipState)
+			replacementStored, err := scheduleRepo.GetByID(ctx, secondSchedule.ID)
+			require.NoError(t, err)
+			require.NotNil(t, replacementStored, "incoming replacement resources must remain ordinary domain resources")
+			replacementOwner, err := automationRepo.GetTriggerOwner(ctx, secondSchedule.ID)
+			require.NoError(t, err)
+			require.Nil(t, replacementOwner)
 		})
 	}
 }

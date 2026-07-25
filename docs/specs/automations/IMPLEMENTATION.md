@@ -72,7 +72,7 @@ Any error before commit rolls back every Save write. A failed first Save creates
 
 Removing or reconfiguring a Schedule deletes its obsolete exclusively owned Scheduler row. Domain Tasks remain ordinary OpenVibely resources unless their normal lifecycle deletes them independently.
 
-Maintained Native/GitHub registration is another current-graph writer. Changed registration preserves the Automation identity and lifecycle, creates the replacement graph, removes every prior graph/runtime projection, deletes obsolete owned Scheduler rows, and leaves exactly one current graph. An unchanged registration also removes any retained graph rows from pre-contract state.
+Maintained Native/GitHub setup registration is a point-in-time creation path, not an upgrade or migration path. The first registration for a project-scoped stable setup key creates the saved graph from that release's bundled template. No bundled-template version, upgrade state, or migration target is persisted. Any later registration for the same published Automation returns the existing graph, identity, lifecycle, resource bindings, and runtime projection unchanged, even when a newer release changes template nodes, edges, configuration, names, or supplied resources. Registration may remove obsolete noncurrent rows left by pre-contract failed/draft attempts, but it never replaces the current graph or its owned Schedules. A user changes an existing Automation only through explicit Edit and `Save changes`; adopting a newer bundled template requires deleting the old Automation and creating it again.
 
 ## Lifecycle
 
@@ -149,5 +149,5 @@ Changes to Automation Graphs require:
 - stable `templ generate` after `.templ` changes;
 - `gofmt`, `git diff --check`, and `go build ./...`;
 - focused touched-package tests and a fresh full repository suite;
-- `STATUS.md` and authoritative managed-memory reconciliation;
+- `STATUS.md` and authoritative tracked specification reconciliation, with managed memory excluded when the task contract requires it;
 - a clean checkpoint followed by a separate edit-free full contract audit.

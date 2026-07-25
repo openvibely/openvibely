@@ -292,24 +292,27 @@ func TestAutomationRuntimeExpectedDueCASLeavesNoOrphanInvocation(t *testing.T) {
 func TestAutomationRuntimeOverlappingInvocationsProjectConcurrently(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
+	firstTask, firstSchedule := automationTestTaskAndSchedule(t, fixture.taskRepo, fixture.schedRepo, fixture.project.ID, "First runtime loop")
 	inboxTask, inboxSchedule := automationTestTaskAndSchedule(t, fixture.taskRepo, fixture.schedRepo, fixture.project.ID, "Runtime inbox")
 	due := time.Now().UTC().Add(-time.Minute)
-	inboxSchedule.NextRun = &due
-	inboxSchedule.RunAt = due.Add(-time.Hour)
-	inboxSchedule.RepeatType = models.RepeatHours
-	inboxSchedule.RepeatInterval = 1
-	require.NoError(t, fixture.schedRepo.Update(ctx, &inboxSchedule))
+	for _, schedule := range []*models.Schedule{&firstSchedule, &inboxSchedule} {
+		schedule.NextRun = &due
+		schedule.RunAt = due.Add(-time.Hour)
+		schedule.RepeatType = models.RepeatHours
+		schedule.RepeatInterval = 1
+		require.NoError(t, fixture.schedRepo.Update(ctx, schedule))
+	}
 	definition, _, err := NewAutomationRegistrationService(fixture.repo, NewAutomationAdapterRegistry()).Register(ctx, AutomationRegistrationRequest{
-		ProjectID: fixture.project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/runtime",
+		ProjectID: fixture.project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/runtime-overlap",
 		Resources: []models.AutomationResourceBinding{
-			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: fixture.schedule.ID},
-			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: fixture.task.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: firstSchedule.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: firstTask.ID},
 			{NodeKey: "inbox", ResourceType: "schedule", ResourceID: inboxSchedule.ID},
 			{NodeKey: "inbox", ResourceType: "task", ResourceID: inboxTask.ID},
 		},
 	})
 	require.NoError(t, err)
-	first, firstDispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	first, firstDispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, firstSchedule, time.Now().UTC(), firstSchedule.ComputeNextRun(time.Now().UTC()))
 	require.NoError(t, err)
 	second, secondDispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, inboxSchedule, time.Now().UTC(), inboxSchedule.ComputeNextRun(time.Now().UTC()))
 	require.NoError(t, err)
@@ -489,7 +492,6 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 	require.Equal(t, "task_running", invocation.SkippedReason)
 
 	approval := automationNodeByKey(t, fixture.definition, "approval")
-	completed := automationNodeByKey(t, fixture.definition, "completed")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: approval.ID}
 	projection := repository.AutomationProjectionEvent{
 		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
@@ -512,6 +514,7 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 		Resources: []models.AutomationResourceBinding{{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: newSchedule.ID}, {NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: newTask.ID}},
 	})
 	require.NoError(t, err)
+	require.Equal(t, fixture.definition.Version.ID, newDefinition.Version.ID, "setup reruns must preserve the point-in-time graph")
 	newApproval := automationNodeByKey(t, newDefinition, "approval")
 	newCompleted := automationNodeByKey(t, newDefinition, "completed")
 	newBinding := models.AutomationBinding{AutomationID: newDefinition.Automation.ID, VersionID: newDefinition.Version.ID, NodeID: newApproval.ID}
@@ -522,11 +525,11 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 		EventKey: "alert:stable:current-graph-waiting", ToNodeID: newApproval.ID, Transition: models.AutomationTransitionWaiting,
 	})
 	require.NoError(t, err)
-	require.NotEqual(t, item.ID, mappedItem.ID, "replacement must not map current work onto deleted graph projection")
+	require.Equal(t, item.ID, mappedItem.ID, "setup reruns must keep work on the saved graph projection")
 	require.Equal(t, newDefinition.Version.ID, mappedActivity.VersionID)
-	var oldProjectionRows int
-	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE id = ?`, item.ID).Scan(&oldProjectionRows))
-	require.Zero(t, oldProjectionRows, "maintained replacement must delete prior graph runtime projection")
+	var preservedProjectionRows int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE id = ?`, item.ID).Scan(&preservedProjectionRows))
+	require.Equal(t, 1, preservedProjectionRows, "setup reruns must preserve current runtime projection")
 	liveCurrentGraph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
 	require.NoError(t, err)
 	for _, node := range liveCurrentGraph.Nodes {
@@ -534,14 +537,6 @@ func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T
 			require.Equal(t, 1, node.Counts.Waiting, "Live must count only current-graph positions")
 		}
 	}
-
-	binding.WorkItemID = item.ID
-	binding.NodeID = approval.ID
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
-		Context: projection.Context, Binding: binding, ActivityKey: "alert:stable:deleted-graph-complete", ActivityType: "outcome", ActivityStatus: models.AutomationActivityCompleted,
-		EventKey: "alert:stable:deleted-graph-completed", FromNodeID: approval.ID, ToNodeID: completed.ID, Transition: models.AutomationTransitionCompleted,
-	})
-	require.Error(t, err, "deleted graph bindings must not accept new runtime projection")
 
 	newBinding.WorkItemID = mappedItem.ID
 	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{

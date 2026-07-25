@@ -55,6 +55,23 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 	if stableKey == "" || len(stableKey) > 120 {
 		return nil, false, errors.New("automation stable key is required and must not exceed 120 characters")
 	}
+	existing, err := s.repo.GetByStableKey(ctx, req.ProjectID, stableKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing != nil && existing.PublishedVersionID != nil {
+		definition, created, returnErr = s.repo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
+			ProjectID: req.ProjectID, StableKey: stableKey, AdapterKey: adapterKey,
+		})
+		if returnErr == nil && definition != nil {
+			automationobs.Event("automation.registration.completed",
+				automationobs.String("automation_id", definition.Automation.ID),
+				automationobs.String("version_id", definition.Version.ID),
+				automationobs.String("project_id", req.ProjectID),
+				automationobs.String("created", fmt.Sprintf("%t", created)))
+		}
+		return definition, created, returnErr
+	}
 	if len(req.Resources) == 0 || len(req.Resources) > 100 {
 		return nil, false, errors.New("registered automation requires between 1 and 100 resource bindings")
 	}
