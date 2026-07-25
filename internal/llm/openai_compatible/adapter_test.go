@@ -730,3 +730,65 @@ func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 }
+
+func TestPersistReasoningContentClearsStaleReasoning(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	agentRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Clear stale reasoning",
+		Category:  models.CategoryChat,
+		Status:    models.StatusPending,
+		Prompt:    "question",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	defaultAgent, err := agentRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	execution := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: defaultAgent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "question",
+	}
+	require.NoError(t, execRepo.Create(ctx, execution))
+	require.NoError(t, execRepo.UpdateReasoningContent(ctx, execution.ID, "stale thought"))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(execRepo, nil)
+	_, err = adapter.Call(ctx, llmcontracts.AgentRequest{
+		Ctx:       ctx,
+		Operation: llmcontracts.OperationDirect,
+		ExecID:    execution.ID,
+		Message:   "question",
+		Agent: models.LLMConfig{
+			Name:       "Kimi",
+			Provider:   models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodAPIKey,
+			Model:      "kimi-k3",
+			APIKey:     "test-key",
+			BaseURL:    srv.URL + "/v1/",
+			Transport:  "chat_completions",
+		},
+	}, ".")
+	require.NoError(t, err)
+
+	stored, err := execRepo.GetByID(ctx, execution.ID)
+	require.NoError(t, err)
+	require.Empty(t, stored.ReasoningContent)
+	replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{execution.ID})
+	require.NoError(t, err)
+	require.Len(t, replay[execution.ID], 1)
+}

@@ -276,22 +276,6 @@ func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasonin
 	return nil
 }
 
-func (r *ExecutionRepo) ReplaceReplayMessages(ctx context.Context, id string, messages []models.ExecutionReplayMessage) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("starting execution replay transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	if err := replaceExecutionReplayMessages(ctx, tx, id, messages); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing execution replay messages: %w", err)
-	}
-	return nil
-}
-
 func replaceExecutionReplayMessages(ctx context.Context, tx *sql.Tx, id string, messages []models.ExecutionReplayMessage) error {
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM execution_replay_messages WHERE execution_id = ?`, id); err != nil {

@@ -281,11 +281,7 @@ func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, ag
 		ReasoningContent: reasoning.String(),
 		TranscriptJSON:   string(transcriptJSON),
 	}}
-	if reasoning.Len() > 0 {
-		err = a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), execID, reasoning.String(), replay)
-	} else {
-		err = a.execRepo.ReplaceReplayMessages(context.WithoutCancel(ctx), execID, replay)
-	}
+	err = a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), execID, reasoning.String(), replay)
 	if err != nil {
 		if callErr != nil {
 			applog.Infof("[openai-compatible] preserve reasoning replay after call error execution=%s: %v", execID, err)
