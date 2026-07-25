@@ -230,7 +230,12 @@ func compatibleTemperature(agent models.LLMConfig) float64 {
 }
 
 func supportsReasoningContentReplay(agent models.LLMConfig) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "kimi-")
+	switch strings.ToLower(strings.TrimSpace(agent.Model)) {
+	case "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, agent models.LLMConfig, client *openaiclient.Client, callErr error) error {

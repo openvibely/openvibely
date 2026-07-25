@@ -524,7 +524,10 @@ func TestBuildClientHistoryPreservesReasoningContent(t *testing.T) {
 
 func TestSupportsReasoningContentReplayForKimiOnly(t *testing.T) {
 	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k3"}))
-	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: " KIMI-K2.5 "}))
+	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: " KIMI-K2.6 "}))
+	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.7-code"}))
+	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.7-code-highspeed"}))
+	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "kimi-k2.5"}))
 	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "glm-5"}))
 	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "gpt-5.6"}))
 }
