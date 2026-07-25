@@ -60,24 +60,18 @@ func OmittedTemperature() float64 {
 
 // completionsMessage represents a message in the /v1/chat/completions format.
 type completionsMessage struct {
-	Role             string      `json:"role"`
-	Content          interface{} `json:"content"` // string or array of content blocks
-	ReasoningContent string      `json:"reasoning_content,omitempty"`
-	ToolCalls        []struct {
-		ID       string `json:"id"`
-		Type     string `json:"type"`
-		Function struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		} `json:"function"`
-	} `json:"tool_calls,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
+	Role             string                `json:"role"`
+	Content          interface{}           `json:"content"` // string or array of content blocks
+	ReasoningContent string                `json:"reasoning_content,omitempty"`
+	ToolCalls        []CompletionsToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string                `json:"tool_call_id,omitempty"`
 }
 
 // SendCompletions sends a message using the /v1/chat/completions API with tool use.
 // This is the standard OpenAI API format (not Responses API).
 func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *CompletionsOptions) (*AgenticResponse, error) {
 	c.lastCompletionsReasoning = ""
+	c.lastCompletionsTranscript = nil
 	if opts == nil {
 		opts = &CompletionsOptions{}
 	}
@@ -121,18 +115,39 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 
 	// Build initial messages from history + new prompt
 	messages := make([]completionsMessage, 0, len(c.History)+2)
+	existingCompletionsHistory := cloneCompletionsHistory(c.completionsHistory)
+	if existingCompletionsHistory == nil && len(c.History) > 0 {
+		existingCompletionsHistory = make([]CompletionsHistoryMessage, 0, len(c.History))
+		for _, message := range c.History {
+			existingCompletionsHistory = append(existingCompletionsHistory, CompletionsHistoryMessage{
+				Role:    message.Role,
+				Content: message.Content,
+			})
+		}
+	}
 	if opts.System != "" {
 		messages = append(messages, completionsMessage{
 			Role:    "system",
 			Content: opts.System,
 		})
 	}
-	for i, msg := range c.History {
-		messages = append(messages, completionsMessage{
-			Role:             msg.Role,
-			Content:          msg.Content,
-			ReasoningContent: c.completionsReasoningByIndex[i],
-		})
+	if existingCompletionsHistory != nil {
+		for _, msg := range existingCompletionsHistory {
+			messages = append(messages, completionsMessage{
+				Role:             msg.Role,
+				Content:          msg.Content,
+				ReasoningContent: msg.ReasoningContent,
+				ToolCalls:        append([]CompletionsToolCall(nil), msg.ToolCalls...),
+				ToolCallID:       msg.ToolCallID,
+			})
+		}
+	} else {
+		for _, msg := range c.History {
+			messages = append(messages, completionsMessage{
+				Role:    msg.Role,
+				Content: msg.Content,
+			})
+		}
 	}
 
 	// Add current prompt with optional attachments
@@ -179,6 +194,7 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	result := &AgenticResponse{Model: opts.Model}
 	var allText strings.Builder
 	finalReasoningContent := ""
+	currentTranscript := []CompletionsHistoryMessage{{Role: "user", Content: prompt}}
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		turnResult, err := c.sendCompletionsTurn(ctx, messages, tools, opts)
@@ -198,6 +214,12 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 
 		allText.WriteString(turnResult.text)
 		finalReasoningContent = turnResult.reasoningContent
+		currentTranscript = append(currentTranscript, CompletionsHistoryMessage{
+			Role:             "assistant",
+			Content:          turnResult.text,
+			ReasoningContent: turnResult.reasoningContent,
+			ToolCalls:        append([]CompletionsToolCall(nil), turnResult.toolCalls...),
+		})
 
 		// Add assistant message to history
 		if len(turnResult.toolCalls) > 0 {
@@ -267,6 +289,11 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 				Content:    output,
 				ToolCallID: tc.ID,
 			})
+			currentTranscript = append(currentTranscript, CompletionsHistoryMessage{
+				Role:       "tool",
+				Content:    output,
+				ToolCallID: tc.ID,
+			})
 		}
 	}
 
@@ -275,13 +302,9 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	// Update client history
 	c.History = append(c.History, Message{Role: "user", Content: prompt})
 	c.History = append(c.History, Message{Role: "assistant", Content: result.Text})
-	if c.completionsReasoningByIndex == nil {
-		c.completionsReasoningByIndex = make(map[int]string)
-	}
-	if finalReasoningContent != "" {
-		c.completionsReasoningByIndex[len(c.History)-1] = finalReasoningContent
-	}
+	c.completionsHistory = append(existingCompletionsHistory, cloneCompletionsHistory(currentTranscript)...)
 	c.lastCompletionsReasoning = finalReasoningContent
+	c.lastCompletionsTranscript = cloneCompletionsHistory(currentTranscript)
 
 	return result, nil
 }
@@ -306,16 +329,9 @@ func isProtectedCompletionsBodyField(key string) bool {
 }
 
 type completionsTurnResult struct {
-	text             string
-	reasoningContent string
-	toolCalls        []struct {
-		ID       string `json:"id"`
-		Type     string `json:"type"`
-		Function struct {
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		} `json:"function"`
-	}
+	text              string
+	reasoningContent  string
+	toolCalls         []CompletionsToolCall
 	stopReason        string
 	model             string
 	inputTokens       int
@@ -485,14 +501,7 @@ func (c *Client) parseCompletionsStream(body io.Reader, onText func(string)) (*c
 					idx = int(rawIndex)
 				}
 				for len(result.toolCalls) <= idx {
-					result.toolCalls = append(result.toolCalls, struct {
-						ID       string `json:"id"`
-						Type     string `json:"type"`
-						Function struct {
-							Name      string `json:"name"`
-							Arguments string `json:"arguments"`
-						} `json:"function"`
-					}{})
+					result.toolCalls = append(result.toolCalls, CompletionsToolCall{})
 				}
 
 				if id, ok := tcMap["id"].(string); ok {

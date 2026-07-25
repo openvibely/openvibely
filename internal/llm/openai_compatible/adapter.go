@@ -260,16 +260,38 @@ func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, ag
 	if !supportsReasoningContentReplay(agent) || a.execRepo == nil || strings.TrimSpace(execID) == "" || client == nil {
 		return callErr
 	}
-	reasoningContent := client.LastCompletionsReasoningContent()
-	if reasoningContent == "" {
+	transcript := client.LastCompletionsTranscript()
+	if len(transcript) == 0 {
 		return callErr
 	}
-	if err := a.execRepo.UpdateReasoningContent(context.WithoutCancel(ctx), execID, reasoningContent); err != nil {
+	transcriptJSON, err := json.Marshal(transcript)
+	if err != nil {
 		if callErr != nil {
-			applog.Infof("[openai-compatible] preserve reasoning content after call error execution=%s: %v", execID, err)
 			return callErr
 		}
-		return fmt.Errorf("persist reasoning content: %w", err)
+		return fmt.Errorf("marshal reasoning replay transcript: %w", err)
+	}
+	var reasoning strings.Builder
+	for _, message := range transcript {
+		if message.Role == "assistant" {
+			reasoning.WriteString(message.ReasoningContent)
+		}
+	}
+	replay := []models.ExecutionReplayMessage{{
+		ReasoningContent: reasoning.String(),
+		TranscriptJSON:   string(transcriptJSON),
+	}}
+	if reasoning.Len() > 0 {
+		err = a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), execID, reasoning.String(), replay)
+	} else {
+		err = a.execRepo.ReplaceReplayMessages(context.WithoutCancel(ctx), execID, replay)
+	}
+	if err != nil {
+		if callErr != nil {
+			applog.Infof("[openai-compatible] preserve reasoning replay after call error execution=%s: %v", execID, err)
+			return callErr
+		}
+		return fmt.Errorf("persist reasoning replay: %w", err)
 	}
 	return callErr
 }
@@ -481,8 +503,21 @@ func buildClientHistoryWithReplay(
 	history := llmprompt.LimitChatHistory(chatHistory)
 	messages := make([]openaiclient.CompletionsHistoryMessage, 0, len(history)*2)
 	for _, exec := range history {
-		if replay := replayByExecutionID[exec.ID]; len(replay) > 0 {
+		replay := replayByExecutionID[exec.ID]
+		if len(replay) == 0 {
+			replay = exec.ReplayMessages
+		}
+		if len(replay) > 0 {
 			for _, turn := range replay {
+				if transcript, ok := decodeReplayTranscript(turn.TranscriptJSON); ok {
+					for _, message := range transcript {
+						if !preserveReasoningContent {
+							message.ReasoningContent = ""
+						}
+						messages = append(messages, message)
+					}
+					continue
+				}
 				if turn.UserContent != "" {
 					messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: turn.UserContent})
 				}
@@ -516,6 +551,17 @@ func buildClientHistoryWithReplay(
 		}
 	}
 	return messages
+}
+
+func decodeReplayTranscript(raw string) ([]openaiclient.CompletionsHistoryMessage, bool) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, false
+	}
+	var messages []openaiclient.CompletionsHistoryMessage
+	if err := json.Unmarshal([]byte(raw), &messages); err != nil || len(messages) == 0 {
+		return nil, false
+	}
+	return messages, true
 }
 
 func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.CompletionsHistoryMessage, error) {

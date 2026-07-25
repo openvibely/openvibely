@@ -267,6 +267,32 @@ func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasonin
 		`UPDATE executions SET reasoning_content = ? WHERE id = ?`, reasoningContent, id); err != nil {
 		return fmt.Errorf("updating execution reasoning content: %w", err)
 	}
+	if err := replaceExecutionReplayMessages(ctx, tx, id, messages); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing execution replay messages: %w", err)
+	}
+	return nil
+}
+
+func (r *ExecutionRepo) ReplaceReplayMessages(ctx context.Context, id string, messages []models.ExecutionReplayMessage) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("starting execution replay transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := replaceExecutionReplayMessages(ctx, tx, id, messages); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing execution replay messages: %w", err)
+	}
+	return nil
+}
+
+func replaceExecutionReplayMessages(ctx context.Context, tx *sql.Tx, id string, messages []models.ExecutionReplayMessage) error {
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM execution_replay_messages WHERE execution_id = ?`, id); err != nil {
 		return fmt.Errorf("clearing execution replay messages: %w", err)
@@ -274,14 +300,11 @@ func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasonin
 	for sequence, message := range messages {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO execution_replay_messages (
-				execution_id, sequence, user_content, assistant_content, reasoning_content
-			) VALUES (?, ?, ?, ?, ?)`,
-			id, sequence, message.UserContent, message.AssistantContent, message.ReasoningContent); err != nil {
+				execution_id, sequence, user_content, assistant_content, reasoning_content, transcript_json
+			) VALUES (?, ?, ?, ?, ?, ?)`,
+			id, sequence, message.UserContent, message.AssistantContent, message.ReasoningContent, message.TranscriptJSON); err != nil {
 			return fmt.Errorf("inserting execution replay message %d: %w", sequence, err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing execution replay messages: %w", err)
 	}
 	return nil
 }
@@ -294,7 +317,7 @@ func (r *ExecutionRepo) ReplayMessagesByExecutionIDs(ctx context.Context, ids []
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT execution_id, user_content, assistant_content, reasoning_content
+		SELECT execution_id, user_content, assistant_content, reasoning_content, transcript_json
 		FROM execution_replay_messages
 		WHERE execution_id IN (`+strings.Join(placeholders, ",")+`)
 		ORDER BY execution_id, sequence`, args...)
@@ -306,7 +329,7 @@ func (r *ExecutionRepo) ReplayMessagesByExecutionIDs(ctx context.Context, ids []
 	for rows.Next() {
 		var id string
 		var message models.ExecutionReplayMessage
-		if err := rows.Scan(&id, &message.UserContent, &message.AssistantContent, &message.ReasoningContent); err != nil {
+		if err := rows.Scan(&id, &message.UserContent, &message.AssistantContent, &message.ReasoningContent, &message.TranscriptJSON); err != nil {
 			return nil, fmt.Errorf("scanning execution replay message: %w", err)
 		}
 		result[id] = append(result[id], message)

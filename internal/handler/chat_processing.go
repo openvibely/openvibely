@@ -786,9 +786,16 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 		}
 		if strings.TrimSpace(params.Message) != "" || strings.TrimSpace(assistantDelta) != "" {
 			reasoningContent := ""
+			var replayMessages []models.ExecutionReplayMessage
 			if h.execRepo != nil && strings.TrimSpace(params.ExecID) != "" {
 				if exec, execErr := h.execRepo.GetByID(ctx, params.ExecID); execErr == nil && exec != nil {
 					reasoningContent = exec.ReasoningContent
+					replayByID, replayErr := h.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{params.ExecID})
+					if replayErr != nil {
+						applog.Infof("[handler] preparePendingSteeringInputs exec=%s error loading replay context: %v", params.ExecID, replayErr)
+					} else {
+						replayMessages = replayByID[params.ExecID]
+					}
 				} else if execErr != nil {
 					applog.Infof("[handler] preparePendingSteeringInputs exec=%s error loading reasoning context: %v", params.ExecID, execErr)
 				}
@@ -801,6 +808,7 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 				Output:           assistantDelta,
 				IsFollowup:       params.IsTaskFollowup,
 				ReasoningContent: reasoningContent,
+				ReplayMessages:   replayMessages,
 			})
 		}
 		params.Message = steeringInstruction
@@ -844,6 +852,13 @@ func (h *Handler) persistSteeringReplayHistory(ctx context.Context, params strea
 	replay := make([]models.ExecutionReplayMessage, 0, len(steeringHistory)+1)
 	var reasoning strings.Builder
 	for _, turn := range steeringHistory {
+		if len(turn.ReplayMessages) > 0 {
+			replay = append(replay, turn.ReplayMessages...)
+			for _, message := range turn.ReplayMessages {
+				reasoning.WriteString(message.ReasoningContent)
+			}
+			continue
+		}
 		replay = append(replay, models.ExecutionReplayMessage{
 			UserContent:      turn.PromptSent,
 			AssistantContent: turn.Output,
@@ -851,16 +866,27 @@ func (h *Handler) persistSteeringReplayHistory(ctx context.Context, params strea
 		})
 		reasoning.WriteString(turn.ReasoningContent)
 	}
-	finalAssistantOutput := finalOutput
-	if strings.HasPrefix(finalOutput, params.steeringOutputCursor) {
-		finalAssistantOutput = finalOutput[len(params.steeringOutputCursor):]
+	currentReplayByID, err := h.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{params.ExecID})
+	if err != nil {
+		return fmt.Errorf("load current replay history: %w", err)
 	}
-	replay = append(replay, models.ExecutionReplayMessage{
-		UserContent:      params.Message,
-		AssistantContent: finalAssistantOutput,
-		ReasoningContent: exec.ReasoningContent,
-	})
-	reasoning.WriteString(exec.ReasoningContent)
+	if currentReplay := currentReplayByID[params.ExecID]; len(currentReplay) > 0 {
+		replay = append(replay, currentReplay...)
+		for _, message := range currentReplay {
+			reasoning.WriteString(message.ReasoningContent)
+		}
+	} else {
+		finalAssistantOutput := finalOutput
+		if strings.HasPrefix(finalOutput, params.steeringOutputCursor) {
+			finalAssistantOutput = finalOutput[len(params.steeringOutputCursor):]
+		}
+		replay = append(replay, models.ExecutionReplayMessage{
+			UserContent:      params.Message,
+			AssistantContent: finalAssistantOutput,
+			ReasoningContent: exec.ReasoningContent,
+		})
+		reasoning.WriteString(exec.ReasoningContent)
+	}
 
 	if err := h.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), params.ExecID, reasoning.String(), replay); err != nil {
 		return fmt.Errorf("persist steering replay history: %w", err)

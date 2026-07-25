@@ -678,3 +678,55 @@ func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
 		{Role: "assistant", Content: "second answer"},
 	}, glmHistory)
 }
+
+func TestPrepareClientHistoryPreservesToolTranscript(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	agentRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Tool replay history",
+		Category:  models.CategoryChat,
+		Status:    models.StatusPending,
+		Prompt:    "question",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	agent, err := agentRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	execution := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "question",
+	}
+	require.NoError(t, execRepo.Create(ctx, execution))
+	require.NoError(t, execRepo.Complete(ctx, execution.ID, models.ExecCompleted, "answer", "", 0, 0))
+
+	var toolCall openaiclient.CompletionsToolCall
+	toolCall.ID = "call_1"
+	toolCall.Type = "function"
+	toolCall.Function.Name = "lookup"
+	toolCall.Function.Arguments = `{"key":"value"}`
+	want := []openaiclient.CompletionsHistoryMessage{
+		{Role: "user", Content: "question"},
+		{Role: "assistant", ReasoningContent: "tool thought", ToolCalls: []openaiclient.CompletionsToolCall{toolCall}},
+		{Role: "tool", Content: "tool result", ToolCallID: "call_1"},
+		{Role: "assistant", Content: "answer", ReasoningContent: "final thought"},
+	}
+	transcriptJSON, err := json.Marshal(want)
+	require.NoError(t, err)
+	require.NoError(t, execRepo.ReplaceReasoningReplay(ctx, execution.ID, "tool thoughtfinal thought", []models.ExecutionReplayMessage{{
+		ReasoningContent: "tool thoughtfinal thought",
+		TranscriptJSON:   string(transcriptJSON),
+	}}))
+
+	lightHistory, err := execRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	adapter := New(execRepo, nil)
+	got, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}

@@ -90,7 +90,7 @@ func TestExecutionRepo_ReplaceReasoningReplay(t *testing.T) {
 	}
 
 	want := []models.ExecutionReplayMessage{
-		{UserContent: "first question", AssistantContent: "first answer", ReasoningContent: "first thought"},
+		{UserContent: "first question", AssistantContent: "first answer", ReasoningContent: "first thought", TranscriptJSON: `[{"role":"user","content":"first question"}]`},
 		{UserContent: "steer", AssistantContent: "second answer", ReasoningContent: "second thought"},
 	}
 	if err := execRepo.ReplaceReasoningReplay(ctx, exec.ID, "first thoughtsecond thought", want); err != nil {
