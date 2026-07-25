@@ -14,6 +14,8 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -512,4 +514,48 @@ func TestSupportsReasoningContentReplayForKimiOnly(t *testing.T) {
 	require.True(t, supportsReasoningContentReplay(models.LLMConfig{Model: " KIMI-K2.5 "}))
 	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "glm-5"}))
 	require.False(t, supportsReasoningContentReplay(models.LLMConfig{Model: "gpt-5.6"}))
+}
+
+func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	agentRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Reasoning history",
+		Category:  models.CategoryChat,
+		Status:    models.StatusPending,
+		Prompt:    "question",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	agent, err := agentRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	execution := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "question",
+	}
+	require.NoError(t, execRepo.Create(ctx, execution))
+	require.NoError(t, execRepo.Complete(ctx, execution.ID, models.ExecCompleted, "answer", "", 0, 0))
+	require.NoError(t, execRepo.UpdateReasoningContent(ctx, execution.ID, "private thought"))
+
+	lightHistory, err := execRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, lightHistory, 1)
+	require.Empty(t, lightHistory[0].ReasoningContent)
+
+	adapter := New(execRepo, nil)
+	kimiHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
+	require.NoError(t, err)
+	require.Len(t, kimiHistory, 2)
+	require.Equal(t, "private thought", kimiHistory[1].ReasoningContent)
+
+	glmHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "glm-5"}, lightHistory)
+	require.NoError(t, err)
+	require.Len(t, glmHistory, 2)
+	require.Empty(t, glmHistory[1].ReasoningContent)
 }

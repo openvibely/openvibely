@@ -231,9 +231,14 @@ func TestExecutionRepo_ListByTask(t *testing.T) {
 	agent, _ := agentRepo.GetDefault(ctx)
 
 	// Create two executions
+	var executionIDs []string
 	for i := 0; i < 2; i++ {
 		exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
 		execRepo.Create(ctx, exec)
+		executionIDs = append(executionIDs, exec.ID)
+	}
+	if err := execRepo.UpdateReasoningContent(ctx, executionIDs[0], "large private reasoning"); err != nil {
+		t.Fatalf("UpdateReasoningContent: %v", err)
 	}
 
 	execs, err := execRepo.ListByTask(ctx, task.ID)
@@ -242,6 +247,19 @@ func TestExecutionRepo_ListByTask(t *testing.T) {
 	}
 	if len(execs) != 2 {
 		t.Errorf("expected 2 executions, got %d", len(execs))
+	}
+	for _, exec := range execs {
+		if exec.ReasoningContent != "" {
+			t.Errorf("lightweight list loaded reasoning content for %q", exec.ID)
+		}
+	}
+
+	reasoningByID, err := execRepo.ReasoningContentByIDs(ctx, []string{executionIDs[0], executionIDs[0], ""})
+	if err != nil {
+		t.Fatalf("ReasoningContentByIDs: %v", err)
+	}
+	if got := reasoningByID[executionIDs[0]]; got != "large private reasoning" {
+		t.Errorf("ReasoningContentByIDs[%q] = %q", executionIDs[0], got)
 	}
 }
 

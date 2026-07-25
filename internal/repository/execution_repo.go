@@ -34,14 +34,14 @@ func (r *ExecutionRepo) DB() *sql.DB {
 const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, reasoning_content, error_message,
 		tokens_used, duration_ms, is_followup, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
-// executionSelectColumnsLight omits diff_output (substituting an empty string) so that
-// list/pagination queries don't load the potentially very large diff blob on every request.
+// executionSelectColumnsLight omits reasoning_content and diff_output (substituting
+// empty strings) so list/pagination queries don't load potentially very large blobs.
 // The scan shape matches executionSelectColumns, so scanExecutionRow still works; the
-// resulting Execution will have DiffOutput == "".
-const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, reasoning_content, error_message,
+// resulting Execution will have ReasoningContent == "" and DiffOutput == "".
+const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, '' AS reasoning_content, error_message,
 		tokens_used, duration_ms, is_followup, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
-const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.reasoning_content, e.error_message,
+const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, '' AS reasoning_content, e.error_message,
 		e.tokens_used, e.duration_ms, e.is_followup, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
 
 func scanExecutionRow(scanner interface {
@@ -254,6 +254,53 @@ func (r *ExecutionRepo) UpdateReasoningContent(ctx context.Context, id, reasonin
 		return fmt.Errorf("updating execution reasoning content: %w", err)
 	}
 	return nil
+}
+
+func (r *ExecutionRepo) ReasoningContentByIDs(ctx context.Context, ids []string) (map[string]string, error) {
+	result := make(map[string]string)
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	placeholders := make([]string, 0, len(ids))
+	args := make([]interface{}, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	if len(args) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, COALESCE(reasoning_content, '') FROM executions WHERE id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("loading execution reasoning content: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, reasoningContent string
+		if err := rows.Scan(&id, &reasoningContent); err != nil {
+			return nil, fmt.Errorf("scanning execution reasoning content: %w", err)
+		}
+		if reasoningContent != "" {
+			result[id] = reasoningContent
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating execution reasoning content: %w", err)
+	}
+	return result, nil
 }
 
 func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.ExecutionStatus, output, errMsg string, tokensUsed int, durationMs int64) error {

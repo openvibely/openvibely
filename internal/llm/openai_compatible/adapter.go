@@ -172,7 +172,11 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
-	client.SetCompletionsHistory(buildClientHistory(req.ChatHistory, supportsReasoningContentReplay(req.Agent)))
+	history, err := a.prepareClientHistory(ctx, req.Agent, req.ChatHistory)
+	if err != nil {
+		return "", llmusage.FromTotal(0), err
+	}
+	client.SetCompletionsHistory(history)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
 	if req.ChatMode == models.ChatModeOrchestrate {
@@ -437,6 +441,32 @@ func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent
 		}
 	}
 	return messages
+}
+
+func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.CompletionsHistoryMessage, error) {
+	preserveReasoningContent := supportsReasoningContentReplay(agent)
+	if !preserveReasoningContent || a.execRepo == nil {
+		return buildClientHistory(chatHistory, preserveReasoningContent), nil
+	}
+
+	limitedHistory := llmprompt.LimitChatHistory(chatHistory)
+	history := append([]models.Execution(nil), limitedHistory...)
+	ids := make([]string, 0, len(history))
+	for _, exec := range history {
+		if strings.TrimSpace(exec.ID) != "" {
+			ids = append(ids, exec.ID)
+		}
+	}
+	reasoningByID, err := a.execRepo.ReasoningContentByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("load Kimi reasoning history: %w", err)
+	}
+	for i := range history {
+		if reasoningContent, ok := reasoningByID[history[i].ID]; ok {
+			history[i].ReasoningContent = reasoningContent
+		}
+	}
+	return buildClientHistory(history, true), nil
 }
 
 func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
