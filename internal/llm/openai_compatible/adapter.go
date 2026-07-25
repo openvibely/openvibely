@@ -470,9 +470,36 @@ func planModeAllowsReadOnlyTool(name string) bool {
 }
 
 func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent bool) []openaiclient.CompletionsHistoryMessage {
+	return buildClientHistoryWithReplay(chatHistory, preserveReasoningContent, nil)
+}
+
+func buildClientHistoryWithReplay(
+	chatHistory []models.Execution,
+	preserveReasoningContent bool,
+	replayByExecutionID map[string][]models.ExecutionReplayMessage,
+) []openaiclient.CompletionsHistoryMessage {
 	history := llmprompt.LimitChatHistory(chatHistory)
 	messages := make([]openaiclient.CompletionsHistoryMessage, 0, len(history)*2)
 	for _, exec := range history {
+		if replay := replayByExecutionID[exec.ID]; len(replay) > 0 {
+			for _, turn := range replay {
+				if turn.UserContent != "" {
+					messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: turn.UserContent})
+				}
+				if turn.AssistantContent != "" || (preserveReasoningContent && turn.ReasoningContent != "") {
+					reasoningContent := ""
+					if preserveReasoningContent {
+						reasoningContent = turn.ReasoningContent
+					}
+					messages = append(messages, openaiclient.CompletionsHistoryMessage{
+						Role:             "assistant",
+						Content:          turn.AssistantContent,
+						ReasoningContent: reasoningContent,
+					})
+				}
+			}
+			continue
+		}
 		if exec.PromptSent != "" {
 			messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: exec.PromptSent})
 		}
@@ -493,7 +520,7 @@ func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent
 
 func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.CompletionsHistoryMessage, error) {
 	preserveReasoningContent := supportsReasoningContentReplay(agent)
-	if !preserveReasoningContent || a.execRepo == nil {
+	if a.execRepo == nil {
 		return buildClientHistory(chatHistory, preserveReasoningContent), nil
 	}
 
@@ -505,16 +532,22 @@ func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConf
 			ids = append(ids, exec.ID)
 		}
 	}
-	reasoningByID, err := a.execRepo.ReasoningContentByIDs(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("load Kimi reasoning history: %w", err)
-	}
-	for i := range history {
-		if reasoningContent, ok := reasoningByID[history[i].ID]; ok {
-			history[i].ReasoningContent = reasoningContent
+	if preserveReasoningContent {
+		reasoningByID, err := a.execRepo.ReasoningContentByIDs(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("load Kimi reasoning history: %w", err)
+		}
+		for i := range history {
+			if reasoningContent, ok := reasoningByID[history[i].ID]; ok {
+				history[i].ReasoningContent = reasoningContent
+			}
 		}
 	}
-	return buildClientHistory(history, true), nil
+	replayByExecutionID, err := a.execRepo.ReplayMessagesByExecutionIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("load execution replay history: %w", err)
+	}
+	return buildClientHistoryWithReplay(history, preserveReasoningContent, replayByExecutionID), nil
 }
 
 func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {

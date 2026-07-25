@@ -69,6 +69,64 @@ func TestExecutionRepo_CreateAndComplete(t *testing.T) {
 	}
 }
 
+func TestExecutionRepo_ReplaceReasoningReplay(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	agentRepo := NewLLMConfigRepo(db)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "Replay Test", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	agent, err := agentRepo.GetDefault(ctx)
+	if err != nil {
+		t.Fatalf("get default agent: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "first question"}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+
+	want := []models.ExecutionReplayMessage{
+		{UserContent: "first question", AssistantContent: "first answer", ReasoningContent: "first thought"},
+		{UserContent: "steer", AssistantContent: "second answer", ReasoningContent: "second thought"},
+	}
+	if err := execRepo.ReplaceReasoningReplay(ctx, exec.ID, "first thoughtsecond thought", want); err != nil {
+		t.Fatalf("replace reasoning replay: %v", err)
+	}
+
+	stored, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if stored.ReasoningContent != "first thoughtsecond thought" {
+		t.Fatalf("reasoning content = %q", stored.ReasoningContent)
+	}
+	replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{"", exec.ID, exec.ID})
+	if err != nil {
+		t.Fatalf("get replay messages: %v", err)
+	}
+	if !reflect.DeepEqual(replay[exec.ID], want) {
+		t.Fatalf("replay messages = %#v, want %#v", replay[exec.ID], want)
+	}
+
+	replacement := []models.ExecutionReplayMessage{
+		{UserContent: "replacement", AssistantContent: "answer", ReasoningContent: "thought"},
+	}
+	if err := execRepo.ReplaceReasoningReplay(ctx, exec.ID, "thought", replacement); err != nil {
+		t.Fatalf("replace replay again: %v", err)
+	}
+	replay, err = execRepo.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
+	if err != nil {
+		t.Fatalf("get replaced replay messages: %v", err)
+	}
+	if !reflect.DeepEqual(replay[exec.ID], replacement) {
+		t.Fatalf("replaced replay messages = %#v, want %#v", replay[exec.ID], replacement)
+	}
+}
+
 func TestExecutionRepo_CompletePreservesCodedAliasesAndNormalizesRealAliases(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)

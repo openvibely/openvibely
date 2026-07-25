@@ -29,3 +29,11 @@ type Execution struct {
 	StartedAt        time.Time       `json:"started_at"`
 	CompletedAt      *time.Time      `json:"completed_at"`
 }
+
+// ExecutionReplayMessage preserves one exact user/assistant exchange made
+// inside an execution that continued after live steering.
+type ExecutionReplayMessage struct {
+	UserContent      string
+	AssistantContent string
+	ReasoningContent string
+}

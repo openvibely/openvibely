@@ -16,6 +16,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 	"github.com/stretchr/testify/require"
 )
 
@@ -615,4 +616,65 @@ func TestPrepareClientHistoryLoadsReasoningOnlyForKimi(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, glmHistory, 2)
 	require.Empty(t, glmHistory[1].ReasoningContent)
+}
+
+func TestPrepareClientHistoryPreservesSteeringMessageBoundaries(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	agentRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Steering replay history",
+		Category:  models.CategoryChat,
+		Status:    models.StatusPending,
+		Prompt:    "first question",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	agent, err := agentRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	execution := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    "first question",
+	}
+	require.NoError(t, execRepo.Create(ctx, execution))
+	require.NoError(t, execRepo.Complete(ctx, execution.ID, models.ExecCompleted, "first answersecond answer", "", 0, 0))
+	require.NoError(t, execRepo.ReplaceReasoningReplay(ctx, execution.ID, "first thoughtsecond thought", []models.ExecutionReplayMessage{
+		{
+			UserContent:      "first question",
+			AssistantContent: "first answer",
+			ReasoningContent: "first thought",
+		},
+		{
+			UserContent:      "steer",
+			AssistantContent: "second answer",
+			ReasoningContent: "second thought",
+		},
+	}))
+
+	lightHistory, err := execRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	adapter := New(execRepo, nil)
+
+	kimiHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "kimi-k3"}, lightHistory)
+	require.NoError(t, err)
+	require.Equal(t, []openaiclient.CompletionsHistoryMessage{
+		{Role: "user", Content: "first question"},
+		{Role: "assistant", Content: "first answer", ReasoningContent: "first thought"},
+		{Role: "user", Content: "steer"},
+		{Role: "assistant", Content: "second answer", ReasoningContent: "second thought"},
+	}, kimiHistory)
+
+	glmHistory, err := adapter.prepareClientHistory(ctx, models.LLMConfig{Model: "glm-5"}, lightHistory)
+	require.NoError(t, err)
+	require.Equal(t, []openaiclient.CompletionsHistoryMessage{
+		{Role: "user", Content: "first question"},
+		{Role: "assistant", Content: "first answer"},
+		{Role: "user", Content: "steer"},
+		{Role: "assistant", Content: "second answer"},
+	}, glmHistory)
 }

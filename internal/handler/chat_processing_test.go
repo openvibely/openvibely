@@ -3546,6 +3546,8 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 		IsTaskFollowup: true,
 		ChatHistory: []models.Execution{{
 			ID:               exec.ID + "-steering-context-1",
+			PromptSent:       "first prompt",
+			Output:           "first answer",
 			ReasoningContent: "first private reasoning",
 		}},
 	}
@@ -3557,10 +3559,30 @@ func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing
 	require.Equal(t, "first private reasoning plus detail", params.ChatHistory[1].ReasoningContent)
 
 	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "final private reasoning"))
-	require.NoError(t, h.persistSteeringReasoningHistory(ctx, params))
+	require.NoError(t, h.persistSteeringReplayHistory(ctx, params, "assistant answerfinal answer"))
 	stored, err := h.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
 	require.Equal(t, "first private reasoningfirst private reasoning plus detailfinal private reasoning", stored.ReasoningContent)
+
+	replay, err := h.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
+	require.NoError(t, err)
+	require.Equal(t, []models.ExecutionReplayMessage{
+		{
+			UserContent:      "first prompt",
+			AssistantContent: "first answer",
+			ReasoningContent: "first private reasoning",
+		},
+		{
+			UserContent:      "active prompt",
+			AssistantContent: "assistant answer",
+			ReasoningContent: "first private reasoning plus detail",
+		},
+		{
+			UserContent:      formatSteeringInstruction("continue with this constraint"),
+			AssistantContent: "final answer",
+			ReasoningContent: "final private reasoning",
+		},
+	}, replay[exec.ID])
 }
 
 func TestClaimPendingTextSteeringInputsSkipsAttachmentSteering(t *testing.T) {

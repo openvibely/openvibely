@@ -256,27 +256,70 @@ func (r *ExecutionRepo) UpdateReasoningContent(ctx context.Context, id, reasonin
 	return nil
 }
 
-func (r *ExecutionRepo) ReasoningContentByIDs(ctx context.Context, ids []string) (map[string]string, error) {
-	result := make(map[string]string)
-	if len(ids) == 0 {
+func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasoningContent string, messages []models.ExecutionReplayMessage) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("starting execution replay transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE executions SET reasoning_content = ? WHERE id = ?`, reasoningContent, id); err != nil {
+		return fmt.Errorf("updating execution reasoning content: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM execution_replay_messages WHERE execution_id = ?`, id); err != nil {
+		return fmt.Errorf("clearing execution replay messages: %w", err)
+	}
+	for sequence, message := range messages {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO execution_replay_messages (
+				execution_id, sequence, user_content, assistant_content, reasoning_content
+			) VALUES (?, ?, ?, ?, ?)`,
+			id, sequence, message.UserContent, message.AssistantContent, message.ReasoningContent); err != nil {
+			return fmt.Errorf("inserting execution replay message %d: %w", sequence, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing execution replay messages: %w", err)
+	}
+	return nil
+}
+
+func (r *ExecutionRepo) ReplayMessagesByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
+	result := make(map[string][]models.ExecutionReplayMessage)
+	placeholders, args := uniqueExecutionIDArgs(ids)
+	if len(args) == 0 {
 		return result, nil
 	}
 
-	placeholders := make([]string, 0, len(ids))
-	args := make([]interface{}, 0, len(ids))
-	seen := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		seen[id] = struct{}{}
-		placeholders = append(placeholders, "?")
-		args = append(args, id)
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT execution_id, user_content, assistant_content, reasoning_content
+		FROM execution_replay_messages
+		WHERE execution_id IN (`+strings.Join(placeholders, ",")+`)
+		ORDER BY execution_id, sequence`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("loading execution replay messages: %w", err)
 	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		var message models.ExecutionReplayMessage
+		if err := rows.Scan(&id, &message.UserContent, &message.AssistantContent, &message.ReasoningContent); err != nil {
+			return nil, fmt.Errorf("scanning execution replay message: %w", err)
+		}
+		result[id] = append(result[id], message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating execution replay messages: %w", err)
+	}
+	return result, nil
+}
+
+func (r *ExecutionRepo) ReasoningContentByIDs(ctx context.Context, ids []string) (map[string]string, error) {
+	result := make(map[string]string)
+	placeholders, args := uniqueExecutionIDArgs(ids)
 	if len(args) == 0 {
 		return result, nil
 	}
@@ -301,6 +344,25 @@ func (r *ExecutionRepo) ReasoningContentByIDs(ctx context.Context, ids []string)
 		return nil, fmt.Errorf("iterating execution reasoning content: %w", err)
 	}
 	return result, nil
+}
+
+func uniqueExecutionIDArgs(ids []string) ([]string, []interface{}) {
+	placeholders := make([]string, 0, len(ids))
+	args := make([]interface{}, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	return placeholders, args
 }
 
 func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.ExecutionStatus, output, errMsg string, tokensUsed int, durationMs int64) error {
