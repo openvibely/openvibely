@@ -1156,8 +1156,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				function modelSupportsTemperature(provider, model) {
 					if (provider === 'mixture') return false;
 					if (!isOpenAICompatibleProvider(provider)) return true;
-					var preset = document.getElementById('model_openai_compatible_preset').value || 'custom';
-					return !(preset === 'moonshot' && (model || '').trim().toLowerCase().indexOf('kimi-') === 0);
+					return (model || '').trim().toLowerCase().indexOf('kimi-') !== 0;
 				}
 
 				function updateTemperatureField(provider, model) {

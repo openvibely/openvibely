@@ -221,10 +221,9 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 }
 
 func compatibleTemperature(agent models.LLMConfig) float64 {
-	// Moonshot's Kimi models use model-defined fixed temperatures. Omitting the
-	// field lets each Kimi variant select its required value.
-	if strings.EqualFold(strings.TrimSpace(agent.PresetSlug), "moonshot") &&
-		strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "kimi-") {
+	// Kimi models use model-defined fixed temperatures. Detect the model rather
+	// than the preset so manually configured Moonshot endpoints behave correctly.
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "kimi-") {
 		return openaiclient.OmittedTemperature()
 	}
 	return agent.Temperature

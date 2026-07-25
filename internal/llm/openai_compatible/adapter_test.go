@@ -110,9 +110,9 @@ func TestCompatibleTemperatureOmitsMoonshotKimiOnly(t *testing.T) {
 			agent: models.LLMConfig{PresetSlug: "zai", Model: "glm-5", Temperature: 0},
 		},
 		{
-			name:      "custom kimi-compatible endpoint",
-			agent:     models.LLMConfig{Model: "kimi-k2.5", Temperature: 0.2},
-			wantValue: 0.2,
+			name:     "custom kimi-compatible endpoint",
+			agent:    models.LLMConfig{Model: "kimi-k2.6", Temperature: 0.2},
+			wantOmit: true,
 		},
 	}
 
