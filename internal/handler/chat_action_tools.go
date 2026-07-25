@@ -532,7 +532,8 @@ func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, re
 	if h.githubSvc == nil {
 		return nil, fmt.Errorf("github service unavailable")
 	}
-	if strings.TrimSpace(repoURL) != "" {
+	automationContext, automationBound := service.AutomationContextFromContext(ctx)
+	if strings.TrimSpace(repoURL) != "" && (!automationBound || automationContext.ProjectID != projectID) {
 		return h.githubSvc.ResolveRepo(ctx, repoURL, "")
 	}
 	if h.projectRepo == nil {

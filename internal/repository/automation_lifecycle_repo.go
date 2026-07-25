@@ -208,6 +208,13 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 		WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE project_id = ? AND automation_id = ?)`, projectID, automationID); err != nil {
 		return err
 	}
+	if _, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'backlog', updated_at = CURRENT_TIMESTAMP
+		WHERE project_id = ? AND category = 'active' AND status = 'pending' AND parent_task_id IS NULL
+		  AND id IN (SELECT resource_id FROM automation_definition_resources
+			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND resource_type = 'task')`,
+		projectID, projectID, automationID, published.String); err != nil {
+		return err
+	}
 	if state == models.AutomationArchived {
 		if _, err := conn.ExecContext(ctx, `UPDATE automation_trigger_owners SET ownership_state = 'archived', updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND automation_id = ?`, projectID, automationID); err != nil {
 			return err

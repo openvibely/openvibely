@@ -1500,6 +1500,21 @@ func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID 
 	return "", nil
 }
 
+func (r *AutomationRepo) ReleaseExternalActivityReservation(ctx context.Context, projectID string, binding models.AutomationBinding, activityKey string) error {
+	if projectID == "" || binding.AutomationID == "" || binding.VersionID == "" || binding.NodeID == "" || binding.InvocationID == "" || strings.TrimSpace(activityKey) == "" {
+		return errors.New("complete invocation binding is required to release an external mutation reservation")
+	}
+	_, err := r.db.ExecContext(ctx, `DELETE FROM automation_activities
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND node_id = ? AND invocation_id = ?
+		  AND activity_key = ? AND status = 'pending'
+		  AND NOT EXISTS (SELECT 1 FROM automation_activity_resources WHERE activity_id = automation_activities.id)`,
+		projectID, binding.AutomationID, binding.VersionID, binding.NodeID, binding.InvocationID, strings.TrimSpace(activityKey))
+	if err != nil {
+		return fmt.Errorf("releasing automation external activity reservation: %w", err)
+	}
+	return nil
+}
+
 func (r *AutomationRepo) ListAutomationPullRequests(ctx context.Context, projectID, automationID string, limit int) ([]models.TaskPullRequest, error) {
 	if limit <= 0 || limit > 20 {
 		limit = 20

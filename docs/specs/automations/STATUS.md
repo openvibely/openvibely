@@ -28,13 +28,15 @@ Each Automation has exactly one current saved graph. There is no Automation draf
 
 ## Runtime And Lifecycle
 
-- Newly created runnable Tasks remain non-admitted Backlog rows inside the Save transaction until the graph, resource membership, configured categories, and topology are ready. Active root Tasks are submitted through the existing worker only after commit.
-- Saving while paused or archived preserves that lifecycle. It does not enable schedules, resume work, or reacquire active ownership.
+- Newly created runnable Tasks remain non-admitted Backlog rows inside the Save transaction until the graph, resource membership, configured categories, and topology are ready. New or existing roots that end Save as pending and Active are submitted through the existing worker only after commit, including Backlog-to-Active changes and completed roots reset to pending.
+- Saving while paused or archived preserves that lifecycle. It does not enable schedules, resume work, or reacquire active ownership. Pause and Archive atomically demote current-graph pending Active roots to Backlog, so roots already present in the in-memory worker queue fail authoritative dispatch admission.
 - Active root Tasks added or changed from Backlog to Active while paused remain non-admitted until explicit Resume. Resume atomically restores their configured Active category and then submits those exact roots through `TaskService`; archived roots remain non-admitted and archived Automations remain non-resumable.
+- Unrelated Automation edits preserve each retained Scheduler row's exact `run_at` and `next_run` when cadence fields are unchanged. Maintained registration preserves a schedule's individual disabled setting while lifecycle state remains authoritative.
 - Ordinary queued roots reload their current persisted Task configuration at dispatch, so replacement prompt/Agent/topology data cannot be mixed with stale queued values. Definition-only root provenance creates and terminalizes an execution-scoped work item on the replacement Live graph; prepared Automation dispatches retain their exact immutable envelope.
 - Archived Automations retain disabled exclusive schedule provenance using archived owner rows. Archived edits can therefore remove obsolete Scheduler rows, and deleting an archived Automation removes all exclusively owned Scheduler rows while preserving Tasks.
+- Automation GitHub tools always resolve the current project's repository, ignoring model-supplied repository overrides across reads and writes. GitHub issue creation performs a bounded one-page server-side normalized-title duplicate check; issue content is not returned to the model by that check, and a rejection exposes only the issue number plus a runtime-constructed same-repository URL.
 - Native Alert approval never authorizes merge, release, or deployment. GitHub assignment, review, merge, release, and deployment remain human-controlled.
-- Runtime state is shown only in the full-width Live graph, whose canvas grows to fill the remaining viewport height. Only Schedule and Task nodes with exact current task bindings navigate, and they open that existing project-scoped Task; nodes without runtime resources are inert.
+- Runtime state is shown only in the full-width Live graph, whose canvas grows to fill the remaining viewport height. Only Schedule and Task nodes with exact current task bindings navigate, and they open that existing project-scoped Task; nodes without runtime resources are inert. Polling, SSE, visibility, and manual external refreshes share one browser request-generation guard so an older response cannot overwrite newer Live state.
 
 ## Regression Coverage
 
@@ -43,12 +45,12 @@ Current regressions cover:
 - Browser-local Template, Describe It, Blank, and Edit flows; atomic Save while running; one-current-graph replacement; and injected first-Save/replacement failures that prove complete rollback with no partial Tasks, Scheduler rows, Automation identity, or graph replacement.
 - Maintained registration replacement for active, paused, and archived Automations, including prior graph/runtime deletion, unchanged-registration cleanup, obsolete schedule removal, and exact Task/Schedule configuration hydration.
 - Automation-owned prompt coverage for Offering Manager, all three finders, Dev Inbox, and Loop Auditor, plus cadence coverage and a source-level regression that forbids runtime dependencies on `builtinskills`, `SKILL.md`, or global skill support files. Existing saved Automations continue from their current persisted graph.
-- No pre-commit root execution, production provenance lookup, stale queued-root refresh after graph replacement, completed root Live projection, paused existing/new root admission on Resume, and deterministic task handoffs/fan-out.
-- Archive then delete, archive then schedule removal, paused/archived Save, and configured disabled schedules on Resume.
-- Strict public browser Save rejection of missing and reversed ports plus narrowly scoped reopened-graph connector normalization.
+- No pre-commit root execution, production provenance lookup, stale queued-root refresh after graph replacement, completed root Live projection, paused/archived queued-root demotion, paused existing/new root admission on Resume, existing-root post-commit submission, and deterministic task handoffs/fan-out.
+- Archive then delete, archive then schedule removal, paused/archived Save, unchanged-cadence `run_at`/`next_run` preservation, individually disabled maintained registration, and configured disabled schedules on Resume.
+- Automation rename propagation to bound Task titles and strict public browser Save rejection of missing and reversed ports plus narrowly scoped reopened-graph connector normalization.
 - Schedule-owned Task semantics across custom, maintained, Describe It, template, and Chat paths.
-- Live-only detail, exact Task links, removed auxiliary routes, and absence of version/history compatibility copy.
-- Native Alert and GitHub lifecycle boundaries, project isolation, idempotency, and no inference from existing resources.
+- Live-only detail, exact Task links, removed auxiliary routes, absence of version/history compatibility copy, and a real-Chrome newest-first/oldest-last refresh race proving stale responses are rejected.
+- Native Alert and GitHub lifecycle boundaries, project isolation for the full Automation GitHub tool surface, same-execution issue mutation idempotency, bounded server-side cross-run issue duplicate prevention without model-visible issue content, and no inference from existing resources.
 
 ## Checkpoint Lineage
 
@@ -76,4 +78,4 @@ The atomic Save correction removes publication-attempt and publication-step pers
 
 The implementation and tracked documentation describe self-contained GitHub SDLC Automation prompt defaults, matching recurring cadences, registration hydration, browser-local creation paths, and atomic Save; the Automation has no runtime dependency on the bootstrap skill package. The selected managed `automation_graphs` memory still describes the previous template behavior and therefore predates this browser-local template-flow correction. No authorized managed-memory writer is available in this task runtime, so that managed representation cannot be updated here and synchronization is not claimed.
 
-A fresh final contract audit passed after the final full suite. It found no production references to compiler contract versions, plan revisions, candidate hashes, publication-attempt/step models or tables, staged-Save guards, failed-Save recovery state, or recovery UI copy. The audit also verified browser-local Template, Describe It, Blank, and Edit flows; exact Chat candidate matching inside the Save transaction; and rollback coverage for first Save and replacement failures.
+The latest implementation correction addresses the material findings from the preceding read-only audit and adds focused regressions for each reported defect class. This ledger does not claim a clean final audit: a separate fresh strictly read-only audit-only turn is still required after implementation validation.

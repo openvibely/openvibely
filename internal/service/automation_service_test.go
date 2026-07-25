@@ -243,6 +243,36 @@ func TestMaintainedAutomationRegistrationReplacesCurrentGraphAndPreservesLifecyc
 	}
 }
 
+func TestMaintainedAutomationRegistrationPreservesIndividuallyDisabledSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Disabled maintained schedule")
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
+	task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Disabled maintained trigger")
+	_, err := db.ExecContext(ctx, `UPDATE schedules SET enabled = 0 WHERE id = ?`, schedule.ID)
+	require.NoError(t, err)
+	request := AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC,
+		StableKey: "native-sdlc/disabled", Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
+		}}
+
+	_, _, err = registration.Register(ctx, request)
+	require.NoError(t, err)
+	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.False(t, stored.Enabled)
+
+	_, _, err = registration.Register(ctx, request)
+	require.NoError(t, err)
+	stored, err = scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.False(t, stored.Enabled)
+}
+
 func TestAutomationRegistrationRejectsScheduleTaskMismatch(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Mismatched scheduled task")

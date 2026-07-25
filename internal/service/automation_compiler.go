@@ -153,6 +153,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	existingResources := map[string]models.AutomationDefinitionResource{}
 	if current != nil {
 		automation = current.Automation
+		automation.Name = candidate.Name
 		expectedGraphID = current.Version.ID
 		for _, resource := range current.Resources {
 			existingResources[resource.NodeKey+"\x00"+resource.ResourceType] = resource
@@ -244,6 +245,15 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			RepeatType: schedule.RepeatType, RepeatInterval: schedule.RepeatInterval, Enabled: schedule.Enabled}
 		if existing := existingResources[node.Key+"\x00schedule"]; existing.ResourceID != "" {
 			scheduleWrite.ExistingScheduleID = existing.ResourceID
+			stored, err := c.scheduleRepo.GetByID(ctx, existing.ResourceID)
+			if err != nil {
+				return nil, err
+			}
+			if stored == nil {
+				return nil, fmt.Errorf("schedule for node %q is unavailable", node.Key)
+			}
+			scheduleWrite.PreserveTiming = stored.RunAt.In(time.Local).Format("15:04") == schedule.RunAt.In(time.Local).Format("15:04") &&
+				stored.RepeatType == schedule.RepeatType && stored.RepeatInterval == schedule.RepeatInterval
 		}
 		write.Schedules = append(write.Schedules, scheduleWrite)
 	}

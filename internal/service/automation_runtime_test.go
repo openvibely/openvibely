@@ -928,6 +928,21 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Contains(t, second, `"reused":true`)
 	require.Equal(t, int32(1), createCalls.Load(), "successful issue creation retry must resolve persisted provenance")
 
+	provider.findDuplicateFn = func(_ context.Context, repo *GitHubRepoRef, title string, limit int) (*GitHubIssueDuplicate, error) {
+		require.Equal(t, "example/runtime", repo.FullName)
+		require.Equal(t, "Cross-run duplicate", title)
+		require.Equal(t, 50, limit)
+		return &GitHubIssueDuplicate{Number: 77}, nil
+	}
+	_, err = handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"Cross-run duplicate","body":"UNTRUSTED SECRET BODY"}`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "#77")
+	require.Contains(t, err.Error(), "https://github.com/example/runtime/issues/77")
+	require.NotContains(t, err.Error(), "Cross-run duplicate")
+	require.NotContains(t, err.Error(), "UNTRUSTED SECRET BODY")
+	require.Equal(t, int32(1), createCalls.Load(), "a likely cross-run duplicate must not create another issue")
+	provider.findDuplicateFn = nil
+
 	ambiguousInput := githubCreateIssueRuntimeInput{Title: "Ambiguous issue", Body: "body"}
 	repoRef, err := provider.ResolveRepo(ctx, fixture.project.RepoURL, fixture.project.RepoPath)
 	require.NoError(t, err)

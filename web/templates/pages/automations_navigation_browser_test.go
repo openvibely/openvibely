@@ -126,6 +126,10 @@ func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *test
 		`data-automation-live-node="unbound-task-node"`,
 		`href="/tasks/scheduled-task?project_id=project-live"`,
 		`href="/tasks/follow-up-task?project_id=project-live"`,
+		`data-refresh-url="/automations/automation-live?project_id=project-live"`,
+		`window.openVibelyAutomationLiveRefresh = function(method, url)`,
+		`X-OpenVibely-Automation-Live-Generation`,
+		`htmx:beforeSwap`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected simplified Automation Live to contain %q", want)
@@ -141,6 +145,8 @@ func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *test
 		`data-automation-view="history"`,
 		`aria-label="Automation views"`,
 		`xl:grid-cols-[minmax(0,1fr)_22rem]`,
+		`hx-trigger="every 20s`,
+		`htmx.trigger(root, 'automation-visible')`,
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("expected simplified Automation Live to omit %q", forbidden)
@@ -404,8 +410,14 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (getComputedStyle(label).overflow !== 'hidden') fail('long node label is not visibly bounded');
 	    if (!document.body.textContent.includes('No active work')) fail('zero counters did not collapse to a readable summary');
     if (document.querySelector('[data-automation-view]')) fail('Live still exposes redundant Automation tabs');
-    if (document.getElementById('automation-node-resources')) fail('Live still exposes the node resources sidebar');
-    click('#automation-live [data-automation-breadcrumb] a[href^="/automations?"]', 'Automations breadcrumb from Live');
+	    if (document.getElementById('automation-node-resources')) fail('Live still exposes the node resources sidebar');
+	    window.openVibelyAutomationLiveRefresh('GET', '/automations/automation-a?project_id=project-browser&refresh_order=older');
+	    window.openVibelyAutomationLiveRefresh('GET', '/automations/automation-a?project_id=project-browser&refresh_order=newer');
+	    await waitFor(function() { return document.getElementById('automation-live') && document.getElementById('automation-live').textContent.includes('Newest Live response'); }, 'newest concurrent Live response');
+	    await wait(350);
+	    if (!document.getElementById('automation-live').textContent.includes('Newest Live response')) fail('an older concurrent Live response overwrote the newest state');
+	    await report('progress', 'live-refresh-order-guarded');
+	    click('#automation-live [data-automation-breadcrumb] a[href^="/automations?"]', 'Automations breadcrumb from Live');
     await waitFor(portfolioReady, 'portfolio after Live breadcrumb');
     await report('progress', 'live-in-page-back-restored');
 	    var automationBSelector = '[data-automation-url^="/automations/automation-b?"]';
@@ -670,7 +682,15 @@ window.addEventListener('DOMContentLoaded', function() {
 			}
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script><script>%s</script>%s%s</head><body><main id="main-content" hx-history-elt>%s</main></body></html>`, navigationScript, style, runner, fragment)
 		case "/automations/automation-a":
-			_, _ = w.Write([]byte(renderLive("automation-a", "Automation A")))
+			switch r.URL.Query().Get("refresh_order") {
+			case "older":
+				time.Sleep(250 * time.Millisecond)
+				_, _ = w.Write([]byte(renderLive("automation-a", "Older Live response")))
+			case "newer":
+				_, _ = w.Write([]byte(renderLive("automation-a", "Newest Live response")))
+			default:
+				_, _ = w.Write([]byte(renderLive("automation-a", "Automation A")))
+			}
 		case "/automations/automation-a/builder":
 			_, _ = w.Write([]byte(renderBlankBuilder(true)))
 		case "/automations/automation-b":

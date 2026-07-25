@@ -56,6 +56,7 @@ type AutomationSaveSchedule struct {
 	RepeatType         models.RepeatType
 	RepeatInterval     int
 	Enabled            bool
+	PreserveTiming     bool
 }
 
 func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSaveWrite) (*models.AutomationDefinition, []models.Task, error) {
@@ -192,7 +193,6 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 
 	taskRepo := NewTaskRepo(r.db, nil)
 	taskIDs := make(map[string]string, len(in.Tasks))
-	createdTasks := make(map[string]*models.Task, len(in.Tasks))
 	for _, write := range in.Tasks {
 		if write.ExistingTaskID != "" {
 			var projectID string
@@ -212,7 +212,6 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 			return nil, nil, fmt.Errorf("creating task for node %q: %w", write.NodeKey, err)
 		}
 		taskIDs[write.NodeKey] = task.ID
-		createdTasks[write.NodeKey] = task
 	}
 
 	var runnable []models.Task
@@ -273,18 +272,17 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 				return nil, nil, err
 			}
 		}
-		if created := createdTasks[write.NodeKey]; created != nil {
-			created.Title = write.Title
-			created.Prompt = write.Prompt
-			created.Category = category
-			created.Priority = write.Priority
-			created.AgentDefinitionID = write.AgentDefinitionID
-			created.ParentTaskID = parentID
-			created.ChainConfig = chainConfig
-			created.Status = status
-			if automation.LifecycleState == models.AutomationActive && category == models.CategoryActive && parentID == nil && status != models.StatusBlocked {
-				runnable = append(runnable, *created)
-			}
+		var storedCategory models.TaskCategory
+		var storedStatus models.TaskStatus
+		var storedParentID sql.NullString
+		if err := conn.QueryRowContext(ctx, `SELECT category, status, parent_task_id FROM tasks WHERE id = ? AND project_id = ?`, taskID, in.ProjectID).
+			Scan(&storedCategory, &storedStatus, &storedParentID); err != nil {
+			return nil, nil, fmt.Errorf("loading saved task for node %q: %w", write.NodeKey, err)
+		}
+		if automation.LifecycleState == models.AutomationActive && storedCategory == models.CategoryActive && storedStatus == models.StatusPending && !storedParentID.Valid {
+			runnable = append(runnable, models.Task{ID: taskID, ProjectID: in.ProjectID, Title: write.Title, Prompt: write.Prompt,
+				Category: storedCategory, Priority: write.Priority, Status: storedStatus, AgentDefinitionID: write.AgentDefinitionID,
+				ChainConfig: chainConfig})
 		}
 	}
 
@@ -313,7 +311,12 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 			if ownerAutomationID != in.AutomationID || ownerProjectID != in.ProjectID {
 				return nil, nil, fmt.Errorf("schedule for node %q is not owned by this Automation", write.NodeKey)
 			}
-			if _, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, run_at = ?, repeat_type = ?, repeat_interval = ?, enabled = ?,
+			if write.PreserveTiming {
+				if _, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+					taskID, enabled, scheduleID); err != nil {
+					return nil, nil, fmt.Errorf("updating schedule for node %q: %w", write.NodeKey, err)
+				}
+			} else if _, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, run_at = ?, repeat_type = ?, repeat_interval = ?, enabled = ?,
 				next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, taskID, write.RunAt, write.RepeatType,
 				write.RepeatInterval, enabled, write.RunAt, scheduleID); err != nil {
 				return nil, nil, fmt.Errorf("updating schedule for node %q: %w", write.NodeKey, err)

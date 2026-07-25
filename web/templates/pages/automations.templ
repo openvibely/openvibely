@@ -156,8 +156,8 @@ templ AutomationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 
 templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
 		<div id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
-			data-external-refresh-url={ fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", graph.Automation.ID, currentProjectID) }
-			hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }		hx-trigger="every 20s [document.visibilityState === 'visible'], automation-visible" hx-target="this" hx-swap="outerHTML">
+			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }
+			data-external-refresh-url={ fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", graph.Automation.ID, currentProjectID) }>
 			@layout.PageTitle(graph.Automation.Name)
 			@automationBreadcrumb(currentProjectID, graph.Automation.ID, graph.Automation.Name, "")
 			<div class="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -196,7 +196,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						<p class="mt-1 text-xs text-base-content/60">Last persisted update { graph.ExternalState.LastUpdatedAt.Local().Format("Jan 2, 3:04 PM") }</p>
 					}
 				</div>
-				<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#automation-live" hx-swap="outerHTML">
+				<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", graph.Automation.ID, currentProjectID)) } onsubmit="event.preventDefault(); window.openVibelyAutomationLiveRefresh('POST', this.getAttribute('action')); return false;">
 					<input type="hidden" name="project_id" value={ currentProjectID }/>
 					<button class="btn btn-outline btn-sm" type="submit">Refresh GitHub state</button>
 				</form>
@@ -250,6 +250,48 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 			}
 		</div>		<script>
 			(function() {
+				var liveRoot = document.getElementById('automation-live');
+				if (!liveRoot || !window.htmx) return;
+				var state = window._automationLiveRefreshState;
+				if (!state) {
+					state = window._automationLiveRefreshState = {generation: 0, automationId: '', timer: null};
+				}
+				if (state.automationId !== liveRoot.dataset.automationId) {
+					state.generation = 0;
+					state.automationId = liveRoot.dataset.automationId;
+				}
+				if (state.timer) clearInterval(state.timer);
+				window.openVibelyAutomationLiveRefresh = function(method, url) {
+					var root = document.getElementById('automation-live');
+					if (!root || !window.htmx) return;
+					if (state.automationId !== root.dataset.automationId) {
+						state.generation = 0;
+						state.automationId = root.dataset.automationId;
+					}
+					var generation = ++state.generation;
+					return window.htmx.ajax(method || 'GET', url || root.dataset.refreshUrl, {
+						target: '#automation-live',
+						swap: 'outerHTML',
+						headers: {
+							'X-OpenVibely-Automation-Live-Generation': String(generation),
+							'X-OpenVibely-Automation-ID': root.dataset.automationId
+						}
+					});
+				};
+				if (!window._automationLiveSwapGuardBound) {
+					window._automationLiveSwapGuardBound = true;
+					document.body.addEventListener('htmx:beforeSwap', function(event) {
+						var target = event.detail && event.detail.target;
+						if (!target || target.id !== 'automation-live') return;
+						var headers = event.detail.requestConfig && event.detail.requestConfig.headers || {};
+						var generation = Number(headers['X-OpenVibely-Automation-Live-Generation'] || 0);
+						var automationId = headers['X-OpenVibely-Automation-ID'] || '';
+						var current = document.getElementById('automation-live');
+						if (!generation || !current || automationId !== current.dataset.automationId || generation < state.generation) {
+							event.detail.shouldSwap = false;
+						}
+					});
+				}
 				if (!window._automationLiveEventBound) {
 					window._automationLiveEventBound = true;
 					window.addEventListener('sse-automation-event', function(event) {
@@ -259,9 +301,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						if (event.detail.automation_id && event.detail.automation_id !== root.dataset.automationId) return;
 						clearTimeout(window._automationLiveRefreshTimer);
 						window._automationLiveRefreshTimer = setTimeout(function() {
-							if (document.getElementById('automation-live')) {
-								htmx.ajax('GET', root.getAttribute('hx-get'), {target: '#automation-live', swap: 'outerHTML'});
-							}
+							window.openVibelyAutomationLiveRefresh('GET');
 						}, 250);
 					});
 					document.addEventListener('visibilitychange', function() {
@@ -269,12 +309,17 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						var root = document.getElementById('automation-live');
 						if (!root) return;
 						if (root.dataset.externalRefreshUrl && root.querySelector('[data-automation-external-state]')) {
-							htmx.ajax('POST', root.dataset.externalRefreshUrl, {target: '#automation-live', swap: 'outerHTML'});
+							window.openVibelyAutomationLiveRefresh('POST', root.dataset.externalRefreshUrl);
 							return;
 						}
-						htmx.trigger(root, 'automation-visible');
+						window.openVibelyAutomationLiveRefresh('GET');
 					});
 				}
+				state.timer = setInterval(function() {
+					if (document.visibilityState === 'visible' && document.getElementById('automation-live')) {
+						window.openVibelyAutomationLiveRefresh('GET');
+					}
+				}, 20000);
 				var canvasRoot = document.querySelector('[data-automation-readonly-canvas]');
 				var svg = canvasRoot && canvasRoot.querySelector('[data-automation-canvas]');
 				if (canvasRoot && svg) {

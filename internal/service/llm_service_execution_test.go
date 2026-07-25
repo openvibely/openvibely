@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 type captureProviderAdapter struct {
@@ -3778,6 +3779,7 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 type fakeGitHubIssueRuntimeProvider struct {
 	resolveRepoFn        func(context.Context, string, string) (*GitHubRepoRef, error)
 	createIssueFn        func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
+	findDuplicateFn      func(context.Context, *GitHubRepoRef, string, int) (*GitHubIssueDuplicate, error)
 	getIssueFn           func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error)
 	findPRFn             func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	addLabelsFn          func(context.Context, *GitHubRepoRef, int, []string) error
@@ -3846,6 +3848,13 @@ func (f *fakeGitHubIssueRuntimeProvider) CreateIssue(ctx context.Context, repo *
 	return &GitHubIssue{Number: 1, URL: "https://github.com/openvibely/openvibely/issues/1", Title: req.Title, Labels: req.Labels}, nil
 }
 
+func (f *fakeGitHubIssueRuntimeProvider) FindOpenIssueDuplicate(ctx context.Context, repo *GitHubRepoRef, title string, limit int) (*GitHubIssueDuplicate, error) {
+	if f.findDuplicateFn != nil {
+		return f.findDuplicateFn(ctx, repo, title, limit)
+	}
+	return nil, nil
+}
+
 func (f *fakeGitHubIssueRuntimeProvider) GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {
 	if f.getIssueFn != nil {
 		return f.getIssueFn(ctx, repo, issueNumber)
@@ -3909,6 +3918,32 @@ func (f *fakeGitHubIssueRuntimeProvider) AddLabelsToIssue(ctx context.Context, r
 		}
 	}
 	return nil
+}
+
+func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Automation repository boundary", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/project.git"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	var resolvedURL, resolvedPath string
+	provider := &fakeGitHubIssueRuntimeProvider{resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+		resolvedURL, resolvedPath = repoURL, repoPath
+		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project"}, nil
+	}}
+	opts := githubIssueRuntimeOptions{ProjectID: project.ID, ProjectRepo: projectRepo, GitHub: provider}
+	automationCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID,
+		Bindings: []models.AutomationBinding{{AutomationID: "automation", VersionID: "graph", NodeID: "node"}}})
+
+	_, err := resolveGitHubRepoForRuntimeToolURL(automationCtx, opts, "https://github.com/attacker/other")
+	require.NoError(t, err)
+	require.Equal(t, project.RepoURL, resolvedURL)
+	require.Equal(t, project.RepoPath, resolvedPath)
+
+	_, err = resolveGitHubRepoForRuntimeToolURL(ctx, opts, "https://github.com/example/other")
+	require.NoError(t, err)
+	require.Equal(t, "https://github.com/example/other", resolvedURL, "ordinary Chat must retain explicit repository selection")
+	require.Empty(t, resolvedPath)
 }
 
 func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *testing.T) {

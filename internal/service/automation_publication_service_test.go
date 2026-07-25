@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -20,6 +21,15 @@ type automationSaveHarness struct {
 	drafts         *AutomationDraftService
 	compiler       *AutomationCompiler
 	lifecycle      *AutomationLifecycleService
+}
+
+type recordingAutomationTaskService struct {
+	*TaskService
+	submitted []models.Task
+}
+
+func (s *recordingAutomationTaskService) SubmitSavedAutomationTask(task models.Task) {
+	s.submitted = append(s.submitted, task)
 }
 
 func newAutomationSaveHarness(t *testing.T, name string) automationSaveHarness {
@@ -162,6 +172,109 @@ func TestAutomationSavePreservesPausedAndArchivedLifecycle(t *testing.T) {
 	require.False(t, schedule.Enabled)
 }
 
+func TestAutomationPauseAndArchiveDemotePendingActiveRoots(t *testing.T) {
+	for _, state := range []models.AutomationLifecycleState{models.AutomationPaused, models.AutomationArchived} {
+		t.Run(string(state), func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Lifecycle root admission "+string(state))
+			ctx := context.Background()
+			candidate := customTaskOnlyCandidate("Lifecycle root", "Wait for lifecycle changes.", models.CategoryActive)
+			saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err)
+			taskID := automationResourceID(t, saved.Definition, "root", "task")
+
+			if state == models.AutomationPaused {
+				err = h.lifecycle.Pause(ctx, h.project.ID, saved.Definition.Automation.ID)
+			} else {
+				err = h.lifecycle.Archive(ctx, h.project.ID, saved.Definition.Automation.ID)
+			}
+			require.NoError(t, err)
+			task, err := h.taskRepo.GetByID(ctx, taskID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryBacklog, task.Category)
+			require.Equal(t, models.StatusPending, task.Status)
+		})
+	}
+}
+
+func TestAutomationSavePreservesScheduleTimingWhenCadenceIsUnchanged(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Preserve schedule timing")
+	ctx := context.Background()
+	candidate := customScheduledTaskCandidate("Scheduled review", "Review one request.")
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	scheduleID := automationResourceID(t, first.Definition, "schedule", "schedule")
+	preservedNextRun := time.Date(2042, time.March, 4, 5, 6, 7, 0, time.UTC)
+	_, err = h.db.ExecContext(ctx, `UPDATE schedules SET next_run = ? WHERE id = ?`, preservedNextRun, scheduleID)
+	require.NoError(t, err)
+	before, err := h.scheduleRepo.GetByID(ctx, scheduleID)
+	require.NoError(t, err)
+
+	candidate.Nodes[0].Config["prompt"] = "Only the task prompt changed."
+	_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	after, err := h.scheduleRepo.GetByID(ctx, scheduleID)
+	require.NoError(t, err)
+	require.Equal(t, before.RunAt, after.RunAt)
+	require.NotNil(t, after.NextRun)
+	require.Equal(t, preservedNextRun, *after.NextRun)
+}
+
+func TestAutomationRenameUpdatesBoundTaskTitles(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Rename task titles")
+	ctx := context.Background()
+	candidate := customTaskOnlyCandidate("Original automation", "Do the work.", models.CategoryBacklog)
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	taskID := automationResourceID(t, first.Definition, "root", "task")
+
+	candidate.Name = "Renamed automation"
+	_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	task, err := h.taskRepo.GetByID(ctx, taskID)
+	require.NoError(t, err)
+	require.Contains(t, task.Title, "Renamed automation")
+	require.NotContains(t, task.Title, "Original automation")
+}
+
+func TestAutomationSaveSubmitsExistingRootsThatBecomePendingActive(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		setup func(*testing.T, *sql.DB, string)
+	}{
+		{name: "backlog to active", setup: func(t *testing.T, db *sql.DB, taskID string) {
+			_, err := db.Exec(`UPDATE tasks SET category = 'backlog' WHERE id = ?`, taskID)
+			require.NoError(t, err)
+		}},
+		{name: "completed reset to pending", setup: func(t *testing.T, db *sql.DB, taskID string) {
+			_, err := db.Exec(`UPDATE tasks SET status = 'completed' WHERE id = ?`, taskID)
+			require.NoError(t, err)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Submit existing root "+test.name)
+			ctx := context.Background()
+			recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+			h.compiler.taskSvc = recorder
+			candidate := customTaskOnlyCandidate("Runnable root", "Run this root.", models.CategoryActive)
+			first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err)
+			taskID := automationResourceID(t, first.Definition, "root", "task")
+			recorder.submitted = nil
+			test.setup(t, h.db, taskID)
+
+			_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
+				Source: "manual", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err)
+			require.Len(t, recorder.submitted, 1)
+			require.Equal(t, taskID, recorder.submitted[0].ID)
+			require.Equal(t, models.CategoryActive, recorder.submitted[0].Category)
+			require.Equal(t, models.StatusPending, recorder.submitted[0].Status)
+		})
+	}
+}
+
 func TestAutomationDeleteRemovesOwnedScheduleAndPreservesTask(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic delete")
 	ctx := context.Background()
@@ -190,6 +303,14 @@ func TestAutomationSavePreviewRejectsUnavailableGitHubIntegrationWithoutPersiste
 	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
 	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
 	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+}
+
+func customTaskOnlyCandidate(name, prompt string, category models.TaskCategory) models.AutomationDraftCandidate {
+	return models.AutomationDraftCandidate{SchemaVersion: 1, Name: name, Description: "Atomic custom root",
+		AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
+		Nodes: []models.AutomationDraftNode{{Key: "root", Name: "Root", Type: models.AutomationNodeAgentTask, Role: "task",
+			Config: map[string]any{"prompt": prompt, "category": string(category), "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}}},
+		Edges: []models.AutomationDraftEdge{}}
 }
 
 func customScheduledTaskCandidate(name, prompt string) models.AutomationDraftCandidate {

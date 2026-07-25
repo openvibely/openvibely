@@ -177,10 +177,20 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 	}
 
 	nodeIDs := make(map[string]string, len(in.Nodes))
+	scheduleEnabledByNode := make(map[string]bool, len(in.Nodes))
+	hasScheduleEnabled := make(map[string]bool, len(in.Nodes))
 	for _, n := range in.Nodes {
 		config := n.ConfigJSON
 		if strings.TrimSpace(config) == "" {
 			config = "{}"
+		}
+		var decodedConfig map[string]any
+		if err := json.Unmarshal([]byte(config), &decodedConfig); err != nil {
+			return nil, false, fmt.Errorf("decoding automation node %q configuration: %w", n.Key, err)
+		}
+		if enabled, ok := decodedConfig["enabled"].(bool); ok {
+			scheduleEnabledByNode[n.Key] = enabled
+			hasScheduleEnabled[n.Key] = true
 		}
 		var id string
 		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_nodes
@@ -248,7 +258,15 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 				a.ID, versionID, nodeID, ownershipState); err != nil {
 				return nil, false, fmt.Errorf("claiming trigger ownership: %w", err)
 			}
-			enabled := effectiveLifecycle == models.AutomationActive
+			var currentlyEnabled bool
+			if err := conn.QueryRowContext(ctx, `SELECT enabled FROM schedules WHERE id = ?`, binding.ResourceID).Scan(&currentlyEnabled); err != nil {
+				return nil, false, fmt.Errorf("loading trigger lifecycle: %w", err)
+			}
+			enabled := currentlyEnabled
+			if hasScheduleEnabled[binding.NodeKey] {
+				enabled = scheduleEnabledByNode[binding.NodeKey]
+			}
+			enabled = effectiveLifecycle == models.AutomationActive && enabled
 			if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, enabled, binding.ResourceID); err != nil {
 				return nil, false, fmt.Errorf("updating trigger lifecycle: %w", err)
 			}
