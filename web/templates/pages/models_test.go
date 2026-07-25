@@ -415,6 +415,47 @@ func TestModelsContent_DefaultCardCarriesCompleteEditData(t *testing.T) {
 	}
 }
 
+func TestModelsContent_CompatibleModelCardsShowEffectiveSettings(t *testing.T) {
+	agents := []models.LLMConfig{
+		{
+			ID:              "kimi-model",
+			Name:            "Kimi",
+			Provider:        models.ProviderOpenAICompatible,
+			Model:           "kimi-k3",
+			ReasoningEffort: "max",
+			Temperature:     0.7,
+		},
+		{
+			ID:              "glm-model",
+			Name:            "GLM",
+			Provider:        models.ProviderOpenAICompatible,
+			Model:           "glm-5.2",
+			ReasoningEffort: "high",
+			Temperature:     0.4,
+		},
+	}
+	var buf bytes.Buffer
+	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+
+	kimiCard := renderedModelCard(t, buf.String(), "kimi-model")
+	if strings.Contains(kimiCard, "Temperature:") {
+		t.Fatalf("Kimi card should not show an unused temperature:\n%s", kimiCard)
+	}
+	if !strings.Contains(kimiCard, "Reasoning effort: max") {
+		t.Fatalf("Kimi card should show its reasoning effort:\n%s", kimiCard)
+	}
+
+	glmCard := renderedModelCard(t, buf.String(), "glm-model")
+	if !strings.Contains(glmCard, "Temperature: 0.4") {
+		t.Fatalf("GLM card should show its effective temperature:\n%s", glmCard)
+	}
+	if !strings.Contains(glmCard, "Reasoning effort: high") {
+		t.Fatalf("GLM card should show its reasoning effort:\n%s", glmCard)
+	}
+}
+
 func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {

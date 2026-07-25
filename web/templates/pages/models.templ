@@ -31,6 +31,14 @@ func hasDefault(agents []models.LLMConfig) bool {
 	return false
 }
 
+func modelCardShowsTemperature(agent models.LLMConfig) bool {
+	if agent.Provider == models.ProviderMixture {
+		return false
+	}
+	return agent.Provider != models.ProviderOpenAICompatible ||
+		!strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "kimi-")
+}
+
 func oauthStatusText(agent models.LLMConfig) string {
 	if !agent.IsOAuth() {
 		return ""
@@ -317,11 +325,12 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									if agent.Provider == models.ProviderMixture {
 										<p class="text-sm opacity-60">Aggregator: { mixtureAggregatorSummary(agent, agents) }</p>
 										<p class="text-sm opacity-60">References: { fmt.Sprintf("%d", mixtureReferenceCount(agent)) }</p>
-									} else {
+									} else if modelCardShowsTemperature(agent) {
 										<p class="text-sm opacity-60">
 											{ fmt.Sprintf("Temperature: %.1f", agent.Temperature) }
 										</p>
-									}								if agent.Provider == models.ProviderOpenAI && agent.ReasoningEffort != "" {
+									}
+									if agent.ReasoningEffort != "" {
 									<p class="text-sm opacity-60">
 										Reasoning effort: { agent.ReasoningEffort }
 									</p>
