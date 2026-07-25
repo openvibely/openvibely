@@ -157,24 +157,27 @@ func (h *Handler) prepareAutomationTaskFollowup(ctx context.Context, params *str
 		}
 		params.Task = task
 	}
-	if params.AutomationContext != nil || h.automationGraphSvc == nil {
+	if params.AutomationContext != nil {
 		return nil
 	}
 	var automationContext models.AutomationContext
 	var err error
-	if strings.TrimSpace(params.ExecID) != "" {
+	if h.automationGraphSvc != nil && strings.TrimSpace(params.ExecID) != "" {
 		automationContext, err = h.automationGraphSvc.ContextForExecution(ctx, params.ProjectID, params.ExecID)
 		if err != nil {
 			return fmt.Errorf("loading task-thread Automation execution context: %w", err)
 		}
 	}
-	if len(automationContext.Bindings) == 0 {
+	if h.automationGraphSvc != nil && len(automationContext.Bindings) == 0 {
 		automationContext, err = h.automationGraphSvc.ContextForTask(ctx, params.ProjectID, params.TaskID)
 		if err != nil {
 			return fmt.Errorf("loading task-thread Automation task context: %w", err)
 		}
 	}
-	if len(automationContext.Bindings) > 0 {
+	if len(automationContext.Bindings) == 0 && repository.IsAutomationTaskCreatedVia(params.Task.CreatedVia) {
+		automationContext = models.AutomationContext{ProjectID: params.Task.ProjectID, OriginTask: true}
+	}
+	if len(automationContext.Bindings) > 0 || automationContext.OriginTask {
 		params.AutomationContext = &automationContext
 	}
 	return nil

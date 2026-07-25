@@ -46,6 +46,55 @@ func TestAutomationCapabilitySnapshotIsBoundedDeterministicAndSecretFree(t *test
 	}
 }
 
+func TestAutomationDescriptionGenerationEnforcesGitHubCapabilityReadiness(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	githubCandidate, err := svc.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+	githubJSON, err := json.Marshal(githubCandidate)
+	require.NoError(t, err)
+	fallback, err := svc.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	fallback.Name = "Local review"
+	fallback.Nodes = []models.AutomationDraftNode{{
+		Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task",
+		Config: map[string]any{"prompt": "Review the local project.", "category": "backlog", "priority": 2},
+	}}
+	fallbackJSON, err := json.Marshal(fallback)
+	require.NoError(t, err)
+
+	t.Run("unconfigured GitHub is repaired", func(t *testing.T) {
+		var snapshot models.AutomationCapabilitySnapshot
+		snapshot.Integrations = map[string]models.AutomationIntegrationCapability{"github": {Configured: false}}
+		calls := 0
+		preview, err := svc.PreviewDescription(context.Background(), "Create a GitHub delivery workflow", snapshot,
+			func(_ context.Context, prompt string) (string, error) {
+				calls++
+				if calls == 1 {
+					return string(githubJSON), nil
+				}
+				require.Contains(t, prompt, "github_unavailable")
+				return string(fallbackJSON), nil
+			})
+		require.NoError(t, err)
+		require.Equal(t, 2, calls)
+		require.Equal(t, AutomationAdapterCustom, preview.Candidate.AdapterKey)
+	})
+
+	t.Run("configured GitHub is accepted", func(t *testing.T) {
+		var snapshot models.AutomationCapabilitySnapshot
+		snapshot.Integrations = map[string]models.AutomationIntegrationCapability{"github": {Configured: true}}
+		calls := 0
+		preview, err := svc.PreviewDescription(context.Background(), "Create a GitHub delivery workflow", snapshot,
+			func(_ context.Context, _ string) (string, error) {
+				calls++
+				return string(githubJSON), nil
+			})
+		require.NoError(t, err)
+		require.Equal(t, 1, calls)
+		require.Equal(t, AutomationAdapterGitHubSDLC, preview.Candidate.AdapterKey)
+	})
+}
+
 func TestAutomationDescriptionPromptExposesOnlyExecutableCustomCapabilities(t *testing.T) {
 	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	candidate, err := svc.BlankCandidate(AutomationAdapterCustom)

@@ -303,6 +303,32 @@ func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task mode
 		return nil
 	}
 	runtime.Definitions = filtered
+	writeTools := make(map[string]bool, len(filtered))
+	for _, def := range filtered {
+		if def.Access == llmcontracts.RuntimeToolAccessWrite {
+			writeTools[strings.ToLower(strings.TrimSpace(def.Name))] = true
+		}
+	}
+	if len(writeTools) > 0 {
+		baseExecutor := runtime.Executor
+		runtime.Executor = func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if writeTools[strings.ToLower(strings.TrimSpace(name))] {
+				if automationContext.OriginTask && len(automationContext.Bindings) == 0 {
+					return "", true, true, errors.New("GitHub mutation is not authorized by the caller's Automation graph because its originating graph is no longer current")
+				}
+				for _, binding := range automationContext.Bindings {
+					current, err := s.automationRepo.IsCurrentActiveBinding(toolCtx, task.ProjectID, binding)
+					if err != nil {
+						return "", true, true, err
+					}
+					if !current {
+						return "", true, true, errors.New("GitHub mutation is not authorized by the caller's current active Automation graph")
+					}
+				}
+			}
+			return baseExecutor(toolCtx, name, input)
+		}
+	}
 	return runtime
 }
 
@@ -671,7 +697,8 @@ func (s *LLMService) createPreparedAutomationTask(ctx context.Context, projectID
 	selectedAgentID, _ := selectTaskCreationAgent(request, agents)
 	category := resolveTaskCreationCategory(request, selectedAgentID, agents)
 	task := &models.Task{ProjectID: projectID, Title: request.Title, Prompt: request.Prompt,
-		Status: models.StatusPending, Category: category, Priority: request.Priority}
+		Status: models.StatusPending, Category: category, Priority: request.Priority,
+		CreatedVia: repository.AutomationCompilerTaskCreatedVia(plan.sourceBinding.AutomationID, plan.targetNode.NodeKey)}
 	if selectedAgentID != "" {
 		task.AgentID = &selectedAgentID
 	}

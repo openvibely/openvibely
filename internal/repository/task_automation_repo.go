@@ -18,6 +18,11 @@ func AutomationCompilerTaskCreatedVia(automationID, nodeKey string) string {
 	return "automation:" + automationID + ":" + nodeKey
 }
 
+func IsAutomationTaskCreatedVia(createdVia string) bool {
+	parts := strings.Split(strings.TrimSpace(createdVia), ":")
+	return len(parts) >= 3 && parts[0] == "automation" && strings.TrimSpace(parts[1]) != "" && strings.TrimSpace(parts[2]) != ""
+}
+
 // ActivateAutomationChainedTask reuses the existing Task state transition and
 // records the connected Automation handoff in the same local transaction.
 func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent models.Task, child *models.Task, event AutomationProjectionEvent) (*models.AutomationWorkItem, *models.AutomationActivity, bool, error) {

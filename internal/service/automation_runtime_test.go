@@ -1026,6 +1026,8 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	implementationTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Implement exact issue")
 	require.NoError(t, err)
 	require.NotNil(t, implementationTask)
+	require.Equal(t, repository.AutomationCompilerTaskCreatedVia(fixture.definition.Automation.ID, implementationNode.NodeKey), implementationTask.CreatedVia,
+		"issue-specific Automation Tasks need a durable origin marker after graph replacement deletes projection")
 	require.Contains(t, firstOutput, implementationTask.ID)
 	implementationContext, err := fixture.repo.ContextForTask(ctx, fixture.project.ID, implementationTask.ID)
 	require.NoError(t, err)

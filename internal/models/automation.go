@@ -233,8 +233,9 @@ type AutomationBinding struct {
 }
 
 type AutomationContext struct {
-	ProjectID string              `json:"project_id"`
-	Bindings  []AutomationBinding `json:"bindings"`
+	ProjectID  string              `json:"project_id"`
+	Bindings   []AutomationBinding `json:"bindings"`
+	OriginTask bool                `json:"origin_task,omitempty"`
 }
 
 type AutomationDispatchEnvelope struct {

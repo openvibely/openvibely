@@ -27,7 +27,7 @@ func AutomationContextFromContext(ctx context.Context) (models.AutomationContext
 		return models.AutomationContext{}, false
 	}
 	value, ok := ctx.Value(automationContextKey{}).(models.AutomationContext)
-	return value, ok && value.ProjectID != "" && len(value.Bindings) > 0
+	return value, ok && value.ProjectID != "" && (len(value.Bindings) > 0 || value.OriginTask)
 }
 
 func AutomationExecutionFromContext(ctx context.Context) (taskID, executionID string, ok bool) {

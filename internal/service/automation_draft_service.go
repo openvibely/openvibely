@@ -999,6 +999,12 @@ func validateAutomationTaskReferenceShape(node models.AutomationDraftNode) []mod
 
 func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate models.AutomationDraftCandidate, snapshot models.AutomationCapabilitySnapshot) []models.AutomationValidationIssue {
 	issues := s.ValidateCandidate(candidate)
+	if candidate.AdapterKey == AutomationAdapterGitHubSDLC || customAutomationUsesGitHub(candidate) {
+		github, configured := snapshot.Integrations["github"]
+		if !configured || !github.Configured {
+			issues = append(issues, models.AutomationValidationIssue{Code: "github_unavailable", Message: "GitHub is unavailable for this project; generate a graph that uses only configured capabilities."})
+		}
+	}
 	agents := make(map[string]bool, len(snapshot.Agents))
 	for _, agent := range snapshot.Agents {
 		agents[agent.ID] = true

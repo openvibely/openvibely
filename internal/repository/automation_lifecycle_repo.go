@@ -135,11 +135,31 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 		}
 	}
 
-	var admittedTaskIDs []string
+	admittedTaskIDs := []string{}
+	nodesByKey := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		nodesByKey[node.Key] = node
+	}
+	scheduleDerivedChildren := make(map[string]bool)
+	for _, edge := range candidate.Edges {
+		source, sourceOK := nodesByKey[edge.From]
+		target, targetOK := nodesByKey[edge.To]
+		if sourceOK && targetOK && source.Type == models.AutomationNodeTrigger && target.Type == models.AutomationNodeAgentTask &&
+			(target.Role == "task" || target.Role == "github_inbox") {
+			scheduleDerivedChildren[target.Key] = true
+		}
+	}
 	for _, node := range candidate.Nodes {
 		category, _ := node.Config["category"].(string)
-		if node.Type != models.AutomationNodeAgentTask || node.Role != "task" || category != string(models.CategoryActive) {
+		configuredRunnable := node.Type == models.AutomationNodeAgentTask && node.Role == "task" && category == string(models.CategoryActive)
+		scheduleDerived := node.Type == models.AutomationNodeAgentTask &&
+			(node.Role == "task" || node.Role == "github_inbox") && scheduleDerivedChildren[node.Key]
+		if !configuredRunnable && !scheduleDerived {
 			continue
+		}
+		allowRoot := 0
+		if configuredRunnable {
+			allowRoot = 1
 		}
 		var taskID string
 		err := conn.QueryRowContext(ctx, `SELECT t.id FROM automation_definition_resources resource
@@ -147,7 +167,7 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 			JOIN tasks t ON t.id = resource.resource_id AND t.project_id = resource.project_id
 			WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ?
 				AND resource.resource_type = 'task' AND n.node_key = ? AND t.category = 'backlog'
-				AND t.status = 'pending' AND (t.parent_task_id IS NULL OR EXISTS (
+				AND t.status = 'pending' AND ((? = 1 AND t.parent_task_id IS NULL) OR EXISTS (
 					SELECT 1 FROM automation_transitions transition
 					JOIN automation_definition_resources parent_resource ON parent_resource.project_id = transition.project_id
 						AND parent_resource.automation_id = transition.automation_id AND parent_resource.version_id = transition.version_id
@@ -155,7 +175,7 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 						AND parent_resource.resource_id = t.parent_task_id
 					WHERE transition.project_id = resource.project_id AND transition.automation_id = resource.automation_id
 						AND transition.version_id = resource.version_id AND transition.to_node_id = n.id AND transition.state = 'entered'
-				))`, projectID, automationID, versionID.String, node.Key).Scan(&taskID)
+				))`, projectID, automationID, versionID.String, node.Key, allowRoot).Scan(&taskID)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}

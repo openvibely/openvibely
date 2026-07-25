@@ -1269,6 +1269,120 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 	require.Equal(t, 1, provenance, "follow-up issue creation must retain Automation provenance")
 }
 
+func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Replaced Automation origin").Build()
+	project.RepoURL = "https://github.com/example/runtime.git"
+	project.RepoPath = t.TempDir()
+	require.NoError(t, tc.projectRepo.Update(ctx, project))
+
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo,
+		service.NewTaskService(tc.taskRepo, repository.NewAttachmentRepo(tc.db), nil), tc.taskRepo, tc.scheduleRepo, validator)
+	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Replace task graph", Description: "Original graph",
+		AutomationType: "custom", AdapterKey: service.AutomationAdapterCustom,
+		Nodes: []models.AutomationDraftNode{{Key: "original", Name: "Original task", Type: models.AutomationNodeAgentTask, Role: "task",
+			Config: map[string]any{"prompt": "Run original work.", "category": "backlog", "priority": 2}}}}
+	first, err := compiler.Save(ctx, service.AutomationSaveRequest{ProjectID: project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	originalTaskID := ""
+	for _, resource := range first.Definition.Resources {
+		if resource.NodeKey == "original" && resource.ResourceType == "task" {
+			originalTaskID = resource.ResourceID
+		}
+	}
+	require.NotEmpty(t, originalTaskID)
+	originalTask, err := tc.taskRepo.GetByID(ctx, originalTaskID)
+	require.NoError(t, err)
+	require.True(t, repository.IsAutomationTaskCreatedVia(originalTask.CreatedVia))
+	originalNodeID := ""
+	for _, node := range first.Definition.Nodes {
+		if node.NodeKey == "original" {
+			originalNodeID = node.ID
+		}
+	}
+	require.NotEmpty(t, originalNodeID)
+	oldBinding := models.AutomationBinding{AutomationID: first.Definition.Automation.ID, VersionID: first.Definition.Version.ID, NodeID: originalNodeID}
+
+	replacement := candidate
+	replacement.Description = "Replacement graph"
+	replacement.Nodes = []models.AutomationDraftNode{{Key: "replacement", Name: "Replacement task", Type: models.AutomationNodeAgentTask, Role: "task",
+		Config: map[string]any{"prompt": "Run replacement work.", "category": "backlog", "priority": 2}}}
+	_, err = compiler.Save(ctx, service.AutomationSaveRequest{ProjectID: project.ID, AutomationID: first.Definition.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: replacement})
+	require.NoError(t, err)
+	staleContext, err := automationRepo.ContextForTask(ctx, project.ID, originalTask.ID)
+	require.NoError(t, err)
+	require.Empty(t, staleContext.Bindings, "replacement removes old causal projection but preserves the domain Task")
+
+	var issueCalls, pullRequestCalls, branchReplacementCalls int
+	github := &fakeGitHubService{
+		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		createIssueFn: func(_ context.Context, _ *service.GitHubRepoRef, _ service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
+			issueCalls++
+			return &service.GitHubIssue{Number: 1}, nil
+		},
+		createPRFn: func(_ context.Context, _ *service.GitHubRepoRef, _ service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			pullRequestCalls++
+			return &service.GitHubPullRequest{Number: 1}, nil
+		},
+		replaceBranchHeadFn: func(_ context.Context, _ *service.GitHubRepoRef, _ service.GitHubReplaceBranchHeadRequest) error {
+			branchReplacementCalls++
+			return nil
+		},
+	}
+	graphSvc := service.NewAutomationGraphService(automationRepo)
+	tc.handler.SetAutomationServices(graphSvc, service.NewAutomationRegistrationService(automationRepo, registry))
+	tc.handler.SetGitHubService(github)
+	tc.handler.llmSvc.SetGitHubIssueRuntimeProvider(github)
+	tc.handler.llmSvc.SetAutomationRepo(automationRepo)
+
+	params := streamingResponseParams{ProjectID: project.ID, TaskID: originalTask.ID, ExecID: "replacement-followup", IsTaskFollowup: true, Task: originalTask}
+	require.NoError(t, tc.handler.prepareAutomationTaskFollowup(ctx, &params))
+	require.NotNil(t, params.AutomationContext)
+	require.True(t, params.AutomationContext.OriginTask)
+	require.Empty(t, params.AutomationContext.Bindings)
+	tc.handler.automationGraphSvc = nil
+	withoutLookup := streamingResponseParams{ProjectID: project.ID, TaskID: originalTask.ID, ExecID: "replacement-without-lookup", IsTaskFollowup: true, Task: originalTask}
+	require.NoError(t, tc.handler.prepareAutomationTaskFollowup(ctx, &withoutLookup))
+	require.NotNil(t, withoutLookup.AutomationContext)
+	require.True(t, withoutLookup.AutomationContext.OriginTask, "missing graph lookup must not permit generic GitHub mutation fallback")
+	tc.handler.automationGraphSvc = graphSvc
+	preparedCtx := service.WithAutomationContext(ctx, *params.AutomationContext)
+	preparedCtx = service.WithAutomationExecution(preparedCtx, originalTask.ID, params.ExecID)
+	staleQueuedCtx := service.WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{oldBinding}})
+	staleQueuedCtx = service.WithAutomationExecution(staleQueuedCtx, originalTask.ID, params.ExecID)
+	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, false)
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	for _, runtimeContext := range []struct {
+		name string
+		ctx  context.Context
+	}{{name: "reconstructed origin", ctx: preparedCtx}, {name: "already prepared stale queued binding", ctx: staleQueuedCtx}} {
+		for _, call := range []struct {
+			name  string
+			input string
+		}{
+			{name: "github_create_issue", input: `{"title":"Must remain blocked"}`},
+			{name: "github_open_pull_request", input: fmt.Sprintf(`{"task_id":%q,"issue_number":1}`, originalTask.ID)},
+			{name: "github_replace_pull_request_branch", input: fmt.Sprintf(`{"task_id":%q,"confirm_history_rewrite":true,"expected_head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, originalTask.ID)},
+		} {
+			_, handled, isError, callErr := runtime.Executor(runtimeContext.ctx, call.name, json.RawMessage(call.input))
+			require.True(t, handled, runtimeContext.name+": "+call.name)
+			require.True(t, isError, runtimeContext.name+": "+call.name)
+			require.ErrorContains(t, callErr, "not authorized", runtimeContext.name+": "+call.name)
+		}
+	}
+	require.Zero(t, issueCalls)
+	require.Zero(t, pullRequestCalls)
+	require.Zero(t, branchReplacementCalls)
+}
+
 func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

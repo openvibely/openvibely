@@ -363,6 +363,91 @@ func TestAutomationSaveSubmitsExistingRootsThatBecomePendingActive(t *testing.T)
 	}
 }
 
+func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Deferred scheduled GitHub inbox")
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(h.db)
+	h.project.RepoURL = "https://github.com/example/automation.git"
+	require.NoError(t, projectRepo.Update(ctx, &h.project))
+	settingsRepo := repository.NewSettingsRepo(h.db)
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
+	githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{
+		ProjectID: h.project.ID, GitHubLogin: "automation-bot", Enabled: true,
+	}))
+	h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
+
+	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Deferred scheduled inbox", Description: "Resume a scheduled GitHub inbox handoff",
+		AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
+		Nodes: []models.AutomationDraftNode{
+			{Key: "producer", Name: "Find improvements", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Find one focused improvement.", "category": "backlog", "priority": 2}},
+			{Key: "issue", Name: "Create issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Open one reviewable suggestion issue.", "labels": []any{"suggestion"}}},
+			{Key: "assignment", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
+			{Key: "schedule", Name: "Hourly inbox", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Poll the assigned issue inbox.", "category": "scheduled", "priority": 2, "run_at": "09:15", "repeat_type": "hours", "repeat_interval": 1, "enabled": true}},
+			{Key: "followup", Name: "GitHub inbox", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process newly assigned issues.", "category": "backlog", "priority": 3}},
+			{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the accepted issue.", "category": "active", "priority": 3}},
+			{Key: "open_pr", Name: "Open pull request", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a reviewable pull request.", "base": "main", "draft": false}},
+			{Key: "review", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},
+			{Key: "complete", Name: "Merged", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+		},
+		Edges: []models.AutomationDraftEdge{
+			{Key: "producer_issue", From: "producer", To: "issue", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "issue_assignment", From: "issue", To: "assignment", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "schedule_inbox", From: "schedule", To: "followup", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "assignment_inbox", From: "assignment", To: "followup", FromPort: "right", ToPort: "left", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
+			{Key: "inbox_implementation", From: "followup", To: "implementation", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "implementation_pr", From: "implementation", To: "open_pr", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "pr_review", From: "open_pr", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "review_complete", From: "review", To: "complete", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		}}
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{
+		ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+	})
+	require.NoError(t, err)
+
+	parent, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "schedule", "task"))
+	require.NoError(t, err)
+	childID := automationResourceID(t, saved.Definition, "followup", "task")
+	child, err := h.taskRepo.GetByID(ctx, childID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, child.Category)
+	require.NoError(t, h.lifecycle.Pause(ctx, h.project.ID, saved.Definition.Automation.ID))
+
+	execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
+	require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+	sourceNode := automationNodeByKey(t, saved.Definition, "schedule")
+	binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: sourceNode.ID}
+	causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{binding}})
+	causalCtx = withAutomationExecution(causalCtx, parent.ID, execution.ID)
+	config, err := parent.ParseChainConfig()
+	require.NoError(t, err)
+	require.Equal(t, string(models.CategoryActive), config.ChildCategory, "Schedule handoffs are effectively runnable even when the saved inbox category is Backlog")
+	llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo,
+		taskSvc: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	require.NoError(t, llmSvc.activateCompiledAutomationChild(causalCtx, *parent, "assigned issues discovered\n[STATUS: SUCCESS]", config))
+
+	deferred, err := h.taskRepo.GetByID(ctx, childID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, deferred.Category)
+	var entered int
+	require.NoError(t, h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND to_node_id = ? AND state = 'entered'`,
+		h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, sourceNode.ID,
+		automationNodeByKey(t, saved.Definition, "followup").ID).Scan(&entered))
+	require.Equal(t, 1, entered)
+
+	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	resume := NewAutomationLifecycleService(h.automationRepo, h.scheduleRepo, recorder)
+	require.NoError(t, resume.Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
+	require.Len(t, recorder.submitted, 1)
+	require.Equal(t, childID, recorder.submitted[0].ID)
+	require.Equal(t, models.CategoryActive, recorder.submitted[0].Category)
+
+	require.NoError(t, resume.Resume(ctx, h.project.ID, saved.Definition.Automation.ID))
+	require.Len(t, recorder.submitted, 1, "the deferred Schedule handoff must be admitted exactly once")
+}
+
 func TestAutomationInactiveLifecycleDefersCompiledChildHandoff(t *testing.T) {
 	for _, state := range []models.AutomationLifecycleState{models.AutomationPaused, models.AutomationArchived} {
 		t.Run(string(state), func(t *testing.T) {
