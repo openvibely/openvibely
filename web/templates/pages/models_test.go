@@ -89,6 +89,11 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if strings.Contains(out, "{ value: 'kimi-k2-0711-preview'") {
 		t.Error("did not expect discontinued Kimi K2 preview in selector")
 	}
+	for _, model := range []string{"glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.6"} {
+		if !strings.Contains(out, "{ value: '"+model+"'") {
+			t.Errorf("expected current Z.AI model %q in selector", model)
+		}
+	}
 	if !strings.Contains(out, "{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max']") {
 		t.Error("expected Claude Fable 5 effort options")
 	}
