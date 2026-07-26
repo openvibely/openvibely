@@ -321,7 +321,7 @@ func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, nod
 			issueTaskPrompt := automationCompiledGitHubIssueTaskPrompt(candidate, *issueTask)
 			category, _ := issueTask.Config["category"].(string)
 			priority, _ := draftInt(issueTask.Config["priority"])
-			prompt += "\n\nGitHub assignment handoff:\nCall github_get_project_inbox, then github_list_assigned_issues for an authorized configured inbox login. Reconcile existing work with list_tasks before calling create_task. Create at most one visible task per actionable assigned issue and include source_github_issue_number so existing GitHub/Automation provenance is preserved. Do not set source_github_repo_url; the server restricts Automation provenance to this project's explicit repository URL. Use category " + category + " and priority " + fmt.Sprintf("%d", priority) + ". The task prompt must include:\n" + issueTaskPrompt +
+			prompt += "\n\nGitHub assignment handoff:\nCall github_get_project_inbox, then github_list_assigned_issues for an authorized configured inbox login. Reconcile existing work with list_tasks before calling create_task. Create at most one visible task per actionable assigned issue and include source_github_issue_number so existing GitHub/Automation provenance is preserved. Do not set source_github_repo_url; the server resolves Automation provenance from this project's configured repository URL, or from a GitHub remote in its local checkout when that URL is blank. Use category " + category + " and priority " + fmt.Sprintf("%d", priority) + ". The task prompt must include:\n" + issueTaskPrompt +
 				"\nAssignment is a human approval signal only. You must not approve an issue, approve a PR, merge, release, or deploy on the human's behalf."
 		}
 	}

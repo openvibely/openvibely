@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +49,47 @@ func newAutomationSaveHarness(t *testing.T, name string) automationSaveHarness {
 	return automationSaveHarness{db: db, project: project, automationRepo: automationRepo, taskRepo: taskRepo,
 		scheduleRepo: scheduleRepo, drafts: drafts, compiler: compiler,
 		lifecycle: NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)}
+}
+
+func TestAutomationSaveRejectsInvalidMaintainedGitHubActionSettingsAtomically(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		role     string
+		field    string
+		value    any
+		wantCode string
+	}{
+		{name: "issue instructions wrong type", role: "create_github_issue", field: "instructions", value: true, wantCode: "action_instructions"},
+		{name: "issue instructions exceed limit", role: "create_github_issue", field: "instructions", value: strings.Repeat("x", 2001), wantCode: "action_instructions"},
+		{name: "labels wrong type", role: "create_github_issue", field: "labels", value: "bug", wantCode: "github_issue_labels"},
+		{name: "labels exceed limit", role: "create_github_issue", field: "labels", value: []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}, wantCode: "github_issue_labels"},
+		{name: "label exceeds limit", role: "create_github_issue", field: "labels", value: []string{strings.Repeat("x", 101)}, wantCode: "github_issue_labels"},
+		{name: "label uses forbidden prefix", role: "create_github_issue", field: "labels", value: []string{"OpenVibely:internal"}, wantCode: "github_issue_labels"},
+		{name: "pull request instructions wrong type", role: "open_pull_request", field: "instructions", value: false, wantCode: "action_instructions"},
+		{name: "pull request base wrong type", role: "open_pull_request", field: "base", value: 42, wantCode: "pull_request_base"},
+		{name: "pull request base exceeds limit", role: "open_pull_request", field: "base", value: strings.Repeat("x", 201), wantCode: "pull_request_base"},
+		{name: "pull request draft wrong type", role: "open_pull_request", field: "draft", value: "false", wantCode: "pull_request_draft"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Invalid maintained GitHub settings "+test.name)
+			candidate, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+			require.NoError(t, err)
+			for i := range candidate.Nodes {
+				if candidate.Nodes[i].Role == test.role {
+					candidate.Nodes[i].Config[test.field] = test.value
+				}
+			}
+
+			require.Contains(t, issueCodes(h.drafts.ValidateCandidate(candidate)), test.wantCode)
+			_, err = h.compiler.Save(context.Background(), AutomationSaveRequest{
+				ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate,
+			})
+			require.ErrorContains(t, err, "automation graph validation failed")
+			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
+			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
+			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+		})
+	}
 }
 
 func TestAutomationSaveRejectsSemanticRepairsAndPreservesSelectedTaskCategories(t *testing.T) {

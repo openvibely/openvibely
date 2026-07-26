@@ -117,8 +117,25 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 				config["repeat_interval"] = 1
 			}
 		}
-		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{
-			Key: node.Key, Name: node.Name, Type: models.AutomationNodeType(node.Type), Role: node.Role,
+		switch node.Role {
+		case "create_notification":
+			config["notification_type"] = "approval_request"
+			config["instructions"] = "Summarize the proposal that needs a human decision."
+		case "create_github_issue":
+			config["instructions"] = "Open one focused, reviewable GitHub issue."
+			config["labels"] = []string{}
+		case "open_pull_request":
+			config["instructions"] = "Open a reviewable pull request linked to the source issue."
+			config["base"] = ""
+			config["draft"] = false
+		case "native_approval":
+			config["approval_method"] = "native_alert"
+		case "github_assignment":
+			config["approval_method"] = "github_assignment"
+		case "pull_request_review":
+			config["approval_method"] = "pull_request_review"
+		}
+		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: node.Key, Name: node.Name, Type: models.AutomationNodeType(node.Type), Role: node.Role,
 			Config: config, Position: &models.AutomationDraftPoint{X: node.X, Y: node.Y},
 		})
 	}
@@ -859,47 +876,58 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 		}
 	}
 	if node.Type == models.AutomationNodeAction {
-		instructions, instructionsOK := node.Config["instructions"].(string)
-		if !instructionsOK || strings.TrimSpace(instructions) == "" || len(instructions) > 2000 {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "action_instructions", Message: "This action requires instructions of at most 2000 characters."})
-		}
-		switch node.Role {
-		case "create_notification":
-			notificationType, typeOK := node.Config["notification_type"].(string)
-			if !typeOK || strings.TrimSpace(notificationType) == "" || len(notificationType) > 100 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_type", Message: "Create notification requires a notification type of at most 100 characters."})
-			}
-		case "create_github_issue":
-			labels, labelsOK := draftStringSlice(node.Config["labels"])
-			if !labelsOK || len(labels) > 10 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_issue_labels", Message: "GitHub issue labels must be a list of at most 10 labels."})
-			} else {
-				for _, label := range labels {
-					label = strings.TrimSpace(label)
-					if label == "" || len(label) > 100 || strings.HasPrefix(strings.ToLower(label), "openvibely:") {
-						issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_issue_labels", Message: "GitHub issue labels must be non-empty plain labels of at most 100 characters and must not use the openvibely: prefix."})
-						break
-					}
-				}
-			}
-		case "open_pull_request":
-			base, baseOK := node.Config["base"].(string)
-			if !baseOK || len(strings.TrimSpace(base)) > 200 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_base", Message: "Pull request base must be blank or at most 200 characters."})
-			}
-			if _, draftOK := node.Config["draft"].(bool); !draftOK {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_draft", Message: "Pull request draft state must be true or false."})
-			}
-		}
+		issues = append(issues, validateAutomationActionConfig(node, node.Role)...)
 	}
 	if node.Type == models.AutomationNodeHumanGate {
-		method, methodOK := node.Config["approval_method"].(string)
-		expectedMethod := map[string]string{"native_approval": "native_alert", "github_assignment": "github_assignment", "pull_request_review": "pull_request_review"}[node.Role]
-		if !methodOK || expectedMethod == "" || method != expectedMethod {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_method", Message: "This human gate must use its matching human-controlled approval method."})
+		issues = append(issues, validateAutomationHumanGateConfig(node, node.Role)...)
+	}
+	return issues
+}
+
+func validateAutomationActionConfig(node models.AutomationDraftNode, role string) []models.AutomationValidationIssue {
+	var issues []models.AutomationValidationIssue
+	instructions, instructionsOK := node.Config["instructions"].(string)
+	if !instructionsOK || strings.TrimSpace(instructions) == "" || len(instructions) > 2000 {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "action_instructions", Message: "This action requires instructions of at most 2000 characters."})
+	}
+	switch role {
+	case "create_notification":
+		notificationType, typeOK := node.Config["notification_type"].(string)
+		if !typeOK || strings.TrimSpace(notificationType) == "" || len(notificationType) > 100 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "notification_type", Message: "Create notification requires a notification type of at most 100 characters."})
+		}
+	case "create_github_issue":
+		labels, labelsOK := draftStringSlice(node.Config["labels"])
+		if !labelsOK || len(labels) > 10 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_issue_labels", Message: "GitHub issue labels must be a list of at most 10 labels."})
+		} else {
+			for _, label := range labels {
+				label = strings.TrimSpace(label)
+				if label == "" || len(label) > 100 || strings.HasPrefix(strings.ToLower(label), "openvibely:") {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_issue_labels", Message: "GitHub issue labels must be non-empty plain labels of at most 100 characters and must not use the openvibely: prefix."})
+					break
+				}
+			}
+		}
+	case "open_pull_request":
+		base, baseOK := node.Config["base"].(string)
+		if !baseOK || len(strings.TrimSpace(base)) > 200 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_base", Message: "Pull request base must be blank or at most 200 characters."})
+		}
+		if _, draftOK := node.Config["draft"].(bool); !draftOK {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "pull_request_draft", Message: "Pull request draft state must be true or false."})
 		}
 	}
 	return issues
+}
+
+func validateAutomationHumanGateConfig(node models.AutomationDraftNode, role string) []models.AutomationValidationIssue {
+	method, methodOK := node.Config["approval_method"].(string)
+	expectedMethod := map[string]string{"native_approval": "native_alert", "github_assignment": "github_assignment", "pull_request_review": "pull_request_review"}[role]
+	if !methodOK || expectedMethod == "" || method != expectedMethod {
+		return []models.AutomationValidationIssue{{NodeKey: node.Key, Code: "approval_method", Message: "This human gate must use its matching human-controlled approval method."}}
+	}
+	return nil
 }
 
 func validateAutomationNodeConfig(adapter AutomationAdapter, canonical AutomationAdapterNode, node models.AutomationDraftNode) []models.AutomationValidationIssue {
@@ -975,6 +1003,12 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		if _, ok := node.Config["enabled"].(bool); !ok {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Trigger enabled state must be true or false."})
 		}
+	}
+	switch canonical.Role {
+	case "create_notification", "create_github_issue", "open_pull_request":
+		issues = append(issues, validateAutomationActionConfig(node, canonical.Role)...)
+	case "native_approval", "github_assignment", "pull_request_review":
+		issues = append(issues, validateAutomationHumanGateConfig(node, canonical.Role)...)
 	}
 	return issues
 }

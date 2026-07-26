@@ -66,6 +66,29 @@ func TestGitHubSDLCTemplateAcceptsBrowserSubmittedActionSettings(t *testing.T) {
 	require.Empty(t, drafts.ValidateCandidate(candidate), "the maintained template must accept the action settings emitted by its own browser form")
 }
 
+func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *testing.T) {
+	require.Contains(t, githubSDLCDevInboxPrompt, "or from a GitHub remote in its local checkout when that URL is blank")
+	require.NotContains(t, githubSDLCDevInboxPrompt, "restricted to the selected project's explicit repository URL")
+	require.Contains(t, githubSDLCOfferingManagerPrompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection")
+	require.NotContains(t, githubSDLCOfferingManagerPrompt, "searching/inspecting existing visible work")
+
+	candidate := models.AutomationDraftCandidate{
+		AdapterKey: AutomationAdapterCustom,
+		Nodes: []models.AutomationDraftNode{
+			{Key: "inbox", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process assigned issues."}},
+			{Key: "implementation", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the issue.", "category": "active", "priority": 2}},
+			{Key: "open_pr", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a reviewable pull request.", "base": "", "draft": false}},
+		},
+		Edges: []models.AutomationDraftEdge{
+			{Key: "inbox_implementation", From: "inbox", To: "implementation"},
+			{Key: "implementation_open_pr", From: "implementation", To: "open_pr"},
+		},
+	}
+	prompt := automationCompiledTaskPrompt(candidate, candidate.Nodes[0])
+	require.Contains(t, prompt, "or from a GitHub remote in its local checkout when that URL is blank")
+	require.NotContains(t, prompt, "restricted to this project's explicit repository URL")
+}
+
 func TestGitHubSDLCTemplateOwnsItsPrompts(t *testing.T) {
 	source, err := os.ReadFile("automation_github_sdlc_prompts.go")
 	require.NoError(t, err)
