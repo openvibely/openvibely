@@ -199,3 +199,7 @@ always_use:
 ## openvibely_automation_graph_workflow
 
 [OpenVibely Automation Graph Workflow](openvibely_automation_graph_workflow/SKILL.md) — Implement, debug, and explain OpenVibely Automation graph nodes, browser-local creation, atomic Save, runtime handoffs, and projections without creating a parallel executor.
+
+## openvibely_sdlc_loop_audit
+
+[OpenVibely SDLC Loop Audit](openvibely_sdlc_loop_audit/SKILL.md) — Reconcile GitHub assignments, issues, pull requests, and OpenVibely task state without creating duplicate work.
