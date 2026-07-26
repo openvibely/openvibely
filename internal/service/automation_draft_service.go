@@ -77,6 +77,14 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 	return errors.New("automation graph candidate contains trailing JSON")
 }
 
+func (s *AutomationDraftService) CreationTemplateCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
+	adapterKey = strings.TrimSpace(adapterKey)
+	if adapterKey != AutomationAdapterNativeSDLC && adapterKey != AutomationAdapterGitHubSDLC {
+		return models.AutomationDraftCandidate{}, fmt.Errorf("unsupported automation template %q", adapterKey)
+	}
+	return s.TemplateCandidate(adapterKey)
+}
+
 func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
 	adapter, ok := s.registry.Get(strings.TrimSpace(adapterKey))
 	if !ok {

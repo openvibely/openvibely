@@ -43,7 +43,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 	} else {
 		switch source {
 		case "template":
-			candidate, err = h.automationDraftSvc.TemplateCandidate(strings.TrimSpace(c.FormValue("template_key")))
+			candidate, err = h.automationDraftSvc.CreationTemplateCandidate(strings.TrimSpace(c.FormValue("template_key")))
 		case "blank":
 			candidate, err = h.automationDraftSvc.BlankCandidate("")
 		case "describe":
@@ -57,6 +57,9 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		}
 	}
 	if err != nil {
+		if source == "template" {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		if source == "describe" {
 			message := "Could not generate a supported Automation: " + err.Error()
 			description := c.FormValue("description")

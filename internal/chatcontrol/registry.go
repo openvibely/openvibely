@@ -749,7 +749,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc","vision_driver"]},"description":{"type":"string","maxLength":4000}},"required":["source"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000}},"required":["source"],"additionalProperties":false}`),
 	},
 	{
 		Name:         "save_automation",

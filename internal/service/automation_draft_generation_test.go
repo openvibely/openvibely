@@ -186,13 +186,18 @@ func TestAutomationDescriptionPromptIncludesCanonicalMaintainedAdapters(t *testi
 	require.NoError(t, err)
 
 	_, err = svc.PreviewDescription(context.Background(), "Review a request", models.AutomationCapabilitySnapshot{}, func(_ context.Context, prompt string) (string, error) {
-		for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC, AutomationAdapterVisionDriver} {
+		for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
 			canonical, candidateErr := svc.TemplateCandidate(adapterKey)
 			require.NoError(t, candidateErr)
 			encoded, marshalErr := json.Marshal(canonical)
 			require.NoError(t, marshalErr)
 			require.Contains(t, prompt, string(encoded), "Describe It must receive the registry-derived canonical %s topology", adapterKey)
 		}
+		visionDriver, candidateErr := svc.TemplateCandidate(AutomationAdapterVisionDriver)
+		require.NoError(t, candidateErr)
+		encodedVisionDriver, marshalErr := json.Marshal(visionDriver)
+		require.NoError(t, marshalErr)
+		require.NotContains(t, prompt, string(encodedVisionDriver), "Describe It must not advertise the retired Vision Driver template")
 		return string(validJSON), nil
 	})
 	require.NoError(t, err)

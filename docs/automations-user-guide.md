@@ -16,7 +16,7 @@ Open `/automations`, select `New Automation`, and choose how to start:
 
 | Starting Point | Use It For |
 |---|---|
-| Template | Start from a maintained Native, GitHub, or Vision Driver graph. |
+| Template | Start from a maintained Native or GitHub SDLC graph. Both include scheduled Vision Suggestions. |
 | Describe It | Describe the result you want and review a generated browser-local graph. |
 | Blank | Build a custom graph from an empty canvas. |
 

@@ -54,7 +54,7 @@ func (h *Handler) executeAutomationPlanSaveAction(ctx context.Context, params st
 	switch request.Source {
 	case "template":
 		var err error
-		candidate, err = h.automationDraftSvc.TemplateCandidate(request.TemplateKey)
+		candidate, err = h.automationDraftSvc.CreationTemplateCandidate(request.TemplateKey)
 		if err != nil {
 			return "", err
 		}

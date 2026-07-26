@@ -130,7 +130,7 @@ func automationDescriptionCapabilities(snapshot models.AutomationCapabilitySnaps
 }
 
 func (s *AutomationDraftService) automationDescriptionMaintainedAdapters() (string, error) {
-	keys := []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC, AutomationAdapterVisionDriver}
+	keys := []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC}
 	candidates := make([]models.AutomationDraftCandidate, 0, len(keys))
 	for _, key := range keys {
 		candidate, err := s.TemplateCandidate(key)

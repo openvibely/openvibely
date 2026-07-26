@@ -828,14 +828,25 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	for _, label := range []string{"Template", "Describe It", "Blank"} {
 		require.Contains(t, newPage.Body.String(), label)
 	}
+	require.NotContains(t, newPage.Body.String(), `value="vision_driver"`)
+	require.NotContains(t, newPage.Body.String(), ">Vision Driver</option>")
 	require.NotContains(t, newPage.Body.String(), "Register Existing")
 	newPartial := tc.HTMX().Get("/automations/new?project_id=" + project.ID).Execute()
 	require.Equal(t, 200, newPartial.Code)
 	require.Contains(t, newPartial.Body.String(), `id="automation-new"`)
 	require.NotContains(t, newPartial.Body.String(), "<!DOCTYPE html>")
 
-	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+	rejectedVisionTemplate := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterVisionDriver},
+	}).Execute()
+	require.Equal(t, http.StatusBadRequest, rejectedVisionTemplate.Code, rejectedVisionTemplate.Body.String())
+	require.Contains(t, rejectedVisionTemplate.Body.String(), "unsupported automation template")
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Zero(t, tableCountHandler(t, tc, "tasks"))
+	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+
+	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterNativeSDLC},
 	}).Execute()
 	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
 	require.Contains(t, preview.Body.String(), `id="automation-builder"`)
@@ -886,7 +897,9 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.Equal(t, http.StatusNotFound, foreignDraft.Code)
 
 	var ownedScheduleID string
-	require.NoError(t, tc.db.QueryRow(`SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?`, automationID).Scan(&ownedScheduleID))
+	require.NoError(t, tc.db.QueryRow(`SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ? LIMIT 1`, automationID).Scan(&ownedScheduleID))
+	var ownedScheduleCount int
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_trigger_owners WHERE automation_id = ?`, automationID).Scan(&ownedScheduleCount))
 	taskCountBeforeDelete := tableCountHandler(t, tc, "tasks")
 	scheduleCountBeforeDelete := tableCountHandler(t, tc, "schedules")
 	foreignDelete := tc.HTMX().Post(fmt.Sprintf("/automations/%s/delete?project_id=%s", automationID, other.ID)).WithForm(url.Values{"project_id": {other.ID}}).Execute()
@@ -902,7 +915,7 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.NoError(t, err)
 	require.Nil(t, gone)
 	require.Equal(t, taskCountBeforeDelete, tableCountHandler(t, tc, "tasks"), "deleting an Automation must preserve existing tasks")
-	require.Equal(t, scheduleCountBeforeDelete-1, tableCountHandler(t, tc, "schedules"), "deleting an Automation must delete its owned trigger schedules")
+	require.Equal(t, scheduleCountBeforeDelete-ownedScheduleCount, tableCountHandler(t, tc, "schedules"), "deleting an Automation must delete its owned trigger schedules")
 	ownedSchedule, err := tc.scheduleRepo.GetByID(context.Background(), ownedScheduleID)
 	require.NoError(t, err)
 	require.Nil(t, ownedSchedule, "deleted Automation trigger must not remain as a paused schedule")
@@ -1043,6 +1056,13 @@ func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) 
 	require.Len(t, collector.pendingAutomationPlan, 1)
 	require.Zero(t, tableCountHandler(t, tc, "automations"), "planning must not create an Automation before Save")
 	require.Zero(t, tableCountHandler(t, tc, "tasks")-1, "planning must not create Automation runtime tasks")
+	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+
+	_, handled, _, err = runtime.Executor(ctx, "plan_automation_save", json.RawMessage(`{"source":"template","template_key":"vision_driver"}`))
+	require.ErrorContains(t, err, `unsupported automation template "vision_driver"`)
+	require.True(t, handled)
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Zero(t, tableCountHandler(t, tc, "tasks")-1)
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 }
 
