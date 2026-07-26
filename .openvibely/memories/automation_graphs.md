@@ -4,7 +4,7 @@ type: project
 created: 2026-07-18
 updated: 2026-07-26
 source: task_conversation
-source_id: e109ce8999815c5518324d5ce39b470b:21f5d29f9a230ca2
+source_id: e109ce8999815c5518324d5ce39b470b:8bdc5503b8b1b752
 confidence: high
 title: Automation Graphs
 ---
@@ -20,7 +20,8 @@ Architecture and safety boundaries:
 - Unsupported handoffs, executable cycles, ambiguous duplicate targets, self-edges, dangling endpoints, duplicate keys, unsupported conditions/types, unsafe configuration, foreign-project references, and arbitrary executable behavior fail closed with no resource effects.
 
 Current implementation state:
-- Maintained Native/GitHub template creation and registration share canonical valid Task, Schedule, action, and human-gate defaults. Registration overlays exact bound Task/Schedule values, while trusted Edit reconstruction fills only absent canonical keys in older maintained snapshots and performs no write before explicit Save.
+- Maintained Native/GitHub template creation and registration share canonical Task, Schedule, action, and human-gate defaults. Registration overlays exact bound Task/Schedule values, while trusted Edit reconstruction fills only absent canonical keys in older maintained snapshots and performs no write before explicit Save.
+- Known GitHub SDLC defect found on 2026-07-26: a published graph may retain an `{}` configuration for the legacy downstream Implementation node, leaving it without the prompt/category/priority required for issue-specific task creation. When Dev Inbox discovers an assigned issue, runtime intentionally fails closed with `published GitHub task configuration has no prompt`; no implementation task is created, and retries continue failing until the graph is corrected. The product fix must provide and validate canonical Implementation task configuration for template creation/registration. Existing point-in-time Automations are not silently upgraded and require explicit Edit/Save or delete/recreate to adopt corrected defaults.
 - The bundled GitHub autonomous SDLC bootstrap and public guidance are aligned with the project-repository boundary. Automation-bound prompts do not pass `repo_url` overrides; runtime resolves the selected project's configured repository URL first and a GitHub remote from its local checkout second. Ordinary non-Automation GitHub tools retain explicit `repo_url` support. Dev Inbox issue-task provenance sets only `source_github_issue_number`, never `source_github_repo_url`, while Offering/finder guidance forbids GitHub issue-corpus searches and relies on trusted local Automation duplicate protection.
 - Existing Automations have no bundled-template upgrade path or version migration. Registration reruns preserve the existing current graph and resources; users adopt changed templates by explicit Edit/Save or delete/recreate.
 - Registration may clean obsolete noncurrent graphs and exclusively owned Schedules left by failed pre-contract attempts, but preserves the current graph, its runtime projection and Schedules, and backing domain Tasks.
