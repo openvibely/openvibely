@@ -15,6 +15,48 @@ type automationGitHubConnectionProvider interface {
 	GetConnectionStatus(context.Context) (GitHubConnectionStatus, error)
 }
 
+type automationGitHubRepositoryResolver interface {
+	ResolveRepo(context.Context, string, string) (*GitHubRepoRef, error)
+}
+
+func resolveAutomationProjectGitHubRepository(ctx context.Context, provider any, project *models.Project) (*GitHubRepoRef, error) {
+	if project == nil {
+		return nil, errors.New("project not found")
+	}
+	repoURL := strings.TrimSpace(project.RepoURL)
+	repoPath := ""
+	if repoURL == "" {
+		repoPath = strings.TrimSpace(project.RepoPath)
+	}
+	if resolver, ok := provider.(automationGitHubRepositoryResolver); ok {
+		return resolver.ResolveRepo(ctx, repoURL, repoPath)
+	}
+	if repoURL != "" {
+		repo, err := ParseGitHubRepoURL(repoURL)
+		if err != nil {
+			return nil, err
+		}
+		return &repo, nil
+	}
+	return nil, errors.New("project has no GitHub repository URL or resolvable local Git remote")
+}
+
+func automationGitHubAuthorizedInboxReady(ctx context.Context, repo *repository.GitHubAuthRepo) (bool, error) {
+	if repo == nil {
+		return false, nil
+	}
+	actors, err := repo.ListAuthorizedInboxAssignees(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, actor := range actors {
+		if strings.TrimSpace(actor.GitHubLogin) != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 type AutomationSaveValidator struct {
 	registry         *AutomationAdapterRegistry
 	drafts           *AutomationDraftService
@@ -147,19 +189,15 @@ func (v *AutomationSaveValidator) capabilityIssues(ctx context.Context, projectI
 		issues = append(issues, models.AutomationValidationIssue{Code: "github_auth_unavailable", Message: "Configure the selected GitHub authentication mode before saving this Automation."})
 	}
 
-	inboxReady := false
-	if v.githubAuthRepo != nil {
-		inbox, err := v.githubAuthRepo.GetProjectInbox(ctx, projectID)
-		if err != nil {
-			return nil, err
-		}
-		inboxReady = inbox != nil && inbox.Enabled && strings.TrimSpace(inbox.GitHubLogin) != ""
+	inboxReady, err := automationGitHubAuthorizedInboxReady(ctx, v.githubAuthRepo)
+	if err != nil {
+		return nil, err
 	}
 	if !inboxReady {
-		issues = append(issues, models.AutomationValidationIssue{Code: "github_approval_inbox_unavailable", Message: "Enable a project GitHub approval inbox before saving this Automation."})
+		issues = append(issues, models.AutomationValidationIssue{Code: "github_approval_inbox_unavailable", Message: "Add at least one GitHub Authorized User before saving this Automation."})
 	}
-	if project == nil || strings.TrimSpace(project.RepoURL) == "" {
-		issues = append(issues, models.AutomationValidationIssue{Code: "github_repository_unavailable", Message: "Configure an explicit GitHub repository for this project before saving this Automation."})
+	if _, err := resolveAutomationProjectGitHubRepository(ctx, v.githubConnection, project); err != nil {
+		issues = append(issues, models.AutomationValidationIssue{Code: "github_repository_unavailable", Message: "Configure a project GitHub repository URL or a GitHub remote in the project's local checkout before saving this Automation."})
 	}
 	return issues, nil
 }

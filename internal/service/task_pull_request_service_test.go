@@ -500,7 +500,7 @@ func TestTaskPullRequestServiceOpenForTaskRecoversAlreadyExistsByFindingPR(t *te
 	}
 }
 
-func TestTaskPullRequestServiceAutomationOperationsRequireExplicitRepoURLWithoutPathInference(t *testing.T) {
+func TestTaskPullRequestServiceAutomationOperationsUseProjectURLOrLocalGitRemote(t *testing.T) {
 	ctx := context.Background()
 	t.Run("open", func(t *testing.T) {
 		db := testutil.NewTestDB(t)
@@ -533,14 +533,15 @@ func TestTaskPullRequestServiceAutomationOperationsRequireExplicitRepoURLWithout
 		}
 
 		project.RepoURL = ""
-		callsBeforeMissingURL := resolveCalls
-		missingURLTask := &models.Task{ID: "task-open-missing-url", ProjectID: project.ID, Title: "Missing URL", WorktreeBranch: "task/missing-url"}
-		_, err := svc.OpenForAutomationTask(ctx, project, missingURLTask, OpenTaskPullRequestOptions{})
-		if err == nil || !strings.Contains(err.Error(), "explicit repository URL") {
-			t.Fatalf("expected explicit repository URL error, got %v", err)
+		localRemoteTask := &models.Task{ProjectID: project.ID, Title: "Local remote", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/local-remote"}
+		if err := taskRepo.Create(ctx, localRemoteTask); err != nil {
+			t.Fatalf("create local-remote Automation task: %v", err)
 		}
-		if resolveCalls != callsBeforeMissingURL {
-			t.Fatal("Automation PR open must fail before provider resolution when repo_url is absent")
+		if _, err := svc.OpenForAutomationTask(ctx, project, localRemoteTask, OpenTaskPullRequestOptions{}); err != nil {
+			t.Fatalf("Automation PR open must use the project local Git remote when repo_url is absent: %v", err)
+		}
+		if resolvedURL != "" || resolvedPath != project.RepoPath {
+			t.Fatalf("Automation repository resolution must fall back to repo_path, got url=%q path=%q", resolvedURL, resolvedPath)
 		}
 
 		ordinaryTask := &models.Task{ProjectID: project.ID, Title: "Ordinary PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/ordinary-pr"}
@@ -592,13 +593,11 @@ func TestTaskPullRequestServiceAutomationOperationsRequireExplicitRepoURLWithout
 		}
 
 		project.RepoURL = ""
-		callsBeforeMissingURL := resolveCalls
-		_, err := svc.ReplaceBranchHeadForAutomationTask(ctx, project, task, strings.Repeat("a", 40))
-		if err == nil || !strings.Contains(err.Error(), "explicit repository URL") {
-			t.Fatalf("expected explicit repository URL error, got %v", err)
+		if _, err := svc.ReplaceBranchHeadForAutomationTask(ctx, project, task, strings.Repeat("a", 40)); err != nil {
+			t.Fatalf("Automation branch replacement must use the project local Git remote when repo_url is absent: %v", err)
 		}
-		if resolveCalls != callsBeforeMissingURL {
-			t.Fatal("Automation branch replacement must fail before provider resolution when repo_url is absent")
+		if resolvedURL != "" || resolvedPath != project.RepoPath {
+			t.Fatalf("Automation branch replacement must fall back to repo_path, got url=%q path=%q", resolvedURL, resolvedPath)
 		}
 
 		if _, err := svc.ReplaceBranchHeadForTask(ctx, project, task, strings.Repeat("a", 40)); err != nil {

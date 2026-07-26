@@ -50,14 +50,14 @@ func NewTaskPullRequestService(github TaskPullRequestGitHubProvider, repo *repos
 }
 
 func (s *TaskPullRequestService) ReplaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
-	return s.replaceBranchHeadForTask(ctx, project, task, expectedHead, false)
+	return s.replaceBranchHeadForTask(ctx, project, task, expectedHead)
 }
 
 func (s *TaskPullRequestService) ReplaceBranchHeadForAutomationTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
-	return s.replaceBranchHeadForTask(ctx, project, task, expectedHead, true)
+	return s.replaceBranchHeadForTask(ctx, project, task, expectedHead)
 }
 
-func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string, requireExplicitRepoURL bool) (*models.TaskPullRequest, error) {
+func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is required")
 	}
@@ -82,9 +82,6 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 	if strings.TrimSpace(project.RepoPath) == "" {
 		return nil, fmt.Errorf("project has no repository path configured")
 	}
-	if requireExplicitRepoURL && strings.TrimSpace(project.RepoURL) == "" {
-		return nil, fmt.Errorf("Automation pull request operation requires the current project's explicit repository URL")
-	}
 	existingPR, err := s.repo.GetByTaskID(ctx, task.ID)
 	if err != nil {
 		return nil, fmt.Errorf("checking existing pull request: %w", err)
@@ -96,9 +93,9 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 	if !ok {
 		return nil, fmt.Errorf("github integration does not support branch replacement")
 	}
-	repoPathForResolution := project.RepoPath
-	if requireExplicitRepoURL {
-		repoPathForResolution = ""
+	repoPathForResolution := ""
+	if strings.TrimSpace(project.RepoURL) == "" {
+		repoPathForResolution = project.RepoPath
 	}
 	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, repoPathForResolution)
 	if err != nil {
@@ -132,14 +129,14 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 }
 
 func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
-	return s.openForTask(ctx, project, task, opts, false)
+	return s.openForTask(ctx, project, task, opts)
 }
 
 func (s *TaskPullRequestService) OpenForAutomationTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
-	return s.openForTask(ctx, project, task, opts, true)
+	return s.openForTask(ctx, project, task, opts)
 }
 
-func (s *TaskPullRequestService) openForTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions, requireExplicitRepoURL bool) (*OpenTaskPullRequestResult, error) {
+func (s *TaskPullRequestService) openForTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is required")
 	}
@@ -158,18 +155,15 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if strings.TrimSpace(project.RepoPath) == "" {
 		return nil, fmt.Errorf("project has no repository path configured")
 	}
-	if requireExplicitRepoURL && strings.TrimSpace(project.RepoURL) == "" {
-		return nil, fmt.Errorf("Automation pull request operation requires the current project's explicit repository URL")
-	}
 
 	existingPR, err := s.repo.GetByTaskID(ctx, task.ID)
 	if err != nil {
 		return nil, fmt.Errorf("checking existing pull request: %w", err)
 	}
 
-	repoPathForResolution := project.RepoPath
-	if requireExplicitRepoURL {
-		repoPathForResolution = ""
+	repoPathForResolution := ""
+	if strings.TrimSpace(project.RepoURL) == "" {
+		repoPathForResolution = project.RepoPath
 	}
 	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, repoPathForResolution)
 	if err != nil {

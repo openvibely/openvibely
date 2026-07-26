@@ -3934,14 +3934,14 @@ func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *te
 
 	project.RepoURL = ""
 	require.NoError(t, projectRepo.Update(ctx, project))
-	resolveCalls := 0
 	provider.resolveRepoFn = func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
-		resolveCalls++
-		return nil, fmt.Errorf("unexpected repository resolution url=%q path=%q", repoURL, repoPath)
+		resolvedURL, resolvedPath = repoURL, repoPath
+		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project"}, nil
 	}
 	_, err = resolveGitHubRepoForRuntimeToolURL(automationCtx, opts, "https://github.com/attacker/other")
-	require.ErrorContains(t, err, "explicit repository URL")
-	require.Zero(t, resolveCalls, "Automation runtime must fail before local Git remote inference")
+	require.NoError(t, err)
+	require.Empty(t, resolvedURL, "Automation runtime must ignore the model repository override")
+	require.Equal(t, project.RepoPath, resolvedPath, "Automation runtime must resolve the project's local Git remote when repo_url is absent")
 
 	project.RepoURL = "https://github.com/openvibely/project.git"
 	require.NoError(t, projectRepo.Update(ctx, project))

@@ -17,7 +17,7 @@ Why this matters:
 
 Before creating the loop:
 
-1. Create or select the OpenVibely project for the repository.
+1. Create or select the OpenVibely project for the repository. Configure its GitHub repository URL, or ensure the project's local checkout has a GitHub remote; the explicit project URL takes precedence when both exist.
 2. Configure GitHub in `/channels` using a PAT or GitHub App.
 3. Add the GitHub user or bot accounts OpenVibely should trust under `Authorized Users` in GitHub Runtime Settings.
 4. For PAT setups, assign GitHub issues to the PAT owner when you want OpenVibely scheduled tasks to notice them.

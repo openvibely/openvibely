@@ -116,11 +116,14 @@ func supportedAutomationRoles() []string {
 }
 
 func (b *AutomationCapabilitySnapshotBuilder) githubConfigured(ctx context.Context, project *models.Project) bool {
-	if b == nil || b.settingsRepo == nil || b.githubAuthRepo == nil || b.githubConnection == nil || project == nil || strings.TrimSpace(project.RepoURL) == "" {
+	if b == nil || b.settingsRepo == nil || b.githubAuthRepo == nil || b.githubConnection == nil || project == nil {
 		return false
 	}
-	inbox, err := b.githubAuthRepo.GetProjectInbox(ctx, project.ID)
-	if err != nil || inbox == nil || !inbox.Enabled || strings.TrimSpace(inbox.GitHubLogin) == "" {
+	inboxReady, err := automationGitHubAuthorizedInboxReady(ctx, b.githubAuthRepo)
+	if err != nil || !inboxReady {
+		return false
+	}
+	if _, err := resolveAutomationProjectGitHubRepository(ctx, b.githubConnection, project); err != nil {
 		return false
 	}
 	mode, err := b.settingsRepo.Get(ctx, GitHubSettingAuthMode)

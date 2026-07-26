@@ -46,6 +46,26 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 	}
 }
 
+func TestGitHubSDLCTemplateAcceptsBrowserSubmittedActionSettings(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+
+	for i := range candidate.Nodes {
+		switch candidate.Nodes[i].Role {
+		case "create_github_issue":
+			candidate.Nodes[i].Config["instructions"] = "Open one focused, reviewable GitHub issue."
+			candidate.Nodes[i].Config["labels"] = []string{"suggestion"}
+		case "open_pull_request":
+			candidate.Nodes[i].Config["instructions"] = "Open a reviewable pull request linked to the source issue."
+			candidate.Nodes[i].Config["base"] = ""
+			candidate.Nodes[i].Config["draft"] = false
+		}
+	}
+
+	require.Empty(t, drafts.ValidateCandidate(candidate), "the maintained template must accept the action settings emitted by its own browser form")
+}
+
 func TestGitHubSDLCTemplateOwnsItsPrompts(t *testing.T) {
 	source, err := os.ReadFile("automation_github_sdlc_prompts.go")
 	require.NoError(t, err)

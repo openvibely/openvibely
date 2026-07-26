@@ -914,6 +914,20 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 			allowed[key] = true
 		}
 	}
+	switch canonical.Role {
+	case "create_notification":
+		allowed["notification_type"] = true
+		allowed["instructions"] = true
+	case "create_github_issue":
+		allowed["instructions"] = true
+		allowed["labels"] = true
+	case "open_pull_request":
+		allowed["instructions"] = true
+		allowed["base"] = true
+		allowed["draft"] = true
+	case "native_approval", "github_assignment", "pull_request_review":
+		allowed["approval_method"] = true
+	}
 	var issues []models.AutomationValidationIssue
 	for key, value := range node.Config {
 		if !allowed[key] {
@@ -1002,7 +1016,7 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 	if candidate.AdapterKey == AutomationAdapterGitHubSDLC || customAutomationUsesGitHub(candidate) {
 		github, configured := snapshot.Integrations["github"]
 		if !configured || !github.Configured {
-			issues = append(issues, models.AutomationValidationIssue{Code: "github_unavailable", Message: "GitHub is not ready for this project. Configure connected GitHub authentication, an explicit project GitHub repository, and an enabled project GitHub approval inbox before saving this Automation."})
+			issues = append(issues, models.AutomationValidationIssue{Code: "github_unavailable", Message: "GitHub is not ready for this project. Configure connected GitHub authentication, at least one GitHub Authorized User, and either a project GitHub repository URL or a GitHub remote in the project's local checkout before saving this Automation."})
 		}
 	}
 	agents := make(map[string]bool, len(snapshot.Agents))

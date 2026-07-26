@@ -612,10 +612,10 @@ func (s *LLMService) automationGitHubTaskCreationPlan(ctx context.Context, proje
 	if err != nil {
 		return nil, fmt.Errorf("loading Automation project repository: %w", err)
 	}
-	if project == nil || strings.TrimSpace(project.RepoURL) == "" {
-		return nil, errors.New("Automation project repository URL is unavailable")
+	if project == nil {
+		return nil, errors.New("Automation project repository is unavailable")
 	}
-	repo, err := s.githubIssueRuntime.ResolveRepo(ctx, strings.TrimSpace(project.RepoURL), "")
+	repo, err := resolveAutomationProjectGitHubRepository(ctx, s.githubIssueRuntime, project)
 	if err != nil {
 		return nil, fmt.Errorf("resolving Automation project repository: %w", err)
 	}

@@ -610,9 +610,7 @@ func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) 
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
 	githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
-	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{
-		ProjectID: h.project.ID, GitHubLogin: "automation-bot", Enabled: true,
-	}))
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 
 	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Deferred scheduled inbox", Description: "Resume a scheduled GitHub inbox handoff",

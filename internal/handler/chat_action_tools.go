@@ -547,18 +547,19 @@ func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, re
 		return nil, fmt.Errorf("current project not found")
 	}
 	if automationBound && automationContext.ProjectID == projectID {
+		repoPath := ""
 		if strings.TrimSpace(project.RepoURL) == "" {
-			return nil, fmt.Errorf("Automation GitHub runtime requires the current project's explicit repository URL")
+			repoPath = project.RepoPath
 		}
-		return h.githubSvc.ResolveRepo(ctx, project.RepoURL, "")
+		return h.githubSvc.ResolveRepo(ctx, project.RepoURL, repoPath)
 	}
 	return h.githubSvc.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
 }
 
-func requireAutomationExplicitGitHubRepo(ctx context.Context, projectID string, project *models.Project) error {
+func requireAutomationGitHubRepo(ctx context.Context, projectID string, project *models.Project) error {
 	if automationContext, ok := service.AutomationContextFromContext(ctx); ok && automationContext.ProjectID == projectID &&
-		(project == nil || strings.TrimSpace(project.RepoURL) == "") {
-		return fmt.Errorf("Automation GitHub runtime requires the current project's explicit repository URL")
+		(project == nil || (strings.TrimSpace(project.RepoURL) == "" && strings.TrimSpace(project.RepoPath) == "")) {
+		return fmt.Errorf("Automation GitHub runtime requires a project repository URL or local Git checkout")
 	}
 	return nil
 }
@@ -773,7 +774,7 @@ func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params s
 	if project == nil {
 		return "", fmt.Errorf("current project not found")
 	}
-	if err := requireAutomationExplicitGitHubRepo(ctx, params.ProjectID, project); err != nil {
+	if err := requireAutomationGitHubRepo(ctx, params.ProjectID, project); err != nil {
 		return "", err
 	}
 	var issueNumber *int
@@ -823,7 +824,7 @@ func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context,
 	if project == nil {
 		return "", fmt.Errorf("current project not found")
 	}
-	if err := requireAutomationExplicitGitHubRepo(ctx, params.ProjectID, project); err != nil {
+	if err := requireAutomationGitHubRepo(ctx, params.ProjectID, project); err != nil {
 		return "", err
 	}
 	record, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)

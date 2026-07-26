@@ -425,7 +425,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			}
 			var repoRef *GitHubRepoRef
 			if automationBound {
-				repoRef, err = opts.GitHub.ResolveRepo(ctx, project.RepoURL, "")
+				repoRef, err = resolveAutomationProjectGitHubRepository(ctx, opts.GitHub, project)
 			} else {
 				repoRef, err = opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
 			}
@@ -653,9 +653,6 @@ func resolveGitHubRuntimeProject(ctx context.Context, opts githubIssueRuntimeOpt
 	if project == nil {
 		return nil, fmt.Errorf("current project not found")
 	}
-	if automationContext, ok := AutomationContextFromContext(ctx); ok && automationContext.ProjectID == opts.ProjectID && strings.TrimSpace(project.RepoURL) == "" {
-		return nil, fmt.Errorf("Automation GitHub runtime requires the current project's explicit repository URL")
-	}
 	return project, nil
 }
 
@@ -673,7 +670,7 @@ func resolveGitHubRepoForRuntimeToolURL(ctx context.Context, opts githubIssueRun
 		return nil, err
 	}
 	if automationBound && automationContext.ProjectID == opts.ProjectID {
-		return opts.GitHub.ResolveRepo(ctx, project.RepoURL, "")
+		return resolveAutomationProjectGitHubRepository(ctx, opts.GitHub, project)
 	}
 	return opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
 }

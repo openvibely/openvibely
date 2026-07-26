@@ -994,7 +994,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 			return &GitHubIssue{Number: 42, URL: "https://github.com/example/runtime/issues/42", Title: req.Title, State: "open"}, nil
 		},
 		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
-			return &GitHubAuthenticatedUser{Login: "dev"}, []GitHubIssue{{Number: 42, Title: "Exact issue", State: "open"}, {Number: 43, Title: "Second issue", State: "open"}}, nil
+			return &GitHubAuthenticatedUser{Login: "dev"}, []GitHubIssue{{Number: 42, Title: "Exact issue", State: "open"}, {Number: 43, Title: "Second issue", State: "open"}, {Number: 44, Title: "Local remote issue", State: "open"}}, nil
 		},
 		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			return &GitHubPullRequest{Number: 7, URL: "https://github.com/example/runtime/pull/7", State: "open"}, nil
@@ -1034,7 +1034,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.NoError(t, err)
 	var issueItems int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND kind = 'github_issue'`, fixture.definition.Automation.ID).Scan(&issueItems))
-	require.Equal(t, 2, issueItems, "one shared inbox execution must preserve distinct issue work items")
+	require.Equal(t, 3, issueItems, "one shared inbox execution must preserve distinct issue work items")
 
 	taskSvc := NewTaskService(fixture.taskRepo, nil, nil)
 	implementationNode := automationNodeByKey(t, fixture.definition, "implementation")
@@ -1064,16 +1064,21 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	configuredRepoURL := fixture.project.RepoURL
 	fixture.project.RepoURL = ""
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
-	_, handled, isErr, missingRepoErr := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
-		"title":"Missing repository issue task","prompt":"must not persist",
-		"source_github_issue_number":42,"source_github_repo_url":"https://github.com/attacker/fallback"
+	localRemoteOutput, handled, isErr, localRemoteErr := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
+		"title":"Local remote issue task","prompt":"use the project local remote","category":"backlog",
+		"source_github_issue_number":44,"source_github_repo_url":"https://github.com/attacker/fallback"
 	}`))
+	require.NoError(t, localRemoteErr)
 	require.True(t, handled)
-	require.True(t, isErr)
-	require.ErrorContains(t, missingRepoErr, "repository URL is unavailable")
-	afterMissingRepoTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
-	require.NoError(t, err)
-	require.Len(t, afterMissingRepoTasks, len(beforeTasks), "missing explicit project repo_url must fail before task persistence")
+	require.False(t, isErr)
+	require.Contains(t, localRemoteOutput, "Local remote issue task")
+	resolvedRepoMu.Lock()
+	require.NotEmpty(t, resolvedRepoPaths)
+	require.Equal(t, fixture.project.RepoPath, resolvedRepoPaths[len(resolvedRepoPaths)-1], "Automation issue-task creation must fall back to the project's local Git remote")
+	require.Empty(t, resolvedRepoURLs[len(resolvedRepoURLs)-1], "a model-supplied repository override must remain ignored")
+	resolvedRepoURLs = nil
+	resolvedRepoPaths = nil
+	resolvedRepoMu.Unlock()
 	fixture.project.RepoURL = configuredRepoURL
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 
@@ -1108,7 +1113,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Contains(t, secondOutput, implementationTask.ID)
 	afterDuplicateTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
 	require.NoError(t, err)
-	require.Len(t, afterDuplicateTasks, len(beforeTasks)+1, "one issue work item must have at most one implementation task")
+	require.Len(t, afterDuplicateTasks, len(beforeTasks)+2, "one issue work item must have at most one implementation task")
 
 	telegram := &TelegramService{taskSvc: taskSvc, taskRepo: fixture.taskRepo, llmSvc: llmSvc}
 	telegramHandlers := telegram.telegramActionHandlersForTask(fixture.project.ID, fixture.task.ID, 123, 456, nil)
@@ -1120,7 +1125,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Contains(t, channelOutput, implementationTask.ID)
 	afterChannelTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
 	require.NoError(t, err)
-	require.Len(t, afterChannelTasks, len(beforeTasks)+1, "task-bound channel create_task must use exact Automation provenance")
+	require.Len(t, afterChannelTasks, len(beforeTasks)+2, "task-bound channel create_task must use exact Automation provenance")
 
 	type taskCreationCallResult struct {
 		output  string
@@ -1155,7 +1160,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	}
 	afterConcurrentTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
 	require.NoError(t, err)
-	require.Len(t, afterConcurrentTasks, len(beforeTasks)+2, "concurrent creation must persist one canonical task for issue 43")
+	require.Len(t, afterConcurrentTasks, len(beforeTasks)+3, "concurrent creation must persist one canonical task for issue 43")
 	var issue43Task *models.Task
 	for i := range afterConcurrentTasks {
 		if strings.Contains(afterConcurrentTasks[i].Title, "concurrent title for issue 43") {
@@ -1199,8 +1204,8 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activity_resources WHERE resource_type = 'pull_request' AND resource_id = 'github:example/runtime:pull:7'`).Scan(&prResources))
 	require.Equal(t, 1, prResources)
 	edgeExpectations := map[string]int{
-		"bug_to_issue": 1, "issue_to_assignment": 1, "assignment_to_inbox": 2,
-		"inbox_to_implementation": 2, "implementation_to_pr": 1, "pr_to_review": 1,
+		"bug_to_issue": 1, "issue_to_assignment": 1, "assignment_to_inbox": 3,
+		"inbox_to_implementation": 3, "implementation_to_pr": 1, "pr_to_review": 1,
 	}
 	for edgeKey, expected := range edgeExpectations {
 		var edgeTransitions int
@@ -1309,9 +1314,7 @@ func replaceAutomationGitHubIssueGraph(t *testing.T, fixture automationRuntimeFi
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
 	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
 	githubAuthRepo := repository.NewGitHubAuthRepo(fixture.repo.DB())
-	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{
-		ProjectID: fixture.project.ID, GitHubLogin: "automation-bot", Enabled: true,
-	}))
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(fixture.repo, registry)
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
@@ -2009,11 +2012,13 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	require.True(t, graph.ExternalState.Stale, "a failed external refresh must retain stale persisted freshness")
 
 	fixture.project.RepoURL = ""
+	fixture.project.RepoPath = "/projects/example-runtime"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
-	resolveCalls := provider.resolveCalls
+	provider.err = nil
 	_, err = external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
-	require.ErrorContains(t, err, "explicit repository URL")
-	require.Equal(t, resolveCalls, provider.resolveCalls, "missing repo_url must fail before provider resolution can infer a Git remote")
+	require.NoError(t, err)
+	require.Empty(t, provider.resolvedURL)
+	require.Equal(t, fixture.project.RepoPath, provider.resolvedPath, "Automation external refresh must fall back to the project's local Git remote")
 }
 
 func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {

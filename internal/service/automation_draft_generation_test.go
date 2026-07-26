@@ -457,6 +457,44 @@ func (s automationCapabilityGitHubStatusStub) GetConnectionStatus(context.Contex
 	return s.status, s.err
 }
 
+type automationCapabilityGitHubResolverStub struct {
+	automationCapabilityGitHubStatusStub
+	resolvedURL  string
+	resolvedPath string
+}
+
+func (s *automationCapabilityGitHubResolverStub) ResolveRepo(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+	s.resolvedURL = repoURL
+	s.resolvedPath = repoPath
+	return &GitHubRepoRef{Owner: "openvibely", Name: "local-project", FullName: "openvibely/local-project"}, nil
+}
+
+func TestAutomationCapabilitySnapshotAcceptsAuthorizedUserAndLocalGitHubRemote(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := automationTestProject(t, projectRepo, "Local GitHub snapshot")
+	project.RepoPath = "/projects/local-github"
+	require.NoError(t, projectRepo.Update(ctx, &project))
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "secret-not-rendered"))
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
+	provider := &automationCapabilityGitHubResolverStub{automationCapabilityGitHubStatusStub: automationCapabilityGitHubStatusStub{
+		status: GitHubConnectionStatus{AuthMode: GitHubAuthModePAT, Configured: true, Connected: true, HasPAT: true},
+	}}
+	builder := NewAutomationCapabilitySnapshotBuilder(projectRepo, nil, nil, settingsRepo)
+	builder.SetGitHubAuthRepository(githubAuthRepo)
+	builder.SetGitHubConnectionProvider(provider)
+
+	snapshot, err := builder.Build(ctx, project.ID)
+	require.NoError(t, err)
+	require.True(t, snapshot.Integrations["github"].Configured)
+	require.Empty(t, provider.resolvedURL)
+	require.Equal(t, project.RepoPath, provider.resolvedPath)
+}
+
 func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -481,21 +519,17 @@ func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testin
 	builder.SetGitHubConnectionProvider(automationCapabilityGitHubStatusStub{status: GitHubConnectionStatus{AuthMode: GitHubAuthModePAT, Configured: true, Connected: true, HasPAT: true}})
 	snapshot, err = builder.Build(ctx, project.ID)
 	require.NoError(t, err)
-	require.False(t, snapshot.Integrations["github"].Configured, "GitHub readiness also requires an explicit project repository")
+	require.False(t, snapshot.Integrations["github"].Configured, "GitHub readiness also requires a project repository URL or resolvable local Git remote")
 
 	project.RepoURL = "https://github.com/openvibely/snapshot.git"
 	require.NoError(t, projectRepo.Update(ctx, &project))
 	snapshot, err = builder.Build(ctx, project.ID)
 	require.NoError(t, err)
-	require.False(t, snapshot.Integrations["github"].Configured, "GitHub readiness also requires an enabled approval inbox")
-	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "automation-bot", Enabled: false}))
+	require.False(t, snapshot.Integrations["github"].Configured, "GitHub readiness also requires at least one authorized inbox assignee")
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
 	snapshot, err = builder.Build(ctx, project.ID)
 	require.NoError(t, err)
-	require.False(t, snapshot.Integrations["github"].Configured, "a disabled approval inbox is not ready")
-	require.NoError(t, githubAuthRepo.UpsertProjectInbox(ctx, &models.GitHubProjectInbox{ProjectID: project.ID, GitHubLogin: "automation-bot", Enabled: true}))
-	snapshot, err = builder.Build(ctx, project.ID)
-	require.NoError(t, err)
-	require.True(t, snapshot.Integrations["github"].Configured)
+	require.True(t, snapshot.Integrations["github"].Configured, "the visible Authorized Users configuration must satisfy inbox readiness")
 	encoded, err := json.Marshal(snapshot)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "secret-not-rendered")

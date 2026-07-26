@@ -721,11 +721,72 @@ func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.
 	require.Contains(t, saved.Body.String(), "Save did not apply")
 	require.Regexp(t, `(?s)<details[^>]*data-automation-validation-summary[^>]*open`, saved.Body.String())
 	require.Contains(t, saved.Body.String(), "Configure connected GitHub authentication")
-	require.Contains(t, saved.Body.String(), "an explicit project GitHub repository")
-	require.Contains(t, saved.Body.String(), "an enabled project GitHub approval inbox")
+	require.Contains(t, saved.Body.String(), "at least one GitHub Authorized User")
+	require.Contains(t, saved.Body.String(), "a project GitHub repository URL or a GitHub remote")
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 	require.Zero(t, tableCountHandler(t, tc, "tasks"))
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+}
+
+func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionFields(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Configured GitHub template").Build()
+	project.RepoURL = "https://github.com/openvibely/openvibely"
+	require.NoError(t, tc.projectRepo.Update(ctx, project))
+	require.NoError(t, tc.settingsRepo.Set(ctx, service.GitHubSettingAuthMode, service.GitHubAuthModePAT))
+	require.NoError(t, tc.settingsRepo.Set(ctx, service.GitHubSettingPAT, "configured-test-pat"))
+	githubAuthRepo := repository.NewGitHubAuthRepo(tc.db)
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "configured-user"}))
+	github := &fakeGitHubService{
+		statusFn: func(context.Context) (service.GitHubConnectionStatus, error) {
+			return service.GitHubConnectionStatus{AuthMode: service.GitHubAuthModePAT, Configured: true, Connected: true, HasPAT: true}, nil
+		},
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
+			require.Equal(t, project.RepoURL, repoURL)
+			require.Empty(t, repoPath)
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+		},
+	}
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	validator.SetCapabilityDependencies(tc.projectRepo, tc.settingsRepo, githubAuthRepo)
+	validator.SetGitHubConnectionProvider(github)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	capabilities.SetGitHubAuthRepository(githubAuthRepo)
+	capabilities.SetGitHubConnectionProvider(github)
+	drafts.SetCapabilitySnapshotBuilder(capabilities)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	candidate, err := drafts.TemplateCandidate(service.AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+	for i := range candidate.Nodes {
+		switch candidate.Nodes[i].Role {
+		case "create_github_issue":
+			candidate.Nodes[i].Config["instructions"] = "Open one focused, reviewable GitHub issue."
+			candidate.Nodes[i].Config["labels"] = []string{"suggestion"}
+		case "open_pull_request":
+			candidate.Nodes[i].Config["instructions"] = "Open a reviewable pull request linked to the source issue."
+			candidate.Nodes[i].Config["base"] = ""
+			candidate.Nodes[i].Config["draft"] = false
+		}
+	}
+
+	saved := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"},
+		"candidate_json": {automationDraftCandidateJSONForTest(t, candidate)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
+	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
+	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
+	require.NotZero(t, tableCountHandler(t, tc, "tasks"))
+	require.NotZero(t, tableCountHandler(t, tc, "schedules"))
+	var legacyInboxRows int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_project_inboxes WHERE project_id = ?`, project.ID).Scan(&legacyInboxRows))
+	require.Zero(t, legacyInboxRows, "visible Authorized Users must not require a hidden legacy inbox row")
 }
 
 func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t *testing.T) {
