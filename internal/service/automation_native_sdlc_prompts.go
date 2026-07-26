@@ -9,7 +9,7 @@ import (
 // They intentionally mirror the behavior of the bootstrap skill shipped when
 // the template was defined, but template execution does not depend on that
 // skill being installed or retained.
-const nativeSDLCVisionSuggestionsPrompt = `Review the configured project vision or source-of-truth files and identify small, reviewable gaps.
+const nativeSDLCVisionSuggestionsPrompt = `Choose one focused project component or workflow to inspect this run. Compare that area with the configured project vision or source-of-truth files and identify small, reviewable gaps. Vary the component over time instead of repeatedly auditing the same files.
 
 Do not modify code and do not create implementation tasks. For each actionable finding, call create_notification with a generic type such as product_suggestion, a concise title and message, a detailed body with evidence, scope, risk, and acceptance criteria, structured metadata identifying the inspected area and evidence, and a stable idempotency key derived from the project-independent finding identity.
 

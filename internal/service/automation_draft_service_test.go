@@ -51,6 +51,8 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	require.NoError(t, err)
 
 	visionPrompt, _ := automationDraftNodeByKey(t, candidate, "vision_suggestions").Config["prompt"].(string)
+	require.Contains(t, visionPrompt, "Choose one focused project component or workflow")
+	require.Contains(t, visionPrompt, "Vary the component over time")
 	require.Contains(t, visionPrompt, "project vision or source-of-truth files")
 	require.Contains(t, visionPrompt, "create_notification")
 	require.Contains(t, visionPrompt, "stable idempotency key")
