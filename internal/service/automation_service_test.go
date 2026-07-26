@@ -222,6 +222,22 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 	require.NotEmpty(t, registeredImplementationConfig["prompt"], "first registration must publish executable issue-task instructions")
 	require.Equal(t, string(models.CategoryBacklog), registeredImplementationConfig["category"])
 	require.EqualValues(t, 2, registeredImplementationConfig["priority"])
+
+	_, err = db.ExecContext(ctx, `UPDATE automation_nodes SET config_json = '{}'
+		WHERE automation_id = ? AND node_key = 'implementation'`, githubDefinition.Automation.ID)
+	require.NoError(t, err, "simulate an older point-in-time GitHub snapshot with empty issue-task configuration")
+	rerun, reused, err := NewAutomationRegistrationService(automationRepo, registry).Register(ctx, AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/editable",
+	})
+	require.NoError(t, err)
+	require.True(t, reused)
+	require.Equal(t, githubDefinition.Version.ID, rerun.Version.ID, "registration reruns must not upgrade the saved snapshot")
+	for _, node := range rerun.Nodes {
+		if node.NodeKey == "implementation" {
+			require.JSONEq(t, `{}`, node.ConfigJSON, "registration reruns must preserve explicit stored configuration")
+		}
+	}
+
 	githubReopened, err := drafts.CurrentCandidate(ctx, project.ID, githubDefinition.Automation.ID)
 	require.NoError(t, err)
 	require.Empty(t, githubReopened.ValidationErrors)

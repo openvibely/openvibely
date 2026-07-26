@@ -1637,7 +1637,7 @@ func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T)
 	agent := models.LLMConfig{Name: "Automation queue model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, tc.llmConfigRepo.Create(ctx, &agent))
 	agentID := agent.ID
-	task := models.Task{ProjectID: project.ID, Title: "Automation queue task", Category: models.CategoryActive,
+	task := models.Task{ProjectID: project.ID, Title: "Automation queue task", Category: models.CategoryScheduled,
 		Priority: 2, Status: models.StatusPending, Prompt: "causal task", AgentID: &agentID}
 	require.NoError(t, tc.taskRepo.Create(ctx, &task))
 	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}

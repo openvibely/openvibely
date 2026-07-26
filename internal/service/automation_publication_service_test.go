@@ -124,12 +124,16 @@ func TestAutomationSaveRejectsNewVisionDriverAndAllowsExistingEdit(t *testing.T)
 
 func TestAutomationSaveRejectsInvalidMaintainedGitHubActionSettingsAtomically(t *testing.T) {
 	for _, test := range []struct {
-		name     string
-		role     string
-		field    string
-		value    any
-		wantCode string
+		name        string
+		role        string
+		field       string
+		value       any
+		removeField bool
+		wantCode    string
 	}{
+		{name: "implementation prompt missing", role: "implementation", field: "prompt", removeField: true, wantCode: "missing_prompt"},
+		{name: "implementation category missing", role: "implementation", field: "category", removeField: true, wantCode: "category"},
+		{name: "implementation priority missing", role: "implementation", field: "priority", removeField: true, wantCode: "priority"},
 		{name: "issue instructions wrong type", role: "create_github_issue", field: "instructions", value: true, wantCode: "action_instructions"},
 		{name: "issue instructions exceed limit", role: "create_github_issue", field: "instructions", value: strings.Repeat("x", 2001), wantCode: "action_instructions"},
 		{name: "labels wrong type", role: "create_github_issue", field: "labels", value: "bug", wantCode: "github_issue_labels"},
@@ -147,7 +151,11 @@ func TestAutomationSaveRejectsInvalidMaintainedGitHubActionSettingsAtomically(t 
 			require.NoError(t, err)
 			for i := range candidate.Nodes {
 				if candidate.Nodes[i].Role == test.role {
-					candidate.Nodes[i].Config[test.field] = test.value
+					if test.removeField {
+						delete(candidate.Nodes[i].Config, test.field)
+					} else {
+						candidate.Nodes[i].Config[test.field] = test.value
+					}
 				}
 			}
 
