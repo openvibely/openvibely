@@ -75,6 +75,38 @@ func TestSyncTo_SeedsDefaultIndexesAndSkillBodies(t *testing.T) {
 	}
 }
 
+func TestSyncTo_GitHubBootstrapUsesProjectRepositoryAndTrustedLocalDeduplication(t *testing.T) {
+	root := t.TempDir()
+	if err := SyncTo(root); err != nil {
+		t.Fatalf("SyncTo: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, "skills", "openvibely_github_autonomous_sdlc_bootstrap", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read GitHub bootstrap skill: %v", err)
+	}
+	body := string(data)
+	for _, want := range []string{
+		"Do not set `source_github_repo_url`",
+		"the selected project's configured repository URL",
+		"a GitHub remote in its local checkout when that URL is blank",
+		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
+		"trusted local state",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("GitHub bootstrap skill missing repository/deduplication guidance %q:\n%s", want, body)
+		}
+	}
+	for _, forbidden := range []string{
+		"set `source_github_repo_url` when polling a non-default repository",
+		"Avoid duplicates by searching/inspecting existing visible work",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("GitHub bootstrap skill contains stale guidance %q:\n%s", forbidden, body)
+		}
+	}
+}
+
 func TestSyncTo_BundledSystemPromptsAvoidUnnecessaryInternalLabelInjection(t *testing.T) {
 	root := t.TempDir()
 	if err := SyncTo(root); err != nil {

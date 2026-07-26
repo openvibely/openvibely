@@ -62,7 +62,7 @@ For each returned issue, inspect it with `github_get_issue`. Treat assignment to
 
 Treat an eligible issue as actionable when it is assigned to the PAT owner or configured Authorized Users. Optional labels such as `approved`, `feature`, `bug`, `performance`, or `duplication` may refine priority/scope, but do not require an `approved` label unless the user's workflow explicitly says to require one.
 
-Before creating anything, call `list_tasks` (a read-only, current-project task discovery tool) with the GitHub issue number and/or URL as the `query` to reconcile existing implementation work; if it returns a matching task, continue that task instead of creating a duplicate. For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue. If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR. Set `source_github_issue_number` to the exact issue number returned by this inbox execution and set `source_github_repo_url` when polling a non-default repository; these fields let the server bind the new task to the persisted discovered issue without prompt/title inference. Include the GitHub issue number, URL, title, and acceptance notes in the task prompt, then call `set_task_goal` for the created task so it implements the issue and opens/reuses a PR with `github_open_pull_request` when done. Comment concise status on the issue with `github_comment_on_issue` and add `task-created` / `in-progress` labels when work is started.
+Before creating anything, call `list_tasks` (a read-only, current-project task discovery tool) with the GitHub issue number and/or URL as the `query` to reconcile existing implementation work; if it returns a matching task, continue that task instead of creating a duplicate. For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue. If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR. Set `source_github_issue_number` to the exact issue number returned by this inbox execution. Do not set `source_github_repo_url`; the server resolves Automation provenance from the selected project's configured repository URL, or from a GitHub remote in its local checkout when that URL is blank. Include the GitHub issue number, URL, title, and acceptance notes in the task prompt, then call `set_task_goal` for the created task so it implements the issue and opens/reuses a PR with `github_open_pull_request` when done. Comment concise status on the issue with `github_comment_on_issue` and add `task-created` / `in-progress` labels when work is started.
 
 Use unprefixed labels only, such as `task-created`, `in-progress`, `blocked`, `needs-human`, and `pr-opened`. Never use labels beginning with `openvibely:`.
 
@@ -76,7 +76,7 @@ Review the configured project vision/source files and identify small, reviewable
 
 Open GitHub suggestion issues only. Use `github_create_issue` with unprefixed labels such as `suggestion` and `feature`. Do not create implementation tasks and do not modify code.
 
-Include enough context for a human to approve, reject, or assign the issue. Avoid duplicates by searching/inspecting existing visible work when the available tools allow it.
+Include enough context for a human to approve, reject, or assign the issue. Do not list, search, or inspect existing GitHub issues for duplicate detection; the server prevents duplicate Automation-created issues using trusted local state.
 ```
 
 ## Prompt Pattern For Bug / Optimization / Redundancy Finders
@@ -100,5 +100,5 @@ Do not modify code, do not create OpenVibely implementation tasks, and do not op
 - Do not make GitHub runtime tools explicit-agent-grant-only as part of this setup; scheduled tasks need the generic GitHub tools when GitHub is configured and the provider supports runtime tool calls.
 - Do not create or mutate agents unless the user explicitly asks and the available tool surface supports it. Prefer visible tasks, schedules, prompts, and configured GitHub identities; do not add persisted goals to recurring loop tasks.
 - Do not treat GitHub API credentials as authorization for human-triggered auto-fix work.
-- Do not rely on prompt memory for dedupe or status. Use visible GitHub issues, comments, labels, task threads, schedules, and implementation-task goals for per-issue work records.
+- Do not rely on prompt memory or GitHub issue-corpus searches for duplicate prevention. Automation issue creation uses trusted local state; use visible comments, labels, task threads, schedules, and implementation-task goals for per-issue work records.
 - Do not claim the bootstrap is complete if required GitHub tools, channel credentials, or schedules are missing.
