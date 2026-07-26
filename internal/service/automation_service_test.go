@@ -114,6 +114,76 @@ func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
 	require.Nil(t, foreignView)
 }
 
+func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Editable registered maintained Automation")
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	registry := NewAutomationAdapterRegistry()
+	task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Registered maintained trigger")
+
+	definition, reused, err := NewAutomationRegistrationService(automationRepo, registry).Register(ctx, AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/editable",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, reused)
+	var registeredApprovalConfig map[string]any
+	for _, node := range definition.Nodes {
+		if node.NodeKey == "approval" {
+			require.NoError(t, json.Unmarshal([]byte(node.ConfigJSON), &registeredApprovalConfig))
+		}
+	}
+	require.Equal(t, "native_alert", registeredApprovalConfig["approval_method"], "new registered snapshots must persist valid maintained defaults")
+
+	_, err = db.ExecContext(ctx, `UPDATE automation_nodes SET config_json = '{}'
+		WHERE automation_id = ? AND node_type IN ('action', 'human_gate')`, definition.Automation.ID)
+	require.NoError(t, err, "simulate a registered snapshot created before maintained defaults were persisted")
+
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	reopened, err := drafts.CurrentCandidate(ctx, project.ID, definition.Automation.ID)
+	require.NoError(t, err)
+	require.Empty(t, reopened.ValidationErrors, "registered maintained snapshots must reopen as valid editable graphs")
+	require.Equal(t, "native_alert", automationDraftNodeByKey(t, reopened.Candidate, "approval").Config["approval_method"])
+
+	validator := NewAutomationSaveValidator(registry, drafts)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil), taskRepo, scheduleRepo, validator)
+	saved, err := compiler.Save(ctx, AutomationSaveRequest{
+		ProjectID: project.ID, AutomationID: definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate,
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, definition.Version.ID, saved.Definition.Version.ID)
+	require.Equal(t, task.ID, automationResourceID(t, saved.Definition, "vision_suggestions", "task"))
+	require.Equal(t, schedule.ID, automationResourceID(t, saved.Definition, "vision_suggestions", "schedule"))
+
+	invalidSubmission, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	delete(automationDraftNodeByKey(t, invalidSubmission, "approval").Config, "approval_method")
+	require.Contains(t, issueCodes(drafts.ValidateCandidate(invalidSubmission)), "approval_method", "public Save validation must not hydrate missing maintained settings")
+
+	githubTask, githubSchedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Registered GitHub trigger")
+	githubDefinition, reused, err := NewAutomationRegistrationService(automationRepo, registry).Register(ctx, AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/editable",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: githubTask.ID},
+			{NodeKey: "dev_inbox", ResourceType: "schedule", ResourceID: githubSchedule.ID},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, reused)
+	githubReopened, err := drafts.CurrentCandidate(ctx, project.ID, githubDefinition.Automation.ID)
+	require.NoError(t, err)
+	require.Empty(t, githubReopened.ValidationErrors)
+	require.Equal(t, []any{}, automationDraftNodeByKey(t, githubReopened.Candidate, "issue").Config["labels"])
+	require.Equal(t, false, automationDraftNodeByKey(t, githubReopened.Candidate, "open_pr").Config["draft"])
+	require.Equal(t, "github_assignment", automationDraftNodeByKey(t, githubReopened.Candidate, "assignment").Config["approval_method"])
+}
+
 func TestAutomationPortfolioListsEverySavedAutomationBeyondOneHundred(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

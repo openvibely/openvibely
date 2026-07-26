@@ -1012,7 +1012,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Contains(t, second, `"reused":true`)
 	require.Equal(t, int32(1), createCalls.Load(), "successful issue creation retry must resolve persisted provenance")
 
-	ambiguousInput := githubCreateIssueRuntimeInput{Title: "Ambiguous issue", Body: "body"}
+	ambiguousInput := githubCreateIssueRuntimeInput{Title: "Ambiguous issue", Body: "body", Labels: []string{}}
 	repoRef, err := provider.ResolveRepo(ctx, fixture.project.RepoURL, fixture.project.RepoPath)
 	require.NoError(t, err)
 	ambiguousKey := githubIssueCreationActivityKey(ctx, repoRef, ambiguousInput)
@@ -1488,7 +1488,7 @@ func TestAutomationGitHubIssueCreationRecordsSuccessDespiteRequestCancellation(t
 	defer cancel()
 	input := json.RawMessage(`{"title":"Canceled successful issue","body":"body"}`)
 	activityKey := githubIssueCreationActivityKey(firstBaseCtx, &GitHubRepoRef{FullName: "example/runtime"},
-		githubCreateIssueRuntimeInput{Title: "Canceled successful issue", Body: "body"})
+		githubCreateIssueRuntimeInput{Title: "Canceled successful issue", Body: "body", Labels: []string{}})
 
 	firstOutput, firstErr := createIssue(firstCtx, input)
 	require.NoError(t, firstErr)
@@ -1557,7 +1557,7 @@ func TestAutomationGitHubIssueCreationRepairsCompletedClaimProjection(t *testing
 			firstCtx := newCausalContext("projection-failure-first")
 			input := json.RawMessage(`{"title":"Projection repair issue","body":"body"}`)
 			activityKey := githubIssueCreationActivityKey(firstCtx, &GitHubRepoRef{FullName: "example/runtime"},
-				githubCreateIssueRuntimeInput{Title: "Projection repair issue", Body: "body"})
+				githubCreateIssueRuntimeInput{Title: "Projection repair issue", Body: "body", Labels: []string{}})
 			_, err := fixture.repo.DB().Exec(tc.triggerSQL)
 			require.NoError(t, err)
 
@@ -1580,7 +1580,7 @@ func TestAutomationGitHubIssueCreationRepairsCompletedClaimProjection(t *testing
 			require.Contains(t, sameOutput, `"reused":true`)
 			laterCtx := newCausalContext("projection-failure-later")
 			laterActivityKey := githubIssueCreationActivityKey(laterCtx, &GitHubRepoRef{FullName: "example/runtime"},
-				githubCreateIssueRuntimeInput{Title: "Projection repair issue", Body: "body"})
+				githubCreateIssueRuntimeInput{Title: "Projection repair issue", Body: "body", Labels: []string{}})
 			laterAutomationContext, ok := AutomationContextFromContext(laterCtx)
 			require.True(t, ok)
 			for _, binding := range laterAutomationContext.Bindings {
@@ -1647,7 +1647,7 @@ func TestAutomationGitHubIssueCreationRepairsPartialMultiBindingProjection(t *te
 	causalCtx = withAutomationExecution(causalCtx, fixture.task.ID, execution.ID)
 	input := json.RawMessage(`{"title":"Partial multi-binding projection","body":"body"}`)
 	activityKey := githubIssueCreationActivityKey(causalCtx, &GitHubRepoRef{FullName: "example/runtime"},
-		githubCreateIssueRuntimeInput{Title: "Partial multi-binding projection", Body: "body"})
+		githubCreateIssueRuntimeInput{Title: "Partial multi-binding projection", Body: "body", Labels: []string{}})
 
 	_, err = fixture.repo.DB().Exec(fmt.Sprintf(`CREATE TRIGGER fail_second_automation_issue_projection
 		BEFORE INSERT ON automation_work_items WHEN NEW.automation_id = '%s' BEGIN

@@ -89,12 +89,37 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 		AutomationType: adapter.AutomationType,
 		AdapterKey:     adapter.Key,
 	}
+	defaultConfigs, err := defaultAutomationNodeConfigs(adapter)
+	if err != nil {
+		return models.AutomationDraftCandidate{}, err
+	}
+	for _, node := range adapter.Nodes {
+		config := defaultConfigs[node.Key]
+		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: node.Key, Name: node.Name, Type: models.AutomationNodeType(node.Type), Role: node.Role,
+			Config: config, Position: &models.AutomationDraftPoint{X: node.X, Y: node.Y},
+		})
+	}
+	for _, edge := range adapter.Edges {
+		condition := map[string]any{}
+		if strings.TrimSpace(edge.Condition) != "" {
+			_ = json.Unmarshal([]byte(edge.Condition), &condition)
+		}
+		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{
+			Key: edge.Key, From: edge.From, To: edge.To, FromPort: "right", ToPort: "left",
+			Label: edge.Label, Condition: condition,
+		})
+	}
+	return candidate, nil
+}
+
+func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[string]any, error) {
+	configs := make(map[string]map[string]any, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
 		config := map[string]any{}
 		if node.AllowedResources["task"] {
 			prompt, err := defaultAutomationNodePrompt(adapter.Key, node.Role)
 			if err != nil {
-				return models.AutomationDraftCandidate{}, err
+				return nil, err
 			}
 			config["prompt"] = prompt
 			config["category"] = string(models.CategoryBacklog)
@@ -111,10 +136,8 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 			}
 			if node.Role == "loop_auditor" {
 				config["repeat_type"] = string(models.RepeatWeekly)
-				config["repeat_interval"] = 1
 			} else if strings.Contains(node.Key, "inbox") {
 				config["repeat_type"] = string(models.RepeatHours)
-				config["repeat_interval"] = 1
 			}
 		}
 		switch node.Role {
@@ -135,32 +158,17 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 		case "pull_request_review":
 			config["approval_method"] = "pull_request_review"
 		}
-		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{Key: node.Key, Name: node.Name, Type: models.AutomationNodeType(node.Type), Role: node.Role,
-			Config: config, Position: &models.AutomationDraftPoint{X: node.X, Y: node.Y},
-		})
+		configs[node.Key] = config
 	}
-	for i := range candidate.Nodes {
-		if !adapterNodeAccepts(adapter, candidate.Nodes[i].Key, "schedule") {
+	for _, node := range adapter.Nodes {
+		if !node.AllowedResources["schedule"] {
 			continue
 		}
-		target := adapterScheduleTarget(adapter, candidate.Nodes[i].Key)
-		for j := range candidate.Nodes {
-			if candidate.Nodes[j].Key == target {
-				candidate.Nodes[j].Config["category"] = string(models.CategoryScheduled)
-			}
+		if target := configs[adapterScheduleTarget(adapter, node.Key)]; target != nil {
+			target["category"] = string(models.CategoryScheduled)
 		}
 	}
-	for _, edge := range adapter.Edges {
-		condition := map[string]any{}
-		if strings.TrimSpace(edge.Condition) != "" {
-			_ = json.Unmarshal([]byte(edge.Condition), &condition)
-		}
-		candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{
-			Key: edge.Key, From: edge.From, To: edge.To, FromPort: "right", ToPort: "left",
-			Label: edge.Label, Condition: condition,
-		})
-	}
-	return candidate, nil
+	return configs, nil
 }
 
 func (s *AutomationDraftService) BlankCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
@@ -252,6 +260,23 @@ func (s *AutomationDraftService) normalizeReopenedCandidate(candidate models.Aut
 	for i := range candidate.Edges {
 		candidate.Edges[i].FromPort = "right"
 		candidate.Edges[i].ToPort = "left"
+	}
+	if !adapter.DynamicTopology {
+		defaults, err := defaultAutomationNodeConfigs(adapter)
+		if err != nil {
+			return candidate, err
+		}
+		for i := range candidate.Nodes {
+			node := &candidate.Nodes[i]
+			if node.Config == nil {
+				node.Config = map[string]any{}
+			}
+			for key, value := range defaults[node.Key] {
+				if _, exists := node.Config[key]; !exists {
+					node.Config[key] = value
+				}
+			}
+		}
 	}
 	if adapter.DynamicTopology {
 		for i := range candidate.Nodes {

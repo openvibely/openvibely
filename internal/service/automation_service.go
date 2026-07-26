@@ -225,7 +225,14 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 }
 
 func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context, projectID string, adapter AutomationAdapter, node AutomationAdapterNode, taskID, scheduleID string, configuredEnabled *bool) (string, error) {
-	config := map[string]any{}
+	defaults, err := defaultAutomationNodeConfigs(adapter)
+	if err != nil {
+		return "", fmt.Errorf("build registered node %q defaults: %w", node.Key, err)
+	}
+	config := defaults[node.Key]
+	if config == nil {
+		config = map[string]any{}
+	}
 	if taskID != "" {
 		var prompt string
 		var category models.TaskCategory
