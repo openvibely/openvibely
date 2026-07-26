@@ -46,9 +46,36 @@ Scheduled and initial task runtimes derive project and claimant from the persist
 Run a visible bootstrap task or task-thread turn with the bundled `openvibely_native_autonomous_sdlc_bootstrap` skill and ask:
 
 ```text
-Use the OpenVibely Native Autonomous SDLC Bootstrap skill. Create a scheduled suggestion producer and a project-scoped approved-notification inbox for this project. Suggestions must use stable idempotency keys. The inbox must inspect, claim, and atomically create linked Backlog implementation tasks. Do not authorize merge, release, or deployment.
+Use the OpenVibely Native Autonomous SDLC Bootstrap skill. Create one visible scheduled task for each maintained loop role: Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, Notification Inbox, and Loop Auditor. Do not create separate runner tasks. Discovery tasks must create reviewable notifications only, use stable idempotency keys, and never modify code or create implementation tasks. The inbox must inspect approved notifications, claim them, and atomically create linked Backlog implementation tasks. The auditor must report loop-health findings through notifications without changing implementation work. Do not authorize merge, release, or deployment. Register the created tasks and schedules as the maintained Native SDLC Automation.
 ```
 
-A typical setup schedules the suggestion producer daily and the approved-notification inbox hourly. Recurring loop tasks should not receive persisted goals by default; their schedules drive recurrence. Implementation tasks may use normal task goals, worktrees, review, and PR flows independently.
+The six scheduled tasks have separate responsibilities:
 
-The inbox prompt should list `decision_state=approved` notifications, inspect each with `get_alert`, claim it, call `create_alert_implementation_task`, and then mark processing complete. On pre-link failure it should mark processing failed or release the claim. It must omit `project_id` or repeat only its own project ID.
+- `Native Vision Suggestions`, usually daily, compares a focused area with project vision or source-of-truth files and creates small reviewable feature notifications.
+- `Native Bug Finder`, usually daily, inspects a focused component for likely defects, edge cases, broken behavior, or missing regression coverage.
+- `Native Optimization Finder`, usually daily, looks for measurable performance, latency, memory, build, or workflow improvements.
+- `Native Redundancy Finder`, usually daily, identifies duplicated or redundant code that can be made generic without over-engineering.
+- `Native Notification Inbox`, commonly hourly, turns approved notifications into at most one linked Backlog implementation task each.
+- `Native Loop Auditor`, usually weekly, checks stale notifications, expired or failed claims, missing task links, duplicate implementation work, and blocked tasks.
+
+Each role is one visible scheduled task; do not create separate runner tasks. Recurring loop tasks should not receive persisted goals by default because their schedules drive recurrence. Implementation tasks may use normal task goals, worktrees, review, and PR flows independently.
+
+## Discovery And Review
+
+Vision Suggestions and the three finders inspect one focused area per run and vary that area over time. For each actionable finding, they call `create_notification` with a generic type, concise title and message, evidence and acceptance criteria in the body, structured metadata, and a stable project-independent idempotency key. They must not create implementation tasks or modify code.
+
+Notifications remain pending until a human approves or rejects them on Alerts. Approval authorizes implementation-task creation only. It does not authorize merge, release, deployment, destructive remediation, or credential changes.
+
+## Inbox And Recovery
+
+The Notification Inbox calls `list_alerts` with `decision_state=approved` and `implementation_task_linked=false`, inspects every result with `get_alert`, and then attempts `claim_alert`. For each successful claim, it calls `create_alert_implementation_task` with the reviewed notification ID, body, metadata, acceptance criteria, and approval boundary, then calls `complete_alert_processing`.
+
+If work cannot be linked, the inbox calls `fail_alert_processing` with a concise retry diagnostic. It uses `release_alert_claim` only when no implementation task was linked and another scan should retry immediately. Claims are leases, failed or expired unlinked work is retryable, and repeated task-creation calls return the already linked task rather than creating a duplicate. The inbox must omit `project_id` or repeat only its own project ID.
+
+The Loop Auditor reports findings through new Native notifications. It does not alter implementation work or bypass human approval.
+
+## Automation Registration
+
+After all six tasks and schedules exist, the bootstrap calls `register_automation_resources` once with adapter `native_sdlc`, stable key `native-sdlc/default`, and the actual resource IDs. Each task and its schedule use the same node key: `vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `inbox`, and `auditor`.
+
+Registration publishes only these explicitly created maintained resources. It does not infer, migrate, or backfill legacy tasks or schedules. A setup rerun reuses the same Automation identity. The bootstrap reports the visible tasks and schedules, the Automation URL, and any missing runtime-tool or model capability.

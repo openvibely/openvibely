@@ -259,6 +259,56 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 	}
 }
 
+func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	repoRoot := filepath.Clean(filepath.Join(wd, "..", ".."))
+
+	skillPath := filepath.Join(repoRoot, "internal", "builtinskills", "builtin", SkillsDir, "openvibely_native_autonomous_sdlc_bootstrap", SkillFile)
+	skillBody, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read built-in Native bootstrap skill: %v", err)
+	}
+	skillText := string(skillBody)
+
+	guidePath := filepath.Join(repoRoot, "docs", "openvibely-native-autonomous-sdlc-user-guide.md")
+	guideBody, err := os.ReadFile(guidePath)
+	if err != nil {
+		t.Fatalf("read Native autonomous SDLC guide: %v", err)
+	}
+	guideText := string(guideBody)
+
+	for _, want := range []string{
+		"Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, Notification Inbox, and Loop Auditor",
+		"Do not create separate runner tasks",
+		"usually daily",
+		"commonly hourly",
+		"usually weekly",
+		"must not create implementation tasks or modify code",
+		"create_alert_implementation_task",
+		"register_automation_resources",
+		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `inbox`, and `auditor`",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("Native bootstrap skill missing %q", want)
+		}
+		if !strings.Contains(guideText, want) {
+			t.Fatalf("Native autonomous SDLC guide missing %q", want)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"Create a scheduled suggestion producer and a project-scoped approved-notification inbox",
+		"A typical setup schedules the suggestion producer daily and the approved-notification inbox hourly",
+	} {
+		if strings.Contains(guideText, forbidden) {
+			t.Fatalf("Native autonomous SDLC guide contains stale two-task guidance %q", forbidden)
+		}
+	}
+}
+
 func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
