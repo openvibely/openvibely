@@ -801,6 +801,88 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 	require.Zero(t, legacyInboxRows, "visible Authorized Users must not require a hidden legacy inbox row")
 }
 
+func TestAutomationBrowserRejectsForgedNewVisionDriverCandidateAndAllowsExistingEdit(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Forged Vision Driver candidate").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	candidate, err := drafts.TemplateCandidate(service.AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"},
+		"candidate_json": {automationDraftCandidateJSONForTest(t, candidate)}, "save_changes": {"true"},
+		"node_vision_driver_enabled": {"true"},
+	}).Execute()
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Empty(t, response.Header().Get("HX-Redirect"))
+	require.Contains(t, response.Body.String(), "Save did not apply")
+	require.Contains(t, response.Body.String(), "Vision Driver")
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Zero(t, tableCountHandler(t, tc, "tasks"))
+	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+
+	existing := seedExistingVisionDriverForHandler(t, tc, automationRepo, project.ID, candidate)
+	candidate.Description = "Edited existing Vision Driver through the browser"
+	candidate.Nodes[0].Config["prompt"] = "Use the edited browser prompt."
+	edited := tc.HTMX().Post("/automations/" + existing.Automation.ID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"edit"},
+		"candidate_json": {automationDraftCandidateJSONForTest(t, candidate)}, "save_changes": {"true"},
+		"node_vision_driver_enabled": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, edited.Code, edited.Body.String())
+	require.NotEmpty(t, edited.Header().Get("HX-Redirect"))
+	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
+	stored, err := automationRepo.GetDefinition(context.Background(), project.ID, existing.Automation.ID)
+	require.NoError(t, err)
+	require.Equal(t, candidate.Description, stored.Automation.Description)
+}
+
+func seedExistingVisionDriverForHandler(t *testing.T, tc *TestContext, automationRepo *repository.AutomationRepo, projectID string, candidate models.AutomationDraftCandidate) *models.AutomationDefinition {
+	t.Helper()
+	ctx := context.Background()
+	task := &models.Task{ProjectID: projectID, Title: "Existing Vision Driver", Prompt: candidate.Nodes[0].Config["prompt"].(string),
+		Category: models.CategoryScheduled, Priority: 2, Status: models.StatusPending, CreatedVia: "test-existing-vision-driver"}
+	require.NoError(t, tc.taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, tc.scheduleRepo.Create(ctx, schedule))
+
+	nodes := make([]models.AutomationNodeSpec, 0, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		config, err := json.Marshal(node.Config)
+		require.NoError(t, err)
+		position := models.AutomationDraftPoint{}
+		if node.Position != nil {
+			position = *node.Position
+		}
+		nodes = append(nodes, models.AutomationNodeSpec{Key: node.Key, Name: node.Name, Type: node.Type, Role: node.Role,
+			ConfigJSON: string(config), PositionX: position.X, PositionY: position.Y})
+	}
+	edges := make([]models.AutomationEdgeSpec, 0, len(candidate.Edges))
+	for i, edge := range candidate.Edges {
+		condition, err := json.Marshal(edge.Condition)
+		require.NoError(t, err)
+		edges = append(edges, models.AutomationEdgeSpec{Key: edge.Key, SourceNodeKey: edge.From, TargetNodeKey: edge.To,
+			Label: edge.Label, ConditionJSON: string(condition), DisplayOrder: i})
+	}
+	definition, reused, err := automationRepo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
+		ProjectID: projectID, StableKey: "vision-driver/existing-handler", Name: candidate.Name, Description: candidate.Description,
+		AutomationType: candidate.AutomationType, AdapterKey: candidate.AdapterKey, CreatedVia: "test", Nodes: nodes, Edges: edges,
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_driver", ResourceType: "task", ResourceID: task.ID, Relation: "owned"},
+			{NodeKey: "vision_driver", ResourceType: "schedule", ResourceID: schedule.ID, Relation: "owned"},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, reused)
+	return definition
+}
+
 func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Builder Project").Build()

@@ -147,6 +147,9 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	if err != nil {
 		return nil, err
 	}
+	if candidate.AdapterKey == AutomationAdapterVisionDriver && current == nil {
+		return nil, errors.New("Vision Driver cannot be created; use Native SDLC or GitHub SDLC for new Automations")
+	}
 	expectedGraphID := ""
 	automation := models.Automation{ID: automationID, ProjectID: request.ProjectID, Name: candidate.Name,
 		Description: candidate.Description, AutomationType: candidate.AutomationType, LifecycleState: models.AutomationActive}

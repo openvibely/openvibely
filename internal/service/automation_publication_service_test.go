@@ -51,6 +51,77 @@ func newAutomationSaveHarness(t *testing.T, name string) automationSaveHarness {
 		lifecycle: NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)}
 }
 
+func seedExistingVisionDriverAutomation(t *testing.T, h automationSaveHarness) (*models.AutomationDefinition, models.AutomationDraftCandidate) {
+	t.Helper()
+	ctx := context.Background()
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+	driver := automationDraftNodeByKey(t, candidate, "vision_driver")
+	prompt, category, priority := automationNodeTaskConfiguration(candidate, driver)
+	task := &models.Task{ProjectID: h.project.ID, Title: "Existing Vision Driver", Prompt: prompt, Category: category,
+		Priority: priority, Status: models.StatusPending, CreatedVia: "test-existing-vision-driver"}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().Add(time.Hour), RepeatType: models.RepeatDaily,
+		RepeatInterval: 1, Enabled: true}
+	require.NoError(t, h.scheduleRepo.Create(ctx, schedule))
+
+	nodes := make([]models.AutomationNodeSpec, 0, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		config, marshalErr := json.Marshal(node.Config)
+		require.NoError(t, marshalErr)
+		position := models.AutomationDraftPoint{}
+		if node.Position != nil {
+			position = *node.Position
+		}
+		nodes = append(nodes, models.AutomationNodeSpec{Key: node.Key, Name: node.Name, Type: node.Type, Role: node.Role,
+			ConfigJSON: string(config), PositionX: position.X, PositionY: position.Y})
+	}
+	edges := make([]models.AutomationEdgeSpec, 0, len(candidate.Edges))
+	for i, edge := range candidate.Edges {
+		condition, marshalErr := json.Marshal(edge.Condition)
+		require.NoError(t, marshalErr)
+		edges = append(edges, models.AutomationEdgeSpec{Key: edge.Key, SourceNodeKey: edge.From, TargetNodeKey: edge.To,
+			Label: edge.Label, ConditionJSON: string(condition), DisplayOrder: i})
+	}
+	definition, reused, err := h.automationRepo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
+		ProjectID: h.project.ID, StableKey: "vision-driver/existing", Name: candidate.Name, Description: candidate.Description,
+		AutomationType: candidate.AutomationType, AdapterKey: candidate.AdapterKey, CreatedVia: "test",
+		Nodes: nodes, Edges: edges, Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_driver", ResourceType: "task", ResourceID: task.ID, Relation: "owned"},
+			{NodeKey: "vision_driver", ResourceType: "schedule", ResourceID: schedule.ID, Relation: "owned"},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, reused)
+	return definition, candidate
+}
+
+func TestAutomationSaveRejectsNewVisionDriverAndAllowsExistingEdit(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Vision Driver creation boundary")
+	ctx := context.Background()
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterVisionDriver)
+	require.NoError(t, err)
+
+	for _, automationID := range []string{"", repository.NewID()} {
+		_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: automationID,
+			Source: "template", CreatedVia: "web", Candidate: candidate})
+		require.ErrorContains(t, err, "Vision Driver cannot be created")
+	}
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+
+	existing, editable := seedExistingVisionDriverAutomation(t, h)
+	editable.Description = "Edited existing Vision Driver"
+	editable.Nodes[0].Config["prompt"] = "Use the edited existing prompt."
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: existing.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: editable})
+	require.NoError(t, err)
+	require.Equal(t, existing.Automation.ID, saved.Definition.Automation.ID)
+	require.Equal(t, "Edited existing Vision Driver", saved.Definition.Automation.Description)
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
+}
+
 func TestAutomationSaveRejectsInvalidMaintainedGitHubActionSettingsAtomically(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -316,7 +387,7 @@ func TestAutomationReplacementUsesOneCurrentGraphAndDeletesRemovedSchedule(t *te
 func TestAutomationSaveRollsBackAllRowsWhenScheduleCreationFails(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic automation save")
 	ctx := context.Background()
-	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterVisionDriver)
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
 	_, err = h.db.ExecContext(ctx, `CREATE TRIGGER fail_atomic_automation_schedule
 		BEFORE INSERT ON schedules BEGIN SELECT RAISE(ABORT, 'injected schedule failure'); END`)
@@ -332,12 +403,12 @@ func TestAutomationSaveRollsBackAllRowsWhenScheduleCreationFails(t *testing.T) {
 func TestAutomationReplacementRollsBackToCurrentGraphWhenScheduleUpdateFails(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic automation replacement")
 	ctx := context.Background()
-	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterVisionDriver)
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	currentGraphID := first.Definition.Version.ID
-	taskID := automationResourceID(t, first.Definition, "vision_driver", "task")
+	taskID := automationResourceID(t, first.Definition, "vision_suggestions", "task")
 	originalTask, err := h.taskRepo.GetByID(ctx, taskID)
 	require.NoError(t, err)
 
@@ -361,7 +432,7 @@ func TestAutomationReplacementRollsBackToCurrentGraphWhenScheduleUpdateFails(t *
 func TestAutomationSavePreservesPausedAndArchivedLifecycle(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic lifecycle Save")
 	ctx := context.Background()
-	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterVisionDriver)
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
@@ -371,7 +442,7 @@ func TestAutomationSavePreservesPausedAndArchivedLifecycle(t *testing.T) {
 		Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	require.Equal(t, models.AutomationPaused, paused.Definition.Automation.LifecycleState)
-	schedule, err := h.scheduleRepo.GetByID(ctx, automationResourceID(t, paused.Definition, "vision_driver", "schedule"))
+	schedule, err := h.scheduleRepo.GetByID(ctx, automationResourceID(t, paused.Definition, "vision_suggestions", "schedule"))
 	require.NoError(t, err)
 	require.False(t, schedule.Enabled)
 
@@ -381,7 +452,7 @@ func TestAutomationSavePreservesPausedAndArchivedLifecycle(t *testing.T) {
 		Source: "manual", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
 	require.Equal(t, models.AutomationArchived, archived.Definition.Automation.LifecycleState)
-	schedule, err = h.scheduleRepo.GetByID(ctx, automationResourceID(t, archived.Definition, "vision_driver", "schedule"))
+	schedule, err = h.scheduleRepo.GetByID(ctx, automationResourceID(t, archived.Definition, "vision_suggestions", "schedule"))
 	require.NoError(t, err)
 	require.False(t, schedule.Enabled)
 }
@@ -994,12 +1065,12 @@ func TestAutomationPauseOrArchiveAfterChildActivationPreventsSubmission(t *testi
 func TestAutomationDeleteRemovesOwnedScheduleAndPreservesTask(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic delete")
 	ctx := context.Background()
-	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterVisionDriver)
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
 	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
 	require.NoError(t, err)
-	taskID := automationResourceID(t, saved.Definition, "vision_driver", "task")
-	scheduleID := automationResourceID(t, saved.Definition, "vision_driver", "schedule")
+	taskID := automationResourceID(t, saved.Definition, "vision_suggestions", "task")
+	scheduleID := automationResourceID(t, saved.Definition, "vision_suggestions", "schedule")
 	require.NoError(t, h.lifecycle.Delete(ctx, h.project.ID, saved.Definition.Automation.ID))
 	task, err := h.taskRepo.GetByID(ctx, taskID)
 	require.NoError(t, err)

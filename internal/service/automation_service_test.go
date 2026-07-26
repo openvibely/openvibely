@@ -651,7 +651,7 @@ func TestAutomationRegistrationRejectsUnsupportedAdapterAndExclusiveTriggerReuse
 		{NodeKey: "vision_driver", ResourceType: "schedule", ResourceID: schedule.ID},
 		{NodeKey: "vision_driver", ResourceType: "task", ResourceID: task.ID},
 	}})
-	require.ErrorContains(t, err, "unsupported maintained automation adapter", "Vision Driver is publishable from explicit drafts but is not a maintained setup registration path")
+	require.ErrorContains(t, err, "unsupported maintained automation adapter", "Vision Driver remains supported only for existing saved graphs, not maintained setup registration")
 
 	_, _, err = service.Register(ctx, AutomationRegistrationRequest{ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/shared-trigger", Resources: []models.AutomationResourceBinding{
 		{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID, Relation: "shared"},

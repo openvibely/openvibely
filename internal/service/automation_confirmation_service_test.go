@@ -30,7 +30,7 @@ func TestAutomationChatConfirmationBindsExactCandidateWithoutCreatingAutomation(
 	automationRepo := repository.NewAutomationRepo(db)
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(automationRepo, registry)
-	candidate, err := drafts.TemplateCandidate(AutomationAdapterVisionDriver)
+	candidate, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
 	confirmation := NewAutomationConfirmationService(automationRepo, execRepo, []byte("test-confirmation-secret"))
 	now := time.Now().UTC()
