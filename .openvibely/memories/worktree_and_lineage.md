@@ -2,7 +2,7 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-07-24
+updated: 2026-07-26
 source: consolidation
 source_id: memory_consolidation_2026_07_24
 confidence: high
@@ -44,6 +44,7 @@ Commit-message direction:
 - Do not add or accept a `Changed files:`/file-list body; do not invent `task` scopes or mention task/worktree machinery unless it is the actual code scope; do not use generic `Task completed:`/`Followup:` subjects or lifecycle labels.
 - Existing historical commits keep their original subjects. Changes-tab integration commits remain static (`Merge task:`, `Squash merge task:`), and fast-forward creates no merge commit.
 - Recorded recovery incident (2026-07-24): an Automation task branch had collapsed a long granular checkpoint chain. Reflog and unreachable-object recovery restored the chain non-destructively, backup refs preserved both recovered and collapsed states, and the implementation tree was reconciled without rewriting shared published ancestry. The durable lesson is to preserve recovery refs, verify tree equality and ancestry, integrate later target-branch changes normally, and keep task-branch recovery separate from any force rewrite of shared refs.
+- Automation task merge state (2026-07-26): task `e109ce8999815c5518324d5ce39b470b` diverged after `main` added managed memory/skill artifacts. Merging local `main` into `task/e109ce89-implement-automations` produced one conflict in `.openvibely/memories/automation_graphs.md`; resolving it with main's newer clean-audit/completion state created merge commit `49674cf0d536d9d9bc524926508203a88e3c44d8`. The worktree was clean, `main` was an ancestor of the task branch, and build plus the full serial test suite passed, so the target can fast-forward to that checkpoint.
 
 Follow-up lineage direction:
 - Task-thread follow-ups to terminal merged/stale tasks are guarded against blindly merging the current target into an old historical task branch/worktree.
