@@ -154,6 +154,55 @@ func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.
 	require.Zero(t, reservations)
 }
 
+func TestAutomationDeleteRejectsOrdinaryRunningExecution(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
+	binding := models.AutomationBinding{
+		AutomationID: fixture.definition.Automation.ID,
+		VersionID:    fixture.definition.Version.ID,
+		NodeID:       producer.ID,
+	}
+	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "ordinary automation task"}
+	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	require.NoError(t, execRepo.Create(ctx, &execution))
+	require.Empty(t, execution.DispatchID, "ordinary task execution must not depend on scheduler dispatch ownership")
+	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusRunning))
+	_, activity, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context:        models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}},
+		Binding:        binding,
+		WorkItemKey:    "execution:" + execution.ID + ":root",
+		WorkItemKind:   "task_execution",
+		WorkItemTitle:  fixture.task.Title,
+		ActivityKey:    "execution:" + execution.ID + ":run",
+		ActivityType:   "task_execution",
+		ActivityStatus: models.AutomationActivityRunning,
+		EventKey:       "execution:" + execution.ID + ":entered",
+		ToNodeID:       binding.NodeID,
+		Transition:     models.AutomationTransitionEntered,
+		Resources:      []models.AutomationActivityResource{{ResourceType: "execution", ResourceID: execution.ID}, {ResourceType: "task", ResourceID: fixture.task.ID}},
+	})
+	require.NoError(t, err)
+
+	lifecycle := NewAutomationLifecycleService(fixture.repo, fixture.schedRepo)
+	err = lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID)
+	require.ErrorIs(t, err, repository.ErrAutomationDispatchInFlight)
+	definition, err := fixture.repo.GetDefinition(ctx, fixture.project.ID, fixture.definition.Automation.ID)
+	require.NoError(t, err)
+	require.NotNil(t, definition, "rejected deletion must preserve the Automation graph")
+	var executionRows, activityRows, resourceRows int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM executions WHERE id = ? AND status = 'running'`, execution.ID).Scan(&executionRows))
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activities WHERE id = ?`, activity.ID).Scan(&activityRows))
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activity_resources WHERE activity_id = ? AND resource_type = 'execution' AND resource_id = ?`, activity.ID, execution.ID).Scan(&resourceRows))
+	require.Equal(t, 1, executionRows)
+	require.Equal(t, 1, activityRows)
+	require.Equal(t, 1, resourceRows)
+
+	require.NoError(t, execRepo.Complete(ctx, execution.ID, models.ExecCompleted, "ok", "", 1, 1))
+	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCompleted))
+	require.NoError(t, lifecycle.Delete(ctx, fixture.project.ID, fixture.definition.Automation.ID), "terminal ordinary execution must not block deletion")
+}
+
 func TestAutomationDeleteAllowsOrphanedRunningInvocationAfterTaskDeletion(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()

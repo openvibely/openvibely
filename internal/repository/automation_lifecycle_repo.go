@@ -396,13 +396,21 @@ func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automa
 		return err
 	}
 	var inFlight int
-	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*)
+	if err := conn.QueryRowContext(ctx, `SELECT CASE WHEN EXISTS (
+		SELECT 1
 		FROM automation_invocations i
 		LEFT JOIN automation_dispatch_outbox d ON d.invocation_id = i.id
 		WHERE i.project_id = ? AND i.automation_id = ?
 		  AND ((i.status IN ('claimed','dispatched','running') AND d.id IS NOT NULL)
 		    OR d.status IN ('pending','processing','submitted')
-		    OR EXISTS (SELECT 1 FROM executions e WHERE e.dispatch_id = d.id AND e.status = 'running'))`, projectID, automationID).Scan(&inFlight); err != nil {
+		    OR EXISTS (SELECT 1 FROM executions e WHERE e.dispatch_id = d.id AND e.status = 'running'))
+	) OR EXISTS (
+		SELECT 1
+		FROM automation_activities a
+		JOIN automation_activity_resources ar ON ar.activity_id = a.id AND ar.resource_type = 'execution'
+		JOIN executions e ON e.id = ar.resource_id
+		WHERE a.project_id = ? AND a.automation_id = ? AND e.status = 'running'
+	) THEN 1 ELSE 0 END`, projectID, automationID, projectID, automationID).Scan(&inFlight); err != nil {
 		return err
 	}
 	if inFlight > 0 {
