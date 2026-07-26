@@ -126,10 +126,12 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 
 func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *testing.T) {
 	for _, test := range []struct {
-		name       string
-		maintained bool
-		mutate     func(*models.AutomationDraftCandidate)
-		overlay    url.Values
+		name             string
+		maintained       bool
+		githubMaintained bool
+		wantMessage      string
+		mutate           func(*models.AutomationDraftCandidate)
+		overlay          url.Values
 	}{
 		{name: "empty maintained node name", maintained: true, mutate: func(candidate *models.AutomationDraftCandidate) {
 			candidate.Nodes[0].Name = ""
@@ -146,6 +148,13 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 		}},
 		{name: "Task category", mutate: func(candidate *models.AutomationDraftCandidate) {
 			candidate.Nodes[1].Config["category"] = "scheduled"
+		}},
+		{name: "GitHub Implementation category", githubMaintained: true, wantMessage: "GitHub implementation task category must be backlog", mutate: func(candidate *models.AutomationDraftCandidate) {
+			for i := range candidate.Nodes {
+				if candidate.Nodes[i].Role == "implementation" {
+					candidate.Nodes[i].Config["category"] = "scheduled"
+				}
+			}
 		}},
 		{name: "Schedule category", mutate: func(candidate *models.AutomationDraftCandidate) {
 			candidate.Nodes[0].Config["category"] = "active"
@@ -177,6 +186,10 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 				candidate, err = drafts.TemplateCandidate(service.AutomationAdapterVisionDriver)
 				require.NoError(t, err)
 			}
+			if test.githubMaintained {
+				candidate, err = drafts.TemplateCandidate(service.AutomationAdapterGitHubSDLC)
+				require.NoError(t, err)
+			}
 			if test.mutate != nil {
 				test.mutate(&candidate)
 			}
@@ -192,6 +205,9 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 			response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(form).Execute()
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 			require.Contains(t, response.Body.String(), "Save did not apply")
+			if test.wantMessage != "" {
+				require.Contains(t, response.Body.String(), test.wantMessage)
+			}
 			require.Empty(t, response.Header().Get("HX-Redirect"))
 			require.Zero(t, tableCountHandler(t, tc, "automations"))
 			require.Zero(t, tableCountHandler(t, tc, "tasks"))

@@ -133,6 +133,7 @@ func TestAutomationSaveRejectsInvalidMaintainedGitHubActionSettingsAtomically(t 
 	}{
 		{name: "implementation prompt missing", role: "implementation", field: "prompt", removeField: true, wantCode: "missing_prompt"},
 		{name: "implementation category missing", role: "implementation", field: "category", removeField: true, wantCode: "category"},
+		{name: "implementation category scheduled", role: "implementation", field: "category", value: string(models.CategoryScheduled), wantCode: "category"},
 		{name: "implementation priority missing", role: "implementation", field: "priority", removeField: true, wantCode: "priority"},
 		{name: "issue instructions wrong type", role: "create_github_issue", field: "instructions", value: true, wantCode: "action_instructions"},
 		{name: "issue instructions exceed limit", role: "create_github_issue", field: "instructions", value: strings.Repeat("x", 2001), wantCode: "action_instructions"},

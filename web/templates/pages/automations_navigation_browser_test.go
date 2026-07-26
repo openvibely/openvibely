@@ -179,6 +179,51 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 	}
 }
 
+func TestAutomationBuilderRestrictsGitHubImplementationCategoryToBacklog(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion: 1, Name: "GitHub SDLC", AutomationType: "github_sdlc", AdapterKey: "github_sdlc",
+		Nodes: []models.AutomationDraftNode{
+			{Key: "dev_inbox", Name: "Dev Inbox", Type: models.AutomationNodeTrigger, Role: "github_inbox", Position: &models.AutomationDraftPoint{X: 0, Y: 0}, Config: map[string]any{
+				"prompt": "Poll assigned issues.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "hours", "repeat_interval": 1, "enabled": true,
+			}},
+			{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "implementation", Position: &models.AutomationDraftPoint{X: 220, Y: 0}, Config: map[string]any{
+				"prompt": "Implement the issue.", "category": "backlog", "priority": 2,
+			}},
+		},
+	}
+	var out bytes.Buffer
+	page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}}
+	if err := AutomationBuilderContent(page, "project-github-category").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation builder: %v", err)
+	}
+	body := out.String()
+	selectMarkup := func(name string) string {
+		t.Helper()
+		marker := `name="` + name + `"`
+		position := strings.Index(body, marker)
+		if position < 0 {
+			t.Fatalf("category control %q not found", name)
+		}
+		start := strings.LastIndex(body[:position], "<select")
+		endOffset := strings.Index(body[position:], "</select>")
+		if start < 0 || endOffset < 0 {
+			t.Fatalf("category control %q is malformed", name)
+		}
+		return body[start : position+endOffset+len("</select>")]
+	}
+
+	if strings.Contains(body, `name="node_implementation_category"`) {
+		t.Fatalf("GitHub configuration-only Implementation category must not be editable")
+	}
+	if !strings.Contains(body, ">Backlog</span>") {
+		t.Fatalf("GitHub configuration-only Implementation category must render as Backlog")
+	}
+	devInboxCategory := selectMarkup("node_dev_inbox_category")
+	if !strings.Contains(devInboxCategory, `value="scheduled"`) {
+		t.Fatalf("maintained Schedule node must retain its scheduled category: %s", devInboxCategory)
+	}
+}
+
 func TestAutomationBuilderRendersDirectionalPortsAndScheduleWording(t *testing.T) {
 	candidate := models.AutomationDraftCandidate{
 		SchemaVersion:  1,

@@ -122,6 +122,24 @@ func TestGitHubSDLCTemplateConfiguresAndValidatesIssueImplementationTask(t *test
 			"prompt": "missing_prompt", "category": "category", "priority": "priority",
 		}[field], "maintained GitHub implementation %s must be required before Save", field)
 	}
+
+	invalidCategory := candidate
+	invalidCategory.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
+	for i := range invalidCategory.Nodes {
+		if invalidCategory.Nodes[i].Key != "implementation" {
+			continue
+		}
+		invalidCategory.Nodes[i].Config = make(map[string]any, len(candidate.Nodes[i].Config))
+		for key, value := range candidate.Nodes[i].Config {
+			invalidCategory.Nodes[i].Config[key] = value
+		}
+		invalidCategory.Nodes[i].Config["category"] = string(models.CategoryScheduled)
+	}
+	require.Contains(t, issueCodes(drafts.ValidateCandidate(invalidCategory)), "category", "issue-specific Implementation tasks must remain Backlog")
+
+	devInbox := automationDraftNodeByKey(t, candidate, "dev_inbox")
+	require.Equal(t, string(models.CategoryScheduled), devInbox.Config["category"])
+	require.NotContains(t, issueCodes(drafts.ValidateCandidate(candidate)), "category", "maintained Schedule nodes must retain their scheduled category")
 }
 
 func TestGitHubSDLCTemplateAcceptsBrowserSubmittedActionSettings(t *testing.T) {

@@ -1010,7 +1010,11 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Task nodes require a prompt before saving."})
 		}
 		category, categoryOK := node.Config["category"].(string)
-		if !categoryOK || (category != string(models.CategoryBacklog) && category != string(models.CategoryScheduled)) {
+		if node.Role == "implementation" && adapter.Key == AutomationAdapterGitHubSDLC {
+			if !categoryOK || category != string(models.CategoryBacklog) {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "GitHub implementation task category must be backlog."})
+			}
+		} else if !categoryOK || (category != string(models.CategoryBacklog) && category != string(models.CategoryScheduled)) {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "Automation task category must be backlog or scheduled."})
 		}
 		priority, priorityOK := draftInt(node.Config["priority"])
