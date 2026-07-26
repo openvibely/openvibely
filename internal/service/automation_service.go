@@ -33,7 +33,7 @@ func NewAutomationRegistrationService(repo *repository.AutomationRepo, registry 
 	return &AutomationRegistrationService{repo: repo, registry: registry}
 }
 
-func (s *AutomationRegistrationService) Register(ctx context.Context, req AutomationRegistrationRequest) (definition *models.AutomationDefinition, created bool, returnErr error) {
+func (s *AutomationRegistrationService) Register(ctx context.Context, req AutomationRegistrationRequest) (definition *models.AutomationDefinition, reused bool, returnErr error) {
 	defer func() {
 		if returnErr != nil {
 			automationobs.Event("automation.registration.validation_failure",
@@ -60,7 +60,7 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 		return nil, false, err
 	}
 	if existing != nil && existing.PublishedVersionID != nil {
-		definition, created, returnErr = s.repo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
+		definition, reused, returnErr = s.repo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
 			ProjectID: req.ProjectID, StableKey: stableKey, AdapterKey: adapterKey,
 		})
 		if returnErr == nil && definition != nil {
@@ -68,9 +68,9 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 				automationobs.String("automation_id", definition.Automation.ID),
 				automationobs.String("version_id", definition.Version.ID),
 				automationobs.String("project_id", req.ProjectID),
-				automationobs.String("created", fmt.Sprintf("%t", created)))
+				automationobs.String("created", fmt.Sprintf("%t", !reused)))
 		}
-		return definition, created, returnErr
+		return definition, reused, returnErr
 	}
 	if len(req.Resources) == 0 || len(req.Resources) > 100 {
 		return nil, false, errors.New("registered automation requires between 1 and 100 resource bindings")
@@ -209,7 +209,7 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 	if createdVia == "" {
 		createdVia = "bootstrap"
 	}
-	definition, created, returnErr = s.repo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
+	definition, reused, returnErr = s.repo.PublishRegistered(ctx, models.AutomationRegisteredPublication{
 		ProjectID: req.ProjectID, StableKey: stableKey, Name: name, Description: adapter.Description,
 		AutomationType: adapter.AutomationType, AdapterKey: adapter.Key, CreatedVia: createdVia,
 		Nodes: nodes, Edges: edges, Resources: resources,
@@ -219,9 +219,9 @@ func (s *AutomationRegistrationService) Register(ctx context.Context, req Automa
 			automationobs.String("automation_id", definition.Automation.ID),
 			automationobs.String("version_id", definition.Version.ID),
 			automationobs.String("project_id", req.ProjectID),
-			automationobs.String("created", fmt.Sprintf("%t", created)))
+			automationobs.String("created", fmt.Sprintf("%t", !reused)))
 	}
-	return definition, created, returnErr
+	return definition, reused, returnErr
 }
 
 func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context, projectID string, adapter AutomationAdapter, node AutomationAdapterNode, taskID, scheduleID string, configuredEnabled *bool) (string, error) {

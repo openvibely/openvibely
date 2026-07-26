@@ -1,11 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +34,40 @@ func automationTestTaskAndSchedule(t *testing.T, dbRepo *repository.TaskRepo, sc
 	schedule := models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
 	require.NoError(t, scheduleRepo.Create(context.Background(), &schedule))
 	return task, schedule
+}
+
+func TestAutomationRegistrationTelemetryReportsCreationTruthfully(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Registration telemetry")
+	task, schedule := automationTestTaskAndSchedule(t, repository.NewTaskRepo(db, nil), repository.NewScheduleRepo(db), project.ID, "Registered task")
+	registration := NewAutomationRegistrationService(repository.NewAutomationRepo(db), NewAutomationAdapterRegistry())
+	request := AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/telemetry",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+		},
+	}
+
+	var logs bytes.Buffer
+	originalOutput := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(originalOutput) })
+
+	_, reused, err := registration.Register(ctx, request)
+	require.NoError(t, err)
+	require.False(t, reused)
+	require.Contains(t, logs.String(), `event=automation.registration.completed`)
+	require.Contains(t, logs.String(), `created="true"`)
+
+	logs.Reset()
+	_, reused, err = registration.Register(ctx, request)
+	require.NoError(t, err)
+	require.True(t, reused)
+	require.Contains(t, logs.String(), `event=automation.registration.completed`)
+	require.Contains(t, logs.String(), `created="false"`)
+	require.NotContains(t, strings.TrimSpace(logs.String()), `created="true"`)
 }
 
 func TestAutomationRegistrationExplicitIdentityAndIsolation(t *testing.T) {
