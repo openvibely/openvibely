@@ -4,7 +4,7 @@ type: project
 created: 2026-07-18
 updated: 2026-07-26
 source: task_conversation
-source_id: e109ce8999815c5518324d5ce39b470b:109eeff4433fa45b
+source_id: e109ce8999815c5518324d5ce39b470b:5204b65883fe3f9d
 confidence: high
 title: Automation Graphs
 ---
@@ -27,6 +27,7 @@ Current implementation state:
 - Periodic health reconciliation uses bounded primary-key keyset pagination and excludes unsaved shells, so health updates cannot starve rows beyond a batch boundary.
 - Custom Task fan-out treats queued/running children as branch-local contention: independent siblings may still activate once, while topology, configuration, lifecycle, and provenance errors remain fail-fast.
 - Local GitHub issue creation claims move through `reserved`, `dispatched`, and `completed`. Only definitively pre-dispatch reservations may expire or release; ambiguous provider outcomes remain fail-closed. Completed identity/projection recovery requires exact trusted project, Task, Automation, graph, and source-node provenance, without inferring missing historical provenance.
+- Checkpoint `af47386f64cca3bb17d5815820ad1e398af24579` closes the Vision Driver creation boundary at `AutomationCompiler.Save`: empty or nonexistent Automation IDs cannot create a Vision Driver Automation, including through forged browser `candidate_json`, and rejection creates no Automation, Task, or Schedule effects. Existing project-scoped Vision Driver graphs remain editable through compiler and public browser Save paths under the same Automation identity. Focused race tests and the full serial repository suite pass; a separate fresh edit-free Definition of Done audit is still required before declaring the feature complete.
 
 Builder and publication contract:
 - Template, Describe It, Blank, and Edit are browser-local until `Save changes`. Selecting `Use template` loads the canonical maintained graph into the same builder without creating an Automation, Task, Schedule, graph row, or runtime resource; users may review or customize it, and refresh/navigation discards it. Only `Save changes` validates and atomically creates the Automation and required resources, then redirects to Live.
