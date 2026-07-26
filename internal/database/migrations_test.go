@@ -1709,7 +1709,7 @@ func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
 	}
 }
 
-func TestMigration120And121LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
+func TestMigration121And122LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-atomic-save.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
