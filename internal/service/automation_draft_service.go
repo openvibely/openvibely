@@ -1223,10 +1223,14 @@ func adapterScheduleTarget(adapter AutomationAdapter, triggerKey string) string 
 }
 
 func defaultAutomationNodePrompt(adapterKey, role string) (string, error) {
-	if adapterKey == AutomationAdapterGitHubSDLC {
+	switch adapterKey {
+	case AutomationAdapterNativeSDLC:
+		return nativeSDLCRolePrompt(role)
+	case AutomationAdapterGitHubSDLC:
 		return githubSDLCRolePrompt(role)
+	default:
+		return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " ")), nil
 	}
-	return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " ")), nil
 }
 
 func (s *AutomationDraftService) PreviewCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {

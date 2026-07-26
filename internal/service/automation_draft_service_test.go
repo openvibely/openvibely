@@ -46,6 +46,52 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 	}
 }
 
+func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t *testing.T) {
+	candidate, err := NewAutomationDraftService(nil, NewAutomationAdapterRegistry()).TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+
+	visionPrompt, _ := automationDraftNodeByKey(t, candidate, "vision_suggestions").Config["prompt"].(string)
+	require.Contains(t, visionPrompt, "project vision or source-of-truth files")
+	require.Contains(t, visionPrompt, "create_notification")
+	require.Contains(t, visionPrompt, "stable idempotency key")
+	require.Contains(t, visionPrompt, "Do not modify code")
+	require.Contains(t, visionPrompt, "do not create implementation tasks")
+
+	for _, nodeKey := range []string{"bug_finder", "optimization_finder", "redundancy_finder"} {
+		prompt, _ := automationDraftNodeByKey(t, candidate, nodeKey).Config["prompt"].(string)
+		require.Contains(t, prompt, "Choose one focused project component or workflow")
+		require.Contains(t, prompt, "create_notification")
+		require.Contains(t, prompt, "stable idempotency key")
+		require.Contains(t, prompt, "evidence, scope, risk, and acceptance criteria")
+		require.Contains(t, prompt, "Approval authorizes task creation only")
+	}
+
+	inboxPrompt, _ := automationDraftNodeByKey(t, candidate, "inbox").Config["prompt"].(string)
+	for _, required := range []string{
+		"decision_state=approved", "implementation_task_linked=false", "get_alert", "claim_alert",
+		"create_alert_implementation_task", "complete_alert_processing", "fail_alert_processing", "release_alert_claim",
+	} {
+		require.Contains(t, inboxPrompt, required)
+	}
+	require.Contains(t, inboxPrompt, "atomically links at most one task")
+	require.Contains(t, inboxPrompt, "human approval authorized task creation only")
+
+	auditorPrompt, _ := automationDraftNodeByKey(t, candidate, "auditor").Config["prompt"].(string)
+	for _, required := range []string{"stale notifications", "expired or failed claims", "missing notification/task links", "duplicate implementation work", "blocked tasks", "create_notification"} {
+		require.Contains(t, auditorPrompt, required)
+	}
+	require.Contains(t, auditorPrompt, "does not bypass approval")
+}
+
+func TestNativeSDLCTemplateOwnsItsPrompts(t *testing.T) {
+	source, err := os.ReadFile("automation_native_sdlc_prompts.go")
+	require.NoError(t, err)
+	sourceText := string(source)
+	require.Contains(t, sourceText, "func nativeSDLCRolePrompt")
+	require.NotContains(t, sourceText, "builtinskills")
+	require.NotContains(t, sourceText, "SKILL.md")
+}
+
 func TestGitHubSDLCTemplateAcceptsBrowserSubmittedActionSettings(t *testing.T) {
 	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
