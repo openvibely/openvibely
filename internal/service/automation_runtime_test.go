@@ -1201,23 +1201,28 @@ func newAutomationGitHubIssueDedupHarness(t *testing.T, provider GitHubIssueRunt
 
 func assertAutomationGitHubIssueProjection(t *testing.T, fixture automationRuntimeFixture, issueNumber int, activityKey string) {
 	t.Helper()
+	assertAutomationGitHubIssueProjectionForDefinition(t, fixture, fixture.definition, issueNumber, activityKey)
+}
+
+func assertAutomationGitHubIssueProjectionForDefinition(t *testing.T, fixture automationRuntimeFixture, definition *models.AutomationDefinition, issueNumber int, activityKey string) {
+	t.Helper()
 	resourceID := fmt.Sprintf("github:example/runtime:issue:%d", issueNumber)
 	var workItems int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items
 		WHERE project_id = ? AND automation_id = ? AND work_item_key = ? AND kind = 'github_issue' AND status = 'waiting'`,
-		fixture.project.ID, fixture.definition.Automation.ID, resourceID).Scan(&workItems))
+		fixture.project.ID, definition.Automation.ID, resourceID).Scan(&workItems))
 	require.Equal(t, 1, workItems, "the created issue must have one waiting Automation work item")
 
 	var activities int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activities
 		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND activity_key = ?
 			AND activity_type = 'create_github_issue' AND status = 'completed' AND work_item_id IS NOT NULL`,
-		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, activityKey).Scan(&activities))
+		fixture.project.ID, definition.Automation.ID, definition.Version.ID, activityKey).Scan(&activities))
 	require.Equal(t, 1, activities, "the original issue activity must be completed against the work item")
 	var totalActivities int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activities
 		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND activity_type = 'create_github_issue'`,
-		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID).Scan(&totalActivities))
+		fixture.project.ID, definition.Automation.ID, definition.Version.ID).Scan(&totalActivities))
 	require.Equal(t, 1, totalActivities, "retries must not leave duplicate or pending issue activities")
 
 	var resources int
@@ -1226,7 +1231,7 @@ func assertAutomationGitHubIssueProjection(t *testing.T, fixture automationRunti
 		WHERE a.project_id = ? AND a.automation_id = ? AND a.version_id = ? AND a.activity_key = ?
 			AND ((ar.resource_type = 'github_issue' AND ar.resource_id = ?)
 				OR ar.resource_type = 'task' OR ar.resource_type = 'execution')`, fixture.project.ID,
-		fixture.definition.Automation.ID, fixture.definition.Version.ID, activityKey, resourceID).Scan(&resources))
+		definition.Automation.ID, definition.Version.ID, activityKey, resourceID).Scan(&resources))
 	require.Equal(t, 3, resources, "the repaired activity must retain issue, task, and execution provenance")
 
 	for edgeKey, state := range map[string]string{"bug_to_issue": "entered", "issue_to_assignment": "waiting"} {
@@ -1234,7 +1239,7 @@ func assertAutomationGitHubIssueProjection(t *testing.T, fixture automationRunti
 		require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_transitions tr
 			JOIN automation_edges e ON e.id = tr.edge_id
 			WHERE tr.project_id = ? AND tr.automation_id = ? AND tr.version_id = ? AND e.edge_key = ? AND tr.state = ?`,
-			fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, edgeKey, state).Scan(&transitions))
+			fixture.project.ID, definition.Automation.ID, definition.Version.ID, edgeKey, state).Scan(&transitions))
 		require.Equal(t, 1, transitions, edgeKey+" must be recorded exactly once")
 	}
 	var waitingAssignment int
@@ -1242,8 +1247,8 @@ func assertAutomationGitHubIssueProjection(t *testing.T, fixture automationRunti
 		JOIN automation_nodes n ON n.id = p.node_id
 		JOIN automation_work_items wi ON wi.id = p.work_item_id
 		WHERE p.project_id = ? AND p.automation_id = ? AND p.version_id = ? AND n.node_key = 'assignment'
-			AND p.state = 'waiting' AND wi.work_item_key = ?`, fixture.project.ID, fixture.definition.Automation.ID,
-		fixture.definition.Version.ID, resourceID).Scan(&waitingAssignment))
+			AND p.state = 'waiting' AND wi.work_item_key = ?`, fixture.project.ID, definition.Automation.ID,
+		definition.Version.ID, resourceID).Scan(&waitingAssignment))
 	require.Equal(t, 1, waitingAssignment, "the issue must wait at the human assignment gate")
 }
 
@@ -1545,6 +1550,77 @@ func TestAutomationGitHubIssueCreationRepairsCompletedClaimProjection(t *testing
 			require.Equal(t, int32(1), createCalls.Load(), "projection repair must not mutate GitHub again")
 		})
 	}
+}
+
+func TestAutomationGitHubIssueCreationRepairsPartialMultiBindingProjection(t *testing.T) {
+	var createCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createCalls.Add(1)
+			return &GitHubIssue{Number: 96, URL: "https://github.com/example/runtime/issues/96", Title: req.Title, State: "open"}, nil
+		},
+	}
+	fixture, _, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
+	ctx := context.Background()
+	secondSchedule := models.Schedule{TaskID: fixture.task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, fixture.schedRepo.Create(ctx, &secondSchedule))
+	secondDefinition, _, err := NewAutomationRegistrationService(fixture.repo, NewAutomationAdapterRegistry()).Register(ctx, AutomationRegistrationRequest{
+		ProjectID: fixture.project.ID, AdapterKey: AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/partial-multi-binding",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "dev_inbox", ResourceType: "schedule", ResourceID: secondSchedule.ID},
+			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: fixture.task.ID},
+		},
+	})
+	require.NoError(t, err)
+
+	definitions := []*models.AutomationDefinition{fixture.definition, secondDefinition}
+	schedules := []models.Schedule{fixture.schedule, secondSchedule}
+	bindings := make([]models.AutomationBinding, 0, len(definitions))
+	for i, definition := range definitions {
+		sourceNode := automationNodeByKey(t, definition, "bug_finder")
+		var invocationID string
+		require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `INSERT INTO automation_invocations
+			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
+			VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
+			definition.Automation.ID, definition.Version.ID, sourceNode.ID, schedules[i].ID, fmt.Sprintf("partial-multi-binding-%d", i)).Scan(&invocationID))
+		bindings = append(bindings, models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID,
+			InvocationID: invocationID, NodeID: sourceNode.ID})
+	}
+	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "partial multi-binding projection"}
+	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+	causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: bindings})
+	causalCtx = withAutomationExecution(causalCtx, fixture.task.ID, execution.ID)
+	input := json.RawMessage(`{"title":"Partial multi-binding projection","body":"body"}`)
+	activityKey := githubIssueCreationActivityKey(causalCtx, &GitHubRepoRef{FullName: "example/runtime"},
+		githubCreateIssueRuntimeInput{Title: "Partial multi-binding projection", Body: "body"})
+
+	_, err = fixture.repo.DB().Exec(fmt.Sprintf(`CREATE TRIGGER fail_second_automation_issue_projection
+		BEFORE INSERT ON automation_work_items WHEN NEW.automation_id = '%s' BEGIN
+			SELECT RAISE(FAIL, 'injected second binding projection failure');
+		END`, secondDefinition.Automation.ID))
+	require.NoError(t, err)
+	_, firstErr := createIssue(causalCtx, input)
+	require.ErrorContains(t, firstErr, "injected second binding projection failure")
+	var firstProjectedItems, secondProjectedItems int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ?`,
+		fixture.definition.Automation.ID).Scan(&firstProjectedItems))
+	require.Equal(t, 1, firstProjectedItems, "the injected failure must happen after the first binding projects")
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ?`,
+		secondDefinition.Automation.ID).Scan(&secondProjectedItems))
+	require.Zero(t, secondProjectedItems, "the injected failure must leave the second binding unprojected")
+	_, err = fixture.repo.DB().Exec(`DROP TRIGGER fail_second_automation_issue_projection`)
+	require.NoError(t, err)
+
+	retryOutput, retryErr := createIssue(causalCtx, input)
+	require.NoError(t, retryErr)
+	require.Contains(t, retryOutput, `"Number":96`)
+	require.Contains(t, retryOutput, `"reused":true`)
+	assertAutomationGitHubIssueProjectionForDefinition(t, fixture, fixture.definition, 96, activityKey)
+	assertAutomationGitHubIssueProjectionForDefinition(t, fixture, secondDefinition, 96, activityKey)
+	require.Equal(t, int32(1), createCalls.Load(), "partial multi-binding repair must not mutate GitHub again")
 }
 
 func TestAutomationGitHubIssueCreationDoesNotReadExistingIssuesForDeduplication(t *testing.T) {

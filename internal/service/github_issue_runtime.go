@@ -158,11 +158,9 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 						return "", reserveErr
 					}
 					if resourceID != "" {
-						if err := releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey); err != nil {
-							return "", err
-						}
-						issue := githubIssueFromCanonicalResource(resourceID)
-						return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue, "reused": true})
+						reservationNeedsReconciliation = true
+						reconciliationBindings = append(reconciliationBindings, binding)
+						continue
 					}
 					reservedBindings = append(reservedBindings, binding)
 				}
