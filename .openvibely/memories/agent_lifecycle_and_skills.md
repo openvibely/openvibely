@@ -2,7 +2,7 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-07-17
+updated: 2026-07-24
 source: consolidation
 source_id: memory_consolidation_2026_07_17
 confidence: high
@@ -21,6 +21,7 @@ Agent and catalog facts:
 - Project-scoped agent create/update/delete and related agent-specific UI/API requests must preserve or recover project context. Backend cleanup/materialization should prefer the agent's persisted `ProjectID` when resolving the project skill root, and frontend agent-specific URLs should carry the active `project_id` query.
 - Standalone skills are filesystem-backed packages. `<root>/skills/SKILLS.md` headings are canonical handles and match `<root>/skills/<handle>/SKILL.md`.
 - An indexed standalone skill is unusable unless the matching package body exists in the checkout the running app loads; creating the package only inside an isolated task worktree leaves the main catalog pointing at a dead path.
+- Bundled-skill startup sync overwrites the embedded `SKILL.md` and merges the bundled index, but does not prune extra support files already present in the installed global package. A global skill may therefore retain `references/` or `templates/` added by an earlier import, update, or Skill Curator operation even when the current repository built-in package ships only `SKILL.md`; a fresh installation from that repository will not receive those absent support files.
 - Project scope overrides global scope for matching standalone or agent-owned skill keys. Product direction favors explicit import/index maintenance over automatic disk auto-discovery.
 - `skill.enabled: false` disables a skill for task execution, lifecycle hooks, routing, `skill_view`, and context injection; management/admin listings still show disabled skills.
 - Standalone top-level `always_use` metadata is catalog control data and does not appear in model-visible `<available_skills>` rendering.

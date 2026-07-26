@@ -14,9 +14,9 @@ Why this matters:
 
 ## Recommended Setup
 
-**Start with Codex `gpt-5.5` at `high` reasoning effort.** This is the default model and the setup OpenVibely is tuned against. It handles the full range of tasks — code generation, multi-file edits, test writing, debugging — and the `high` effort level gives it enough reasoning depth to produce solid results without the latency cost of `xhigh`. For most teams this is the only model config they need.
+**Start with Codex `gpt-5.6-sol` at `medium` reasoning effort.** This is the default model and the setup OpenVibely is tuned against. It is the flagship GPT-5.6 tier for complex coding and professional work, while `medium` is the model's balanced default. For most teams this is the only model config they need.
 
-If a task is complex enough that `high` is producing shallow plans or missing edge cases, switch that model config to `xhigh`. Reserve `xhigh` for the tasks where deeper reasoning is worth the extra time.
+For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.6-luna`. Increase effort to `high`, `xhigh`, or `max` only when representative tasks show a useful quality gain. Use `none` or `low` for latency-sensitive work.
 
 **Secondary: Claude Opus** for teams that prefer Anthropic. Opus at `medium` effort performs comparably for most coding tasks at a lower latency and cost than higher effort levels.
 
@@ -55,12 +55,15 @@ If a task is complex enough that `high` is producing shallow plans or missing ed
 
 | Model | Reasoning Efforts | Notes |
 |---|---|---|
+| gpt-5.6-sol | none / low / medium / high / xhigh / max | Default flagship tier. 1.05M context, 128k max output. |
+| gpt-5.6-terra | none / low / medium / high / xhigh / max | Balances intelligence and cost. 1.05M context, 128k max output. |
+| gpt-5.6-luna | none / low / medium / high / xhigh / max | Efficient high-volume tier. 1.05M context, 128k max output. |
 | gpt-5.5 | low / medium / high / xhigh | Codex 5.5 frontier model. |
 | gpt-5.5-pro | low / medium / high / xhigh | Pro/Enterprise tier. |
 | gpt-5.4 | low / medium / high / xhigh | |
-| gpt-5.4-mini | low / medium / high | Smaller, faster variant. |
+| gpt-5.4-mini | low / medium / high / xhigh | Smaller, faster variant. |
 | gpt-5.3-codex | low / medium / high / xhigh | Legacy. |
-| gpt-5.3-codex-spark | low / medium / high | Fast research preview. |
+| gpt-5.3-codex-spark | low / medium / high / xhigh | Fast research preview. |
 | gpt-5.2-codex | low / medium / high / xhigh | Legacy. |
 | gpt-5.1-codex-max | low / medium / high / xhigh | Legacy. |
 | gpt-5.1-codex / mini | low / medium / high | Legacy. |
@@ -83,7 +86,7 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 ### OpenAI
 
 - Auth options include API key and OAuth.
-- For supported Codex models, `Codex Reasoning Effort` is available.
+- For supported Codex models, `Codex Reasoning Effort` is available. GPT-5.6 supports `none`, `low`, `medium`, `high`, `xhigh`, and `max`; its default is `medium`.
 - First-party OpenAI configs use OpenVibely's OpenAI/Codex provider path, not the generic OpenAI-compatible Chat Completions adapter.
 
 ### OpenAI-Compatible Chat Completions

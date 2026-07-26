@@ -190,7 +190,7 @@ always_use:
 
 ## openvibely_security_boundary_workflow
 
-[OpenVibely Security Boundary Workflow](openvibely_security_boundary_workflow/SKILL.md) — Implement and audit strict configuration, HTTP protocol, retry-deadline, cookie, and identity boundaries for OpenVibely authentication and external integrations.
+[OpenVibely Security Boundary Workflow](openvibely_security_boundary_workflow/SKILL.md) — Implement and audit strict configuration, HTTP protocol, retry-deadline, cookie, identity, and untrusted-content boundaries for OpenVibely authentication and external integrations.
 
 ## openvibely_github_actions_workflow
 
@@ -198,4 +198,4 @@ always_use:
 
 ## openvibely_automation_graph_workflow
 
-[OpenVibely Automation Graph Workflow](openvibely_automation_graph_workflow/SKILL.md) — Implement, debug, and explain OpenVibely Automation graph nodes, publication effects, runtime handoffs, and projections without creating a parallel executor.
+[OpenVibely Automation Graph Workflow](openvibely_automation_graph_workflow/SKILL.md) — Implement, debug, and explain OpenVibely Automation graph nodes, browser-local creation, atomic Save, runtime handoffs, and projections without creating a parallel executor.
