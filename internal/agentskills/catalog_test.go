@@ -334,6 +334,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"visible scheduled OpenVibely tasks",
 		"generic GitHub runtime tools",
 		"Do not create hidden daemon or poller services",
+		"For this Automation bootstrap, do not pass `repo_url` overrides",
+		"Automation-bound GitHub tools resolve only the selected project's configured GitHub repository URL",
+		"falling back to a GitHub remote in that project's local checkout",
 		"github_list_my_assigned_issues",
 		"github_list_assigned_issues",
 		"github_list_assigned_issues_with_prs",
@@ -371,6 +374,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	for _, want := range []string{
 		"There is no hidden GitHub poller daemon",
 		"GitHub Runtime Settings",
+		"For this Automation loop, do not pass `repo_url` overrides",
+		"Automation-bound GitHub tools use only the selected project's configured GitHub repository URL",
+		"fall back to a GitHub remote in that project's local checkout",
 		"github_list_my_assigned_issues",
 		"github_list_assigned_issues",
 		"github_list_assigned_issues_with_prs",
@@ -420,9 +426,11 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"Start with two scheduled tasks before adding more scanner/finder loops",
 		"You can later add Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks",
 		"optional Loop Auditor",
+		"When a prompt names a specific GitHub repository URL, pass `repo_url` to issue create/read/list/comment/label tools",
+		"prompts may pass `repo_url` when they name a specific GitHub repository URL",
 	} {
-		if strings.Contains(guideText, forbidden) {
-			t.Fatalf("GitHub autonomous SDLC guide contains stale or contradictory guidance %q", forbidden)
+		if strings.Contains(skillText, forbidden) || strings.Contains(guideText, forbidden) {
+			t.Fatalf("GitHub bootstrap guidance contains stale or contradictory guidance %q", forbidden)
 		}
 	}
 
@@ -438,8 +446,22 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read GitHub channel setup guide: %v", err)
 	}
-	if !strings.Contains(string(githubSetupBody), "[GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md)") {
+	githubSetupText := string(githubSetupBody)
+	if !strings.Contains(githubSetupText, "[GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md)") {
 		t.Fatalf("GitHub channel setup guide does not link GitHub autonomous SDLC guide")
+	}
+	for _, want := range []string{
+		"Ordinary non-Automation GitHub issue tools may accept `repo_url`",
+		"Automation-bound GitHub tools ignore model-supplied `repo_url` overrides",
+		"selected project's configured GitHub repository URL",
+		"GitHub remote in that project's local checkout",
+	} {
+		if !strings.Contains(githubSetupText, want) {
+			t.Fatalf("GitHub channel setup guide missing repository-boundary guidance %q", want)
+		}
+	}
+	if strings.Contains(githubSetupText, "GitHub issue API tools default to the current project repository, but can accept `repo_url` when a prompt names a specific GitHub repository URL") {
+		t.Fatalf("GitHub channel setup guide contains stale repository-override guidance")
 	}
 }
 

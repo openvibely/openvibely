@@ -26,7 +26,7 @@ Before creating the loop:
 
 A PAT identifies a real GitHub user, so scheduled tasks can call `github_list_my_assigned_issues` to find issues assigned to that user. A GitHub App installation may be installed on an organization, which is not an issue assignee; use `github_get_project_inbox` to read the Authorized Users and pass those logins to `github_list_assigned_issues`.
 
-GitHub issue API tools default to the current project repository, but prompts may pass `repo_url` when they name a specific GitHub repository URL. This applies to issue create/read/list/comment/label tools. Pull request tools remain tied to the current OpenVibely task/project because they publish task worktree branches through the configured GitHub token/API and persist task PR records.
+For this Automation loop, do not pass `repo_url` overrides. Automation-bound GitHub tools use only the selected project's configured GitHub repository URL and fall back to a GitHub remote in that project's local checkout when the URL is blank. Pull request tools use that same project boundary because they publish task worktree branches through the configured GitHub token/API and persist task PR records.
 
 ## Bootstrap Skill
 
