@@ -89,7 +89,7 @@ Review the configured project vision/source files and identify small, reviewable
 
 Open GitHub suggestion issues only. Use `github_create_issue` with unprefixed labels such as `suggestion` and `feature`. Do not create implementation tasks and do not modify code.
 
-Include enough context for a human to approve, reject, or assign the issue. Avoid duplicates by searching or inspecting existing visible work when the available tools allow it.
+Include enough context for a human to approve, reject, or assign the issue. Do not list, search, or inspect existing GitHub issues for duplicate detection; the server prevents duplicate Automation-created issues using trusted local state.
 ```
 
 Offering, Bug Finder, Optimization Finder, and Redundancy Finder tasks should open issues only. They should not modify code, create OpenVibely implementation tasks, or open PRs. Dev Inbox acts on issues assigned to the PAT owner or configured Authorized Users and creates the implementation tasks that later open PRs. Add labels such as `approved`, `feature`, `bug`, `performance`, or `duplication` when useful for human organization, but assignment is the default approval signal for entering the implementation mailbox.

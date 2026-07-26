@@ -342,6 +342,8 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks",
 		"These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks",
 		"Offering, Bug Finder, Optimization Finder, and Redundancy Finder tasks should open issues only",
+		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
+		"the server prevents duplicate Automation-created issues using trusted local state",
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
 		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
@@ -350,6 +352,15 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	} {
 		if !strings.Contains(guideText, want) {
 			t.Fatalf("GitHub autonomous SDLC guide missing %q", want)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"Avoid duplicates by searching or inspecting existing visible work",
+		"Avoid duplicates by searching/inspecting existing visible work",
+	} {
+		if strings.Contains(guideText, forbidden) {
+			t.Fatalf("GitHub autonomous SDLC guide contains stale duplicate-search guidance %q", forbidden)
 		}
 	}
 
