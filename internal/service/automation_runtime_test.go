@@ -1038,8 +1038,6 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 
 	taskSvc := NewTaskService(fixture.taskRepo, nil, nil)
 	implementationNode := automationNodeByKey(t, fixture.definition, "implementation")
-	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `UPDATE automation_nodes SET config_json = ? WHERE id = ? RETURNING id`,
-		`{"prompt":"Implement the exact assigned GitHub issue and open a pull request.","category":"backlog","priority":2}`, implementationNode.ID).Scan(&implementationNode.ID))
 	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
 		taskRepo: fixture.taskRepo, taskSvc: taskSvc}
 	runtime := llmSvc.taskControlRuntimeTools(fixture.task)

@@ -25,6 +25,10 @@ Use unprefixed labels only, such as ` + "`" + `task-created` + "`" + `, ` + "`" 
 
 When implementation work is complete in a task branch, use ` + "`" + `github_open_pull_request` + "`" + ` for that task and include issue metadata so the task PR record stays linked. Do not use local ` + "`" + `git push` + "`" + ` or GitHub CLI as a fallback if the tool fails; report the tool error so GitHub token/API publication can be fixed.`
 
+const githubSDLCImplementationPrompt = `Implement the assigned GitHub issue in the current project.
+
+Read the issue and relevant project context, make the focused code or documentation changes needed to satisfy its acceptance criteria, and run the relevant build and tests. Keep the work tied to the source issue and use github_open_pull_request to open or reuse the reviewable pull request when implementation is complete. Do not approve or merge the pull request, release, or deploy on a human's behalf.`
+
 const githubSDLCOfferingManagerPrompt = `Review the configured project vision/source files and identify small, reviewable feature gaps.
 
 Open GitHub suggestion issues only. Use ` + "`" + `github_create_issue` + "`" + ` with unprefixed labels such as ` + "`" + `suggestion` + "`" + ` and ` + "`" + `feature` + "`" + `. Do not create implementation tasks and do not modify code.
@@ -52,6 +56,8 @@ func githubSDLCRolePrompt(role string) (string, error) {
 		return githubSDLCFinderPrompt, nil
 	case "github_inbox":
 		return githubSDLCDevInboxPrompt, nil
+	case "implementation":
+		return githubSDLCImplementationPrompt, nil
 	case "loop_auditor":
 		return githubSDLCLoopAuditorPrompt, nil
 	default:

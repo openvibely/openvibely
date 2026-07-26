@@ -213,6 +213,15 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.False(t, reused)
+	var registeredImplementationConfig map[string]any
+	for _, node := range githubDefinition.Nodes {
+		if node.NodeKey == "implementation" {
+			require.NoError(t, json.Unmarshal([]byte(node.ConfigJSON), &registeredImplementationConfig))
+		}
+	}
+	require.NotEmpty(t, registeredImplementationConfig["prompt"], "first registration must publish executable issue-task instructions")
+	require.Equal(t, string(models.CategoryBacklog), registeredImplementationConfig["category"])
+	require.EqualValues(t, 2, registeredImplementationConfig["priority"])
 	githubReopened, err := drafts.CurrentCandidate(ctx, project.ID, githubDefinition.Automation.ID)
 	require.NoError(t, err)
 	require.Empty(t, githubReopened.ValidationErrors)

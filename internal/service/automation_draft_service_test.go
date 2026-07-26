@@ -94,6 +94,36 @@ func TestNativeSDLCTemplateOwnsItsPrompts(t *testing.T) {
 	require.NotContains(t, sourceText, "SKILL.md")
 }
 
+func TestGitHubSDLCTemplateConfiguresAndValidatesIssueImplementationTask(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+
+	implementation := automationDraftNodeByKey(t, candidate, "implementation")
+	require.NotEmpty(t, implementation.Config["prompt"])
+	require.Equal(t, string(models.CategoryBacklog), implementation.Config["category"])
+	require.EqualValues(t, 2, implementation.Config["priority"])
+	require.Empty(t, drafts.ValidateCandidate(candidate))
+
+	for _, field := range []string{"prompt", "category", "priority"} {
+		invalid := candidate
+		invalid.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
+		for i := range invalid.Nodes {
+			if invalid.Nodes[i].Key != "implementation" {
+				continue
+			}
+			invalid.Nodes[i].Config = make(map[string]any, len(candidate.Nodes[i].Config))
+			for key, value := range candidate.Nodes[i].Config {
+				invalid.Nodes[i].Config[key] = value
+			}
+			delete(invalid.Nodes[i].Config, field)
+		}
+		require.Contains(t, issueCodes(drafts.ValidateCandidate(invalid)), map[string]string{
+			"prompt": "missing_prompt", "category": "category", "priority": "priority",
+		}[field], "maintained GitHub implementation %s must be required before Save", field)
+	}
+}
+
 func TestGitHubSDLCTemplateAcceptsBrowserSubmittedActionSettings(t *testing.T) {
 	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)

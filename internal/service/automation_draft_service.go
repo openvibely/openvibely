@@ -124,7 +124,7 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 	configs := make(map[string]map[string]any, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
 		config := map[string]any{}
-		if node.AllowedResources["task"] {
+		if automationMaintainedNodeUsesTaskConfiguration(adapter, node) {
 			prompt, err := defaultAutomationNodePrompt(adapter.Key, node.Role)
 			if err != nil {
 				return nil, err
@@ -177,6 +177,10 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 		}
 	}
 	return configs, nil
+}
+
+func automationMaintainedNodeUsesTaskConfiguration(adapter AutomationAdapter, node AutomationAdapterNode) bool {
+	return node.AllowedResources["task"] || adapter.Key == AutomationAdapterGitHubSDLC && node.Role == "implementation"
 }
 
 func (s *AutomationDraftService) BlankCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
@@ -965,7 +969,8 @@ func validateAutomationHumanGateConfig(node models.AutomationDraftNode, role str
 
 func validateAutomationNodeConfig(adapter AutomationAdapter, canonical AutomationAdapterNode, node models.AutomationDraftNode) []models.AutomationValidationIssue {
 	allowed := map[string]bool{}
-	if canonical.AllowedResources["task"] {
+	usesTaskConfiguration := automationMaintainedNodeUsesTaskConfiguration(adapter, canonical)
+	if usesTaskConfiguration {
 		for _, key := range []string{"prompt", "category", "priority", "agent_ref", "skills", "source_files"} {
 			allowed[key] = true
 		}
@@ -999,7 +1004,7 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsafe_config", Message: fmt.Sprintf("Configuration field %q contains an unsupported value.", key)})
 		}
 	}
-	if canonical.AllowedResources["task"] {
+	if usesTaskConfiguration {
 		prompt, promptOK := node.Config["prompt"].(string)
 		if !promptOK || strings.TrimSpace(prompt) == "" {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Task nodes require a prompt before saving."})

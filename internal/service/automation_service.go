@@ -269,6 +269,11 @@ func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context
 		}
 		config["enabled"] = enabled
 	}
+	if issues := validateAutomationNodeConfig(adapter, node, models.AutomationDraftNode{
+		Key: node.Key, Name: node.Name, Type: models.AutomationNodeType(node.Type), Role: node.Role, Config: config,
+	}); len(issues) > 0 {
+		return "", fmt.Errorf("registered node %q configuration is invalid: %s", node.Key, issues[0].Message)
+	}
 	raw, err := json.Marshal(config)
 	if err != nil {
 		return "", fmt.Errorf("encode registered node %q configuration: %w", node.Key, err)
