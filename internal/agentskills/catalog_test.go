@@ -389,9 +389,18 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues",
 		"Do not set a persisted goal on the Dev Inbox scheduled task itself",
 		"Do not immediately start Dev Inbox or scanner/finder tasks during bootstrap unless the user explicitly asks for an immediate poll/scan pass",
-		"Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks",
+		"`GitHub Offering Manager: Vision Suggestions` | Daily",
+		"`GitHub Dev Inbox` | Hourly",
+		"`GitHub Bug Finder` | Daily",
+		"`GitHub Optimization Finder` | Daily",
+		"`GitHub Redundancy Finder` | Daily",
+		"`GitHub Loop Auditor` | Weekly",
 		"These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks",
 		"Offering, Bug Finder, Optimization Finder, and Redundancy Finder tasks should open issues only",
+		"register_automation_resources",
+		"`github_sdlc`",
+		"`github-sdlc/default`",
+		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `dev_inbox`, and `auditor`",
 		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
 		"the server prevents duplicate Automation-created issues using trusted local state",
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
@@ -408,9 +417,12 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	for _, forbidden := range []string{
 		"Avoid duplicates by searching or inspecting existing visible work",
 		"Avoid duplicates by searching/inspecting existing visible work",
+		"Start with two scheduled tasks before adding more scanner/finder loops",
+		"You can later add Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks",
+		"optional Loop Auditor",
 	} {
 		if strings.Contains(guideText, forbidden) {
-			t.Fatalf("GitHub autonomous SDLC guide contains stale duplicate-search guidance %q", forbidden)
+			t.Fatalf("GitHub autonomous SDLC guide contains stale or contradictory guidance %q", forbidden)
 		}
 	}
 

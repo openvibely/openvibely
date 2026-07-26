@@ -38,23 +38,28 @@ Use the OpenVibely GitHub Autonomous SDLC Bootstrap skill to set up the GitHub S
 
 The skill creates or updates normal visible tasks and schedules; it does not start a hidden daemon. Setup should create one visible task per loop role and schedule that same task, not create separate standalone runner tasks plus scheduled duplicates. The first setup action should create/run `GitHub Offering Manager: Vision Suggestions` immediately so it can open initial suggestion issues, then attach its daily schedule and create the Dev Inbox, Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor schedules afterward.
 
-## Minimum Visible Loop
+## Maintained Visible Loop
 
-Start with two scheduled tasks before adding more scanner/finder loops.
+Create all six scheduled roles as part of the maintained setup.
 
 | Task | Cadence | Purpose |
 |---|---:|---|
 | `GitHub Offering Manager: Vision Suggestions` | Daily | Reads project vision/source files and opens suggestion issues only. |
 | `GitHub Dev Inbox` | Hourly | Forwards authorized PR comments/reviews to linked implementation tasks, then checks open issues assigned to the PAT user or configured GitHub Authorized Users and links/updates eligible work. |
+| `GitHub Bug Finder` | Daily | Inspects one focused area for likely defects and opens bug issues only. |
+| `GitHub Optimization Finder` | Daily | Inspects one focused area for measurable performance or efficiency improvements and opens performance issues only. |
+| `GitHub Redundancy Finder` | Daily | Inspects one focused area for duplicated or redundant code and opens duplication issues only. |
+| `GitHub Loop Auditor` | Weekly | Reviews stale labels, blocked work, duplicate tasks, missing issue/task/PR links, and unexpected assignments. |
 
-You can later add Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks using the same pattern. These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks.
+These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks. Loop Auditor is required in the maintained setup.
 
 Initial setup order:
 
 1. Create `GitHub Offering Manager: Vision Suggestions` first and run that same task immediately. If no explicit run-existing-task action is available, create it as `active` for the first run, then attach the daily schedule to that same task after the creation/start action is accepted.
-2. Create `GitHub Dev Inbox`, `GitHub Bug Finder`, `GitHub Optimization Finder`, `GitHub Redundancy Finder`, and optional Loop Auditor tasks as their own scheduled tasks and attach their recurring schedules without setting persisted task goals.
+2. Create `GitHub Dev Inbox`, `GitHub Bug Finder`, `GitHub Optimization Finder`, `GitHub Redundancy Finder`, and `GitHub Loop Auditor` as their own scheduled tasks and attach their recurring schedules without setting persisted task goals.
 3. Do not create separate standalone one-off runner tasks in addition to the scheduled loop tasks. Do not immediately start Dev Inbox or scanner/finder tasks during bootstrap unless the user explicitly asks for an immediate poll/scan pass.
 4. Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues, or when the user explicitly asks for goal-driven continuation.
+5. After all six tasks and schedules exist, call `register_automation_resources` once with adapter key `github_sdlc`, stable key `github-sdlc/default`, and the actual task and schedule IDs. Bind each task and its schedule to the same canonical node key: `vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `dev_inbox`, and `auditor`. Do not infer or register pre-feature resources.
 
 ## Dev Inbox Prompt Pattern
 
