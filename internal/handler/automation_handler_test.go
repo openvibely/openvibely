@@ -129,10 +129,15 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 		name       string
 		maintained bool
 		mutate     func(*models.AutomationDraftCandidate)
+		overlay    url.Values
 	}{
 		{name: "empty maintained node name", maintained: true, mutate: func(candidate *models.AutomationDraftCandidate) {
 			candidate.Nodes[0].Name = ""
 		}},
+		{name: "empty automation name form overlay", overlay: url.Values{"automation_name": {""}}},
+		{name: "empty node name form overlay", overlay: url.Values{"node_schedule_name": {""}}},
+		{name: "malformed priority form overlay", overlay: url.Values{"node_followup_priority": {"not-a-number"}}},
+		{name: "malformed repeat interval form overlay", overlay: url.Values{"node_schedule_repeat_interval": {"not-a-number"}}},
 		{name: "automation type", mutate: func(candidate *models.AutomationDraftCandidate) {
 			candidate.AutomationType = "github_sdlc"
 		}},
@@ -172,14 +177,21 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 				candidate, err = drafts.TemplateCandidate(service.AutomationAdapterVisionDriver)
 				require.NoError(t, err)
 			}
-			test.mutate(&candidate)
+			if test.mutate != nil {
+				test.mutate(&candidate)
+			}
 			raw, err := json.Marshal(candidate)
 			require.NoError(t, err)
 
-			response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+			form := url.Values{
 				"project_id": {project.ID}, "candidate_json": {string(raw)}, "save_changes": {"true"},
-			}).Execute()
+			}
+			for key, values := range test.overlay {
+				form[key] = values
+			}
+			response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(form).Execute()
 			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			require.Contains(t, response.Body.String(), "Save did not apply")
 			require.Empty(t, response.Header().Get("HX-Redirect"))
 			require.Zero(t, tableCountHandler(t, tc, "automations"))
 			require.Zero(t, tableCountHandler(t, tc, "tasks"))

@@ -172,13 +172,13 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 	if candidate == nil {
 		return
 	}
-	if value, exists := automationDraftFormValue(c, "automation_name"); exists && strings.TrimSpace(value) != "" {
+	if value, exists := automationDraftFormValue(c, "automation_name"); exists {
 		candidate.Name = strings.TrimSpace(value)
 	}
 	for i := range candidate.Nodes {
 		node := &candidate.Nodes[i]
 		prefix := "node_" + node.Key + "_"
-		if value, exists := automationDraftFormValue(c, prefix+"name"); exists && strings.TrimSpace(value) != "" {
+		if value, exists := automationDraftFormValue(c, prefix+"name"); exists {
 			node.Name = strings.TrimSpace(value)
 		}
 		if _, ok := node.Config["prompt"]; ok {
@@ -191,6 +191,8 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 			if value, exists := automationDraftFormValue(c, prefix+"priority"); exists {
 				if priority, parseErr := strconv.Atoi(value); parseErr == nil {
 					node.Config["priority"] = priority
+				} else {
+					node.Config["priority"] = value
 				}
 			}
 			if value, exists := automationDraftFormValue(c, prefix+"agent_ref"); exists {
@@ -215,6 +217,8 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 			if value, exists := automationDraftFormValue(c, prefix+"repeat_interval"); exists {
 				if interval, parseErr := strconv.Atoi(value); parseErr == nil {
 					node.Config["repeat_interval"] = interval
+				} else {
+					node.Config["repeat_interval"] = value
 				}
 			}
 			if _, exists := automationDraftFormValue(c, prefix+"enabled"); exists || strings.TrimSpace(c.FormValue("builder_action")) == "" {
