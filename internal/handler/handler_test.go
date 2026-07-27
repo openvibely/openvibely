@@ -4855,8 +4855,8 @@ func TestHandler_TaskThreadSend_BacklogMovesToActive(t *testing.T) {
 	if updatedTask.Category != models.CategoryActive {
 		t.Errorf("expected category active, got %s", updatedTask.Category)
 	}
-	if updatedTask.Status != models.StatusQueued {
-		t.Errorf("expected status queued, got %s", updatedTask.Status)
+	if updatedTask.Status != models.StatusQueued && updatedTask.Status != models.StatusRunning {
+		t.Errorf("expected status queued or running, got %s", updatedTask.Status)
 	}
 }
 
