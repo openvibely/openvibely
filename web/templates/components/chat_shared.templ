@@ -3478,13 +3478,7 @@ templ ChatAutoScrollScript() {
 					if (typeof explicitScope !== 'string' && !intentScope && messagesEl) {
 						intentScope = mountedScope;
 					}
-					if (messagesEl && intentScope !== mountedScope) {
-						window._chatSendScrollIntents[messagesId] = {
-							intentRevision: window._chatScrollIntentRevision || 0,
-							scope: intentScope
-						};
-						return;
-					}
+					if (messagesEl && intentScope !== mountedScope) return;
 					var trackerKey = 'scrollTracker_' + messagesId;
 					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
 					if (tracker && tracker.resetOnUserSend) tracker.resetOnUserSend();
