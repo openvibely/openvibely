@@ -906,6 +906,40 @@ func TestHandler_ListModels(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 }
 
+func TestHandler_ListModels_RendersAuthoritativeDesktopOAuthMode(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.SetDesktopMode(true)
+	if err := llmConfigRepo.Create(context.Background(), &models.LLMConfig{
+		Name:       "Desktop OAuth",
+		Provider:   models.ProviderOpenAI,
+		AuthMethod: models.AuthMethodOAuth,
+		Model:      "gpt-5.4",
+	}); err != nil {
+		t.Fatalf("create oauth model: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		htmx bool
+	}{
+		{name: "full page"},
+		{name: "htmx fragment", htmx: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/models", nil)
+			if tc.htmx {
+				req.Header.Set("HX-Request", "true")
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			assertCode(t, rec, http.StatusOK)
+			if !strings.Contains(rec.Body.String(), `data-oauth-external="true"`) {
+				t.Fatal("expected desktop handler mode to be rendered into OAuth links")
+			}
+		})
+	}
+}
+
 func TestHandler_ListModels_DeleteConfirmationDialog(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 	rec := htmxGet(e, "/models")

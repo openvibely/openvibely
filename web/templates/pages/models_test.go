@@ -17,7 +17,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	// HTML <option> elements and the JS modelOptionsByProvider catalog.
 	agents := []models.LLMConfig{}
 	var buf bytes.Buffer
-	err := ModelsContent(agents, nil).Render(context.Background(), &buf)
+	err := ModelsContent(agents, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 	// 2. Claude Fable 5 and Claude Mythos 5 remain as selectable options.
 	// 3. Neither Fable 5 nor Mythos 5 is the first option (i.e., neither is auto-selected).
 	var buf bytes.Buffer
-	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -200,7 +200,7 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 func TestModelsContent_ModelFormUsesHTMXSubmit(t *testing.T) {
 	agents := []models.LLMConfig{}
 	var buf bytes.Buffer
-	err := ModelsContent(agents, nil).Render(context.Background(), &buf)
+	err := ModelsContent(agents, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestModelsContent_ModelMutationsPreserveActiveProject(t *testing.T) {
 		{ID: "model-b", Name: "Model B", Provider: models.ProviderOpenAI, Model: "gpt-5", IsDefault: true},
 	}
 	var buf bytes.Buffer
-	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -316,7 +316,7 @@ func TestModelsContent_ModelMutationsPreserveActiveProject(t *testing.T) {
 
 func TestModelsContent_ModelModalJavaScriptShape(t *testing.T) {
 	var buf bytes.Buffer
-	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -375,7 +375,7 @@ func TestModelsContent_DefaultCardCarriesCompleteEditData(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -435,7 +435,7 @@ func TestModelsContent_CompatibleModelCardsShowEffectiveSettings(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 
@@ -458,7 +458,7 @@ func TestModelsContent_CompatibleModelCardsShowEffectiveSettings(t *testing.T) {
 
 func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 	var buf bytes.Buffer
-	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -526,7 +526,7 @@ func TestModelsContent_MixtureEditHydratesSavedReferenceOrder(t *testing.T) {
 		{ID: "mix", Name: "Ordered Mix", Provider: models.ProviderMixture, Model: "mixture", MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"ref-b"},{"agent_config_id":"ref-a"}],"aggregator":{"agent_config_id":"ref-a"}}`},
 	}
 	var buf bytes.Buffer
-	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -595,7 +595,7 @@ func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
 		{ID: "internal", Name: "Internal", Provider: models.LLMProvider("internal"), AuthMethod: models.AuthMethodAPIKey, Model: "internal"},
 	}
 	var buf bytes.Buffer
-	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -622,7 +622,7 @@ func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
 
 func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	var buf bytes.Buffer
-	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -898,7 +898,7 @@ func balancedJavaScriptBraces(value string) error {
 // Anthropic or OpenAI connection-method selects.
 func TestModelsContent_NoCLIOptionInAuthSelects(t *testing.T) {
 	var buf bytes.Buffer
-	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -928,7 +928,7 @@ func TestModelsContent_OAuthLinksUseRuntimeSpecificLaunch(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := ModelsContent(agents, nil).Render(context.Background(), &buf)
+	err := ModelsContent(agents, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
@@ -940,8 +940,11 @@ func TestModelsContent_OAuthLinksUseRuntimeSpecificLaunch(t *testing.T) {
 	if !strings.Contains(out, "data-oauth-path=\"/models/openai-oauth/oauth/initiate\"") {
 		t.Fatal("expected OAuth links to expose model-specific oauth path via data attribute")
 	}
-	if !strings.Contains(out, "getAttribute('data-runtime') !== 'desktop'") {
-		t.Fatal("expected OAuth launcher to preserve normal navigation outside desktop runtime")
+	if !strings.Contains(out, "data-oauth-external=\"false\"") {
+		t.Fatal("expected server-rendered OAuth links to use normal browser navigation")
+	}
+	if strings.Contains(out, "getAttribute('data-runtime')") {
+		t.Fatal("expected OAuth launch mode not to depend on client-side runtime detection")
 	}
 	if !strings.Contains(out, "external=1") {
 		t.Fatal("expected desktop OAuth launcher to request backend external launch mode")
@@ -951,5 +954,13 @@ func TestModelsContent_OAuthLinksUseRuntimeSpecificLaunch(t *testing.T) {
 	}
 	if strings.Contains(out, "window.location.href = externalURL") {
 		t.Fatal("expected desktop OAuth launcher to avoid WebView navigation")
+	}
+
+	buf.Reset()
+	if err := ModelsContent(agents, nil, true).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render desktop models content: %v", err)
+	}
+	if !strings.Contains(buf.String(), "data-oauth-external=\"true\"") {
+		t.Fatal("expected desktop OAuth links to request external browser launch")
 	}
 }

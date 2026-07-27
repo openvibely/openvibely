@@ -40,13 +40,13 @@ func (h *Handler) ListModels(c echo.Context) error {
 
 	// For HTMX requests, return just the agents content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.ModelsContent(agents, modelWorkerStats))
+		return render(c, http.StatusOK, pages.ModelsContent(agents, modelWorkerStats, h.desktopMode))
 	}
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 	projects, _ := h.projectSvc.List(c.Request().Context())
 
-	return render(c, http.StatusOK, pages.Models(projects, currentProjectID, agents, modelWorkerStats))
+	return render(c, http.StatusOK, pages.Models(projects, currentProjectID, agents, modelWorkerStats, h.desktopMode))
 }
 
 // resolveProviderAndAuth maps UI form values to DB provider and auth_method.
@@ -485,7 +485,7 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents)))
+		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
 	}
 	redirectURL := "/models"
 	if projectID := c.QueryParam("project_id"); projectID != "" {
@@ -618,7 +618,7 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 		if err != nil {
 			return err
 		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents)))
+		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
 	}
 	redirectURL := "/models"
 	if projectID := c.QueryParam("project_id"); projectID != "" {
@@ -654,7 +654,7 @@ func (h *Handler) SetDefaultModel(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents)))
+		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
 	}
 	return c.Redirect(http.StatusSeeOther, "/models")
 }
@@ -726,7 +726,7 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents)))
+		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
 	}
 	return c.Redirect(http.StatusSeeOther, "/models")
 }

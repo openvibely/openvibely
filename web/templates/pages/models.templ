@@ -11,15 +11,15 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
-templ Models(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelWorkerStats map[string]int) {
+templ Models(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
 	@layout.Base("Models", projects, currentProjectID) {
-		@modelsContent(agents, modelWorkerStats)
+		@modelsContent(agents, modelWorkerStats, desktopMode)
 	}
 }
 
 // AgentsContent renders just the agents content for HTMX requests
-templ ModelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) {
-	@modelsContent(agents, modelWorkerStats)
+templ ModelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
+	@modelsContent(agents, modelWorkerStats, desktopMode)
 }
 
 func hasDefault(agents []models.LLMConfig) bool {
@@ -180,7 +180,7 @@ templ providerIcon(provider models.LLMProvider) {
 	}
 }
 
-templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) {
+templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
 	<div id="models-container" data-search-container>
 		@layout.PageTitle("Models")
 	<div class="flex items-center justify-between mb-6">
@@ -341,11 +341,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 											{ oauthStatusText(agent) }
 										</span>
 									if !agent.HasValidOAuthToken() {
-											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } class="btn btn-xs btn-outline" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">
+											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } data-oauth-external={ fmt.Sprintf("%t", desktopMode) } class="btn btn-xs btn-outline" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">
 											Connect with OAuth
 										</a>
 									} else {
-											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } class="btn btn-xs btn-ghost" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">
+											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } data-oauth-external={ fmt.Sprintf("%t", desktopMode) } class="btn btn-xs btn-ghost" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">
 												Re-authorize
 											</a>
 									}
@@ -759,7 +759,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						var href = path || '';
 						if (!href) return false;
 						href = modelMutationURL(href);
-						if (document.documentElement.getAttribute('data-runtime') !== 'desktop') {
+						if (!anchor || anchor.dataset.oauthExternal !== 'true') {
 							if (anchor) anchor.href = href;
 							return true;
 						}

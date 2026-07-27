@@ -24,7 +24,7 @@ func TestPrimaryNavigationFragmentsIncludeAuthoritativePageTitles(t *testing.T) 
 		{name: "reflection", title: "Reflection", component: HistoryContent(&models.History{}, "")},
 		{name: "analytics", title: "Analytics Dashboard", component: AnalyticsContent(nil)},
 		{name: "alerts", title: "Alerts", component: AlertsContent(nil, "", 0)},
-		{name: "models", title: "Models", component: ModelsContent(nil, nil)},
+		{name: "models", title: "Models", component: ModelsContent(nil, nil, false)},
 		{name: "agents", title: "Agents", component: AgentsContent(nil, nil)},
 		{name: "skills", title: "Skills", component: SkillsContent(nil, false)},
 		{name: "workers", title: "Workers", component: WorkerSettingsContent(0, 0, 0, 0, nil, nil)},
