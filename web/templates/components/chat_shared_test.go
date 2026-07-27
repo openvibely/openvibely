@@ -1374,9 +1374,12 @@ func TestChatAutoScrollScript_BindsAttachmentImageSmartScroll(t *testing.T) {
 		"if (sentByUser)",
 		"window.hasChatSendScrollIntent = function(messagesId, explicitScope)",
 		"function chatSendScrollIntentScopeKey(scope)",
+		"window.getChatSendIntentScopeRevision = function(messagesId, scope)",
+		"window.advanceChatSendIntentScopeRevision = function(messagesEl)",
 		"var scopedIntents = window._chatSendScrollIntents[messagesId] || {};",
-		"scopedIntents[scopeKey] = { intentRevision: null, scope: intentScope };",
+		"scopedIntents[scopeKey] = { scopeRevision: null, scope: intentScope };",
 		"var intent = scopedIntents && scopedIntents[chatSendScrollIntentScopeKey(currentScope)];",
+		"scopeRevision === intent.scopeRevision",
 		"delete scopedIntents[chatSendScrollIntentScopeKey(currentScope)];",
 		"window.scrollChatToBottomAfterLayout = function(messagesEl, smooth)",
 		"window.bindAttachmentImageSmartScroll = function(messagesEl, trackerKey, trackerFallback)",
@@ -4777,6 +4780,47 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 				if (taskAReturnTracker.userScrolledUp || bottomDistance(taskAReturn) > 1) fail('returning to task A did not restore its deliberate-send pinning');
 				taskAReturn.remove();
 			}
+			async function verifyCrossScopeReadingDoesNotInvalidateSend() {
+				var messagesId = 'task-thread-scope-revision-messages';
+				var trackerKey = 'scrollTracker_' + messagesId;
+				var taskA = document.createElement('div');
+				taskA.id = messagesId; taskA.className = 'transcript'; taskA.style.visibility = '';
+				taskA.setAttribute('data-scroll-intent-scope', 'task-a');
+				for (var i = 0; i < 6; i++) pair(taskA);
+				root.appendChild(taskA);
+				var tracker = window.resolveScrollTracker(trackerKey, taskA);
+				window.markChatSendScrollIntent(messagesId, 'task-a');
+				if (!window.hasChatSendScrollIntent(messagesId, 'task-a')) fail('task A mounted send did not establish scoped intent');
+				taskA.remove();
+
+				var taskB = document.createElement('div');
+				taskB.id = messagesId; taskB.className = 'transcript'; taskB.style.visibility = '';
+				taskB.setAttribute('data-scroll-intent-scope', 'task-b');
+				for (var j = 0; j < 6; j++) pair(taskB);
+				root.appendChild(taskB);
+				tracker = window.resolveScrollTracker(trackerKey, taskB);
+				taskB.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
+				taskB.scrollTop = 45;
+				taskB.dispatchEvent(new Event('scroll'));
+				if (!tracker.userScrolledUp) fail('task B did not record upward-reading intent');
+				taskB.remove();
+
+				var taskAReturn = document.createElement('div');
+				taskAReturn.id = messagesId; taskAReturn.className = 'transcript'; taskAReturn.style.visibility = '';
+				taskAReturn.setAttribute('data-scroll-intent-scope', 'task-a');
+				for (var k = 0; k < 7; k++) pair(taskAReturn);
+				root.appendChild(taskAReturn);
+				tracker = window.resolveScrollTracker(trackerKey, taskAReturn);
+				var initialization = window.initializeChatTranscriptScrollState({
+					messages: taskAReturn,
+					tracker: tracker,
+					state: {scrollTop: 45, userScrolledUp: true, pinned: false},
+					scope: 'task-a'
+				});
+				if (!initialization.sentByUser) fail('task B reading invalidated task A scoped send intent');
+				if (tracker.userScrolledUp || bottomDistance(taskAReturn) > 1) fail('returning task A did not stay pinned after task B reading');
+				taskAReturn.remove();
+			}
 			async function verifyUnacceptedSendPreservesReading(surfaceId) {
 				var surface = document.createElement('div');			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
 			for (var i = 0; i < 6; i++) pair(surface);
@@ -4869,6 +4913,7 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 			await verifyCrossTaskSendIntentIsolation();
 			await verifyDelayedCrossTaskAcceptanceIsolation();
 			await verifyDelayedCrossTaskAcceptancePreservesMountedSend();
+			await verifyCrossScopeReadingDoesNotInvalidateSend();
 			await verifyUnacceptedSendPreservesReading('chat-failed-messages');
 			await verifyUnacceptedSendPreservesReading('task-thread-failed-messages');
 			root.setAttribute('data-test-result', 'pass');

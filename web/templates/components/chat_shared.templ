@@ -2879,6 +2879,28 @@ templ ChatAutoScrollScript() {
 		//   - shouldAutoScroll() returns !userScrolledUp. Do NOT AND with
 		//     isNearBottom — during innerHTML refresh that creates a clamp-driven
 		//     "yes auto-scroll" pulse that yanks the user back down.
+			window._chatSendIntentScopeRevisions = window._chatSendIntentScopeRevisions || {};
+
+			function chatSendIntentScopeRevisionKey(scope) {
+				return 'scope:' + (scope || '');
+			}
+
+			window.getChatSendIntentScopeRevision = function(messagesId, scope) {
+				var revisions = window._chatSendIntentScopeRevisions[messagesId] || {};
+				return revisions[chatSendIntentScopeRevisionKey(scope)] || 0;
+			};
+
+			window.advanceChatSendIntentScopeRevision = function(messagesEl) {
+				if (!messagesEl) return 0;
+				var messagesId = messagesEl.id || '';
+				var scope = messagesEl.getAttribute ? (messagesEl.getAttribute('data-scroll-intent-scope') || '') : '';
+				var revisions = window._chatSendIntentScopeRevisions[messagesId] || {};
+				var scopeKey = chatSendIntentScopeRevisionKey(scope);
+				revisions[scopeKey] = (revisions[scopeKey] || 0) + 1;
+				window._chatSendIntentScopeRevisions[messagesId] = revisions;
+				return revisions[scopeKey];
+			};
+
 			window.ChatScrollTracker = function(element) {
 				this.element = element;
 				this.userScrolledUp = false;
@@ -2938,6 +2960,7 @@ templ ChatAutoScrollScript() {
 						var isNear = window.chatAutoScroll.isNearBottom(self.element);
 						if (self._userInteracting) {
 							window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
+							if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(self.element);
 							self.userScrolledUp = !isNear;
 							self.intentRevision = window._chatScrollIntentRevision;
 							if (typeof self.onIntentChange === 'function') self.onIntentChange();
@@ -2996,6 +3019,7 @@ templ ChatAutoScrollScript() {
 				resetOnUserSend: function() {
 					this.userScrolledUp = false;
 					window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
+					if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(this.element);
 					this.intentRevision = window._chatScrollIntentRevision;
 					this._userInteracting = false;
 					this._pointerInteracting = false;
@@ -3487,7 +3511,7 @@ templ ChatAutoScrollScript() {
 					var scopedIntents = window._chatSendScrollIntents[messagesId] || {};
 					var scopeKey = chatSendScrollIntentScopeKey(intentScope);
 					if (messagesEl && intentScope !== mountedScope) {
-						scopedIntents[scopeKey] = { intentRevision: null, scope: intentScope };
+						scopedIntents[scopeKey] = { scopeRevision: null, scope: intentScope };
 						window._chatSendScrollIntents[messagesId] = scopedIntents;
 						return;
 					}
@@ -3495,7 +3519,7 @@ templ ChatAutoScrollScript() {
 					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
 					if (tracker && tracker.resetOnUserSend) tracker.resetOnUserSend();
 					scopedIntents[scopeKey] = {
-						intentRevision: tracker ? (tracker.intentRevision || 0) : null,
+						scopeRevision: window.getChatSendIntentScopeRevision ? window.getChatSendIntentScopeRevision(messagesId, intentScope) : 0,
 						scope: intentScope
 					};
 					window._chatSendScrollIntents[messagesId] = scopedIntents;
@@ -3514,8 +3538,9 @@ templ ChatAutoScrollScript() {
 					if (!intent) return false;
 					var trackerKey = 'scrollTracker_' + messagesId;
 					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
-					if (tracker && intent.intentRevision === null) intent.intentRevision = tracker.intentRevision || 0;
-					return !tracker || tracker.intentRevision === intent.intentRevision;
+					var scopeRevision = window.getChatSendIntentScopeRevision ? window.getChatSendIntentScopeRevision(messagesId, currentScope) : 0;
+					if (tracker && intent.scopeRevision === null) intent.scopeRevision = scopeRevision;
+					return !tracker || scopeRevision === intent.scopeRevision;
 				};
 
 				window.consumeChatSendScrollIntent = function(messagesId, explicitScope) {
