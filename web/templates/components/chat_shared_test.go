@@ -4619,11 +4619,33 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 			pair(surface);
 			await wait(100);
 			if (bottomDistance(surface) > 1) fail(surfaceId + ' did not follow asynchronous post-send growth');
+			if (!window.consumeChatSendScrollIntent(surfaceId)) fail(surfaceId + ' lost valid send intent before authoritative swap');
 			surface.remove();
 		}
-		async function verifyUnacceptedSendPreservesReading(surfaceId) {
-			var surface = document.createElement('div');
-			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
+			async function verifyPostSendReadingOverridesPendingIntent(surfaceId) {
+				var surface = document.createElement('div');
+				surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
+				for (var i = 0; i < 6; i++) pair(surface);
+				root.appendChild(surface);
+				var surfaceTracker = window.resolveScrollTracker('scrollTracker_' + surfaceId, surface);
+				window.observeChatTranscriptLayout({messages: surface, tracker: surfaceTracker, stateKey: 'post-send-' + surfaceId});
+				window.markChatSendScrollIntent(surfaceId);
+				surface.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
+				surface.scrollTop = 45;
+				surface.dispatchEvent(new Event('scroll'));
+			if (!surfaceTracker.userScrolledUp) fail(surfaceId + ' did not record post-send upward-reading intent');
+			var image = document.createElement('img');
+			image.setAttribute('data-chat-attachment-image', 'true');
+			surface.appendChild(image);
+			window.bindAttachmentImageSmartScroll(surface, 'scrollTracker_' + surfaceId, surfaceTracker);
+			if (!surfaceTracker.userScrolledUp) fail(surfaceId + ' stale send intent let delayed image binding override newer upward-reading intent');
+			if (window.consumeChatSendScrollIntent(surfaceId)) fail(surfaceId + ' stale send intent overrode newer upward-reading intent');				pair(surface);
+				await wait(100);
+				if (!surfaceTracker.userScrolledUp || Math.abs(surface.scrollTop - 45) > 1) fail(surfaceId + ' post-send reading intent did not survive delayed growth');
+				surface.remove();
+			}
+			async function verifyUnacceptedSendPreservesReading(surfaceId) {
+				var surface = document.createElement('div');			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
 			for (var i = 0; i < 6; i++) pair(surface);
 			root.appendChild(surface);
 			var surfaceTracker = window.resolveScrollTracker('scrollTracker_' + surfaceId, surface);
@@ -4709,6 +4731,8 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 			if (Math.abs(interactiveHydration.scrollTop - 60) > 1 || !interactiveTracker.userScrolledUp) fail('render barrier restored a stale position after an already-scrolled-up user moved again');
 			await verifyDeliberateSend('chat-messages');
 			await verifyDeliberateSend('task-thread-messages');
+			await verifyPostSendReadingOverridesPendingIntent('chat-post-send-messages');
+			await verifyPostSendReadingOverridesPendingIntent('task-thread-post-send-messages');
 			await verifyUnacceptedSendPreservesReading('chat-failed-messages');
 			await verifyUnacceptedSendPreservesReading('task-thread-failed-messages');
 			root.setAttribute('data-test-result', 'pass');

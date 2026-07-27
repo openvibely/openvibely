@@ -3466,21 +3466,29 @@ templ ChatAutoScrollScript() {
 						messagesId = target.charAt(0) === '#' ? target.substring(1) : target;
 					}
 					if (!messagesId) return;
-					window._chatSendScrollIntents[messagesId] = true;
 					var messagesEl = document.getElementById(messagesId);
 					var trackerKey = 'scrollTracker_' + messagesId;
 					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
 					if (tracker && tracker.resetOnUserSend) tracker.resetOnUserSend();
-				};
-
-				window.consumeChatSendScrollIntent = function(messagesId) {
-					if (!messagesId || !window._chatSendScrollIntents || !window._chatSendScrollIntents[messagesId]) return false;
-					delete window._chatSendScrollIntents[messagesId];
-					return true;
+					window._chatSendScrollIntents[messagesId] = {
+						intentRevision: tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0)
+					};
 				};
 
 				window.hasChatSendScrollIntent = function(messagesId) {
-					return !!(messagesId && window._chatSendScrollIntents && window._chatSendScrollIntents[messagesId]);
+					if (!messagesId || !window._chatSendScrollIntents) return false;
+					var intent = window._chatSendScrollIntents[messagesId];
+					if (!intent) return false;
+					var messagesEl = document.getElementById(messagesId);
+					var trackerKey = 'scrollTracker_' + messagesId;
+					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
+					return !tracker || tracker.intentRevision === (intent.intentRevision || 0);
+				};
+
+				window.consumeChatSendScrollIntent = function(messagesId) {
+					var isCurrent = window.hasChatSendScrollIntent(messagesId);
+					if (messagesId && window._chatSendScrollIntents) delete window._chatSendScrollIntents[messagesId];
+					return isCurrent;
 				};
 
 				window.scrollChatToBottomAfterLayout = function(messagesEl, smooth) {
