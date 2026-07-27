@@ -3472,8 +3472,18 @@ templ ChatAutoScrollScript() {
 					}
 					if (!messagesId) return;
 					var messagesEl = document.getElementById(messagesId);
-					if (typeof explicitScope !== 'string' && !intentScope && messagesEl && messagesEl.getAttribute) {
-						intentScope = messagesEl.getAttribute('data-scroll-intent-scope') || '';
+					var mountedScope = messagesEl && messagesEl.getAttribute
+						? (messagesEl.getAttribute('data-scroll-intent-scope') || '')
+						: '';
+					if (typeof explicitScope !== 'string' && !intentScope && messagesEl) {
+						intentScope = mountedScope;
+					}
+					if (messagesEl && intentScope !== mountedScope) {
+						window._chatSendScrollIntents[messagesId] = {
+							intentRevision: window._chatScrollIntentRevision || 0,
+							scope: intentScope
+						};
+						return;
 					}
 					var trackerKey = 'scrollTracker_' + messagesId;
 					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];

@@ -1389,6 +1389,11 @@ func TestChatAutoScrollScript_BindsAttachmentImageSmartScroll(t *testing.T) {
 			t.Fatalf("attachment image smart-scroll helper missing %q", r)
 		}
 	}
+	mismatchGuard := strings.Index(content, "if (messagesEl && intentScope !== mountedScope)")
+	trackerResolution := strings.Index(content, "var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];")
+	if mismatchGuard < 0 || trackerResolution < 0 || mismatchGuard > trackerResolution {
+		t.Fatal("send intent scope mismatch must be rejected before resolving or resetting the mounted transcript tracker")
+	}
 }
 
 func TestTaskThreadUsesSharedSendScrollTracker(t *testing.T) {
@@ -4679,6 +4684,28 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 				if (!taskBTracker.userScrolledUp || Math.abs(taskB.scrollTop - 45) > 1) fail('task A send intent overrode task B reading position');
 				taskB.remove();
 			}
+			async function verifyDelayedCrossTaskAcceptanceIsolation() {
+				var taskB = document.createElement('div');
+				taskB.id = 'task-thread-delayed-response-messages'; taskB.className = 'transcript'; taskB.style.visibility = '';
+				taskB.setAttribute('data-scroll-intent-scope', 'task-b');
+				for (var i = 0; i < 6; i++) pair(taskB);
+				root.appendChild(taskB);
+				var taskBTracker = window.resolveScrollTracker('scrollTracker_task-thread-delayed-response-messages', taskB);
+				taskBTracker.userScrolledUp = true;
+				taskB.scrollTop = 45;
+				var taskBRevision = taskBTracker.intentRevision;
+
+				var detachedTaskAForm = document.createElement('form');
+				detachedTaskAForm.setAttribute('hx-target', '#task-thread-delayed-response-messages');
+				detachedTaskAForm.setAttribute('data-scroll-intent-scope', 'task-a');
+				window.markChatSendScrollIntent(detachedTaskAForm);
+
+				if (!taskBTracker.userScrolledUp) fail('delayed task A acceptance reset task B upward-reading intent');
+				if (taskBTracker.intentRevision !== taskBRevision) fail('delayed task A acceptance changed task B intent revision');
+				if (Math.abs(taskB.scrollTop - 45) > 1) fail('delayed task A acceptance pinned task B transcript');
+				if (window.hasChatSendScrollIntent('task-thread-delayed-response-messages')) fail('delayed task A acceptance created current intent for task B');
+				taskB.remove();
+			}
 			async function verifyUnacceptedSendPreservesReading(surfaceId) {
 				var surface = document.createElement('div');			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
 			for (var i = 0; i < 6; i++) pair(surface);
@@ -4769,6 +4796,7 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 			await verifyPostSendReadingOverridesPendingIntent('chat-post-send-messages');
 			await verifyPostSendReadingOverridesPendingIntent('task-thread-post-send-messages');
 			await verifyCrossTaskSendIntentIsolation();
+			await verifyDelayedCrossTaskAcceptanceIsolation();
 			await verifyUnacceptedSendPreservesReading('chat-failed-messages');
 			await verifyUnacceptedSendPreservesReading('task-thread-failed-messages');
 			root.setAttribute('data-test-result', 'pass');
