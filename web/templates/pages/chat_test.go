@@ -54,6 +54,9 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		t.Fatalf("render chat content: %v", err)
 	}
 	content := buf.String()
+	if count := strings.Count(content, `data-scroll-intent-scope="project-scroll"`); count != 2 {
+		t.Fatalf("global Chat transcript and composer must share project-scoped send intent, got %d markers", count)
+	}
 
 	if !strings.Contains(content, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true"`) {
 		t.Fatal("global Chat must hide its initial transcript until hydration and scroll restoration settle")

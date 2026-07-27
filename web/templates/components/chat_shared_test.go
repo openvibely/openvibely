@@ -1371,7 +1371,11 @@ func TestChatAutoScrollScript_BindsAttachmentImageSmartScroll(t *testing.T) {
 		"window.markChatSendScrollIntent = function(formOrMessagesId, explicitScope)",
 		"window.consumeChatSendScrollIntent = function(messagesId, explicitScope)",
 		"window.hasChatSendScrollIntent = function(messagesId, explicitScope)",
-		"if ((intent.scope || '') !== currentScope) return false;",
+		"function chatSendScrollIntentScopeKey(scope)",
+		"var scopedIntents = window._chatSendScrollIntents[messagesId] || {};",
+		"scopedIntents[scopeKey] = { intentRevision: null, scope: intentScope };",
+		"var intent = scopedIntents && scopedIntents[chatSendScrollIntentScopeKey(currentScope)];",
+		"delete scopedIntents[chatSendScrollIntentScopeKey(currentScope)];",
 		"window.scrollChatToBottomAfterLayout = function(messagesEl, smooth)",
 		"window.bindAttachmentImageSmartScroll = function(messagesEl, trackerKey, trackerFallback)",
 		`querySelectorAll('img[data-chat-attachment-image="true"]')`,
@@ -4743,6 +4747,19 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 				taskBTracker.resetOnUserSend();
 				if (taskBTracker.userScrolledUp || bottomDistance(replacement) > 1) fail('task B replacement did not restore deliberate-send pinning');
 				replacement.remove();
+
+				var taskAReturn = document.createElement('div');
+				taskAReturn.id = messagesId; taskAReturn.className = 'transcript'; taskAReturn.style.visibility = '';
+				taskAReturn.setAttribute('data-scroll-intent-scope', 'task-a');
+				for (var k = 0; k < 7; k++) pair(taskAReturn);
+				root.appendChild(taskAReturn);
+				var taskAReturnTracker = window.resolveScrollTracker(trackerKey, taskAReturn);
+				taskAReturnTracker.userScrolledUp = true;
+				taskAReturn.scrollTop = 45;
+				if (!window.consumeChatSendScrollIntent(messagesId, 'task-a')) fail('delayed task A acceptance was not preserved for navigation back');
+				taskAReturnTracker.resetOnUserSend();
+				if (taskAReturnTracker.userScrolledUp || bottomDistance(taskAReturn) > 1) fail('returning to task A did not restore its deliberate-send pinning');
+				taskAReturn.remove();
 			}
 			async function verifyUnacceptedSendPreservesReading(surfaceId) {
 				var surface = document.createElement('div');			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';

@@ -1500,6 +1500,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-attachment-state-key={ chatAttachmentStateKey(config) }
 			if config.TaskID != "" {
 				data-scroll-intent-scope={ config.TaskID }
+			} else if config.ProjectID != "" {
+				data-scroll-intent-scope={ config.ProjectID }
 			}
 			class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"
 		>
@@ -3460,6 +3462,10 @@ templ ChatAutoScrollScript() {
 
 				window._chatSendScrollIntents = window._chatSendScrollIntents || {};
 
+				function chatSendScrollIntentScopeKey(scope) {
+					return 'scope:' + (scope || '');
+				}
+
 				window.markChatSendScrollIntent = function(formOrMessagesId, explicitScope) {
 					var messagesId = '';
 					var intentScope = typeof explicitScope === 'string' ? explicitScope : '';
@@ -3478,33 +3484,51 @@ templ ChatAutoScrollScript() {
 					if (typeof explicitScope !== 'string' && !intentScope && messagesEl) {
 						intentScope = mountedScope;
 					}
-					if (messagesEl && intentScope !== mountedScope) return;
+					var scopedIntents = window._chatSendScrollIntents[messagesId] || {};
+					var scopeKey = chatSendScrollIntentScopeKey(intentScope);
+					if (messagesEl && intentScope !== mountedScope) {
+						scopedIntents[scopeKey] = { intentRevision: null, scope: intentScope };
+						window._chatSendScrollIntents[messagesId] = scopedIntents;
+						return;
+					}
 					var trackerKey = 'scrollTracker_' + messagesId;
 					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
 					if (tracker && tracker.resetOnUserSend) tracker.resetOnUserSend();
-					window._chatSendScrollIntents[messagesId] = {
-						intentRevision: tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0),
+					scopedIntents[scopeKey] = {
+						intentRevision: tracker ? (tracker.intentRevision || 0) : null,
 						scope: intentScope
 					};
+					window._chatSendScrollIntents[messagesId] = scopedIntents;
 				};
 
 				window.hasChatSendScrollIntent = function(messagesId, explicitScope) {
 					if (!messagesId || !window._chatSendScrollIntents) return false;
-					var intent = window._chatSendScrollIntents[messagesId];
+					var messagesEl = document.getElementById(messagesId);
+					var mountedScope = messagesEl && messagesEl.getAttribute
+						? (messagesEl.getAttribute('data-scroll-intent-scope') || '')
+						: '';
+					var currentScope = typeof explicitScope === 'string' ? explicitScope : mountedScope;
+					if (messagesEl && currentScope !== mountedScope) return false;
+					var scopedIntents = window._chatSendScrollIntents[messagesId];
+					var intent = scopedIntents && scopedIntents[chatSendScrollIntentScopeKey(currentScope)];
 					if (!intent) return false;
+					var trackerKey = 'scrollTracker_' + messagesId;
+					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
+					if (tracker && intent.intentRevision === null) intent.intentRevision = tracker.intentRevision || 0;
+					return !tracker || tracker.intentRevision === intent.intentRevision;
+				};
+
+				window.consumeChatSendScrollIntent = function(messagesId, explicitScope) {
 					var messagesEl = document.getElementById(messagesId);
 					var currentScope = typeof explicitScope === 'string'
 						? explicitScope
 						: (messagesEl && messagesEl.getAttribute ? (messagesEl.getAttribute('data-scroll-intent-scope') || '') : '');
-					if ((intent.scope || '') !== currentScope) return false;
-					var trackerKey = 'scrollTracker_' + messagesId;
-					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
-					return !tracker || tracker.intentRevision === (intent.intentRevision || 0);
-				};
-
-				window.consumeChatSendScrollIntent = function(messagesId, explicitScope) {
-					var isCurrent = window.hasChatSendScrollIntent(messagesId, explicitScope);
-					if (messagesId && window._chatSendScrollIntents) delete window._chatSendScrollIntents[messagesId];
+					var isCurrent = window.hasChatSendScrollIntent(messagesId, currentScope);
+					var scopedIntents = messagesId && window._chatSendScrollIntents ? window._chatSendScrollIntents[messagesId] : null;
+					if (scopedIntents) {
+						delete scopedIntents[chatSendScrollIntentScopeKey(currentScope)];
+						if (Object.keys(scopedIntents).length === 0) delete window._chatSendScrollIntents[messagesId];
+					}
 					return isCurrent;
 				};
 
