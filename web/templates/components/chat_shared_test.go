@@ -1390,7 +1390,18 @@ func TestChatAutoScrollScript_BindsAttachmentImageSmartScroll(t *testing.T) {
 	}
 }
 
-func TestChatInputForm_MarksSendScrollIntentOnSubmit(t *testing.T) {
+func TestTaskThreadUsesSharedSendScrollTracker(t *testing.T) {
+	var taskBuf bytes.Buffer
+	if err := TaskThreadView(&models.Task{ID: "task-scroll"}, nil, nil, nil, nil, nil, false, 30).Render(context.Background(), &taskBuf); err != nil {
+		t.Fatalf("render task thread: %v", err)
+	}
+
+	if !strings.Contains(taskBuf.String(), "window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages)") {
+		t.Fatal("task Thread must register its page tracker with the shared send/layout coordinator")
+	}
+}
+
+func TestChatInputForm_CommitsSendScrollIntentAfterSuccessfulAcceptance(t *testing.T) {
 	config := ChatInputFormConfig{
 		FormID:       "chat-form",
 		InputID:      "message-input",
@@ -1404,11 +1415,17 @@ func TestChatInputForm_MarksSendScrollIntentOnSubmit(t *testing.T) {
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, "form.addEventListener('submit', markSendScrollIntent);") {
-		t.Fatal("chat input form should mark scroll intent on any real submit, including button click and Enter")
+	if strings.Contains(content, "form.addEventListener('submit', markSendScrollIntent);") {
+		t.Fatal("composer must not replace upward-reading intent before the send is accepted")
 	}
-	if !strings.Contains(content, "if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);") {
-		t.Fatal("submit handler should route through the shared send-scroll intent helper")
+	for _, required := range []string{
+		"if (event.detail.successful)",
+		"if (responseText.trim() !== '')",
+		"if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("accepted composer send must commit shared bottom-pin intent: missing %q", required)
+		}
 	}
 }
 
@@ -1489,7 +1506,6 @@ func TestStreamingScrollIntegration(t *testing.T) {
 				"tracker.shouldAutoScroll",
 				"addEventListener('done'",
 				"scrollTracker_",
-				"resetOnUserSend",
 			},
 		},
 		{
@@ -1511,6 +1527,9 @@ func TestStreamingScrollIntegration(t *testing.T) {
 				}
 			}
 		})
+	}
+	if strings.Contains(streamingContent, "tracker.resetOnUserSend()") {
+		t.Fatal("stream discovery without a deliberate local send must preserve upward-reading intent")
 	}
 }
 
@@ -3904,8 +3923,8 @@ func TestTaskThreadView_ClearsDraftBeforeSuccessfulThreadSwap(t *testing.T) {
 	if !strings.Contains(content, "window._taskThreadUserScrolledUp = false;") {
 		t.Fatal("beforeRequest should reset thread auto-scroll state for any thread send request")
 	}
-	if !strings.Contains(content, "if (window.markChatSendScrollIntent) window.markChatSendScrollIntent('task-thread-messages');") {
-		t.Fatal("beforeRequest should mark deliberate thread sends for post-swap attachment bottom alignment")
+	if strings.Contains(content, "if (window.markChatSendScrollIntent) window.markChatSendScrollIntent('task-thread-messages');") {
+		t.Fatal("thread request start must not override upward-reading intent before the send succeeds")
 	}
 	if !strings.Contains(content, "window._taskThreadSavedInput = ''") {
 		t.Fatal("beforeSwap should clear saved thread input on successful thread form swap")
@@ -3932,7 +3951,7 @@ func TestTaskThreadView_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *tes
 	if count := strings.Count(content, "window.bindAttachmentImageSmartScroll"); count < 4 {
 		t.Fatalf("expected task thread to bind attachment image smart-scroll on initial render and HTMX swap paths, got %d", count)
 	}
-	trackerInit := strings.Index(content, "window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages)")
+	trackerInit := strings.Index(content, "window._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages)")
 	initialBind := strings.Index(content, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker)")
 	if initialBind < 0 {
 		t.Fatal("task thread must bind attachment image smart-scroll with the task-thread tracker")
@@ -3962,7 +3981,7 @@ func TestTaskThreadView_BindsAttachmentImageSmartScrollAfterRenderAndSwap(t *tes
 		t.Fatal("task thread should handle full task detail content refreshes")
 	}
 	fullRefreshBody := content[fullRefreshIdx:]
-	fullRefreshTrackerInit := strings.Index(fullRefreshBody, "window._taskThreadPageTracker = new window.ChatScrollTracker(chatMessages)")
+	fullRefreshTrackerInit := strings.Index(fullRefreshBody, "window._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages)")
 	fullRefreshBind := strings.Index(fullRefreshBody, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker)")
 	if fullRefreshBind < 0 {
 		t.Fatal("task detail content refreshes must bind attachment image smart-scroll")
@@ -4582,6 +4601,42 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 		function bottomDistance(messages) { return messages.scrollHeight - messages.scrollTop - messages.clientHeight; }
 		function pair(messages) { var child = document.createElement('div'); child.className = 'pair'; child.setAttribute('data-execution-pair', 'true'); messages.appendChild(child); }
 		function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+		async function verifyDeliberateSend(surfaceId) {
+			var surface = document.createElement('div');
+			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
+			for (var i = 0; i < 6; i++) pair(surface);
+			root.appendChild(surface);
+			var trackerKey = 'scrollTracker_' + surfaceId;
+			var surfaceTracker = window.resolveScrollTracker(trackerKey, surface);
+			window.observeChatTranscriptLayout({messages: surface, tracker: surfaceTracker, stateKey: 'send-' + surfaceId});
+			surface.scrollTop = surface.scrollHeight;
+			surface.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
+			surface.scrollTop = 45;
+			surface.dispatchEvent(new Event('scroll'));
+			if (!surfaceTracker.userScrolledUp) fail(surfaceId + ' did not establish upward-reading intent');
+			window.markChatSendScrollIntent(surfaceId);
+			if (surfaceTracker.userScrolledUp || bottomDistance(surface) > 1) fail(surfaceId + ' successful send did not pin immediately');
+			pair(surface);
+			await wait(100);
+			if (bottomDistance(surface) > 1) fail(surfaceId + ' did not follow asynchronous post-send growth');
+			surface.remove();
+		}
+		async function verifyUnacceptedSendPreservesReading(surfaceId) {
+			var surface = document.createElement('div');
+			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
+			for (var i = 0; i < 6; i++) pair(surface);
+			root.appendChild(surface);
+			var surfaceTracker = window.resolveScrollTracker('scrollTracker_' + surfaceId, surface);
+			window.observeChatTranscriptLayout({messages: surface, tracker: surfaceTracker, stateKey: 'failed-' + surfaceId});
+			surface.scrollTop = surface.scrollHeight;
+			surface.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
+			surface.scrollTop = 45;
+			surface.dispatchEvent(new Event('scroll'));
+			pair(surface);
+			await wait(100);
+			if (!surfaceTracker.userScrolledUp || Math.abs(surface.scrollTop - 45) > 1) fail(surfaceId + ' unaccepted send overrode upward-reading intent');
+			surface.remove();
+		}
 		var messages = document.getElementById('messages');
 		var tracker = new window.ChatScrollTracker(messages);
 		var resolveHydration;
@@ -4652,6 +4707,10 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 			resolveReadingHydration();
 			await continuedReadingRestore;
 			if (Math.abs(interactiveHydration.scrollTop - 60) > 1 || !interactiveTracker.userScrolledUp) fail('render barrier restored a stale position after an already-scrolled-up user moved again');
+			await verifyDeliberateSend('chat-messages');
+			await verifyDeliberateSend('task-thread-messages');
+			await verifyUnacceptedSendPreservesReading('chat-failed-messages');
+			await verifyUnacceptedSendPreservesReading('task-thread-failed-messages');
 			root.setAttribute('data-test-result', 'pass');
 		}).catch(function(error) {
 			root.setAttribute('data-test-result', 'fail');

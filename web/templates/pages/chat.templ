@@ -171,8 +171,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('chat-messages') : false;
 						if (sentByUser) savedState = { scrollTop: 0, userScrolledUp: false, pinned: true };
 						if (!window._chatPageTracker || window._chatPageTracker.element !== chatMessages) {
-							if (window._chatPageTracker) window._chatPageTracker.destroy();
-							window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
+							window._chatPageTracker = window.resolveScrollTracker('scrollTracker_chat-messages', chatMessages);
 						}
 							if (sentByUser && window._chatPageTracker.resetOnUserSend) window._chatPageTracker.resetOnUserSend();
 							else window._chatPageTracker.userScrolledUp = savedState ? !!savedState.userScrolledUp : false;
@@ -569,9 +568,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			(function() {
 				var chatMessages = document.getElementById('chat-messages');
 				if (chatMessages && window.ChatScrollTracker) {
-					// Clean up any previous tracker
-					if (window._chatPageTracker) window._chatPageTracker.destroy();
-					window._chatPageTracker = new window.ChatScrollTracker(chatMessages);
+					window._chatPageTracker = window.resolveScrollTracker('scrollTracker_chat-messages', chatMessages);
 				}
 			})();
 
@@ -579,12 +576,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			if (!window._chatSwapHandlerAttached) {
 				window._chatSwapHandlerAttached = true;
 
-				// Rule 1: Reset tracker when user sends a message (beforeRequest fires before swap)
+				// Track request-local Chat streaming state without changing scroll intent
+				// until the shared composer confirms that the send was accepted.
 					document.body.addEventListener('htmx:beforeRequest', function(event) {
 						var triggerEl = event.detail.elt;
 						if (triggerEl && triggerEl.id === 'chat-form') {
-							var tracker = window._chatPageTracker;
-							if (tracker) tracker.resetOnUserSend();
 							// Hide prompt immediately on new send — will re-evaluate
 							// only after the new response completes and passes plan detection
 							window._chatStreamInProgress = true;

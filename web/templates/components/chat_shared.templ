@@ -517,8 +517,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						tracker = window[trackerKey];
 					}
-					// User just sent a message: reset scroll tracking and pin to bottom.
-					if (tracker) tracker.resetOnUserSend();
+					// The shared composer commits deliberate-send pin intent only after
+					// the server accepts the message. Stream discovery alone must preserve
+					// upward-reading intent from this or another browser surface.
 				}
 						// Buffer for accumulating streaming content
 						var textBuffer = '';
@@ -1812,9 +1813,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							function currentSubmitButton() {
 								return form.querySelector('button[type="submit"]');
 							}
-								function markSendScrollIntent() {
-							if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
-						}
 								function safeSubmit() {
 									var submitBtn = currentSubmitButton();
 									if (typeof form.requestSubmit === 'function') {
@@ -1824,7 +1822,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
 								form.dispatchEvent(submitEvent);
 							}
-							form.addEventListener('submit', markSendScrollIntent);
 
 				var messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';
 				var messageHistoryLimit = 50;
@@ -2571,6 +2568,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							// Keep user draft intact when the handler intentionally returns no content
 							// (e.g. model-setup guard toasts) so users don't lose their message.
 							if (responseText.trim() !== '') {
+								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 								rememberSubmittedMessage(messageHistorySubmittedValue);
 								resetMessageHistoryNavigation();
 								if (messageInput) messageInput.value = '';

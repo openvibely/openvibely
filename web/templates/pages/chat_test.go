@@ -60,6 +60,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 	}
 	for _, required := range []string{
 		"var chatScrollStateKey = 'chat-scroll-' + projectId;",
+		"window._chatPageTracker = window.resolveScrollTracker('scrollTracker_chat-messages', chatMessages);",
 		"window.saveChatTranscriptScrollState(chatScrollStateKey, chatMessages, window._chatPageTracker);",
 		"window.restoreChatTranscriptScroll({",
 		"stateKey: chatScrollStateKey",
