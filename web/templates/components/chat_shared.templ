@@ -3307,6 +3307,8 @@ templ ChatAutoScrollScript() {
 				container.dataset.earlierPrevScrollHeight = String(container.scrollHeight || 0);
 				container.dataset.earlierPrevScrollTop = String(container.scrollTop || 0);
 				container.dataset.earlierPrevBottomDistance = String((container.scrollHeight || 0) - (container.scrollTop || 0));
+				var tracker = container.id ? window['scrollTracker_' + container.id] : null;
+				container.dataset.earlierIntentRevision = String(tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0));
 				var anchor = getFirstVisibleExecutionPair(container);
 				if (anchor && anchor.pair) {
 					container.dataset.earlierAnchorExecId = anchor.pair.getAttribute('data-exec-id') || '';
@@ -3368,6 +3370,16 @@ templ ChatAutoScrollScript() {
 				});
 			};
 
+			function clearChatEarlierRestoreState(container) {
+				delete container.dataset.earlierPrevScrollHeight;
+				delete container.dataset.earlierPrevScrollTop;
+				delete container.dataset.earlierPrevBottomDistance;
+				delete container.dataset.earlierAnchorExecId;
+				delete container.dataset.earlierAnchorOffsetTop;
+				delete container.dataset.earlierIntentRevision;
+				delete container.dataset.earlierSwapPrepared;
+			}
+
 			window.restoreChatEarlierScroll = function(container) {
 				if (!container) return;
 				var prevHeight = parseInt(container.dataset.earlierPrevScrollHeight || '0', 10) || 0;
@@ -3375,9 +3387,10 @@ templ ChatAutoScrollScript() {
 				var prevBottomDistance = parseInt(container.dataset.earlierPrevBottomDistance || '0', 10) || 0;
 				var anchorExecID = container.dataset.earlierAnchorExecId || '';
 				var anchorOffsetTop = parseFloat(container.dataset.earlierAnchorOffsetTop || '0') || 0;
+				var preparedIntentRevision = parseInt(container.dataset.earlierIntentRevision || '0', 10) || 0;
 				if (prevHeight <= 0) {
 					container.dataset.earlierRequestLoading = 'false';
-					delete container.dataset.earlierSwapPrepared;
+					clearChatEarlierRestoreState(container);
 					return;
 				}
 					container.dataset.earlierAnchorRestoring = 'true';
@@ -3385,6 +3398,17 @@ templ ChatAutoScrollScript() {
 					Promise.resolve(hydrationPromise).then(function() {
 						delete container._chatEarlierHydrationPromise;
 						requestAnimationFrame(function() {
+					var tracker = container.id ? window['scrollTracker_' + container.id] : null;
+					var currentIntentRevision = tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0);
+					if (currentIntentRevision !== preparedIntentRevision) {
+						if (tracker && tracker.shouldAutoScroll()) window.chatAutoScroll.scrollToBottom(container, false);
+						clearChatEarlierRestoreState(container);
+						requestAnimationFrame(function() {
+							container.dataset.earlierAnchorRestoring = 'false';
+							container.dataset.earlierRequestLoading = 'false';
+						});
+						return;
+					}
 					var restored = false;
 					if (prevBottomDistance > 0) {
 						container.scrollTop = Math.max(0, (container.scrollHeight || 0) - prevBottomDistance);
@@ -3402,12 +3426,7 @@ templ ChatAutoScrollScript() {
 					if (!restored) {
 						container.scrollTop = prevTop + Math.max(0, (container.scrollHeight || 0) - prevHeight);
 					}
-					delete container.dataset.earlierPrevScrollHeight;
-					delete container.dataset.earlierPrevScrollTop;
-					delete container.dataset.earlierPrevBottomDistance;
-					delete container.dataset.earlierAnchorExecId;
-					delete container.dataset.earlierAnchorOffsetTop;
-					delete container.dataset.earlierSwapPrepared;
+					clearChatEarlierRestoreState(container);
 					requestAnimationFrame(function() {
 						container.dataset.earlierAnchorRestoring = 'false';
 						container.dataset.earlierRequestLoading = 'false';

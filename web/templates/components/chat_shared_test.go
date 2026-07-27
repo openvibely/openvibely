@@ -4562,6 +4562,11 @@ func TestChatAutoScrollScript_EarlierLoaderUsesTopIntentWithoutDuplicateRebinds(
 		"container.dataset.earlierPrevBottomDistance",
 		"container.dataset.earlierAnchorExecId",
 		"container.dataset.earlierAnchorOffsetTop",
+		"container.dataset.earlierIntentRevision",
+		"var preparedIntentRevision = parseInt(container.dataset.earlierIntentRevision",
+		"if (currentIntentRevision !== preparedIntentRevision)",
+		"if (tracker && tracker.shouldAutoScroll()) window.chatAutoScroll.scrollToBottom(container, false)",
+		"clearChatEarlierRestoreState(container)",
 		"requestAnimationFrame(function()",
 		"container.scrollTop = Math.max(0, (container.scrollHeight || 0) - prevBottomDistance)",
 		"currentOffset - anchorOffsetTop",
@@ -4631,6 +4636,60 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 		function bottomDistance(messages) { return messages.scrollHeight - messages.scrollTop - messages.clientHeight; }
 		function pair(messages) { var child = document.createElement('div'); child.className = 'pair'; child.setAttribute('data-execution-pair', 'true'); messages.appendChild(child); }
 		function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+		async function verifySendSupersedesEarlierRestore(surfaceId) {
+			var surface = document.createElement('div');
+			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
+			for (var i = 0; i < 7; i++) pair(surface);
+			var loader = document.createElement('div');
+			loader.setAttribute('data-earlier-loader', 'true');
+			loader.setAttribute('data-container-id', surfaceId);
+			surface.insertBefore(loader, surface.firstChild);
+			root.appendChild(surface);
+			var tracker = window.resolveScrollTracker('scrollTracker_' + surfaceId, surface);
+			window.observeChatTranscriptLayout({messages: surface, tracker: tracker, stateKey: 'pagination-send-' + surfaceId});
+			surface.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
+			surface.scrollTop = 45;
+			surface.dispatchEvent(new Event('scroll'));
+			window.prepareChatEarlierSwap(loader);
+			var resolveEarlierHydration;
+			surface._chatEarlierHydrationPromise = new Promise(function(resolve) { resolveEarlierHydration = resolve; });
+			window.restoreChatEarlierScroll(surface);
+			window.markChatSendScrollIntent(surfaceId);
+			var older = document.createElement('div');
+			older.className = 'pair'; older.setAttribute('data-execution-pair', 'true');
+			surface.insertBefore(older, loader.nextSibling);
+			await wait(100);
+			if (bottomDistance(surface) > 1) fail(surfaceId + ' did not remain pinned while earlier-page hydration was pending');
+			resolveEarlierHydration();
+			await wait(100);
+			if (bottomDistance(surface) > 1 || tracker.userScrolledUp) fail(surfaceId + ' delayed earlier-page restore overrode successful-send pinning');
+			surface.remove();
+		}
+		async function verifyReadingSupersedesEarlierRestore(surfaceId) {
+			var surface = document.createElement('div');
+			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
+			for (var i = 0; i < 7; i++) pair(surface);
+			var loader = document.createElement('div');
+			loader.setAttribute('data-earlier-loader', 'true');
+			loader.setAttribute('data-container-id', surfaceId);
+			surface.insertBefore(loader, surface.firstChild);
+			root.appendChild(surface);
+			var tracker = window.resolveScrollTracker('scrollTracker_' + surfaceId, surface);
+			window.prepareChatEarlierSwap(loader);
+			var resolveEarlierHydration;
+			surface._chatEarlierHydrationPromise = new Promise(function(resolve) { resolveEarlierHydration = resolve; });
+			window.restoreChatEarlierScroll(surface);
+			var older = document.createElement('div');
+			older.className = 'pair'; older.setAttribute('data-execution-pair', 'true');
+			surface.insertBefore(older, loader.nextSibling);
+			surface.dispatchEvent(new WheelEvent('wheel', {deltaY: -120, bubbles: true}));
+			surface.scrollTop = 90;
+			surface.dispatchEvent(new Event('scroll'));
+			resolveEarlierHydration();
+			await wait(100);
+			if (!tracker.userScrolledUp || Math.abs(surface.scrollTop - 90) > 1) fail(surfaceId + ' delayed earlier-page restore overrode newer upward-reading intent');
+			surface.remove();
+		}
 		async function verifyDeliberateSend(surfaceId) {
 			var surface = document.createElement('div');
 			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
@@ -4906,6 +4965,10 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 			resolveReadingHydration();
 			await continuedReadingRestore;
 			if (Math.abs(interactiveHydration.scrollTop - 60) > 1 || !interactiveTracker.userScrolledUp) fail('render barrier restored a stale position after an already-scrolled-up user moved again');
+			await verifySendSupersedesEarlierRestore('chat-messages-pagination-send');
+			await verifySendSupersedesEarlierRestore('task-thread-messages-pagination-send');
+			await verifyReadingSupersedesEarlierRestore('chat-messages-pagination-reading');
+			await verifyReadingSupersedesEarlierRestore('task-thread-messages-pagination-reading');
 			await verifyDeliberateSend('chat-messages');
 			await verifyDeliberateSend('task-thread-messages');
 			await verifyPostSendReadingOverridesPendingIntent('chat-post-send-messages');
