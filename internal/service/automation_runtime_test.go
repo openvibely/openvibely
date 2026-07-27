@@ -1036,7 +1036,8 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND kind = 'github_issue'`, fixture.definition.Automation.ID).Scan(&issueItems))
 	require.Equal(t, 3, issueItems, "one shared inbox execution must preserve distinct issue work items")
 
-	taskSvc := NewTaskService(fixture.taskRepo, nil, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(fixture.taskRepo, nil, workerSvc)
 	implementationNode := automationNodeByKey(t, fixture.definition, "implementation")
 	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
 		taskRepo: fixture.taskRepo, taskSvc: taskSvc}
@@ -1070,6 +1071,15 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.Contains(t, localRemoteOutput, "Local remote issue task")
+	localRemoteTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Local remote issue task")
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, localRemoteTask.Category, "GitHub assignment is approval, so the issue-specific task must be admitted immediately")
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, localRemoteTask.ID, submitted.ID, "the approved issue-specific task must be submitted to the worker")
+	case <-time.After(time.Second):
+		t.Fatal("approved GitHub issue task was not submitted to the worker")
+	}
 	resolvedRepoMu.Lock()
 	require.NotEmpty(t, resolvedRepoPaths)
 	require.Equal(t, fixture.project.RepoPath, resolvedRepoPaths[len(resolvedRepoPaths)-1], "Automation issue-task creation must fall back to the project's local Git remote")

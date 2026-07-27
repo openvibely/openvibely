@@ -101,7 +101,7 @@ func TestGitHubSDLCTemplateConfiguresAndValidatesIssueImplementationTask(t *test
 
 	implementation := automationDraftNodeByKey(t, candidate, "implementation")
 	require.NotEmpty(t, implementation.Config["prompt"])
-	require.Equal(t, string(models.CategoryBacklog), implementation.Config["category"])
+	require.Equal(t, string(models.CategoryActive), implementation.Config["category"])
 	require.EqualValues(t, 2, implementation.Config["priority"])
 	require.Empty(t, drafts.ValidateCandidate(candidate))
 
@@ -123,19 +123,21 @@ func TestGitHubSDLCTemplateConfiguresAndValidatesIssueImplementationTask(t *test
 		}[field], "maintained GitHub implementation %s must be required before Save", field)
 	}
 
-	invalidCategory := candidate
-	invalidCategory.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
-	for i := range invalidCategory.Nodes {
-		if invalidCategory.Nodes[i].Key != "implementation" {
-			continue
+	for _, category := range []models.TaskCategory{models.CategoryBacklog, models.CategoryScheduled} {
+		invalidCategory := candidate
+		invalidCategory.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
+		for i := range invalidCategory.Nodes {
+			if invalidCategory.Nodes[i].Key != "implementation" {
+				continue
+			}
+			invalidCategory.Nodes[i].Config = make(map[string]any, len(candidate.Nodes[i].Config))
+			for key, value := range candidate.Nodes[i].Config {
+				invalidCategory.Nodes[i].Config[key] = value
+			}
+			invalidCategory.Nodes[i].Config["category"] = string(category)
 		}
-		invalidCategory.Nodes[i].Config = make(map[string]any, len(candidate.Nodes[i].Config))
-		for key, value := range candidate.Nodes[i].Config {
-			invalidCategory.Nodes[i].Config[key] = value
-		}
-		invalidCategory.Nodes[i].Config["category"] = string(models.CategoryScheduled)
+		require.Contains(t, issueCodes(drafts.ValidateCandidate(invalidCategory)), "category", "approved issue-specific Implementation tasks must be Active, not %s", category)
 	}
-	require.Contains(t, issueCodes(drafts.ValidateCandidate(invalidCategory)), "category", "issue-specific Implementation tasks must remain Backlog")
 
 	devInbox := automationDraftNodeByKey(t, candidate, "dev_inbox")
 	require.Equal(t, string(models.CategoryScheduled), devInbox.Config["category"])

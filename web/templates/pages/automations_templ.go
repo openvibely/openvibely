@@ -3381,7 +3381,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 					return templ_7745c5c3_Err
 				}
 				if page.Result.Candidate.AdapterKey == "github_sdlc" && node.Role == "implementation" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 271, "<label class=\"form-control\"><span class=\"label-text\">Category</span><span class=\"input input-bordered flex items-center bg-base-200 text-base-content/70\">Backlog</span></label> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 271, "<label class=\"form-control\"><span class=\"label-text\">Category</span><span class=\"input input-bordered flex items-center bg-base-200 text-base-content/70\">Active</span></label> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

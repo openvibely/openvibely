@@ -179,7 +179,7 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 	}
 }
 
-func TestAutomationBuilderRestrictsGitHubImplementationCategoryToBacklog(t *testing.T) {
+func TestAutomationBuilderFixesGitHubImplementationCategoryToActive(t *testing.T) {
 	candidate := models.AutomationDraftCandidate{
 		SchemaVersion: 1, Name: "GitHub SDLC", AutomationType: "github_sdlc", AdapterKey: "github_sdlc",
 		Nodes: []models.AutomationDraftNode{
@@ -187,9 +187,8 @@ func TestAutomationBuilderRestrictsGitHubImplementationCategoryToBacklog(t *test
 				"prompt": "Poll assigned issues.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "hours", "repeat_interval": 1, "enabled": true,
 			}},
 			{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "implementation", Position: &models.AutomationDraftPoint{X: 220, Y: 0}, Config: map[string]any{
-				"prompt": "Implement the issue.", "category": "backlog", "priority": 2,
-			}},
-		},
+				"prompt": "Implement the issue.", "category": "active", "priority": 2,
+			}}},
 	}
 	var out bytes.Buffer
 	page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}}
@@ -215,8 +214,8 @@ func TestAutomationBuilderRestrictsGitHubImplementationCategoryToBacklog(t *test
 	if strings.Contains(body, `name="node_implementation_category"`) {
 		t.Fatalf("GitHub configuration-only Implementation category must not be editable")
 	}
-	if !strings.Contains(body, ">Backlog</span>") {
-		t.Fatalf("GitHub configuration-only Implementation category must render as Backlog")
+	if !strings.Contains(body, ">Active</span>") {
+		t.Fatalf("GitHub configuration-only Implementation category must render as Active")
 	}
 	devInboxCategory := selectMarkup("node_dev_inbox_category")
 	if !strings.Contains(devInboxCategory, `value="scheduled"`) {

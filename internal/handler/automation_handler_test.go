@@ -149,10 +149,10 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 		{name: "Task category", mutate: func(candidate *models.AutomationDraftCandidate) {
 			candidate.Nodes[1].Config["category"] = "scheduled"
 		}},
-		{name: "GitHub Implementation category", githubMaintained: true, wantMessage: "GitHub implementation task category must be backlog", mutate: func(candidate *models.AutomationDraftCandidate) {
+		{name: "GitHub Implementation category", githubMaintained: true, wantMessage: "GitHub implementation task category must be active", mutate: func(candidate *models.AutomationDraftCandidate) {
 			for i := range candidate.Nodes {
 				if candidate.Nodes[i].Role == "implementation" {
-					candidate.Nodes[i].Config["category"] = "scheduled"
+					candidate.Nodes[i].Config["category"] = "backlog"
 				}
 			}
 		}},

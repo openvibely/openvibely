@@ -220,7 +220,7 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, registeredImplementationConfig["prompt"], "first registration must publish executable issue-task instructions")
-	require.Equal(t, string(models.CategoryBacklog), registeredImplementationConfig["category"])
+	require.Equal(t, string(models.CategoryActive), registeredImplementationConfig["category"])
 	require.EqualValues(t, 2, registeredImplementationConfig["priority"])
 
 	_, err = db.ExecContext(ctx, `UPDATE automation_nodes SET config_json = '{}'

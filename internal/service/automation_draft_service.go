@@ -131,6 +131,9 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 			}
 			config["prompt"] = prompt
 			config["category"] = string(models.CategoryBacklog)
+			if adapter.Key == AutomationAdapterGitHubSDLC && node.Role == "implementation" {
+				config["category"] = string(models.CategoryActive)
+			}
 			config["priority"] = 2
 		}
 		if node.AllowedResources["schedule"] {
@@ -1011,8 +1014,8 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		}
 		category, categoryOK := node.Config["category"].(string)
 		if node.Role == "implementation" && adapter.Key == AutomationAdapterGitHubSDLC {
-			if !categoryOK || category != string(models.CategoryBacklog) {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "GitHub implementation task category must be backlog."})
+			if !categoryOK || category != string(models.CategoryActive) {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "GitHub implementation task category must be active."})
 			}
 		} else if !categoryOK || (category != string(models.CategoryBacklog) && category != string(models.CategoryScheduled)) {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "Automation task category must be backlog or scheduled."})
