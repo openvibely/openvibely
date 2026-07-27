@@ -348,6 +348,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				}
 				data-window-limit={ fmt.Sprintf("%d", windowLimit) }
 				data-earlier-url-base={ fmt.Sprintf("/tasks/%s/thread?limit=%d", task.ID, windowLimit) }
+				data-scroll-intent-scope={ task.ID }
 			>
 			@TaskPrimaryAgentBanner(agentDef)
 			if hasEarlier && len(executions) > 0 {
@@ -436,7 +437,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			}
 
 			function _consumeTaskThreadSendScrollIntent() {
-				var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages') : false;
+				var sentByUser = window.consumeChatSendScrollIntent ? window.consumeChatSendScrollIntent('task-thread-messages', _taskThreadTaskId()) : false;
 				if (!sentByUser) return false;
 				if (window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {
 					window._taskThreadPageTracker.resetOnUserSend();

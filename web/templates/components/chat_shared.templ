@@ -1498,6 +1498,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-clear-func-name={ config.FormID + "ClearAttachments" }
 			data-message-history-key={ chatMessageHistoryStorageKey(config) }
 			data-attachment-state-key={ chatAttachmentStateKey(config) }
+			if config.TaskID != "" {
+				data-scroll-intent-scope={ config.TaskID }
+			}
 			class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"
 		>
 			<!-- Drop zone overlay -->
@@ -3457,36 +3460,46 @@ templ ChatAutoScrollScript() {
 
 				window._chatSendScrollIntents = window._chatSendScrollIntents || {};
 
-				window.markChatSendScrollIntent = function(formOrMessagesId) {
+				window.markChatSendScrollIntent = function(formOrMessagesId, explicitScope) {
 					var messagesId = '';
+					var intentScope = typeof explicitScope === 'string' ? explicitScope : '';
 					if (typeof formOrMessagesId === 'string') {
 						messagesId = formOrMessagesId;
 					} else if (formOrMessagesId && formOrMessagesId.getAttribute) {
 						var target = formOrMessagesId.getAttribute('hx-target') || '';
 						messagesId = target.charAt(0) === '#' ? target.substring(1) : target;
+						if (typeof explicitScope !== 'string') intentScope = formOrMessagesId.getAttribute('data-scroll-intent-scope') || '';
 					}
 					if (!messagesId) return;
 					var messagesEl = document.getElementById(messagesId);
+					if (typeof explicitScope !== 'string' && !intentScope && messagesEl && messagesEl.getAttribute) {
+						intentScope = messagesEl.getAttribute('data-scroll-intent-scope') || '';
+					}
 					var trackerKey = 'scrollTracker_' + messagesId;
 					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
 					if (tracker && tracker.resetOnUserSend) tracker.resetOnUserSend();
 					window._chatSendScrollIntents[messagesId] = {
-						intentRevision: tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0)
+						intentRevision: tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0),
+						scope: intentScope
 					};
 				};
 
-				window.hasChatSendScrollIntent = function(messagesId) {
+				window.hasChatSendScrollIntent = function(messagesId, explicitScope) {
 					if (!messagesId || !window._chatSendScrollIntents) return false;
 					var intent = window._chatSendScrollIntents[messagesId];
 					if (!intent) return false;
 					var messagesEl = document.getElementById(messagesId);
+					var currentScope = typeof explicitScope === 'string'
+						? explicitScope
+						: (messagesEl && messagesEl.getAttribute ? (messagesEl.getAttribute('data-scroll-intent-scope') || '') : '');
+					if ((intent.scope || '') !== currentScope) return false;
 					var trackerKey = 'scrollTracker_' + messagesId;
 					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
 					return !tracker || tracker.intentRevision === (intent.intentRevision || 0);
 				};
 
-				window.consumeChatSendScrollIntent = function(messagesId) {
-					var isCurrent = window.hasChatSendScrollIntent(messagesId);
+				window.consumeChatSendScrollIntent = function(messagesId, explicitScope) {
+					var isCurrent = window.hasChatSendScrollIntent(messagesId, explicitScope);
 					if (messagesId && window._chatSendScrollIntents) delete window._chatSendScrollIntents[messagesId];
 					return isCurrent;
 				};

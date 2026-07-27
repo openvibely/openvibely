@@ -1368,9 +1368,10 @@ func TestChatAutoScrollScript_BindsAttachmentImageSmartScroll(t *testing.T) {
 	content := buf.String()
 
 	required := []string{
-		"window.markChatSendScrollIntent = function(formOrMessagesId)",
-		"window.consumeChatSendScrollIntent = function(messagesId)",
-		"window.hasChatSendScrollIntent = function(messagesId)",
+		"window.markChatSendScrollIntent = function(formOrMessagesId, explicitScope)",
+		"window.consumeChatSendScrollIntent = function(messagesId, explicitScope)",
+		"window.hasChatSendScrollIntent = function(messagesId, explicitScope)",
+		"if ((intent.scope || '') !== currentScope) return false;",
 		"window.scrollChatToBottomAfterLayout = function(messagesEl, smooth)",
 		"window.bindAttachmentImageSmartScroll = function(messagesEl, trackerKey, trackerFallback)",
 		`querySelectorAll('img[data-chat-attachment-image="true"]')`,
@@ -1396,8 +1397,15 @@ func TestTaskThreadUsesSharedSendScrollTracker(t *testing.T) {
 		t.Fatalf("render task thread: %v", err)
 	}
 
-	if !strings.Contains(taskBuf.String(), "window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages)") {
+	content := taskBuf.String()
+	if !strings.Contains(content, "window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages)") {
 		t.Fatal("task Thread must register its page tracker with the shared send/layout coordinator")
+	}
+	if count := strings.Count(content, `data-scroll-intent-scope="task-scroll"`); count != 2 {
+		t.Fatalf("task Thread transcript and composer must share the task-scoped send intent, got %d markers", count)
+	}
+	if !strings.Contains(content, "window.consumeChatSendScrollIntent('task-thread-messages', _taskThreadTaskId())") {
+		t.Fatal("task Thread must consume send intent using the current task identity")
 	}
 }
 
@@ -4644,6 +4652,33 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 				if (!surfaceTracker.userScrolledUp || Math.abs(surface.scrollTop - 45) > 1) fail(surfaceId + ' post-send reading intent did not survive delayed growth');
 				surface.remove();
 			}
+			async function verifyCrossTaskSendIntentIsolation() {
+				var taskA = document.createElement('div');
+				taskA.id = 'task-thread-cross-task-messages'; taskA.className = 'transcript'; taskA.style.visibility = '';
+				taskA.setAttribute('data-scroll-intent-scope', 'task-a');
+				for (var i = 0; i < 6; i++) pair(taskA);
+				root.appendChild(taskA);
+				window.resolveScrollTracker('scrollTracker_task-thread-cross-task-messages', taskA);
+				window.markChatSendScrollIntent('task-thread-cross-task-messages');
+				taskA.remove();
+
+				var taskB = document.createElement('div');
+				taskB.id = 'task-thread-cross-task-messages'; taskB.className = 'transcript'; taskB.style.visibility = '';
+				taskB.setAttribute('data-scroll-intent-scope', 'task-b');
+				for (var j = 0; j < 6; j++) pair(taskB);
+				root.appendChild(taskB);
+				var taskBTracker = window.resolveScrollTracker('scrollTracker_task-thread-cross-task-messages', taskB);
+				taskBTracker.userScrolledUp = true;
+				taskB.scrollTop = 45;
+				if (!taskBTracker.userScrolledUp) fail('task B did not restore upward-reading intent');
+				var image = document.createElement('img');
+				image.setAttribute('data-chat-attachment-image', 'true');
+				taskB.appendChild(image);
+				window.bindAttachmentImageSmartScroll(taskB, 'scrollTracker_task-thread-cross-task-messages', taskBTracker);
+				if (window.hasChatSendScrollIntent('task-thread-cross-task-messages')) fail('task A send intent leaked into task B');
+				if (!taskBTracker.userScrolledUp || Math.abs(taskB.scrollTop - 45) > 1) fail('task A send intent overrode task B reading position');
+				taskB.remove();
+			}
 			async function verifyUnacceptedSendPreservesReading(surfaceId) {
 				var surface = document.createElement('div');			surface.id = surfaceId; surface.className = 'transcript'; surface.style.visibility = '';
 			for (var i = 0; i < 6; i++) pair(surface);
@@ -4733,6 +4768,7 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 			await verifyDeliberateSend('task-thread-messages');
 			await verifyPostSendReadingOverridesPendingIntent('chat-post-send-messages');
 			await verifyPostSendReadingOverridesPendingIntent('task-thread-post-send-messages');
+			await verifyCrossTaskSendIntentIsolation();
 			await verifyUnacceptedSendPreservesReading('chat-failed-messages');
 			await verifyUnacceptedSendPreservesReading('task-thread-failed-messages');
 			root.setAttribute('data-test-result', 'pass');
