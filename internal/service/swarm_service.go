@@ -185,6 +185,17 @@ func (s *SwarmService) CreateSwarmTask(ctx context.Context, req CreateSwarmTaskR
 }
 
 func (s *SwarmService) StartPlanner(ctx context.Context, parentTaskID string) error {
+	return s.startPlanner(ctx, parentTaskID, false)
+}
+
+// StartPlannerForScheduledRun starts or resumes the planner for one scheduled
+// occurrence. startsNewContext is transient dispatch metadata for the actual
+// planner execution; it is not persisted on the parent or planner task.
+func (s *SwarmService) StartPlannerForScheduledRun(ctx context.Context, parentTaskID string, startsNewContext bool) error {
+	return s.startPlanner(ctx, parentTaskID, startsNewContext)
+}
+
+func (s *SwarmService) startPlanner(ctx context.Context, parentTaskID string, startsNewContext bool) error {
 	s.orchestration.Lock()
 	defer s.orchestration.Unlock()
 	parent, err := s.taskRepo.GetByID(ctx, parentTaskID)
@@ -206,6 +217,7 @@ func (s *SwarmService) StartPlanner(ctx context.Context, parentTaskID string) er
 	if existing, err := s.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner); err != nil {
 		return err
 	} else if existing != nil {
+		existing.StartsNewContext = startsNewContext
 		return s.submitIfRunnable(ctx, existing)
 	}
 	prompt := plannerPrompt(parent.Prompt, maxWorkers(parent))
@@ -223,6 +235,7 @@ func (s *SwarmService) StartPlanner(ctx context.Context, parentTaskID string) er
 		SwarmStatus:       "planning",
 		SwarmConfig:       `{"isolation":"read_only","rerun_generation":1,"required":true}`,
 		SwarmSequence:     0,
+		StartsNewContext:  startsNewContext,
 	}
 	if err := s.createSwarmChild(ctx, parent, child); err != nil {
 		return err

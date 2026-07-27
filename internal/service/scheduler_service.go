@@ -23,6 +23,7 @@ const staleQueuedTaskTimeout = 10 * time.Minute
 // time (not catching up on all missed occurrences).
 type SwarmPlannerStarter interface {
 	StartPlanner(ctx context.Context, parentTaskID string) error
+	StartPlannerForScheduledRun(ctx context.Context, parentTaskID string, startsNewContext bool) error
 }
 
 type SchedulerService struct {
@@ -204,7 +205,7 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 				task.ID, task.Title, sched.ID, sched.RepeatType)
 		}
 		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
-			if err := s.swarmStarter.StartPlanner(ctx, task.ID); err != nil {
+			if err := s.swarmStarter.StartPlannerForScheduledRun(ctx, task.ID, sched.ClearContextOnStart); err != nil {
 				applog.Infof("[scheduler] checkDueTasks error starting swarm planner task=%s: %v", task.ID, err)
 				continue
 			}

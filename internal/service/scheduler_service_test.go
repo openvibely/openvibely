@@ -149,6 +149,81 @@ func TestSchedulerService_CheckDueTasks_PersistsContextBoundaryAfterWorkerReload
 	}
 }
 
+func TestSchedulerService_CheckDueTasks_SwarmPlannerPersistsContextBoundary(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	model := &models.LLMConfig{Name: "Scheduled swarm context model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, model); err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mockLLM := testutil.NewMockLLMCaller()
+	mockLLM.Response = `{"workers":[{"title":"Inspect","prompt":"Inspect the task","worker_kind":"analysis","required":true,"read_only":true}]}`
+	mockLLM.TextOnly = mockLLM.Response
+	llmSvc.SetLLMCaller(mockLLM)
+
+	workerSvc := NewWorkerService(llmSvc, 1, projectRepo)
+	workerSvc.SetTaskRepo(taskRepo)
+	workerSvc.SetLLMConfigRepo(llmConfigRepo)
+	workerSvc.SetExecutionRepo(execRepo)
+	workerSvc.Start(ctx)
+	defer workerSvc.Stop()
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
+
+	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{
+		ProjectID: "default", Title: "Scheduled swarm context", Prompt: "Plan on schedule", Category: models.CategoryBacklog,
+		MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create swarm: %v", err)
+	}
+	now := time.Now().UTC()
+	schedule := &models.Schedule{
+		TaskID: parent.ID, RunAt: now.Add(-time.Minute), RepeatType: models.RepeatOnce, RepeatInterval: 1,
+		Enabled: true, ClearContextOnStart: true,
+	}
+	if err := scheduleRepo.Create(ctx, schedule); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+	scheduler := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	scheduler.SetSwarmPlannerStarter(swarmSvc)
+	scheduler.checkDueTasks(ctx)
+
+	planner, err := taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("load planner: planner=%#v err=%v", planner, err)
+	}
+	var execution *models.Execution
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		executions, listErr := execRepo.ListByTask(ctx, planner.ID)
+		if listErr != nil {
+			t.Fatalf("list planner executions: %v", listErr)
+		}
+		if len(executions) > 0 {
+			execution = &executions[0]
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if execution == nil {
+		t.Fatal("timed out waiting for planner execution")
+	}
+	if !execution.StartsNewContext {
+		t.Fatal("expected scheduled swarm planner execution to persist a new-context boundary")
+	}
+}
+
 func TestSchedulerService_CheckDueTasks_StartsPlannerForSwarmParent(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)

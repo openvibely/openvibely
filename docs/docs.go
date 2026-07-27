@@ -3096,6 +3096,9 @@ const docTemplate = `{
         "models.Schedule": {
             "type": "object",
             "properties": {
+                "clear_context_on_start": {
+                    "type": "boolean"
+                },
                 "created_at": {
                     "type": "string"
                 },
