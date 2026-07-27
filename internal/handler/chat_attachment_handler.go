@@ -198,12 +198,15 @@ func (h *Handler) cleanupUnpublishedPendingAttachmentSession(ctx context.Context
 	if h.threadInputRepo == nil {
 		return errors.New("thread input repository is unavailable")
 	}
-	referenced, err := h.threadInputRepo.AttachmentSessionReferenced(context.WithoutCancel(ctx), sessionID)
+	retired, err := h.threadInputRepo.RetireAttachmentSessionIfUnowned(context.WithoutCancel(ctx), sessionID)
 	if err != nil {
 		return err
 	}
-	if referenced {
+	if !retired {
 		return nil
+	}
+	if h.pendingRemovalHook != nil {
+		h.pendingRemovalHook(sessionID)
 	}
 	if err := os.RemoveAll(filepath.Join(uploadsDir, "chat", "pending", sessionID)); err != nil {
 		return fmt.Errorf("removing unpublished pending attachment session %s: %w", sessionID, err)

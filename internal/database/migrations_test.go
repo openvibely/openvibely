@@ -94,6 +94,42 @@ func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
 	}
 }
 
+func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "retired-attachment-sessions-131.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatal(err)
+	}
+
+	const sessionID = "0123456789abcdef0123456789abcdef"
+	if _, err := db.Exec(`INSERT INTO retired_attachment_sessions(session_id) VALUES (?)`, sessionID); err != nil {
+		t.Fatalf("retiring attachment session: %v", err)
+	}
+	_, err = db.Exec(`
+		INSERT INTO thread_inputs
+			(id, scope, project_id, input_mode, input_status, content, attachment_session_id, queue_position)
+		VALUES ('late-owner', 'chat', 'default', 'queued', 'pending', 'late', ?, 1)`, sessionID)
+	if err == nil || !strings.Contains(err.Error(), "attachment session retired") {
+		t.Fatalf("late owner error = %v, want attachment session retired", err)
+	}
+
+	plan := explainQueryPlan(t, db, `
+		SELECT 1 FROM thread_inputs
+		WHERE attachment_session_id = ?
+		  AND attachment_session_id IS NOT NULL AND attachment_session_id <> ''`, sessionID)
+	if !strings.Contains(plan, "USING COVERING INDEX idx_thread_inputs_attachment_session_id") {
+		t.Fatalf("attachment session ownership plan = %q, want covering ownership index", plan)
+	}
+}
+
 func explainQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
 	t.Helper()
 	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
@@ -587,8 +623,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 130 {
-		t.Fatalf("max goose version = %d, want 130", maxVersion)
+	if maxVersion != 131 {
+		t.Fatalf("max goose version = %d, want 131", maxVersion)
 	}
 }
 
@@ -739,8 +775,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 130 {
-		t.Fatalf("max goose version = %d, want 130", maxVersion)
+	if maxVersion != 131 {
+		t.Fatalf("max goose version = %d, want 131", maxVersion)
 	}
 }
 
@@ -1226,8 +1262,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 130 {
-		t.Fatalf("max goose version = %d, want 130", maxVersion)
+	if maxVersion != 131 {
+		t.Fatalf("max goose version = %d, want 131", maxVersion)
 	}
 }
 
@@ -1578,8 +1614,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 130 {
-		t.Fatalf("max goose version = %d, want 130", maxVersion)
+	if maxVersion != 131 {
+		t.Fatalf("max goose version = %d, want 131", maxVersion)
 	}
 }
 

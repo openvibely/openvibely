@@ -901,6 +901,15 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 		}
 	}
 
+	// Establish the durable cleanup boundary while the deletion transaction owns
+	// the database connection. The migration triggers reject any later thread
+	// input that attempts to acquire one of these sessions after commit.
+	for _, sessionID := range manifest.PendingUploadSessionIDs {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO retired_attachment_sessions(session_id) VALUES (?)`, sessionID); err != nil {
+			return manifest, false, fmt.Errorf("retiring pending attachment session for task deletion: %w", err)
+		}
+	}
+
 	if beforeDelete != nil {
 		if err = beforeDelete(manifest); err != nil {
 			return manifest, false, err

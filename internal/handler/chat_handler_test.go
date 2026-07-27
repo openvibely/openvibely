@@ -1666,6 +1666,37 @@ func TestHandler_BrowserPendingAttachmentMetadataFailurePreservesReferencedSessi
 	require.NotNil(t, storedExec)
 }
 
+func TestCleanupUnpublishedPendingAttachmentSession_RejectsOwnerAcquiredBeforeRemoval(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Pending attachment retirement race")
+	otherTask := createTask(t, h, project.ID, "Late pending owner", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusPending
+	})
+	const sessionID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(sessionDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "staged.txt"), []byte("content"), 0o600))
+
+	var ownershipErr error
+	h.pendingRemovalHook = func(gotSessionID string) {
+		require.Equal(t, sessionID, gotSessionID)
+		ownershipErr = h.threadInputRepo.CreateQueued(context.Background(), &models.ThreadInput{
+			Scope:               models.ThreadInputScopeTask,
+			ProjectID:           project.ID,
+			TaskID:              otherTask.ID,
+			InputMode:           models.ThreadInputModeQueued,
+			InputStatus:         models.ThreadInputPending,
+			Content:             "late durable owner",
+			AttachmentSessionID: sessionID,
+		})
+	}
+
+	require.NoError(t, h.cleanupUnpublishedPendingAttachmentSession(context.Background(), sessionID))
+	require.ErrorContains(t, ownershipErr, "attachment session retired")
+	require.NoDirExists(t, sessionDir)
+}
+
 func TestHandler_DirectBrowserAttachmentFailureRemovesUnpublishedSession(t *testing.T) {
 	tests := []struct {
 		name       string

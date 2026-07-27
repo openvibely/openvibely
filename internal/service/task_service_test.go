@@ -1159,6 +1159,39 @@ func TestTaskService_Delete_PreservesAttachmentsWhenDurableDeleteFails(t *testin
 	require.Len(t, attachments, 1)
 }
 
+func TestTaskService_Delete_RollsBackPendingSessionRetirementWhenDeleteFails(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	uploadsDir := filepath.Join(t.TempDir(), "uploads")
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	svc.SetDeletionUploadsDir(uploadsDir)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Failed delete pending owner", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	const sessionID = "cccccccccccccccccccccccccccccccc"
+	require.NoError(t, threadInputRepo.CreateQueued(ctx, &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID,
+		InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending,
+		Content: "owned before failed deletion", AttachmentSessionID: sessionID,
+	}))
+	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(sessionDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "pending.txt"), []byte("pending"), 0o600))
+	_, err := db.Exec(`CREATE TRIGGER fail_pending_task_delete BEFORE DELETE ON tasks WHEN OLD.id = '` + task.ID + `' BEGIN SELECT RAISE(ABORT, 'injected pending delete failure'); END`)
+	require.NoError(t, err)
+
+	err = svc.Delete(ctx, task.ID)
+	require.ErrorContains(t, err, "injected pending delete failure")
+	require.DirExists(t, sessionDir)
+	var retired int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM retired_attachment_sessions WHERE session_id = ?`, sessionID).Scan(&retired))
+	require.Zero(t, retired, "failed durable deletion must roll back session retirement")
+	stored, getErr := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.NotNil(t, stored)
+}
+
 func TestTaskService_Delete_PreventsUploadMetadataRaceFromLeakingFile(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -1194,6 +1227,46 @@ func TestTaskService_Delete_PreventsUploadMetadataRaceFromLeakingFile(t *testing
 	require.NoError(t, svc.Delete(ctx, task.ID))
 	require.Error(t, <-insertResult, "metadata publication after deletion starts must fail")
 	require.NoFileExists(t, latePath)
+}
+
+func TestTaskService_Delete_RejectsPendingSessionOwnerAcquiredAfterCommitBeforeRemoval(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	uploadsDir := filepath.Join(t.TempDir(), "uploads")
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	svc.SetDeletionUploadsDir(uploadsDir)
+	ctx := context.Background()
+	deletedTask := &models.Task{ProjectID: "default", Title: "Deleted pending owner", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	lateTask := &models.Task{ProjectID: "default", Title: "Late pending owner", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, deletedTask))
+	require.NoError(t, taskRepo.Create(ctx, lateTask))
+	const sessionID = "dddddddddddddddddddddddddddddddd"
+	require.NoError(t, threadInputRepo.CreateQueued(ctx, &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: deletedTask.ID,
+		InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending,
+		Content: "owned before deletion", AttachmentSessionID: sessionID,
+	}))
+	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(sessionDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "pending.txt"), []byte("pending"), 0o600))
+
+	var ownershipErr error
+	svc.beforePendingSessionRemoval = func(gotSessionID string) {
+		require.Equal(t, sessionID, gotSessionID)
+		ownershipErr = threadInputRepo.CreateQueued(context.Background(), &models.ThreadInput{
+			Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: lateTask.ID,
+			InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending,
+			Content: "late durable owner", AttachmentSessionID: sessionID,
+		})
+	}
+
+	require.NoError(t, svc.Delete(ctx, deletedTask.ID))
+	require.ErrorContains(t, ownershipErr, "attachment session retired")
+	require.NoDirExists(t, sessionDir)
+	stored, err := taskRepo.GetByID(ctx, lateTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
 }
 
 func TestTaskService_Delete_RejectsUnsafePendingUploadSessionBeforeCancellation(t *testing.T) {

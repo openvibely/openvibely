@@ -915,6 +915,43 @@ func (r *ThreadInputRepo) AttachmentSessionReferenced(ctx context.Context, sessi
 	return referenced != 0, nil
 }
 
+func (r *ThreadInputRepo) RetireAttachmentSessionIfUnowned(ctx context.Context, sessionID string) (retired bool, err error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("beginning attachment session retirement: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var referenced int
+	if err = tx.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM thread_inputs
+			WHERE attachment_session_id = ?
+			  AND attachment_session_id IS NOT NULL
+			  AND attachment_session_id <> ''
+		)`, sessionID).Scan(&referenced); err != nil {
+		return false, fmt.Errorf("checking attachment session ownership before retirement: %w", err)
+	}
+	if referenced != 0 {
+		if err = tx.Commit(); err != nil {
+			return false, fmt.Errorf("committing owned attachment session check: %w", err)
+		}
+		return false, nil
+	}
+	if _, err = tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO retired_attachment_sessions(session_id) VALUES (?)`, sessionID); err != nil {
+		return false, fmt.Errorf("retiring unowned attachment session: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return false, fmt.Errorf("committing attachment session retirement: %w", err)
+	}
+	return true, nil
+}
+
 func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID string) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE thread_inputs

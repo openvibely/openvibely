@@ -26,6 +26,7 @@ type TaskService struct {
 	queuedTaskThreadFollowupHook      func(context.Context, string) (bool, error)
 	failedTaskThreadFollowupRetryHook func(context.Context, string) (bool, error)
 	updateCategoryTaskLoader          func(context.Context, string) (*models.Task, error)
+	beforePendingSessionRemoval       func(string)
 }
 
 func NewTaskService(repo *repository.TaskRepo, _ *repository.AttachmentRepo, workerSvc *WorkerService) *TaskService {
@@ -389,6 +390,9 @@ func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, cate
 	}
 	for _, sessionID := range manifest.PendingUploadSessionIDs {
 		path := filepath.Join(s.uploadsDir, "chat", "pending", sessionID)
+		if s.beforePendingSessionRemoval != nil {
+			s.beforePendingSessionRemoval(sessionID)
+		}
 		if err := os.RemoveAll(path); err != nil {
 			applog.Infof("[task-svc] Delete error removing pending uploads %s after durable deletion: %v", path, err)
 			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing pending uploads %s: %w", path, err))

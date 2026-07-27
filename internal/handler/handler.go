@@ -97,6 +97,7 @@ type Handler struct {
 	hostedSSOInstanceID        string
 	appBaseURL                 string
 	desktopMode                bool
+	pendingRemovalHook         func(string)
 
 	loginFailuresMu   sync.Mutex
 	loginFailureTimes []time.Time
