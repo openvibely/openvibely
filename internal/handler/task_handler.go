@@ -1941,6 +1941,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	taskID := c.Param("taskId")
 	message := c.FormValue("message")
 	agentID := c.FormValue("agent_id")
+	sessionID := c.FormValue("attachment_session_id")
 
 	if message == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "message is required")
@@ -1953,6 +1954,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		return err
 	}
 	if task == nil {
+		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+			applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s for missing task: %v", sessionID, cleanupErr)
+		}
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 	if h.swarmSvc != nil && task.SwarmRole == models.SwarmRoleParent {
@@ -1967,7 +1971,6 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 
 	// Check for pending image attachments (for vision-aware agent selection)
-	sessionID := c.FormValue("attachment_session_id")
 	hasImages := hasPendingImages(sessionID)
 
 	// Select agent: prefer form value, fall back to task's assigned agent, then auto-select.
@@ -2046,6 +2049,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 	if err := h.execRepo.CreateDirectTaskFollowup(c.Request().Context(), exec); err != nil {
 		applog.Infof("[handler] TaskThreadSend error creating execution: %v", err)
+		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+			applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s after execution create failure: %v", sessionID, cleanupErr)
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
 	if err := h.applySwarmChildFollowupStart(c.Request().Context(), task, message); err != nil {
