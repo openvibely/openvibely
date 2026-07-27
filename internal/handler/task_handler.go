@@ -2022,6 +2022,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
 			applog.Infof("[handler] TaskThreadSend error creating queued input: %v", err)
+			if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+				applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s: %v", sessionID, cleanupErr)
+			}
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
 		}
 		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(c.Request().Context(), queued); err != nil {

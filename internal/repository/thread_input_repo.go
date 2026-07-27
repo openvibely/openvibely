@@ -900,6 +900,21 @@ func (r *ThreadInputRepo) CancelPendingForTask(ctx context.Context, taskID strin
 	return nil
 }
 
+func (r *ThreadInputRepo) AttachmentSessionReferenced(ctx context.Context, sessionID string) (bool, error) {
+	var referenced int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM thread_inputs
+			WHERE attachment_session_id = ?
+			  AND attachment_session_id IS NOT NULL
+			  AND attachment_session_id <> ''
+		)`, sessionID).Scan(&referenced)
+	if err != nil {
+		return false, fmt.Errorf("checking attachment session ownership: %w", err)
+	}
+	return referenced != 0, nil
+}
+
 func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID string) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE thread_inputs

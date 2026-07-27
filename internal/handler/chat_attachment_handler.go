@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -183,6 +185,30 @@ func (h *Handler) DeleteChatAttachment(c echo.Context) error {
 	// Return updated attachments list for this execution
 	attachments, _ := h.chatAttachmentRepo.ListByExecution(c.Request().Context(), executionID)
 	return render(c, http.StatusOK, components.ChatAttachmentListOnly(attachments))
+}
+
+func (h *Handler) cleanupUnpublishedPendingAttachmentSession(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	if !isValidPendingAttachmentSessionID(sessionID) {
+		return fmt.Errorf("invalid pending attachment session: %q", sessionID)
+	}
+	if h.threadInputRepo == nil {
+		return errors.New("thread input repository is unavailable")
+	}
+	referenced, err := h.threadInputRepo.AttachmentSessionReferenced(context.WithoutCancel(ctx), sessionID)
+	if err != nil {
+		return err
+	}
+	if referenced {
+		return nil
+	}
+	if err := os.RemoveAll(filepath.Join(uploadsDir, "chat", "pending", sessionID)); err != nil {
+		return fmt.Errorf("removing unpublished pending attachment session %s: %w", sessionID, err)
+	}
+	return nil
 }
 
 func isValidPendingAttachmentSessionID(sessionID string) bool {
