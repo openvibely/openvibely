@@ -916,7 +916,7 @@ func TestModelsContent_NoCLIOptionInAuthSelects(t *testing.T) {
 	}
 }
 
-func TestModelsContent_OAuthLinksLaunchInSystemBrowser(t *testing.T) {
+func TestModelsContent_OAuthLinksUseRuntimeSpecificLaunch(t *testing.T) {
 	agents := []models.LLMConfig{
 		{
 			ID:         "openai-oauth",
@@ -934,19 +934,22 @@ func TestModelsContent_OAuthLinksLaunchInSystemBrowser(t *testing.T) {
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "return launchOAuthInSystemBrowser(this.dataset.oauthPath)") {
-		t.Fatal("expected OAuth links to launch through system-browser helper")
+	if !strings.Contains(out, "return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)") {
+		t.Fatal("expected OAuth links to use the runtime-specific launch helper")
 	}
 	if !strings.Contains(out, "data-oauth-path=\"/models/openai-oauth/oauth/initiate\"") {
 		t.Fatal("expected OAuth links to expose model-specific oauth path via data attribute")
 	}
+	if !strings.Contains(out, "getAttribute('data-runtime') !== 'desktop'") {
+		t.Fatal("expected OAuth launcher to preserve normal navigation outside desktop runtime")
+	}
 	if !strings.Contains(out, "external=1") {
-		t.Fatal("expected system-browser helper to request backend external launch mode")
+		t.Fatal("expected desktop OAuth launcher to request backend external launch mode")
 	}
 	if !strings.Contains(out, "fetch(externalURL") {
-		t.Fatal("expected OAuth launcher to call backend in background via fetch")
+		t.Fatal("expected desktop OAuth launcher to call backend in background via fetch")
 	}
 	if strings.Contains(out, "window.location.href = externalURL") {
-		t.Fatal("expected OAuth launcher to avoid page navigation")
+		t.Fatal("expected desktop OAuth launcher to avoid WebView navigation")
 	}
 }

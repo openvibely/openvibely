@@ -341,11 +341,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 											{ oauthStatusText(agent) }
 										</span>
 									if !agent.HasValidOAuthToken() {
-											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } class="btn btn-xs btn-outline" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath)">
+											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } class="btn btn-xs btn-outline" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">
 											Connect with OAuth
 										</a>
 									} else {
-											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } class="btn btn-xs btn-ghost" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath)">
+											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } class="btn btn-xs btn-ghost" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">
 												Re-authorize
 											</a>
 									}
@@ -755,10 +755,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 		</style>
 
 			<script>
-					function launchOAuthInSystemBrowser(path) {
+					function launchOAuthInSystemBrowser(path, anchor) {
 						var href = path || '';
 						if (!href) return false;
 						href = modelMutationURL(href);
+						if (document.documentElement.getAttribute('data-runtime') !== 'desktop') {
+							if (anchor) anchor.href = href;
+							return true;
+						}
 						var externalURL = href;
 						if (externalURL.indexOf('?') === -1) {
 							externalURL += '?external=1';
