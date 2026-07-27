@@ -1158,6 +1158,31 @@ func TestTaskService_Delete_PreservesAttachmentsWhenDurableDeleteFails(t *testin
 	require.Len(t, attachments, 1)
 }
 
+func TestTaskService_Delete_RejectsUnsafePendingUploadSessionBeforeCancellation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	workerSvc := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetDeletionUploadCleanup(repository.NewChatAttachmentRepo(db), repository.NewThreadInputRepo(db), filepath.Join(t.TempDir(), "uploads"))
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Unsafe pending upload", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	_, err := db.Exec(`INSERT INTO thread_inputs
+		(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
+		VALUES ('unsafe-delete-input', 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', '../outside', 1)`, task.ID)
+	require.NoError(t, err)
+	cancelled := false
+	workerSvc.RegisterCancel(task.ID, func() { cancelled = true })
+
+	err = svc.Delete(ctx, task.ID)
+	require.ErrorContains(t, err, "invalid pending attachment session")
+	require.False(t, cancelled)
+	stored, getErr := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.NotNil(t, stored)
+}
+
 func TestTaskService_Delete_SurfacesPostDeleteAttachmentCleanupFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -1186,6 +1211,10 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	uploadsDir := filepath.Join(t.TempDir(), "uploads")
+	svc.SetDeletionUploadCleanup(chatAttachmentRepo, threadInputRepo, uploadsDir)
 	cancelled := make(chan struct{})
 	managedWorktree := filepath.Join(t.TempDir(), "managed-worktree")
 	if err := os.Mkdir(managedWorktree, 0o755); err != nil {
@@ -1226,6 +1255,28 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	if err := attachmentRepo.Create(ctx, attachment); err != nil {
 		t.Fatalf("Create attachment: %v", err)
 	}
+
+	executionAttachmentPath := filepath.Join(uploadsDir, "chat", "delete-exec", "execution.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(executionAttachmentPath), 0o700))
+	require.NoError(t, os.WriteFile(executionAttachmentPath, []byte("execution attachment"), 0o600))
+	_, err = db.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent) VALUES ('delete-exec', ?, 'completed', 'prompt')`, task.ID)
+	require.NoError(t, err)
+	require.NoError(t, chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: "delete-exec",
+		FileName:    "execution.txt",
+		FilePath:    executionAttachmentPath,
+		MediaType:   "text/plain",
+		FileSize:    20,
+	}))
+
+	const pendingSessionID = "0123456789abcdef0123456789abcdef"
+	pendingUploadDir := filepath.Join(uploadsDir, "chat", "pending", pendingSessionID)
+	require.NoError(t, os.MkdirAll(pendingUploadDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingUploadDir, "pending.txt"), []byte("pending"), 0o600))
+	_, err = db.Exec(`INSERT INTO thread_inputs
+		(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
+		VALUES ('delete-thread-input', 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', ?, 1)`, task.ID, pendingSessionID)
+	require.NoError(t, err)
 
 	// Verify attachment exists in DB
 	attachments, err := attachmentRepo.ListByTask(ctx, task.ID)
@@ -1271,7 +1322,13 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 
 	// Verify physical file was deleted
 	if _, err := os.Stat(tmpFilePath); !os.IsNotExist(err) {
-		t.Error("expected file to be deleted")
+		t.Error("expected task attachment file to be deleted")
+	}
+	if _, err := os.Stat(executionAttachmentPath); !os.IsNotExist(err) {
+		t.Error("expected execution attachment file to be deleted")
+	}
+	if _, err := os.Stat(pendingUploadDir); !os.IsNotExist(err) {
+		t.Error("expected pending upload session to be deleted")
 	}
 	if _, err := os.Stat(managedWorktree); err != nil {
 		t.Fatalf("task deletion must preserve managed worktrees for lineage-safe cleanup: %v", err)

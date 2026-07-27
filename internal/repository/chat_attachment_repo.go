@@ -140,6 +140,32 @@ func (r *ChatAttachmentRepo) ListByExecutionIDs(ctx context.Context, execIDs []s
 	return result, nil
 }
 
+func (r *ChatAttachmentRepo) ListFilePathsByTask(ctx context.Context, taskID string) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT ca.file_path
+		FROM chat_attachments ca
+		JOIN executions e ON e.id = ca.execution_id
+		WHERE e.task_id = ?
+		ORDER BY ca.file_path`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("listing chat attachment paths by task: %w", err)
+	}
+	defer rows.Close()
+
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("scanning chat attachment path by task: %w", err)
+		}
+		paths = append(paths, path)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating chat attachment paths by task: %w", err)
+	}
+	return paths, nil
+}
+
 func (r *ChatAttachmentRepo) Delete(ctx context.Context, id string) error {
 	query := `DELETE FROM chat_attachments WHERE id = ?`
 	result, err := r.db.ExecContext(ctx, query, id)

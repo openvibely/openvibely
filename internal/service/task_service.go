@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -18,6 +19,9 @@ var ErrDuplicateTask = errors.New("task with this name already exists in this pr
 type TaskService struct {
 	repo                              *repository.TaskRepo
 	attachmentRepo                    *repository.AttachmentRepo
+	chatAttachmentRepo                *repository.ChatAttachmentRepo
+	threadInputRepo                   *repository.ThreadInputRepo
+	uploadsDir                        string
 	workerSvc                         *WorkerService
 	agentRepo                         *repository.AgentRepo
 	goalSvc                           *TaskGoalService
@@ -33,6 +37,12 @@ func NewTaskService(repo *repository.TaskRepo, attachmentRepo *repository.Attach
 		attachmentRepo: attachmentRepo,
 		workerSvc:      workerSvc,
 	}
+}
+
+func (s *TaskService) SetDeletionUploadCleanup(chatAttachmentRepo *repository.ChatAttachmentRepo, threadInputRepo *repository.ThreadInputRepo, uploadsDir string) {
+	s.chatAttachmentRepo = chatAttachmentRepo
+	s.threadInputRepo = threadInputRepo
+	s.uploadsDir = uploadsDir
 }
 
 func (s *TaskService) SetAgentRepo(agentRepo *repository.AgentRepo) {
@@ -339,6 +349,33 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models
 func (s *TaskService) Delete(ctx context.Context, id string) error {
 	applog.Infof("[task-svc] Delete id=%s", id)
 
+	// Capture every file owner before the relational rows disappear. These reads
+	// happen before cancellation so a preparation failure leaves the task runnable.
+	attachments, err := s.attachmentRepo.ListByTask(ctx, id)
+	if err != nil {
+		return fmt.Errorf("listing attachments for deletion: %w", err)
+	}
+	var chatAttachmentPaths []string
+	if s.chatAttachmentRepo != nil {
+		chatAttachmentPaths, err = s.chatAttachmentRepo.ListFilePathsByTask(ctx, id)
+		if err != nil {
+			return fmt.Errorf("listing execution attachments for deletion: %w", err)
+		}
+	}
+	var pendingUploadDirs []string
+	if s.threadInputRepo != nil {
+		sessionIDs, listErr := s.threadInputRepo.ListAttachmentSessionIDsByTask(ctx, id)
+		if listErr != nil {
+			return fmt.Errorf("listing pending uploads for deletion: %w", listErr)
+		}
+		for _, sessionID := range sessionIDs {
+			if !isPendingAttachmentSessionID(sessionID) {
+				return fmt.Errorf("invalid pending attachment session for task deletion: %q", sessionID)
+			}
+			pendingUploadDirs = append(pendingUploadDirs, filepath.Join(s.uploadsDir, "chat", "pending", sessionID))
+		}
+	}
+
 	// Stop running work before its execution and task rows disappear. Cancellation
 	// only holds the worker cancellation mutex long enough to remove the callback;
 	// provider and process shutdown happen outside that lock and are not awaited.
@@ -346,39 +383,52 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 		s.workerSvc.CancelRunningTask(id)
 	}
 
-	// Get all attachments for this task
-	attachments, err := s.attachmentRepo.ListByTask(ctx, id)
-	if err != nil {
-		applog.Infof("[task-svc] Delete error listing attachments: %v", err)
-		return fmt.Errorf("listing attachments for deletion: %w", err)
-	}
-
-	// Delete the task and all task-owned relational state atomically through the
-	// database foreign-key cascades before touching files. If this durable
-	// boundary fails, attachment metadata and files remain consistent.
+	// The task delete is the durable boundary for all task-owned relational state.
+	// No filesystem or git operation runs while SQLite holds the write connection.
 	if err := s.repo.Delete(ctx, id); err != nil {
-		applog.Infof("[task-svc] Delete error deleting task: %v", err)
 		return err
 	}
 
-	// Filesystem cleanup deliberately happens after the database connection is
-	// released. Surface failures because the task is already durably deleted and
-	// the remaining path requires operator cleanup.
+	// Filesystem cleanup is synchronous after the durable delete so failures are
+	// visible instead of silently leaking uploads. Managed git worktrees are not
+	// touched here; lineage-aware orphan cleanup remains their owner.
 	var cleanupErrors []error
+	removeFile := func(kind, path string) {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			applog.Infof("[task-svc] Delete error removing %s %s after durable deletion: %v", kind, path, err)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing %s %s: %w", kind, path, err))
+		}
+	}
 	for _, att := range attachments {
-		if err := os.Remove(att.FilePath); err != nil && !os.IsNotExist(err) {
-			applog.Infof("[task-svc] Delete error removing file %s after durable deletion: %v", att.FilePath, err)
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing attachment %s: %w", att.FilePath, err))
-		} else {
-			applog.Infof("[task-svc] Delete removed file %s", att.FilePath)
+		removeFile("attachment", att.FilePath)
+	}
+	for _, path := range chatAttachmentPaths {
+		removeFile("execution attachment", path)
+	}
+	for _, path := range pendingUploadDirs {
+		if err := os.RemoveAll(path); err != nil {
+			applog.Infof("[task-svc] Delete error removing pending uploads %s after durable deletion: %v", path, err)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing pending uploads %s: %w", path, err))
 		}
 	}
 	if err := errors.Join(cleanupErrors...); err != nil {
 		return err
 	}
 
-	applog.Infof("[task-svc] Delete success id=%s (deleted %d attachments)", id, len(attachments))
+	applog.Infof("[task-svc] Delete success id=%s (deleted %d task attachments, %d execution attachments, %d pending upload sessions)", id, len(attachments), len(chatAttachmentPaths), len(pendingUploadDirs))
 	return nil
+}
+
+func isPendingAttachmentSessionID(sessionID string) bool {
+	if len(sessionID) != 32 {
+		return false
+	}
+	for _, ch := range sessionID {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *TaskService) RunTask(ctx context.Context, id string) error {
