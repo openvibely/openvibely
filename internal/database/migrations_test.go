@@ -56,11 +56,47 @@ func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
 			t.Errorf("query plan for %s = %q, want covering index", indexName, plan)
 		}
 	}
+	manifestPlan := explainQueryPlan(t, db, `
+		WITH owned_sessions(attachment_session_id) AS (
+			SELECT ti.attachment_session_id
+			FROM thread_inputs ti
+			WHERE ti.task_id = ?
+			  AND ti.attachment_session_id IS NOT NULL AND ti.attachment_session_id <> ''
+			UNION
+			SELECT ti.attachment_session_id
+			FROM executions owner_execution
+			CROSS JOIN thread_inputs ti INDEXED BY idx_thread_inputs_steering_turn
+				ON ti.run_execution_id = owner_execution.id
+			WHERE owner_execution.task_id = ? AND ti.task_id IS NULL
+			  AND ti.attachment_session_id IS NOT NULL AND ti.attachment_session_id <> ''
+		)
+		SELECT owned.attachment_session_id
+		FROM owned_sessions owned
+		WHERE NOT EXISTS (
+			SELECT 1 FROM thread_inputs other
+			WHERE other.attachment_session_id IS NOT NULL AND other.attachment_session_id <> ''
+			  AND other.attachment_session_id = owned.attachment_session_id
+			  AND (
+				(other.task_id IS NOT NULL AND other.task_id <> ?)
+				OR (other.task_id IS NULL AND NOT EXISTS (
+					SELECT 1 FROM executions other_execution
+					WHERE other_execution.id = other.run_execution_id AND other_execution.task_id = ?
+				))
+			  )
+		  )`, "task", "task", "task", "task")
+	if strings.Contains(manifestPlan, "SCAN ti") || strings.Contains(manifestPlan, "SCAN other") {
+		t.Fatalf("pending upload manifest plan = %q, want indexed thread input searches", manifestPlan)
+	}
+	if !strings.Contains(manifestPlan, "idx_thread_inputs_pending_task") ||
+		!strings.Contains(manifestPlan, "idx_thread_inputs_steering_turn") ||
+		!strings.Contains(manifestPlan, "idx_thread_inputs_attachment_session_id") {
+		t.Fatalf("pending upload manifest plan = %q, want task, execution, and shared-session indexes", manifestPlan)
+	}
 }
 
-func explainQueryPlan(t *testing.T, db *sql.DB, query string, arg any) string {
+func explainQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
 	t.Helper()
-	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, arg)
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1126,6 +1126,45 @@ func TestHandler_ClearChat(t *testing.T) {
 	}
 }
 
+func TestHandler_ClearChat_CleansExecutionLinkedPendingUploads(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Clear Chat Pending Uploads")
+	chatTask := createTask(t, h, project.ID, "Chat with queued upload", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusRunning
+		task.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, chatTask.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+		exec.PromptSent = "active chat"
+	})
+	const sessionID = "fedcba9876543210fedcba9876543210"
+	pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(pendingDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "queued.txt"), []byte("queued"), 0o600))
+	queued := &models.ThreadInput{
+		Scope: models.ThreadInputScopeChat, ProjectID: project.ID, RunExecutionID: exec.ID,
+		AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending,
+		Content: "queued chat", AttachmentSessionID: sessionID,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+
+	req := httptest.NewRequest(http.MethodDelete, "/chat/history?project_id="+project.ID, nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoDirExists(t, pendingDir)
+	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, models.ThreadInputCancelled, stored.InputStatus)
+	require.Empty(t, stored.RunExecutionID)
+}
+
 func TestHandler_ClearChat_OnlyDeletesCurrentProject(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

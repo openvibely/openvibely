@@ -863,13 +863,36 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 		return manifest, false, fmt.Errorf("listing execution attachment paths for deletion: %w", err)
 	}
 	if err = readPaths(`
-		SELECT DISTINCT ti.attachment_session_id
-		FROM thread_inputs ti
-		WHERE ti.task_id = ? AND ti.attachment_session_id IS NOT NULL AND ti.attachment_session_id <> ''
-		  AND NOT EXISTS (
+		WITH owned_sessions(attachment_session_id) AS (
+			SELECT ti.attachment_session_id
+			FROM thread_inputs ti
+			WHERE ti.task_id = ?
+			  AND ti.attachment_session_id IS NOT NULL AND ti.attachment_session_id <> ''
+			UNION
+			SELECT ti.attachment_session_id
+			FROM executions owner_execution
+			CROSS JOIN thread_inputs ti INDEXED BY idx_thread_inputs_steering_turn
+				ON ti.run_execution_id = owner_execution.id
+			WHERE owner_execution.task_id = ? AND ti.task_id IS NULL
+			  AND ti.attachment_session_id IS NOT NULL AND ti.attachment_session_id <> ''
+		)
+		SELECT owned.attachment_session_id
+		FROM owned_sessions owned
+		WHERE NOT EXISTS (
 			SELECT 1 FROM thread_inputs other
-			WHERE other.attachment_session_id = ti.attachment_session_id AND other.task_id <> ti.task_id
-		  )`, &manifest.PendingUploadSessionIDs, id); err != nil {
+			WHERE other.attachment_session_id IS NOT NULL AND other.attachment_session_id <> ''
+			  AND other.attachment_session_id = owned.attachment_session_id
+			  AND (
+				(other.task_id IS NOT NULL AND other.task_id <> ?)
+				OR (
+					other.task_id IS NULL
+					AND NOT EXISTS (
+						SELECT 1 FROM executions other_execution
+						WHERE other_execution.id = other.run_execution_id AND other_execution.task_id = ?
+					)
+				)
+			  )
+		  )`, &manifest.PendingUploadSessionIDs, id, id, id, id); err != nil {
 		return manifest, false, fmt.Errorf("listing pending upload sessions for deletion: %w", err)
 	}
 	for _, sessionID := range manifest.PendingUploadSessionIDs {

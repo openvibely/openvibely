@@ -1280,6 +1280,40 @@ func TestTaskService_Delete_PreservesFilesStillReferencedByAnotherTask(t *testin
 	require.NotNil(t, stored)
 }
 
+func TestTaskService_Delete_PreservesExecutionLinkedSessionOwnedByAnotherProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	uploadsDir := filepath.Join(t.TempDir(), "uploads")
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	svc.SetDeletionUploadsDir(uploadsDir)
+	ctx := context.Background()
+	require.NoError(t, func() error {
+		_, err := db.Exec(`INSERT INTO projects(id, name) VALUES ('other-project', 'Other project')`)
+		return err
+	}())
+	first := &models.Task{ProjectID: "default", Title: "First chat owner", Category: models.CategoryChat, Status: models.StatusCompleted, Prompt: "test"}
+	second := &models.Task{ProjectID: "other-project", Title: "Second chat owner", Category: models.CategoryChat, Status: models.StatusCompleted, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, first))
+	require.NoError(t, taskRepo.Create(ctx, second))
+	_, err := db.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent) VALUES ('first-shared-exec', ?, 'completed', 'first'), ('second-shared-exec', ?, 'completed', 'second')`, first.ID, second.ID)
+	require.NoError(t, err)
+	const sharedSession = "abcdef0123456789abcdef0123456789"
+	sharedDir := filepath.Join(uploadsDir, "chat", "pending", sharedSession)
+	require.NoError(t, os.MkdirAll(sharedDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(sharedDir, "pending.txt"), []byte("pending"), 0o600))
+	_, err = db.Exec(`INSERT INTO thread_inputs
+		(id, scope, project_id, run_execution_id, input_mode, input_status, content, attachment_session_id, queue_position)
+		VALUES ('first-shared-chat-input', 'chat', 'default', 'first-shared-exec', 'queued', 'cancelled', 'first', ?, 1),
+		       ('second-shared-chat-input', 'chat', 'other-project', 'second-shared-exec', 'queued', 'pending', 'second', ?, 1)`, sharedSession, sharedSession)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.Delete(ctx, first.ID))
+	require.DirExists(t, sharedDir)
+	stored, err := taskRepo.GetByID(ctx, second.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+}
+
 func TestTaskService_Delete_SurfacesPostDeleteAttachmentCleanupFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -1891,10 +1925,14 @@ func TestTaskService_DeleteAll_CleansEveryUploadOwner(t *testing.T) {
 			pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 			require.NoError(t, os.MkdirAll(pendingDir, 0o700))
 			require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "pending.txt"), []byte("pending"), 0o600))
-			_, err = db.Exec(`INSERT INTO thread_inputs(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
-				VALUES (?, 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', ?, 1)`, "bulk-input-"+tt.name, task.ID, sessionID)
+			if tt.category == models.CategoryChat {
+				_, err = db.Exec(`INSERT INTO thread_inputs(id, scope, project_id, run_execution_id, input_mode, input_status, content, attachment_session_id, queue_position)
+						VALUES (?, 'chat', 'default', ?, 'queued', 'pending', 'follow up', ?, 1)`, "bulk-input-"+tt.name, execID, sessionID)
+			} else {
+				_, err = db.Exec(`INSERT INTO thread_inputs(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
+						VALUES (?, 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', ?, 1)`, "bulk-input-"+tt.name, task.ID, sessionID)
+			}
 			require.NoError(t, err)
-
 			count, err := tt.delete(svc, ctx, "default")
 			require.NoError(t, err)
 			require.Equal(t, 1, count)

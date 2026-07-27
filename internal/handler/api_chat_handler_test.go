@@ -791,6 +791,94 @@ func TestAPIChatMessage_QueuesBehindActiveTurnWithAttachments(t *testing.T) {
 	assert.Contains(t, entries[0].Name(), "queued.txt")
 }
 
+func TestAPIChatMessage_QueuedAttachmentMetadataFailureRemovesPendingSession(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Chat Queue Rollback Project")
+	activeTask := createTask(t, h, project.ID, "API Active Chat Rollback", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active api chat"
+	})
+	require.NoError(t, func() error {
+		_, err := db.Exec(`CREATE TRIGGER fail_api_queued_input BEFORE INSERT ON thread_inputs BEGIN SELECT RAISE(ABORT, 'injected queued metadata failure'); END`)
+		return err
+	}())
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	require.NoError(t, writer.WriteField("message", "queued api chat rollback"))
+	require.NoError(t, writer.WriteField("project_id", project.ID))
+	part, err := writer.CreateFormFile("attachments", "queued.txt")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("queued attachment content"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+	pendingRoot := filepath.Join(uploadsDir, "chat", "pending")
+	entries, readErr := os.ReadDir(pendingRoot)
+	if !os.IsNotExist(readErr) {
+		require.NoError(t, readErr)
+		require.Empty(t, entries, "failed queued metadata publication must remove its pending session")
+	}
+}
+
+func TestAPIChatMessage_ImmediateAttachmentMetadataFailureRemovesFile(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "API Chat Immediate Rollback Project")
+	require.NoError(t, func() error {
+		_, err := db.Exec(`CREATE TRIGGER fail_api_chat_attachment BEFORE INSERT ON chat_attachments BEGIN SELECT RAISE(ABORT, 'injected attachment metadata failure'); END`)
+		return err
+	}())
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	require.NoError(t, writer.WriteField("message", "immediate api chat rollback"))
+	require.NoError(t, writer.WriteField("project_id", project.ID))
+	part, err := writer.CreateFormFile("attachments", "immediate.txt")
+	require.NoError(t, err)
+	_, err = part.Write([]byte("immediate attachment content"))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+	var files []string
+	require.NoError(t, filepath.Walk(filepath.Join(uploadsDir, "chat"), func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if !info.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	}))
+	require.Empty(t, files, "failed immediate metadata publication must remove its file")
+	chatEntries, readErr := os.ReadDir(filepath.Join(uploadsDir, "chat"))
+	if !os.IsNotExist(readErr) {
+		require.NoError(t, readErr)
+		require.Empty(t, chatEntries, "failed immediate metadata publication must remove its empty execution directory")
+	}
+}
+
 func TestAPIChatMessageStatus_Queued(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
