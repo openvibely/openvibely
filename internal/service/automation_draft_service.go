@@ -914,6 +914,11 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 		if _, enabledOK := node.Config["enabled"].(bool); !enabledOK {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Trigger enabled state must be true or false."})
 		}
+		if clearContextOnStart, present := node.Config["clear_context_on_start"]; present {
+			if _, valid := clearContextOnStart.(bool); !valid {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "clear_context_on_start", Message: "Clear context on start must be true or false."})
+			}
+		}
 	}
 	if node.Type == models.AutomationNodeAction {
 		issues = append(issues, validateAutomationActionConfig(node, node.Role)...)
@@ -1282,11 +1287,45 @@ func (s *AutomationDraftService) CurrentCandidate(ctx context.Context, projectID
 	if err != nil {
 		return nil, err
 	}
+	candidate, err = s.hydratePersistedScheduleContext(ctx, projectID, candidate, current)
+	if err != nil {
+		return nil, err
+	}
 	candidate, err = s.normalizeReopenedCandidate(candidate)
 	if err != nil {
 		return nil, err
 	}
 	return s.PreviewCandidate(ctx, projectID, candidate, current)
+}
+
+func (s *AutomationDraftService) hydratePersistedScheduleContext(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, current *models.AutomationDefinition) (models.AutomationDraftCandidate, error) {
+	scheduleByNode := make(map[string]string)
+	for _, resource := range current.Resources {
+		if resource.ResourceType == "schedule" {
+			scheduleByNode[resource.NodeKey] = resource.ResourceID
+		}
+	}
+	for i := range candidate.Nodes {
+		node := &candidate.Nodes[i]
+		if node.Config == nil {
+			node.Config = map[string]any{}
+		}
+		if _, present := node.Config["clear_context_on_start"]; present {
+			continue
+		}
+		scheduleID := scheduleByNode[node.Key]
+		if scheduleID == "" {
+			continue
+		}
+		var clearContextOnStart bool
+		if err := s.repo.DB().QueryRowContext(ctx, `SELECT s.clear_context_on_start
+			FROM schedules s JOIN tasks t ON t.id = s.task_id
+			WHERE s.id = ? AND t.project_id = ?`, scheduleID, projectID).Scan(&clearContextOnStart); err != nil {
+			return candidate, fmt.Errorf("load saved schedule context for node %q: %w", node.Key, err)
+		}
+		node.Config["clear_context_on_start"] = clearContextOnStart
+	}
+	return candidate, nil
 }
 
 func (s *AutomationDraftService) candidateFromDefinition(ctx context.Context, projectID, automationID string, current *models.AutomationDefinition) (models.AutomationDraftCandidate, error) {

@@ -333,6 +333,7 @@ func TestGitHubSDLCRegistrationHydratesInitialSnapshotAcrossPause(t *testing.T) 
 	require.EqualValues(t, task.Priority, config["priority"])
 	require.Equal(t, string(models.RepeatHours), config["repeat_type"])
 	require.EqualValues(t, 1, config["repeat_interval"])
+	require.Equal(t, false, config["clear_context_on_start"])
 
 	require.NoError(t, automationRepo.SetAutomationLifecycle(ctx, project.ID, definition.Automation.ID, models.AutomationPaused))
 	storedTask, err := taskRepo.GetByID(ctx, task.ID)

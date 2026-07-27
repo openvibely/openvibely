@@ -252,9 +252,10 @@ func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context
 		var repeatType models.RepeatType
 		var repeatInterval int
 		var enabled bool
-		if err := s.repo.DB().QueryRowContext(ctx, `SELECT s.run_at, s.repeat_type, s.repeat_interval, s.enabled
+		var clearContextOnStart bool
+		if err := s.repo.DB().QueryRowContext(ctx, `SELECT s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start
 			FROM schedules s JOIN tasks t ON t.id = s.task_id
-			WHERE s.id = ? AND t.project_id = ?`, scheduleID, projectID).Scan(&runAt, &repeatType, &repeatInterval, &enabled); err != nil {
+			WHERE s.id = ? AND t.project_id = ?`, scheduleID, projectID).Scan(&runAt, &repeatType, &repeatInterval, &enabled, &clearContextOnStart); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return "", fmt.Errorf("schedule resource %q does not exist or belongs to another project", scheduleID)
 			}
@@ -268,6 +269,7 @@ func (s *AutomationRegistrationService) registeredNodeConfig(ctx context.Context
 			enabled = *configuredEnabled
 		}
 		config["enabled"] = enabled
+		config["clear_context_on_start"] = clearContextOnStart
 	}
 	if issues := validateAutomationNodeConfig(adapter, node, models.AutomationDraftNode{
 		Key: node.Key, Name: node.Name, Type: models.AutomationNodeType(node.Type), Role: node.Role, Config: config,

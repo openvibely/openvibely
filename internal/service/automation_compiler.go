@@ -236,6 +236,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			continue
 		}
 		node := candidateNodes[resourceNode.Key]
+		_, clearContextConfigured := node.Config["clear_context_on_start"]
 		taskNodeKey := node.Key
 		if candidate.AdapterKey != AutomationAdapterCustom {
 			taskNodeKey, _ = node.Config["target_node_key"].(string)
@@ -254,6 +255,15 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			}
 			if stored == nil {
 				return nil, fmt.Errorf("schedule for node %q is unavailable", node.Key)
+			}
+			if !clearContextConfigured {
+				scheduleWrite.ClearContextOnStart = stored.ClearContextOnStart
+				for i := range write.Candidate.Nodes {
+					if write.Candidate.Nodes[i].Key == node.Key {
+						write.Candidate.Nodes[i].Config["clear_context_on_start"] = stored.ClearContextOnStart
+						break
+					}
+				}
 			}
 			scheduleWrite.PreserveTiming = stored.RunAt.In(time.Local).Format("15:04") == schedule.RunAt.In(time.Local).Format("15:04") &&
 				stored.RepeatType == schedule.RepeatType && stored.RepeatInterval == schedule.RepeatInterval

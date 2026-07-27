@@ -370,6 +370,40 @@ func TestAutomationSaveCreatesCurrentGraphTaskAndScheduleAtomically(t *testing.T
 	require.False(t, tableExists(t, h.db, "automation_publication_steps"))
 }
 
+func TestAutomationSavePreservesLegacyScheduleClearContextValue(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Legacy schedule context")
+	ctx := context.Background()
+	candidate := customScheduledTaskCandidate("Legacy schedule context", "Review one request.")
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{
+		ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+	})
+	require.NoError(t, err)
+
+	scheduleID := automationResourceID(t, first.Definition, "schedule", "schedule")
+	require.NoError(t, h.db.QueryRowContext(ctx, `UPDATE schedules SET clear_context_on_start = 0 WHERE id = ? RETURNING id`, scheduleID).Scan(&scheduleID))
+
+	delete(candidate.Nodes[0].Config, "clear_context_on_start")
+	legacyJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	_, err = h.db.ExecContext(ctx, `UPDATE automation_graph_metadata SET candidate_json = ? WHERE automation_id = ?`,
+		string(legacyJSON), first.Definition.Automation.ID)
+	require.NoError(t, err)
+
+	reopened, err := h.drafts.CurrentCandidate(ctx, h.project.ID, first.Definition.Automation.ID)
+	require.NoError(t, err)
+	require.Equal(t, false, automationDraftNodeByKey(t, reopened.Candidate, "schedule").Config["clear_context_on_start"])
+
+	delete(automationDraftNodeByKey(t, reopened.Candidate, "schedule").Config, "clear_context_on_start")
+	_, err = h.compiler.Save(ctx, AutomationSaveRequest{
+		ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID,
+		Source: "manual", CreatedVia: "web", Candidate: reopened.Candidate,
+	})
+	require.NoError(t, err)
+	stored, err := h.scheduleRepo.GetByID(ctx, scheduleID)
+	require.NoError(t, err)
+	require.False(t, stored.ClearContextOnStart)
+}
+
 func TestAutomationReplacementUsesOneCurrentGraphAndDeletesRemovedSchedule(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic replacement")
 	ctx := context.Background()
