@@ -977,10 +977,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// execution transactionally with their durable dispatch claim; ordinary task
 	// runs keep the existing creation path.
 	exec := &models.Execution{
-		TaskID:        task.ID,
-		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
-		PromptSent:    task.Prompt,
+		TaskID:           task.ID,
+		AgentConfigID:    agent.ID,
+		Status:           models.ExecRunning,
+		PromptSent:       task.Prompt,
+		StartsNewContext: task.StartsNewContext,
 	}
 	if preparedID := preparedAutomationExecutionID(ctx); preparedID != "" {
 		prepared, getErr := s.execRepo.GetByID(ctx, preparedID)

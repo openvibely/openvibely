@@ -22,6 +22,7 @@ type Execution struct {
 	TokensUsed       int                      `json:"tokens_used"`
 	DurationMs       int64                    `json:"duration_ms"`
 	IsFollowup       bool                     `json:"is_followup"`
+	StartsNewContext bool                     `json:"starts_new_context"`
 	DiffOutput       string                   `json:"diff_output"`
 	CliSessionID     string                   `json:"cli_session_id"`
 	DispatchID       string                   `json:"dispatch_id,omitempty"`

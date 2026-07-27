@@ -307,9 +307,11 @@ func (w *WorkerService) dispatchNext() {
 				// Ordinary submissions are admission hints keyed by Task ID. The
 				// persisted Task is authoritative at dispatch time so a queued root
 				// cannot run replaced prompt, Agent, or topology data under the
-				// current Automation graph. Prepared dispatches retain their exact
-				// immutable envelope and pre-created execution instead.
+				// current Automation graph. The scheduled occurrence's context boundary
+				// is runtime-only, so preserve it across the persisted task refresh.
+				startsNewContext := task.StartsNewContext
 				task = *dbTask
+				task.StartsNewContext = startsNewContext
 			}
 
 			// Dependency gating: chained tasks must wait for parent to reach terminal state.
@@ -468,7 +470,9 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		}
 		claimed = true
 		completionAttempted = true
+		startsNewContext := task.StartsNewContext
 		task = dispatchClaim.Task
+		task.StartsNewContext = startsNewContext
 		if len(dispatchClaim.AutomationContext.Bindings) > 0 || dispatchClaim.AutomationContext.OriginTask {
 			taskCtx = WithAutomationContext(taskCtx, dispatchClaim.AutomationContext)
 		}

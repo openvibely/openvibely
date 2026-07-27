@@ -238,9 +238,12 @@ func (r *TaskRepo) ClaimAutomationDispatch(ctx context.Context, dispatchID, clai
 			return nil, ErrAutomationTaskBusy
 		}
 		if err := conn.QueryRowContext(ctx, `INSERT INTO executions
-			(task_id, agent_config_id, status, prompt_sent, is_followup, dispatch_id)
-			VALUES (?, NULLIF(?, ''), 'running', ?, 0, ?) RETURNING id`, taskID, agentConfigID, prompt, dispatchID).
-			Scan(&executionID); err != nil {
+				(task_id, agent_config_id, status, prompt_sent, is_followup, dispatch_id, starts_new_context)
+				VALUES (?, NULLIF(?, ''), 'running', ?, 0, ?, COALESCE((
+					SELECT s.clear_context_on_start FROM automation_invocations i
+					JOIN schedules s ON i.trigger_resource_type = 'schedule' AND s.id = i.trigger_resource_id
+					WHERE i.id = ?
+				), 0)) RETURNING id`, taskID, agentConfigID, prompt, dispatchID, invocationID).Scan(&executionID); err != nil {
 			return nil, fmt.Errorf("creating automation execution: %w", err)
 		}
 	} else {

@@ -451,7 +451,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}}},"required":["time"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"clear_context_on_start":{"type":"boolean","description":"Clear prior model conversation context when each scheduled run starts; defaults to true."}},"required":["time"],"additionalProperties":false}`),
 	},
 	{
 		Name:              "delete_schedule",
@@ -472,7 +472,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"enabled":{"type":"boolean"}},"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"enabled":{"type":"boolean"},"clear_context_on_start":{"type":"boolean","description":"Whether each scheduled start clears prior model conversation context."}},"additionalProperties":false}`),
 	},
 
 	// --- Alerts and actionable notifications domain ---

@@ -34,11 +34,12 @@ func TestScheduleRepo_CreateAndGetByID(t *testing.T) {
 	runAt := time.Now().Add(1 * time.Hour).Truncate(time.Second)
 
 	sched := &models.Schedule{
-		TaskID:         task.ID,
-		RunAt:          runAt,
-		RepeatType:     models.RepeatOnce,
-		RepeatInterval: 1,
-		Enabled:        true,
+		TaskID:              task.ID,
+		RunAt:               runAt,
+		RepeatType:          models.RepeatOnce,
+		RepeatInterval:      1,
+		Enabled:             true,
+		ClearContextOnStart: true,
 	}
 
 	if err := repo.Create(ctx, sched); err != nil {
@@ -60,6 +61,9 @@ func TestScheduleRepo_CreateAndGetByID(t *testing.T) {
 	}
 	if got.RepeatType != models.RepeatOnce {
 		t.Errorf("expected RepeatType=once, got %q", got.RepeatType)
+	}
+	if !got.ClearContextOnStart {
+		t.Error("expected ClearContextOnStart to round-trip")
 	}
 }
 

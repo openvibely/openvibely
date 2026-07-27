@@ -44,6 +44,7 @@ func newAutomationRuntimeFixture(t *testing.T, adapterKey string) automationRunt
 	schedule.NextRun = &due
 	schedule.RepeatType = models.RepeatHours
 	schedule.RepeatInterval = 1
+	schedule.ClearContextOnStart = true
 	require.NoError(t, scheduleRepo.Update(context.Background(), &schedule))
 	triggerKey, taskKey, stableKey := "vision_suggestions", "vision_suggestions", "native-sdlc/runtime"
 	if adapterKey == AutomationAdapterGitHubSDLC {
@@ -112,6 +113,7 @@ func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.
 	execution, err := fixture.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "owner")
 	require.NoError(t, err)
 	require.Equal(t, dispatch.ID, execution.DispatchID)
+	require.True(t, execution.StartsNewContext)
 	sameExecution, err := fixture.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "owner")
 	require.NoError(t, err)
 	require.Equal(t, execution.ID, sameExecution.ID, "dispatch retry must resolve the prepared execution")

@@ -216,6 +216,7 @@ type Task struct {
 	CreatedVia        string       `json:"created_via"`        // Origin: "web", "telegram", etc.
 	TelegramChatID    int64        `json:"telegram_chat_id"`   // Telegram chat ID for sending completion notifications
 	HasGoal           bool         `json:"has_goal,omitempty"` // Derived: task has a non-cleared persisted goal
+	StartsNewContext  bool         `json:"-"`                  // Runtime-only: this dispatch starts a new model replay context
 	CreatedAt         time.Time    `json:"created_at"`
 	UpdatedAt         time.Time    `json:"updated_at"`
 	CompletedAt       *time.Time   `json:"completed_at,omitempty"`

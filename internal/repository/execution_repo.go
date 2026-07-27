@@ -32,17 +32,17 @@ func (r *ExecutionRepo) DB() *sql.DB {
 }
 
 const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, reasoning_content, error_message,
-		tokens_used, duration_ms, is_followup, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
+		tokens_used, duration_ms, is_followup, starts_new_context, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
 // executionSelectColumnsLight omits reasoning_content and diff_output (substituting
 // empty strings) so list/pagination queries don't load potentially very large blobs.
 // The scan shape matches executionSelectColumns, so scanExecutionRow still works; the
 // resulting Execution will have ReasoningContent == "" and DiffOutput == "".
 const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, '' AS reasoning_content, error_message,
-		tokens_used, duration_ms, is_followup, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
+		tokens_used, duration_ms, is_followup, starts_new_context, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
 const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, '' AS reasoning_content, e.error_message,
-		e.tokens_used, e.duration_ms, e.is_followup, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
+		e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
 
 func scanExecutionRow(scanner interface {
 	Scan(dest ...interface{}) error
@@ -50,7 +50,7 @@ func scanExecutionRow(scanner interface {
 	var e models.Execution
 	err := scanner.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
 		&e.Output, &e.ReasoningContent, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup,
-		&e.DiffOutput, &e.CliSessionID, &e.DispatchID, &e.StartedAt, &e.CompletedAt)
+		&e.StartsNewContext, &e.DiffOutput, &e.CliSessionID, &e.DispatchID, &e.StartedAt, &e.CompletedAt)
 	return e, err
 }
 
@@ -183,10 +183,10 @@ func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
 		isFollowup = 1
 	}
 	err := r.db.QueryRowContext(ctx,
-		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
-		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?)
+		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
+		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
 		 RETURNING id, started_at`,
-		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup).
+		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
 		Scan(&e.ID, &e.StartedAt)
 	if err != nil {
 		return fmt.Errorf("creating execution: %w", err)
@@ -216,10 +216,10 @@ func (r *ExecutionRepo) CreateDirectTaskFollowup(ctx context.Context, e *models.
 		return fmt.Errorf("reactivating task for direct follow-up: %w", err)
 	}
 	if err := tx.QueryRowContext(ctx,
-		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
-		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?)
+		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
+		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
 		 RETURNING id, started_at`,
-		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup).
+		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
 		Scan(&e.ID, &e.StartedAt); err != nil {
 		return fmt.Errorf("creating direct task follow-up execution: %w", err)
 	}

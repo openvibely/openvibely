@@ -927,7 +927,7 @@ type TaskWithSchedule struct {
 func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID string) ([]TaskWithSchedule, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id, t.created_at, t.updated_at, t.completed_at,
-			 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run, s.last_run, s.created_at, s.updated_at,
+			 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start, s.next_run, s.last_run, s.created_at, s.updated_at,
 			 COALESCE(automation_node.name, '')
 			 FROM tasks t
 			 LEFT JOIN schedules s ON t.id = s.task_id
@@ -948,13 +948,13 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 		var tws TaskWithSchedule
 		var schedID, schedTaskID sql.NullString
 		var schedRunAt, schedCreatedAt, schedUpdatedAt sql.NullTime
-		var schedRepeatType, schedRepeatInterval, schedEnabled sql.NullString
+		var schedRepeatType, schedRepeatInterval, schedEnabled, schedClearContext sql.NullString
 		var schedNextRun, schedLastRun sql.NullTime
 
 		if err := rows.Scan(
 			&tws.Task.ID, &tws.Task.ProjectID, &tws.Task.Title, &tws.Task.Category,
 			&tws.Task.Priority, &tws.Task.Status, &tws.Task.Prompt, &tws.Task.AgentID, &tws.Task.AgentDefinitionID, &tws.Task.Tag, &tws.Task.DisplayOrder, &tws.Task.ParentTaskID, &tws.Task.ChainConfig, &tws.Task.SwarmRole, &tws.Task.SwarmStatus, &tws.Task.SwarmConfig, &tws.Task.SwarmSequence, &tws.Task.WorktreePath, &tws.Task.WorktreeBranch, &tws.Task.AutoMerge, &tws.Task.MergeTargetBranch, &tws.Task.MergeStatus, &tws.Task.BaseBranch, &tws.Task.BaseCommitSHA, &tws.Task.LineageDepth, &tws.Task.CreatedVia, &tws.Task.TelegramChatID, &tws.Task.CreatedAt, &tws.Task.UpdatedAt, &tws.Task.CompletedAt,
-			&schedID, &schedTaskID, &schedRunAt, &schedRepeatType, &schedRepeatInterval, &schedEnabled, &schedNextRun, &schedLastRun, &schedCreatedAt, &schedUpdatedAt,
+			&schedID, &schedTaskID, &schedRunAt, &schedRepeatType, &schedRepeatInterval, &schedEnabled, &schedClearContext, &schedNextRun, &schedLastRun, &schedCreatedAt, &schedUpdatedAt,
 			&tws.AutomationScheduleName,
 		); err != nil {
 			return nil, fmt.Errorf("scanning task with schedule: %w", err)
@@ -970,14 +970,15 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 				fmt.Sscanf(schedRepeatInterval.String, "%d", &repeatInterval)
 			}
 			tws.Schedule = &models.Schedule{
-				ID:             schedID.String,
-				TaskID:         schedTaskID.String,
-				RunAt:          schedRunAt.Time,
-				RepeatType:     models.RepeatType(schedRepeatType.String),
-				RepeatInterval: repeatInterval,
-				Enabled:        enabled,
-				CreatedAt:      schedCreatedAt.Time,
-				UpdatedAt:      schedUpdatedAt.Time,
+				ID:                  schedID.String,
+				TaskID:              schedTaskID.String,
+				RunAt:               schedRunAt.Time,
+				RepeatType:          models.RepeatType(schedRepeatType.String),
+				RepeatInterval:      repeatInterval,
+				Enabled:             enabled,
+				ClearContextOnStart: schedClearContext.String == "1" || schedClearContext.String == "true",
+				CreatedAt:           schedCreatedAt.Time,
+				UpdatedAt:           schedUpdatedAt.Time,
 			}
 			if schedNextRun.Valid {
 				tws.Schedule.NextRun = &schedNextRun.Time

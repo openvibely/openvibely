@@ -483,8 +483,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 128 {
-		t.Fatalf("max goose version = %d, want 128", maxVersion)
+	if maxVersion != 129 {
+		t.Fatalf("max goose version = %d, want 129", maxVersion)
 	}
 }
 
@@ -635,8 +635,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 128 {
-		t.Fatalf("max goose version = %d, want 128", maxVersion)
+	if maxVersion != 129 {
+		t.Fatalf("max goose version = %d, want 129", maxVersion)
 	}
 }
 
@@ -1122,8 +1122,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 128 {
-		t.Fatalf("max goose version = %d, want 128", maxVersion)
+	if maxVersion != 129 {
+		t.Fatalf("max goose version = %d, want 129", maxVersion)
 	}
 }
 
@@ -1474,8 +1474,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 128 {
-		t.Fatalf("max goose version = %d, want 128", maxVersion)
+	if maxVersion != 129 {
+		t.Fatalf("max goose version = %d, want 129", maxVersion)
 	}
 }
 
@@ -1905,5 +1905,44 @@ func TestMigration114AutomationRuntimeUpAndDown(t *testing.T) {
 	var definitions int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='automations'`).Scan(&definitions); err != nil || definitions != 1 {
 		t.Fatalf("phase 1 definition tables must remain after migration 114 down: count=%d err=%v", definitions, err)
+	}
+}
+
+func TestMigration129PreservesExistingScheduleContextSemantics(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "schedule-context-129.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 128); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-129', 'Migration 129', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('task-129', 'project-129', 'Existing scheduled task', 'scheduled', 2, 'completed', 'run');
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('schedule-129', 'task-129', CURRENT_TIMESTAMP, 'daily', 1, 1, CURRENT_TIMESTAMP);
+		INSERT INTO executions (id, task_id, status, prompt_sent, output)
+			VALUES ('execution-129', 'task-129', 'completed', 'old prompt', 'old output');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 129); err != nil {
+		t.Fatal(err)
+	}
+	var clearContext, startsNewContext bool
+	if err := db.QueryRow(`SELECT clear_context_on_start FROM schedules WHERE id = 'schedule-129'`).Scan(&clearContext); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT starts_new_context FROM executions WHERE id = 'execution-129'`).Scan(&startsNewContext); err != nil {
+		t.Fatal(err)
+	}
+	if clearContext || startsNewContext {
+		t.Fatalf("existing rows must preserve prior context semantics: clear=%t boundary=%t", clearContext, startsNewContext)
 	}
 }

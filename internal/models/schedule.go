@@ -20,16 +20,17 @@ func (rt RepeatType) IsSubDaily() bool {
 }
 
 type Schedule struct {
-	ID             string     `json:"id"`
-	TaskID         string     `json:"task_id"`
-	RunAt          time.Time  `json:"run_at"`
-	RepeatType     RepeatType `json:"repeat_type"`
-	RepeatInterval int        `json:"repeat_interval"`
-	Enabled        bool       `json:"enabled"`
-	NextRun        *time.Time `json:"next_run"`
-	LastRun        *time.Time `json:"last_run"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID                  string     `json:"id"`
+	TaskID              string     `json:"task_id"`
+	RunAt               time.Time  `json:"run_at"`
+	RepeatType          RepeatType `json:"repeat_type"`
+	RepeatInterval      int        `json:"repeat_interval"`
+	Enabled             bool       `json:"enabled"`
+	ClearContextOnStart bool       `json:"clear_context_on_start"`
+	NextRun             *time.Time `json:"next_run"`
+	LastRun             *time.Time `json:"last_run"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 // ComputeNextRun calculates the next run time based on repeat settings.

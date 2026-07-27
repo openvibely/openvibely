@@ -471,6 +471,20 @@ func TestFilterChatHistory_ReturnsNonNilForEmpty(t *testing.T) {
 	}
 }
 
+func TestFilterChatHistory_StopsAtLatestNewContextBoundary(t *testing.T) {
+	executions := []models.Execution{
+		{ID: "old", Status: models.ExecCompleted, PromptSent: "old prompt"},
+		{ID: "boundary", Status: models.ExecCompleted, PromptSent: "scheduled run", StartsNewContext: true},
+		{ID: "new", Status: models.ExecCompleted, PromptSent: "follow-up"},
+		{ID: "current", Status: models.ExecRunning},
+	}
+
+	result := filterChatHistory(executions, "current")
+	require.Len(t, result, 2)
+	assert.Equal(t, "boundary", result[0].ID)
+	assert.Equal(t, "new", result[1].ID)
+}
+
 func TestCombineContexts_BothPresent(t *testing.T) {
 	result := combineContexts("task context here", "attachment context here")
 	if result != "task context here\nattachment context here" {

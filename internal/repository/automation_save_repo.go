@@ -49,14 +49,15 @@ type AutomationSaveTask struct {
 }
 
 type AutomationSaveSchedule struct {
-	NodeKey            string
-	ExistingScheduleID string
-	TaskNodeKey        string
-	RunAt              time.Time
-	RepeatType         models.RepeatType
-	RepeatInterval     int
-	Enabled            bool
-	PreserveTiming     bool
+	NodeKey             string
+	ExistingScheduleID  string
+	TaskNodeKey         string
+	RunAt               time.Time
+	RepeatType          models.RepeatType
+	RepeatInterval      int
+	Enabled             bool
+	ClearContextOnStart bool
+	PreserveTiming      bool
 }
 
 func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSaveWrite) (*models.AutomationDefinition, []models.Task, error) {
@@ -299,9 +300,9 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		if scheduleID == "" {
 			nextRun := write.RunAt
 			if err := conn.QueryRowContext(ctx, `INSERT INTO schedules
-				(id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
-				VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)
-				RETURNING id`, taskID, write.RunAt, write.RepeatType, write.RepeatInterval, enabled, nextRun).Scan(&scheduleID); err != nil {
+				(id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run)
+				VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)
+				RETURNING id`, taskID, write.RunAt, write.RepeatType, write.RepeatInterval, enabled, write.ClearContextOnStart, nextRun).Scan(&scheduleID); err != nil {
 				return nil, nil, fmt.Errorf("creating schedule for node %q: %w", write.NodeKey, err)
 			}
 		} else {
@@ -314,13 +315,13 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 				return nil, nil, fmt.Errorf("schedule for node %q is not owned by this Automation", write.NodeKey)
 			}
 			if write.PreserveTiming {
-				if _, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-					taskID, enabled, scheduleID); err != nil {
+				if _, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, enabled = ?, clear_context_on_start = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+					taskID, enabled, write.ClearContextOnStart, scheduleID); err != nil {
 					return nil, nil, fmt.Errorf("updating schedule for node %q: %w", write.NodeKey, err)
 				}
 			} else if _, err := conn.ExecContext(ctx, `UPDATE schedules SET task_id = ?, run_at = ?, repeat_type = ?, repeat_interval = ?, enabled = ?,
-				next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, taskID, write.RunAt, write.RepeatType,
-				write.RepeatInterval, enabled, write.RunAt, scheduleID); err != nil {
+				clear_context_on_start = ?, next_run = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, taskID, write.RunAt, write.RepeatType,
+				write.RepeatInterval, enabled, write.ClearContextOnStart, write.RunAt, scheduleID); err != nil {
 				return nil, nil, fmt.Errorf("updating schedule for node %q: %w", write.NodeKey, err)
 			}
 		}

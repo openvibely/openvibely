@@ -2168,8 +2168,15 @@ func filterChatHistory(executions []models.Execution, currentExecID string) []mo
 		return []models.Execution{}
 	}
 
-	result := make([]models.Execution, 0, len(executions))
-	for i := range executions {
+	start := 0
+	for i := len(executions) - 1; i >= 0; i-- {
+		if executions[i].StartsNewContext && executions[i].ID != currentExecID {
+			start = i
+			break
+		}
+	}
+	result := make([]models.Execution, 0, len(executions)-start)
+	for i := start; i < len(executions); i++ {
 		if executions[i].ID == currentExecID || executions[i].Status == models.ExecRunning {
 			continue
 		}
@@ -2701,12 +2708,17 @@ func (h *Handler) executeChatScheduleRequests(ctx context.Context, projectID str
 		// Convert to UTC for storage
 		runAtUTC := runAt.UTC()
 
+		clearContextOnStart := true
+		if req.ClearContextOnStart != nil {
+			clearContextOnStart = *req.ClearContextOnStart
+		}
 		schedule := &models.Schedule{
-			TaskID:         task.ID,
-			RunAt:          runAtUTC,
-			RepeatType:     repeatType,
-			RepeatInterval: repeatInterval,
-			Enabled:        true,
+			TaskID:              task.ID,
+			RunAt:               runAtUTC,
+			RepeatType:          repeatType,
+			RepeatInterval:      repeatInterval,
+			Enabled:             true,
+			ClearContextOnStart: clearContextOnStart,
 		}
 
 		if err := h.scheduleRepo.Create(ctx, schedule); err != nil {
@@ -2898,7 +2910,10 @@ func (h *Handler) executeChatModifyScheduleRequests(ctx context.Context, project
 				changes = append(changes, "enabled→false")
 			}
 		}
-
+		if req.ClearContextOnStart != nil {
+			schedule.ClearContextOnStart = *req.ClearContextOnStart
+			changes = append(changes, fmt.Sprintf("clear_context_on_start→%t", *req.ClearContextOnStart))
+		}
 		if len(changes) == 0 {
 			results = append(results, fmt.Sprintf("- No changes specified for schedule on task \"%s\"", task.Title))
 			continue

@@ -352,12 +352,16 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, schedules, 1)
+	require.True(t, schedules[0].ClearContextOnStart)
 
-	modifyOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","time":"10:45","enabled":false}`))
+	modifyOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","time":"10:45","enabled":false,"clear_context_on_start":false}`))
 	require.NoError(t, err)
 	require.Contains(t, modifyOut, "Updated schedule")
 	require.Contains(t, modifyOut, "time→10:45")
 	require.Contains(t, modifyOut, "enabled→false")
+	modified, err := scheduleRepo.GetByID(ctx, schedules[0].ID)
+	require.NoError(t, err)
+	require.False(t, modified.ClearContextOnStart)
 }
 
 func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *testing.T) {

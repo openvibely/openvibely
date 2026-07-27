@@ -19,7 +19,7 @@ func NewScheduleRepo(db *sql.DB) *ScheduleRepo {
 
 func (r *ScheduleRepo) ListByTask(ctx context.Context, taskID string) ([]models.Schedule, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run, last_run, created_at, updated_at
+		`SELECT id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run, last_run, created_at, updated_at
 		 FROM schedules WHERE task_id = ? ORDER BY created_at DESC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing schedules: %w", err)
@@ -30,7 +30,7 @@ func (r *ScheduleRepo) ListByTask(ctx context.Context, taskID string) ([]models.
 
 func (r *ScheduleRepo) ListDue(ctx context.Context, now time.Time) ([]models.Schedule, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run, last_run, created_at, updated_at
+		`SELECT id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run, last_run, created_at, updated_at
 		 FROM schedules WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ?
 		 ORDER BY next_run ASC`, now)
 	if err != nil {
@@ -42,7 +42,7 @@ func (r *ScheduleRepo) ListDue(ctx context.Context, now time.Time) ([]models.Sch
 
 func (r *ScheduleRepo) ListByProject(ctx context.Context, projectID string) ([]models.Schedule, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled,
+		`SELECT s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start,
 		 s.next_run, s.last_run, s.created_at, s.updated_at
 		 FROM schedules s
 		 JOIN tasks t ON t.id = s.task_id
@@ -69,7 +69,7 @@ func (r *ScheduleRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (map
 		args[i] = id
 	}
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run, last_run, created_at, updated_at
+		`SELECT id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run, last_run, created_at, updated_at
 		 FROM schedules WHERE task_id IN (`+string(placeholders)+`) ORDER BY created_at DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("batch listing schedules: %w", err)
@@ -80,7 +80,7 @@ func (r *ScheduleRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (map
 	for rows.Next() {
 		var s models.Schedule
 		if err := rows.Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval,
-			&s.Enabled, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			&s.Enabled, &s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning schedule: %w", err)
 		}
 		result[s.TaskID] = append(result[s.TaskID], s)
@@ -91,10 +91,10 @@ func (r *ScheduleRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (map
 func (r *ScheduleRepo) GetByID(ctx context.Context, id string) (*models.Schedule, error) {
 	var s models.Schedule
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run, last_run, created_at, updated_at
+		`SELECT id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run, last_run, created_at, updated_at
 		 FROM schedules WHERE id = ?`, id).
 		Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval, &s.Enabled,
-			&s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt)
+			&s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -111,10 +111,10 @@ func (r *ScheduleRepo) Create(ctx context.Context, s *models.Schedule) error {
 		s.NextRun = &t
 	}
 	err := r.db.QueryRowContext(ctx,
-		`INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
-		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)
+		`INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run)
+		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
-		s.TaskID, s.RunAt, s.RepeatType, s.RepeatInterval, s.Enabled, s.NextRun).
+		s.TaskID, s.RunAt, s.RepeatType, s.RepeatInterval, s.Enabled, s.ClearContextOnStart, s.NextRun).
 		Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("creating schedule: %w", err)
@@ -125,9 +125,9 @@ func (r *ScheduleRepo) Create(ctx context.Context, s *models.Schedule) error {
 func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE schedules SET run_at = ?, repeat_type = ?, repeat_interval = ?,
-		 enabled = ?, next_run = ?, updated_at = datetime('now')
+		 enabled = ?, clear_context_on_start = ?, next_run = ?, updated_at = datetime('now')
 		 WHERE id = ?`,
-		s.RunAt, s.RepeatType, s.RepeatInterval, s.Enabled, s.NextRun, s.ID)
+		s.RunAt, s.RepeatType, s.RepeatInterval, s.Enabled, s.ClearContextOnStart, s.NextRun, s.ID)
 	if err != nil {
 		return fmt.Errorf("updating schedule: %w", err)
 	}
@@ -167,7 +167,7 @@ func (r *ScheduleRepo) scanRows(rows *sql.Rows) ([]models.Schedule, error) {
 	for rows.Next() {
 		var s models.Schedule
 		if err := rows.Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval,
-			&s.Enabled, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			&s.Enabled, &s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scanning schedule: %w", err)
 		}
 		schedules = append(schedules, s)

@@ -245,7 +245,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			return nil, err
 		}
 		scheduleWrite := repository.AutomationSaveSchedule{NodeKey: node.Key, TaskNodeKey: taskNodeKey, RunAt: schedule.RunAt,
-			RepeatType: schedule.RepeatType, RepeatInterval: schedule.RepeatInterval, Enabled: schedule.Enabled}
+			RepeatType: schedule.RepeatType, RepeatInterval: schedule.RepeatInterval, Enabled: schedule.Enabled, ClearContextOnStart: schedule.ClearContextOnStart}
 		if existing := existingResources[node.Key+"\x00schedule"]; existing.ResourceID != "" {
 			scheduleWrite.ExistingScheduleID = existing.ResourceID
 			stored, err := c.scheduleRepo.GetByID(ctx, existing.ResourceID)
@@ -304,7 +304,11 @@ func (c *AutomationCompiler) scheduleFromNode(taskID string, node models.Automat
 	repeat, _ := node.Config["repeat_type"].(string)
 	interval, _ := draftInt(node.Config["repeat_interval"])
 	enabled, _ := node.Config["enabled"].(bool)
-	return models.Schedule{TaskID: taskID, RunAt: runAt.UTC(), RepeatType: models.RepeatType(repeat), RepeatInterval: interval, Enabled: enabled}, nil
+	clearContextOnStart, present := node.Config["clear_context_on_start"].(bool)
+	if !present {
+		clearContextOnStart = true
+	}
+	return models.Schedule{TaskID: taskID, RunAt: runAt.UTC(), RepeatType: models.RepeatType(repeat), RepeatInterval: interval, Enabled: enabled, ClearContextOnStart: clearContextOnStart}, nil
 }
 
 type AutomationLifecycleService struct {

@@ -365,6 +365,7 @@ func TestAutomationSaveCreatesCurrentGraphTaskAndScheduleAtomically(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, taskID, schedule.TaskID)
 	require.True(t, schedule.Enabled)
+	require.True(t, schedule.ClearContextOnStart)
 	require.False(t, tableExists(t, h.db, "automation_publication_attempts"))
 	require.False(t, tableExists(t, h.db, "automation_publication_steps"))
 }

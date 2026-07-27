@@ -1313,3 +1313,14 @@ func TestScheduleContent_DisabledScheduleRenderedWithGreyedStyle(t *testing.T) {
 		t.Error("expected line-through CSS class on disabled schedule card title")
 	}
 }
+
+func TestScheduleContentClearContextDefaultsChecked(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ScheduleContent(&models.Project{ID: "default", Name: "Default"}, nil, 0, nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	html := buf.String()
+	if !strings.Contains(html, "Clear context on start") || !strings.Contains(html, `name="clear_context_on_start" value="true" class="checkbox" checked`) {
+		t.Fatal("new scheduled task form must default clear context to checked")
+	}
+}

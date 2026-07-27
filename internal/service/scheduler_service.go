@@ -190,6 +190,10 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			applog.Infof("[scheduler] checkDueTasks reset task %s category from %q to %q for recurring schedule", task.ID, prevCategory, models.CategoryScheduled)
 		}
 
+		// A clear-context schedule starts a new replay segment without deleting
+		// earlier executions, lifecycle records, goals, or audit history.
+		task.StartsNewContext = sched.ClearContextOnStart
+
 		// Log if this is a missed schedule (next_run is significantly in the past)
 		if sched.NextRun != nil && sched.NextRun.Before(now.Add(-1*time.Minute)) {
 			timeSinceDue := now.Sub(*sched.NextRun)

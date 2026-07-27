@@ -729,6 +729,14 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 								<span class="text-sm opacity-60" id="sched-repeat-interval-label">day(s)</span>
 							</div>
 						</div>
+						<div class="form-control md:col-span-2">
+							<input type="hidden" name="clear_context_on_start" value="false"/>
+							<label class="label cursor-pointer justify-start gap-3">
+								<input type="checkbox" name="clear_context_on_start" value="true" class="checkbox" checked/>
+								<span class="label-text">Clear context on start</span>
+							</label>
+							<label class="label"><span class="label-text-alt opacity-60">Start each scheduled run without prior model conversation context</span></label>
+						</div>
 					</div>
 						<div class="modal-action">
 						<button type="button" class="btn" onclick="new_scheduled_task_modal.close()">Cancel</button>

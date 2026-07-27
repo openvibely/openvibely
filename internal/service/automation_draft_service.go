@@ -827,7 +827,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	case models.AutomationNodeAgentTask:
 		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true}
 	case models.AutomationNodeTrigger:
-		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true}
+		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true, "clear_context_on_start": true}
 	case models.AutomationNodeAction:
 		switch node.Role {
 		case "create_notification":
@@ -979,7 +979,7 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		}
 	}
 	if canonical.AllowedResources["schedule"] {
-		for _, key := range []string{"target_node_key", "run_at", "repeat_type", "repeat_interval", "enabled"} {
+		for _, key := range []string{"target_node_key", "run_at", "repeat_type", "repeat_interval", "enabled", "clear_context_on_start"} {
 			allowed[key] = true
 		}
 	}

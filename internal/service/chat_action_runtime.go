@@ -609,7 +609,11 @@ func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandle
 		repeatInterval = req.Interval
 	}
 	runAt := channelScheduleRunAt(time.Now().Local(), hourVal, minuteVal, repeatType, req.Days)
-	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt.UTC(), RepeatType: repeatType, RepeatInterval: repeatInterval, Enabled: true}
+	clearContextOnStart := true
+	if req.ClearContextOnStart != nil {
+		clearContextOnStart = *req.ClearContextOnStart
+	}
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt.UTC(), RepeatType: repeatType, RepeatInterval: repeatInterval, Enabled: true, ClearContextOnStart: clearContextOnStart}
 	if err := opts.ScheduleRepo.Create(ctx, schedule); err != nil {
 		return fmt.Sprintf("Error scheduling task %q: %v", task.Title, err)
 	}
@@ -797,6 +801,10 @@ func applyChannelScheduleChanges(schedule *models.Schedule, req ModifyScheduleRe
 		} else {
 			changes = append(changes, "enabled→false")
 		}
+	}
+	if req.ClearContextOnStart != nil {
+		schedule.ClearContextOnStart = *req.ClearContextOnStart
+		changes = append(changes, fmt.Sprintf("clear_context_on_start→%t", *req.ClearContextOnStart))
 	}
 	if len(changes) == 0 {
 		return changes, false, ""

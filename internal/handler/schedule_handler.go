@@ -59,11 +59,12 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	}
 
 	s := &models.Schedule{
-		TaskID:         taskID,
-		RunAt:          runAt,
-		RepeatType:     models.RepeatType(c.FormValue("repeat_type")),
-		RepeatInterval: repeatInterval,
-		Enabled:        true,
+		TaskID:              taskID,
+		RunAt:               runAt,
+		RepeatType:          models.RepeatType(c.FormValue("repeat_type")),
+		RepeatInterval:      repeatInterval,
+		Enabled:             true,
+		ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
 	}
 	if s.RepeatType == "" {
 		s.RepeatType = models.RepeatOnce
@@ -178,6 +179,9 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	schedule.RunAt = runAt
 	schedule.RepeatType = repeatType
 	schedule.RepeatInterval = repeatInterval
+	if _, present := c.Request().PostForm["clear_context_on_start"]; present {
+		schedule.ClearContextOnStart = formBoolEnabled(c, "clear_context_on_start", schedule.ClearContextOnStart)
+	}
 
 	// Set NextRun to RunAt. For recurring schedules with a past RunAt, the
 	// scheduler will pick it up on its next tick, execute the task once for

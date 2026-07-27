@@ -38,11 +38,12 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 
 	now := time.Now().UTC()
 	sched := &models.Schedule{
-		TaskID:         task.ID,
-		RunAt:          now.Add(-1 * time.Minute),
-		RepeatType:     models.RepeatOnce,
-		RepeatInterval: 1,
-		Enabled:        true,
+		TaskID:              task.ID,
+		RunAt:               now.Add(-1 * time.Minute),
+		RepeatType:          models.RepeatOnce,
+		RepeatInterval:      1,
+		Enabled:             true,
+		ClearContextOnStart: true,
 	}
 	scheduleRepo.Create(ctx, sched)
 
@@ -58,6 +59,9 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 		if submitted.AgentDefinitionID == nil || *submitted.AgentDefinitionID != agent.ID {
 			t.Errorf("expected submitted primary agent %s, got %v", agent.ID, submitted.AgentDefinitionID)
 		}
+		if !submitted.StartsNewContext {
+			t.Error("expected clear-context schedule to mark the submitted run as a new context")
+		}
 	case <-time.After(100 * time.Millisecond):
 		t.Error("expected due task to be submitted")
 	}
@@ -66,6 +70,82 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 	updated, _ := scheduleRepo.GetByID(ctx, sched.ID)
 	if updated.LastRun == nil {
 		t.Error("expected LastRun to be set after checkDueTasks")
+	}
+}
+
+func TestSchedulerService_CheckDueTasks_PersistsContextBoundaryAfterWorkerReload(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	model := &models.LLMConfig{Name: "Scheduled context model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, model); err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mockLLM := testutil.NewMockLLMCaller()
+	mockLLM.Response = "scheduled run complete"
+	mockLLM.TextOnly = mockLLM.Response
+	llmSvc.SetLLMCaller(mockLLM)
+
+	workerSvc := NewWorkerService(llmSvc, 1, projectRepo)
+	workerSvc.SetTaskRepo(taskRepo)
+	workerSvc.SetLLMConfigRepo(llmConfigRepo)
+	workerSvc.SetExecutionRepo(execRepo)
+	workerSvc.Start(ctx)
+	defer workerSvc.Stop()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Clear context after worker reload",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "run with a fresh context",
+		AgentID:   &model.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	now := time.Now().UTC()
+	schedule := &models.Schedule{
+		TaskID:              task.ID,
+		RunAt:               now.Add(-time.Minute),
+		RepeatType:          models.RepeatOnce,
+		RepeatInterval:      1,
+		Enabled:             true,
+		ClearContextOnStart: true,
+	}
+	if err := scheduleRepo.Create(ctx, schedule); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+
+	NewSchedulerService(scheduleRepo, taskRepo, workerSvc).checkDueTasks(ctx)
+
+	var execution *models.Execution
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		executions, err := execRepo.ListByTask(ctx, task.ID)
+		if err != nil {
+			t.Fatalf("list executions: %v", err)
+		}
+		if len(executions) > 0 && executions[0].Status != models.ExecRunning {
+			execution = &executions[0]
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if execution == nil {
+		t.Fatal("timed out waiting for scheduled execution")
+	}
+	if !execution.StartsNewContext {
+		t.Fatal("expected persisted scheduled execution to start a new context after worker task reload")
 	}
 }
 

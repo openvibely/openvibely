@@ -363,11 +363,12 @@ func (h *Handler) CreateTask(c echo.Context) error {
 					repeatInterval = 1
 				}
 				sched := &models.Schedule{
-					TaskID:         t.ID,
-					RunAt:          runAt,
-					RepeatType:     models.RepeatType(c.FormValue("repeat_type")),
-					RepeatInterval: repeatInterval,
-					Enabled:        true,
+					TaskID:              t.ID,
+					RunAt:               runAt,
+					RepeatType:          models.RepeatType(c.FormValue("repeat_type")),
+					RepeatInterval:      repeatInterval,
+					Enabled:             true,
+					ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
 				}
 				if sched.RepeatType == "" {
 					sched.RepeatType = models.RepeatDaily

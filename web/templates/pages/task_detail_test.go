@@ -1054,3 +1054,33 @@ func TestTaskDetailContent_ScheduleEnabledState(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskDetailScheduleClearContextControlsDefaultAndHydrate(t *testing.T) {
+	task := &models.Task{ID: "task-schedule-context", ProjectID: "default", Title: "Scheduled context"}
+	schedules := []models.Schedule{
+		{ID: "clear", TaskID: task.ID, RunAt: time.Now(), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true},
+		{ID: "keep", TaskID: task.ID, RunAt: time.Now(), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true},
+	}
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, schedules, nil, nil, nil, "schedules", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	html := buf.String()
+	if strings.Count(html, "Clear context on start") != 3 {
+		t.Fatalf("expected add and two edit controls, got %d", strings.Count(html, "Clear context on start"))
+	}
+	clearCardStart := strings.Index(html, `id="schedule-card-clear"`)
+	keepCardStart := strings.Index(html, `id="schedule-card-keep"`)
+	if clearCardStart < 0 || keepCardStart < 0 {
+		t.Fatal("expected both schedule cards")
+	}
+	clearCard := html[clearCardStart:keepCardStart]
+	keepCard := html[keepCardStart:]
+	checkedInput := `name="clear_context_on_start" value="true" class="checkbox checkbox-sm" checked`
+	if !strings.Contains(clearCard, checkedInput) {
+		t.Fatal("enabled persisted schedule must render checked")
+	}
+	if strings.Contains(keepCard, checkedInput) {
+		t.Fatal("disabled persisted schedule must render unchecked")
+	}
+}
