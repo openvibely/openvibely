@@ -339,6 +339,13 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models
 func (s *TaskService) Delete(ctx context.Context, id string) error {
 	applog.Infof("[task-svc] Delete id=%s", id)
 
+	// Stop running work before its execution and task rows disappear. Cancellation
+	// only holds the worker cancellation mutex long enough to remove the callback;
+	// provider and process shutdown happen outside that lock and are not awaited.
+	if s.workerSvc != nil {
+		s.workerSvc.CancelRunningTask(id)
+	}
+
 	// Get all attachments for this task
 	attachments, err := s.attachmentRepo.ListByTask(ctx, id)
 	if err != nil {
@@ -346,25 +353,27 @@ func (s *TaskService) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("listing attachments for deletion: %w", err)
 	}
 
-	// Delete physical files for all attachments
+	// Delete the task and all task-owned relational state atomically through the
+	// database foreign-key cascades before touching files. If this durable
+	// boundary fails, attachment metadata and files remain consistent.
+	if err := s.repo.Delete(ctx, id); err != nil {
+		applog.Infof("[task-svc] Delete error deleting task: %v", err)
+		return err
+	}
+
+	// Filesystem cleanup deliberately happens after the database connection is
+	// released. Surface failures because the task is already durably deleted and
+	// the remaining path requires operator cleanup.
+	var cleanupErrors []error
 	for _, att := range attachments {
 		if err := os.Remove(att.FilePath); err != nil && !os.IsNotExist(err) {
-			applog.Infof("[task-svc] Delete warning: failed to delete file %s: %v", att.FilePath, err)
-			// Continue even if file deletion fails - the file might already be gone
+			applog.Infof("[task-svc] Delete error removing file %s after durable deletion: %v", att.FilePath, err)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing attachment %s: %w", att.FilePath, err))
 		} else {
 			applog.Infof("[task-svc] Delete removed file %s", att.FilePath)
 		}
 	}
-
-	// Delete attachment records from database
-	if err := s.attachmentRepo.DeleteByTask(ctx, id); err != nil {
-		applog.Infof("[task-svc] Delete error deleting attachments: %v", err)
-		return fmt.Errorf("deleting attachments: %w", err)
-	}
-
-	// Delete the task itself
-	if err := s.repo.Delete(ctx, id); err != nil {
-		applog.Infof("[task-svc] Delete error deleting task: %v", err)
+	if err := errors.Join(cleanupErrors...); err != nil {
 		return err
 	}
 

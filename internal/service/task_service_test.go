@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -1132,6 +1133,52 @@ func TestTaskService_Update_DuplicateTitle(t *testing.T) {
 	}
 }
 
+func TestTaskService_Delete_PreservesAttachmentsWhenDurableDeleteFails(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Delete failure", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	path := filepath.Join(t.TempDir(), "attachment.txt")
+	require.NoError(t, os.WriteFile(path, []byte("content"), 0o600))
+	require.NoError(t, attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "attachment.txt", FilePath: path, MediaType: "text/plain", FileSize: 7}))
+	_, err := db.Exec(`CREATE TRIGGER fail_task_delete BEFORE DELETE ON tasks WHEN OLD.id = '` + task.ID + `' BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END`)
+	require.NoError(t, err)
+
+	err = svc.Delete(ctx, task.ID)
+	require.ErrorContains(t, err, "injected delete failure")
+	require.FileExists(t, path)
+	stored, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	attachments, err := attachmentRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 1)
+}
+
+func TestTaskService_Delete_SurfacesPostDeleteAttachmentCleanupFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Cleanup failure", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	nonEmptyDirectory := filepath.Join(t.TempDir(), "not-a-file")
+	require.NoError(t, os.Mkdir(nonEmptyDirectory, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(nonEmptyDirectory, "child"), []byte("content"), 0o600))
+	require.NoError(t, attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "attachment.txt", FilePath: nonEmptyDirectory, MediaType: "text/plain", FileSize: 7}))
+
+	err := svc.Delete(ctx, task.ID)
+	require.ErrorContains(t, err, "task deleted but removing attachment")
+	stored, getErr := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.Nil(t, stored)
+	require.DirExists(t, nonEmptyDirectory)
+}
+
 func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -1139,18 +1186,25 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
+	cancelled := make(chan struct{})
+	managedWorktree := filepath.Join(t.TempDir(), "managed-worktree")
+	if err := os.Mkdir(managedWorktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create a task
 	task := &models.Task{
-		ProjectID: "default",
-		Title:     "Test Task",
-		Category:  models.CategoryBacklog,
-		Status:    models.StatusPending,
-		Prompt:    "test",
+		ProjectID:    "default",
+		Title:        "Test Task",
+		Category:     models.CategoryBacklog,
+		Status:       models.StatusPending,
+		Prompt:       "test",
+		WorktreePath: managedWorktree,
 	}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("Create task: %v", err)
 	}
+	workerSvc.RegisterCancel(task.ID, func() { close(cancelled) })
 
 	// Create a temporary file to simulate an attachment
 	tmpFile, err := os.CreateTemp("", "test-attachment-*.txt")
@@ -1191,6 +1245,11 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	if err := svc.Delete(ctx, task.ID); err != nil {
 		t.Fatalf("Delete task: %v", err)
 	}
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("deleting a task did not cancel its registered execution")
+	}
 
 	// Verify task was deleted
 	deletedTask, err := taskRepo.GetByID(ctx, task.ID)
@@ -1213,6 +1272,9 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	// Verify physical file was deleted
 	if _, err := os.Stat(tmpFilePath); !os.IsNotExist(err) {
 		t.Error("expected file to be deleted")
+	}
+	if _, err := os.Stat(managedWorktree); err != nil {
+		t.Fatalf("task deletion must preserve managed worktrees for lineage-safe cleanup: %v", err)
 	}
 }
 

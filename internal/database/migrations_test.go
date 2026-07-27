@@ -12,6 +12,71 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestMigration129IndexesTaskDeletionForeignKeys(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "task-deletion-indexes-129.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 128); err != nil {
+		t.Fatal(err)
+	}
+
+	if plan := explainQueryPlan(t, db, `SELECT rowid FROM alerts WHERE execution_id = ?`, "execution"); !strings.Contains(plan, "SCAN alerts") {
+		t.Fatalf("migration 128 alerts execution lookup plan = %q, want table scan baseline", plan)
+	}
+	if err := goose.UpTo(db, ".", 129); err != nil {
+		t.Fatal(err)
+	}
+
+	queries := map[string]string{
+		"idx_alerts_execution_id":             `SELECT rowid FROM alerts WHERE execution_id = ?`,
+		"idx_alerts_task_id":                  `SELECT rowid FROM alerts WHERE task_id = ?`,
+		"idx_alerts_source_task_id":           `SELECT rowid FROM alerts WHERE source_task_id = ?`,
+		"idx_architect_tasks_task_id":         `SELECT rowid FROM architect_tasks WHERE task_id = ?`,
+		"idx_automation_dispatch_outbox_task": `SELECT rowid FROM automation_dispatch_outbox WHERE task_id = ?`,
+		"idx_conflict_history_task_a":         `SELECT rowid FROM conflict_history WHERE task_a_id = ?`,
+		"idx_conflict_history_task_b":         `SELECT rowid FROM conflict_history WHERE task_b_id = ?`,
+		"idx_insights_task_id":                `SELECT rowid FROM insights WHERE task_id = ?`,
+		"idx_llm_usage_events_task":           `SELECT rowid FROM llm_usage_events WHERE task_id = ?`,
+		"idx_schedules_task_id":               `SELECT rowid FROM schedules WHERE task_id = ?`,
+		"idx_skill_analytics_events_task":     `SELECT rowid FROM skill_analytics_events WHERE task_id = ?`,
+	}
+	for indexName, query := range queries {
+		plan := explainQueryPlan(t, db, query, "task")
+		if !strings.Contains(plan, "USING COVERING INDEX "+indexName) {
+			t.Errorf("query plan for %s = %q, want covering index", indexName, plan)
+		}
+	}
+}
+
+func explainQueryPlan(t *testing.T, db *sql.DB, query string, arg any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, arg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(details, "; ")
+}
+
 func TestMigration122DeletesFailedPublicationCreatedSchedulesBeforeDroppingJournal(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-publication-schedules-122.db")
 	db, err := sql.Open("sqlite", dbPath)
