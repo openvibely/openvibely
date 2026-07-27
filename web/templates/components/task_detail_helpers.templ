@@ -612,18 +612,30 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
 						var taskId = _taskThreadTaskId();
 						var preservedScrollState = _getTaskThreadScrollState(taskId);
-						var restoredScrollState = _restoreTaskThreadScrollState(chatMessages, preservedScrollState);
-						if (!restoredScrollState && window.chatAutoScroll) {
-							window.chatAutoScroll.scrollToBottom(chatMessages, false);
-						}
-						var preservedUserScrolledUp = restoredScrollState ? !!preservedScrollState.userScrolledUp : false;
 
-						// Set up page-level scroll tracker for task thread before binding attachment image handlers
-						// so cached/complete images respect restored explicit upward scroll intent.
+						// Set up the page tracker before applying initial state so a scoped
+						// successful send can supersede a stale navigation snapshot.
 						if (window.ChatScrollTracker) {
 							window._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);
-							window._taskThreadPageTracker.userScrolledUp = preservedUserScrolledUp;
 						}
+						var initialScrollState = window.initializeChatTranscriptScrollState
+							? window.initializeChatTranscriptScrollState({
+								messages: chatMessages,
+								tracker: window._taskThreadPageTracker,
+								state: preservedScrollState,
+								scope: taskId
+							})
+							: { sentByUser: false, restoredScrollState: _restoreTaskThreadScrollState(chatMessages, preservedScrollState), userScrolledUp: !!(preservedScrollState && preservedScrollState.userScrolledUp) };
+						if (!initialScrollState.restoredScrollState && !initialScrollState.sentByUser && window.chatAutoScroll) {
+							window.chatAutoScroll.scrollToBottom(chatMessages, false);
+						}
+						var preservedUserScrolledUp = !!initialScrollState.userScrolledUp;
+						if (initialScrollState.sentByUser) {
+							window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+							var sentStateKey = _taskThreadScrollStateKey(taskId);
+							if (sentStateKey) delete window._taskThreadScrollStates[sentStateKey];
+						}
+						if (window._taskThreadPageTracker) window._taskThreadPageTracker.userScrolledUp = preservedUserScrolledUp;
 						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
 
 						// Keep global flag as fallback source of truth across partial re-inits.

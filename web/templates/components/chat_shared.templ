@@ -3532,6 +3532,30 @@ templ ChatAutoScrollScript() {
 					return isCurrent;
 				};
 
+				window.initializeChatTranscriptScrollState = function(options) {
+					options = options || {};
+					var messages = options.messages;
+					var tracker = options.tracker;
+					if (!messages) return { sentByUser: false, restoredScrollState: false, userScrolledUp: false };
+					var sentByUser = window.consumeChatSendScrollIntent
+						? window.consumeChatSendScrollIntent(messages.id || '', options.scope)
+						: false;
+					if (sentByUser) {
+						if (tracker && tracker.resetOnUserSend) tracker.resetOnUserSend();
+						else if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(messages, false);
+						return { sentByUser: true, restoredScrollState: false, userScrolledUp: false };
+					}
+					var state = options.state;
+					if (state) {
+						messages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : messages.scrollHeight;
+						if (tracker) tracker.userScrolledUp = !!state.userScrolledUp;
+						return { sentByUser: false, restoredScrollState: true, userScrolledUp: !!state.userScrolledUp };
+					}
+					if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(messages, false);
+					if (tracker) tracker.userScrolledUp = false;
+					return { sentByUser: false, restoredScrollState: false, userScrolledUp: false };
+				};
+
 				window.scrollChatToBottomAfterLayout = function(messagesEl, smooth) {
 					if (!messagesEl || !window.chatAutoScroll) return;
 					requestAnimationFrame(function() {

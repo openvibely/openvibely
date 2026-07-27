@@ -1370,6 +1370,8 @@ func TestChatAutoScrollScript_BindsAttachmentImageSmartScroll(t *testing.T) {
 	required := []string{
 		"window.markChatSendScrollIntent = function(formOrMessagesId, explicitScope)",
 		"window.consumeChatSendScrollIntent = function(messagesId, explicitScope)",
+		"window.initializeChatTranscriptScrollState = function(options)",
+		"if (sentByUser)",
 		"window.hasChatSendScrollIntent = function(messagesId, explicitScope)",
 		"function chatSendScrollIntentScopeKey(scope)",
 		"var scopedIntents = window._chatSendScrollIntents[messagesId] || {};",
@@ -4342,7 +4344,10 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 		"window._taskThreadScrollStates = window._taskThreadScrollStates || {};",
 		"return taskId ? 'task-thread-scroll-' + taskId : '';",
 		"var preservedScrollState = _getTaskThreadScrollState(taskId);",
-		"var restoredScrollState = _restoreTaskThreadScrollState(chatMessages, preservedScrollState);",
+		"window.initializeChatTranscriptScrollState({",
+		"state: preservedScrollState,",
+		"scope: taskId",
+		"if (initialScrollState.sentByUser)",
 		"messages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : messages.scrollHeight;",
 		"userScrolledUp: userScrolledUp, pinned: !userScrolledUp",
 		"_saveTaskThreadScrollState();",
@@ -4351,6 +4356,11 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 		if !strings.Contains(content, r) {
 			t.Fatalf("expected task thread scroll preservation code to include %q", r)
 		}
+	}
+	initialization := strings.Index(content, "var initialScrollState = window.initializeChatTranscriptScrollState")
+	attachmentBinding := strings.Index(content, "window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker)")
+	if initialization < 0 || attachmentBinding < 0 || initialization > attachmentBinding {
+		t.Fatal("task thread must consume initial scoped send intent before attachment/layout handlers can apply stale reading state")
 	}
 
 	if strings.Contains(content, "var preservedUserScrolledUp = window._taskThreadUserScrolledUp;") {
@@ -4741,10 +4751,13 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 				for (var j = 0; j < 7; j++) pair(replacement);
 				root.appendChild(replacement);
 				taskBTracker = window.resolveScrollTracker(trackerKey, replacement);
-				taskBTracker.userScrolledUp = true;
-				replacement.scrollTop = 45;
-				if (!window.consumeChatSendScrollIntent(messagesId, 'task-b')) fail('task B send intent was unavailable after tracker rebind');
-				taskBTracker.resetOnUserSend();
+				var taskBInitialization = window.initializeChatTranscriptScrollState({
+					messages: replacement,
+					tracker: taskBTracker,
+					state: {scrollTop: 45, userScrolledUp: true, pinned: false},
+					scope: 'task-b'
+				});
+				if (!taskBInitialization.sentByUser) fail('task B send intent was unavailable after tracker rebind');
 				if (taskBTracker.userScrolledUp || bottomDistance(replacement) > 1) fail('task B replacement did not restore deliberate-send pinning');
 				replacement.remove();
 
@@ -4754,10 +4767,13 @@ func TestTranscriptScrollCoordinatorInChrome(t *testing.T) {
 				for (var k = 0; k < 7; k++) pair(taskAReturn);
 				root.appendChild(taskAReturn);
 				var taskAReturnTracker = window.resolveScrollTracker(trackerKey, taskAReturn);
-				taskAReturnTracker.userScrolledUp = true;
-				taskAReturn.scrollTop = 45;
-				if (!window.consumeChatSendScrollIntent(messagesId, 'task-a')) fail('delayed task A acceptance was not preserved for navigation back');
-				taskAReturnTracker.resetOnUserSend();
+				var taskAInitialization = window.initializeChatTranscriptScrollState({
+					messages: taskAReturn,
+					tracker: taskAReturnTracker,
+					state: {scrollTop: 45, userScrolledUp: true, pinned: false},
+					scope: 'task-a'
+				});
+				if (!taskAInitialization.sentByUser) fail('delayed task A acceptance was not consumed on initial navigation render');
 				if (taskAReturnTracker.userScrolledUp || bottomDistance(taskAReturn) > 1) fail('returning to task A did not restore its deliberate-send pinning');
 				taskAReturn.remove();
 			}
