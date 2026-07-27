@@ -12,8 +12,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func TestMigration129IndexesTaskDeletionForeignKeys(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "task-deletion-indexes-129.db")
+func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "task-deletion-indexes-130.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatal(err)
@@ -23,29 +23,32 @@ func TestMigration129IndexesTaskDeletionForeignKeys(t *testing.T) {
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
 	}
-	if err := goose.UpTo(db, ".", 128); err != nil {
-		t.Fatal(err)
-	}
-
-	if plan := explainQueryPlan(t, db, `SELECT rowid FROM alerts WHERE execution_id = ?`, "execution"); !strings.Contains(plan, "SCAN alerts") {
-		t.Fatalf("migration 128 alerts execution lookup plan = %q, want table scan baseline", plan)
-	}
 	if err := goose.UpTo(db, ".", 129); err != nil {
 		t.Fatal(err)
 	}
 
+	if plan := explainQueryPlan(t, db, `SELECT rowid FROM alerts WHERE execution_id = ?`, "execution"); !strings.Contains(plan, "SCAN alerts") {
+		t.Fatalf("migration 129 alerts execution lookup plan = %q, want table scan baseline", plan)
+	}
+	if err := goose.UpTo(db, ".", 130); err != nil {
+		t.Fatal(err)
+	}
+
 	queries := map[string]string{
-		"idx_alerts_execution_id":             `SELECT rowid FROM alerts WHERE execution_id = ?`,
-		"idx_alerts_task_id":                  `SELECT rowid FROM alerts WHERE task_id = ?`,
-		"idx_alerts_source_task_id":           `SELECT rowid FROM alerts WHERE source_task_id = ?`,
-		"idx_architect_tasks_task_id":         `SELECT rowid FROM architect_tasks WHERE task_id = ?`,
-		"idx_automation_dispatch_outbox_task": `SELECT rowid FROM automation_dispatch_outbox WHERE task_id = ?`,
-		"idx_conflict_history_task_a":         `SELECT rowid FROM conflict_history WHERE task_a_id = ?`,
-		"idx_conflict_history_task_b":         `SELECT rowid FROM conflict_history WHERE task_b_id = ?`,
-		"idx_insights_task_id":                `SELECT rowid FROM insights WHERE task_id = ?`,
-		"idx_llm_usage_events_task":           `SELECT rowid FROM llm_usage_events WHERE task_id = ?`,
-		"idx_schedules_task_id":               `SELECT rowid FROM schedules WHERE task_id = ?`,
-		"idx_skill_analytics_events_task":     `SELECT rowid FROM skill_analytics_events WHERE task_id = ?`,
+		"idx_alerts_execution_id":                 `SELECT rowid FROM alerts WHERE execution_id = ?`,
+		"idx_alerts_task_id":                      `SELECT rowid FROM alerts WHERE task_id = ?`,
+		"idx_alerts_source_task_id":               `SELECT rowid FROM alerts WHERE source_task_id = ?`,
+		"idx_architect_tasks_task_id":             `SELECT rowid FROM architect_tasks WHERE task_id = ?`,
+		"idx_automation_dispatch_outbox_task":     `SELECT rowid FROM automation_dispatch_outbox WHERE task_id = ?`,
+		"idx_conflict_history_task_a":             `SELECT rowid FROM conflict_history WHERE task_a_id = ?`,
+		"idx_conflict_history_task_b":             `SELECT rowid FROM conflict_history WHERE task_b_id = ?`,
+		"idx_insights_task_id":                    `SELECT rowid FROM insights WHERE task_id = ?`,
+		"idx_llm_usage_events_task":               `SELECT rowid FROM llm_usage_events WHERE task_id = ?`,
+		"idx_schedules_task_id":                   `SELECT rowid FROM schedules WHERE task_id = ?`,
+		"idx_skill_analytics_events_task":         `SELECT rowid FROM skill_analytics_events WHERE task_id = ?`,
+		"idx_task_attachments_file_path":          `SELECT rowid FROM task_attachments WHERE file_path = ?`,
+		"idx_chat_attachments_file_path":          `SELECT rowid FROM chat_attachments WHERE file_path = ?`,
+		"idx_thread_inputs_attachment_session_id": `SELECT rowid FROM thread_inputs WHERE attachment_session_id = ? AND attachment_session_id IS NOT NULL AND attachment_session_id <> ''`,
 	}
 	for indexName, query := range queries {
 		plan := explainQueryPlan(t, db, query, "task")
@@ -548,8 +551,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 129 {
-		t.Fatalf("max goose version = %d, want 129", maxVersion)
+	if maxVersion != 130 {
+		t.Fatalf("max goose version = %d, want 130", maxVersion)
 	}
 }
 
@@ -700,8 +703,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 129 {
-		t.Fatalf("max goose version = %d, want 129", maxVersion)
+	if maxVersion != 130 {
+		t.Fatalf("max goose version = %d, want 130", maxVersion)
 	}
 }
 
@@ -1187,8 +1190,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 129 {
-		t.Fatalf("max goose version = %d, want 129", maxVersion)
+	if maxVersion != 130 {
+		t.Fatalf("max goose version = %d, want 130", maxVersion)
 	}
 }
 
@@ -1539,8 +1542,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 129 {
-		t.Fatalf("max goose version = %d, want 129", maxVersion)
+	if maxVersion != 130 {
+		t.Fatalf("max goose version = %d, want 130", maxVersion)
 	}
 }
 

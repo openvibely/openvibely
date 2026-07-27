@@ -782,6 +782,133 @@ func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, 
 	return tasks, total, rows.Err()
 }
 
+type TaskDeletionManifest struct {
+	TaskAttachmentPaths      []string
+	ExecutionAttachmentPaths []string
+	PendingUploadSessionIDs  []string
+}
+
+func (r *TaskRepo) DeleteWithCleanupManifest(ctx context.Context, id string, beforeDelete func(TaskDeletionManifest) error) (TaskDeletionManifest, bool, error) {
+	return r.deleteWithCleanupManifest(ctx, id, "", "", beforeDelete)
+}
+
+func (r *TaskRepo) DeleteWithCleanupManifestIfCategory(ctx context.Context, id, projectID string, category models.TaskCategory, beforeDelete func(TaskDeletionManifest) error) (TaskDeletionManifest, bool, error) {
+	return r.deleteWithCleanupManifest(ctx, id, projectID, string(category), beforeDelete)
+}
+
+func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID, category string, beforeDelete func(TaskDeletionManifest) error) (manifest TaskDeletionManifest, deleted bool, err error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return manifest, false, fmt.Errorf("beginning task deletion: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	where := `id = ?`
+	args := []any{id}
+	if projectID != "" || category != "" {
+		where += ` AND project_id = ? AND category = ?`
+		args = append(args, projectID, category)
+	}
+	var exists int
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE `+where, args...).Scan(&exists); err != nil {
+		return manifest, false, fmt.Errorf("checking task for deletion: %w", err)
+	}
+	if exists == 0 {
+		if err = tx.Commit(); err != nil {
+			return manifest, false, fmt.Errorf("committing empty task deletion: %w", err)
+		}
+		return manifest, false, nil
+	}
+
+	readPaths := func(query string, destination *[]string, queryArgs ...any) error {
+		rows, queryErr := tx.QueryContext(ctx, query, queryArgs...)
+		if queryErr != nil {
+			return queryErr
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var value string
+			if scanErr := rows.Scan(&value); scanErr != nil {
+				return scanErr
+			}
+			*destination = append(*destination, value)
+		}
+		return rows.Err()
+	}
+	if err = readPaths(`
+		SELECT ta.file_path
+		FROM task_attachments ta
+		WHERE ta.task_id = ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_attachments other
+			WHERE other.file_path = ta.file_path AND other.task_id <> ta.task_id
+		  )`, &manifest.TaskAttachmentPaths, id); err != nil {
+		return manifest, false, fmt.Errorf("listing task attachment paths for deletion: %w", err)
+	}
+	if err = readPaths(`
+		SELECT ca.file_path
+		FROM chat_attachments ca
+		JOIN executions e ON e.id = ca.execution_id
+		WHERE e.task_id = ?
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM chat_attachments other_ca
+			JOIN executions other_e ON other_e.id = other_ca.execution_id
+			WHERE other_ca.file_path = ca.file_path AND other_e.task_id <> e.task_id
+		  )`, &manifest.ExecutionAttachmentPaths, id); err != nil {
+		return manifest, false, fmt.Errorf("listing execution attachment paths for deletion: %w", err)
+	}
+	if err = readPaths(`
+		SELECT DISTINCT ti.attachment_session_id
+		FROM thread_inputs ti
+		WHERE ti.task_id = ? AND ti.attachment_session_id IS NOT NULL AND ti.attachment_session_id <> ''
+		  AND NOT EXISTS (
+			SELECT 1 FROM thread_inputs other
+			WHERE other.attachment_session_id = ti.attachment_session_id AND other.task_id <> ti.task_id
+		  )`, &manifest.PendingUploadSessionIDs, id); err != nil {
+		return manifest, false, fmt.Errorf("listing pending upload sessions for deletion: %w", err)
+	}
+	for _, sessionID := range manifest.PendingUploadSessionIDs {
+		if !isTaskDeletionUploadSessionID(sessionID) {
+			return manifest, false, fmt.Errorf("invalid pending attachment session for task deletion: %q", sessionID)
+		}
+	}
+
+	if beforeDelete != nil {
+		if err = beforeDelete(manifest); err != nil {
+			return manifest, false, err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE `+where, args...)
+	if err != nil {
+		return manifest, false, fmt.Errorf("deleting task: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return manifest, false, fmt.Errorf("getting deleted task count: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return manifest, false, fmt.Errorf("committing task deletion: %w", err)
+	}
+	return manifest, rows > 0, nil
+}
+
+func isTaskDeletionUploadSessionID(sessionID string) bool {
+	if len(sessionID) != 32 {
+		return false
+	}
+	for _, ch := range sessionID {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *TaskRepo) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1158,13 +1159,50 @@ func TestTaskService_Delete_PreservesAttachmentsWhenDurableDeleteFails(t *testin
 	require.Len(t, attachments, 1)
 }
 
+func TestTaskService_Delete_PreventsUploadMetadataRaceFromLeakingFile(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	workerSvc := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetDeletionUploadsDir(filepath.Join(t.TempDir(), "uploads"))
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Concurrent upload", Category: models.CategoryBacklog, Status: models.StatusRunning, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	_, err := db.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent) VALUES ('race-exec', ?, 'running', 'prompt')`, task.ID)
+	require.NoError(t, err)
+
+	latePath := filepath.Join(t.TempDir(), "late-upload.txt")
+	require.NoError(t, os.WriteFile(latePath, []byte("late"), 0o600))
+	insertResult := make(chan error, 1)
+	workerSvc.RegisterCancel(task.ID, func() {
+		go func() {
+			err := chatAttachmentRepo.Create(context.Background(), &models.ChatAttachment{
+				ExecutionID: "race-exec", FileName: "late-upload.txt", FilePath: latePath, MediaType: "text/plain", FileSize: 4,
+			})
+			if err != nil {
+				_ = os.Remove(latePath) // normal upload publication rollback
+			}
+			insertResult <- err
+		}()
+		// Give the competing metadata write an opportunity to enter the old
+		// snapshot-to-delete gap. The fixed path holds the deletion transaction.
+		time.Sleep(25 * time.Millisecond)
+	})
+
+	require.NoError(t, svc.Delete(ctx, task.ID))
+	require.Error(t, <-insertResult, "metadata publication after deletion starts must fail")
+	require.NoFileExists(t, latePath)
+}
+
 func TestTaskService_Delete_RejectsUnsafePendingUploadSessionBeforeCancellation(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	workerSvc := newTestWorkerService(t)
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
-	svc.SetDeletionUploadCleanup(repository.NewChatAttachmentRepo(db), repository.NewThreadInputRepo(db), filepath.Join(t.TempDir(), "uploads"))
+	svc.SetDeletionUploadsDir(filepath.Join(t.TempDir(), "uploads"))
 	ctx := context.Background()
 	task := &models.Task{ProjectID: "default", Title: "Unsafe pending upload", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
 	require.NoError(t, taskRepo.Create(ctx, task))
@@ -1180,6 +1218,65 @@ func TestTaskService_Delete_RejectsUnsafePendingUploadSessionBeforeCancellation(
 	require.False(t, cancelled)
 	stored, getErr := taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, getErr)
+	require.NotNil(t, stored)
+}
+
+func TestTaskService_Delete_RejectsPendingUploadsWithoutConfiguredRoot(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Missing upload root", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	_, err := db.Exec(`INSERT INTO thread_inputs
+		(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
+		VALUES ('missing-root-input', 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', 'abcdefabcdefabcdefabcdefabcdefab', 1)`, task.ID)
+	require.NoError(t, err)
+	cancelled := false
+	workerSvc.RegisterCancel(task.ID, func() { cancelled = true })
+
+	err = svc.Delete(ctx, task.ID)
+	require.ErrorContains(t, err, "uploads directory is not configured")
+	require.False(t, cancelled)
+	stored, getErr := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.NotNil(t, stored)
+}
+
+func TestTaskService_Delete_PreservesFilesStillReferencedByAnotherTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	uploadsDir := filepath.Join(t.TempDir(), "uploads")
+	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
+	svc.SetDeletionUploadsDir(uploadsDir)
+	ctx := context.Background()
+	first := &models.Task{ProjectID: "default", Title: "First owner", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	second := &models.Task{ProjectID: "default", Title: "Second owner", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, first))
+	require.NoError(t, taskRepo.Create(ctx, second))
+	sharedPath := filepath.Join(t.TempDir(), "shared.txt")
+	require.NoError(t, os.WriteFile(sharedPath, []byte("shared"), 0o600))
+	for _, task := range []*models.Task{first, second} {
+		require.NoError(t, attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "shared.txt", FilePath: sharedPath, MediaType: "text/plain", FileSize: 6}))
+	}
+	const sharedSession = "1234567890abcdef1234567890abcdef"
+	sharedDir := filepath.Join(uploadsDir, "chat", "pending", sharedSession)
+	require.NoError(t, os.MkdirAll(sharedDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(sharedDir, "pending.txt"), []byte("pending"), 0o600))
+	for i, task := range []*models.Task{first, second} {
+		_, err := db.Exec(`INSERT INTO thread_inputs
+			(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
+			VALUES (?, 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', ?, 1)`, fmt.Sprintf("shared-input-%d", i), task.ID, sharedSession)
+		require.NoError(t, err)
+	}
+
+	require.NoError(t, svc.Delete(ctx, first.ID))
+	require.FileExists(t, sharedPath)
+	require.DirExists(t, sharedDir)
+	stored, err := taskRepo.GetByID(ctx, second.ID)
+	require.NoError(t, err)
 	require.NotNil(t, stored)
 }
 
@@ -1212,9 +1309,8 @@ func TestTaskService_Delete_DeletesAttachments(t *testing.T) {
 	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	ctx := context.Background()
 	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
-	threadInputRepo := repository.NewThreadInputRepo(db)
 	uploadsDir := filepath.Join(t.TempDir(), "uploads")
-	svc.SetDeletionUploadCleanup(chatAttachmentRepo, threadInputRepo, uploadsDir)
+	svc.SetDeletionUploadsDir(uploadsDir)
 	cancelled := make(chan struct{})
 	managedWorktree := filepath.Join(t.TempDir(), "managed-worktree")
 	if err := os.Mkdir(managedWorktree, 0o755); err != nil {
@@ -1750,6 +1846,107 @@ func TestTaskService_ActiveTaskWithCompletedStatusIsNotDeleted(t *testing.T) {
 	if !found {
 		t.Error("task with category=active and status=completed should appear in active category listing")
 	}
+}
+
+func TestTaskService_DeleteAll_CleansEveryUploadOwner(t *testing.T) {
+	tests := []struct {
+		name     string
+		category models.TaskCategory
+		delete   func(*TaskService, context.Context, string) (int, error)
+	}{
+		{name: "completed", category: models.CategoryCompleted, delete: func(s *TaskService, ctx context.Context, projectID string) (int, error) {
+			return s.DeleteAllCompleted(ctx, projectID)
+		}},
+		{name: "backlog", category: models.CategoryBacklog, delete: func(s *TaskService, ctx context.Context, projectID string) (int, error) {
+			return s.DeleteAllBacklog(ctx, projectID)
+		}},
+		{name: "chat", category: models.CategoryChat, delete: func(s *TaskService, ctx context.Context, projectID string) (int, error) {
+			return s.DeleteAllChat(ctx, projectID)
+		}},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			attachmentRepo := repository.NewAttachmentRepo(db)
+			chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+			uploadsDir := filepath.Join(t.TempDir(), "uploads")
+			svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
+			svc.SetDeletionUploadsDir(uploadsDir)
+			ctx := context.Background()
+			task := &models.Task{ProjectID: "default", Title: "Bulk " + tt.name, Category: tt.category, Status: models.StatusCompleted, Prompt: "test"}
+			require.NoError(t, taskRepo.Create(ctx, task))
+
+			taskPath := filepath.Join(t.TempDir(), "task.txt")
+			require.NoError(t, os.WriteFile(taskPath, []byte("task"), 0o600))
+			require.NoError(t, attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "task.txt", FilePath: taskPath, MediaType: "text/plain", FileSize: 4}))
+			execID := fmt.Sprintf("bulk-exec-%d", i)
+			_, err := db.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent) VALUES (?, ?, 'completed', 'prompt')`, execID, task.ID)
+			require.NoError(t, err)
+			execPath := filepath.Join(uploadsDir, "chat", execID, "execution.txt")
+			require.NoError(t, os.MkdirAll(filepath.Dir(execPath), 0o700))
+			require.NoError(t, os.WriteFile(execPath, []byte("execution"), 0o600))
+			require.NoError(t, chatAttachmentRepo.Create(ctx, &models.ChatAttachment{ExecutionID: execID, FileName: "execution.txt", FilePath: execPath, MediaType: "text/plain", FileSize: 9}))
+			sessionID := fmt.Sprintf("%032x", i+1)
+			pendingDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+			require.NoError(t, os.MkdirAll(pendingDir, 0o700))
+			require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "pending.txt"), []byte("pending"), 0o600))
+			_, err = db.Exec(`INSERT INTO thread_inputs(id, scope, project_id, task_id, input_mode, input_status, content, attachment_session_id, queue_position)
+				VALUES (?, 'task_thread', 'default', ?, 'queued', 'pending', 'follow up', ?, 1)`, "bulk-input-"+tt.name, task.ID, sessionID)
+			require.NoError(t, err)
+
+			count, err := tt.delete(svc, ctx, "default")
+			require.NoError(t, err)
+			require.Equal(t, 1, count)
+			require.NoFileExists(t, taskPath)
+			require.NoFileExists(t, execPath)
+			require.NoDirExists(t, pendingDir)
+		})
+	}
+}
+
+func TestTaskService_DeleteAll_PreservesFilesWhenDurableDeleteFails(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Bulk delete failure", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	path := filepath.Join(t.TempDir(), "attachment.txt")
+	require.NoError(t, os.WriteFile(path, []byte("content"), 0o600))
+	require.NoError(t, attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "attachment.txt", FilePath: path, MediaType: "text/plain", FileSize: 7}))
+	_, err := db.Exec(`CREATE TRIGGER fail_bulk_task_delete BEFORE DELETE ON tasks WHEN OLD.id = '` + task.ID + `' BEGIN SELECT RAISE(ABORT, 'injected bulk delete failure'); END`)
+	require.NoError(t, err)
+
+	count, err := svc.DeleteAllCompleted(ctx, "default")
+	require.Zero(t, count)
+	require.ErrorContains(t, err, "injected bulk delete failure")
+	require.FileExists(t, path)
+	stored, getErr := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.NotNil(t, stored)
+}
+
+func TestTaskService_DeleteAll_SurfacesCleanupFailureAfterDurableDelete(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	svc := NewTaskService(taskRepo, attachmentRepo, newTestWorkerService(t))
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Bulk cleanup failure", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	nonEmptyDirectory := filepath.Join(t.TempDir(), "not-a-file")
+	require.NoError(t, os.Mkdir(nonEmptyDirectory, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(nonEmptyDirectory, "child"), []byte("content"), 0o600))
+	require.NoError(t, attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "attachment.txt", FilePath: nonEmptyDirectory, MediaType: "text/plain", FileSize: 7}))
+
+	count, err := svc.DeleteAllBacklog(ctx, "default")
+	require.Equal(t, 1, count)
+	require.ErrorContains(t, err, "task deleted but removing attachment")
+	stored, getErr := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.Nil(t, stored)
 }
 
 func TestTaskService_DeleteAllCompleted(t *testing.T) {

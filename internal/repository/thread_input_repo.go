@@ -862,31 +862,6 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 	})
 }
 
-func (r *ThreadInputRepo) ListAttachmentSessionIDsByTask(ctx context.Context, taskID string) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT DISTINCT attachment_session_id
-		FROM thread_inputs
-		WHERE task_id = ? AND COALESCE(attachment_session_id, '') <> ''
-		ORDER BY attachment_session_id`, taskID)
-	if err != nil {
-		return nil, fmt.Errorf("listing attachment sessions by task: %w", err)
-	}
-	defer rows.Close()
-
-	var sessionIDs []string
-	for rows.Next() {
-		var sessionID string
-		if err := rows.Scan(&sessionID); err != nil {
-			return nil, fmt.Errorf("scanning attachment session by task: %w", err)
-		}
-		sessionIDs = append(sessionIDs, sessionID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating attachment sessions by task: %w", err)
-	}
-	return sessionIDs, nil
-}
-
 func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models.ThreadInput, error) {
 	cancelled, err := scanThreadInput(r.db.QueryRowContext(ctx, `
 		UPDATE thread_inputs

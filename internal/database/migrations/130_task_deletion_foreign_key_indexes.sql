@@ -14,7 +14,17 @@ CREATE INDEX idx_llm_usage_events_task ON llm_usage_events(task_id) WHERE task_i
 CREATE INDEX idx_schedules_task_id ON schedules(task_id);
 CREATE INDEX idx_skill_analytics_events_task ON skill_analytics_events(task_id) WHERE task_id IS NOT NULL;
 
+-- Task deletion preserves files or pending sessions still referenced by another
+-- task. Index those ownership checks so cleanup capture remains bounded.
+CREATE INDEX idx_task_attachments_file_path ON task_attachments(file_path);
+CREATE INDEX idx_chat_attachments_file_path ON chat_attachments(file_path);
+CREATE INDEX idx_thread_inputs_attachment_session_id ON thread_inputs(attachment_session_id)
+    WHERE attachment_session_id IS NOT NULL AND attachment_session_id <> '';
+
 -- +goose Down
+DROP INDEX IF EXISTS idx_thread_inputs_attachment_session_id;
+DROP INDEX IF EXISTS idx_chat_attachments_file_path;
+DROP INDEX IF EXISTS idx_task_attachments_file_path;
 DROP INDEX IF EXISTS idx_skill_analytics_events_task;
 DROP INDEX IF EXISTS idx_schedules_task_id;
 DROP INDEX IF EXISTS idx_llm_usage_events_task;
