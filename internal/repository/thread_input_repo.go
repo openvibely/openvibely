@@ -915,6 +915,19 @@ func (r *ThreadInputRepo) AttachmentSessionReferenced(ctx context.Context, sessi
 	return referenced != 0, nil
 }
 
+func (r *ThreadInputRepo) IsAttachmentSessionRetired(ctx context.Context, sessionID string) (bool, error) {
+	var retired int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM retired_attachment_sessions
+			WHERE session_id = ?
+		)`, sessionID).Scan(&retired)
+	if err != nil {
+		return false, fmt.Errorf("checking attachment session retirement: %w", err)
+	}
+	return retired != 0, nil
+}
+
 func (r *ThreadInputRepo) RetireAttachmentSessionIfUnowned(ctx context.Context, sessionID string) (retired bool, err error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/attachmentsession"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -1227,6 +1228,70 @@ func TestTaskService_Delete_PreventsUploadMetadataRaceFromLeakingFile(t *testing
 	require.NoError(t, svc.Delete(ctx, task.ID))
 	require.Error(t, <-insertResult, "metadata publication after deletion starts must fail")
 	require.NoFileExists(t, latePath)
+}
+
+func TestTaskService_Delete_SerializesPendingPublicationAfterRetirement(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	uploadsDir := filepath.Join(t.TempDir(), "uploads")
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), newTestWorkerService(t))
+	svc.SetDeletionUploadsDir(uploadsDir)
+	ctx := context.Background()
+	task := &models.Task{ProjectID: "default", Title: "Retired publication", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "test"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	const sessionID = "abababababababababababababababab"
+	require.NoError(t, threadInputRepo.CreateQueued(ctx, &models.ThreadInput{
+		Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID,
+		InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending,
+		Content: "owned before deletion", AttachmentSessionID: sessionID,
+	}))
+	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(sessionDir, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(sessionDir, "pending.txt"), []byte("pending"), 0o600))
+
+	cleanupPaused := make(chan struct{})
+	continueCleanup := make(chan struct{})
+	svc.beforePendingSessionRemoval = func(gotSessionID string) {
+		assert.Equal(t, sessionID, gotSessionID)
+		close(cleanupPaused)
+		<-continueCleanup
+	}
+	deleteResult := make(chan error, 1)
+	go func() {
+		deleteResult <- svc.Delete(ctx, task.ID)
+	}()
+	<-cleanupPaused
+
+	type publicationResult struct {
+		retired bool
+		err     error
+	}
+	publicationStarted := make(chan struct{})
+	publicationDone := make(chan publicationResult, 1)
+	go func() {
+		close(publicationStarted)
+		unlockSession := attachmentsession.Lock(sessionID)
+		defer unlockSession()
+		retired, err := threadInputRepo.IsAttachmentSessionRetired(context.Background(), sessionID)
+		if err == nil && !retired {
+			err = os.WriteFile(filepath.Join(sessionDir, "late.txt"), []byte("late"), 0o600)
+		}
+		publicationDone <- publicationResult{retired: retired, err: err}
+	}()
+	<-publicationStarted
+	select {
+	case result := <-publicationDone:
+		t.Fatalf("publication completed while same-session cleanup was paused: %+v", result)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(continueCleanup)
+	require.NoError(t, <-deleteResult)
+	result := <-publicationDone
+	require.NoError(t, result.err)
+	require.True(t, result.retired)
+	require.NoDirExists(t, sessionDir)
 }
 
 func TestTaskService_Delete_RejectsPendingSessionOwnerAcquiredAfterCommitBeforeRemoval(t *testing.T) {

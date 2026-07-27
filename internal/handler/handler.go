@@ -98,6 +98,7 @@ type Handler struct {
 	appBaseURL                 string
 	desktopMode                bool
 	pendingRemovalHook         func(string)
+	pendingPublicationHook     func(string)
 
 	loginFailuresMu   sync.Mutex
 	loginFailureTimes []time.Time
