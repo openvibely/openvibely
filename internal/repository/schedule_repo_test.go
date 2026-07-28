@@ -67,6 +67,55 @@ func TestScheduleRepo_CreateAndGetByID(t *testing.T) {
 	}
 }
 
+func TestScheduleRepo_UpdateClearContextOnStartPreservesTimingState(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	task := createTestTask(t, taskRepo)
+	runAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	staleNextRun := runAt.Add(time.Hour)
+	schedule := &models.Schedule{
+		TaskID:              task.ID,
+		RunAt:               runAt,
+		RepeatType:          models.RepeatHours,
+		RepeatInterval:      3,
+		Enabled:             true,
+		ClearContextOnStart: false,
+		NextRun:             &staleNextRun,
+	}
+	if err := repo.Create(ctx, schedule); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	lastRun := time.Now().UTC().Truncate(time.Second)
+	advancedNextRun := lastRun.Add(3 * time.Hour)
+	if err := repo.MarkRan(ctx, schedule.ID, lastRun, &advancedNextRun); err != nil {
+		t.Fatalf("MarkRan: %v", err)
+	}
+	if err := repo.UpdateClearContextOnStart(ctx, schedule.ID, true); err != nil {
+		t.Fatalf("UpdateClearContextOnStart: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if !got.ClearContextOnStart {
+		t.Fatal("expected ClearContextOnStart to update")
+	}
+	if !got.RunAt.Equal(runAt) || got.RepeatType != models.RepeatHours || got.RepeatInterval != 3 || !got.Enabled {
+		t.Fatalf("context-only update changed schedule configuration: %#v", got)
+	}
+	if got.LastRun == nil || !got.LastRun.Equal(lastRun) {
+		t.Fatalf("LastRun changed: got %v, want %v", got.LastRun, lastRun)
+	}
+	if got.NextRun == nil || !got.NextRun.Equal(advancedNextRun) {
+		t.Fatalf("NextRun changed: got %v, want %v", got.NextRun, advancedNextRun)
+	}
+}
+
 func TestScheduleRepo_ListDue(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)

@@ -1141,8 +1141,7 @@ func (h *Handler) updateTaskScheduleContextFromEditForm(c echo.Context, taskID s
 		if schedules[i].ClearContextOnStart == clearContextOnStart {
 			continue
 		}
-		schedules[i].ClearContextOnStart = clearContextOnStart
-		if err := h.scheduleRepo.Update(c.Request().Context(), &schedules[i]); err != nil {
+		if err := h.scheduleRepo.UpdateClearContextOnStart(c.Request().Context(), schedules[i].ID, clearContextOnStart); err != nil {
 			return err
 		}
 	}

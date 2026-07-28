@@ -151,9 +151,26 @@ func TestHandler_UpdateTask_UpdatesOnlyOwnedScheduleContextSettings(t *testing.T
 	if err := h.taskSvc.Create(ctx, otherTask); err != nil {
 		t.Fatalf("create other task: %v", err)
 	}
-	first := createSchedule(t, h, task.ID, time.Now().Add(time.Hour), func(schedule *models.Schedule) { schedule.ClearContextOnStart = true })
-	second := createSchedule(t, h, task.ID, time.Now().Add(2*time.Hour))
+	first := createSchedule(t, h, task.ID, time.Now().Add(time.Hour), func(schedule *models.Schedule) {
+		schedule.ClearContextOnStart = true
+		schedule.RepeatType = models.RepeatHours
+		schedule.RepeatInterval = 3
+	})
+	second := createSchedule(t, h, task.ID, time.Now().Add(2*time.Hour), func(schedule *models.Schedule) {
+		schedule.RepeatType = models.RepeatDaily
+		schedule.RepeatInterval = 2
+	})
 	other := createSchedule(t, h, otherTask.ID, time.Now().Add(3*time.Hour), func(schedule *models.Schedule) { schedule.ClearContextOnStart = true })
+	firstLastRun := time.Now().UTC().Truncate(time.Second)
+	firstNextRun := firstLastRun.Add(3 * time.Hour)
+	secondLastRun := firstLastRun.Add(time.Minute)
+	secondNextRun := secondLastRun.Add(48 * time.Hour)
+	if err := h.scheduleRepo.MarkRan(ctx, first.ID, firstLastRun, &firstNextRun); err != nil {
+		t.Fatalf("mark first schedule ran: %v", err)
+	}
+	if err := h.scheduleRepo.MarkRan(ctx, second.ID, secondLastRun, &secondNextRun); err != nil {
+		t.Fatalf("mark second schedule ran: %v", err)
+	}
 
 	form := url.Values{
 		"title":                             {task.Title},
@@ -192,6 +209,18 @@ func TestHandler_UpdateTask_UpdatesOnlyOwnedScheduleContextSettings(t *testing.T
 	}
 	if !gotOther.ClearContextOnStart {
 		t.Fatal("unrelated schedule must not be changed")
+	}
+	if !gotFirst.RunAt.Equal(first.RunAt) || gotFirst.RepeatType != models.RepeatHours || gotFirst.RepeatInterval != 3 || !gotFirst.Enabled {
+		t.Fatalf("first schedule configuration changed: %#v", gotFirst)
+	}
+	if gotFirst.LastRun == nil || !gotFirst.LastRun.Equal(firstLastRun) || gotFirst.NextRun == nil || !gotFirst.NextRun.Equal(firstNextRun) {
+		t.Fatalf("first schedule timing changed: last=%v next=%v", gotFirst.LastRun, gotFirst.NextRun)
+	}
+	if !gotSecond.RunAt.Equal(second.RunAt) || gotSecond.RepeatType != models.RepeatDaily || gotSecond.RepeatInterval != 2 || !gotSecond.Enabled {
+		t.Fatalf("second schedule configuration changed: %#v", gotSecond)
+	}
+	if gotSecond.LastRun == nil || !gotSecond.LastRun.Equal(secondLastRun) || gotSecond.NextRun == nil || !gotSecond.NextRun.Equal(secondNextRun) {
+		t.Fatalf("second schedule timing changed: last=%v next=%v", gotSecond.LastRun, gotSecond.NextRun)
 	}
 }
 
