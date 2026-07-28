@@ -94,6 +94,45 @@ func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
 	}
 }
 
+func TestMigration130AllowsLegacyDatabaseWithoutArchitectTables(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-task-deletion-indexes-130.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 129); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, table := range []string{"architect_tasks", "architect_messages", "architect_sessions", "architect_templates"} {
+		if _, err := db.Exec(`DROP TABLE ` + table); err != nil {
+			t.Fatalf("dropping legacy-absent table %s: %v", table, err)
+		}
+	}
+	if err := goose.UpTo(db, ".", 130); err != nil {
+		t.Fatalf("migration 130 on legacy database without architect tables: %v", err)
+	}
+
+	var indexCount int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'index' AND name = 'idx_architect_tasks_task_id'
+	`).Scan(&indexCount); err != nil {
+		t.Fatal(err)
+	}
+	if indexCount != 0 {
+		t.Fatalf("legacy architect task index count = %d, want 0", indexCount)
+	}
+	if plan := explainQueryPlan(t, db, `SELECT rowid FROM alerts WHERE execution_id = ?`, "execution"); !strings.Contains(plan, "USING COVERING INDEX idx_alerts_execution_id") {
+		t.Fatalf("legacy alerts execution lookup plan = %q, want migration 130 index", plan)
+	}
+}
+
 func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "retired-attachment-sessions-131.db")
 	db, err := sql.Open("sqlite", dbPath)
