@@ -202,4 +202,8 @@ always_use:
 
 ## openvibely_sdlc_loop_audit
 
-[OpenVibely SDLC Loop Audit](openvibely_sdlc_loop_audit/SKILL.md) — Reconcile GitHub assignments, issues, pull requests, and OpenVibely task state without creating duplicate work.
+[OpenVibely SDLC Loop Audit](openvibely_sdlc_loop_audit/SKILL.md) — Reconcile GitHub assignments, issues, pull requests, tasks, and deterministic Automation loop health without creating duplicate work.
+
+## openvibely_alert_lifecycle_workflow
+
+[OpenVibely Alert Lifecycle Workflow](openvibely_alert_lifecycle_workflow/SKILL.md) — Implement and audit OpenVibely alert listing, read, dismiss, deletion, retention, and UI refresh semantics.
