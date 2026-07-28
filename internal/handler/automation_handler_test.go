@@ -972,6 +972,9 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.Equal(t, fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID), created.Header().Get("HX-Redirect"))
 	require.NotZero(t, tableCountHandler(t, tc, "tasks"))
 	require.NotZero(t, tableCountHandler(t, tc, "schedules"))
+	var schedulesKeepingContext int
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE clear_context_on_start = 0`).Scan(&schedulesKeepingContext))
+	require.Equal(t, tableCountHandler(t, tc, "schedules"), schedulesKeepingContext, "unchecked browser Save values must persist false")
 	compiledTasks, err := tc.taskRepo.ListByProject(context.Background(), project.ID, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, compiledTasks)

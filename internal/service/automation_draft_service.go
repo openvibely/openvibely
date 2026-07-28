@@ -1053,6 +1053,11 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		if _, ok := node.Config["enabled"].(bool); !ok {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Trigger enabled state must be true or false."})
 		}
+		if clearContextOnStart, present := node.Config["clear_context_on_start"]; present {
+			if _, valid := clearContextOnStart.(bool); !valid {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "clear_context_on_start", Message: "Clear context on start must be true or false."})
+			}
+		}
 	}
 	switch canonical.Role {
 	case "create_notification", "create_github_issue", "open_pull_request":

@@ -227,6 +227,9 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 			if _, exists := automationDraftFormValue(c, prefix+"enabled"); exists || strings.TrimSpace(c.FormValue("builder_action")) == "" {
 				node.Config["enabled"] = c.FormValue(prefix+"enabled") == "true"
 			}
+			if _, exists := automationDraftFormValue(c, prefix+"clear_context_on_start"); exists || strings.TrimSpace(c.FormValue("builder_action")) == "" {
+				node.Config["clear_context_on_start"] = c.FormValue(prefix+"clear_context_on_start") == "true"
+			}
 		}
 		if _, ok := node.Config["notification_type"]; ok {
 			if value, exists := automationDraftFormValue(c, prefix+"notification_type"); exists {

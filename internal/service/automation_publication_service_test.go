@@ -136,6 +136,7 @@ func TestAutomationSaveRejectsInvalidMaintainedGitHubActionSettingsAtomically(t 
 		{name: "implementation category backlog", role: "implementation", field: "category", value: string(models.CategoryBacklog), wantCode: "category"},
 		{name: "implementation category scheduled", role: "implementation", field: "category", value: string(models.CategoryScheduled), wantCode: "category"},
 		{name: "implementation priority missing", role: "implementation", field: "priority", removeField: true, wantCode: "priority"},
+		{name: "schedule clear context wrong type", role: "github_inbox", field: "clear_context_on_start", value: "false", wantCode: "clear_context_on_start"},
 		{name: "issue instructions wrong type", role: "create_github_issue", field: "instructions", value: true, wantCode: "action_instructions"},
 		{name: "issue instructions exceed limit", role: "create_github_issue", field: "instructions", value: strings.Repeat("x", 2001), wantCode: "action_instructions"},
 		{name: "labels wrong type", role: "create_github_issue", field: "labels", value: "bug", wantCode: "github_issue_labels"},
