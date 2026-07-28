@@ -23,6 +23,15 @@ func TestTaskDeletionLargeHistoryDoesNotBlockUnrelatedQueries(t *testing.T) {
 		WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < 2000)
 			INSERT INTO executions(id, task_id, status, prompt_sent, output)
 			SELECT printf('delete-exec-%06d', x), 'delete-parent', 'completed', 'prompt', 'output' FROM n;
+		WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < 2000)
+			INSERT INTO lifecycle_executions(id, task_id, task_run_id, when_slot, status)
+			SELECT printf('delete-lifecycle-%06d', x), 'delete-parent', printf('delete-exec-%06d', x), 'route_task', 'completed' FROM n;
+		WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < 20000)
+			INSERT INTO lifecycle_execution_events(id, lifecycle_execution_id, seq, event_type, payload_json)
+			SELECT printf('delete-lifecycle-event-%06d', x), printf('delete-lifecycle-%06d', ((x - 1) / 10) + 1), ((x - 1) % 10) + 1, 'fixture', '{"fixture":true}' FROM n;
+		WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < 50000)
+			INSERT INTO lifecycle_executions(id, task_id, task_run_id, when_slot, status)
+			SELECT printf('unrelated-lifecycle-%06d', x), 'delete-child', printf('unrelated-run-%06d', x), 'route_task', 'completed' FROM n;
 		INSERT INTO schedules(id, task_id, run_at, repeat_type) VALUES ('delete-schedule', 'delete-parent', CURRENT_TIMESTAMP, 'once');
 		INSERT INTO task_goals(task_id, goal_id, objective, status) VALUES ('delete-parent', 'delete-goal', 'objective', 'active');
 		WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x + 1 FROM n WHERE x < 500)
@@ -69,20 +78,24 @@ func TestTaskDeletionLargeHistoryDoesNotBlockUnrelatedQueries(t *testing.T) {
 	if deleteLatency > responsivenessLimit || unrelatedLatency > responsivenessLimit {
 		t.Fatalf("indexed task deletion took %s and blocked an unrelated query for %s; both must remain below %s", deleteLatency, unrelatedLatency, responsivenessLimit)
 	}
-	t.Logf("deleted 2,000 executions with 50,000 unrelated alerts in %s; unrelated query latency %s", deleteLatency, unrelatedLatency)
+	t.Logf("deleted 2,000 execution turns, 2,000 lifecycle runs, and 20,000 lifecycle events with 50,000 unrelated lifecycle runs and alerts in %s; unrelated query latency %s", deleteLatency, unrelatedLatency)
 
 	for table, want := range map[string]int{
-		"tasks":            1,
-		"executions":       0,
-		"schedules":        0,
-		"task_goals":       0,
-		"thread_inputs":    0,
-		"task_attachments": 0,
+		"tasks":                      1,
+		"executions":                 0,
+		"lifecycle_executions":       0,
+		"lifecycle_execution_events": 0,
+		"schedules":                  0,
+		"task_goals":                 0,
+		"thread_inputs":              0,
+		"task_attachments":           0,
 	} {
 		var got int
 		query := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE %s`, table, map[string]string{
 			"tasks": "id IN ('delete-parent', 'delete-child')", "executions": "task_id = 'delete-parent'",
-			"schedules": "task_id = 'delete-parent'", "task_goals": "task_id = 'delete-parent'",
+			"lifecycle_executions":       "task_id = 'delete-parent'",
+			"lifecycle_execution_events": "lifecycle_execution_id LIKE 'delete-lifecycle-%'",
+			"schedules":                  "task_id = 'delete-parent'", "task_goals": "task_id = 'delete-parent'",
 			"thread_inputs": "task_id = 'delete-parent'", "task_attachments": "task_id = 'delete-parent'",
 		}[table])
 		if err := db.QueryRow(query).Scan(&got); err != nil {
