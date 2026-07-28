@@ -2,7 +2,7 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-07-20
+updated: 2026-07-27
 source: consolidation
 source_id: memory_consolidation_2026_07_20
 confidence: high
@@ -15,6 +15,7 @@ Durable model and migration facts:
 - Alerts are project-owned. List/count, ID-based reads, read-state, delete, decision, claim, linkage, and processing operations enforce project ownership server-side.
 - Existing operational alerts retain their persisted project IDs. Migration does not infer ownership from the active UI project or introduce implicit global visibility; legacy rows are backfilled as `scope=project`, `decision=not_required`, and `processing=not_applicable`.
 - Actionable notification decision state is separate from read/unread and automation processing state. Notifications carry project/scope, type, title/message/body, source and source-task identity, timestamps, structured metadata, optional project-scoped idempotency key, lease claimant/time, processing/failure state, and linked implementation task.
+- Deleting a task intentionally retains associated alerts as historical records while nulling their `task_id`, `source_task_id`, and `execution_id` references. Those alerts must be deleted separately if no longer wanted.
 - Human approval authorizes downstream task creation only. It does not authorize merge, release, deployment, or other higher-risk actions.
 
 Authorization, concurrency, and runtime facts:
@@ -31,7 +32,7 @@ Authorization, concurrency, and runtime facts:
 - Automation-bound idempotent notification retries may reuse an Alert only when the same persisted Automation source already owns the creation transition; a same-project, same-key Alert created outside that Automation is rejected rather than adopted.
 
 Product surfaces:
-- The Alerts page supports inspection, approve/reject controls for pending notifications, decision and processing badges, claimant/failure details, linked-task navigation, project context, and project-filtered live refresh. Existing operational alert read/delete behavior remains supported.
+- The Alerts page supports inspection, approve/reject controls for pending notifications, decision and processing badges, claimant/failure details, linked-task navigation, project context, and project-filtered live refresh. Deleting one alert or all alerts for the selected project physically removes those rows and refreshes the list and unread badge; marking read only changes `is_read`, and dismissing only changes decision state.
 - The Alerts page currently fetches only the newest 100 project alerts, while search is client-side and decision-state filters and pagination are absent. Older pending approvals can therefore become unreachable behind newer operational alerts; the durable product direction is server-side filtering/pagination so pending human decisions remain reachable.
 - The bundled `openvibely_native_autonomous_sdlc_bootstrap` skill provides an OpenVibely-native alternative to the GitHub-backed workflow. Suggestion producers use `create_notification`; scheduled inbox tasks inspect approved notifications, claim them, and create one atomically linked implementation task.
 - The model, migration, authorization boundaries, tool contracts, lease recovery, and schedule configuration are documented in `docs/openvibely-native-autonomous-sdlc-user-guide.md`.

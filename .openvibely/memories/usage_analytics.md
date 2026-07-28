@@ -35,6 +35,7 @@ Provider normalization facts:
 
 Analytics surface facts:
 - `/analytics` includes local task/execution/productivity analytics, LLM usage/account-limit views, and Skill Curator analytics.
+- Project memory recall effectiveness and downstream follow-through are not currently inspectable alongside skill analytics; an Analytics addition is proposed in `openvibely/openvibely#85`.
 - `/api/analytics/usage` backs the Analytics page usage section; `/api/analytics/skills` backs Skill Curator Analytics.
 - The Analytics page sends the selected/current project ID to every local analytics endpoint it fetches, and the visible project label is tied to that same project ID.
 - Local Analytics sections are project-scoped when labeled with the selected project: model usage filters `llm_usage_events.project_id`; Skill Curator analytics filters `skill_analytics_events.project_id`; task/execution/productivity analytics and failed-task patterns filter through `tasks.project_id`.
