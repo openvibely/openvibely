@@ -1066,8 +1066,11 @@ func TestTaskDetailScheduleClearContextControlsDefaultAndHydrate(t *testing.T) {
 		t.Fatalf("render: %v", err)
 	}
 	html := buf.String()
-	if strings.Count(html, "Clear context on start") != 3 {
-		t.Fatalf("expected add and two edit controls, got %d", strings.Count(html, "Clear context on start"))
+	if strings.Count(html, `name="clear_context_on_start" value="true"`) != 3 {
+		t.Fatalf("expected add and two schedule edit controls, got %d", strings.Count(html, `name="clear_context_on_start" value="true"`))
+	}
+	if strings.Count(html, `name="clear_context_schedule_ids"`) != 2 {
+		t.Fatalf("expected two task edit controls, got %d", strings.Count(html, `name="clear_context_schedule_ids"`))
 	}
 	clearCardStart := strings.Index(html, `id="schedule-card-clear"`)
 	keepCardStart := strings.Index(html, `id="schedule-card-keep"`)

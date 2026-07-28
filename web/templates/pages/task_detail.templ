@@ -263,6 +263,34 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 									}
 								</select>
 							</div>
+							if len(schedules) > 0 {
+								<div class="form-control mb-4">
+									<input type="hidden" name="schedule_context_settings_present" value="1"/>
+									<label class="label">
+										<span class="label-text">Schedule context</span>
+									</label>
+									<div class="space-y-2">
+										for _, schedule := range schedules {
+											<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-base-300 px-3 py-2">
+												<input
+													type="checkbox"
+													name="clear_context_schedule_ids"
+													value={ schedule.ID }
+													class="checkbox checkbox-sm mt-0.5"
+													checked?={ schedule.ClearContextOnStart }
+												/>
+												<span class="min-w-0">
+													<span class="label-text block">Clear context on start</span>
+													if len(schedules) > 1 {
+														<span class="label-text-alt block opacity-60">{ schedule.RunAt.Local().Format("Jan 2, 2006 3:04 PM") } · { string(schedule.RepeatType) }</span>
+													}
+												</span>
+											</label>
+										}
+									</div>
+									<label class="label"><span class="label-text-alt opacity-60">Start selected scheduled runs without prior model conversation context.</span></label>
+								</div>
+							}
 							<div class="form-control mb-4">
 								<label class="label">
 									<span class="label-text">Prompt</span>

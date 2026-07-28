@@ -96,6 +96,105 @@ func TestHandler_GetTask_FromSchedulePage(t *testing.T) {
 	}
 }
 
+func TestHandler_GetTask_EditFormHydratesScheduleClearContext(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Edit Scheduled Context",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "Original prompt",
+	}
+	if err := h.taskSvc.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	schedule := createSchedule(t, h, task.ID, time.Now().Add(time.Hour), func(schedule *models.Schedule) {
+		schedule.ClearContextOnStart = true
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=details&from=schedule", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`name="schedule_context_settings_present" value="1"`,
+		`name="clear_context_schedule_ids" value="` + schedule.ID + `"`,
+		`Clear context on start`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected Edit Task form to contain %q", want)
+		}
+	}
+	checkbox := `name="clear_context_schedule_ids" value="` + schedule.ID + `"`
+	start := strings.Index(body, checkbox)
+	if start < 0 || !strings.Contains(body[start:min(len(body), start+200)], "checked") {
+		t.Fatal("expected persisted clear-context schedule to render checked in Edit Task form")
+	}
+}
+
+func TestHandler_UpdateTask_UpdatesOnlyOwnedScheduleContextSettings(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "Scheduled Context Settings", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "run"}
+	otherTask := &models.Task{ProjectID: "default", Title: "Other Scheduled Context", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "other"}
+	if err := h.taskSvc.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := h.taskSvc.Create(ctx, otherTask); err != nil {
+		t.Fatalf("create other task: %v", err)
+	}
+	first := createSchedule(t, h, task.ID, time.Now().Add(time.Hour), func(schedule *models.Schedule) { schedule.ClearContextOnStart = true })
+	second := createSchedule(t, h, task.ID, time.Now().Add(2*time.Hour))
+	other := createSchedule(t, h, otherTask.ID, time.Now().Add(3*time.Hour), func(schedule *models.Schedule) { schedule.ClearContextOnStart = true })
+
+	form := url.Values{
+		"title":                             {task.Title},
+		"prompt":                            {task.Prompt},
+		"category":                          {string(task.Category)},
+		"priority":                          {"2"},
+		"tag":                               {""},
+		"schedule_context_settings_present": {"1"},
+		"clear_context_schedule_ids":        {second.ID, other.ID},
+	}
+	req := httptest.NewRequest(http.MethodPut, "/tasks/"+task.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	gotFirst, err := h.scheduleRepo.GetByID(ctx, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotSecond, err := h.scheduleRepo.GetByID(ctx, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotOther, err := h.scheduleRepo.GetByID(ctx, other.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotFirst.ClearContextOnStart {
+		t.Fatal("unchecked owned schedule must be updated to false")
+	}
+	if !gotSecond.ClearContextOnStart {
+		t.Fatal("checked owned schedule must be updated to true")
+	}
+	if !gotOther.ClearContextOnStart {
+		t.Fatal("unrelated schedule must not be changed")
+	}
+}
+
 func TestHandler_UpdateTask_FromSchedulePage(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
