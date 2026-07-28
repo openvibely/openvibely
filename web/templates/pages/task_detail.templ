@@ -271,6 +271,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 									</label>
 									<div class="space-y-2">
 										for _, schedule := range schedules {
+											<input type="hidden" name="schedule_context_schedule_ids" value={ schedule.ID }/>
 											<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-base-300 px-3 py-2">
 												<input
 													type="checkbox"

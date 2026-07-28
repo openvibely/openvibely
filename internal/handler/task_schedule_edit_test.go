@@ -125,6 +125,7 @@ func TestHandler_GetTask_EditFormHydratesScheduleClearContext(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		`name="schedule_context_settings_present" value="1"`,
+		`name="schedule_context_schedule_ids" value="` + schedule.ID + `"`,
 		`name="clear_context_schedule_ids" value="` + schedule.ID + `"`,
 		`Clear context on start`,
 	} {
@@ -161,6 +162,9 @@ func TestHandler_UpdateTask_UpdatesOnlyOwnedScheduleContextSettings(t *testing.T
 		schedule.RepeatInterval = 2
 	})
 	other := createSchedule(t, h, otherTask.ID, time.Now().Add(3*time.Hour), func(schedule *models.Schedule) { schedule.ClearContextOnStart = true })
+	// Simulate a schedule created after the Edit Task modal was rendered. It is
+	// current DB state, but absent from the form's represented schedule IDs.
+	later := createSchedule(t, h, task.ID, time.Now().Add(4*time.Hour), func(schedule *models.Schedule) { schedule.ClearContextOnStart = true })
 	firstLastRun := time.Now().UTC().Truncate(time.Second)
 	firstNextRun := firstLastRun.Add(3 * time.Hour)
 	secondLastRun := firstLastRun.Add(time.Minute)
@@ -179,6 +183,7 @@ func TestHandler_UpdateTask_UpdatesOnlyOwnedScheduleContextSettings(t *testing.T
 		"priority":                          {"2"},
 		"tag":                               {""},
 		"schedule_context_settings_present": {"1"},
+		"schedule_context_schedule_ids":     {first.ID, second.ID},
 		"clear_context_schedule_ids":        {second.ID, other.ID},
 	}
 	req := httptest.NewRequest(http.MethodPut, "/tasks/"+task.ID, strings.NewReader(form.Encode()))
@@ -201,6 +206,10 @@ func TestHandler_UpdateTask_UpdatesOnlyOwnedScheduleContextSettings(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	gotLater, err := h.scheduleRepo.GetByID(ctx, later.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if gotFirst.ClearContextOnStart {
 		t.Fatal("unchecked owned schedule must be updated to false")
 	}
@@ -209,6 +218,9 @@ func TestHandler_UpdateTask_UpdatesOnlyOwnedScheduleContextSettings(t *testing.T
 	}
 	if !gotOther.ClearContextOnStart {
 		t.Fatal("unrelated schedule must not be changed")
+	}
+	if !gotLater.ClearContextOnStart {
+		t.Fatal("schedule created after form rendering must not be changed")
 	}
 	if !gotFirst.RunAt.Equal(first.RunAt) || gotFirst.RepeatType != models.RepeatHours || gotFirst.RepeatInterval != 3 || !gotFirst.Enabled {
 		t.Fatalf("first schedule configuration changed: %#v", gotFirst)

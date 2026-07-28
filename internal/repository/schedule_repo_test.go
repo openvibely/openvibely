@@ -94,7 +94,7 @@ func TestScheduleRepo_UpdateClearContextOnStartPreservesTimingState(t *testing.T
 	if err := repo.MarkRan(ctx, schedule.ID, lastRun, &advancedNextRun); err != nil {
 		t.Fatalf("MarkRan: %v", err)
 	}
-	if err := repo.UpdateClearContextOnStart(ctx, schedule.ID, true); err != nil {
+	if err := repo.UpdateClearContextOnStart(ctx, schedule.ID, task.ID, true); err != nil {
 		t.Fatalf("UpdateClearContextOnStart: %v", err)
 	}
 
@@ -113,6 +113,47 @@ func TestScheduleRepo_UpdateClearContextOnStartPreservesTimingState(t *testing.T
 	}
 	if got.NextRun == nil || !got.NextRun.Equal(advancedNextRun) {
 		t.Fatalf("NextRun changed: got %v, want %v", got.NextRun, advancedNextRun)
+	}
+}
+
+func TestScheduleRepo_UpdateClearContextOnStartRequiresTaskOwnership(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	originalTask := createTestTask(t, taskRepo)
+	otherTask := &models.Task{
+		ProjectID: "default", Title: "New schedule owner", Category: models.CategoryScheduled,
+		Status: models.StatusPending, Prompt: "other",
+	}
+	if err := taskRepo.Create(ctx, otherTask); err != nil {
+		t.Fatalf("creating other task: %v", err)
+	}
+	runAt := time.Now().UTC().Add(time.Hour)
+	schedule := &models.Schedule{
+		TaskID: originalTask.ID, RunAt: runAt, RepeatType: models.RepeatDaily,
+		RepeatInterval: 1, Enabled: true, ClearContextOnStart: true,
+	}
+	if err := repo.Create(ctx, schedule); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE schedules SET task_id = ? WHERE id = ?`, otherTask.ID, schedule.ID); err != nil {
+		t.Fatalf("reassign schedule: %v", err)
+	}
+
+	if err := repo.UpdateClearContextOnStart(ctx, schedule.ID, originalTask.ID, false); err != nil {
+		t.Fatalf("UpdateClearContextOnStart: %v", err)
+	}
+	got, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.TaskID != otherTask.ID {
+		t.Fatalf("schedule owner changed: got %s, want %s", got.TaskID, otherTask.ID)
+	}
+	if !got.ClearContextOnStart {
+		t.Fatal("stale owner must not update schedule context policy")
 	}
 }
 

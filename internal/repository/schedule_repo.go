@@ -134,10 +134,10 @@ func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
 	return nil
 }
 
-func (r *ScheduleRepo) UpdateClearContextOnStart(ctx context.Context, id string, clearContextOnStart bool) error {
+func (r *ScheduleRepo) UpdateClearContextOnStart(ctx context.Context, id, taskID string, clearContextOnStart bool) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE schedules SET clear_context_on_start = ?, updated_at = datetime('now') WHERE id = ?`,
-		clearContextOnStart, id)
+		`UPDATE schedules SET clear_context_on_start = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
+		clearContextOnStart, id, taskID)
 	if err != nil {
 		return fmt.Errorf("updating schedule clear context on start: %w", err)
 	}

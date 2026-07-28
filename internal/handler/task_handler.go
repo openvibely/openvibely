@@ -1128,20 +1128,29 @@ func (h *Handler) updateTaskScheduleContextFromEditForm(c echo.Context, taskID s
 	if c.FormValue("schedule_context_settings_present") == "" {
 		return nil
 	}
+	represented := make(map[string]bool)
+	for _, scheduleID := range c.Request().Form["schedule_context_schedule_ids"] {
+		represented[scheduleID] = true
+	}
 	selected := make(map[string]bool)
 	for _, scheduleID := range c.Request().Form["clear_context_schedule_ids"] {
-		selected[scheduleID] = true
+		if represented[scheduleID] {
+			selected[scheduleID] = true
+		}
 	}
 	schedules, err := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
 	if err != nil {
 		return err
 	}
 	for i := range schedules {
+		if !represented[schedules[i].ID] {
+			continue
+		}
 		clearContextOnStart := selected[schedules[i].ID]
 		if schedules[i].ClearContextOnStart == clearContextOnStart {
 			continue
 		}
-		if err := h.scheduleRepo.UpdateClearContextOnStart(c.Request().Context(), schedules[i].ID, clearContextOnStart); err != nil {
+		if err := h.scheduleRepo.UpdateClearContextOnStart(c.Request().Context(), schedules[i].ID, taskID, clearContextOnStart); err != nil {
 			return err
 		}
 	}
