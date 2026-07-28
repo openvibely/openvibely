@@ -56,6 +56,8 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	require.Contains(t, visionPrompt, "project vision or source-of-truth files")
 	require.Contains(t, visionPrompt, "create_notification")
 	require.Contains(t, visionPrompt, "stable idempotency key")
+	require.Contains(t, visionPrompt, "Do not list, search, or inspect GitHub issues for duplicate detection")
+	require.Contains(t, visionPrompt, "Native notification idempotency")
 	require.Contains(t, visionPrompt, "Do not modify code")
 	require.Contains(t, visionPrompt, "do not create implementation tasks")
 
@@ -64,6 +66,8 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 		require.Contains(t, prompt, "Choose one focused project component or workflow")
 		require.Contains(t, prompt, "create_notification")
 		require.Contains(t, prompt, "stable idempotency key")
+		require.Contains(t, prompt, "Do not list, search, or inspect GitHub issues for duplicate detection")
+		require.Contains(t, prompt, "Native notification idempotency")
 		require.Contains(t, prompt, "evidence, scope, risk, and acceptance criteria")
 		require.Contains(t, prompt, "Approval authorizes task creation only")
 	}
@@ -83,6 +87,8 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 		require.Contains(t, auditorPrompt, required)
 	}
 	require.Contains(t, auditorPrompt, "does not bypass approval")
+	require.Contains(t, auditorPrompt, "Do not list, search, or inspect GitHub issues for duplicate detection")
+	require.Contains(t, auditorPrompt, "Native notification and task state")
 }
 
 func TestNativeSDLCTemplateOwnsItsPrompts(t *testing.T) {

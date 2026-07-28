@@ -287,6 +287,8 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"commonly hourly",
 		"usually weekly",
 		"must not create implementation tasks or modify code",
+		"Do not list, search, or inspect GitHub issues for duplicate detection",
+		"Native notification idempotency",
 		"create_alert_implementation_task",
 		"register_automation_resources",
 		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `inbox`, and `auditor`",

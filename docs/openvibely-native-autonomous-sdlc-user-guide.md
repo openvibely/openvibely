@@ -46,7 +46,7 @@ Scheduled and initial task runtimes derive project and claimant from the persist
 Run a visible bootstrap task or task-thread turn with the bundled `openvibely_native_autonomous_sdlc_bootstrap` skill and ask:
 
 ```text
-Use the OpenVibely Native Autonomous SDLC Bootstrap skill. Create one visible scheduled task for each maintained loop role: Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, Notification Inbox, and Loop Auditor. Do not create separate runner tasks. Discovery tasks must create reviewable notifications only, use stable idempotency keys, and never modify code or create implementation tasks. The inbox must inspect approved notifications, claim them, and atomically create linked Backlog implementation tasks. The auditor must report loop-health findings through notifications without changing implementation work. Do not authorize merge, release, or deployment. Register the created tasks and schedules as the maintained Native SDLC Automation.
+Use the OpenVibely Native Autonomous SDLC Bootstrap skill. Create one visible scheduled task for each maintained loop role: Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, Notification Inbox, and Loop Auditor. Do not create separate runner tasks. Discovery tasks must create reviewable notifications only, use stable idempotency keys, and never modify code or create implementation tasks. Native notification idempotency is the duplicate-prevention boundary; do not list, search, or inspect GitHub issues for duplicate detection. The inbox must inspect approved notifications, claim them, and atomically create linked Backlog implementation tasks. The auditor must report loop-health findings through notifications without changing implementation work. Do not authorize merge, release, or deployment. Register the created tasks and schedules as the maintained Native SDLC Automation.
 ```
 
 The six scheduled tasks have separate responsibilities:
@@ -62,7 +62,7 @@ Each role is one visible scheduled task; do not create separate runner tasks. Re
 
 ## Discovery And Review
 
-Vision Suggestions and the three finders inspect one focused area per run and vary that area over time. For each actionable finding, they call `create_notification` with a generic type, concise title and message, evidence and acceptance criteria in the body, structured metadata, and a stable project-independent idempotency key. They must not create implementation tasks or modify code.
+Vision Suggestions and the three finders inspect one focused area per run and vary that area over time. For each actionable finding, they call `create_notification` with a generic type, concise title and message, evidence and acceptance criteria in the body, structured metadata, and a stable project-independent idempotency key. Native notification idempotency is the duplicate-prevention boundary. Do not list, search, or inspect GitHub issues for duplicate detection. They must not create implementation tasks or modify code.
 
 Notifications remain pending until a human approves or rejects them on Alerts. Approval authorizes implementation-task creation only. It does not authorize merge, release, deployment, destructive remediation, or credential changes.
 
@@ -72,7 +72,7 @@ The Notification Inbox calls `list_alerts` with `decision_state=approved` and `i
 
 If work cannot be linked, the inbox calls `fail_alert_processing` with a concise retry diagnostic. It uses `release_alert_claim` only when no implementation task was linked and another scan should retry immediately. Claims are leases, failed or expired unlinked work is retryable, and repeated task-creation calls return the already linked task rather than creating a duplicate. The inbox must omit `project_id` or repeat only its own project ID.
 
-The Loop Auditor reports findings through new Native notifications. It does not alter implementation work or bypass human approval.
+The Loop Auditor reports findings through new Native notifications. Native notification and task state is authoritative for duplicate checks; it does not list, search, or inspect GitHub issues. It does not alter implementation work or bypass human approval.
 
 ## Automation Registration
 

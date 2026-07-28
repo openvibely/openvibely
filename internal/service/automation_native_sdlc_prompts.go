@@ -11,7 +11,7 @@ import (
 // skill being installed or retained.
 const nativeSDLCVisionSuggestionsPrompt = `Choose one focused project component or workflow to inspect this run. Compare that area with the configured project vision or source-of-truth files and identify small, reviewable gaps. Vary the component over time instead of repeatedly auditing the same files.
 
-Do not modify code and do not create implementation tasks. For each actionable finding, call create_notification with a generic type such as product_suggestion, a concise title and message, a detailed body with evidence, scope, risk, and acceptance criteria, structured metadata identifying the inspected area and evidence, and a stable idempotency key derived from the project-independent finding identity.
+Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with a generic type such as product_suggestion, a concise title and message, a detailed body with evidence, scope, risk, and acceptance criteria, structured metadata identifying the inspected area and evidence, and a stable idempotency key derived from the project-independent finding identity.
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 
@@ -22,7 +22,7 @@ Look only for findings in this task's scope:
 - Optimization Finder: measurable performance, latency, memory, build, or workflow efficiency improvements.
 - Redundancy Finder: duplicated or redundant code that could be made generic without over-engineering.
 
-Do not modify code and do not create implementation tasks. For each actionable finding, call create_notification with a generic type matching the scope, such as bug_suggestion, performance_suggestion, or maintenance_suggestion; a concise title and message; a detailed body with evidence, scope, risk, and acceptance criteria; structured metadata identifying the inspected component and evidence; and a stable idempotency key derived from the project-independent finding identity.
+Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with a generic type matching the scope, such as bug_suggestion, performance_suggestion, or maintenance_suggestion; a concise title and message; a detailed body with evidence, scope, risk, and acceptance criteria; structured metadata identifying the inspected component and evidence; and a stable idempotency key derived from the project-independent finding identity.
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 
@@ -36,7 +36,7 @@ Call complete_alert_processing after the implementation task is linked. If creat
 
 const nativeSDLCLoopAuditorPrompt = `Audit this project's Native SDLC loop for stale notifications, expired or failed claims, missing notification/task links, duplicate implementation work, and blocked tasks.
 
-Inspect only project-scoped OpenVibely notification and task state. Report each actionable audit finding through create_notification with concrete evidence and a stable idempotency key. The auditor does not bypass approval, create or alter implementation work, merge, release, or deploy.`
+Inspect only project-scoped OpenVibely notification and task state. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification and task state is authoritative for this loop. Report each actionable audit finding through create_notification with concrete evidence and a stable idempotency key. The auditor does not bypass approval, create or alter implementation work, merge, release, or deploy.`
 
 func nativeSDLCRolePrompt(role string) (string, error) {
 	switch strings.TrimSpace(role) {
