@@ -80,22 +80,17 @@ Open GitHub suggestion issues only. Use `github_create_issue` with unprefixed la
 Include enough context for a human to approve, reject, or assign the issue. Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call `github_create_issue` for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 ```
 
-## Prompt Pattern For Bug / Optimization / Redundancy Finders
+## Role-Specific Finder Prompts
 
-```text
-Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
+Give each finder its own prompt. Never give one finder a menu of all three roles and expect it to infer its identity from the task title.
 
-Look only for issues in this task's scope:
-- Bug Finder: likely defects, edge-case failures, broken behavior, or missing tests that indicate a bug.
-- Optimization Finder: measurable performance, latency, memory, build, or workflow efficiency improvements.
-- Redundancy Finder: duplicated or redundant code that could be made generic without over-engineering.
+- Bug Finder: start with `You are the Bug Finder.` Inspect only likely correctness defects, edge-case failures, broken behavior, or missing tests that indicate a bug. Require a concrete failure path, expected versus actual behavior, and needed regression coverage. Create issues only with the `bug` label.
+- Optimization Finder: start with `You are the Optimization Finder.` Inspect only measurable performance, latency, throughput, memory, build, or workflow efficiency bottlenecks. Require evidence or a measurement plan and before-and-after criteria. Create issues only with the `performance` label.
+- Redundancy Finder: start with `You are the Redundancy Finder.` Inspect only demonstrated duplicated or redundant code, configuration, or workflow logic. Name the repeated locations and propose the smallest safe consolidation without over-engineering. Create issues only with the `duplication` label.
 
-Open GitHub issues only using `github_create_issue` with unprefixed labels matching the scope, such as `bug`, `performance`, or `duplication`. Include the inspected component, evidence, risk, and suggested acceptance criteria.
+Every finder prompt must choose one focused project component or workflow, vary it over time, and call `github_create_issue` for each actionable finding. Include the inspected component, evidence, risk, and suggested acceptance criteria. Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call `github_create_issue` for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 
-Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call `github_create_issue` for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
-
-Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.
-```
+Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox creates implementation tasks later only after a human assigns the issue to the configured OpenVibely GitHub inbox identity.
 
 ## Common Pitfalls
 

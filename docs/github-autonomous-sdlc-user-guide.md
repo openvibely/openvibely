@@ -99,24 +99,17 @@ Include enough context for a human to approve, reject, or assign the issue. Do n
 
 Offering, Bug Finder, Optimization Finder, and Redundancy Finder tasks should open issues only. They should not modify code, create OpenVibely implementation tasks, or open PRs. Dev Inbox acts on issues assigned to the PAT owner or configured Authorized Users and creates the implementation tasks that later open PRs. Add labels such as `approved`, `feature`, `bug`, `performance`, or `duplication` when useful for human organization, but assignment is the default approval signal for entering the implementation mailbox.
 
-## Finder Prompt Pattern
+## Role-Specific Finder Prompts
 
-Create separate visible scheduled tasks for bug, optimization, and redundancy discovery with prompts like:
+Create separate visible scheduled tasks for bug, optimization, and redundancy discovery. Never give one finder a menu of all three roles and expect it to infer its identity from the task title.
 
-```text
-Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
+- Bug Finder starts with `You are the Bug Finder.`, requires a concrete correctness failure path plus expected versus actual behavior and regression coverage, and creates issues only with the `bug` label.
+- Optimization Finder starts with `You are the Optimization Finder.`, requires measurable evidence or a measurement plan plus before-and-after criteria, and creates issues only with the `performance` label.
+- Redundancy Finder starts with `You are the Redundancy Finder.`, identifies the repeated locations and smallest safe consolidation without over-engineering, and creates issues only with the `duplication` label.
 
-Look only for issues in this task's scope:
-- Bug Finder: likely defects, edge-case failures, broken behavior, or missing tests that indicate a bug.
-- Optimization Finder: measurable performance, latency, memory, build, or workflow efficiency improvements.
-- Redundancy Finder: duplicated or redundant code that could be made generic without over-engineering.
+Every finder chooses one focused component or workflow and varies it over time. Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call `github_create_issue` for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state. Include evidence, risk, and acceptance criteria.
 
-Open GitHub issues only using `github_create_issue` with unprefixed labels matching the scope, such as `bug`, `performance`, or `duplication`. Include the inspected component, evidence, risk, and suggested acceptance criteria.
-
-Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call `github_create_issue` for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
-
-Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.
-```
+Finders do not modify code, create OpenVibely implementation tasks, or open PRs. The Dev Inbox creates implementation tasks later only after a human assigns the issue to the configured OpenVibely GitHub inbox identity.
 
 ## Labels
 

@@ -39,26 +39,17 @@ Do not supply another project's `project_id`. Runtime tools bind to the executin
 - `Native Redundancy Finder`, daily. Looks for duplicated or redundant code and creates maintenance notifications only.
 - `Native Loop Auditor`, weekly. Reviews stale notifications, claims, missing task links, duplicate tasks, and blocked work.
 
-## Discovery Prompt Pattern
+## Role-Specific Discovery Prompts
 
-```text
-Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files. Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification idempotency is the duplicate-prevention boundary.
+Give each finder its own prompt. Never use one shared three-role menu and expect it to infer its identity from the task title.
 
-Use this task's role as its scope:
-- Vision Suggestions: small, reviewable gaps against the project vision or source-of-truth files.
-- Bug Finder: likely defects, edge-case failures, broken behavior, or missing regression coverage.
-- Optimization Finder: measurable performance, latency, memory, build, or workflow efficiency improvements.
-- Redundancy Finder: duplicated or redundant code that could be made generic without over-engineering.
+- Bug Finder: start with `You are the Bug Finder.` Inspect only likely correctness defects, edge-case failures, broken behavior, or missing regression coverage. Require a concrete failure path, expected versus actual behavior, and needed regression coverage. Create only `bug_suggestion` notifications.
+- Optimization Finder: start with `You are the Optimization Finder.` Inspect only measurable performance, latency, throughput, memory, build, or workflow efficiency bottlenecks. Require evidence or a measurement plan and before-and-after criteria. Create only `performance_suggestion` notifications.
+- Redundancy Finder: start with `You are the Redundancy Finder.` Inspect only demonstrated duplicated or redundant code, configuration, or workflow logic. Name the repeated locations and propose the smallest safe consolidation without over-engineering. Create only `maintenance_suggestion` notifications.
 
-For each actionable finding, call `create_notification` with:
-- a generic type such as `product_suggestion`, `bug_suggestion`, `performance_suggestion`, or `maintenance_suggestion`;
-- a concise title and message;
-- a detailed body with evidence, scope, risk, and acceptance criteria;
-- structured metadata identifying the inspected component and evidence;
-- a stable idempotency key derived from the project-independent finding identity.
+Every discovery prompt must choose one focused project component or workflow, vary it over time, and forbid modifying code or creating implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification idempotency is the duplicate-prevention boundary. For every actionable finding, call `create_notification` with the role's exact type, a concise title and message, a detailed body with evidence, scope, risk, and acceptance criteria, structured metadata, and a stable idempotency key.
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.
-```
 
 ## Notification Inbox Prompt
 

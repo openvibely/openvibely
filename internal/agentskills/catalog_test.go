@@ -331,6 +331,21 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		}
 	}
 
+	for _, want := range []string{
+		"Give each finder its own prompt",
+		"one shared three-role menu",
+		"bug_suggestion",
+		"performance_suggestion",
+		"maintenance_suggestion",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("Native bootstrap skill missing role-specific finder guidance %q", want)
+		}
+		if !strings.Contains(guideText, want) {
+			t.Fatalf("Native autonomous SDLC guide missing role-specific finder guidance %q", want)
+		}
+	}
+
 	for _, forbidden := range []string{
 		"Create a scheduled suggestion producer and a project-scoped approved-notification inbox",
 		"A typical setup schedules the suggestion producer daily and the approved-notification inbox hourly",
@@ -449,6 +464,25 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	} {
 		if !strings.Contains(guideText, want) {
 			t.Fatalf("GitHub autonomous SDLC guide missing %q", want)
+		}
+	}
+
+	for _, text := range []struct {
+		name string
+		body string
+	}{{name: "GitHub bootstrap skill", body: skillText}, {name: "GitHub autonomous SDLC guide", body: guideText}} {
+		for _, want := range []string{
+			"Never give one finder a menu of all three roles",
+			"You are the Bug Finder.",
+			"You are the Optimization Finder.",
+			"You are the Redundancy Finder.",
+			"`bug` label",
+			"`performance` label",
+			"`duplication` label",
+		} {
+			if !strings.Contains(text.body, want) {
+				t.Fatalf("%s missing role-specific finder guidance %q", text.name, want)
+			}
 		}
 	}
 

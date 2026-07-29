@@ -35,14 +35,31 @@ Open GitHub suggestion issues only. Use ` + "`" + `github_create_issue` + "`" + 
 
 Include enough context for a human to approve, reject, or assign the issue. Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.`
 
-const githubSDLCFinderPrompt = `Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
+const githubSDLCBugFinderPrompt = `You are the Bug Finder. Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
 
-Look only for issues in this task's scope:
-- Bug Finder: likely defects, edge-case failures, broken behavior, or missing tests that indicate a bug.
-- Optimization Finder: measurable performance, latency, memory, build, or workflow efficiency improvements.
-- Redundancy Finder: duplicated or redundant code that could be made generic without over-engineering.
+Look only for likely correctness defects, edge-case failures, broken behavior, or missing tests that indicate a bug. Require a concrete failure path, explain expected versus actual behavior, and identify the regression coverage needed to prove the fix. Do not report performance-only opportunities or code duplication without a demonstrated correctness defect.
 
-Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with unprefixed labels matching the scope, such as ` + "`" + `bug` + "`" + `, ` + "`" + `performance` + "`" + `, or ` + "`" + `duplication` + "`" + `. Include the inspected component, evidence, risk, and suggested acceptance criteria.
+Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `bug` + "`" + `. Include the inspected component, evidence, risk, and suggested acceptance criteria.
+
+Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
+
+Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.`
+
+const githubSDLCOptimizationFinderPrompt = `You are the Optimization Finder. Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
+
+Look only for measurable performance, latency, throughput, memory, build, or workflow efficiency bottlenecks. Require current evidence or a concrete measurement plan and define before-and-after criteria that would demonstrate improvement. Do not report correctness defects or code duplication unless they directly establish the measured optimization opportunity.
+
+Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `performance` + "`" + `. Include the inspected component, evidence, risk, and suggested acceptance criteria.
+
+Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
+
+Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.`
+
+const githubSDLCRedundancyFinderPrompt = `You are the Redundancy Finder. Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
+
+Look only for demonstrated duplicated or redundant code, configuration, or workflow logic. Identify the repeated locations, explain why they represent the same responsibility, and propose the smallest safe consolidation without over-engineering. Do not report correctness defects or performance-only opportunities as redundancy findings.
+
+Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `duplication` + "`" + `. Include the inspected component, evidence, risk, and suggested acceptance criteria.
 
 Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 
@@ -54,8 +71,12 @@ func githubSDLCRolePrompt(role string) (string, error) {
 	switch strings.TrimSpace(role) {
 	case "offering_manager":
 		return githubSDLCOfferingManagerPrompt, nil
-	case "bug_finder", "optimization_finder", "redundancy_finder":
-		return githubSDLCFinderPrompt, nil
+	case "bug_finder":
+		return githubSDLCBugFinderPrompt, nil
+	case "optimization_finder":
+		return githubSDLCOptimizationFinderPrompt, nil
+	case "redundancy_finder":
+		return githubSDLCRedundancyFinderPrompt, nil
 	case "github_inbox":
 		return githubSDLCDevInboxPrompt, nil
 	case "implementation":
