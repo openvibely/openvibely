@@ -6632,12 +6632,13 @@ func TestProcessStreamingResponse_ReaddsRecoveredPreparedSteeringToRealtimeUI(t 
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
 
 	h.processStreamingResponse(streamingResponseParams{
-		ExecID:         exec.ID,
-		TaskID:         task.ID,
-		Message:        "active prompt",
-		Agent:          *agent,
-		ProjectID:      project.ID,
-		IsTaskFollowup: true,
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
 	})
 
 	var sawRemoval bool
