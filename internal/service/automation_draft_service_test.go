@@ -81,6 +81,8 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	}
 	require.Contains(t, inboxPrompt, "atomically links at most one task")
 	require.Contains(t, inboxPrompt, "human approval authorized task creation only")
+	require.Contains(t, inboxPrompt, "Call list_alerts without project_id")
+	require.Contains(t, inboxPrompt, "Never reuse a project ID from prior messages, examples, memory, or tool output")
 
 	auditorPrompt, _ := automationDraftNodeByKey(t, candidate, "auditor").Config["prompt"].(string)
 	for _, required := range []string{"stale notifications", "expired or failed claims", "missing notification/task links", "duplicate implementation work", "blocked tasks", "create_notification"} {

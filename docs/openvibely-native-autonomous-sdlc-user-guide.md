@@ -68,9 +68,9 @@ Notifications remain pending until a human approves or rejects them on Alerts. A
 
 ## Inbox And Recovery
 
-The Notification Inbox calls `list_alerts` with `decision_state=approved` and `implementation_task_linked=false`, inspects every result with `get_alert`, and then attempts `claim_alert`. For each successful claim, it calls `create_alert_implementation_task` with the reviewed notification ID, body, metadata, acceptance criteria, and approval boundary, then calls `complete_alert_processing`.
+Notification Inbox instructions: Call `list_alerts` without `project_id`, using `decision_state=approved` and `implementation_task_linked=false`; the runtime automatically uses the scheduled task's persisted project. Never reuse a project ID from prior messages, examples, memory, or tool output. Inspect every result with `get_alert`, and then attempt `claim_alert`. For each successful claim, call `create_alert_implementation_task` with the reviewed notification ID, body, metadata, acceptance criteria, and approval boundary, then call `complete_alert_processing`.
 
-If work cannot be linked, the inbox calls `fail_alert_processing` with a concise retry diagnostic. It uses `release_alert_claim` only when no implementation task was linked and another scan should retry immediately. Claims are leases, failed or expired unlinked work is retryable, and repeated task-creation calls return the already linked task rather than creating a duplicate. The inbox must omit `project_id` or repeat only its own project ID.
+If work cannot be linked, the inbox calls `fail_alert_processing` with a concise retry diagnostic. It uses `release_alert_claim` only when no implementation task was linked and another scan should retry immediately. Claims are leases, failed or expired unlinked work is retryable, and repeated task-creation calls return the already linked task rather than creating a duplicate. The inbox omits `project_id`; runtime binds every action to its persisted task project and rejects any mismatch.
 
 The Loop Auditor reports findings through new Native notifications. Native notification and task state is authoritative for duplicate checks; it does not list, search, or inspect GitHub issues. It does not alter implementation work or bypass human approval.
 

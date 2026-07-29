@@ -317,6 +317,8 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"must not create implementation tasks or modify code",
 		"Do not list, search, or inspect GitHub issues for duplicate detection",
 		"Native notification idempotency",
+		"Call `list_alerts` without `project_id`",
+		"Never reuse a project ID from prior messages, examples, memory, or tool output",
 		"create_alert_implementation_task",
 		"register_automation_resources",
 		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `inbox`, and `auditor`",

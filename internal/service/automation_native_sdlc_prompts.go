@@ -28,7 +28,7 @@ The notification remains pending until a human approves or rejects it on Alerts.
 
 const nativeSDLCNotificationInboxPrompt = `Process approved actionable notifications for this scheduled task's own project.
 
-Call list_alerts with decision_state=approved, implementation_task_linked=false, a bounded limit, and stable pagination. Do not pass a different project ID. For each result, call get_alert and inspect the full body and metadata before claiming it.
+Call list_alerts without project_id, using decision_state=approved, implementation_task_linked=false, a bounded limit, and stable pagination. The runtime automatically uses this scheduled task's persisted project. Never reuse a project ID from prior messages, examples, memory, or tool output. For each result, call get_alert and inspect the full body and metadata before claiming it.
 
 Call claim_alert for each notification you can process. If the claim succeeds, call create_alert_implementation_task with a focused Backlog task title and prompt. Include the notification ID, reviewed context, acceptance criteria, and the rule that human approval authorized task creation only. The operation atomically links at most one task and is safe to retry after a crash.
 
