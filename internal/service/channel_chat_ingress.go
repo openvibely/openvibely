@@ -525,11 +525,36 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 	if opts.ExecRepo == nil {
 		return formatErr("Error creating follow-up execution for %q: execution repository not configured", task.Title)
 	}
-	if err := opts.ExecRepo.CreateDirectTaskFollowup(ctx, exec); err != nil {
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: opts.Message, Source: opts.Source}
+	if opts.NewQueuedInput != nil {
+		if custom := opts.NewQueuedInput(task, "", agent.ID); custom != nil {
+			queued = custom
+			queued.Scope = models.ThreadInputScopeTask
+			queued.ProjectID = task.ProjectID
+			queued.TaskID = task.ID
+			queued.RunExecutionID = ""
+			queued.AgentConfigID = agent.ID
+			queued.InputMode = models.ThreadInputModeQueued
+			queued.InputStatus = models.ThreadInputPending
+			queued.Content = opts.Message
+			queued.Source = opts.Source
+		}
+	}
+	started, err := opts.ExecRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
+	if err != nil {
 		if opts.ExecutionCreateErrorResult != nil {
 			return opts.ExecutionCreateErrorResult(task, err)
 		}
-		return formatErr("Error creating follow-up execution for %q: %v", task.Title, err)
+		return formatErr("Error admitting follow-up execution for %q: %v", task.Title, err)
+	}
+	if !started {
+		if opts.QueuedTaskThreadPromoter != nil {
+			go opts.QueuedTaskThreadPromoter(task.ID)
+		}
+		if opts.QueuedResult != nil {
+			return opts.QueuedResult(task)
+		}
+		return fmt.Sprintf("Queued message to task %q [TASK_ID:%s]. It will run after the active thread turn finishes.", task.Title, task.ID)
 	}
 	priorExecs, _ := opts.ExecRepo.ListByTaskChronological(ctx, task.ID)
 	priorHistory := priorExecs

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -194,37 +195,73 @@ func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
 	return nil
 }
 
+// CreateDirectTaskFollowupOrQueue atomically either starts a direct follow-up or
+// appends it to the task's durable FIFO queue when another run owns admission.
+// The task status is the ordinary-worker claim before its execution row exists;
+// Automation reservations provide the equivalent prepared-run ownership signal.
+func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *models.Execution, input *models.ThreadInput) (bool, error) {
+	if e == nil || input == nil {
+		return false, fmt.Errorf("execution and queued input are required")
+	}
+	threadRepo := NewThreadInputRepo(r.db)
+	started := false
+	err := threadRepo.WithImmediateTx(ctx, func(dbexec SQLExecutor) error {
+		var status models.TaskStatus
+		var projectID string
+		if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
+			return fmt.Errorf("loading task for follow-up admission: %w", err)
+		}
+		var protected int
+		if err := dbexec.QueryRowContext(ctx, `SELECT EXISTS (
+			SELECT 1 FROM executions WHERE task_id = ? AND status = 'running'
+			UNION ALL SELECT 1 FROM automation_task_run_reservations WHERE task_id = ?
+			UNION ALL SELECT 1 FROM thread_inputs
+			 WHERE scope = 'task_thread' AND task_id = ? AND input_status = 'pending'
+		)`, e.TaskID, e.TaskID, e.TaskID).Scan(&protected); err != nil {
+			return fmt.Errorf("checking task follow-up admission: %w", err)
+		}
+		if status == models.StatusRunning || status == models.StatusQueued || protected != 0 {
+			input.Scope = models.ThreadInputScopeTask
+			input.ProjectID = projectID
+			input.TaskID = e.TaskID
+			input.InputMode = models.ThreadInputModeQueued
+			input.InputStatus = models.ThreadInputPending
+			return threadRepo.CreateQueuedWithExecutor(ctx, dbexec, input)
+		}
+		if _, err := dbexec.ExecContext(ctx, `UPDATE tasks
+			SET status = 'queued', category = 'active', updated_at = datetime('now') WHERE id = ?`, e.TaskID); err != nil {
+			return fmt.Errorf("reactivating task for direct follow-up: %w", err)
+		}
+		isFollowup := 0
+		if e.IsFollowup {
+			isFollowup = 1
+		}
+		if err := dbexec.QueryRowContext(ctx, `INSERT INTO executions
+			(id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
+			VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
+			RETURNING id, started_at`, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
+			Scan(&e.ID, &e.StartedAt); err != nil {
+			return fmt.Errorf("creating direct task follow-up execution: %w", err)
+		}
+		started = true
+		return nil
+	})
+	return started, err
+}
+
+var ErrTaskExecutionAdmissionReserved = errors.New("task execution admission is reserved")
+
 func (r *ExecutionRepo) CreateDirectTaskFollowup(ctx context.Context, e *models.Execution) error {
 	if e == nil {
 		return fmt.Errorf("execution is required")
 	}
-	isFollowup := 0
-	if e.IsFollowup {
-		isFollowup = 1
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	input := &models.ThreadInput{AgentConfigID: e.AgentConfigID, Content: e.PromptSent}
+	started, err := r.CreateDirectTaskFollowupOrQueue(ctx, e, input)
 	if err != nil {
-		return fmt.Errorf("starting direct task follow-up transaction: %w", err)
+		return err
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE tasks
-		SET status = CASE WHEN status IN ('running', 'queued') THEN status ELSE 'queued' END,
-		    category = 'active',
-		    updated_at = datetime('now')
-		WHERE id = ?`, e.TaskID); err != nil {
-		return fmt.Errorf("reactivating task for direct follow-up: %w", err)
-	}
-	if err := tx.QueryRowContext(ctx,
-		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
-		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
-		 RETURNING id, started_at`,
-		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
-		Scan(&e.ID, &e.StartedAt); err != nil {
-		return fmt.Errorf("creating direct task follow-up execution: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing direct task follow-up execution: %w", err)
+	if !started {
+		return ErrTaskExecutionAdmissionReserved
 	}
 	return nil
 }

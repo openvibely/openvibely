@@ -373,6 +373,36 @@ func TestSchedulerService_CheckDueTasks_SkipsRunningTask(t *testing.T) {
 	}
 }
 
+func TestSchedulerService_CheckActiveTasks_DoesNotSubmitBehindDirectFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	task := &models.Task{ProjectID: "default", Title: "Follow-up owns admission", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "active direct follow-up", IsFollowup: true}
+	started, err := repository.NewExecutionRepo(db).CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent, Source: models.TaskOriginWeb})
+	if err != nil || !started {
+		t.Fatalf("admit direct follow-up: started=%v err=%v", started, err)
+	}
+
+	svc := NewSchedulerService(repository.NewScheduleRepo(db), taskRepo, workerSvc)
+	for i := 0; i < 5; i++ {
+		svc.checkActiveTasks(ctx)
+	}
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("scheduler resubmitted original prompt behind direct follow-up: %#v", submitted)
+	case <-time.After(100 * time.Millisecond):
+	}
+	execs, err := repository.NewExecutionRepo(db).ListByTaskChronological(ctx, task.ID)
+	if err != nil || len(execs) != 1 || execs[0].ID != exec.ID || execs[0].PromptSent != "active direct follow-up" {
+		t.Fatalf("expected only direct follow-up execution, got %#v err=%v", execs, err)
+	}
+}
+
 func TestSchedulerService_CheckActiveTasks(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)

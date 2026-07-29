@@ -2047,12 +2047,31 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		PromptSent:    message,
 		IsFollowup:    true,
 	}
-	if err := h.execRepo.CreateDirectTaskFollowup(c.Request().Context(), exec); err != nil {
-		applog.Infof("[handler] TaskThreadSend error creating execution: %v", err)
+	queued := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           task.ProjectID,
+		TaskID:              taskID,
+		AgentConfigID:       agent.ID,
+		InputMode:           models.ThreadInputModeQueued,
+		InputStatus:         models.ThreadInputPending,
+		Content:             message,
+		Source:              models.TaskOriginWeb,
+		AttachmentSessionID: sessionID,
+	}
+	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(c.Request().Context(), exec, queued)
+	if err != nil {
+		applog.Infof("[handler] TaskThreadSend error admitting execution: %v", err)
 		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
-			applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s after execution create failure: %v", sessionID, cleanupErr)
+			applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s after admission failure: %v", sessionID, cleanupErr)
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
+	}
+	if !started {
+		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(c.Request().Context(), queued); err != nil {
+			applog.Infof("[handler] TaskThreadSend task=%s input=%s active execution bind skipped: %v", taskID, queued.ID, err)
+		}
+		go h.PromoteQueuedTaskThreadInput(taskID)
+		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != "", taskID))
 	}
 	if err := h.applySwarmChildFollowupStart(c.Request().Context(), task, message); err != nil {
 		applog.Infof("[handler] TaskThreadSend swarm child follow-up routing failed task=%s: %v", taskID, err)

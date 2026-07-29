@@ -75,7 +75,8 @@ type WorkerService struct {
 	taskGoalSvc                      *TaskGoalService
 	automationRepo                   *repository.AutomationRepo
 	afterCompleteRuntimeToolProvider func(context.Context, models.Task) *llmcontracts.RuntimeTools
-	beforeOrdinaryTaskClaim          func(models.Task) // deterministic dispatch-race test barrier
+	beforeOrdinaryTaskClaim          func(models.Task) // deterministic pre-claim test barrier
+	afterOrdinaryTaskClaim           func(models.Task) // deterministic persisted-claim test barrier
 	currentCatalog                   atomic.Value      // stores *agentskills.Catalog for hook skill resolution
 }
 
@@ -470,6 +471,9 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		}
 		claimed = true
 		completionAttempted = true
+		if w.afterOrdinaryTaskClaim != nil {
+			w.afterOrdinaryTaskClaim(dispatchClaim.Task)
+		}
 		startsNewContext := task.StartsNewContext
 		task = dispatchClaim.Task
 		task.StartsNewContext = startsNewContext

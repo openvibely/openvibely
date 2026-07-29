@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -220,6 +222,9 @@ func TestThreadInputRepo_ClaimQueuedForTaskExecutionRetargetsRemainingQueuedGuar
 	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "active"}
 	if err := execRepo.Create(ctx, active); err != nil {
 		t.Fatalf("create active execution: %v", err)
+	}
+	if err := NewTaskRepo(db, nil).UpdateStatus(ctx, task.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("terminalize task before queued promotion: %v", err)
 	}
 
 	first := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "first"}
@@ -1220,6 +1225,212 @@ func TestThreadInputRepo_ListPendingForTask_PreparedSteeringReappearsAfterRequeu
 	}
 	if !found {
 		t.Errorf("requeued steering row should reappear in pending list after provider failure, got %+v", pending)
+	}
+}
+
+func TestExecutionRepo_TaskFollowupAdmissionConcurrentDirectStartsExactlyOnce(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	if err := NewTaskRepo(db, nil).UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
+		t.Fatalf("set task pending: %v", err)
+	}
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+
+	const submissions = 12
+	type result struct {
+		content string
+		started bool
+		err     error
+	}
+	results := make(chan result, submissions)
+	var wg sync.WaitGroup
+	for i := 0; i < submissions; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			content := fmt.Sprintf("direct race follow-up %02d", i)
+			exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: content, IsFollowup: true}
+			started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{AgentConfigID: agent.ID, Content: content})
+			results <- result{content: content, started: started, err: err}
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	startedCount := 0
+	allContent := make(map[string]bool, submissions)
+	for result := range results {
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		allContent[result.content] = true
+		if result.started {
+			startedCount++
+		}
+	}
+	if startedCount != 1 {
+		t.Fatalf("expected exactly one direct admission winner, got %d", startedCount)
+	}
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil || len(execs) != 1 || execs[0].Status != models.ExecRunning {
+		t.Fatalf("expected one running direct execution, got %#v err=%v", execs, err)
+	}
+	pending, err := NewThreadInputRepo(db).ListPendingForTask(ctx, task.ID)
+	if err != nil || len(pending) != submissions-1 {
+		t.Fatalf("expected %d queued losers, got %#v err=%v", submissions-1, pending, err)
+	}
+	delete(allContent, execs[0].PromptSent)
+	for _, input := range pending {
+		delete(allContent, input.Content)
+	}
+	if len(allContent) != 0 {
+		t.Fatalf("lost concurrent submissions: %#v", allContent)
+	}
+}
+
+func TestExecutionRepo_TaskFollowupAdmissionConcurrentSubmissionsAreDurable(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+
+	const submissions = 12
+	errs := make(chan error, submissions)
+	var wg sync.WaitGroup
+	for i := 0; i < submissions; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			content := fmt.Sprintf("concurrent follow-up %02d", i)
+			exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: content, IsFollowup: true}
+			started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{AgentConfigID: agent.ID, Content: content})
+			if err != nil {
+				errs <- err
+				return
+			}
+			if started {
+				errs <- fmt.Errorf("submission %d started behind claimed task", i)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending, err := NewThreadInputRepo(db).ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != submissions {
+		t.Fatalf("expected %d durable inputs, got %d", submissions, len(pending))
+	}
+	seen := make(map[string]bool, submissions)
+	for _, input := range pending {
+		if seen[input.Content] {
+			t.Fatalf("duplicate queued input %q", input.Content)
+		}
+		seen[input.Content] = true
+	}
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil || len(execs) != 0 {
+		t.Fatalf("expected no direct execution behind claim, got %#v err=%v", execs, err)
+	}
+}
+
+func TestExecutionRepo_TaskFollowupAdmissionSerializesClaimAndFIFORecovery(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	inputRepo := NewThreadInputRepo(db)
+
+	prior := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecCompleted, PromptSent: "prior turn"}
+	if err := execRepo.Create(ctx, prior); err != nil {
+		t.Fatalf("create prior execution: %v", err)
+	}
+	for _, content := range []string{"first follow-up", "second follow-up"} {
+		exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: content, IsFollowup: true}
+		input := &models.ThreadInput{AgentConfigID: agent.ID, Content: content}
+		started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, input)
+		if err != nil {
+			t.Fatalf("admit %q: %v", content, err)
+		}
+		if started {
+			t.Fatalf("claimed ordinary run must queue %q", content)
+		}
+	}
+	pending, err := inputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 2 || pending[0].Content != "first follow-up" || pending[1].Content != "second follow-up" {
+		t.Fatalf("expected FIFO queued inputs, got %#v", pending)
+	}
+
+	reset, err := NewTaskRepo(db, nil).ResetOrphanedRunning(ctx)
+	if err != nil || reset != 1 {
+		t.Fatalf("recover claimed task: reset=%d err=%v", reset, err)
+	}
+	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: pending[0].Content, IsFollowup: true}
+	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, pending[0].ID, promoted); err != nil {
+		t.Fatalf("promote oldest input: %v", err)
+	}
+	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, pending[0].ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}); !errors.Is(err, ErrInputNotPending) {
+		t.Fatalf("expected exactly-once promotion guard, got %v", err)
+	}
+	remaining, err := inputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil || len(remaining) != 1 || remaining[0].Content != "second follow-up" {
+		t.Fatalf("expected second FIFO input to remain pending, got %#v err=%v", remaining, err)
+	}
+}
+
+func TestExecutionRepo_TaskFollowupAdmissionWinsBeforeSchedulerClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	taskRepo := NewTaskRepo(db, nil)
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
+		t.Fatalf("set pending: %v", err)
+	}
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "direct follow-up", IsFollowup: true}
+	input := &models.ThreadInput{AgentConfigID: agent.ID, Content: exec.PromptSent}
+	started, err := NewExecutionRepo(db).CreateDirectTaskFollowupOrQueue(ctx, exec, input)
+	if err != nil || !started {
+		t.Fatalf("direct admission: started=%v err=%v", started, err)
+	}
+	if _, claimed, err := taskRepo.ClaimTaskForDispatch(ctx, task.ID); err != nil || claimed {
+		t.Fatalf("scheduler must not claim behind direct follow-up: claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestThreadInputRepo_QueuedPromotionBlockedByOrdinaryTaskClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	inputRepo := NewThreadInputRepo(db)
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, Content: "queued"}
+	if err := inputRepo.CreateQueued(ctx, input); err != nil {
+		t.Fatalf("create queued input: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: input.Content, IsFollowup: true}
+	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, input.ID, exec); !errors.Is(err, ErrInputNotPending) {
+		t.Fatalf("claimed ordinary task must block queued promotion, got %v", err)
+	}
+	if exec.ID != "" {
+		t.Fatalf("blocked promotion created execution %s", exec.ID)
 	}
 }
 

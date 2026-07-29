@@ -2833,6 +2833,7 @@ func TestStartQueuedTaskThreadInputUsesQueuedChannelReplyContext(t *testing.T) {
 	h.llmSvc.SetLLMCaller(mock)
 
 	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	require.Eventually(t, func() bool { return sentChannel == "C1" }, 2*time.Second, 25*time.Millisecond)
@@ -3053,6 +3054,7 @@ func TestStartQueuedTaskThreadInputFailureUsesQueuedChannelReplyContext(t *testi
 		sentErr = errMsg
 		sentUser = userID
 	}})
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 
 	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 	require.Eventually(t, func() bool { return sentChannel == "Cfail" }, 2*time.Second, 25*time.Millisecond)
@@ -3388,6 +3390,7 @@ func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T)
 	defer broadcaster.Unsubscribe(sub)
 
 	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 
 	var started events.TaskEvent

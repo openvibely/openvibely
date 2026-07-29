@@ -1493,8 +1493,14 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		PromptSent:    failed.PromptSent,
 		IsFollowup:    true,
 	}
-	if err := h.execRepo.CreateDirectTaskFollowup(ctx, exec); err != nil {
+	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: failed.PromptSent, Source: models.TaskOriginWeb}
+	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
+	if err != nil {
 		return err
+	}
+	if !started {
+		go h.PromoteQueuedTaskThreadInput(taskID)
+		return nil
 	}
 	if err := h.applySwarmChildFollowupRetryStart(ctx, task, failed.PromptSent); err != nil {
 		h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)

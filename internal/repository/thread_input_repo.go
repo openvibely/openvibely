@@ -680,6 +680,16 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 		if activeCount > 0 {
 			return ErrActiveTurnChanged
 		}
+		if err := dbexec.QueryRowContext(ctx, `
+			SELECT 1
+			FROM tasks
+			WHERE id = ? AND status NOT IN ('running', 'queued')
+			  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`, exec.TaskID).Scan(&surfaceOK); err != nil {
+			if err == sql.ErrNoRows {
+				return ErrInputNotPending
+			}
+			return fmt.Errorf("checking task admission before queued claim: %w", err)
+		}
 		res, err := dbexec.ExecContext(ctx, `
 			UPDATE thread_inputs
 			SET expected_turn_id = id, updated_at = datetime('now')

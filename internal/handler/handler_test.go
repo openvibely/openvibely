@@ -4646,6 +4646,40 @@ func TestHandler_TaskThreadSend_CancelledTaskIgnoresAndRepairsStaleRunningExecut
 	assert.Equal(t, "follow up after cancelled task", execs[1].PromptSent)
 }
 
+func TestHandler_TaskThreadSend_QueuesDuringClaimedRerunBeforeExecutionExists(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Claimed Rerun Project")
+	task := createTask(t, h, project.ID, "Thread Claimed Rerun Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.Prompt = "stored original prompt"
+		tk.AgentID = &agent.ID
+	})
+	createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "prior turn"
+	})
+
+	form := url.Values{}
+	form.Set("message", "follow up during claimed rerun")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "follow up during claimed rerun")
+	assertContains(t, rec, `data-input-mode="queued"`)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1, "follow-up must not create an execution while the claimed rerun is in lifecycle setup")
+
+	inputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, "follow up during claimed rerun", inputs[0].Content)
+	assert.Empty(t, inputs[0].RunExecutionID)
+}
+
 func TestHandler_TaskThreadSend_QueuesDuringStartingFirstTurnBeforeExecutionExists(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

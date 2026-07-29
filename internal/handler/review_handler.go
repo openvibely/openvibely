@@ -212,9 +212,19 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 		PromptSent:    reviewMessage,
 		IsFollowup:    true,
 	}
-	if err := h.execRepo.CreateDirectTaskFollowup(c.Request().Context(), exec); err != nil {
-		applog.Infof("[handler] SubmitReview error creating execution: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
+	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: reviewMessage, Source: models.TaskOriginWeb}
+	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(c.Request().Context(), exec, queued)
+	if err != nil {
+		applog.Infof("[handler] SubmitReview error admitting execution: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
+	}
+	if !started {
+		if err := h.reviewCommentRepo.DeleteByTask(c.Request().Context(), taskID); err != nil {
+			applog.Infof("[handler] SubmitReview error clearing comments: %v", err)
+		}
+		go h.PromoteQueuedTaskThreadInput(taskID)
+		c.Response().Header().Set("HX-Redirect", fmt.Sprintf("/tasks/%s?tab=chat", taskID))
+		return c.NoContent(http.StatusOK)
 	}
 	if err := h.applySwarmChildFollowupStart(c.Request().Context(), task, reviewMessage); err != nil {
 		applog.Infof("[handler] SubmitReview swarm child follow-up routing failed task=%s: %v", taskID, err)
