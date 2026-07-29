@@ -4680,6 +4680,37 @@ func TestHandler_TaskThreadSend_QueuesDuringClaimedRerunBeforeExecutionExists(t 
 	assert.Empty(t, inputs[0].RunExecutionID)
 }
 
+func TestHandler_TaskThreadSend_FollowupBeforeFirstWorkerClaimDoesNotBlockDispatch(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Followup Before Claim Project")
+	task := createTask(t, h, project.ID, "Thread Followup Before Claim Task", func(tk *models.Task) {
+		tk.Status = models.StatusPending
+		tk.Category = models.CategoryActive
+		tk.Prompt = "stored original prompt"
+		tk.AgentID = &agent.ID
+	})
+
+	form := url.Values{}
+	form.Set("message", "follow-up before worker claim")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `data-input-mode="queued"`)
+
+	claim, claimed, err := h.taskRepo.ClaimTaskForDispatch(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, claimed, "queued first-turn follow-up must not deadlock the original worker dispatch")
+	require.NotNil(t, claim)
+	require.Equal(t, models.StatusRunning, claim.Task.Status)
+
+	inputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, "follow-up before worker claim", inputs[0].Content)
+	assert.Empty(t, inputs[0].RunExecutionID)
+}
+
 func TestHandler_TaskThreadSend_QueuesDuringStartingFirstTurnBeforeExecutionExists(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

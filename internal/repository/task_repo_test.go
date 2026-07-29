@@ -2353,6 +2353,10 @@ func TestTaskRepo_AdmissionOwnershipExcludesSchedulerRecoveryAndClaim(t *testing
 	if err := taskRepo.Create(ctx, withPendingInput); err != nil {
 		t.Fatal(err)
 	}
+	prior := &models.Execution{TaskID: withPendingInput.ID, Status: models.ExecCompleted, PromptSent: "prior turn"}
+	if err := execRepo.Create(ctx, prior); err != nil {
+		t.Fatal(err)
+	}
 	if err := taskRepo.UpdateStatus(ctx, withPendingInput.ID, models.StatusQueued); err != nil {
 		t.Fatal(err)
 	}
@@ -2413,6 +2417,37 @@ func TestTaskRepo_AdmissionOwnershipExcludesSchedulerRecoveryAndClaim(t *testing
 	}
 	if _, claimed, err := taskRepo.ClaimTaskForDispatch(ctx, withReservation.ID); err != nil || claimed {
 		t.Fatalf("atomic dispatch claim must reject an Automation reservation: claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestTaskRepo_FirstTurnQueuedInputStillAllowsSchedulerAndAtomicDispatch(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	inputRepo := NewThreadInputRepo(db)
+	task := &models.Task{ProjectID: "default", Title: "first turn with queued follow-up", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "original prompt"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: task.ProjectID, TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "follow-up"}
+	if err := inputRepo.CreateQueued(ctx, queued); err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := taskRepo.ListActivePending(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ID != task.ID {
+		t.Fatalf("scheduler must retain a fresh first turn with queued follow-ups: %#v", listed)
+	}
+	claim, claimed, err := taskRepo.ClaimTaskForDispatch(ctx, task.ID)
+	if err != nil || !claimed {
+		t.Fatalf("atomic dispatch must claim the original first turn: claim=%#v claimed=%v err=%v", claim, claimed, err)
+	}
+	pending, err := inputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil || len(pending) != 1 || pending[0].ID != queued.ID {
+		t.Fatalf("dispatch claim must preserve queued FIFO input: %#v err=%v", pending, err)
 	}
 }
 

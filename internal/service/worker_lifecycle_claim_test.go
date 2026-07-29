@@ -12,6 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 // TestWorkerService_TaskClaimedBeforeLifecycleHooks verifies the fix for the
@@ -129,6 +130,71 @@ func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing
 	if err != nil || len(remaining) != 1 || remaining[0].Content != "second follow-up" {
 		t.Fatalf("expected second follow-up to remain pending, got %#v err=%v", remaining, err)
 	}
+}
+
+func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	inputRepo := repository.NewThreadInputRepo(db)
+	project := &models.Project{Name: "follow-up before task claim"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent := &models.LLMConfig{Name: "Reverse Admission Agent", Provider: models.ProviderTest, Model: "test-model", MaxTokens: 4096, AuthMethod: models.AuthMethodCLI, IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Fresh ordinary task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt", AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	caller := testutil.NewMockLLMCaller()
+	caller.Response = "ordinary run complete"
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, repository.NewAttachmentRepo(db))
+	llmSvc.SetLLMCaller(caller)
+	worker := NewWorkerService(llmSvc, 1, projectRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetTaskRepo(taskRepo)
+	worker.SetExecutionRepo(execRepo)
+	beforeClaim := make(chan struct{})
+	releaseClaim := make(chan struct{})
+	worker.beforeOrdinaryTaskClaim = func(models.Task) {
+		close(beforeClaim)
+		<-releaseClaim
+	}
+	worker.Start(ctx)
+	defer worker.Stop()
+	worker.Submit(*task)
+
+	select {
+	case <-beforeClaim:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pre-claim barrier")
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "follow-up before claim", Source: models.TaskOriginWeb}
+	require.NoError(t, inputRepo.CreateQueued(ctx, queued))
+	close(releaseClaim)
+
+	require.Eventually(t, func() bool {
+		stored, err := taskRepo.GetByID(ctx, task.ID)
+		return err == nil && stored != nil && stored.Status == models.StatusCompleted && caller.CallCount() == 1
+	}, 5*time.Second, 10*time.Millisecond)
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	require.Equal(t, task.Prompt, execs[0].PromptSent)
+	require.Equal(t, models.ExecCompleted, execs[0].Status)
+
+	pending, err := inputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, queued.ID, pending[0].ID)
+	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
+	require.NoError(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted))
+	require.ErrorIs(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}), repository.ErrInputNotPending)
+	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 2)
+	require.Equal(t, queued.Content, execs[1].PromptSent)
 }
 
 func TestWorkerService_TaskClaimedBeforeLifecycleHooks(t *testing.T) {

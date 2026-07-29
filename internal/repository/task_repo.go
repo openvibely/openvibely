@@ -493,6 +493,12 @@ func (r *TaskRepo) SetPendingIfNotRunningOrQueued(ctx context.Context, id string
 	return updated, nil
 }
 
+const taskThreadInputOwnsAdmissionPredicate = `EXISTS (
+	SELECT 1 FROM thread_inputs i
+	WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending'
+	  AND EXISTS (SELECT 1 FROM executions history WHERE history.task_id = tasks.id)
+)`
+
 // ClaimTask atomically sets status to running only if the task is currently pending.
 // Returns true if the claim succeeded, false if the task was already running/completed/failed.
 func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
@@ -508,7 +514,9 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 	result, err := r.db.ExecContext(ctx,
 		`UPDATE tasks SET status = 'running', updated_at = datetime('now')
 		 WHERE id = ? AND status = 'pending'
-		   AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`,
+		   AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		   AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		   AND NOT `+taskThreadInputOwnsAdmissionPredicate,
 		id)
 	if err != nil {
 		return false, fmt.Errorf("claiming task: %w", err)
@@ -637,8 +645,7 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		WHERE id = ? AND status = 'pending' AND category IN ('active','scheduled')
 		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
-		  AND NOT EXISTS (SELECT 1 FROM thread_inputs i
-		                  WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')`, id)
+		  AND NOT `+taskThreadInputOwnsAdmissionPredicate, id)
 	if err != nil {
 		return nil, false, fmt.Errorf("claiming task for dispatch: %w", err)
 	}
@@ -1036,8 +1043,7 @@ func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error)
 		 FROM tasks WHERE category = 'active' AND status = 'pending'
 		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
 		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
-		 AND NOT EXISTS (SELECT 1 FROM thread_inputs i
-		                 WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
+		 AND NOT `+taskThreadInputOwnsAdmissionPredicate+`
 		 ORDER BY priority DESC, display_order ASC, created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing active pending tasks: %w", err)
@@ -1227,11 +1233,21 @@ func (r *TaskRepo) CountPendingByProject(ctx context.Context) (map[string]int, e
 	return counts, rows.Err()
 }
 
-// ResetOrphanedRunning resets any tasks with status='running' back to 'pending'.
-// Called on startup to recover tasks that were left in running state when the server was killed.
+// ResetOrphanedRunning reclaims tasks whose process-local runner was lost.
+// Tasks with durable queued follow-ups remain queue-owned (failed/backlog) until
+// FIFO promotion; ownerless ordinary tasks return to pending for scheduler retry.
 func (r *TaskRepo) ResetOrphanedRunning(ctx context.Context) (int, error) {
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+		`UPDATE tasks
+		 SET status = CASE
+		       WHEN EXISTS (SELECT 1 FROM thread_inputs i
+		                    WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
+		       THEN 'failed' ELSE 'pending' END,
+		     category = CASE
+		       WHEN category != 'chat' AND EXISTS (SELECT 1 FROM thread_inputs i
+		                    WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
+		       THEN 'backlog' ELSE category END,
+		     updated_at = datetime('now')
 		 WHERE status = 'running'
 		   AND NOT EXISTS (
 		     SELECT 1 FROM automation_task_run_reservations r

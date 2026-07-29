@@ -1519,6 +1519,13 @@ func TestHandler_InitialTaskTurnQueuesRuntimeFollowupBeforeExecutionExistsAndPro
 	require.Empty(t, queued.RunExecutionID)
 	require.Equal(t, models.ThreadInputPending, queued.InputStatus)
 
+	dispatchClaim, claimed, err := h.taskRepo.ClaimTaskForDispatch(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, claimed, "a generic follow-up queued before the first execution must not block the original worker claim")
+	require.NotNil(t, dispatchClaim)
+	require.Equal(t, models.StatusRunning, dispatchClaim.Task.Status)
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending), "restore fixture for direct LLM execution")
+
 	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
 	require.Empty(t, execs, "pre-execution queueing must not create a follow-up execution")

@@ -949,6 +949,10 @@ func TestSchedulerService_RestartRecoveryPromotesQueuedFollowupBeforeOriginalPro
 	if reset, err := taskRepo.ResetOrphanedRunning(ctx); err != nil || reset != 1 {
 		t.Fatalf("restart reset: count=%d err=%v", reset, err)
 	}
+	resetTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil || resetTask.Status != models.StatusFailed || resetTask.Category != models.CategoryBacklog {
+		t.Fatalf("durable follow-up must retain admission across restart: task=%#v err=%v", resetTask, err)
+	}
 
 	// Exercise the former startup ordering as an adversarial interleaving. The
 	// database guards must remain sufficient even though production now offers
