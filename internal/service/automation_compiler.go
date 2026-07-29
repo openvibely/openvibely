@@ -178,7 +178,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
 			switch node.Type {
 			case models.AutomationNodeAgentTask:
-				if !customAutomationGitHubIssueTask(candidate, node.Key) {
+				if !customAutomationGitHubIssueTask(candidate, node.Key) && !customAutomationNativeImplementation(candidate, node.Key) {
 					resource.AllowedResources["task"] = true
 				}
 			case models.AutomationNodeTrigger:

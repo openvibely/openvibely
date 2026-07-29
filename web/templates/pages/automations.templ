@@ -493,7 +493,18 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
 						<label class="form-control"><span class="label-text">Node purpose</span><select class="select select-bordered" name="node_kind" required>
 							if page.Result.Candidate.AdapterKey == "custom" {
-								<option value="schedule">Schedule</option><option value="task">Task</option><option value="create_notification">Create notification</option><option value="human_approval">Human approval</option><option value="create_github_issue">Create GitHub issue</option><option value="human_assignment">Human assignment</option><option value="github_inbox">GitHub inbox</option><option value="open_pull_request">Open pull request</option><option value="human_review">Human review</option><option value="outcome">Outcome</option>
+									<option value="schedule">Schedule</option>
+									<option value="task">Task</option>
+									<option value="create_notification">Create notification</option>
+									<option value="human_approval">Human approval</option>
+									<option value="native_inbox">Approved inbox</option>
+									<option value="native_implementation">Native implementation</option>
+									<option value="create_github_issue">Create GitHub issue</option>
+									<option value="human_assignment">Human assignment</option>
+									<option value="github_inbox">GitHub inbox</option>
+									<option value="open_pull_request">Open pull request</option>
+									<option value="human_review">Human review</option>
+									<option value="outcome">Outcome</option>
 							} else {
 								for _, node := range page.NodePalette {
 									if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {

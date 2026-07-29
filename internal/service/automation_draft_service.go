@@ -300,7 +300,7 @@ func (s *AutomationDraftService) normalizeReopenedCandidate(candidate models.Aut
 			// Older saved custom graphs exposed GitHub issue work as a separate
 			// implementation role. Tasks are generic now; the surrounding inbox and
 			// pull-request connections determine issue-linked materialization.
-			if node.Type == models.AutomationNodeAgentTask && node.Role == "implementation" {
+			if node.Type == models.AutomationNodeAgentTask && node.Role == "implementation" && !customAutomationNativeImplementation(candidate, node.Key) {
 				node.Role = "task"
 			}
 			// A custom Schedule is its own task. Its downstream handoff is represented
@@ -534,7 +534,28 @@ func customAutomationEdgeConditionState(condition map[string]any) (string, bool)
 }
 
 func customAutomationTaskSource(node models.AutomationDraftNode) bool {
-	return node.Type == models.AutomationNodeTrigger || node.Type == models.AutomationNodeAgentTask && node.Role == "task"
+	return node.Type == models.AutomationNodeTrigger && node.Role == "fixed_schedule" || node.Type == models.AutomationNodeAgentTask && node.Role == "task"
+}
+
+func customAutomationNativeImplementation(candidate models.AutomationDraftCandidate, nodeKey string) bool {
+	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		nodes[node.Key] = node
+	}
+	node, ok := nodes[nodeKey]
+	if !ok || node.Type != models.AutomationNodeAgentTask || node.Role != "implementation" || len(node.Config) != 0 {
+		return false
+	}
+	incoming, outgoing := 0, 0
+	for _, edge := range candidate.Edges {
+		if edge.To == nodeKey && nodes[edge.From].Type == models.AutomationNodeTrigger && nodes[edge.From].Role == "native_inbox" {
+			incoming++
+		}
+		if edge.From == nodeKey && nodes[edge.To].Type == models.AutomationNodeOutcome {
+			outgoing++
+		}
+	}
+	return incoming == 1 && outgoing == 1
 }
 
 func customAutomationGitHubIssueTask(candidate models.AutomationDraftCandidate, nodeKey string) bool {
@@ -592,7 +613,9 @@ func customAutomationHandoffSupported(from, to models.AutomationDraftNode) bool 
 			to.Type == models.AutomationNodeAction && (to.Role == "create_notification" || to.Role == "create_github_issue" || to.Role == "open_pull_request")
 	}
 	return from.Type == models.AutomationNodeAction && from.Role == "create_notification" && to.Type == models.AutomationNodeHumanGate && to.Role == "native_approval" ||
-		from.Type == models.AutomationNodeHumanGate && from.Role == "native_approval" && to.Type == models.AutomationNodeOutcome ||
+		from.Type == models.AutomationNodeHumanGate && from.Role == "native_approval" && (to.Type == models.AutomationNodeOutcome || to.Type == models.AutomationNodeTrigger && to.Role == "native_inbox") ||
+		from.Type == models.AutomationNodeTrigger && from.Role == "native_inbox" && to.Type == models.AutomationNodeAgentTask && to.Role == "implementation" ||
+		from.Type == models.AutomationNodeAgentTask && from.Role == "implementation" && to.Type == models.AutomationNodeOutcome ||
 		from.Type == models.AutomationNodeAction && from.Role == "create_github_issue" && to.Type == models.AutomationNodeHumanGate && to.Role == "github_assignment" ||
 		from.Type == models.AutomationNodeHumanGate && from.Role == "github_assignment" && to.Type == models.AutomationNodeAgentTask && to.Role == "github_inbox" ||
 		from.Type == models.AutomationNodeAgentTask && from.Role == "github_inbox" && to.Type == models.AutomationNodeAgentTask && to.Role == "task" ||
@@ -608,12 +631,22 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 	incoming := make(map[string][]models.AutomationDraftEdge, len(candidate.Nodes))
 	outgoing := make(map[string][]models.AutomationDraftEdge, len(candidate.Nodes))
 	var issues []models.AutomationValidationIssue
+	nativeMailbox, githubMailbox := false, false
 	for _, node := range candidate.Nodes {
 		nodes[node.Key] = node
+		switch node.Role {
+		case "native_approval", "native_inbox", "implementation":
+			nativeMailbox = true
+		case "github_assignment", "github_inbox", "open_pull_request", "pull_request_review":
+			githubMailbox = true
+		}
 		switch node.Type {
 		case models.AutomationNodeTrigger:
+			if node.Role != "fixed_schedule" && node.Role != "native_inbox" {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This Schedule role is not executable in custom automations yet."})
+			}
 		case models.AutomationNodeAgentTask:
-			if node.Role != "task" && node.Role != "github_inbox" {
+			if node.Role != "task" && node.Role != "github_inbox" && node.Role != "implementation" {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This Task role is not executable in custom automations yet."})
 			}
 		case models.AutomationNodeAction:
@@ -628,6 +661,9 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 		default:
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This capability is not executable in custom automations yet."})
 		}
+	}
+	if nativeMailbox && githubMailbox {
+		issues = append(issues, models.AutomationValidationIssue{Code: "mixed_mailbox_families", Message: "Choose either the Native approval/inbox flow or the GitHub assignment/inbox/review flow; do not combine mailbox families."})
 	}
 	for _, edge := range candidate.Edges {
 		from, fromOK := nodes[edge.From]
@@ -663,7 +699,21 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 		}
 		switch node.Type {
 		case models.AutomationNodeTrigger:
-			if len(incoming[node.Key]) != 0 {
+			if node.Role == "native_inbox" {
+				approvals := 0
+				for _, edge := range incoming[node.Key] {
+					state, ok := customAutomationEdgeConditionState(edge.Condition)
+					if nodes[edge.From].Role == "native_approval" && ok && state == "approved" {
+						approvals++
+					}
+				}
+				if approvals != 1 || len(incoming[node.Key]) != 1 {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "native_inbox_source", Message: "An Approved inbox needs exactly one approved connection from Human approval."})
+				}
+				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "implementation" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "native_inbox_target", Message: "An Approved inbox needs exactly one Native implementation target."})
+				}
+			} else if len(incoming[node.Key]) != 0 {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "schedule_parents", Message: "A Schedule starts its own task and cannot have an incoming connection."})
 			}
 		case models.AutomationNodeAgentTask:
@@ -693,6 +743,13 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 				}
 				if githubConnections > 0 {
 					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_task_connections", Message: "A Task between a GitHub inbox and Open pull request must have exactly those two connections."})
+				}
+			case "implementation":
+				if len(incoming[node.Key]) != 1 || nodes[incoming[node.Key][0].From].Role != "native_inbox" {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "native_implementation_source", Message: "Native implementation needs exactly one Approved inbox source."})
+				}
+				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Type != models.AutomationNodeOutcome {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "native_implementation_target", Message: "Native implementation needs exactly one terminal Outcome."})
 				}
 			case "github_inbox":
 				schedules, assignments := 0, 0
@@ -761,12 +818,12 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 				states := map[string]int{}
 				for _, edge := range outgoing[node.Key] {
 					state, ok := customAutomationEdgeConditionState(edge.Condition)
-					if ok && nodes[edge.To].Type == models.AutomationNodeOutcome {
+					if ok && (nodes[edge.To].Type == models.AutomationNodeOutcome || nodes[edge.To].Role == "native_inbox") {
 						states[state]++
 					}
 				}
 				if states["approved"] > 1 || states["rejected"] > 1 {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_branches", Message: "Human approval may expose at most one Outcome for each result."})
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "approval_branches", Message: "Human approval may expose at most one target for each result."})
 				}
 			case "github_assignment":
 				if len(incoming[node.Key]) == 0 {
@@ -826,7 +883,11 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	allowed := map[string]bool{}
 	switch node.Type {
 	case models.AutomationNodeAgentTask:
-		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true}
+		if node.Role == "implementation" {
+			allowed = map[string]bool{}
+		} else {
+			allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true}
+		}
 	case models.AutomationNodeTrigger:
 		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true, "clear_context_on_start": true}
 	case models.AutomationNodeAction:
@@ -847,9 +908,9 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	validRole := false
 	switch node.Type {
 	case models.AutomationNodeTrigger:
-		validRole = node.Role == "fixed_schedule"
+		validRole = node.Role == "fixed_schedule" || node.Role == "native_inbox"
 	case models.AutomationNodeAgentTask:
-		validRole = node.Role == "task" || node.Role == "github_inbox"
+		validRole = node.Role == "task" || node.Role == "github_inbox" || node.Role == "implementation"
 	case models.AutomationNodeAction:
 		validRole = node.Role == "create_notification" || node.Role == "create_github_issue" || node.Role == "open_pull_request"
 	case models.AutomationNodeHumanGate:
@@ -869,7 +930,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsafe_config", Message: fmt.Sprintf("Configuration field %q contains an unsupported value.", key)})
 		}
 	}
-	if node.Type == models.AutomationNodeAgentTask {
+	if node.Type == models.AutomationNodeAgentTask && node.Role != "implementation" {
 		prompt, promptOK := node.Config["prompt"].(string)
 		if !promptOK || strings.TrimSpace(prompt) == "" {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "missing_prompt", Message: "Task nodes require a prompt before saving."})

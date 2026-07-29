@@ -29,7 +29,7 @@ The builder lets users add, place, configure, connect, reconnect, and remove sur
 
 - `Schedule`, a substantive scheduled Task plus one Scheduler row targeting that same Task.
 - `Task`, an ordinary OpenVibely Task with prompt, category, priority, and optional surfaced Agent assignment.
-- Native Alert `Create notification` and `Human approval` nodes.
+- Native Alert `Create notification`, `Human approval`, scheduled `Approved inbox`, and projection-only Native `Implementation` nodes.
 - Supported GitHub issue, assignment, inbox, pull-request, and human-review nodes.
 - `Outcome`, a terminal visual result with no runtime side effect.
 
@@ -37,7 +37,9 @@ The existing hidden Workflow subsystem is not an Automation node.
 
 A Schedule can perform recurring work without a second Task. `Schedule → Task` is an explicit downstream handoff: scheduled Task A completes, then existing Task/worker machinery activates or reuses distinct Task B. Task-to-Task handoffs use the same normal parent/chain machinery. One task may fan out to multiple children, but a child may have at most one task parent because persisted Tasks have one parent.
 
-Only the exact `GitHub inbox → Task → Open pull request` shape treats the Task as issue-specific configuration for Tasks created later by the inbox. Other Task nodes materialize as stable Tasks on Save.
+Only the exact `GitHub inbox → Task → Open pull request` shape treats the generic Task as issue-specific configuration for Tasks created later by the inbox. A Native `Approved inbox` is itself a substantive scheduled Task and connects to a projection-only Native `Implementation` stage representing the real Task created through approved-notification processing; Save does not create a placeholder implementation Task.
+
+Custom mailbox graphs use one complete integration family. Native uses `Create notification → Human approval → Approved inbox → Implementation → Outcome`, with an optional rejected Outcome. GitHub uses `Create GitHub issue → Human assignment → GitHub inbox → Task → Open pull request → Human review → Outcome` plus the GitHub inbox's required substantive Schedule source. Native approval/inbox/implementation stages and GitHub assignment/inbox/PR/review stages cannot be mixed in one custom graph.
 
 ## Connections
 
@@ -99,7 +101,7 @@ Only Schedule and Task nodes with exact current `task` resource bindings are lin
 
 ## Native Alert Boundary
 
-Saving a graph containing `Create notification` creates no Alert. A bound Task later invokes the existing notification runtime. Every supported notification action hands off through `Human approval`; approval may terminate or branch to configured approved/rejected Outcomes.
+Saving a graph containing `Create notification` creates no Alert. A bound Task later invokes the existing notification runtime. Every supported notification action hands off through `Human approval`. Human approval may terminate or branch to configured approved/rejected Outcomes, or its approved branch may enter a scheduled `Approved inbox`. That inbox owns its Task and Scheduler row and performs the complete list, inspect, claim, implementation-task linkage, and processing completion/failure workflow. The connected Native `Implementation` node is projection-only; the approved notification creates the real implementation Task at runtime.
 
 Approval authorizes only the configured downstream handoff. It never authorizes merge, release, deployment, or arbitrary execution. Idempotent retries may reuse only an Alert already owned by the exact Automation source.
 

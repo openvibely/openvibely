@@ -345,6 +345,38 @@ func TestAutomationQueuedRootClaimsReplacementDispatchStateAtomically(t *testing
 	require.NotEqual(t, staleAgent.ID, caller.LastAgentRequest().AgentDefinition.ID)
 }
 
+func customNativeMailboxCandidate(name string) models.AutomationDraftCandidate {
+	return models.AutomationDraftCandidate{SchemaVersion: 1, Name: name, AutomationType: "custom", AdapterKey: AutomationAdapterCustom, Nodes: []models.AutomationDraftNode{
+		{Key: "custom_producer", Name: "Daily review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Review one focused area and prepare an actionable notification.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "custom_notification", Name: "Create notification", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "suggestion", "instructions": "Create one reviewable suggestion."}},
+		{Key: "custom_approval", Name: "Human approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{"approval_method": "native_alert"}},
+		{Key: "custom_approved_inbox", Name: "Approved inbox", Type: models.AutomationNodeTrigger, Role: "native_inbox", Config: map[string]any{"prompt": NativeSDLCNotificationInboxPrompt, "category": "scheduled", "priority": 2, "run_at": "09:15", "repeat_type": "hours", "repeat_interval": 1, "enabled": true}},
+		{Key: "custom_implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "implementation", Config: map[string]any{}},
+		{Key: "custom_completed", Name: "Completed", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+		{Key: "custom_rejected", Name: "Rejected", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+	}, Edges: []models.AutomationDraftEdge{
+		{Key: "custom_producer_notification", From: "custom_producer", To: "custom_notification", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "custom_notification_approval", From: "custom_notification", To: "custom_approval", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "custom_approval_inbox", From: "custom_approval", To: "custom_approved_inbox", FromPort: "right", ToPort: "left", Condition: map[string]any{"state": "approved"}},
+		{Key: "custom_approval_rejected", From: "custom_approval", To: "custom_rejected", FromPort: "right", ToPort: "left", Condition: map[string]any{"state": "rejected"}},
+		{Key: "custom_inbox_implementation", From: "custom_approved_inbox", To: "custom_implementation", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "custom_implementation_completed", From: "custom_implementation", To: "custom_completed", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+	}}
+}
+
+func TestAutomationSaveCreatesCustomNativeMailboxWithoutImplementationPlaceholderTask(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Custom Native mailbox")
+	saved, err := h.compiler.Save(context.Background(), AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Custom Native mailbox")})
+	require.NoError(t, err)
+	require.NotEmpty(t, automationResourceID(t, saved.Definition, "custom_producer", "task"))
+	require.NotEmpty(t, automationResourceID(t, saved.Definition, "custom_approved_inbox", "task"))
+	for _, resource := range saved.Definition.Resources {
+		require.False(t, resource.NodeKey == "custom_implementation" && resource.ResourceType == "task", "Native implementation is projection-only")
+	}
+	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources WHERE automation_id = ? AND resource_type = 'task'`, saved.Definition.Automation.ID))
+	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources WHERE automation_id = ? AND resource_type = 'schedule'`, saved.Definition.Automation.ID))
+}
+
 func TestAutomationSaveCreatesCurrentGraphTaskAndScheduleAtomically(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Atomic custom Save")
 	ctx := context.Background()

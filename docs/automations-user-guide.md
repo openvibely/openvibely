@@ -28,12 +28,13 @@ Select `Add node` to add a supported step:
 
 - `Schedule` defines recurring or one-time work and creates its own Task and schedule when saved.
 - `Task` defines project work, optionally performed by a selected Agent.
-- `Create notification` creates a Native Alert notification at runtime.
-- `Human approval` waits for a person to approve or reject the Native notification.
+- `Create notification`, `Human approval`, `Approved inbox`, and Native `Implementation` model the Native Alert mailbox. Approved inbox is itself the scheduled Task; Native Implementation represents the real runtime-created implementation Task and is not a placeholder Task created on Save.
 - `Create GitHub issue`, `Human assignment`, `GitHub inbox`, `Open pull request`, and `Human review` model supported GitHub handoffs.
 - `Outcome` marks a supported terminal result.
 
 Configure each node, then connect its right output to the next node's left input. The builder supports selecting, moving, deleting, and reconnecting nodes and edges, plus pan, zoom, Fit, and Reset controls. Schedule nodes do not have individual enable or disable controls: every current schedule runs while its Automation is Active, Pause disables all of its schedules, and Resume re-enables them.
+
+Mailbox graphs must use one complete family. Native uses `Create notification → Human approval → Approved inbox → Implementation → Outcome`. GitHub uses `Create GitHub issue → Human assignment → GitHub inbox → Task → Open pull request → Human review → Outcome`, with a separate substantive Schedule source for GitHub inbox polling. Native and GitHub approval, inbox, implementation, and review stages cannot be mixed in one custom graph.
 
 Save rejects unsupported or ambiguous handoffs, invalid connector directions, unsafe cycles, missing configuration, and project references that are unavailable or belong to another project. The builder does not expose the hidden Workflow subsystem or arbitrary executable nodes.
 

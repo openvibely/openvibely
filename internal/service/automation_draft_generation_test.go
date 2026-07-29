@@ -41,7 +41,7 @@ func TestAutomationCapabilitySnapshotIsBoundedDeterministicAndSecretFree(t *test
 	require.NotContains(t, string(encoded), "ghp_do_not_expose")
 	require.LessOrEqual(t, len(first.Agents), 50)
 	require.LessOrEqual(t, len(first.ReusableResources), 50)
-	for _, role := range []string{"task", "create_notification", "native_approval", "create_github_issue", "github_assignment", "github_inbox", "open_pull_request", "pull_request_review", "completed"} {
+	for _, role := range []string{"task", "create_notification", "native_approval", "native_inbox", "implementation", "create_github_issue", "github_assignment", "github_inbox", "open_pull_request", "pull_request_review", "completed"} {
 		require.Contains(t, first.SupportedRoles, role, "Describe It must see every surfaced custom capability role")
 	}
 }
@@ -126,7 +126,7 @@ func TestAutomationDescriptionPromptExposesOnlyExecutableCustomCapabilities(t *t
 		var exposed map[string]any
 		require.NoError(t, json.Unmarshal([]byte(prompt[start:start+end]), &exposed))
 		require.Equal(t, []any{"action", "agent_task", "human_gate", "outcome", "trigger"}, exposed["supported_node_types"])
-		require.Equal(t, []any{"completed", "create_github_issue", "create_notification", "fixed_schedule", "github_assignment", "github_inbox", "native_approval", "open_pull_request", "pull_request_review", "task"}, exposed["supported_roles"])
+		require.Equal(t, []any{"completed", "create_github_issue", "create_notification", "fixed_schedule", "github_assignment", "github_inbox", "implementation", "native_approval", "native_inbox", "open_pull_request", "pull_request_review", "task"}, exposed["supported_roles"])
 		require.NotContains(t, exposed, "skills")
 		require.NotContains(t, exposed, "source_files")
 		require.NotContains(t, exposed, "reusable_resources")
@@ -170,6 +170,11 @@ func TestAutomationDescriptionPromptMatchesStrictCustomValidationContract(t *tes
 		require.Contains(t, prompt, "exactly one Task target")
 		require.Contains(t, prompt, "Open pull request must have exactly one incoming edge")
 		require.Contains(t, prompt, "Human review must have exactly one outgoing edge to one Outcome")
+		require.Contains(t, prompt, "Native mailbox family")
+		require.Contains(t, prompt, "Human approval -> Approved inbox -> Implementation -> Outcome")
+		require.Contains(t, prompt, "Approved inbox is itself the scheduled Task")
+		require.Contains(t, prompt, "GitHub mailbox family")
+		require.Contains(t, prompt, "Never combine Native mailbox nodes and GitHub mailbox nodes in one custom graph")
 		require.Contains(t, prompt, "If requested work depends on an external capability")
 		require.Contains(t, prompt, "add an explicit warning")
 		return string(candidateJSON), nil
@@ -245,8 +250,8 @@ func TestAutomationDescriptionGenerationSupportsExpandedCustomBuilderContract(t 
 		require.Contains(t, prompt, "create_github_issue")
 		require.Contains(t, prompt, "github_assignment")
 		require.Contains(t, prompt, "github_inbox")
-		require.NotContains(t, prompt, "role implementation")
-		require.NotContains(t, prompt, "Implementation task template")
+		require.Contains(t, prompt, "role implementation")
+		require.Contains(t, prompt, "Native implementation")
 		require.Contains(t, prompt, "open_pull_request")
 		require.Contains(t, prompt, "pull_request_review")
 		require.NotContains(t, prompt, "existing_workflow")

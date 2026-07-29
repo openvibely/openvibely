@@ -26,7 +26,7 @@ Do not modify code and do not create implementation tasks. Do not list, search, 
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 
-const nativeSDLCNotificationInboxPrompt = `Process approved actionable notifications for this scheduled task's own project.
+const NativeSDLCNotificationInboxPrompt = `Process approved actionable notifications for this scheduled task's own project.
 
 Call list_alerts without project_id, using decision_state=approved, implementation_task_linked=false, a bounded limit, and stable pagination. The runtime automatically uses this scheduled task's persisted project. Never reuse a project ID from prior messages, examples, memory, or tool output. For each result, call get_alert and inspect the full body and metadata before claiming it.
 

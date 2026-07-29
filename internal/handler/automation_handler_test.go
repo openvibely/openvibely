@@ -473,6 +473,8 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	require.NotContains(t, created.Body.String(), `value="agent_task"`)
 	require.Contains(t, created.Body.String(), `value="create_notification"`)
 	require.Contains(t, created.Body.String(), `value="human_approval"`)
+	require.Contains(t, created.Body.String(), `value="native_inbox"`)
+	require.Contains(t, created.Body.String(), `value="native_implementation"`)
 	require.Contains(t, created.Body.String(), `value="create_github_issue"`)
 	require.Contains(t, created.Body.String(), `value="human_assignment"`)
 	require.Contains(t, created.Body.String(), `value="github_inbox"`)

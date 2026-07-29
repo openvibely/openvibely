@@ -364,6 +364,11 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		case "human_approval":
 			nodeType, role = models.AutomationNodeHumanGate, "native_approval"
 			config = map[string]any{"approval_method": "native_alert"}
+		case "native_inbox":
+			nodeType, role = models.AutomationNodeTrigger, "native_inbox"
+			config = map[string]any{"prompt": service.NativeSDLCNotificationInboxPrompt, "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatHours), "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}
+		case "native_implementation":
+			nodeType, role = models.AutomationNodeAgentTask, "implementation"
 		case "create_github_issue":
 			nodeType, role = models.AutomationNodeAction, "create_github_issue"
 			config = map[string]any{"instructions": "Open one focused, reviewable GitHub issue.", "labels": []string{}}

@@ -76,8 +76,26 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	require.Contains(t, visionPrompt, "Do not modify code")
 	require.Contains(t, visionPrompt, "do not create implementation tasks")
 
-	for _, nodeKey := range []string{"bug_finder", "optimization_finder", "redundancy_finder"} {
-		prompt, _ := automationDraftNodeByKey(t, candidate, nodeKey).Config["prompt"].(string)
+	roles := map[string]struct {
+		nodeKey       string
+		identity      string
+		requiredScope string
+		forbidden     []string
+	}{
+		"bug_finder":          {nodeKey: "bug_finder", identity: "You are the Bug Finder.", requiredScope: "bug_suggestion", forbidden: []string{"You are the Optimization Finder.", "You are the Redundancy Finder."}},
+		"optimization_finder": {nodeKey: "optimization_finder", identity: "You are the Optimization Finder.", requiredScope: "performance_suggestion", forbidden: []string{"You are the Bug Finder.", "You are the Redundancy Finder."}},
+		"redundancy_finder":   {nodeKey: "redundancy_finder", identity: "You are the Redundancy Finder.", requiredScope: "maintenance_suggestion", forbidden: []string{"You are the Bug Finder.", "You are the Optimization Finder."}},
+	}
+	seenPrompts := map[string]bool{}
+	for role, expected := range roles {
+		prompt, _ := automationDraftNodeByKey(t, candidate, expected.nodeKey).Config["prompt"].(string)
+		require.Contains(t, prompt, expected.identity, "%s must receive an explicit, unambiguous role", role)
+		require.Contains(t, prompt, expected.requiredScope, "%s must use its role-specific Native notification type", role)
+		for _, forbidden := range expected.forbidden {
+			require.NotContains(t, prompt, forbidden, "%s must not receive another finder identity", role)
+		}
+		require.False(t, seenPrompts[prompt], "%s must not share a prompt body with another finder", role)
+		seenPrompts[prompt] = true
 		require.Contains(t, prompt, "Choose one focused project component or workflow")
 		require.Contains(t, prompt, "create_notification")
 		require.Contains(t, prompt, "stable idempotency key")
@@ -113,6 +131,9 @@ func TestNativeSDLCTemplateOwnsItsPrompts(t *testing.T) {
 	require.NoError(t, err)
 	sourceText := string(source)
 	require.Contains(t, sourceText, "func nativeSDLCRolePrompt")
+	require.Contains(t, sourceText, "const nativeSDLCBugFinderPrompt")
+	require.Contains(t, sourceText, "const nativeSDLCOptimizationFinderPrompt")
+	require.Contains(t, sourceText, "const nativeSDLCRedundancyFinderPrompt")
 	require.NotContains(t, sourceText, "builtinskills")
 	require.NotContains(t, sourceText, "SKILL.md")
 }
@@ -191,8 +212,10 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.Contains(t, githubSDLCDevInboxPrompt, "or from a GitHub remote in its local checkout when that URL is blank")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "restricted to the selected project's explicit repository URL")
 	for name, prompt := range map[string]string{
-		"offering manager": githubSDLCOfferingManagerPrompt,
-		"finder":           githubSDLCFinderPrompt,
+		"offering manager":    githubSDLCOfferingManagerPrompt,
+		"bug finder":          githubSDLCBugFinderPrompt,
+		"optimization finder": githubSDLCOptimizationFinderPrompt,
+		"redundancy finder":   githubSDLCRedundancyFinderPrompt,
 	} {
 		require.Contains(t, prompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection", name)
 		require.Contains(t, prompt, "Do not require a repository-wide issue or pull-request listing/search before publication", name)
@@ -224,7 +247,9 @@ func TestGitHubSDLCTemplateOwnsItsPrompts(t *testing.T) {
 	sourceText := string(source)
 	require.Contains(t, sourceText, "const githubSDLCDevInboxPrompt")
 	require.Contains(t, sourceText, "const githubSDLCOfferingManagerPrompt")
-	require.Contains(t, sourceText, "const githubSDLCFinderPrompt")
+	require.Contains(t, sourceText, "const githubSDLCBugFinderPrompt")
+	require.Contains(t, sourceText, "const githubSDLCOptimizationFinderPrompt")
+	require.Contains(t, sourceText, "const githubSDLCRedundancyFinderPrompt")
 	require.Contains(t, sourceText, "const githubSDLCLoopAuditorPrompt")
 	require.NotContains(t, sourceText, "builtinskills")
 	require.NotContains(t, sourceText, "SKILL.md")
@@ -237,11 +262,31 @@ func TestGitHubSDLCTemplateUsesAutomationOwnedPrompts(t *testing.T) {
 
 	promptsByNode := map[string]string{
 		"vision_suggestions":  githubSDLCOfferingManagerPrompt,
-		"bug_finder":          githubSDLCFinderPrompt,
-		"optimization_finder": githubSDLCFinderPrompt,
-		"redundancy_finder":   githubSDLCFinderPrompt,
+		"bug_finder":          mustGitHubSDLCRolePrompt(t, "bug_finder"),
+		"optimization_finder": mustGitHubSDLCRolePrompt(t, "optimization_finder"),
+		"redundancy_finder":   mustGitHubSDLCRolePrompt(t, "redundancy_finder"),
 		"dev_inbox":           githubSDLCDevInboxPrompt,
 		"auditor":             githubSDLCLoopAuditorPrompt,
+	}
+	finderExpectations := map[string]struct {
+		identity  string
+		label     string
+		forbidden []string
+	}{
+		"bug_finder":          {identity: "You are the Bug Finder.", label: "bug", forbidden: []string{"You are the Optimization Finder.", "You are the Redundancy Finder."}},
+		"optimization_finder": {identity: "You are the Optimization Finder.", label: "performance", forbidden: []string{"You are the Bug Finder.", "You are the Redundancy Finder."}},
+		"redundancy_finder":   {identity: "You are the Redundancy Finder.", label: "duplication", forbidden: []string{"You are the Bug Finder.", "You are the Optimization Finder."}},
+	}
+	seenFinderPrompts := map[string]bool{}
+	for nodeKey, expected := range finderExpectations {
+		prompt := promptsByNode[nodeKey]
+		require.Contains(t, prompt, expected.identity, "%s must receive an explicit, unambiguous role", nodeKey)
+		require.Contains(t, prompt, "label `"+expected.label+"`", "%s must use its role-specific GitHub label", nodeKey)
+		for _, forbidden := range expected.forbidden {
+			require.NotContains(t, prompt, forbidden, "%s must not receive another finder identity", nodeKey)
+		}
+		require.False(t, seenFinderPrompts[prompt], "%s must not share a prompt body with another finder", nodeKey)
+		seenFinderPrompts[prompt] = true
 	}
 	expectedCadence := map[string]struct {
 		repeatType string
@@ -302,6 +347,13 @@ func TestVisionDriverTemplateScheduleOwnsItsTask(t *testing.T) {
 	require.Len(t, candidate.Nodes, 5, "Vision Driver must not add a separate empty schedule relay node")
 }
 
+func mustGitHubSDLCRolePrompt(t *testing.T, role string) string {
+	t.Helper()
+	prompt, err := githubSDLCRolePrompt(role)
+	require.NoError(t, err)
+	return prompt
+}
+
 func automationAdapterNodeByRole(t *testing.T, adapter AutomationAdapter, role string) AutomationAdapterNode {
 	t.Helper()
 	for _, node := range adapter.Nodes {
@@ -338,6 +390,18 @@ func TestAutomationDraftServiceNormalizesRegisteredTemplatesDeterministically(t 
 			require.NotNil(t, node.Position, "layout must be server-owned for %s/%s", adapterKey, node.Key)
 		}
 	}
+}
+
+func TestCustomAutomationValidatesClosedNativeMailboxFlowAndRejectsMixedMailboxFamilies(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate := customNativeMailboxCandidate("Native approval loop")
+	require.Empty(t, svc.ValidateCandidate(candidate), "the complete Native mailbox family must be a supported custom construction")
+	reopened, err := svc.normalizeReopenedCandidate(candidate)
+	require.NoError(t, err)
+	require.Equal(t, "implementation", automationDraftNodeByKey(t, reopened, "custom_implementation").Role, "trusted reopen must preserve the Native projection stage")
+	mixed := candidate
+	mixed.Nodes = append(append([]models.AutomationDraftNode(nil), candidate.Nodes...), models.AutomationDraftNode{Key: "github_assignment", Name: "GitHub assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}})
+	require.Contains(t, issueCodes(svc.ValidateCandidate(mixed)), "mixed_mailbox_families")
 }
 
 func TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoinsOrCycles(t *testing.T) {
@@ -610,7 +674,7 @@ func TestAutomationDraftReopenLimitsLegacySemanticCleanupToTrustedSavedGraphs(t 
 	require.NoError(t, err)
 	require.Equal(t, "implementation", strict.Nodes[0].Config["target_node_key"], "strict submitted-candidate normalization must preserve explicit semantic values for validation")
 	require.Equal(t, "implementation", strict.Nodes[1].Role)
-	require.Contains(t, issueCodes(svc.ValidateCandidate(strict)), "unsupported_capability", "new public custom candidates must reject the compatibility-only implementation role")
+	require.Contains(t, issueCodes(svc.ValidateCandidate(strict)), "native_implementation_source", "the implementation role is valid only in the closed Native inbox topology")
 	require.Empty(t, strict.Edges[0].FromPort)
 	require.Empty(t, strict.Edges[0].ToPort)
 

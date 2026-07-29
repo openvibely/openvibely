@@ -19,6 +19,26 @@ func automationNodeIDByKey(ctx context.Context, exec SQLExecutor, projectID, aut
 	return nodeID, nil
 }
 
+func automationWorkItemNodeIDByRole(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID, workItemID, role string) (string, error) {
+	var nodeID string
+	err := exec.QueryRowContext(ctx, `SELECT n.id FROM automation_work_item_positions p
+		JOIN automation_nodes n ON n.id = p.node_id AND n.project_id = p.project_id
+			AND n.automation_id = p.automation_id AND n.version_id = p.version_id
+		WHERE p.project_id = ? AND p.automation_id = ? AND p.version_id = ? AND p.work_item_id = ? AND n.role = ?
+		ORDER BY p.entered_at DESC, p.node_id LIMIT 1`, projectID, automationID, versionID, workItemID, role).Scan(&nodeID)
+	return nodeID, err
+}
+
+func automationTargetNodeIDByRole(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID, sourceNodeID, role string) (string, error) {
+	var nodeID string
+	err := exec.QueryRowContext(ctx, `SELECT target.id FROM automation_edges edge
+		JOIN automation_nodes target ON target.id = edge.target_node_id AND target.project_id = edge.project_id
+			AND target.automation_id = edge.automation_id AND target.version_id = edge.version_id
+		WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ?
+			AND edge.source_node_id = ? AND target.role = ?`, projectID, automationID, versionID, sourceNodeID, role).Scan(&nodeID)
+	return nodeID, err
+}
+
 func customAlertHandoffNodeIDs(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID, sourceNodeID string) (string, string, bool, error) {
 	var notificationNode, approvalNode string
 	err := exec.QueryRowContext(ctx, `SELECT notification.id, approval.id
@@ -216,7 +236,7 @@ func recordAlertClaimProjection(ctx context.Context, exec SQLExecutor, projectID
 			projectID, value.automationID, value.versionID, value.workItemID); err != nil {
 			return err
 		}
-		inboxNode, err := automationNodeIDByKey(ctx, exec, projectID, value.automationID, value.versionID, "inbox")
+		inboxNode, err := automationWorkItemNodeIDByRole(ctx, exec, projectID, value.automationID, value.versionID, value.workItemID, "native_inbox")
 		if err != nil {
 			return err
 		}
@@ -267,7 +287,7 @@ func recordAlertProcessingProjection(ctx context.Context, exec SQLExecutor, proj
 		}
 		fromNode := value.fromNodeID
 		if fromNode == "" {
-			fromNode, err = automationNodeIDByKey(ctx, exec, projectID, value.automationID, value.versionID, "implementation")
+			fromNode, err = automationWorkItemNodeIDByRole(ctx, exec, projectID, value.automationID, value.versionID, value.workItemID, "implementation")
 			if err != nil {
 				return err
 			}
@@ -346,7 +366,14 @@ func recordAlertImplementationProjection(ctx context.Context, exec SQLExecutor, 
 		return err
 	}
 	for _, value := range targets {
-		implementationNode, err := automationNodeIDByKey(ctx, exec, projectID, value.automationID, value.versionID, "implementation")
+		inboxNode := value.fromNodeID
+		if inboxNode == "" {
+			inboxNode, err = automationWorkItemNodeIDByRole(ctx, exec, projectID, value.automationID, value.versionID, value.workItemID, "native_inbox")
+			if err != nil {
+				return err
+			}
+		}
+		implementationNode, err := automationTargetNodeIDByRole(ctx, exec, projectID, value.automationID, value.versionID, inboxNode, "implementation")
 		if err != nil {
 			return err
 		}
@@ -355,7 +382,7 @@ func recordAlertImplementationProjection(ctx context.Context, exec SQLExecutor, 
 			Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			ActivityKey: "alert:" + alertID + ":implementation-task", ActivityType: "create_implementation_task", ActivityStatus: models.AutomationActivityCompleted,
 			Resources: []models.AutomationActivityResource{{ResourceType: "alert", ResourceID: alertID}, {ResourceType: "task", ResourceID: taskID}},
-			EventKey:  "alert:" + alertID + ":implementation:" + taskID, FromNodeID: value.fromNodeID, ToNodeID: implementationNode, Transition: models.AutomationTransitionEntered,
+			EventKey:  "alert:" + alertID + ":implementation:" + taskID, FromNodeID: inboxNode, ToNodeID: implementationNode, Transition: models.AutomationTransitionEntered,
 		})
 		if err != nil {
 			return err

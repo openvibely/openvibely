@@ -2031,6 +2031,35 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	require.Equal(t, fixture.project.RepoPath, provider.resolvedPath, "Automation external refresh must fall back to the project's local Git remote")
 }
 
+func TestAutomationRuntimeCustomNativeMailboxUsesRoleTopologyInsteadOfMaintainedNodeKeys(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Custom Native runtime")
+	ctx := context.Background()
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Custom Native runtime")})
+	require.NoError(t, err)
+	producer := automationNodeByKey(t, saved.Definition, "custom_producer")
+	producerTaskID := automationResourceID(t, saved.Definition, "custom_producer", "task")
+	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo.SetAutomationRepo(h.automationRepo)
+	alertSvc := NewAlertService(alertRepo, nil)
+	ctx = WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: producer.ID}}})
+	alert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: h.project.ID, SourceTaskID: &producerTaskID, Type: "suggestion", Title: "Custom Native finding", Body: "Review me", IdempotencyKey: "custom-native-finding"})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, alert.ID, models.AlertDecisionApproved))
+	_, err = alertSvc.ClaimApproved(ctx, h.project.ID, alert.ID, "custom-inbox", time.Minute)
+	require.NoError(t, err)
+	implementation, err := alertSvc.CreateImplementationTask(ctx, h.project.ID, alert.ID, "custom-inbox", models.AlertImplementationTaskInput{Title: "Implement custom finding", Prompt: "Implement safely", Priority: 2})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.MarkProcessing(ctx, h.project.ID, alert.ID, "custom-inbox", models.AlertProcessingCompleted, ""))
+	implementationNode := automationNodeByKey(t, saved.Definition, "custom_implementation")
+	taskContext, err := h.automationRepo.ContextForTask(ctx, h.project.ID, implementation.ID)
+	require.NoError(t, err)
+	require.Len(t, taskContext.Bindings, 1)
+	require.Equal(t, implementationNode.ID, taskContext.Bindings[0].NodeID)
+	for _, edgeKey := range []string{"custom_approval_inbox", "custom_inbox_implementation"} {
+		require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions tr JOIN automation_edges e ON e.id = tr.edge_id WHERE tr.automation_id = ? AND e.edge_key = ?`, saved.Definition.Automation.ID, edgeKey))
+	}
+}
+
 func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
