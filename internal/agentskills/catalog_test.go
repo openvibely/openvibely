@@ -325,6 +325,7 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"Call `list_alerts` without `project_id`",
 		"pass the `read` filter",
 		"both read and unread approved notifications",
+		"complete paginated snapshot",
 		"call `execute_tasks` with that exact task ID",
 		"Only after `execute_tasks` succeeds",
 		"Never reuse a project ID from prior messages, examples, memory, or tool output",

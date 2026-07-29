@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -89,6 +90,60 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.AlertProcessingCompleted, final.ProcessingState)
 	require.Equal(t, linked.ImplementationTaskID, *final.ImplementationTaskID)
+}
+
+func TestNativeInboxCollectsAllPagesBeforeShrinkingEligibleSet(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Native inbox pagination"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+
+	createdIDs := make(map[string]struct{}, 3)
+	for i := 0; i < 3; i++ {
+		createdJSON, err := handlers["create_notification"](ctx, json.RawMessage(`{"type":"bug_suggestion","title":"Finding `+string(rune('A'+i))+`"}`))
+		require.NoError(t, err)
+		var created struct {
+			Notification models.Alert `json:"notification"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+		require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
+		createdIDs[created.Notification.ID] = struct{}{}
+	}
+
+	listPage := func(offset int) []models.Alert {
+		listedJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"approved","implementation_task_linked":false,"limit":2,"offset":`+fmt.Sprintf("%d", offset)+`}`))
+		require.NoError(t, err)
+		var listed struct {
+			Notifications []models.Alert `json:"notifications"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(listedJSON), &listed))
+		return listed.Notifications
+	}
+
+	firstPage := listPage(0)
+	require.Len(t, firstPage, 2)
+	snapshotRemainder := listPage(2)
+	require.Len(t, snapshotRemainder, 1, "the inbox must collect later pages before linking changes the filtered set")
+	for _, alert := range firstPage {
+		_, err := handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+alert.ID+`"}`))
+		require.NoError(t, err)
+		_, err = handlers["create_alert_implementation_task"](ctx, json.RawMessage(`{"alert_id":"`+alert.ID+`","title":"Implement finding `+alert.ID+`","prompt":"Implement the approved finding."}`))
+		require.NoError(t, err)
+		delete(createdIDs, alert.ID)
+	}
+
+	require.Empty(t, listPage(2), "advancing the offset after mutation skips the remaining row")
+	remaining := listPage(0)
+	require.Len(t, remaining, 1)
+	require.Equal(t, snapshotRemainder[0].ID, remaining[0].ID, "the pre-mutation snapshot must retain the otherwise skipped notification ID")
+	_, ok := createdIDs[snapshotRemainder[0].ID]
+	require.True(t, ok)
 }
 
 func TestAlertRuntimeCreateAlertPreservesOperationalContract(t *testing.T) {
