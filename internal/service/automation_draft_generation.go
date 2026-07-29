@@ -46,7 +46,7 @@ Supported custom handoffs are deterministic capability connections, not fixed wo
 - Each ordinary Task may have at most one Task or Schedule source because a persisted task has one parent. Schedule -> Task is an explicit downstream handoff: the scheduled Task performs its own configured work first, then OpenVibely activates the separate connected Task after successful completion. Never compile or describe this edge as the Scheduler directly targeting the connected Task.
 - Create notification needs at least one Schedule or Task source and exactly one Human approval target. Human approval may be terminal or connect either or both approved/rejected results to Outcomes. Result edges use condition state approved or rejected, with at most one Outcome for each state. Multiple valid task producers may share one Create notification action.
 - Create GitHub issue needs at least one Schedule or Task source and exactly one outgoing edge to Human assignment. Human assignment needs exactly one outgoing edge to GitHub inbox with condition state assigned.
-- GitHub inbox needs exactly one Schedule source and exactly one Human assignment source. It needs exactly one Task target, and that Task must have exactly one incoming edge from the inbox and exactly one outgoing edge to Open pull request.
+- GitHub inbox needs exactly one Schedule source and exactly one Human assignment source. It needs exactly one Task target, and that Task must have exactly one incoming edge from the inbox and exactly one outgoing edge to Open pull request. The Schedule source must describe concrete work of its own; never use a relay-only prompt such as "Initiate processing of approved issues", "Start the inbox", or "Trigger inbox processing". A valid Schedule prompt names the actual scheduled inspection or preparation it performs, such as "Review the assigned issue queue, identify newly assigned actionable issues, and record the issue numbers for downstream processing."
 - Open pull request must have exactly one incoming edge from that issue-linked Task and exactly one outgoing edge to Human review. Human review must have at least one Open pull request source. Human review must have exactly one outgoing edge to one Outcome. Outcome nodes are terminal.
 - Do not add multiple task parents, create cycles, bypass a human assignment/review gate, or attach conditions to non-gate edges.
 
@@ -186,6 +186,9 @@ func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context
 	if parseErr == nil {
 		issues = s.ValidateCandidateWithCapabilities(candidate, snapshot)
 		if len(issues) == 0 {
+			issues = generatedAutomationDescriptionIssues(candidate)
+		}
+		if len(issues) == 0 {
 			return draftPreviewResult(candidate, nil), nil
 		}
 	}
@@ -211,10 +214,59 @@ func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context
 	normalizeGeneratedTaskPriorities(&candidate)
 	normalizeGeneratedRequiredNativeApprovals(&candidate)
 	issues = s.ValidateCandidateWithCapabilities(candidate, snapshot)
+	if len(issues) == 0 {
+		issues = generatedAutomationDescriptionIssues(candidate)
+	}
 	if len(issues) > 0 {
 		return nil, fmt.Errorf("automation generation repair failed: %s", issues[0].Message)
 	}
 	return draftPreviewResult(candidate, nil), nil
+}
+
+func generatedAutomationDescriptionIssues(candidate models.AutomationDraftCandidate) []models.AutomationValidationIssue {
+	if candidate.AdapterKey != AutomationAdapterCustom {
+		return nil
+	}
+	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		nodes[node.Key] = node
+	}
+	for _, edge := range candidate.Edges {
+		from, fromOK := nodes[edge.From]
+		to, toOK := nodes[edge.To]
+		if !fromOK || !toOK || from.Type != models.AutomationNodeTrigger || from.Role != "fixed_schedule" || to.Role != "github_inbox" {
+			continue
+		}
+		prompt, _ := from.Config["prompt"].(string)
+		if generatedGitHubInboxRelayPrompt(prompt) {
+			return []models.AutomationValidationIssue{{
+				NodeKey: from.Key,
+				Code:    "github_inbox_relay",
+				Message: "A generated Schedule connected to a GitHub inbox must perform concrete scheduled work, not merely initiate or trigger inbox processing.",
+			}}
+		}
+	}
+	return nil
+}
+
+func generatedGitHubInboxRelayPrompt(prompt string) bool {
+	words := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(prompt)), func(r rune) bool {
+		return r < 'a' || r > 'z'
+	})
+	if len(words) == 0 || len(words) > 12 {
+		return false
+	}
+	normalized := strings.Join(words, " ")
+	for _, relay := range []string{
+		"initiate processing", "start processing", "begin processing", "trigger processing",
+		"initiate inbox", "start inbox", "start the inbox", "begin inbox", "trigger inbox", "trigger the inbox",
+		"run inbox", "run the inbox", "invoke inbox", "invoke the inbox", "hand off to inbox", "hand off processing",
+	} {
+		if strings.HasPrefix(normalized, relay) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeGeneratedRequiredNativeApprovals(candidate *models.AutomationDraftCandidate) {

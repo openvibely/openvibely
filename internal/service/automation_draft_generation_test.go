@@ -164,6 +164,9 @@ func TestAutomationDescriptionPromptMatchesStrictCustomValidationContract(t *tes
 		require.Contains(t, prompt, "base must be a string")
 		require.Contains(t, prompt, "draft must be a boolean")
 		require.Contains(t, prompt, "exactly one Schedule source and exactly one Human assignment source")
+		require.Contains(t, prompt, "never use a relay-only prompt")
+		require.Contains(t, prompt, "Initiate processing of approved issues")
+		require.Contains(t, prompt, "Review the assigned issue queue")
 		require.Contains(t, prompt, "exactly one Task target")
 		require.Contains(t, prompt, "Open pull request must have exactly one incoming edge")
 		require.Contains(t, prompt, "Human review must have exactly one outgoing edge to one Outcome")
@@ -548,6 +551,76 @@ func TestAutomationCapabilitySnapshotRequiresUsableConnectedGitHubMode(t *testin
 	snapshot, err = builder.Build(ctx, project.ID)
 	require.NoError(t, err)
 	require.True(t, snapshot.Integrations["github"].Configured)
+}
+
+func TestAutomationDescriptionGenerationRepairsRelayScheduleBeforeGitHubInbox(t *testing.T) {
+	svc := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	relay := generatedGitHubInboxCandidate("Initiate processing of approved issues.")
+	repaired := generatedGitHubInboxCandidate("Review the assigned issue queue, identify newly assigned actionable issues, and record the issue numbers for downstream processing.")
+	relayJSON, err := json.Marshal(relay)
+	require.NoError(t, err)
+	repairedJSON, err := json.Marshal(repaired)
+	require.NoError(t, err)
+	snapshot := models.AutomationCapabilitySnapshot{Integrations: map[string]models.AutomationIntegrationCapability{"github": {Configured: true}}}
+
+	calls := 0
+	preview, err := svc.PreviewDescription(context.Background(), "Check approved model support issues daily", snapshot, func(_ context.Context, prompt string) (string, error) {
+		calls++
+		if calls == 1 {
+			return string(relayJSON), nil
+		}
+		require.Contains(t, prompt, "github_inbox_relay")
+		require.Contains(t, prompt, "Initiate processing of approved issues")
+		return string(repairedJSON), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, calls, "a relay-only generated Schedule must consume the one bounded repair")
+	require.Equal(t, automationDraftNodeByKey(t, repaired, "inbox_schedule").Config["prompt"], automationDraftNodeByKey(t, preview.Candidate, "inbox_schedule").Config["prompt"])
+
+	ordinary, err := svc.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	ordinary.Name = "Daily dependency review"
+	ordinary.Nodes = []models.AutomationDraftNode{
+		{Key: "review", Name: "Review dependencies", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Audit dependency updates and document approved upgrade candidates.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "implement", Name: "Implement upgrades", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the approved dependency upgrades and run validation.", "category": "backlog", "priority": 2}},
+	}
+	ordinary.Edges = []models.AutomationDraftEdge{{Key: "review_to_implement", From: "review", To: "implement", FromPort: "right", ToPort: "left", Condition: map[string]any{}}}
+	ordinaryJSON, err := json.Marshal(ordinary)
+	require.NoError(t, err)
+	calls = 0
+	_, err = svc.PreviewDescription(context.Background(), "Review then implement dependency upgrades", models.AutomationCapabilitySnapshot{}, func(context.Context, string) (string, error) {
+		calls++
+		return string(ordinaryJSON), nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, calls, "substantive Schedule to ordinary Task handoffs must remain valid")
+}
+
+func generatedGitHubInboxCandidate(schedulePrompt string) models.AutomationDraftCandidate {
+	return models.AutomationDraftCandidate{
+		SchemaVersion: 1, Name: "Model support inbox", AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
+		Nodes: []models.AutomationDraftNode{
+			{Key: "issue_source", Name: "Find model support issues", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Identify one focused model support issue that needs human review.", "category": "backlog", "priority": 2}},
+			{Key: "issue", Name: "Create issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Open one focused model support issue for human assignment.", "labels": []any{"suggestion"}}},
+			{Key: "inbox_schedule", Name: "Daily approved issue check", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": schedulePrompt, "category": "scheduled", "priority": 2, "run_at": "04:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+			{Key: "assignment", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
+			{Key: "inbox", Name: "Model support inbox", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process newly assigned model support issues and reconcile issue-linked implementation work.", "category": "backlog", "priority": 2}},
+			{Key: "implementation", Name: "Implement model support", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the assigned model support issue and run relevant validation.", "category": "active", "priority": 2}},
+			{Key: "open_pr", Name: "Open pull request", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "", "draft": false}},
+			{Key: "review", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},
+			{Key: "complete", Name: "Complete", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+		},
+		Edges: []models.AutomationDraftEdge{
+			{Key: "source_to_issue", From: "issue_source", To: "issue", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "issue_to_assignment", From: "issue", To: "assignment", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "schedule_to_inbox", From: "inbox_schedule", To: "inbox", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "assignment_to_inbox", From: "assignment", To: "inbox", FromPort: "right", ToPort: "left", Condition: map[string]any{"state": "assigned"}},
+			{Key: "inbox_to_implementation", From: "inbox", To: "implementation", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "implementation_to_pr", From: "implementation", To: "open_pr", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "pr_to_review", From: "open_pr", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "review_to_complete", From: "review", To: "complete", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		},
+	}
 }
 
 func TestAutomationDescriptionGenerationUsesOneRepairAndNoPersistence(t *testing.T) {
