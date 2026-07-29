@@ -237,6 +237,13 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		}
 		node := candidateNodes[resourceNode.Key]
 		_, clearContextConfigured := node.Config["clear_context_on_start"]
+		node.Config["enabled"] = true
+		for i := range write.Candidate.Nodes {
+			if write.Candidate.Nodes[i].Key == node.Key {
+				write.Candidate.Nodes[i].Config["enabled"] = true
+				break
+			}
+		}
 		taskNodeKey := node.Key
 		if candidate.AdapterKey != AutomationAdapterCustom {
 			taskNodeKey, _ = node.Config["target_node_key"].(string)
@@ -313,12 +320,11 @@ func (c *AutomationCompiler) scheduleFromNode(taskID string, node models.Automat
 	}
 	repeat, _ := node.Config["repeat_type"].(string)
 	interval, _ := draftInt(node.Config["repeat_interval"])
-	enabled, _ := node.Config["enabled"].(bool)
 	clearContextOnStart, present := node.Config["clear_context_on_start"].(bool)
 	if !present {
 		clearContextOnStart = true
 	}
-	return models.Schedule{TaskID: taskID, RunAt: runAt.UTC(), RepeatType: models.RepeatType(repeat), RepeatInterval: interval, Enabled: enabled, ClearContextOnStart: clearContextOnStart}, nil
+	return models.Schedule{TaskID: taskID, RunAt: runAt.UTC(), RepeatType: models.RepeatType(repeat), RepeatInterval: interval, Enabled: true, ClearContextOnStart: clearContextOnStart}, nil
 }
 
 type AutomationLifecycleService struct {

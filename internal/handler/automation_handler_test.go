@@ -949,21 +949,23 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
 	require.Contains(t, preview.Body.String(), `id="automation-builder"`)
 	require.Contains(t, preview.Body.String(), "This template design is browser-local")
+	require.NotContains(t, preview.Body.String(), "Enabled when applied")
+	require.NotContains(t, preview.Body.String(), `_enabled\"`)
 	require.Empty(t, preview.Header().Get("HX-Redirect"), "selecting a template must remain browser-local until Save changes")
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 	require.Zero(t, tableCountHandler(t, tc, "tasks"))
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 
 	candidate := automationCandidateFromResponse(t, preview)
+	for i := range candidate.Nodes {
+		if _, scheduled := candidate.Nodes[i].Config["run_at"]; scheduled {
+			candidate.Nodes[i].Config["enabled"] = false
+		}
+	}
 	rawCandidate, err := json.Marshal(candidate)
 	require.NoError(t, err)
 	saveValues := url.Values{
 		"project_id": {project.ID}, "builder_source": {"template"}, "candidate_json": {string(rawCandidate)}, "save_changes": {"true"},
-	}
-	for _, node := range candidate.Nodes {
-		if enabled, ok := node.Config["enabled"].(bool); ok && enabled {
-			saveValues.Set("node_"+node.Key+"_enabled", "true")
-		}
 	}
 	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(saveValues).Execute()
 	require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
@@ -972,6 +974,9 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.Equal(t, fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID), created.Header().Get("HX-Redirect"))
 	require.NotZero(t, tableCountHandler(t, tc, "tasks"))
 	require.NotZero(t, tableCountHandler(t, tc, "schedules"))
+	var enabledSchedules int
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE enabled = 1`).Scan(&enabledSchedules))
+	require.Equal(t, tableCountHandler(t, tc, "schedules"), enabledSchedules, "active Automation schedules must always be enabled after Save")
 	var schedulesKeepingContext int
 	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE clear_context_on_start = 0`).Scan(&schedulesKeepingContext))
 	require.Equal(t, tableCountHandler(t, tc, "schedules"), schedulesKeepingContext, "unchecked browser Save values must persist false")

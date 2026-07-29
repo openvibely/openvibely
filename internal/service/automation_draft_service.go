@@ -912,8 +912,8 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 		if !intervalOK || interval < 1 || interval > 365 {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
 		}
-		if _, enabledOK := node.Config["enabled"].(bool); !enabledOK {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Trigger enabled state must be true or false."})
+		if enabled, enabledOK := node.Config["enabled"].(bool); !enabledOK || !enabled {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Schedule execution is controlled by the Automation lifecycle and must be enabled."})
 		}
 		if clearContextOnStart, present := node.Config["clear_context_on_start"]; present {
 			if _, valid := clearContextOnStart.(bool); !valid {
@@ -1051,8 +1051,8 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		if !ok || interval < 1 || interval > 365 {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
 		}
-		if _, ok := node.Config["enabled"].(bool); !ok {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Trigger enabled state must be true or false."})
+		if enabled, ok := node.Config["enabled"].(bool); !ok || !enabled {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Schedule execution is controlled by the Automation lifecycle and must be enabled."})
 		}
 		if clearContextOnStart, present := node.Config["clear_context_on_start"]; present {
 			if _, valid := clearContextOnStart.(bool); !valid {

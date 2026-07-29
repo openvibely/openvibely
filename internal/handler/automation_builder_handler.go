@@ -211,6 +211,7 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 			}
 		}
 		if _, ok := node.Config["run_at"]; ok {
+			node.Config["enabled"] = true
 			if value, exists := automationDraftFormValue(c, prefix+"run_at"); exists {
 				node.Config["run_at"] = value
 			}
@@ -223,9 +224,6 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 				} else {
 					node.Config["repeat_interval"] = value
 				}
-			}
-			if _, exists := automationDraftFormValue(c, prefix+"enabled"); exists || strings.TrimSpace(c.FormValue("builder_action")) == "" {
-				node.Config["enabled"] = c.FormValue(prefix+"enabled") == "true"
 			}
 			if _, exists := automationDraftFormValue(c, prefix+"clear_context_on_start"); exists || strings.TrimSpace(c.FormValue("builder_action")) == "" {
 				node.Config["clear_context_on_start"] = c.FormValue(prefix+"clear_context_on_start") == "true"

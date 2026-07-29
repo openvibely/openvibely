@@ -67,38 +67,6 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 			return nil, err
 		}
 	}
-	enabledByNode := make(map[string]bool, len(candidate.Nodes))
-	if hasCandidate {
-		for _, node := range candidate.Nodes {
-			if enabled, ok := node.Config["enabled"].(bool); ok {
-				enabledByNode[node.Key] = enabled
-			}
-		}
-	} else {
-		rows, err := conn.QueryContext(ctx, `SELECT node_key, config_json FROM automation_nodes
-			WHERE project_id = ? AND automation_id = ? AND version_id = ?`, projectID, automationID, versionID.String)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			var nodeKey, configJSON string
-			if err := rows.Scan(&nodeKey, &configJSON); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			var config map[string]any
-			if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			if enabled, ok := config["enabled"].(bool); ok {
-				enabledByNode[nodeKey] = enabled
-			}
-		}
-		if err := rows.Close(); err != nil {
-			return nil, err
-		}
-	}
 	rows, err := conn.QueryContext(ctx, `SELECT o.schedule_id, n.node_key
 		FROM automation_trigger_owners o
 		JOIN automation_nodes n ON n.id = o.node_id AND n.version_id = o.version_id
@@ -126,11 +94,7 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 		return nil, err
 	}
 	for _, schedule := range ownedSchedules {
-		enabled := true
-		if configured, ok := enabledByNode[schedule.nodeKey]; ok {
-			enabled = configured
-		}
-		if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, enabled, schedule.id); err != nil {
+		if _, err := conn.ExecContext(ctx, `UPDATE schedules SET enabled = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, schedule.id); err != nil {
 			return nil, err
 		}
 	}

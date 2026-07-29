@@ -44,6 +44,20 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 			require.NotEmpty(t, draftNode.Config["prompt"])
 			require.Equal(t, true, draftNode.Config["clear_context_on_start"], "%s/%s must explicitly clear context on each scheduled start", adapterKey, node.Key)
 		}
+		invalid := candidate
+		invalid.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
+		for i := range invalid.Nodes {
+			if _, scheduled := invalid.Nodes[i].Config["run_at"]; !scheduled {
+				continue
+			}
+			config := make(map[string]any, len(invalid.Nodes[i].Config))
+			for key, value := range invalid.Nodes[i].Config {
+				config[key] = value
+			}
+			config["enabled"] = false
+			invalid.Nodes[i].Config = config
+		}
+		require.Contains(t, issueCodes(drafts.ValidateCandidate(invalid)), "enabled", "%s must reject per-schedule disable intent", adapterKey)
 	}
 }
 

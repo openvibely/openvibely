@@ -565,7 +565,7 @@ func TestMaintainedAutomationRegistrationUnchangedCleansRetainedGraphSchedule(t 
 		"unchanged registration must preserve the current graph schedule")
 }
 
-func TestMaintainedAutomationRegistrationPreservesIndividuallyDisabledSchedule(t *testing.T) {
+func TestMaintainedAutomationRegistrationEnablesBoundSchedule(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	project := automationTestProject(t, repository.NewProjectRepo(db), "Disabled maintained schedule")
@@ -586,16 +586,16 @@ func TestMaintainedAutomationRegistrationPreservesIndividuallyDisabledSchedule(t
 	require.NoError(t, err)
 	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
 	require.NoError(t, err)
-	require.False(t, stored.Enabled)
+	require.True(t, stored.Enabled)
 
 	_, _, err = registration.Register(ctx, request)
 	require.NoError(t, err)
 	stored, err = scheduleRepo.GetByID(ctx, schedule.ID)
 	require.NoError(t, err)
-	require.False(t, stored.Enabled)
+	require.True(t, stored.Enabled)
 }
 
-func TestMaintainedAutomationRegistrationPreservesScheduleIntentAcrossPauseAndResume(t *testing.T) {
+func TestMaintainedAutomationRegistrationUsesGlobalPauseAndResume(t *testing.T) {
 	for _, test := range []struct {
 		name              string
 		configuredEnabled bool
@@ -630,12 +630,12 @@ func TestMaintainedAutomationRegistrationPreservesScheduleIntentAcrossPauseAndRe
 			require.False(t, pausedSchedule.Enabled)
 
 			_, _, err = registration.Register(ctx, request)
-			require.NoError(t, err, "maintained re-registration while paused must retain configured enablement")
+			require.NoError(t, err, "maintained re-registration while paused must leave the schedule paused")
 			_, err = automationRepo.ResumeAutomation(ctx, project.ID, definition.Automation.ID)
 			require.NoError(t, err)
 			resumedSchedule, err := scheduleRepo.GetByID(ctx, schedule.ID)
 			require.NoError(t, err)
-			require.Equal(t, test.configuredEnabled, resumedSchedule.Enabled)
+			require.True(t, resumedSchedule.Enabled)
 		})
 	}
 }

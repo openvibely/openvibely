@@ -689,8 +689,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 132 {
-		t.Fatalf("max goose version = %d, want 132", maxVersion)
+	if maxVersion != 133 {
+		t.Fatalf("max goose version = %d, want 133", maxVersion)
 	}
 }
 
@@ -841,8 +841,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 132 {
-		t.Fatalf("max goose version = %d, want 132", maxVersion)
+	if maxVersion != 133 {
+		t.Fatalf("max goose version = %d, want 133", maxVersion)
 	}
 }
 
@@ -1328,8 +1328,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 132 {
-		t.Fatalf("max goose version = %d, want 132", maxVersion)
+	if maxVersion != 133 {
+		t.Fatalf("max goose version = %d, want 133", maxVersion)
 	}
 }
 
@@ -1680,8 +1680,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 132 {
-		t.Fatalf("max goose version = %d, want 132", maxVersion)
+	if maxVersion != 133 {
+		t.Fatalf("max goose version = %d, want 133", maxVersion)
 	}
 }
 
@@ -2150,5 +2150,56 @@ func TestMigration129PreservesExistingScheduleContextSemantics(t *testing.T) {
 	}
 	if clearContext || startsNewContext {
 		t.Fatalf("existing rows must preserve prior context semantics: clear=%t boundary=%t", clearContext, startsNewContext)
+	}
+}
+
+func TestMigration133UsesAutomationLifecycleForScheduleEnablement(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "automation-schedule-lifecycle-133.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 132); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-133', 'Migration 133', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt) VALUES
+			('task-active-133', 'project-133', 'Active schedule', 'scheduled', 2, 'pending', 'run'),
+			('task-paused-133', 'project-133', 'Paused schedule', 'scheduled', 2, 'pending', 'run');
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run) VALUES
+			('schedule-active-133', 'task-active-133', CURRENT_TIMESTAMP, 'daily', 1, 0, CURRENT_TIMESTAMP),
+			('schedule-paused-133', 'task-paused-133', CURRENT_TIMESTAMP, 'daily', 1, 0, CURRENT_TIMESTAMP);
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state, published_version_id) VALUES
+			('automation-active-133', 'project-133', 'active-133', 'Active Automation', 'active', 'version-active-133'),
+			('automation-paused-133', 'project-133', 'paused-133', 'Paused Automation', 'paused', 'version-paused-133');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key) VALUES
+			('version-active-133', 'project-133', 'automation-active-133', 1, 'published', 'template', 'native_sdlc'),
+			('version-paused-133', 'project-133', 'automation-paused-133', 1, 'published', 'template', 'native_sdlc');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role) VALUES
+			('node-active-133', 'project-133', 'automation-active-133', 'version-active-133', 'schedule', 'Schedule', 'trigger', 'fixed_schedule'),
+			('node-paused-133', 'project-133', 'automation-paused-133', 'version-paused-133', 'schedule', 'Schedule', 'trigger', 'fixed_schedule');
+		INSERT INTO automation_trigger_owners (schedule_id, project_id, automation_id, version_id, node_id, ownership_state) VALUES
+			('schedule-active-133', 'project-133', 'automation-active-133', 'version-active-133', 'node-active-133', 'active'),
+			('schedule-paused-133', 'project-133', 'automation-paused-133', 'version-paused-133', 'node-paused-133', 'paused');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 133); err != nil {
+		t.Fatal(err)
+	}
+	var activeEnabled, pausedEnabled bool
+	if err := db.QueryRow(`SELECT enabled FROM schedules WHERE id = 'schedule-active-133'`).Scan(&activeEnabled); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT enabled FROM schedules WHERE id = 'schedule-paused-133'`).Scan(&pausedEnabled); err != nil {
+		t.Fatal(err)
+	}
+	if !activeEnabled || pausedEnabled {
+		t.Fatalf("migration 133 must enable only active Automation schedules: active=%t paused=%t", activeEnabled, pausedEnabled)
 	}
 }
