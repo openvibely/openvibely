@@ -75,6 +75,13 @@ window.renderChatMarkdown = function(text) {
 window.renderChatMarkdownAsync = null;
 window.addCodeCopyButtons = function() {};
 window.addEventListener('DOMContentLoaded', function() {
+  window._taskThreadTestSwapTargets = [];
+  document.body.addEventListener('htmx:beforeSwap', function(event) {
+    window._taskThreadTestSwapTargets.push('before:' + ((event.detail && event.detail.target && event.detail.target.id) || ''));
+  });
+  document.body.addEventListener('htmx:afterSwap', function(event) {
+    window._taskThreadTestSwapTargets.push('after:' + ((event.detail && event.detail.target && event.detail.target.id) || ''));
+  });
   function fail(message) { throw new Error(message); }
   function waitFor(check, label, timeout) {
     var started = performance.now();
@@ -106,15 +113,21 @@ window.addEventListener('DOMContentLoaded', function() {
     reportResult('fail', message);
   }
   async function assertPinned(stage) {
-    await waitFor(function() { return bottomDistance() <= 1; }, stage + ' true bottom');
+    try {
+      await waitFor(function() { return bottomDistance() <= 1; }, stage + ' true bottom');
+    } catch (error) {
+      var state = window._taskThreadScrollStates && window._taskThreadScrollStates['task-thread-scroll-task-browser'];
+      fail(stage + ' did not restore true bottom: distance=' + bottomDistance() + '; top=' + messages().scrollTop + '; height=' + messages().scrollHeight + '; trackerUp=' + !!(window._taskThreadPageTracker && window._taskThreadPageTracker.userScrolledUp) + '; state=' + JSON.stringify(state) + '; swaps=' + JSON.stringify(window._taskThreadTestSwapTargets) + '; fresh=' + JSON.stringify(window._taskThreadFreshOpenTasks));
+    }
     if (bottomDistance() > 1) fail(stage + ' did not restore true bottom: ' + bottomDistance());
   }
-  async function assertReading(stage, expectedTop) {
-    await waitFor(function() { return Math.abs(messages().scrollTop - expectedTop) <= 2; }, stage + ' reading position');
+  async function assertFreshBottom(stage) {
+    await assertPinned(stage);
     var state = window._taskThreadScrollStates && window._taskThreadScrollStates['task-thread-scroll-task-browser'];
-    if (Math.abs(messages().scrollTop - expectedTop) > 2 || !window._taskThreadPageTracker || !window._taskThreadPageTracker.userScrolledUp || !state || !state.userScrolledUp) {
-      fail(stage + ' lost upward reading state: top=' + messages().scrollTop + '; trackerUp=' + !!(window._taskThreadPageTracker && window._taskThreadPageTracker.userScrolledUp) + '; state=' + JSON.stringify(state));
+    if (window._taskThreadPageTracker && window._taskThreadPageTracker.userScrolledUp) {
+      fail(stage + ' restored stale upward intent');
     }
+    if (state && state.userScrolledUp) fail(stage + ' retained stale upward snapshot: ' + JSON.stringify(state));
   }
 
   (async function() {
@@ -150,18 +163,35 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitForOther();
     await window.openVibelyNavigate('/tasks/task-browser?tab=chat');
     await waitForTask('direct reading return');
-    await assertReading('direct reading return', 80);
+    await assertFreshBottom('direct reading return');
+
+    var reopenedMessages = messages();
+    reopenedMessages.dispatchEvent(new WheelEvent('wheel', {deltaY: -160, bubbles: true}));
+    reopenedMessages.scrollTop = 80;
+    reopenedMessages.dispatchEvent(new Event('scroll'));
+    await waitFor(function() {
+      return window._taskThreadPageTracker && window._taskThreadPageTracker.userScrolledUp;
+    }, 'post-open upward reading intent');
+    var postOpenTop = reopenedMessages.scrollTop;
+    var growth = document.createElement('div');
+    growth.setAttribute('data-execution-pair', 'true');
+    growth.style.minHeight = '240px';
+    reopenedMessages.appendChild(growth);
+    await new Promise(function(resolve) { setTimeout(resolve, 80); });
+    if (Math.abs(reopenedMessages.scrollTop - postOpenTop) > 2) {
+      fail('post-open asynchronous growth overrode upward reading intent: before=' + postOpenTop + '; after=' + reopenedMessages.scrollTop);
+    }
 
     await window.openVibelyNavigate('/other');
     await waitForOther();
     history.back();
     await waitForTask('reading Back');
-    await assertReading('reading Back', 80);
+    await assertFreshBottom('reading Back');
     history.forward();
     await waitForOther();
     history.back();
     await waitForTask('reading Forward/Back');
-    await assertReading('reading Forward/Back', 80);
+    await assertFreshBottom('reading Forward/Back');
 
     document.getElementById('task-page-root').setAttribute('data-test-result', 'pass');
     await reportResult('pass', '');

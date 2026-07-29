@@ -610,14 +610,29 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 						cleanPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : null;
 						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
 						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
-						var taskId = _taskThreadTaskId();
-						var preservedScrollState = _getTaskThreadScrollState(taskId);
+							var taskId = _taskThreadTaskId();
+							window._taskThreadFreshOpenTasks = window._taskThreadFreshOpenTasks || {};
+							var freshOpen = !!window._taskThreadFreshOpenTasks[taskId];
+							if (freshOpen) {
+								delete window._taskThreadFreshOpenTasks[taskId];
+								window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+								var freshStateKey = _taskThreadScrollStateKey(taskId);
+								if (freshStateKey) {
+									delete window._taskThreadScrollStates[freshStateKey];
+									if (window._chatTranscriptScrollStates) delete window._chatTranscriptScrollStates[freshStateKey];
+								}
+								window._taskThreadUserScrolledUp = false;
+							}
+							var preservedScrollState = freshOpen ? null : _getTaskThreadScrollState(taskId);
 
-						// Set up the page tracker before applying initial state so a scoped
-						// successful send can supersede a stale navigation snapshot.
-						if (window.ChatScrollTracker) {
-							window._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);
-						}
+							// Set up the page tracker before applying initial state so a scoped
+							// successful send can supersede a stale navigation snapshot.
+							if (window.ChatScrollTracker) {
+								window._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);
+								if (freshOpen && window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {
+									window._taskThreadPageTracker.resetOnUserSend();
+								}
+							}
 						var initialScrollState = window.initializeChatTranscriptScrollState
 							? window.initializeChatTranscriptScrollState({
 								messages: chatMessages,
@@ -668,7 +683,32 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 					if (window._initThreadStreaming) window._initThreadStreaming();
 					_restoreTaskThreadDraftToTextarea();
 				})();
-			// Intelligent auto-scroll: only scroll when user hasn't manually scrolled up
+					function _initializeFreshTaskThreadOpen() {
+						var chatMessages = document.getElementById('task-thread-messages');
+						if (!chatMessages) return;
+						var taskId = _taskThreadTaskId();
+						window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+					var stateKey = _taskThreadScrollStateKey(taskId);
+					if (stateKey) {
+						delete window._taskThreadScrollStates[stateKey];
+						if (window._chatTranscriptScrollStates) delete window._chatTranscriptScrollStates[stateKey];
+					}
+						window._taskThreadUserScrolledUp = false;
+						if (window.ChatScrollTracker) {
+							window._taskThreadPageTracker = window.resolveScrollTracker('scrollTracker_task-thread-messages', chatMessages);
+							if (window._taskThreadPageTracker && window._taskThreadPageTracker.resetOnUserSend) {
+								window._taskThreadPageTracker.resetOnUserSend();
+							}
+						}
+						var renderPromise = window.cleanAssistantMessages ? window.cleanAssistantMessages(chatMessages) : Promise.resolve([]);
+						if (window.initChatEarlierLoader) window.initChatEarlierLoader(chatMessages);
+						if (window.pruneChatExecutionWindow) window.pruneChatExecutionWindow(chatMessages);
+						if (window.bindAttachmentImageSmartScroll) window.bindAttachmentImageSmartScroll(chatMessages, 'scrollTracker_task-thread-messages', window._taskThreadPageTracker);
+						_finishTaskThreadRenderScroll(chatMessages, renderPromise);
+						if (window._initThreadStreaming) window._initThreadStreaming();
+					}
+
+					// Intelligent auto-scroll: only scroll when user hasn't manually scrolled up
 			if (!window._taskThreadScrollHandlerAttached) {
 				window._taskThreadScrollHandlerAttached = true;
 
@@ -780,15 +820,26 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 							window._taskThreadStreamingActive = false;
 						}
 
-							// Release detached task-thread runtime owners when navigating away. The
-							// task-keyed scroll snapshot and pin intent were captured above and must
-							// survive direct HTMX return and browser Back/Forward restoration.
+							// Release detached task-thread runtime owners when navigating away.
+							// A later open is a fresh reading session and must settle at the true
+							// bottom instead of restoring an old upward position from this task.
 							if (target && target.id === 'main-content') {
+								var outgoingTaskId = _taskThreadTaskId();
+								window._taskThreadFreshOpenTasks = window._taskThreadFreshOpenTasks || {};
+								if (outgoingTaskId) window._taskThreadFreshOpenTasks[outgoingTaskId] = true;
+								window._taskThreadScrollStates = window._taskThreadScrollStates || {};
+								var outgoingStateKey = _taskThreadScrollStateKey(outgoingTaskId);
+								if (outgoingStateKey) {
+									delete window._taskThreadScrollStates[outgoingStateKey];
+									if (window._chatTranscriptScrollStates) delete window._chatTranscriptScrollStates[outgoingStateKey];
+								}
+								window._taskThreadUserScrolledUp = false;
 								window._taskThreadSavedInput = '';
 								if (window._taskThreadPageTracker) {
 									window._taskThreadPageTracker.destroy();
 									window._taskThreadPageTracker = null;
 								}
+								delete window['scrollTracker_task-thread-messages'];
 							}
 					});
 
@@ -859,9 +910,17 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 									_finishTaskThreadRenderScroll(chatMessages, renderPromise);
 							}
 						}
-						// Restore textarea value after morph polling or full page refresh
-						_restoreTaskThreadDraftToTextarea();
-					});
+							else if (target && target.id === 'main-content') {
+								_initializeFreshTaskThreadOpen();
+							}
+							// Restore textarea value after morph polling or full page refresh
+							_restoreTaskThreadDraftToTextarea();
+						});
+
+						document.body.addEventListener('htmx:historyRestore', function() {
+							_initializeFreshTaskThreadOpen();
+							_restoreTaskThreadDraftToTextarea();
+						});
 			}
 			</script>
 			</div>

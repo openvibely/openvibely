@@ -4346,7 +4346,7 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 	required := []string{
 		"window._taskThreadScrollStates = window._taskThreadScrollStates || {};",
 		"return taskId ? 'task-thread-scroll-' + taskId : '';",
-		"var preservedScrollState = _getTaskThreadScrollState(taskId);",
+		"var preservedScrollState = freshOpen ? null : _getTaskThreadScrollState(taskId);",
 		"window.initializeChatTranscriptScrollState({",
 		"state: preservedScrollState,",
 		"scope: taskId",
@@ -4371,7 +4371,7 @@ func TestTaskThreadView_PreservesPerTaskScrollState(t *testing.T) {
 	}
 }
 
-func TestTaskThreadView_PreservesScrollStateWhenLeavingTaskDetail(t *testing.T) {
+func TestTaskThreadView_DiscardsScrollStateWhenLeavingTaskDetail(t *testing.T) {
 	task := &models.Task{
 		ID:        "thread-scroll-leave",
 		ProjectID: "p1",
@@ -4386,26 +4386,35 @@ func TestTaskThreadView_PreservesScrollStateWhenLeavingTaskDetail(t *testing.T) 
 	content := buf.String()
 
 	if !strings.Contains(content, "target.id === 'task-thread-messages' || target.id === 'task-detail-content' || target.id === 'task-thread-view' || target.id === 'thread-content' || target.id === 'main-content'") {
-		t.Fatal("main-content navigation must synchronously capture the current per-task scroll snapshot")
+		t.Fatal("main-content navigation must synchronously identify the outgoing task thread")
 	}
 	mainContentStart := strings.Index(content, "if (target && target.id === 'main-content')")
 	if mainContentStart < 0 {
-		t.Fatal("task-detail navigation must release the detached task-thread tracker")
+		t.Fatal("task-detail navigation must release detached task-thread state")
 	}
-	mainContentEnd := strings.Index(content[mainContentStart:], "\n\t\t\t\t\t\t}")
+	mainContentEnd := strings.Index(content[mainContentStart:], "delete window['scrollTracker_task-thread-messages'];")
 	if mainContentEnd < 0 {
 		t.Fatal("could not isolate task-detail main-content navigation cleanup")
 	}
 	mainContentBlock := content[mainContentStart : mainContentStart+mainContentEnd]
-	if !strings.Contains(mainContentBlock, "window._taskThreadPageTracker.destroy();") {
-		t.Fatal("task-detail navigation must release the detached task-thread tracker")
-	}
-	for _, forbidden := range []string{
-		"delete window._taskThreadScrollStates",
+	for _, required := range []string{
+		"delete window._taskThreadScrollStates[outgoingStateKey];",
+		"delete window._chatTranscriptScrollStates[outgoingStateKey];",
 		"window._taskThreadUserScrolledUp = false;",
+		"window._taskThreadPageTracker.destroy();",
+		"window._taskThreadFreshOpenTasks[outgoingTaskId] = true;",
 	} {
-		if strings.Contains(mainContentBlock, forbidden) {
-			t.Fatalf("task-detail navigation must preserve per-task reading intent; found %q", forbidden)
+		if !strings.Contains(mainContentBlock, required) {
+			t.Fatalf("task-detail navigation must discard detached task-thread reading state; missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		"else if (target && target.id === 'main-content')",
+		"document.body.addEventListener('htmx:historyRestore'",
+		"_initializeFreshTaskThreadOpen();",
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("fresh task-thread navigation must reconcile at the bottom; missing %q", required)
 		}
 	}
 }
