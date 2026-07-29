@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,6 +66,13 @@ func TestTaskThreadNavigationScrollStateInChrome(t *testing.T) {
 				MediaType:   "image/svg+xml",
 				FileSize:    128,
 			},
+			{
+				ID:          "stalled-image",
+				ExecutionID: executions[0].ID,
+				FileName:    "stalled-history.svg",
+				MediaType:   "image/svg+xml",
+				FileSize:    128,
+			},
 		},
 	}
 
@@ -107,7 +115,8 @@ window.addEventListener('DOMContentLoaded', function() {
     });
   }
   function messages() { return document.getElementById('task-thread-messages'); }
-  function historyImage() { return messages() && messages().querySelector('img[data-chat-attachment-image="true"]'); }
+  function historyImage() { return messages() && messages().querySelector('img[alt="delayed-history.svg"]'); }
+  function stalledHistoryImage() { return messages() && messages().querySelector('img[alt="stalled-history.svg"]'); }
   function bottomDistance() { var el = messages(); return el.scrollHeight - el.scrollTop - el.clientHeight; }
   function waitForTaskDOM(stage) {
     return waitFor(function() {
@@ -158,6 +167,9 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitForTask('initial');
     if (!historyImage().complete || historyImage().naturalHeight < 1) {
       fail('initial transcript became visible before historical image decode completed');
+    }
+    if (stalledHistoryImage().style.display !== 'none' || stalledHistoryImage().hasAttribute('src')) {
+      fail('stalled historical image was not removed from layout before reveal');
     }
     await assertPinned('direct load');
 
@@ -237,6 +249,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 </style>`
 
 	browserResult := make(chan string, 16)
+	var stalledImageRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
@@ -247,6 +260,12 @@ html, body, #main-content { height: 100%; margin: 0; }
 			w.Header().Set("Cache-Control", "no-store")
 			time.Sleep(300 * time.Millisecond)
 			_, _ = w.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="480" viewBox="0 0 320 480"><rect width="320" height="480" fill="#7480ff"/></svg>`))
+		case "/chat/attachments/stalled-image/download":
+			if stalledImageRequests.Add(1) == 1 {
+				<-r.Context().Done()
+				return
+			}
+			http.Error(w, "fixture image unavailable", http.StatusNotFound)
 		case "/tasks/task-browser":
 			fragment := renderTaskFragment()
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

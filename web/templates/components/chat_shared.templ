@@ -3158,9 +3158,28 @@ templ ChatAutoScrollScript() {
 						}
 						if (img.complete) return decodeImage();
 						return new Promise(function(resolve) {
-							function settled() { decodeImage().then(resolve, resolve); }
-							img.addEventListener('load', settled, { once: true });
-							img.addEventListener('error', resolve, { once: true });
+							var finished = false;
+							var timeout;
+							function finish() {
+								if (finished) return;
+								finished = true;
+								clearTimeout(timeout);
+								img.removeEventListener('load', loaded);
+								img.removeEventListener('error', finish);
+								resolve();
+							}
+							function loaded() { decodeImage().then(finish, finish); }
+							function timeoutImage() {
+								if (finished) return;
+								img.style.display = 'none';
+								img.removeAttribute('src');
+								img.removeAttribute('srcset');
+								img.setAttribute('data-chat-attachment-image-timeout', 'true');
+								finish();
+							}
+							img.addEventListener('load', loaded);
+							img.addEventListener('error', finish);
+							timeout = setTimeout(timeoutImage, 3000);
 							if (img.loading === 'lazy') img.loading = 'eager';
 						});
 					}));
