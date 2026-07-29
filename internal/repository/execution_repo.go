@@ -553,6 +553,82 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 	return CompleteSuccessPendingSteering, nil
 }
 
+func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Context) (int64, error) {
+	threadRepo := NewThreadInputRepo(r.db)
+	var recovered int64
+	err := threadRepo.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+		// No direct or promoted task-thread runner survives a process restart.
+		// Automation dispatches retain a durable dispatch identity/reservation and
+		// are deliberately left to Automation reconciliation.
+		if _, err := exec.ExecContext(ctx, `
+			UPDATE thread_inputs
+			SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
+			WHERE input_status = 'pending'
+			  AND input_mode = 'steering'
+			  AND run_execution_id IN (
+			      SELECT e.id
+			      FROM executions e
+			      JOIN tasks t ON t.id = e.task_id
+			      WHERE e.status = 'running'
+			        AND e.dispatch_id IS NULL
+			        AND t.category != 'chat'
+			        AND t.status = 'queued'
+			        AND NOT EXISTS (
+			          SELECT 1 FROM automation_task_run_reservations reservation
+			          WHERE reservation.task_id = t.id
+			        )
+			  )`); err != nil {
+			return fmt.Errorf("requeueing pre-restart task steering inputs: %w", err)
+		}
+		if _, err := exec.ExecContext(ctx, `
+			UPDATE tasks
+			SET status = 'failed', category = 'backlog', updated_at = datetime('now')
+			WHERE status = 'queued'
+			  AND category != 'chat'
+			  AND NOT EXISTS (
+			    SELECT 1 FROM automation_task_run_reservations reservation
+			    WHERE reservation.task_id = tasks.id
+			  )
+			  AND EXISTS (
+			    SELECT 1 FROM executions interrupted
+			    WHERE interrupted.task_id = tasks.id
+			      AND interrupted.status = 'running'
+			      AND interrupted.dispatch_id IS NULL
+			  )`); err != nil {
+			return fmt.Errorf("terminalizing pre-restart task-thread tasks: %w", err)
+		}
+		result, err := exec.ExecContext(ctx, `
+			UPDATE executions
+			SET status = 'failed',
+			    error_message = CASE
+			      WHEN COALESCE(error_message, '') = '' THEN 'Recovered interrupted task-thread execution after restart'
+			      ELSE error_message
+			    END,
+			    completed_at = datetime('now')
+			WHERE status = 'running'
+			  AND dispatch_id IS NULL
+			  AND EXISTS (
+			    SELECT 1 FROM tasks t
+			    WHERE t.id = executions.task_id
+			      AND t.category = 'backlog'
+			      AND t.status = 'failed'
+			      AND NOT EXISTS (
+			        SELECT 1 FROM automation_task_run_reservations reservation
+			        WHERE reservation.task_id = t.id
+			      )
+			  )`)
+		if err != nil {
+			return fmt.Errorf("recovering pre-restart task-thread executions: %w", err)
+		}
+		recovered, err = result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("counting pre-restart task-thread executions: %w", err)
+		}
+		return nil
+	})
+	return recovered, err
+}
+
 func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (int64, error) {
 	// Automation dispatch executions are recovered by AutomationReconciler from
 	// their durable outbox/reservation identity. Generic recovery must not

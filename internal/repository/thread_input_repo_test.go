@@ -11,6 +11,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func TestThreadInputRepo_QueuedFIFOAndApply(t *testing.T) {
@@ -799,6 +800,73 @@ func TestExecutionRepo_FindActiveTaskExecutionTreatsQueuedTaskAsActive(t *testin
 	if stored.Status != models.ExecRunning {
 		t.Fatalf("expected queued execution to remain running, got %s", stored.Status)
 	}
+}
+
+func TestExecutionRepo_RecoverPreRestartRunningTaskExecutionsTerminalizesDirectFollowupWithoutSuccessor(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "interrupted direct follow-up", IsFollowup: true}
+	require.NoError(t, execRepo.Create(ctx, active))
+	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued))
+
+	recovered, err := execRepo.RecoverPreRestartRunningTaskExecutions(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, recovered)
+	stored, err := execRepo.GetByID(ctx, active.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecFailed, stored.Status)
+	storedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusFailed, storedTask.Status)
+	require.Equal(t, models.CategoryBacklog, storedTask.Category)
+	activePending, err := taskRepo.ListActivePending(ctx)
+	require.NoError(t, err)
+	for _, candidate := range activePending {
+		if candidate.ID == task.ID {
+			t.Fatalf("interrupted direct follow-up task must not be offered for original-prompt dispatch")
+		}
+	}
+}
+
+func TestExecutionRepo_RecoverPreRestartRunningTaskExecutionsTerminalizesQueuedFollowupAndPreservesFIFO(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, project.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	inputRepo := NewThreadInputRepo(db)
+
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "interrupted follow-up", IsFollowup: true}
+	require.NoError(t, execRepo.Create(ctx, active))
+	require.NoError(t, taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued))
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "next FIFO follow-up"}
+	require.NoError(t, inputRepo.CreateQueued(ctx, queued))
+
+	recovered, err := execRepo.RecoverPreRestartRunningTaskExecutions(ctx)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, recovered)
+	storedActive, err := execRepo.GetByID(ctx, active.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecFailed, storedActive.Status)
+	storedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusFailed, storedTask.Status)
+	require.Equal(t, models.CategoryBacklog, storedTask.Category)
+
+	ids, err := inputRepo.ListRecoverableQueuedTaskIDs(ctx, 10)
+	require.NoError(t, err)
+	require.Equal(t, []string{task.ID}, ids)
+	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
+	require.NoError(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted))
+	require.ErrorIs(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}), ErrInputNotPending)
 }
 
 func TestExecutionRepo_RecoverStaleRunningTaskExecutionsRepairsPendingTaskCrashLeftover(t *testing.T) {

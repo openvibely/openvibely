@@ -387,16 +387,20 @@ func (r *ThreadInputRepo) ListRecoverableQueuedTaskIDs(ctx context.Context, limi
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT ti.task_id
 		FROM thread_inputs ti
-		JOIN executions guarded ON guarded.id = ti.run_execution_id
+		LEFT JOIN executions guarded ON guarded.id = ti.run_execution_id
 		JOIN tasks t ON t.id = ti.task_id
 		WHERE ti.scope = 'task_thread'
 		  AND ti.input_mode = 'queued'
 		  AND ti.input_status = 'pending'
 		  AND COALESCE(ti.task_id, '') != ''
-		  AND guarded.status IN ('completed', 'failed', 'cancelled')
+		  AND (ti.run_execution_id IS NULL OR guarded.status IN ('completed', 'failed', 'cancelled'))
 		  AND NOT EXISTS (
 		    SELECT 1 FROM executions active
 		    WHERE active.task_id = ti.task_id AND active.status = 'running'
+		  )
+		  AND NOT EXISTS (
+		    SELECT 1 FROM automation_task_run_reservations reservation
+		    WHERE reservation.task_id = ti.task_id
 		  )
 		GROUP BY ti.task_id
 		ORDER BY MIN(ti.queue_position), MIN(ti.created_at), MIN(ti.rowid)

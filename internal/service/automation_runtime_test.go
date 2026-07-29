@@ -134,6 +134,12 @@ func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.
 	recovered, err := repository.NewExecutionRepo(fixture.repo.DB()).RecoverStaleRunningTaskExecutions(ctx)
 	require.NoError(t, err)
 	require.Zero(t, recovered, "generic execution recovery must preserve dispatch executions")
+	preRestartRecovered, err := repository.NewExecutionRepo(fixture.repo.DB()).RecoverPreRestartRunningTaskExecutions(ctx)
+	require.NoError(t, err)
+	require.Zero(t, preRestartRecovered, "pre-restart recovery must preserve dispatch-reserved executions")
+	preserved, err := repository.NewExecutionRepo(fixture.repo.DB()).GetByID(ctx, execution.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecRunning, preserved.Status)
 
 	require.NoError(t, fixture.repo.MarkDispatchSubmitted(ctx, dispatch.ID, "owner", execution.ID))
 	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Complete(ctx, execution.ID, models.ExecCompleted, "ok", "", 1, 1))

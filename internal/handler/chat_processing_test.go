@@ -2016,6 +2016,47 @@ func TestHandler_WorkerCompletionPromotesQueuedTaskThreadInput(t *testing.T) {
 	}
 }
 
+func TestHandler_RecoverQueuedTaskThreadInputsPromotesUnboundInputAfterClaimCrash(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Recover Unbound Task Thread Queue Project")
+	task := createTask(t, h, project.ID, "Recover Unbound Task Thread Queue Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.Prompt = "stored original prompt"
+		tk.AgentID = &agent.ID
+	})
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "follow-up queued before execution insertion"}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending), "startup resets the abandoned ordinary claim")
+
+	started := make(chan string, 1)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "recovered"
+	mock.TextOnly = "recovered"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) { started <- call.Prompt }
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.RecoverQueuedTaskThreadInputs(ctx)
+	select {
+	case got := <-started:
+		if got != queued.Content {
+			t.Fatalf("expected unbound FIFO follow-up, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for unbound queued follow-up recovery")
+	}
+	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	require.Equal(t, queued.Content, execs[0].PromptSent, "startup must not rerun the stored original prompt")
+}
+
 func TestHandler_RecoverQueuedTaskThreadInputsPromotesStrandedInput(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

@@ -831,6 +831,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	} else if count > 0 {
 		applog.Infof("reset %d orphaned running tasks to pending", count)
 	}
+	if recovered, recoverErr := execRepo.RecoverPreRestartRunningTaskExecutions(context.Background()); recoverErr != nil {
+		applog.Infof("warning: failed to recover interrupted task-thread executions: %v", recoverErr)
+	} else if recovered > 0 {
+		applog.Infof("recovered %d interrupted task-thread execution(s)", recovered)
+	}
 	if recovered, recoverErr := execRepo.RecoverStaleRunningTaskExecutions(context.Background()); recoverErr != nil {
 		applog.Infof("warning: failed to recover stale running task executions: %v", recoverErr)
 	} else if recovered > 0 {
