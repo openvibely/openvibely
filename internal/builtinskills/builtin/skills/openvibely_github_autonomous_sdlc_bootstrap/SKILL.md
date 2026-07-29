@@ -5,6 +5,7 @@ skill:
     key: openvibely_github_autonomous_sdlc_bootstrap
     name: OpenVibely GitHub Autonomous SDLC Bootstrap
     scope: global
+    enabled: false
     description: Bootstrap a GitHub-backed, prompt-driven autonomous SDLC loop using generic GitHub tools and visible OpenVibely tasks and schedules.
 ---
 

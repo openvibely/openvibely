@@ -206,6 +206,34 @@ func TestBuildCatalog_LoadsTrackedOpenVibelyProjectGuidance(t *testing.T) {
 	}
 }
 
+func TestBuiltInSDLCAutomationBootstrapSkillsAreDisabledForRuntimeRouting(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	builtinRoot := filepath.Clean(filepath.Join(wd, "..", "builtinskills", "builtin"))
+
+	runtimeCatalog, err := BuildCatalog("runtime", builtinRoot, "")
+	if err != nil {
+		t.Fatalf("build runtime catalog: %v", err)
+	}
+	managementCatalog, err := BuildCatalogAll("management", builtinRoot, "")
+	if err != nil {
+		t.Fatalf("build management catalog: %v", err)
+	}
+	for _, handle := range []string{
+		"openvibely_github_autonomous_sdlc_bootstrap",
+		"openvibely_native_autonomous_sdlc_bootstrap",
+	} {
+		if _, ok := runtimeCatalog.Lookup(handle); ok {
+			t.Errorf("disabled bootstrap skill %q must not be available to lifecycle routing", handle)
+		}
+		if _, ok := managementCatalog.Lookup(handle); !ok {
+			t.Errorf("disabled bootstrap skill %q must remain visible to management", handle)
+		}
+	}
+}
+
 func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {

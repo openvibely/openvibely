@@ -5,6 +5,7 @@ skill:
     key: openvibely_native_autonomous_sdlc_bootstrap
     name: OpenVibely Native Autonomous SDLC Bootstrap
     scope: global
+    enabled: false
     description: Bootstrap a review-gated autonomous SDLC loop using project-scoped OpenVibely notifications, visible scheduled tasks, and implementation tasks.
 ---
 
