@@ -131,9 +131,7 @@ func TestNativeSDLCTemplateOwnsItsPrompts(t *testing.T) {
 	require.NoError(t, err)
 	sourceText := string(source)
 	require.Contains(t, sourceText, "func nativeSDLCRolePrompt")
-	require.Contains(t, sourceText, "const nativeSDLCBugFinderPrompt")
-	require.Contains(t, sourceText, "const nativeSDLCOptimizationFinderPrompt")
-	require.Contains(t, sourceText, "const nativeSDLCRedundancyFinderPrompt")
+	require.Contains(t, sourceText, "const nativeSDLCFinderPrompt")
 	require.NotContains(t, sourceText, "builtinskills")
 	require.NotContains(t, sourceText, "SKILL.md")
 }
@@ -212,10 +210,8 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.Contains(t, githubSDLCDevInboxPrompt, "or from a GitHub remote in its local checkout when that URL is blank")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "restricted to the selected project's explicit repository URL")
 	for name, prompt := range map[string]string{
-		"offering manager":    githubSDLCOfferingManagerPrompt,
-		"bug finder":          githubSDLCBugFinderPrompt,
-		"optimization finder": githubSDLCOptimizationFinderPrompt,
-		"redundancy finder":   githubSDLCRedundancyFinderPrompt,
+		"offering manager": githubSDLCOfferingManagerPrompt,
+		"finder":           githubSDLCFinderPrompt,
 	} {
 		require.Contains(t, prompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection", name)
 		require.Contains(t, prompt, "Do not require a repository-wide issue or pull-request listing/search before publication", name)
@@ -247,9 +243,7 @@ func TestGitHubSDLCTemplateOwnsItsPrompts(t *testing.T) {
 	sourceText := string(source)
 	require.Contains(t, sourceText, "const githubSDLCDevInboxPrompt")
 	require.Contains(t, sourceText, "const githubSDLCOfferingManagerPrompt")
-	require.Contains(t, sourceText, "const githubSDLCBugFinderPrompt")
-	require.Contains(t, sourceText, "const githubSDLCOptimizationFinderPrompt")
-	require.Contains(t, sourceText, "const githubSDLCRedundancyFinderPrompt")
+	require.Contains(t, sourceText, "const githubSDLCFinderPrompt")
 	require.Contains(t, sourceText, "const githubSDLCLoopAuditorPrompt")
 	require.NotContains(t, sourceText, "builtinskills")
 	require.NotContains(t, sourceText, "SKILL.md")
