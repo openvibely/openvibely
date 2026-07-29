@@ -153,7 +153,12 @@ func TestAlertRuntimeFiltersPaginationAuthorizationAndRecovery(t *testing.T) {
 	second := create("Second", "security", "agent-b")
 	third := create("Third", "product", "agent-a")
 	require.NoError(t, alertSvc.MarkRead(ctx, project.ID, first.ID))
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, first.ID, models.AlertDecisionApproved))
 	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, second.ID, models.AlertDecisionRejected))
+
+	approvedAcrossReadStates, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"approved","implementation_task_linked":false}`))
+	require.NoError(t, err)
+	require.Contains(t, approvedAcrossReadStates, first.ID, "omitting read must keep a read approved notification eligible")
 
 	pageOne, err := handlers["list_alerts"](ctx, json.RawMessage(`{"limit":2,"offset":0}`))
 	require.NoError(t, err)

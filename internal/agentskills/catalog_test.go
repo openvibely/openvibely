@@ -276,8 +276,9 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
 		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
-		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
-		"then call `set_task_goal` for the created task so it implements the issue",
+		"If no existing task is evident from available task/thread context, call `create_task` immediately with `category=active`; do not wait for an existing PR",
+		"then call `set_task_goal` for the created or reconciled task so it implements the issue",
+		"call `execute_tasks` with that exact task ID so approved implementation starts immediately",
 		"For PAT setups, use `github_list_my_assigned_issues` to find open issues assigned to the authenticated PAT user",
 		"For GitHub App setups, do not treat the installation owner or organization as an issue assignee",
 	} {
@@ -318,6 +319,10 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"Do not list, search, or inspect GitHub issues for duplicate detection",
 		"Native notification idempotency",
 		"Call `list_alerts` without `project_id`",
+		"pass the `read` filter",
+		"both read and unread approved notifications",
+		"call `execute_tasks` with that exact task ID",
+		"Only after `execute_tasks` succeeds",
 		"Never reuse a project ID from prior messages, examples, memory, or tool output",
 		"create_alert_implementation_task",
 		"register_automation_resources",
@@ -410,8 +415,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
 		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
-		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
-		"then call `set_task_goal` for the created task so it implements the issue",
+		"If no existing task is evident from available task/thread context, call `create_task` immediately with `category=active`; do not wait for an existing PR",
+		"then call `set_task_goal` for the created or reconciled task so it implements the issue",
+		"call `execute_tasks` with that exact task ID so approved implementation starts immediately",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("GitHub bootstrap skill missing %q", want)
@@ -459,8 +465,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
 		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
-		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
-		"then call `set_task_goal` for the created task so it implements the issue",
+		"If no existing task is evident from available task/thread context, call `create_task` immediately with `category=active`; do not wait for an existing PR",
+		"then call `set_task_goal` for the created or reconciled task so it implements the issue",
+		"call `execute_tasks` with that exact task ID so approved implementation starts immediately",
 	} {
 		if !strings.Contains(guideText, want) {
 			t.Fatalf("GitHub autonomous SDLC guide missing %q", want)

@@ -48,8 +48,8 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 	if !ungranted["send_message"] {
 		t.Fatalf("task agents should get send_message by default: %+v", ungranted)
 	}
-	if !ungranted["create_task"] || !ungranted["schedule_task"] || !ungranted["modify_schedule"] {
-		t.Fatalf("task agents should get visible task/schedule bootstrap tools by default: %+v", ungranted)
+	if !ungranted["create_task"] || !ungranted["execute_tasks"] || !ungranted["schedule_task"] || !ungranted["modify_schedule"] {
+		t.Fatalf("task agents should get visible task creation/execution and schedule bootstrap tools by default: %+v", ungranted)
 	}
 	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
 		t.Fatalf("task agents should get GitHub issue tools by default: %+v", ungranted)

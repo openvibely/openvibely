@@ -56,11 +56,11 @@ The notification remains pending until a human approves or rejects it on Alerts.
 ```text
 Process approved actionable notifications for this scheduled task's own project.
 
-Call `list_alerts` without `project_id`, using `decision_state=approved`, `implementation_task_linked=false`, a bounded limit, and stable pagination. The runtime automatically uses this scheduled task's persisted project. Never reuse a project ID from prior messages, examples, memory, or tool output. For each result, call `get_alert` and inspect the full body and metadata before claiming it.
+Call `list_alerts` without `project_id`, using `decision_state=approved`, `implementation_task_linked=false`, a bounded limit, and stable pagination. Do not pass the `read` filter: both read and unread approved notifications are eligible for implementation. The runtime automatically uses this scheduled task's persisted project. Never reuse a project ID from prior messages, examples, memory, or tool output. For each result, call `get_alert` and inspect the full body and metadata before claiming it.
 
-Call `claim_alert` for each notification you can process. If the claim succeeds, call `create_alert_implementation_task` with a focused Backlog task title and prompt. Include the notification ID, reviewed context, acceptance criteria, and the rule that human approval authorized task creation only. The operation atomically links at most one task and is safe to retry after a crash.
+Call `claim_alert` for each notification you can process. If the claim succeeds, call `create_alert_implementation_task` with a focused Backlog task title and prompt. Include the notification ID, reviewed context, acceptance criteria, and the rule that human approval authorized task creation only. The operation atomically links at most one task and is safe to retry after a crash. Use the returned `implementation_task_id` to call `execute_tasks` with that exact task ID so approved work starts immediately. Do not leave the created task waiting in Backlog.
 
-Call `complete_alert_processing` after the implementation task is linked. If creation/linkage fails before a task is linked, call `fail_alert_processing` with a concise error so a later scan can retry. Release a claim only when no task was linked and immediate retry by another scan is appropriate.
+Only after `execute_tasks` succeeds, call `complete_alert_processing`. If creation, linkage, or task execution fails, call `fail_alert_processing` with a concise error so the linked task can be inspected and recovered; do not report processing complete. Release a claim only when no task was linked and immediate retry by another scan is appropriate.
 ```
 
 ## Recovery

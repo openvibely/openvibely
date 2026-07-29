@@ -1402,6 +1402,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"send_to_task":                         true,
 		"send_message":                         true,
 		"create_task":                          true,
+		"execute_tasks":                        true,
 		"create_swarm_task":                    true,
 		"schedule_task":                        true,
 		"delete_schedule":                      true,

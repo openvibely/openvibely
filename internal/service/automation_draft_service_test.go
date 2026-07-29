@@ -115,6 +115,10 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	require.Contains(t, inboxPrompt, "atomically links at most one task")
 	require.Contains(t, inboxPrompt, "human approval authorized task creation only")
 	require.Contains(t, inboxPrompt, "Call list_alerts without project_id")
+	require.Contains(t, inboxPrompt, "Do not pass the read filter")
+	require.Contains(t, inboxPrompt, "both read and unread approved notifications")
+	require.Contains(t, inboxPrompt, "call execute_tasks with that exact implementation task ID")
+	require.Contains(t, inboxPrompt, "Only after execute_tasks succeeds")
 	require.Contains(t, inboxPrompt, "Never reuse a project ID from prior messages, examples, memory, or tool output")
 
 	auditorPrompt, _ := automationDraftNodeByKey(t, candidate, "auditor").Config["prompt"].(string)
@@ -211,6 +215,9 @@ func TestGitHubSDLCTemplateAcceptsBrowserSubmittedActionSettings(t *testing.T) {
 func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *testing.T) {
 	require.Contains(t, githubSDLCDevInboxPrompt, "or from a GitHub remote in its local checkout when that URL is blank")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "restricted to the selected project's explicit repository URL")
+	require.Contains(t, githubSDLCDevInboxPrompt, "category=active")
+	require.Contains(t, githubSDLCDevInboxPrompt, "call execute_tasks with that exact task ID")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Do not leave approved implementation work in Backlog")
 	for name, prompt := range map[string]string{
 		"offering manager":    githubSDLCOfferingManagerPrompt,
 		"bug finder":          githubSDLCBugFinderPrompt,
