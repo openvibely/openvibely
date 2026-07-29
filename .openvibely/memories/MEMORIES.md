@@ -10,6 +10,8 @@
 - [Worktree and Lineage](worktree_and_lineage.md) - Isolated worktrees, diffs, merge/recovery, cleanup, commits, chained-task lineage, and branch drift.
 - [Integrations and Channels](integrations_and_channels.md) - GitHub, webhooks, Slack, Telegram, Discord, Email, outbound targets, and channel UI/runtime behavior.
 - [Usage Analytics](usage_analytics.md) - Local model/skill usage, token normalization, Analytics UI/API, OAuth account snapshots, and privacy.
-- [Testing Coverage and Performance](testing_coverage_and_performance.md) - Coverage policy, durable test priorities, validation, performance seams, and recurring caveats.
+- [Testing Coverage and Performance](testing_coverage_and_performance.md) - Coverage priorities, validation conventions, performance seams, and recurring environmental caveats.
 - [Product Vision and Reviewable Autonomy](product_vision_and_autonomy.md) - Product direction, review boundaries, user priorities, recursive improvement, and GitHub-centered autonomy.
 - [Alerts and Actionable Notifications](alerts_and_actionable_notifications.md) - Project-scoped operational alerts and approval-based notifications, lifecycle state, authorization, atomic claims/task linkage, UI, runtime tools, and native autonomous SDLC.
+- [Automation Graphs](automation_graphs.md) - Project-scoped builder architecture, one-current-graph replacement saves, runnable custom topologies, safety boundaries, runtime projection, and graph UI contracts.
+- [Product Naming and Identity](product_naming_and_identity.md) - Current Finn/Paver/Finnsight naming context and durable criteria for the AI benchmarking product.

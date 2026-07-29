@@ -298,7 +298,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 
 	applog.Infof("[handler] OAuthInitiate redirecting to OAuth for config=%s provider=%s callback=%s port=%d public_callback=%t", id, agent.Provider, redirectURI, portForLog, usePublicCallback)
 
-	if c.QueryParam("external") == "1" {
+	if h.desktopMode && c.QueryParam("external") == "1" {
 		if err := openOAuthURL(authURLFull); err != nil {
 			applog.Infof("[handler] OAuthInitiate external browser open failed: %v", err)
 			return echo.NewHTTPError(http.StatusBadGateway, "failed to open system browser")

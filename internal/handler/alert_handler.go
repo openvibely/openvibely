@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
@@ -19,6 +20,16 @@ func (h *Handler) ListAlerts(c echo.Context) error {
 	if err != nil {
 		applog.Infof("[handler] ListAlerts error: %v", err)
 		return err
+	}
+	if alertID := strings.TrimSpace(c.QueryParam("alert_id")); alertID != "" {
+		alert, getErr := h.alertSvc.GetByID(ctx, currentProjectID, alertID)
+		if getErr != nil {
+			return getErr
+		}
+		if alert == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "notification not found")
+		}
+		alerts = []models.Alert{*alert}
 	}
 
 	unreadCount, _ := h.alertSvc.CountUnread(ctx, currentProjectID)

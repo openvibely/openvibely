@@ -41,6 +41,9 @@ func TestCodexReasoningEffort_ConfiguredEffortWins(t *testing.T) {
 }
 
 func TestCodexReasoningEffort_NewModelLevels(t *testing.T) {
+	if got := CodexReasoningEffort("gpt-5.6-sol", "none"); got != "none" {
+		t.Fatalf("expected Sol to preserve none, got %q", got)
+	}
 	if got := CodexReasoningEffort("gpt-5.6-sol", "max"); got != "max" {
 		t.Fatalf("expected Sol to preserve max, got %q", got)
 	}

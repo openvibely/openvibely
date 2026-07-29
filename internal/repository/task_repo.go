@@ -37,6 +37,28 @@ func (r *TaskRepo) ListByProject(ctx context.Context, projectID string, category
 	return r.ListByProjectWithSort(ctx, projectID, category, "")
 }
 
+func (r *TaskRepo) ListAutomationReusableTasks(ctx context.Context, projectID string, limit int) ([]models.Task, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT id, project_id, title, category, status
+		FROM tasks WHERE project_id = ? AND category IN ('backlog','scheduled','active')
+		ORDER BY title ASC, id ASC LIMIT ?`, projectID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing reusable automation tasks: %w", err)
+	}
+	defer rows.Close()
+	var tasks []models.Task
+	for rows.Next() {
+		var task models.Task
+		if err := rows.Scan(&task.ID, &task.ProjectID, &task.Title, &task.Category, &task.Status); err != nil {
+			return nil, fmt.Errorf("scanning reusable automation task: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
 func (r *TaskRepo) ListByProjectWithSort(ctx context.Context, projectID string, category string, sortBy string) ([]models.Task, error) {
 	return r.ListByProjectWithCategorySorts(ctx, projectID, category, sortBy, "")
 }
@@ -216,8 +238,12 @@ func (r *TaskRepo) GetByProjectAndTitle(ctx context.Context, projectID, title st
 }
 
 func (r *TaskRepo) getOne(ctx context.Context, query string, args ...any) (*models.Task, error) {
+	return getTaskWithExecutor(ctx, r.db, query, args...)
+}
+
+func getTaskWithExecutor(ctx context.Context, exec sqlExecutor, query string, args ...any) (*models.Task, error) {
 	var t models.Task
-	err := r.db.QueryRowContext(ctx, query, args...).
+	err := exec.QueryRowContext(ctx, query, args...).
 		Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
 			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
 	if err == sql.ErrNoRows {
@@ -248,23 +274,27 @@ func (r *TaskRepo) CreateWithGoal(ctx context.Context, t *models.Task, goal *mod
 		if err := r.createWithExecutor(ctx, exec, t); err != nil {
 			return err
 		}
-		goal.TaskID = t.ID
-		if goal.GoalID == "" {
-			goal.GoalID = NewID()
-		}
-		if goal.Status == "" {
-			goal.Status = models.TaskGoalStatusActive
-		}
-		created, err := scanTaskGoal(exec.QueryRowContext(ctx, `
-			INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at)
-			VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL)
-			RETURNING `+taskGoalSelectColumns, goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason))
-		if err != nil {
-			return fmt.Errorf("creating task goal: %w", err)
-		}
-		*goal = *created
-		return nil
+		return createTaskGoalWithExecutor(ctx, exec, t.ID, goal)
 	})
+}
+
+func createTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID string, goal *models.TaskGoal) error {
+	goal.TaskID = taskID
+	if goal.GoalID == "" {
+		goal.GoalID = NewID()
+	}
+	if goal.Status == "" {
+		goal.Status = models.TaskGoalStatusActive
+	}
+	created, err := scanTaskGoal(exec.QueryRowContext(ctx, `
+		INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at)
+		VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL)
+		RETURNING `+taskGoalSelectColumns, goal.TaskID, goal.GoalID, goal.Objective, goal.Status, goal.Reason))
+	if err != nil {
+		return fmt.Errorf("creating task goal: %w", err)
+	}
+	*goal = *created
+	return nil
 }
 
 func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *models.Task) error {
@@ -463,6 +493,12 @@ func (r *TaskRepo) SetPendingIfNotRunningOrQueued(ctx context.Context, id string
 	return updated, nil
 }
 
+const taskThreadInputOwnsAdmissionPredicate = `EXISTS (
+	SELECT 1 FROM thread_inputs i
+	WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending'
+	  AND EXISTS (SELECT 1 FROM executions history WHERE history.task_id = tasks.id)
+)`
+
 // ClaimTask atomically sets status to running only if the task is currently pending.
 // Returns true if the claim succeeded, false if the task was already running/completed/failed.
 func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
@@ -476,7 +512,11 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 	}
 
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE tasks SET status = 'running', updated_at = datetime('now') WHERE id = ? AND status = 'pending'`,
+		`UPDATE tasks SET status = 'running', updated_at = datetime('now')
+		 WHERE id = ? AND status = 'pending'
+		   AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		   AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		   AND NOT `+taskThreadInputOwnsAdmissionPredicate,
 		id)
 	if err != nil {
 		return false, fmt.Errorf("claiming task: %w", err)
@@ -502,6 +542,136 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 	}
 
 	return claimed, nil
+}
+
+// TaskDispatchClaim is the authoritative ordinary-worker dispatch state loaded
+// in the same write transaction that promotes its Task to running.
+type TaskDispatchClaim struct {
+	Task              models.Task
+	AutomationContext models.AutomationContext
+}
+
+// ClaimTaskForDispatch atomically validates worker admission, claims the Task,
+// and loads its exact persisted behavior plus current Automation bindings. This
+// prevents a concurrent Automation Save from mixing a stale queued snapshot
+// with a replacement graph.
+func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDispatchClaim, bool, error) {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, false, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	task, err := getTaskWithExecutor(ctx, conn, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading task for dispatch claim: %w", err)
+	}
+	if task == nil {
+		return nil, false, fmt.Errorf("task not found: %s", id)
+	}
+	if task.Status != models.StatusPending || (task.Category != models.CategoryActive && task.Category != models.CategoryScheduled) {
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		committed = true
+		return &TaskDispatchClaim{Task: *task}, false, nil
+	}
+
+	automationContext, err := contextForTaskWithExecutor(ctx, conn, task.ProjectID, task.ID)
+	if err != nil {
+		return nil, false, fmt.Errorf("loading task Automation context for dispatch claim: %w", err)
+	}
+	if len(automationContext.Bindings) == 0 && IsAutomationTaskCreatedVia(task.CreatedVia) {
+		automationContext = models.AutomationContext{ProjectID: task.ProjectID, OriginTask: true}
+	}
+	checkedBindings := map[string]bool{}
+	for _, binding := range automationContext.Bindings {
+		bindingKey := binding.AutomationID + "\x00" + binding.VersionID
+		if checkedBindings[bindingKey] {
+			continue
+		}
+		checkedBindings[bindingKey] = true
+		var lifecycle models.AutomationLifecycleState
+		err := conn.QueryRowContext(ctx, `SELECT lifecycle_state FROM automations
+			WHERE project_id = ? AND id = ? AND published_version_id = ?`, task.ProjectID, binding.AutomationID, binding.VersionID).Scan(&lifecycle)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, false, fmt.Errorf("loading Automation lifecycle for dispatch claim: %w", err)
+		}
+		if lifecycle == models.AutomationActive {
+			continue
+		}
+		if lifecycle == models.AutomationPaused && task.Category == models.CategoryActive {
+			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_paused_task_admissions
+				(task_id, project_id, automation_id, version_id)
+				SELECT ?, ?, ?, ? WHERE EXISTS (
+					SELECT 1 FROM automation_activity_resources resource
+					JOIN automation_activities activity ON activity.id = resource.activity_id
+					WHERE resource.resource_type = 'task' AND resource.resource_id = ? AND resource.relation = 'child'
+						AND activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+						AND activity.activity_type = 'create_task')
+				ON CONFLICT(task_id) DO NOTHING`, task.ID, task.ProjectID, binding.AutomationID, binding.VersionID,
+				task.ID, task.ProjectID, binding.AutomationID, binding.VersionID); err != nil {
+				return nil, false, fmt.Errorf("preserving paused Automation task admission: %w", err)
+			}
+		} else if lifecycle == models.AutomationArchived {
+			if _, err := conn.ExecContext(ctx, `DELETE FROM automation_paused_task_admissions WHERE task_id = ?`, task.ID); err != nil {
+				return nil, false, fmt.Errorf("removing archived Automation task admission: %w", err)
+			}
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET category = 'backlog', updated_at = datetime('now')
+			WHERE id = ? AND project_id = ? AND status = 'pending' AND category IN ('active','scheduled')`, task.ID, task.ProjectID); err != nil {
+			return nil, false, fmt.Errorf("demoting inactive Automation task before dispatch: %w", err)
+		}
+		task.Category = models.CategoryBacklog
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		committed = true
+		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'running', updated_at = datetime('now')
+		WHERE id = ? AND status = 'pending' AND category IN ('active','scheduled')
+		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		  AND NOT `+taskThreadInputOwnsAdmissionPredicate, id)
+	if err != nil {
+		return nil, false, fmt.Errorf("claiming task for dispatch: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, fmt.Errorf("dispatch claim rows affected: %w", err)
+	}
+	if rows != 1 {
+		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+			return nil, false, err
+		}
+		committed = true
+		return &TaskDispatchClaim{Task: *task}, false, nil
+	}
+	task.Status = models.StatusRunning
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, false, err
+	}
+	committed = true
+
+	if r.broadcaster != nil {
+		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: task.ID, TaskName: task.Title,
+			ProjectID: task.ProjectID, Status: string(models.StatusRunning), OldStatus: string(models.StatusPending),
+			Category: string(task.Category)})
+	}
+	return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, true, nil
 }
 
 // SearchByTitle searches for non-chat tasks matching a title substring within a project.
@@ -622,6 +792,165 @@ func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, 
 	return tasks, total, rows.Err()
 }
 
+type TaskDeletionManifest struct {
+	TaskAttachmentPaths      []string
+	ExecutionAttachmentPaths []string
+	PendingUploadSessionIDs  []string
+}
+
+func (r *TaskRepo) DeleteWithCleanupManifest(ctx context.Context, id string, beforeDelete func(TaskDeletionManifest) error) (TaskDeletionManifest, bool, error) {
+	return r.deleteWithCleanupManifest(ctx, id, "", "", beforeDelete)
+}
+
+func (r *TaskRepo) DeleteWithCleanupManifestIfCategory(ctx context.Context, id, projectID string, category models.TaskCategory, beforeDelete func(TaskDeletionManifest) error) (TaskDeletionManifest, bool, error) {
+	return r.deleteWithCleanupManifest(ctx, id, projectID, string(category), beforeDelete)
+}
+
+func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID, category string, beforeDelete func(TaskDeletionManifest) error) (manifest TaskDeletionManifest, deleted bool, err error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return manifest, false, fmt.Errorf("beginning task deletion: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	where := `id = ?`
+	args := []any{id}
+	if projectID != "" || category != "" {
+		where += ` AND project_id = ? AND category = ?`
+		args = append(args, projectID, category)
+	}
+	var exists int
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE `+where, args...).Scan(&exists); err != nil {
+		return manifest, false, fmt.Errorf("checking task for deletion: %w", err)
+	}
+	if exists == 0 {
+		if err = tx.Commit(); err != nil {
+			return manifest, false, fmt.Errorf("committing empty task deletion: %w", err)
+		}
+		return manifest, false, nil
+	}
+
+	readPaths := func(query string, destination *[]string, queryArgs ...any) error {
+		rows, queryErr := tx.QueryContext(ctx, query, queryArgs...)
+		if queryErr != nil {
+			return queryErr
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var value string
+			if scanErr := rows.Scan(&value); scanErr != nil {
+				return scanErr
+			}
+			*destination = append(*destination, value)
+		}
+		return rows.Err()
+	}
+	if err = readPaths(`
+		SELECT ta.file_path
+		FROM task_attachments ta
+		WHERE ta.task_id = ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_attachments other
+			WHERE other.file_path = ta.file_path AND other.task_id <> ta.task_id
+		  )`, &manifest.TaskAttachmentPaths, id); err != nil {
+		return manifest, false, fmt.Errorf("listing task attachment paths for deletion: %w", err)
+	}
+	if err = readPaths(`
+		SELECT ca.file_path
+		FROM chat_attachments ca
+		JOIN executions e ON e.id = ca.execution_id
+		WHERE e.task_id = ?
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM chat_attachments other_ca
+			JOIN executions other_e ON other_e.id = other_ca.execution_id
+			WHERE other_ca.file_path = ca.file_path AND other_e.task_id <> e.task_id
+		  )`, &manifest.ExecutionAttachmentPaths, id); err != nil {
+		return manifest, false, fmt.Errorf("listing execution attachment paths for deletion: %w", err)
+	}
+	if err = readPaths(`
+		WITH owned_sessions(attachment_session_id) AS (
+			SELECT ti.attachment_session_id
+			FROM thread_inputs ti
+			WHERE ti.task_id = ?
+			  AND ti.attachment_session_id IS NOT NULL AND ti.attachment_session_id <> ''
+			UNION
+			SELECT ti.attachment_session_id
+			FROM executions owner_execution
+			CROSS JOIN thread_inputs ti INDEXED BY idx_thread_inputs_steering_turn
+				ON ti.run_execution_id = owner_execution.id
+			WHERE owner_execution.task_id = ? AND ti.task_id IS NULL
+			  AND ti.attachment_session_id IS NOT NULL AND ti.attachment_session_id <> ''
+		)
+		SELECT owned.attachment_session_id
+		FROM owned_sessions owned
+		WHERE NOT EXISTS (
+			SELECT 1 FROM thread_inputs other
+			WHERE other.attachment_session_id IS NOT NULL AND other.attachment_session_id <> ''
+			  AND other.attachment_session_id = owned.attachment_session_id
+			  AND (
+				(other.task_id IS NOT NULL AND other.task_id <> ?)
+				OR (
+					other.task_id IS NULL
+					AND NOT EXISTS (
+						SELECT 1 FROM executions other_execution
+						WHERE other_execution.id = other.run_execution_id AND other_execution.task_id = ?
+					)
+				)
+			  )
+		  )`, &manifest.PendingUploadSessionIDs, id, id, id, id); err != nil {
+		return manifest, false, fmt.Errorf("listing pending upload sessions for deletion: %w", err)
+	}
+	for _, sessionID := range manifest.PendingUploadSessionIDs {
+		if !isTaskDeletionUploadSessionID(sessionID) {
+			return manifest, false, fmt.Errorf("invalid pending attachment session for task deletion: %q", sessionID)
+		}
+	}
+
+	// Establish the durable cleanup boundary while the deletion transaction owns
+	// the database connection. The migration triggers reject any later thread
+	// input that attempts to acquire one of these sessions after commit.
+	for _, sessionID := range manifest.PendingUploadSessionIDs {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO retired_attachment_sessions(session_id) VALUES (?)`, sessionID); err != nil {
+			return manifest, false, fmt.Errorf("retiring pending attachment session for task deletion: %w", err)
+		}
+	}
+
+	if beforeDelete != nil {
+		if err = beforeDelete(manifest); err != nil {
+			return manifest, false, err
+		}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE `+where, args...)
+	if err != nil {
+		return manifest, false, fmt.Errorf("deleting task: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return manifest, false, fmt.Errorf("getting deleted task count: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return manifest, false, fmt.Errorf("committing task deletion: %w", err)
+	}
+	return manifest, rows > 0, nil
+}
+
+func isTaskDeletionUploadSessionID(sessionID string) bool {
+	if len(sessionID) != 32 {
+		return false
+	}
+	for _, ch := range sessionID {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *TaskRepo) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {
@@ -712,6 +1041,9 @@ func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error)
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE category = 'active' AND status = 'pending'
+		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		 AND NOT `+taskThreadInputOwnsAdmissionPredicate+`
 		 ORDER BY priority DESC, display_order ASC, created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing active pending tasks: %w", err)
@@ -738,6 +1070,10 @@ func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE category = 'active' AND status = 'queued' AND updated_at < ?
+		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		 AND NOT EXISTS (SELECT 1 FROM thread_inputs i
+		                 WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
 		 ORDER BY priority DESC, display_order ASC, created_at ASC`, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("listing stale queued tasks: %w", err)
@@ -756,20 +1092,49 @@ func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.
 	return tasks, rows.Err()
 }
 
+// ReclaimStaleQueuedTask atomically returns an ownerless stale queued task to
+// pending. The ownership guards close the window between stale-task listing and
+// recovery so a newly admitted follow-up or reservation cannot be overwritten.
+func (r *TaskRepo) ReclaimStaleQueuedTask(ctx context.Context, id string, staleDuration time.Duration) (bool, error) {
+	cutoff := time.Now().UTC().Add(-staleDuration).Format("2006-01-02 15:04:05")
+	result, err := r.db.ExecContext(ctx, `UPDATE tasks
+		SET status = 'pending', updated_at = datetime('now')
+		WHERE id = ? AND category = 'active' AND status = 'queued' AND updated_at < ?
+		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		  AND NOT EXISTS (SELECT 1 FROM thread_inputs i
+		                  WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')`, id, cutoff)
+	if err != nil {
+		return false, fmt.Errorf("reclaiming stale queued task: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("checking stale queued task reclaim: %w", err)
+	}
+	return changed == 1, nil
+}
+
 // TaskWithSchedule represents a task with its schedule information for calendar view
 type TaskWithSchedule struct {
-	Task     models.Task
-	Schedule *models.Schedule
+	Task                   models.Task
+	Schedule               *models.Schedule
+	AutomationScheduleName string
 }
 
 func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID string) ([]TaskWithSchedule, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id, t.created_at, t.updated_at, t.completed_at,
-		 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run, s.last_run, s.created_at, s.updated_at
-		 FROM tasks t
-		 LEFT JOIN schedules s ON t.id = s.task_id
-		 WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)
-		 ORDER BY s.next_run ASC`, projectID)
+			 s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start, s.next_run, s.last_run, s.created_at, s.updated_at,
+			 COALESCE(automation_node.name, '')
+			 FROM tasks t
+			 LEFT JOIN schedules s ON t.id = s.task_id
+			 LEFT JOIN automation_trigger_owners automation_owner ON automation_owner.schedule_id = s.id AND automation_owner.project_id = t.project_id
+			 LEFT JOIN automation_nodes automation_node ON automation_node.id = automation_owner.node_id
+				AND automation_node.version_id = automation_owner.version_id
+				AND automation_node.automation_id = automation_owner.automation_id
+				AND automation_node.project_id = automation_owner.project_id
+			 WHERE t.project_id = ? AND (t.category = 'scheduled' OR s.id IS NOT NULL)
+			 ORDER BY s.next_run ASC`, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing tasks with schedules: %w", err)
 	}
@@ -780,13 +1145,14 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 		var tws TaskWithSchedule
 		var schedID, schedTaskID sql.NullString
 		var schedRunAt, schedCreatedAt, schedUpdatedAt sql.NullTime
-		var schedRepeatType, schedRepeatInterval, schedEnabled sql.NullString
+		var schedRepeatType, schedRepeatInterval, schedEnabled, schedClearContext sql.NullString
 		var schedNextRun, schedLastRun sql.NullTime
 
 		if err := rows.Scan(
 			&tws.Task.ID, &tws.Task.ProjectID, &tws.Task.Title, &tws.Task.Category,
 			&tws.Task.Priority, &tws.Task.Status, &tws.Task.Prompt, &tws.Task.AgentID, &tws.Task.AgentDefinitionID, &tws.Task.Tag, &tws.Task.DisplayOrder, &tws.Task.ParentTaskID, &tws.Task.ChainConfig, &tws.Task.SwarmRole, &tws.Task.SwarmStatus, &tws.Task.SwarmConfig, &tws.Task.SwarmSequence, &tws.Task.WorktreePath, &tws.Task.WorktreeBranch, &tws.Task.AutoMerge, &tws.Task.MergeTargetBranch, &tws.Task.MergeStatus, &tws.Task.BaseBranch, &tws.Task.BaseCommitSHA, &tws.Task.LineageDepth, &tws.Task.CreatedVia, &tws.Task.TelegramChatID, &tws.Task.CreatedAt, &tws.Task.UpdatedAt, &tws.Task.CompletedAt,
-			&schedID, &schedTaskID, &schedRunAt, &schedRepeatType, &schedRepeatInterval, &schedEnabled, &schedNextRun, &schedLastRun, &schedCreatedAt, &schedUpdatedAt,
+			&schedID, &schedTaskID, &schedRunAt, &schedRepeatType, &schedRepeatInterval, &schedEnabled, &schedClearContext, &schedNextRun, &schedLastRun, &schedCreatedAt, &schedUpdatedAt,
+			&tws.AutomationScheduleName,
 		); err != nil {
 			return nil, fmt.Errorf("scanning task with schedule: %w", err)
 		}
@@ -801,14 +1167,15 @@ func (r *TaskRepo) ListWithSchedulesByProject(ctx context.Context, projectID str
 				fmt.Sscanf(schedRepeatInterval.String, "%d", &repeatInterval)
 			}
 			tws.Schedule = &models.Schedule{
-				ID:             schedID.String,
-				TaskID:         schedTaskID.String,
-				RunAt:          schedRunAt.Time,
-				RepeatType:     models.RepeatType(schedRepeatType.String),
-				RepeatInterval: repeatInterval,
-				Enabled:        enabled,
-				CreatedAt:      schedCreatedAt.Time,
-				UpdatedAt:      schedUpdatedAt.Time,
+				ID:                  schedID.String,
+				TaskID:              schedTaskID.String,
+				RunAt:               schedRunAt.Time,
+				RepeatType:          models.RepeatType(schedRepeatType.String),
+				RepeatInterval:      repeatInterval,
+				Enabled:             enabled,
+				ClearContextOnStart: schedClearContext.String == "1" || schedClearContext.String == "true",
+				CreatedAt:           schedCreatedAt.Time,
+				UpdatedAt:           schedUpdatedAt.Time,
 			}
 			if schedNextRun.Valid {
 				tws.Schedule.NextRun = &schedNextRun.Time
@@ -866,12 +1233,28 @@ func (r *TaskRepo) CountPendingByProject(ctx context.Context) (map[string]int, e
 	return counts, rows.Err()
 }
 
-// ResetOrphanedRunning resets any tasks with status='running' back to 'pending'.
-// Called on startup to recover tasks that were left in running state when the server was killed.
+// ResetOrphanedRunning reclaims tasks whose process-local runner was lost.
+// Tasks with durable queued follow-ups remain queue-owned (failed/backlog) until
+// FIFO promotion; ownerless ordinary tasks return to pending for scheduler retry.
 func (r *TaskRepo) ResetOrphanedRunning(ctx context.Context) (int, error) {
 	result, err := r.db.ExecContext(ctx,
-		`UPDATE tasks SET status = 'pending', updated_at = datetime('now')
-		 WHERE status = 'running'`)
+		`UPDATE tasks
+		 SET status = CASE
+		       WHEN EXISTS (SELECT 1 FROM thread_inputs i
+		                    WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
+		       THEN 'failed' ELSE 'pending' END,
+		     category = CASE
+		       WHEN category != 'chat' AND EXISTS (SELECT 1 FROM thread_inputs i
+		                    WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
+		       THEN 'backlog' ELSE category END,
+		     updated_at = datetime('now')
+		 WHERE status = 'running'
+		   AND NOT EXISTS (
+		     SELECT 1 FROM automation_task_run_reservations r
+		     JOIN automation_dispatch_outbox d ON d.id = r.dispatch_id
+		     JOIN executions e ON e.dispatch_id = d.id AND e.task_id = tasks.id
+		     WHERE r.task_id = tasks.id AND d.status IN ('processing','submitted') AND e.status = 'running'
+		   )`)
 	if err != nil {
 		return 0, fmt.Errorf("resetting orphaned running tasks: %w", err)
 	}

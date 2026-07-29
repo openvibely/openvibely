@@ -26,9 +26,16 @@ func (h *Handler) supportsChatActionTools(ctx context.Context, agent models.LLMC
 	return service.SupportsRuntimeChatActionTools(ctx, h.llmConfigRepo, agent)
 }
 
+type pendingAutomationPlanConfirmation struct {
+	Issue service.AutomationConfirmationIssue
+	Plan  models.AutomationSavePlan
+	Name  string
+}
+
 type chatActionSummaryCollector struct {
-	createdLines []string
-	editedLines  []string
+	createdLines          []string
+	editedLines           []string
+	pendingAutomationPlan []pendingAutomationPlanConfirmation
 }
 
 func newChatActionSummaryCollector() *chatActionSummaryCollector {
@@ -36,6 +43,33 @@ func newChatActionSummaryCollector() *chatActionSummaryCollector {
 		createdLines: []string{},
 		editedLines:  []string{},
 	}
+}
+
+func (c *chatActionSummaryCollector) addAutomationPlan(pending pendingAutomationPlanConfirmation) {
+	if c == nil {
+		return
+	}
+	c.pendingAutomationPlan = append(c.pendingAutomationPlan, pending)
+}
+
+func (c *chatActionSummaryCollector) appendAutomationPlans(output string) string {
+	if c == nil || len(c.pendingAutomationPlan) == 0 {
+		return output
+	}
+	var blocks []string
+	for _, pending := range c.pendingAutomationPlan {
+		var lines []string
+		for _, effect := range pending.Plan.Effects {
+			lines = append(lines, fmt.Sprintf("- %s %s: %s", effect.Operation, effect.ResourceType, effect.Name))
+		}
+		blocks = append(blocks, fmt.Sprintf("Automation save plan for %s:\n%s\nNothing has been created or activated. To save after reviewing this stored plan, reply exactly: save %s",
+			pending.Name, strings.Join(lines, "\n"), pending.Name))
+	}
+	summary := "\n\n---\n" + strings.Join(blocks, "\n\n")
+	if strings.Contains(output, summary) {
+		return output
+	}
+	return output + summary
 }
 
 func (c *chatActionSummaryCollector) addCreated(summary string) {
@@ -200,6 +234,15 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		ProjectID: params.ProjectID, CallerTaskID: params.TaskID, Source: "agent", AlertSvc: h.alertSvc, TaskRepo: h.taskRepo,
 	})
 	return map[string]chatcontrol.RuntimeActionHandler{
+		"preview_automation_description": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeAutomationPreviewAction(ctx, params, input)
+		},
+		"plan_automation_save": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeAutomationPlanSaveAction(ctx, params, input, collector)
+		},
+		"save_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeAutomationSaveAction(ctx, params, input)
+		},
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeCreateSwarmTaskTool(ctx, params, input, collector)
 		},
@@ -489,7 +532,8 @@ func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, re
 	if h.githubSvc == nil {
 		return nil, fmt.Errorf("github service unavailable")
 	}
-	if strings.TrimSpace(repoURL) != "" {
+	automationContext, automationBound := service.AutomationContextFromContext(ctx)
+	if strings.TrimSpace(repoURL) != "" && (!automationBound || automationContext.ProjectID != projectID) {
 		return h.githubSvc.ResolveRepo(ctx, repoURL, "")
 	}
 	if h.projectRepo == nil {
@@ -502,7 +546,22 @@ func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, re
 	if project == nil {
 		return nil, fmt.Errorf("current project not found")
 	}
+	if automationBound && automationContext.ProjectID == projectID {
+		repoPath := ""
+		if strings.TrimSpace(project.RepoURL) == "" {
+			repoPath = project.RepoPath
+		}
+		return h.githubSvc.ResolveRepo(ctx, project.RepoURL, repoPath)
+	}
 	return h.githubSvc.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+}
+
+func requireAutomationGitHubRepo(ctx context.Context, projectID string, project *models.Project) error {
+	if automationContext, ok := service.AutomationContextFromContext(ctx); ok && automationContext.ProjectID == projectID &&
+		(project == nil || (strings.TrimSpace(project.RepoURL) == "" && strings.TrimSpace(project.RepoPath) == "")) {
+		return fmt.Errorf("Automation GitHub runtime requires a project repository URL or local Git checkout")
+	}
+	return nil
 }
 
 func (h *Handler) executeGitHubCreateIssueTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
@@ -715,6 +774,9 @@ func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params s
 	if project == nil {
 		return "", fmt.Errorf("current project not found")
 	}
+	if err := requireAutomationGitHubRepo(ctx, params.ProjectID, project); err != nil {
+		return "", err
+	}
 	var issueNumber *int
 	if req.IssueNumber > 0 {
 		issueNumber = &req.IssueNumber
@@ -761,6 +823,9 @@ func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context,
 	}
 	if project == nil {
 		return "", fmt.Errorf("current project not found")
+	}
+	if err := requireAutomationGitHubRepo(ctx, params.ProjectID, project); err != nil {
+		return "", err
 	}
 	record, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
 	if err != nil {
@@ -960,9 +1025,19 @@ func decodeChatActionInput(input json.RawMessage, dst any) error {
 // definitions and the shared executor. Used by processStreamingResponse which
 // computes defs from the registry before calling this.
 func (h *Handler) buildChatActionToolRuntimeFromDefs(params streamingResponseParams, collector *chatActionSummaryCollector, defs []llmcontracts.RuntimeToolDefinition, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
+	genericExecutor := h.chatActionExecutor(params, collector, mode, surface)
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
-		Executor:    h.chatActionExecutor(params, collector, mode, surface),
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
+				if hardened := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs); hardened != nil {
+					if output, handled, isError, err := hardened.Executor(ctx, name, input); handled {
+						return output, true, isError, err
+					}
+				}
+			}
+			return genericExecutor(ctx, name, input)
+		},
 	}
 }
 
@@ -1327,6 +1402,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"send_to_task":                         true,
 		"send_message":                         true,
 		"create_task":                          true,
+		"execute_tasks":                        true,
 		"create_swarm_task":                    true,
 		"schedule_task":                        true,
 		"delete_schedule":                      true,

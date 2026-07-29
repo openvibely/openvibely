@@ -451,6 +451,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
 	alertRepo := repository.NewAlertRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	automationRepo.SetBroadcaster(broadcaster)
+	execRepo.SetAutomationRepo(automationRepo)
+	alertRepo.SetAutomationRepo(automationRepo)
 	upcomingRepo := repository.NewUpcomingRepo(db)
 
 	// Services
@@ -462,16 +466,26 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workerSvc.SetTaskRepo(taskRepo)
 	workerSvc.SetLLMConfigRepo(llmConfigRepo)
 	workerSvc.SetExecutionRepo(execRepo)
+	workerSvc.SetAutomationRepo(automationRepo)
 
 	projectSvc := service.NewProjectService(projectRepo)
 	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, broadcaster)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	taskSvc.SetDeletionUploadsDir(filepath.Join(cfg.AppDataDir, "uploads"))
 	taskSvc.SetAgentRepo(agentRepo)
 	taskSvc.SetTaskGoalService(taskGoalSvc)
 	llmSvc.SetTaskGoalService(taskGoalSvc)
 	workerSvc.SetTaskGoalService(taskGoalSvc)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	schedulerSvc.SetAutomationRepo(automationRepo)
+	automationDispatcher := service.NewAutomationDispatcher(automationRepo, taskRepo, workerSvc)
+	automationReconciler := service.NewAutomationReconciler(automationRepo, execRepo, workerSvc)
 	alertSvc := service.NewAlertService(alertRepo, broadcaster)
+	automationRegistry := service.NewAutomationAdapterRegistry()
+	automationRegistrationSvc := service.NewAutomationRegistrationService(automationRepo, automationRegistry)
+	automationGraphSvc := service.NewAutomationGraphService(automationRepo)
+	llmSvc.SetAutomationRegistrationService(automationRegistrationSvc)
+	llmSvc.SetAutomationRepo(automationRepo)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
 	workflowRepo := repository.NewWorkflowRepo(db)
 	workflowSvc := service.NewWorkflowService(workflowRepo, llmConfigRepo, taskRepo, llmSvc)
@@ -539,9 +553,24 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	customPersonalityRepo := repository.NewCustomPersonalityRepo(db)
 
 	settingsRepo := repository.NewSettingsRepo(db)
+	automationDraftSvc := service.NewAutomationDraftService(automationRepo, automationRegistry)
+	automationCapabilitySvc := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, settingsRepo)
+	automationDraftSvc.SetCapabilitySnapshotBuilder(automationCapabilitySvc)
+	automationSaveValidator := service.NewAutomationSaveValidator(automationRegistry, automationDraftSvc)
+	automationSaveValidator.SetAgentRepository(agentRepo)
+	automationCompiler := service.NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, automationSaveValidator)
+	automationCompiler.SetAgentRepository(agentRepo)
+	automationLifecycleSvc := service.NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)
+	automationConfirmationSecret, confirmationSecretErr := service.LoadOrCreateAutomationConfirmationSecret(context.Background(), settingsRepo)
+	if confirmationSecretErr != nil {
+		return nil, fmt.Errorf("initializing automation confirmation secret: %w", confirmationSecretErr)
+	}
+	automationConfirmationSvc := service.NewAutomationConfirmationService(automationRepo, execRepo, automationConfirmationSecret)
 	taskPullRequestRepo := repository.NewTaskPullRequestRepo(db)
 	githubPRFeedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	automationCapabilitySvc.SetGitHubAuthRepository(githubAuthRepo)
+	automationSaveValidator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	webhookRepo := repository.NewWebhookRepo(db)
 
 	// Seed Slack settings from env when provided (useful for bootstrapping local setup).
@@ -578,6 +607,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.GitHubAppPrivateKey,
 		cfg.ProjectRepoRoot,
 	)
+	automationExternalStateSvc := service.NewAutomationExternalStateService(automationRepo, taskPullRequestRepo, projectRepo, githubSvc)
+	automationSaveValidator.SetGitHubConnectionProvider(githubSvc)
+	automationCapabilitySvc.SetGitHubConnectionProvider(githubSvc)
 	llmSvc.SetGitHubIssueRuntimeProvider(githubSvc)
 	llmSvc.SetGitHubAuthRepo(githubAuthRepo)
 	llmSvc.SetTaskPullRequestRepo(taskPullRequestRepo)
@@ -799,6 +831,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	} else if count > 0 {
 		applog.Infof("reset %d orphaned running tasks to pending", count)
 	}
+	if recovered, recoverErr := execRepo.RecoverPreRestartRunningTaskExecutions(context.Background()); recoverErr != nil {
+		applog.Infof("warning: failed to recover interrupted task-thread executions: %v", recoverErr)
+	} else if recovered > 0 {
+		applog.Infof("recovered %d interrupted task-thread execution(s)", recovered)
+	}
 	if recovered, recoverErr := execRepo.RecoverStaleRunningTaskExecutions(context.Background()); recoverErr != nil {
 		applog.Infof("warning: failed to recover stale running task executions: %v", recoverErr)
 	} else if recovered > 0 {
@@ -854,7 +891,8 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}
 
 	workerSvc.Start(srvCtx)
-	schedulerSvc.Start(srvCtx)
+	automationReconciler.Start(srvCtx)
+	automationDispatcher.Start(srvCtx)
 
 	// HTTP Server
 	e := echo.New()
@@ -884,6 +922,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetChatBroadcaster(chatBroadcaster)
 	h.SetExecutionStreamHub(executionStreamHub)
 	h.SetTaskGoalService(taskGoalSvc)
+	h.SetAutomationServices(automationGraphSvc, automationRegistrationSvc)
+	h.SetAutomationExternalStateService(automationExternalStateSvc)
+	h.SetAutomationBuilderServices(automationDraftSvc, automationCapabilitySvc, automationSaveValidator, automationCompiler, automationConfirmationSvc, automationLifecycleSvc)
 	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)
 	h.SetTelegramAuthRepo(telegramAuthRepo)
@@ -965,6 +1006,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		llmSvc.SetTelegramService(telegramSvc)
 	}
 	h.RecoverQueuedTaskThreadInputs(context.Background())
+	// Start scheduler scans only after durable queued task-thread inputs have
+	// been offered for promotion. Repository admission guards remain authoritative
+	// if recovery and a later scan overlap.
+	schedulerSvc.Start(srvCtx)
 	h.RegisterRoutes(e)
 
 	// Bind listener explicitly so we know the actual port before serving.
@@ -1002,8 +1047,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		if hostedPendingStore != nil {
 			hostedPendingStore.Close()
 		}
-		workerSvc.Stop()
 		schedulerSvc.Stop()
+		automationDispatcher.Stop()
+		automationReconciler.Stop()
+		workerSvc.Stop()
 		if telegramSvc != nil {
 			telegramSvc.Stop()
 		}

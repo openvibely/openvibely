@@ -3,6 +3,7 @@ package chatcontrol
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -75,11 +76,70 @@ func TestRegistry_AllActionsHaveDescription(t *testing.T) {
 	}
 }
 
+func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
+	readActions := []string{"preview_automation_description"}
+	writeActions := []string{"plan_automation_save", "save_automation"}
+	for _, name := range append(readActions, writeActions...) {
+		def := Get(name)
+		if def == nil || def.Domain != DomainAutomations {
+			t.Fatalf("expected %s in automations domain", name)
+		}
+		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceWeb); err != nil {
+			t.Fatalf("expected %s in web orchestrate mode: %v", name, err)
+		}
+		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceAPI); err != nil {
+			t.Fatalf("expected %s on project-aware API surface: %v", name, err)
+		}
+		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceSlack); err == nil {
+			t.Fatalf("expected %s unavailable on channel surfaces", name)
+		}
+	}
+	for _, name := range readActions {
+		if err := IsAllowed(name, models.ChatModePlan, SurfaceWeb); err != nil {
+			t.Fatalf("expected read action %s in plan mode: %v", name, err)
+		}
+	}
+	for _, name := range writeActions {
+		if err := IsAllowed(name, models.ChatModePlan, SurfaceWeb); err == nil {
+			t.Fatalf("expected write action %s denied in plan mode", name)
+		}
+	}
+
+	plan := Get("plan_automation_save")
+	var schema struct {
+		Properties struct {
+			Source struct {
+				Enum []string `json:"enum"`
+			} `json:"source"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(plan.Parameters, &schema); err != nil {
+		t.Fatalf("decode Automation save-plan schema: %v", err)
+	}
+	want := []string{"template", "describe", "blank"}
+	if !reflect.DeepEqual(want, schema.Properties.Source.Enum) {
+		t.Fatalf("Automation save-plan source enum = %v, want %v", schema.Properties.Source.Enum, want)
+	}
+	if strings.Contains(string(plan.Parameters), `"candidate"`) || strings.Contains(plan.Description, "structured candidate") {
+		t.Fatal("public Automation save-plan action must not expose a candidate creation identity")
+	}
+	for _, removed := range []string{"create_automation_draft", "plan_automation_publication", "publish_automation_draft"} {
+		if Get(removed) != nil {
+			t.Fatalf("removed draft action %s remains registered", removed)
+		}
+	}
+	preview := Get("preview_automation_description")
+	if preview == nil || !strings.Contains(preview.Description, "custom") || !strings.Contains(preview.Description, "visual builder") ||
+		!strings.Contains(plan.Description, "custom") || !strings.Contains(plan.Description, "visual builder") {
+		t.Fatal("Describe It and Chat action descriptions must advertise the shared custom builder contract")
+	}
+}
+
 func TestRegistry_AllActionsHaveDomain(t *testing.T) {
 	validDomains := map[Domain]bool{
 		DomainTasks: true, DomainSchedules: true, DomainAlerts: true,
 		DomainPersonality: true, DomainModels: true, DomainAgents: true,
-		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainMemory: true, DomainChat: true,
+		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainAutomations: true, DomainMemory: true, DomainChat: true,
 	}
 	for _, a := range Registry() {
 		if !validDomains[a.Domain] {
@@ -364,6 +424,27 @@ func TestRegistry_AlertFlowActions(t *testing.T) {
 		if def.Access != AccessRead {
 			t.Errorf("%s should be read, got %s", name, def.Access)
 		}
+	}
+
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(Get("list_alerts").Parameters, &schema); err != nil {
+		t.Fatalf("decode list_alerts schema: %v", err)
+	}
+	for _, required := range schema.Required {
+		if required == "project_id" || required == "read" {
+			t.Fatalf("list_alerts must leave %s optional", required)
+		}
+	}
+	if description := schema.Properties["project_id"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "persisted caller task") {
+		t.Fatalf("project_id omission contract missing from list_alerts schema: %q", description)
+	}
+	if description := schema.Properties["read"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "both read and unread") {
+		t.Fatalf("read omission contract missing from list_alerts schema: %q", description)
 	}
 }
 

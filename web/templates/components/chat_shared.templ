@@ -517,8 +517,9 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 						}
 						tracker = window[trackerKey];
 					}
-					// User just sent a message: reset scroll tracking and pin to bottom.
-					if (tracker) tracker.resetOnUserSend();
+					// The shared composer commits deliberate-send pin intent only after
+					// the server accepts the message. Stream discovery alone must preserve
+					// upward-reading intent from this or another browser surface.
 				}
 						// Buffer for accumulating streaming content
 						var textBuffer = '';
@@ -1497,6 +1498,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-clear-func-name={ config.FormID + "ClearAttachments" }
 			data-message-history-key={ chatMessageHistoryStorageKey(config) }
 			data-attachment-state-key={ chatAttachmentStateKey(config) }
+			if config.TaskID != "" {
+				data-scroll-intent-scope={ config.TaskID }
+			} else if config.ProjectID != "" {
+				data-scroll-intent-scope={ config.ProjectID }
+			}
 			class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"
 		>
 			<!-- Drop zone overlay -->
@@ -1812,9 +1818,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							function currentSubmitButton() {
 								return form.querySelector('button[type="submit"]');
 							}
-								function markSendScrollIntent() {
-							if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
-						}
 								function safeSubmit() {
 									var submitBtn = currentSubmitButton();
 									if (typeof form.requestSubmit === 'function') {
@@ -1824,7 +1827,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
 								form.dispatchEvent(submitEvent);
 							}
-							form.addEventListener('submit', markSendScrollIntent);
 
 				var messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';
 				var messageHistoryLimit = 50;
@@ -2571,6 +2573,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							// Keep user draft intact when the handler intentionally returns no content
 							// (e.g. model-setup guard toasts) so users don't lose their message.
 							if (responseText.trim() !== '') {
+								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 								rememberSubmittedMessage(messageHistorySubmittedValue);
 								resetMessageHistoryNavigation();
 								if (messageInput) messageInput.value = '';
@@ -2876,6 +2879,28 @@ templ ChatAutoScrollScript() {
 		//   - shouldAutoScroll() returns !userScrolledUp. Do NOT AND with
 		//     isNearBottom — during innerHTML refresh that creates a clamp-driven
 		//     "yes auto-scroll" pulse that yanks the user back down.
+			window._chatSendIntentScopeRevisions = window._chatSendIntentScopeRevisions || {};
+
+			function chatSendIntentScopeRevisionKey(scope) {
+				return 'scope:' + (scope || '');
+			}
+
+			window.getChatSendIntentScopeRevision = function(messagesId, scope) {
+				var revisions = window._chatSendIntentScopeRevisions[messagesId] || {};
+				return revisions[chatSendIntentScopeRevisionKey(scope)] || 0;
+			};
+
+			window.advanceChatSendIntentScopeRevision = function(messagesEl) {
+				if (!messagesEl) return 0;
+				var messagesId = messagesEl.id || '';
+				var scope = messagesEl.getAttribute ? (messagesEl.getAttribute('data-scroll-intent-scope') || '') : '';
+				var revisions = window._chatSendIntentScopeRevisions[messagesId] || {};
+				var scopeKey = chatSendIntentScopeRevisionKey(scope);
+				revisions[scopeKey] = (revisions[scopeKey] || 0) + 1;
+				window._chatSendIntentScopeRevisions[messagesId] = revisions;
+				return revisions[scopeKey];
+			};
+
 			window.ChatScrollTracker = function(element) {
 				this.element = element;
 				this.userScrolledUp = false;
@@ -2935,6 +2960,7 @@ templ ChatAutoScrollScript() {
 						var isNear = window.chatAutoScroll.isNearBottom(self.element);
 						if (self._userInteracting) {
 							window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
+							if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(self.element);
 							self.userScrolledUp = !isNear;
 							self.intentRevision = window._chatScrollIntentRevision;
 							if (typeof self.onIntentChange === 'function') self.onIntentChange();
@@ -2993,6 +3019,7 @@ templ ChatAutoScrollScript() {
 				resetOnUserSend: function() {
 					this.userScrolledUp = false;
 					window._chatScrollIntentRevision = (window._chatScrollIntentRevision || 0) + 1;
+					if (window.advanceChatSendIntentScopeRevision) window.advanceChatSendIntentScopeRevision(this.element);
 					this.intentRevision = window._chatScrollIntentRevision;
 					this._userInteracting = false;
 					this._pointerInteracting = false;
@@ -3121,6 +3148,42 @@ templ ChatAutoScrollScript() {
 				if (tracker) tracker.userScrolledUp = !pinned;
 				if (messages.getAttribute('data-transcript-hydrating') === 'true') messages.style.visibility = 'hidden';
 
+				function waitForImages() {
+					if (!options.waitForImages) return Promise.resolve();
+					var images = messages.querySelectorAll('img[data-chat-attachment-image="true"]');
+					return Promise.all(Array.prototype.map.call(images, function(img) {
+						function decodeImage() {
+							if (typeof img.decode !== 'function') return Promise.resolve();
+							return Promise.resolve(img.decode()).catch(function() {});
+						}
+						if (img.complete) return decodeImage();
+						return new Promise(function(resolve) {
+							var finished = false;
+							var timeout;
+							function finish() {
+								if (finished) return;
+								finished = true;
+								clearTimeout(timeout);
+								img.removeEventListener('load', loaded);
+								img.removeEventListener('error', finish);
+								resolve();
+							}
+							function loaded() { decodeImage().then(finish, finish); }
+							function timeoutImage() {
+								if (finished) return;
+								img.style.display = 'none';
+								img.removeAttribute('src');
+								img.removeAttribute('srcset');
+								img.setAttribute('data-chat-attachment-image-timeout', 'true');
+								finish();
+							}
+							img.addEventListener('load', loaded);
+							img.addEventListener('error', finish);
+							timeout = setTimeout(timeoutImage, 3000);
+							if (img.loading === 'lazy') img.loading = 'eager';
+						});
+					}));
+				}
 				function waitForFonts() {
 					if (!document.fonts || !document.fonts.ready) return Promise.resolve();
 					return Promise.race([
@@ -3133,7 +3196,7 @@ templ ChatAutoScrollScript() {
 						requestAnimationFrame(function() { requestAnimationFrame(resolve); });
 					});
 				}
-				return Promise.resolve(options.renderPromise).catch(function() { return false; }).then(waitForFonts).then(waitForLayout).then(function() {
+				return Promise.resolve(options.renderPromise).catch(function() { return false; }).then(waitForImages).then(waitForFonts).then(waitForLayout).then(function() {
 					if (!messages.isConnected) return false;
 					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
 					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;
@@ -3280,6 +3343,8 @@ templ ChatAutoScrollScript() {
 				container.dataset.earlierPrevScrollHeight = String(container.scrollHeight || 0);
 				container.dataset.earlierPrevScrollTop = String(container.scrollTop || 0);
 				container.dataset.earlierPrevBottomDistance = String((container.scrollHeight || 0) - (container.scrollTop || 0));
+				var tracker = container.id ? window['scrollTracker_' + container.id] : null;
+				container.dataset.earlierIntentRevision = String(tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0));
 				var anchor = getFirstVisibleExecutionPair(container);
 				if (anchor && anchor.pair) {
 					container.dataset.earlierAnchorExecId = anchor.pair.getAttribute('data-exec-id') || '';
@@ -3341,6 +3406,16 @@ templ ChatAutoScrollScript() {
 				});
 			};
 
+			function clearChatEarlierRestoreState(container) {
+				delete container.dataset.earlierPrevScrollHeight;
+				delete container.dataset.earlierPrevScrollTop;
+				delete container.dataset.earlierPrevBottomDistance;
+				delete container.dataset.earlierAnchorExecId;
+				delete container.dataset.earlierAnchorOffsetTop;
+				delete container.dataset.earlierIntentRevision;
+				delete container.dataset.earlierSwapPrepared;
+			}
+
 			window.restoreChatEarlierScroll = function(container) {
 				if (!container) return;
 				var prevHeight = parseInt(container.dataset.earlierPrevScrollHeight || '0', 10) || 0;
@@ -3348,9 +3423,10 @@ templ ChatAutoScrollScript() {
 				var prevBottomDistance = parseInt(container.dataset.earlierPrevBottomDistance || '0', 10) || 0;
 				var anchorExecID = container.dataset.earlierAnchorExecId || '';
 				var anchorOffsetTop = parseFloat(container.dataset.earlierAnchorOffsetTop || '0') || 0;
+				var preparedIntentRevision = parseInt(container.dataset.earlierIntentRevision || '0', 10) || 0;
 				if (prevHeight <= 0) {
 					container.dataset.earlierRequestLoading = 'false';
-					delete container.dataset.earlierSwapPrepared;
+					clearChatEarlierRestoreState(container);
 					return;
 				}
 					container.dataset.earlierAnchorRestoring = 'true';
@@ -3358,6 +3434,17 @@ templ ChatAutoScrollScript() {
 					Promise.resolve(hydrationPromise).then(function() {
 						delete container._chatEarlierHydrationPromise;
 						requestAnimationFrame(function() {
+					var tracker = container.id ? window['scrollTracker_' + container.id] : null;
+					var currentIntentRevision = tracker ? (tracker.intentRevision || 0) : (window._chatScrollIntentRevision || 0);
+					if (currentIntentRevision !== preparedIntentRevision) {
+						if (tracker && tracker.shouldAutoScroll()) window.chatAutoScroll.scrollToBottom(container, false);
+						clearChatEarlierRestoreState(container);
+						requestAnimationFrame(function() {
+							container.dataset.earlierAnchorRestoring = 'false';
+							container.dataset.earlierRequestLoading = 'false';
+						});
+						return;
+					}
 					var restored = false;
 					if (prevBottomDistance > 0) {
 						container.scrollTop = Math.max(0, (container.scrollHeight || 0) - prevBottomDistance);
@@ -3375,12 +3462,7 @@ templ ChatAutoScrollScript() {
 					if (!restored) {
 						container.scrollTop = prevTop + Math.max(0, (container.scrollHeight || 0) - prevHeight);
 					}
-					delete container.dataset.earlierPrevScrollHeight;
-					delete container.dataset.earlierPrevScrollTop;
-					delete container.dataset.earlierPrevBottomDistance;
-					delete container.dataset.earlierAnchorExecId;
-					delete container.dataset.earlierAnchorOffsetTop;
-					delete container.dataset.earlierSwapPrepared;
+					clearChatEarlierRestoreState(container);
 					requestAnimationFrame(function() {
 						container.dataset.earlierAnchorRestoring = 'false';
 						container.dataset.earlierRequestLoading = 'false';
@@ -3459,30 +3541,99 @@ templ ChatAutoScrollScript() {
 
 				window._chatSendScrollIntents = window._chatSendScrollIntents || {};
 
-				window.markChatSendScrollIntent = function(formOrMessagesId) {
+				function chatSendScrollIntentScopeKey(scope) {
+					return 'scope:' + (scope || '');
+				}
+
+				window.markChatSendScrollIntent = function(formOrMessagesId, explicitScope) {
 					var messagesId = '';
+					var intentScope = typeof explicitScope === 'string' ? explicitScope : '';
 					if (typeof formOrMessagesId === 'string') {
 						messagesId = formOrMessagesId;
 					} else if (formOrMessagesId && formOrMessagesId.getAttribute) {
 						var target = formOrMessagesId.getAttribute('hx-target') || '';
 						messagesId = target.charAt(0) === '#' ? target.substring(1) : target;
+						if (typeof explicitScope !== 'string') intentScope = formOrMessagesId.getAttribute('data-scroll-intent-scope') || '';
 					}
 					if (!messagesId) return;
-					window._chatSendScrollIntents[messagesId] = true;
 					var messagesEl = document.getElementById(messagesId);
+					var mountedScope = messagesEl && messagesEl.getAttribute
+						? (messagesEl.getAttribute('data-scroll-intent-scope') || '')
+						: '';
+					if (typeof explicitScope !== 'string' && !intentScope && messagesEl) {
+						intentScope = mountedScope;
+					}
+					var scopedIntents = window._chatSendScrollIntents[messagesId] || {};
+					var scopeKey = chatSendScrollIntentScopeKey(intentScope);
+					if (messagesEl && intentScope !== mountedScope) {
+						scopedIntents[scopeKey] = { scopeRevision: null, scope: intentScope };
+						window._chatSendScrollIntents[messagesId] = scopedIntents;
+						return;
+					}
 					var trackerKey = 'scrollTracker_' + messagesId;
 					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
 					if (tracker && tracker.resetOnUserSend) tracker.resetOnUserSend();
+					scopedIntents[scopeKey] = {
+						scopeRevision: window.getChatSendIntentScopeRevision ? window.getChatSendIntentScopeRevision(messagesId, intentScope) : 0,
+						scope: intentScope
+					};
+					window._chatSendScrollIntents[messagesId] = scopedIntents;
 				};
 
-				window.consumeChatSendScrollIntent = function(messagesId) {
-					if (!messagesId || !window._chatSendScrollIntents || !window._chatSendScrollIntents[messagesId]) return false;
-					delete window._chatSendScrollIntents[messagesId];
-					return true;
+				window.hasChatSendScrollIntent = function(messagesId, explicitScope) {
+					if (!messagesId || !window._chatSendScrollIntents) return false;
+					var messagesEl = document.getElementById(messagesId);
+					var mountedScope = messagesEl && messagesEl.getAttribute
+						? (messagesEl.getAttribute('data-scroll-intent-scope') || '')
+						: '';
+					var currentScope = typeof explicitScope === 'string' ? explicitScope : mountedScope;
+					if (messagesEl && currentScope !== mountedScope) return false;
+					var scopedIntents = window._chatSendScrollIntents[messagesId];
+					var intent = scopedIntents && scopedIntents[chatSendScrollIntentScopeKey(currentScope)];
+					if (!intent) return false;
+					var trackerKey = 'scrollTracker_' + messagesId;
+					var tracker = window.resolveScrollTracker ? window.resolveScrollTracker(trackerKey, messagesEl) : window[trackerKey];
+					var scopeRevision = window.getChatSendIntentScopeRevision ? window.getChatSendIntentScopeRevision(messagesId, currentScope) : 0;
+					if (tracker && intent.scopeRevision === null) intent.scopeRevision = scopeRevision;
+					return !tracker || scopeRevision === intent.scopeRevision;
 				};
 
-				window.hasChatSendScrollIntent = function(messagesId) {
-					return !!(messagesId && window._chatSendScrollIntents && window._chatSendScrollIntents[messagesId]);
+				window.consumeChatSendScrollIntent = function(messagesId, explicitScope) {
+					var messagesEl = document.getElementById(messagesId);
+					var currentScope = typeof explicitScope === 'string'
+						? explicitScope
+						: (messagesEl && messagesEl.getAttribute ? (messagesEl.getAttribute('data-scroll-intent-scope') || '') : '');
+					var isCurrent = window.hasChatSendScrollIntent(messagesId, currentScope);
+					var scopedIntents = messagesId && window._chatSendScrollIntents ? window._chatSendScrollIntents[messagesId] : null;
+					if (scopedIntents) {
+						delete scopedIntents[chatSendScrollIntentScopeKey(currentScope)];
+						if (Object.keys(scopedIntents).length === 0) delete window._chatSendScrollIntents[messagesId];
+					}
+					return isCurrent;
+				};
+
+				window.initializeChatTranscriptScrollState = function(options) {
+					options = options || {};
+					var messages = options.messages;
+					var tracker = options.tracker;
+					if (!messages) return { sentByUser: false, restoredScrollState: false, userScrolledUp: false };
+					var sentByUser = window.consumeChatSendScrollIntent
+						? window.consumeChatSendScrollIntent(messages.id || '', options.scope)
+						: false;
+					if (sentByUser) {
+						if (tracker && tracker.resetOnUserSend) tracker.resetOnUserSend();
+						else if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(messages, false);
+						return { sentByUser: true, restoredScrollState: false, userScrolledUp: false };
+					}
+					var state = options.state;
+					if (state) {
+						messages.scrollTop = state.userScrolledUp ? (state.scrollTop || 0) : messages.scrollHeight;
+						if (tracker) tracker.userScrolledUp = !!state.userScrolledUp;
+						return { sentByUser: false, restoredScrollState: true, userScrolledUp: !!state.userScrolledUp };
+					}
+					if (window.chatAutoScroll) window.chatAutoScroll.scrollToBottom(messages, false);
+					if (tracker) tracker.userScrolledUp = false;
+					return { sentByUser: false, restoredScrollState: false, userScrolledUp: false };
 				};
 
 				window.scrollChatToBottomAfterLayout = function(messagesEl, smooth) {

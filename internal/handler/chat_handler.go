@@ -199,6 +199,9 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		}
 		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
 			applog.Infof("[handler] ChatSend error creating queued input: %v", err)
+			if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+				applog.Infof("[handler] ChatSend error cleaning unpublished attachment session %s: %v", sessionID, cleanupErr)
+			}
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue chat message")
 		}
 		if h.chatBroadcaster != nil {
@@ -227,6 +230,9 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	}
 	if err := h.taskRepo.Create(c.Request().Context(), task); err != nil {
 		applog.Infof("[handler] ChatSend error creating task: %v", err)
+		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+			applog.Infof("[handler] ChatSend error cleaning unpublished attachment session %s after task create failure: %v", sessionID, cleanupErr)
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create chat task")
 	}
 	claimed, err := h.taskRepo.ClaimTask(c.Request().Context(), task.ID)
@@ -237,6 +243,9 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		applog.Infof("[handler] ChatSend error claiming chat task=%s: %v", task.ID, err)
 		if delErr := h.taskRepo.Delete(c.Request().Context(), task.ID); delErr != nil {
 			applog.Infof("[handler] ChatSend error cleaning up unclaimed chat task=%s: %v", task.ID, delErr)
+		}
+		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+			applog.Infof("[handler] ChatSend error cleaning unpublished attachment session %s after claim failure: %v", sessionID, cleanupErr)
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start chat task")
 	}
@@ -253,6 +262,9 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		applog.Infof("[handler] ChatSend error creating execution: %v", err)
 		if delErr := h.taskRepo.Delete(c.Request().Context(), task.ID); delErr != nil {
 			applog.Infof("[handler] ChatSend error cleaning up chat task=%s after execution create failure: %v", task.ID, delErr)
+		}
+		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+			applog.Infof("[handler] ChatSend error cleaning unpublished attachment session %s after execution create failure: %v", sessionID, cleanupErr)
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
 	}
@@ -314,6 +326,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		Agent:            *agent,
 		ChatHistory:      priorHistory,
 		ProjectID:        projectID,
+		PrincipalID:      h.authPrincipalID(c),
 		SystemContext:    combineContexts(combineContexts(taskContext, attachmentContext), personalityContext),
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,
@@ -430,6 +443,9 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 	}
 	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
 		applog.Infof("[handler] ChatSteer error creating steering input: %v", err)
+		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), input.AttachmentSessionID); cleanupErr != nil {
+			applog.Infof("[handler] ChatSteer error cleaning unpublished attachment session %s: %v", input.AttachmentSessionID, cleanupErr)
+		}
 		if errors.Is(err, repository.ErrExpectedTurnEmpty) {
 			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 		}

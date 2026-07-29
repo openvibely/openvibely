@@ -1,0 +1,387 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/openvibely/openvibely/internal/automationobs"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+)
+
+type automationTaskMutationService interface {
+	Create(context.Context, *models.Task) error
+	Update(context.Context, *models.Task) error
+}
+
+type automationTaskSubmissionService interface {
+	SubmitSavedAutomationTask(models.Task)
+}
+
+type AutomationCompiler struct {
+	automationRepo *repository.AutomationRepo
+	taskSvc        automationTaskMutationService
+	taskRepo       *repository.TaskRepo
+	agentRepo      *repository.AgentRepo
+	scheduleRepo   *repository.ScheduleRepo
+	validator      *AutomationSaveValidator
+	now            func() time.Time
+}
+
+type AutomationSaveRequest struct {
+	ProjectID             string
+	AutomationID          string
+	StableKey             string
+	Source                string
+	CreatedVia            string
+	Candidate             models.AutomationDraftCandidate
+	ConfirmationTokenID   string
+	ConfirmationPrincipal string
+	ConfirmationThreadID  string
+	ConfirmingUserInputID string
+}
+
+type AutomationSaveResult struct {
+	Definition *models.AutomationDefinition `json:"definition"`
+}
+
+func NewAutomationCompiler(automationRepo *repository.AutomationRepo, taskSvc automationTaskMutationService, taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, validator *AutomationSaveValidator) *AutomationCompiler {
+	return &AutomationCompiler{automationRepo: automationRepo, taskSvc: taskSvc, taskRepo: taskRepo, scheduleRepo: scheduleRepo, validator: validator, now: time.Now}
+}
+
+func (c *AutomationCompiler) SetAgentRepository(agentRepo *repository.AgentRepo) {
+	c.agentRepo = agentRepo
+}
+
+func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (*models.AutomationSavePlan, models.AutomationDraftCandidate, error) {
+	if c == nil || c.validator == nil || c.validator.drafts == nil || c.validator.registry == nil {
+		return nil, candidate, errors.New("automation save is unavailable")
+	}
+	normalized, err := c.validator.drafts.NormalizeCandidate(candidate)
+	if err != nil {
+		return nil, candidate, err
+	}
+	issues, err := c.validator.drafts.validateCandidateForProject(ctx, projectID, normalized)
+	if err != nil {
+		return nil, normalized, err
+	}
+	capabilityIssues, err := c.validator.capabilityIssues(ctx, projectID, normalized)
+	if err != nil {
+		return nil, normalized, err
+	}
+	agentIssues, err := c.validator.agentIssues(ctx, projectID, normalized)
+	if err != nil {
+		return nil, normalized, err
+	}
+	issues = append(issues, capabilityIssues...)
+	issues = append(issues, agentIssues...)
+	plan := &models.AutomationSavePlan{Validation: issues, WillNot: []string{"merge pull requests", "release software", "deploy software"}}
+	if len(issues) > 0 {
+		automationobs.Event("automation.save.validation_failure", automationobs.String("project_id", projectID), automationobs.String("adapter_key", normalized.AdapterKey))
+		return plan, normalized, nil
+	}
+	adapter, _ := c.validator.registry.Get(normalized.AdapterKey)
+	resourceNodes := adapter.Nodes
+	if adapter.DynamicTopology {
+		resourceNodes = nil
+		for _, node := range normalized.Nodes {
+			allowed := map[string]bool{}
+			if customAutomationNodeMaterializesTask(normalized, node) {
+				allowed["task"] = true
+			}
+			if node.Type == models.AutomationNodeTrigger {
+				allowed["schedule"] = true
+			}
+			resourceNodes = append(resourceNodes, AutomationAdapterNode{Key: node.Key, Name: node.Name, AllowedResources: allowed})
+		}
+	}
+	for _, node := range resourceNodes {
+		if node.AllowedResources["task"] {
+			plan.Effects = append(plan.Effects, models.AutomationSaveEffect{Operation: "create", ResourceType: "task", Name: node.Name})
+		}
+		if node.AllowedResources["schedule"] {
+			plan.Effects = append(plan.Effects, models.AutomationSaveEffect{Operation: "create", ResourceType: "schedule", Name: node.Name})
+		}
+	}
+	return plan, normalized, nil
+}
+
+func customAutomationNodeMaterializesTask(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) bool {
+	if node.Type == models.AutomationNodeTrigger {
+		return true
+	}
+	return node.Type == models.AutomationNodeAgentTask &&
+		!customAutomationGitHubIssueTask(candidate, node.Key) &&
+		!customAutomationNativeImplementation(candidate, node.Key)
+}
+
+// Save validates and applies one complete Automation graph in a single SQLite
+// transaction. It creates no intermediate persistent state.
+func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveRequest) (*AutomationSaveResult, error) {
+	if c == nil || c.automationRepo == nil || c.validator == nil || c.validator.drafts == nil || c.validator.registry == nil || c.taskRepo == nil || c.scheduleRepo == nil {
+		return nil, errors.New("automation save is unavailable")
+	}
+	if strings.TrimSpace(request.ProjectID) == "" {
+		return nil, errors.New("project is required")
+	}
+	candidate, err := c.validator.drafts.NormalizeCandidate(request.Candidate)
+	if err != nil {
+		return nil, err
+	}
+	issues, err := c.validator.drafts.validateCandidateForProject(ctx, request.ProjectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	capabilityIssues, err := c.validator.capabilityIssues(ctx, request.ProjectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	agentIssues, err := c.validator.agentIssues(ctx, request.ProjectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	issues = append(issues, capabilityIssues...)
+	issues = append(issues, agentIssues...)
+	if len(issues) > 0 {
+		return nil, fmt.Errorf("automation graph validation failed: %s", issues[0].Message)
+	}
+
+	automationID := strings.TrimSpace(request.AutomationID)
+	if automationID == "" {
+		automationID = repository.NewID()
+	}
+	current, err := c.automationRepo.GetDefinition(ctx, request.ProjectID, automationID)
+	if err != nil {
+		return nil, err
+	}
+	if candidate.AdapterKey == AutomationAdapterVisionDriver && current == nil {
+		return nil, errors.New("Vision Driver cannot be created; use Native SDLC or GitHub SDLC for new Automations")
+	}
+	expectedGraphID := ""
+	automation := models.Automation{ID: automationID, ProjectID: request.ProjectID, Name: candidate.Name,
+		Description: candidate.Description, AutomationType: candidate.AutomationType, LifecycleState: models.AutomationActive}
+	existingResources := map[string]models.AutomationDefinitionResource{}
+	if current != nil {
+		automation = current.Automation
+		automation.Name = candidate.Name
+		expectedGraphID = current.Version.ID
+		for _, resource := range current.Resources {
+			existingResources[resource.NodeKey+"\x00"+resource.ResourceType] = resource
+		}
+	}
+
+	adapter, ok := c.validator.registry.Get(candidate.AdapterKey)
+	if !ok {
+		return nil, fmt.Errorf("unsupported automation adapter %q", candidate.AdapterKey)
+	}
+	candidateNodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		candidateNodes[node.Key] = node
+	}
+	resourceNodes := adapter.Nodes
+	if adapter.DynamicTopology {
+		resourceNodes = make([]AutomationAdapterNode, 0, len(candidate.Nodes))
+		for _, node := range candidate.Nodes {
+			resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
+			if customAutomationNodeMaterializesTask(candidate, node) {
+				resource.AllowedResources["task"] = true
+			}
+			if node.Type == models.AutomationNodeTrigger {
+				resource.AllowedResources["schedule"] = true
+			}
+			resourceNodes = append(resourceNodes, resource)
+		}
+	}
+
+	write := repository.AutomationSaveWrite{ProjectID: request.ProjectID, AutomationID: automationID, GraphID: repository.NewID(),
+		ExpectedCurrentGraphID: expectedGraphID, StableKey: request.StableKey, Source: request.Source,
+		CreatedVia: request.CreatedVia, Candidate: candidate, ConfirmationTokenID: request.ConfirmationTokenID,
+		ConfirmationPrincipal: request.ConfirmationPrincipal, ConfirmationThreadID: request.ConfirmationThreadID,
+		ConfirmingUserInputID: request.ConfirmingUserInputID}
+	for _, resourceNode := range resourceNodes {
+		if !resourceNode.AllowedResources["task"] {
+			continue
+		}
+		node := candidateNodes[resourceNode.Key]
+		prompt, category, priority := automationNodeTaskConfiguration(candidate, node)
+		agent, err := c.resolveNodeAgent(ctx, request.ProjectID, node)
+		if err != nil {
+			return nil, err
+		}
+		var agentID *string
+		if agent != nil {
+			agentID = &agent.ID
+		}
+		taskWrite := repository.AutomationSaveTask{NodeKey: node.Key, Title: automationTaskTitle(automation, node), Prompt: prompt,
+			Category: category, Priority: priority, AgentDefinitionID: agentID}
+		if existing := existingResources[node.Key+"\x00task"]; existing.ResourceID != "" {
+			taskWrite.ExistingTaskID = existing.ResourceID
+		}
+		if candidate.AdapterKey == AutomationAdapterCustom {
+			taskWrite.ApplyTopology = true
+			taskWrite.ParentNodeKey, _ = customAutomationTaskNeighbors(candidate, node.Key)
+			if _, child := customAutomationTaskNeighbors(candidate, node.Key); child != nil {
+				taskWrite.ChildNodeKey = child.Key
+				taskWrite.ChildTitle = automationTaskTitle(automation, *child)
+				taskWrite.ChildPromptPrefix = automationCompiledTaskPrompt(candidate, *child)
+				childCategory, _ := child.Config["category"].(string)
+				taskWrite.ChildCategory = models.TaskCategory(childCategory)
+				if parentKey, _ := customAutomationTaskNeighbors(candidate, child.Key); parentKey != "" {
+					if parent := candidateNodes[parentKey]; parent.Type == models.AutomationNodeTrigger {
+						taskWrite.ChildCategory = models.CategoryActive
+					}
+				}
+			}
+		}
+		write.Tasks = append(write.Tasks, taskWrite)
+	}
+	for _, resourceNode := range resourceNodes {
+		if !resourceNode.AllowedResources["schedule"] {
+			continue
+		}
+		node := candidateNodes[resourceNode.Key]
+		_, clearContextConfigured := node.Config["clear_context_on_start"]
+		node.Config["enabled"] = true
+		for i := range write.Candidate.Nodes {
+			if write.Candidate.Nodes[i].Key == node.Key {
+				write.Candidate.Nodes[i].Config["enabled"] = true
+				break
+			}
+		}
+		taskNodeKey := node.Key
+		if candidate.AdapterKey != AutomationAdapterCustom {
+			taskNodeKey, _ = node.Config["target_node_key"].(string)
+		}
+		schedule, err := c.scheduleFromNode("", node)
+		if err != nil {
+			return nil, err
+		}
+		scheduleWrite := repository.AutomationSaveSchedule{NodeKey: node.Key, TaskNodeKey: taskNodeKey, RunAt: schedule.RunAt,
+			RepeatType: schedule.RepeatType, RepeatInterval: schedule.RepeatInterval, Enabled: schedule.Enabled, ClearContextOnStart: schedule.ClearContextOnStart}
+		if existing := existingResources[node.Key+"\x00schedule"]; existing.ResourceID != "" {
+			scheduleWrite.ExistingScheduleID = existing.ResourceID
+			stored, err := c.scheduleRepo.GetByID(ctx, existing.ResourceID)
+			if err != nil {
+				return nil, err
+			}
+			if stored == nil {
+				return nil, fmt.Errorf("schedule for node %q is unavailable", node.Key)
+			}
+			if !clearContextConfigured {
+				scheduleWrite.ClearContextOnStart = stored.ClearContextOnStart
+				for i := range write.Candidate.Nodes {
+					if write.Candidate.Nodes[i].Key == node.Key {
+						write.Candidate.Nodes[i].Config["clear_context_on_start"] = stored.ClearContextOnStart
+						break
+					}
+				}
+			}
+			scheduleWrite.PreserveTiming = stored.RunAt.In(time.Local).Format("15:04") == schedule.RunAt.In(time.Local).Format("15:04") &&
+				stored.RepeatType == schedule.RepeatType && stored.RepeatInterval == schedule.RepeatInterval
+		}
+		write.Schedules = append(write.Schedules, scheduleWrite)
+	}
+
+	definition, runnable, err := c.automationRepo.SaveCurrentGraph(ctx, write)
+	if err != nil {
+		return nil, err
+	}
+	if submitter, ok := c.taskSvc.(automationTaskSubmissionService); ok {
+		for _, task := range runnable {
+			submitter.SubmitSavedAutomationTask(task)
+		}
+	}
+	automationobs.Event("automation.saved", automationobs.String("project_id", request.ProjectID),
+		automationobs.String("automation_id", automationID), automationobs.String("graph_id", write.GraphID))
+	return &AutomationSaveResult{Definition: definition}, nil
+}
+
+func (c *AutomationCompiler) resolveNodeAgent(ctx context.Context, projectID string, node models.AutomationDraftNode) (*models.Agent, error) {
+	ref, _ := node.Config["agent_ref"].(string)
+	if strings.TrimSpace(ref) == "" {
+		return nil, nil
+	}
+	agent, err := resolveAutomationAgent(ctx, c.agentRepo, projectID, ref)
+	if err != nil {
+		return nil, err
+	}
+	if agent == nil {
+		return nil, fmt.Errorf("Agent selection for node %q is unavailable in this project", node.Key)
+	}
+	return agent, nil
+}
+
+func (c *AutomationCompiler) scheduleFromNode(taskID string, node models.AutomationDraftNode) (models.Schedule, error) {
+	runAtText, _ := node.Config["run_at"].(string)
+	clock, err := time.ParseInLocation("15:04", runAtText, time.Local)
+	if err != nil {
+		return models.Schedule{}, fmt.Errorf("invalid trigger time for %q", node.Key)
+	}
+	now := c.now().In(time.Local)
+	runAt := time.Date(now.Year(), now.Month(), now.Day(), clock.Hour(), clock.Minute(), 0, 0, time.Local)
+	if !runAt.After(now) {
+		runAt = runAt.AddDate(0, 0, 1)
+	}
+	repeat, _ := node.Config["repeat_type"].(string)
+	interval, _ := draftInt(node.Config["repeat_interval"])
+	clearContextOnStart, present := node.Config["clear_context_on_start"].(bool)
+	if !present {
+		clearContextOnStart = true
+	}
+	return models.Schedule{TaskID: taskID, RunAt: runAt.UTC(), RepeatType: models.RepeatType(repeat), RepeatInterval: interval, Enabled: true, ClearContextOnStart: clearContextOnStart}, nil
+}
+
+type AutomationLifecycleService struct {
+	repo         *repository.AutomationRepo
+	scheduleRepo *repository.ScheduleRepo
+	taskSvc      automationTaskMutationService
+}
+
+func NewAutomationLifecycleService(repo *repository.AutomationRepo, scheduleRepo *repository.ScheduleRepo, taskSvc ...automationTaskMutationService) *AutomationLifecycleService {
+	service := &AutomationLifecycleService{repo: repo, scheduleRepo: scheduleRepo}
+	if len(taskSvc) > 0 {
+		service.taskSvc = taskSvc[0]
+	}
+	return service
+}
+
+func (s *AutomationLifecycleService) Pause(ctx context.Context, projectID, automationID string) error {
+	if s == nil || s.repo == nil {
+		return errors.New("automation lifecycle service is unavailable")
+	}
+	return s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationPaused)
+}
+
+func (s *AutomationLifecycleService) Resume(ctx context.Context, projectID, automationID string) error {
+	if s == nil || s.repo == nil {
+		return errors.New("automation lifecycle service is unavailable")
+	}
+	roots, err := s.repo.ResumeAutomation(ctx, projectID, automationID)
+	if err != nil {
+		return err
+	}
+	if submitter, ok := s.taskSvc.(automationTaskSubmissionService); ok {
+		for _, task := range roots {
+			task.Category = models.CategoryActive
+			submitter.SubmitSavedAutomationTask(task)
+		}
+	}
+	return nil
+}
+
+func (s *AutomationLifecycleService) Archive(ctx context.Context, projectID, automationID string) error {
+	if s == nil || s.repo == nil {
+		return errors.New("automation lifecycle service is unavailable")
+	}
+	return s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationArchived)
+}
+
+func (s *AutomationLifecycleService) Delete(ctx context.Context, projectID, automationID string) error {
+	if s == nil || s.repo == nil {
+		return errors.New("automation lifecycle service is unavailable")
+	}
+	return s.repo.DeleteAutomation(ctx, projectID, automationID)
+}

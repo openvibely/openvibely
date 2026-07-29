@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,37 +42,43 @@ type LLMCaller interface {
 }
 
 type LLMService struct {
-	llmConfigRepo            *repository.LLMConfigRepo
-	execRepo                 *repository.ExecutionRepo
-	taskRepo                 *repository.TaskRepo
-	projectRepo              *repository.ProjectRepo
-	scheduleRepo             *repository.ScheduleRepo
-	attachmentRepo           *repository.AttachmentRepo
-	agentRepo                *repository.AgentRepo
-	lifecycleRepo            *repository.LifecycleRepo
-	mutationRecorder         func(models.Task) agentlibrary.MutationRecorder
-	alertSvc                 *AlertService
-	taskSvc                  *TaskService
-	taskGoalSvc              *TaskGoalService
-	worktreeSvc              *WorktreeService
-	telegramSvc              *TelegramService
-	slackSvc                 *SlackService
-	discordSvc               *DiscordService
-	llmCaller                LLMCaller
-	providerAdapters         map[models.LLMProvider]ProviderAdapter
-	routing                  *agentRoutingStrategy
-	fileChangeBroadcaster    *events.FileChangeBroadcaster
-	threadInputRepo          *repository.ThreadInputRepo
-	usageRepo                *repository.UsageRepo
-	skillAnalyticsRepo       *repository.SkillAnalyticsRepo
-	broadcaster              *events.Broadcaster
-	executionStreamHub       *events.ExecutionStreamHub
-	queuedTaskThreadPromoter func(taskID string)
-	channelMessageRouter     *ChannelMessageRouter
-	githubIssueRuntime       GitHubIssueRuntimeProvider
-	githubAuthRepo           *repository.GitHubAuthRepo
-	taskPullRequestRepo      *repository.TaskPullRequestRepo
-	githubPRFeedbackRepo     *repository.GitHubPRFeedbackRepo
+	llmConfigRepo             *repository.LLMConfigRepo
+	execRepo                  *repository.ExecutionRepo
+	taskRepo                  *repository.TaskRepo
+	projectRepo               *repository.ProjectRepo
+	scheduleRepo              *repository.ScheduleRepo
+	attachmentRepo            *repository.AttachmentRepo
+	agentRepo                 *repository.AgentRepo
+	lifecycleRepo             *repository.LifecycleRepo
+	mutationRecorder          func(models.Task) agentlibrary.MutationRecorder
+	alertSvc                  *AlertService
+	taskSvc                   *TaskService
+	taskGoalSvc               *TaskGoalService
+	worktreeSvc               *WorktreeService
+	telegramSvc               *TelegramService
+	slackSvc                  *SlackService
+	discordSvc                *DiscordService
+	llmCaller                 LLMCaller
+	providerAdapters          map[models.LLMProvider]ProviderAdapter
+	routing                   *agentRoutingStrategy
+	fileChangeBroadcaster     *events.FileChangeBroadcaster
+	threadInputRepo           *repository.ThreadInputRepo
+	usageRepo                 *repository.UsageRepo
+	skillAnalyticsRepo        *repository.SkillAnalyticsRepo
+	broadcaster               *events.Broadcaster
+	executionStreamHub        *events.ExecutionStreamHub
+	queuedTaskThreadPromoter  func(taskID string)
+	channelMessageRouter      *ChannelMessageRouter
+	githubIssueRuntime        GitHubIssueRuntimeProvider
+	githubAuthRepo            *repository.GitHubAuthRepo
+	taskPullRequestRepo       *repository.TaskPullRequestRepo
+	githubPRFeedbackRepo      *repository.GitHubPRFeedbackRepo
+	automationRegistrationSvc *AutomationRegistrationService
+	automationRepo            *repository.AutomationRepo
+
+	// automationHandoffBeforeFinalAdmission is a deterministic test barrier for
+	// the commit-to-submission lifecycle race. Production leaves it nil.
+	automationHandoffBeforeFinalAdmission func()
 	// globalSkillRoot is the parent directory holding <root>/agents for global
 	// agents/skills. It is used for catalog construction and bounded skill
 	// mutation writes; agents themselves remain user-managed.
@@ -199,6 +206,14 @@ func (s *LLMService) SetGitHubAuthRepo(repo *repository.GitHubAuthRepo) {
 	s.githubAuthRepo = repo
 }
 
+func (s *LLMService) SetAutomationRegistrationService(registration *AutomationRegistrationService) {
+	s.automationRegistrationSvc = registration
+}
+
+func (s *LLMService) SetAutomationRepo(repo *repository.AutomationRepo) {
+	s.automationRepo = repo
+}
+
 func (s *LLMService) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
 	s.taskPullRequestRepo = repo
 }
@@ -232,7 +247,7 @@ func (s *LLMService) taskSendMessageRuntimeTools(task models.Task) *llmcontracts
 	}
 }
 
-func (s *LLMService) taskActionRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
+func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
 	if s == nil {
 		return nil
 	}
@@ -244,10 +259,134 @@ func (s *LLMService) taskActionRuntimeTools(task models.Task) *llmcontracts.Runt
 		GitHubPRFeedbackRepo:     s.githubPRFeedbackRepo,
 		GitHubAuthRepo:           s.githubAuthRepo,
 		ThreadInputRepo:          s.threadInputRepo,
+		AutomationRepo:           s.automationRepo,
 		GitHub:                   s.githubIssueRuntime,
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
 	})
-	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools)
+	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
+}
+
+func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task models.Task, defs []llmcontracts.RuntimeToolDefinition) *llmcontracts.RuntimeTools {
+	if s == nil || s.automationRepo == nil || s.githubIssueRuntime == nil || strings.TrimSpace(task.ProjectID) == "" {
+		return nil
+	}
+	automationContext, ok := AutomationContextFromContext(ctx)
+	if !ok || automationContext.ProjectID != task.ProjectID {
+		return nil
+	}
+	allowed := make(map[string]bool, len(defs))
+	for _, def := range defs {
+		allowed[strings.ToLower(strings.TrimSpace(def.Name))] = true
+	}
+	runtime := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
+		ProjectID:                task.ProjectID,
+		ProjectRepo:              s.projectRepo,
+		TaskRepo:                 s.taskRepo,
+		TaskPullRequestRepo:      s.taskPullRequestRepo,
+		GitHubPRFeedbackRepo:     s.githubPRFeedbackRepo,
+		GitHubAuthRepo:           s.githubAuthRepo,
+		ThreadInputRepo:          s.threadInputRepo,
+		AutomationRepo:           s.automationRepo,
+		GitHub:                   s.githubIssueRuntime,
+		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
+	})
+	if runtime == nil {
+		return nil
+	}
+	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, len(runtime.Definitions))
+	for _, def := range runtime.Definitions {
+		if allowed[strings.ToLower(strings.TrimSpace(def.Name))] {
+			filtered = append(filtered, def)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	runtime.Definitions = filtered
+	writeTools := make(map[string]bool, len(filtered))
+	for _, def := range filtered {
+		if def.Access == llmcontracts.RuntimeToolAccessWrite {
+			writeTools[strings.ToLower(strings.TrimSpace(def.Name))] = true
+		}
+	}
+	if len(writeTools) > 0 {
+		baseExecutor := runtime.Executor
+		runtime.Executor = func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if writeTools[strings.ToLower(strings.TrimSpace(name))] {
+				if automationContext.OriginTask && len(automationContext.Bindings) == 0 {
+					return "", true, true, errors.New("GitHub mutation is not authorized by the caller's Automation graph because its originating graph is no longer current")
+				}
+				for _, binding := range automationContext.Bindings {
+					current, err := s.automationRepo.IsCurrentActiveBinding(toolCtx, task.ProjectID, binding)
+					if err != nil {
+						return "", true, true, err
+					}
+					if !current {
+						return "", true, true, errors.New("GitHub mutation is not authorized by the caller's current active Automation graph")
+					}
+				}
+			}
+			return baseExecutor(toolCtx, name, input)
+		}
+	}
+	return runtime
+}
+
+func (s *LLMService) AutomationBootstrapRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
+	return s.automationBootstrapRuntimeTools(ctx, task)
+}
+
+func (s *LLMService) automationBootstrapRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
+	if s == nil || s.automationRegistrationSvc == nil || strings.TrimSpace(task.ProjectID) == "" {
+		return nil
+	}
+	allowedAdapters := map[string]bool{}
+	for _, handle := range SelectedSkillHandlesFromContext(ctx) {
+		switch handle {
+		case "openvibely_native_autonomous_sdlc_bootstrap":
+			allowedAdapters[AutomationAdapterNativeSDLC] = true
+		case "openvibely_github_autonomous_sdlc_bootstrap":
+			allowedAdapters[AutomationAdapterGitHubSDLC] = true
+		}
+	}
+	if len(allowedAdapters) == 0 {
+		return nil
+	}
+	definition := llmcontracts.RuntimeToolDefinition{
+		Name:        "register_automation_resources",
+		Description: "Register the visible tasks and schedules created by this maintained bootstrap as a published Automation. Use actual resource IDs and canonical node keys; the current task project is enforced server-side.",
+		Access:      llmcontracts.RuntimeToolAccessWrite,
+		Parameters:  json.RawMessage(`{"type":"object","properties":{"adapter_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"stable_key":{"type":"string"},"name":{"type":"string"},"resources":{"type":"array","minItems":2,"maxItems":100,"items":{"type":"object","properties":{"node_key":{"type":"string"},"resource_type":{"type":"string","enum":["task","schedule"]},"resource_id":{"type":"string"},"relation":{"type":"string","enum":["owned","shared"]}},"required":["node_key","resource_type","resource_id"],"additionalProperties":false}}},"required":["adapter_key","stable_key","resources"],"additionalProperties":false}`),
+	}
+	return &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{definition}, Executor: func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		if name != "register_automation_resources" {
+			return "", false, false, nil
+		}
+		var request AutomationRegistrationRequest
+		if err := json.Unmarshal(input, &request); err != nil {
+			return "", true, true, fmt.Errorf("invalid automation registration input: %w", err)
+		}
+		if !allowedAdapters[request.AdapterKey] {
+			return "", true, true, fmt.Errorf("adapter %q is unavailable for the selected maintained bootstrap", request.AdapterKey)
+		}
+		request.ProjectID = task.ProjectID
+		request.CreatedVia = "bootstrap"
+		definition, reused, err := s.automationRegistrationSvc.Register(toolCtx, request)
+		if err != nil {
+			return "", true, true, err
+		}
+		result, err := json.Marshal(map[string]any{
+			"automation_id": definition.Automation.ID,
+			"version_id":    definition.Version.ID,
+			"status":        definition.Automation.LifecycleState,
+			"reused":        reused,
+			"url":           fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, task.ProjectID),
+		})
+		if err != nil {
+			return "", true, true, err
+		}
+		return string(result), true, false, nil
+	}}
 }
 
 func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.RuntimeTools {
@@ -260,6 +399,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		"list_tasks":                       true,
 		"create_task":                      true,
 		"create_swarm_task":                true,
+		"execute_tasks":                    true,
 		"set_task_goal":                    true,
 		"clear_task_goal":                  true,
 		"get_task_goal":                    true,
@@ -293,6 +433,15 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		TaskSvc:       s.taskSvc,
 		SwarmSvc:      nil,
 		LLMConfigRepo: s.llmConfigRepo,
+		PrepareTaskCreation: func(ctx context.Context, request *TaskCreationRequest) error {
+			return s.prepareAutomationTaskCreation(ctx, task.ProjectID, request)
+		},
+		CreatePreparedTask: func(ctx context.Context, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
+			return s.createPreparedAutomationTask(ctx, task.ProjectID, request, agents)
+		},
+		OnTasksCreated: func(ctx context.Context, requests []TaskCreationRequest, tasks []models.Task) error {
+			return s.recordAutomationTasksCreated(ctx, task.ProjectID, requests, tasks)
+		},
 	})
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{
 		ProjectID:   task.ProjectID,
@@ -318,6 +467,313 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		Definitions: filtered,
 		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, handlers, allowed),
 	}
+}
+
+func (s *LLMService) connectedAutomationGitHubTask(ctx context.Context, projectID, automationID, versionID, nodeID string) (*models.AutomationNode, error) {
+	// Immutable publications created before generic Task nodes used the
+	// implementation role. Prefer it for those versions, then require the exact
+	// GitHub inbox -> Task -> Open pull request topology used by current graphs.
+	node, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, automationID, versionID, nodeID, "implementation", true)
+	if err != nil || node != nil {
+		return node, err
+	}
+	node, err = s.automationRepo.GetConnectedNodeByRole(ctx, projectID, automationID, versionID, nodeID, "task", true)
+	if err != nil || node == nil {
+		return node, err
+	}
+	inbox, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, automationID, versionID, node.ID, "github_inbox", false)
+	if err != nil || inbox == nil || inbox.ID != nodeID {
+		return nil, err
+	}
+	pullRequest, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, automationID, versionID, node.ID, "open_pull_request", true)
+	if err != nil || pullRequest == nil {
+		return nil, err
+	}
+	return node, nil
+}
+
+func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectID string, request *TaskCreationRequest) error {
+	if s == nil || s.automationRepo == nil || request == nil {
+		return nil
+	}
+	automationContext, ok := AutomationContextFromContext(ctx)
+	if !ok || automationContext.ProjectID != projectID {
+		return nil
+	}
+	var selectedNode *models.AutomationNode
+	for _, binding := range automationContext.Bindings {
+		node, err := s.connectedAutomationGitHubTask(ctx, projectID, binding.AutomationID, binding.VersionID, binding.NodeID)
+		if err != nil {
+			return err
+		}
+		if node == nil {
+			continue
+		}
+		if selectedNode != nil && selectedNode.ConfigJSON != node.ConfigJSON {
+			return errors.New("Automation bindings have conflicting GitHub task configurations")
+		}
+		selectedNode = node
+	}
+	if selectedNode == nil {
+		if request.SourceGitHubIssueNumber > 0 || strings.TrimSpace(request.SourceGitHubRepoURL) != "" {
+			return errors.New("GitHub source issue task creation is not authorized by the caller's exact Automation graph")
+		}
+		return nil
+	}
+	if request.SourceGitHubIssueNumber <= 0 {
+		return errors.New("Automation GitHub inbox task creation requires source_github_issue_number from this execution")
+	}
+	request.SourceGitHubRepoURL = ""
+	request.Chain = nil
+	var config map[string]any
+	if err := json.Unmarshal([]byte(selectedNode.ConfigJSON), &config); err != nil {
+		return fmt.Errorf("decoding GitHub task configuration: %w", err)
+	}
+	prompt, _ := config["prompt"].(string)
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return errors.New("published GitHub task configuration has no prompt")
+	}
+	if modelContext := strings.TrimSpace(request.Prompt); modelContext != "" && modelContext != prompt {
+		prompt += "\n\nIssue-specific context:\n" + modelContext
+	}
+	skills, _ := draftStringSlice(config["skills"])
+	if len(skills) > 0 {
+		prompt += "\n\nConfigured Agent skills:\n- " + strings.Join(automationSkillNames(normalizeDraftReferences(skills)), "\n- ")
+	}
+	sourceFiles, _ := draftStringSlice(config["source_files"])
+	if len(sourceFiles) > 0 {
+		prompt += "\n\nFocus source files:\n- " + strings.Join(normalizeDraftReferences(sourceFiles), "\n- ")
+	}
+	for _, binding := range automationContext.Bindings {
+		if binding.VersionID != selectedNode.VersionID || binding.AutomationID != selectedNode.AutomationID {
+			continue
+		}
+		pullRequest, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, binding.VersionID, selectedNode.ID, "open_pull_request", true)
+		if err != nil {
+			return err
+		}
+		if pullRequest != nil {
+			var prConfig map[string]any
+			if err := json.Unmarshal([]byte(pullRequest.ConfigJSON), &prConfig); err != nil {
+				return fmt.Errorf("decoding pull request node configuration: %w", err)
+			}
+			instructions, _ := prConfig["instructions"].(string)
+			base, _ := prConfig["base"].(string)
+			draft, _ := prConfig["draft"].(bool)
+			prompt += "\n\nPull request handoff:\n" + strings.TrimSpace(instructions) + "\nAfter implementation and validation, call github_open_pull_request for this task and source issue using base \"" + strings.TrimSpace(base) + "\" and draft=" + fmt.Sprintf("%t", draft) + ". Human review and merge remain authoritative."
+		}
+		break
+	}
+	request.Prompt = prompt
+	category, _ := config["category"].(string)
+	request.Category = category
+	priority, _ := draftInt(config["priority"])
+	request.Priority = priority
+	if ref, _ := config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
+		agent, err := resolveAutomationAgent(ctx, s.agentRepo, projectID, ref)
+		if err != nil {
+			return err
+		}
+		if agent == nil {
+			return fmt.Errorf("GitHub task Agent %q is unavailable in this project", ref)
+		}
+		request.AgentDefinitionID = agent.ID
+		request.Agent = ""
+	}
+	return nil
+}
+
+type automationGitHubTaskCreationPlan struct {
+	sourceBinding   models.AutomationBinding
+	targetNode      models.AutomationNode
+	issueResourceID string
+	executionID     string
+}
+
+func (s *LLMService) automationGitHubTaskCreationPlan(ctx context.Context, projectID string, request TaskCreationRequest) (*automationGitHubTaskCreationPlan, error) {
+	if s == nil || s.automationRepo == nil {
+		return nil, nil
+	}
+	automationContext, ok := AutomationContextFromContext(ctx)
+	if !ok || automationContext.ProjectID != projectID {
+		return nil, nil
+	}
+	_, executionID, executionOK := AutomationExecutionFromContext(ctx)
+	if !executionOK || strings.TrimSpace(executionID) == "" {
+		return nil, errors.New("Automation GitHub inbox task creation requires an exact current execution")
+	}
+	if request.SourceGitHubIssueNumber <= 0 {
+		return nil, errors.New("Automation GitHub inbox task creation requires source_github_issue_number from this execution")
+	}
+	if s.githubIssueRuntime == nil || s.projectRepo == nil {
+		return nil, errors.New("Automation GitHub issue provenance is unavailable")
+	}
+	project, err := s.projectRepo.GetByID(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("loading Automation project repository: %w", err)
+	}
+	if project == nil {
+		return nil, errors.New("Automation project repository is unavailable")
+	}
+	repo, err := resolveAutomationProjectGitHubRepository(ctx, s.githubIssueRuntime, project)
+	if err != nil {
+		return nil, fmt.Errorf("resolving Automation project repository: %w", err)
+	}
+	issueResourceID := githubIssueResourceID(repo, request.SourceGitHubIssueNumber)
+	discovered, err := s.automationRepo.BindingsForExecutionResource(ctx, projectID, executionID, "github_issue", issueResourceID)
+	if err != nil {
+		return nil, fmt.Errorf("loading exact Automation issue discovery: %w", err)
+	}
+
+	var plan *automationGitHubTaskCreationPlan
+	for _, causalBinding := range automationContext.Bindings {
+		targetNode, err := s.connectedAutomationGitHubTask(ctx, projectID, causalBinding.AutomationID, causalBinding.VersionID, causalBinding.NodeID)
+		if err != nil {
+			return nil, err
+		}
+		if targetNode == nil {
+			continue
+		}
+		current, err := s.automationRepo.IsCurrentActiveBinding(ctx, projectID, causalBinding)
+		if err != nil {
+			return nil, err
+		}
+		if !current {
+			return nil, errors.New("Automation GitHub inbox task creation is not authorized by the current active graph")
+		}
+		for _, discoveredBinding := range discovered.Bindings {
+			if discoveredBinding.AutomationID != causalBinding.AutomationID || discoveredBinding.VersionID != causalBinding.VersionID ||
+				discoveredBinding.InvocationID != causalBinding.InvocationID || strings.TrimSpace(discoveredBinding.WorkItemID) == "" {
+				continue
+			}
+			sourceBinding := causalBinding
+			sourceBinding.WorkItemID = discoveredBinding.WorkItemID
+			candidate := &automationGitHubTaskCreationPlan{sourceBinding: sourceBinding,
+				targetNode: *targetNode, issueResourceID: issueResourceID, executionID: executionID}
+			if plan != nil && (plan.sourceBinding.AutomationID != candidate.sourceBinding.AutomationID ||
+				plan.sourceBinding.VersionID != candidate.sourceBinding.VersionID || plan.sourceBinding.WorkItemID != candidate.sourceBinding.WorkItemID ||
+				plan.targetNode.ID != candidate.targetNode.ID) {
+				return nil, errors.New("source GitHub issue has conflicting Automation task provenance")
+			}
+			plan = candidate
+		}
+	}
+	if plan == nil {
+		return nil, errors.New("source GitHub issue was not discovered by this exact current Automation execution")
+	}
+	return plan, nil
+}
+
+func (s *LLMService) createPreparedAutomationTask(ctx context.Context, projectID string, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound || automationContext.ProjectID != projectID {
+		return nil, "", false, nil
+	}
+	githubInboxTopology := false
+	for _, binding := range automationContext.Bindings {
+		target, err := s.connectedAutomationGitHubTask(ctx, projectID, binding.AutomationID, binding.VersionID, binding.NodeID)
+		if err != nil {
+			return nil, "", true, err
+		}
+		if target != nil {
+			githubInboxTopology = true
+			break
+		}
+	}
+	if !githubInboxTopology {
+		return nil, "", false, nil
+	}
+	plan, err := s.automationGitHubTaskCreationPlan(ctx, projectID, request)
+	if err != nil {
+		return nil, "", true, err
+	}
+	if plan == nil {
+		return nil, "", false, nil
+	}
+	if s.taskSvc == nil || s.taskRepo == nil {
+		return nil, "", true, errors.New("Automation task service unavailable")
+	}
+
+	selectedAgentID, _ := selectTaskCreationAgent(request, agents)
+	category := resolveTaskCreationCategory(request, selectedAgentID, agents)
+	task := &models.Task{ProjectID: projectID, Title: request.Title, Prompt: request.Prompt,
+		Status: models.StatusPending, Category: category, Priority: request.Priority,
+		CreatedVia: repository.AutomationCompilerTaskCreatedVia(plan.sourceBinding.AutomationID, plan.targetNode.NodeKey)}
+	if selectedAgentID != "" {
+		task.AgentID = &selectedAgentID
+	}
+	agentDefinitionID, err := resolveTaskCreationAgentDefinition(ctx, request, projectID, s.taskSvc)
+	if err != nil {
+		return nil, "", true, err
+	}
+	if agentDefinitionID != "" {
+		task.AgentDefinitionID = &agentDefinitionID
+	}
+	objective := strings.TrimSpace(request.Goal)
+	if len(objective) > MaxTaskGoalLength {
+		return nil, "", true, ErrTaskGoalTooLong
+	}
+	var goal *models.TaskGoal
+	if objective != "" {
+		goal = &models.TaskGoal{GoalID: repository.NewID(), Objective: objective,
+			Status: models.TaskGoalStatusActive, Reason: "set at task creation"}
+	}
+	canonical, created, err := s.automationRepo.CreateOrGetGitHubIssueTask(ctx, s.taskRepo, repository.AutomationGitHubIssueTaskCreation{
+		ProjectID: projectID, ExecutionID: plan.executionID, IssueResourceID: plan.issueResourceID,
+		SourceBinding: plan.sourceBinding, TargetNodeID: plan.targetNode.ID, Task: task, Goal: goal,
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrDuplicateTask) {
+			return nil, "", true, ErrDuplicateTask
+		}
+		return nil, "", true, err
+	}
+	if created {
+		if goal != nil && s.taskSvc.goalSvc != nil {
+			s.taskSvc.goalSvc.publishGoalEvent(events.TaskGoalUpdated, goal)
+		}
+		s.taskSvc.SubmitSavedAutomationTask(*canonical)
+	}
+	action := "Created"
+	if !created {
+		action = "Reused"
+	}
+	summary := fmt.Sprintf("\n\n---\n%s 1 task(s):\n- \"%s\" (%s) [TASK_ID:%s]", action,
+		canonical.Title, canonical.Category, canonical.ID)
+	if strings.TrimSpace(request.Goal) != "" && created {
+		summary += " [goal:set]"
+	}
+	return []models.Task{*canonical}, summary, true, nil
+}
+
+func (s *LLMService) recordAutomationTasksCreated(ctx context.Context, projectID string, requests []TaskCreationRequest, tasks []models.Task) error {
+	if s == nil || s.automationRepo == nil {
+		return nil
+	}
+	automationContext, ok := AutomationContextFromContext(ctx)
+	if !ok || automationContext.ProjectID != projectID {
+		return nil
+	}
+	_, executionID, _ := AutomationExecutionFromContext(ctx)
+	for i, created := range tasks {
+		bindings := automationContext
+		if i < len(requests) && (requests[i].SourceGitHubIssueNumber > 0 || strings.TrimSpace(requests[i].SourceGitHubRepoURL) != "") {
+			return errors.New("Automation GitHub issue tasks must use atomic exact-provenance creation")
+		}
+		for _, binding := range bindings.Bindings {
+			event := repository.AutomationProjectionEvent{
+				Context: bindings, Binding: binding,
+				ActivityKey:  "execution:" + executionID + ":create-task:" + created.ID,
+				ActivityType: "create_task", ActivityStatus: models.AutomationActivityCompleted,
+				Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: created.ID, Relation: "child"}},
+			}
+			if _, _, err := s.automationRepo.RecordProjectionEvent(ctx, event); err != nil {
+				applog.Infof("[agent-svc] automation child task provenance failed task=%s: %v", created.ID, err)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *LLMService) promoteQueuedTaskThreadAfterCompletion(taskID string) {
@@ -518,16 +974,64 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	var runtimeTools *llmcontracts.RuntimeTools
 	scopedFilesWorkDir := ""
 
-	// Create execution record
+	// Create or resolve the execution record. Automation dispatches precreate an
+	// execution transactionally with their durable dispatch claim; ordinary task
+	// runs keep the existing creation path.
 	exec := &models.Execution{
-		TaskID:        task.ID,
-		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
-		PromptSent:    task.Prompt,
+		TaskID:           task.ID,
+		AgentConfigID:    agent.ID,
+		Status:           models.ExecRunning,
+		PromptSent:       task.Prompt,
+		StartsNewContext: task.StartsNewContext,
 	}
-	if err := s.execRepo.Create(ctx, exec); err != nil {
+	if preparedID := preparedAutomationExecutionID(ctx); preparedID != "" {
+		prepared, getErr := s.execRepo.GetByID(ctx, preparedID)
+		if getErr != nil {
+			return nil, llmcontracts.ChatContext{}, fmt.Errorf("loading prepared automation execution: %w", getErr)
+		}
+		if prepared == nil || prepared.TaskID != task.ID || prepared.Status != models.ExecRunning || prepared.DispatchID == "" {
+			return nil, llmcontracts.ChatContext{}, fmt.Errorf("prepared automation execution is invalid")
+		}
+		exec = prepared
+		if err := s.execRepo.SetAgentConfigIfEmpty(ctx, exec.ID, agent.ID); err != nil {
+			return nil, llmcontracts.ChatContext{}, fmt.Errorf("updating prepared automation execution agent: %w", err)
+		}
+		exec.AgentConfigID = agent.ID
+	} else if err := s.execRepo.Create(ctx, exec); err != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating execution: %v", err)
 		return nil, llmcontracts.ChatContext{}, fmt.Errorf("creating execution: %w", err)
+	}
+	preparedExecution := preparedAutomationExecutionID(ctx) != ""
+	ctx = withAutomationExecution(ctx, task.ID, exec.ID)
+	finalizeCtx = context.WithoutCancel(ctx)
+	if s.automationRepo != nil && !preparedExecution {
+		if automationContext, ok := AutomationContextFromContext(ctx); ok && automationContext.ProjectID == task.ProjectID {
+			for i, binding := range automationContext.Bindings {
+				projection := repository.AutomationProjectionEvent{
+					Context: automationContext, Binding: binding,
+					ActivityKey: "execution:" + exec.ID + ":run", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
+					Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}, {ResourceType: "execution", ResourceID: exec.ID}},
+				}
+				if binding.InvocationID == "" && binding.WorkItemID == "" {
+					projection.WorkItemKey = "execution:" + exec.ID + ":root"
+					projection.WorkItemKind = "task_execution"
+					projection.WorkItemTitle = task.Title
+					projection.EventKey = "execution:" + exec.ID + ":entered"
+					projection.ToNodeID = binding.NodeID
+					projection.Transition = models.AutomationTransitionEntered
+				}
+				workItem, _, projectionErr := s.automationRepo.RecordProjectionEvent(ctx, projection)
+				if projectionErr != nil {
+					return nil, llmcontracts.ChatContext{}, fmt.Errorf("recording automation execution provenance: %w", projectionErr)
+				}
+				if workItem != nil {
+					automationContext.Bindings[i].WorkItemID = workItem.ID
+					automationContext.Bindings[i].VersionID = workItem.OriginVersionID
+				}
+			}
+			ctx = WithAutomationContext(ctx, automationContext)
+			finalizeCtx = context.WithoutCancel(ctx)
+		}
 	}
 	if s.broadcaster != nil {
 		s.broadcaster.Publish(events.TaskEvent{
@@ -766,7 +1270,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	runtimeToolsSupported := SupportsRuntimeChatActionTools(callCtx, s.llmConfigRepo, agent)
 	var taskActionTools *llmcontracts.RuntimeTools
 	if runtimeToolsSupported {
-		taskActionTools = s.taskActionRuntimeTools(task)
+		taskActionTools = s.taskActionRuntimeTools(callCtx, task)
 	}
 	if runtimeToolsSupported || agent.Provider != models.ProviderMixture {
 		if ctxTools := llmcontracts.RuntimeToolsFromContext(callCtx); ctxTools != nil || runtimeTools != nil || taskActionTools != nil {
@@ -1393,6 +1897,20 @@ func (s *LLMService) CallAgentDirectWithDefinitionNoTools(ctx context.Context, m
 	return s.callAgentDirectWithDefinition(ctx, message, attachments, agent, workDir, agentDef, true)
 }
 
+type directUsageProjectContextKey struct{}
+
+func WithDirectUsageProject(ctx context.Context, projectID string) context.Context {
+	return context.WithValue(ctx, directUsageProjectContextKey{}, strings.TrimSpace(projectID))
+}
+
+func directUsageProjectFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(directUsageProjectContextKey{}).(string)
+	return strings.TrimSpace(value)
+}
+
 // CallAgentDirectNoTools calls the agent directly and explicitly suppresses
 // tool/plugin execution. Use this for strict JSON-generation helpers.
 func (s *LLMService) CallAgentDirectNoTools(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string) (string, int, error) {
@@ -1446,7 +1964,10 @@ func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message 
 		status = string(models.ExecFailed)
 		errMsg = err.Error()
 	}
-	projectID := s.projectIDForWorkDir(context.Background(), workDir)
+	projectID := directUsageProjectFromContext(ctx)
+	if projectID == "" {
+		projectID = s.projectIDForWorkDir(context.Background(), workDir)
+	}
 	RecordUsageFromResult(context.Background(), s.usageRepo, UsageCapture{ProjectID: projectID, Operation: string(llmcontracts.OperationDirect), Status: status, ErrorMessage: errMsg, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, res)
 	if err != nil {
 		if res.StopReason == "max_tokens" {

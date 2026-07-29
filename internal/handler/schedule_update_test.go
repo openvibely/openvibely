@@ -24,10 +24,10 @@ func TestUpdateSchedule_RecurringAfterRun(t *testing.T) {
 
 	// Create a task
 	task := &models.Task{
-		Title:      "Test Task",
-		ProjectID:  "default",
-		Category:   "scheduled",
-		Status:     "pending",
+		Title:     "Test Task",
+		ProjectID: "default",
+		Category:  "scheduled",
+		Status:    "pending",
 	}
 	if err := taskRepo.Create(context.Background(), task); err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -38,11 +38,12 @@ func TestUpdateSchedule_RecurringAfterRun(t *testing.T) {
 	runAt := time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 14, 0, 0, 0, time.UTC)
 
 	schedule := &models.Schedule{
-		TaskID:         task.ID,
-		RunAt:          runAt,
-		RepeatType:     models.RepeatWeekly,
-		RepeatInterval: 1,
-		Enabled:        true,
+		TaskID:              task.ID,
+		RunAt:               runAt,
+		RepeatType:          models.RepeatWeekly,
+		RepeatInterval:      1,
+		Enabled:             true,
+		ClearContextOnStart: true,
 	}
 
 	if err := scheduleRepo.Create(context.Background(), schedule); err != nil {
@@ -108,6 +109,9 @@ func TestUpdateSchedule_RecurringAfterRun(t *testing.T) {
 	// Verify the interval was updated
 	if updated.RepeatInterval != 2 {
 		t.Errorf("RepeatInterval should be 2, got %d", updated.RepeatInterval)
+	}
+	if !updated.ClearContextOnStart {
+		t.Error("timing-only update must preserve ClearContextOnStart")
 	}
 
 	t.Logf("Original NextRun: %s", originalNextRun.Format("2006-01-02 15:04:05"))

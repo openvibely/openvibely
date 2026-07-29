@@ -22,6 +22,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 type captureProviderAdapter struct {
@@ -3909,6 +3910,49 @@ func (f *fakeGitHubIssueRuntimeProvider) AddLabelsToIssue(ctx context.Context, r
 		}
 	}
 	return nil
+}
+
+func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Automation repository boundary", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/project.git"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	var resolvedURL, resolvedPath string
+	provider := &fakeGitHubIssueRuntimeProvider{resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+		resolvedURL, resolvedPath = repoURL, repoPath
+		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project"}, nil
+	}}
+	opts := githubIssueRuntimeOptions{ProjectID: project.ID, ProjectRepo: projectRepo, GitHub: provider}
+	automationCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID,
+		Bindings: []models.AutomationBinding{{AutomationID: "automation", VersionID: "graph", NodeID: "node"}}})
+
+	_, err := resolveGitHubRepoForRuntimeToolURL(automationCtx, opts, "https://github.com/attacker/other")
+	require.NoError(t, err)
+	require.Equal(t, project.RepoURL, resolvedURL)
+	require.Empty(t, resolvedPath, "Automation issue tools must never pass the local checkout as a repository inference fallback")
+
+	project.RepoURL = ""
+	require.NoError(t, projectRepo.Update(ctx, project))
+	provider.resolveRepoFn = func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+		resolvedURL, resolvedPath = repoURL, repoPath
+		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project"}, nil
+	}
+	_, err = resolveGitHubRepoForRuntimeToolURL(automationCtx, opts, "https://github.com/attacker/other")
+	require.NoError(t, err)
+	require.Empty(t, resolvedURL, "Automation runtime must ignore the model repository override")
+	require.Equal(t, project.RepoPath, resolvedPath, "Automation runtime must resolve the project's local Git remote when repo_url is absent")
+
+	project.RepoURL = "https://github.com/openvibely/project.git"
+	require.NoError(t, projectRepo.Update(ctx, project))
+	provider.resolveRepoFn = func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+		resolvedURL, resolvedPath = repoURL, repoPath
+		return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
+	}
+	_, err = resolveGitHubRepoForRuntimeToolURL(ctx, opts, "https://github.com/example/other")
+	require.NoError(t, err)
+	require.Equal(t, "https://github.com/example/other", resolvedURL, "ordinary Chat must retain explicit repository selection")
+	require.Empty(t, resolvedPath)
 }
 
 func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *testing.T) {

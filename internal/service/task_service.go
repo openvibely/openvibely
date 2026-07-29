@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/attachmentsession"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -17,7 +19,7 @@ var ErrDuplicateTask = errors.New("task with this name already exists in this pr
 
 type TaskService struct {
 	repo                              *repository.TaskRepo
-	attachmentRepo                    *repository.AttachmentRepo
+	uploadsDir                        string
 	workerSvc                         *WorkerService
 	agentRepo                         *repository.AgentRepo
 	goalSvc                           *TaskGoalService
@@ -25,14 +27,18 @@ type TaskService struct {
 	queuedTaskThreadFollowupHook      func(context.Context, string) (bool, error)
 	failedTaskThreadFollowupRetryHook func(context.Context, string) (bool, error)
 	updateCategoryTaskLoader          func(context.Context, string) (*models.Task, error)
+	beforePendingSessionRemoval       func(string)
 }
 
-func NewTaskService(repo *repository.TaskRepo, attachmentRepo *repository.AttachmentRepo, workerSvc *WorkerService) *TaskService {
+func NewTaskService(repo *repository.TaskRepo, _ *repository.AttachmentRepo, workerSvc *WorkerService) *TaskService {
 	return &TaskService{
-		repo:           repo,
-		attachmentRepo: attachmentRepo,
-		workerSvc:      workerSvc,
+		repo:      repo,
+		workerSvc: workerSvc,
 	}
+}
+
+func (s *TaskService) SetDeletionUploadsDir(uploadsDir string) {
+	s.uploadsDir = uploadsDir
 }
 
 func (s *TaskService) SetAgentRepo(agentRepo *repository.AgentRepo) {
@@ -136,6 +142,15 @@ func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, err
 
 func (s *TaskService) Create(ctx context.Context, t *models.Task) error {
 	return s.CreateWithGoal(ctx, t, "")
+}
+
+// SubmitSavedAutomationTask admits a runnable root only after its saved graph
+// and Automation provenance are durable.
+func (s *TaskService) SubmitSavedAutomationTask(task models.Task) {
+	if s == nil || s.workerSvc == nil || task.Category != models.CategoryActive || task.Status == models.StatusBlocked || task.ParentTaskID != nil {
+		return
+	}
+	s.workerSvc.Submit(task)
 }
 
 func (s *TaskService) CreateWithGoal(ctx context.Context, t *models.Task, objective string) error {
@@ -329,38 +344,70 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models
 
 func (s *TaskService) Delete(ctx context.Context, id string) error {
 	applog.Infof("[task-svc] Delete id=%s", id)
+	_, err := s.deleteTask(ctx, id, "", "")
+	return err
+}
 
-	// Get all attachments for this task
-	attachments, err := s.attachmentRepo.ListByTask(ctx, id)
-	if err != nil {
-		applog.Infof("[task-svc] Delete error listing attachments: %v", err)
-		return fmt.Errorf("listing attachments for deletion: %w", err)
+func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, category models.TaskCategory) (bool, error) {
+	prepareDelete := func(manifest repository.TaskDeletionManifest) error {
+		if len(manifest.PendingUploadSessionIDs) > 0 && strings.TrimSpace(s.uploadsDir) == "" {
+			return errors.New("uploads directory is not configured for pending upload cleanup")
+		}
+		if s.workerSvc != nil {
+			s.workerSvc.CancelRunningTask(id)
+		}
+		return nil
+	}
+	var (
+		manifest repository.TaskDeletionManifest
+		deleted  bool
+		err      error
+	)
+	if projectID == "" && category == "" {
+		manifest, deleted, err = s.repo.DeleteWithCleanupManifest(ctx, id, prepareDelete)
+	} else {
+		manifest, deleted, err = s.repo.DeleteWithCleanupManifestIfCategory(ctx, id, projectID, category, prepareDelete)
+	}
+	if err != nil || !deleted {
+		return deleted, err
 	}
 
-	// Delete physical files for all attachments
-	for _, att := range attachments {
-		if err := os.Remove(att.FilePath); err != nil && !os.IsNotExist(err) {
-			applog.Infof("[task-svc] Delete warning: failed to delete file %s: %v", att.FilePath, err)
-			// Continue even if file deletion fails - the file might already be gone
-		} else {
-			applog.Infof("[task-svc] Delete removed file %s", att.FilePath)
+	// The transaction reserves the sole database connection from cleanup capture
+	// through deletion. A concurrent upload metadata write therefore either lands
+	// in the manifest first or fails after the task rows disappear and rolls back
+	// its newly published file. Filesystem and git work remain outside SQLite.
+	var cleanupErrors []error
+	removeFile := func(kind, path string) {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			applog.Infof("[task-svc] Delete error removing %s %s after durable deletion: %v", kind, path, err)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing %s %s: %w", kind, path, err))
 		}
 	}
-
-	// Delete attachment records from database
-	if err := s.attachmentRepo.DeleteByTask(ctx, id); err != nil {
-		applog.Infof("[task-svc] Delete error deleting attachments: %v", err)
-		return fmt.Errorf("deleting attachments: %w", err)
+	for _, path := range manifest.TaskAttachmentPaths {
+		removeFile("attachment", path)
+	}
+	for _, path := range manifest.ExecutionAttachmentPaths {
+		removeFile("execution attachment", path)
+	}
+	for _, sessionID := range manifest.PendingUploadSessionIDs {
+		path := filepath.Join(s.uploadsDir, "chat", "pending", sessionID)
+		unlockSession := attachmentsession.Lock(sessionID)
+		if s.beforePendingSessionRemoval != nil {
+			s.beforePendingSessionRemoval(sessionID)
+		}
+		removeErr := os.RemoveAll(path)
+		unlockSession()
+		if removeErr != nil {
+			applog.Infof("[task-svc] Delete error removing pending uploads %s after durable deletion: %v", path, removeErr)
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("task deleted but removing pending uploads %s: %w", path, removeErr))
+		}
+	}
+	if err := errors.Join(cleanupErrors...); err != nil {
+		return true, err
 	}
 
-	// Delete the task itself
-	if err := s.repo.Delete(ctx, id); err != nil {
-		applog.Infof("[task-svc] Delete error deleting task: %v", err)
-		return err
-	}
-
-	applog.Infof("[task-svc] Delete success id=%s (deleted %d attachments)", id, len(attachments))
-	return nil
+	applog.Infof("[task-svc] Delete success id=%s (deleted %d task attachments, %d execution attachments, %d pending upload sessions)", id, len(manifest.TaskAttachmentPaths), len(manifest.ExecutionAttachmentPaths), len(manifest.PendingUploadSessionIDs))
+	return true, nil
 }
 
 func (s *TaskService) RunTask(ctx context.Context, id string) error {
@@ -487,102 +534,40 @@ func (s *TaskService) MoveCompletedActiveToCompleted(ctx context.Context) (int, 
 }
 
 func (s *TaskService) DeleteAllCompleted(ctx context.Context, projectID string) (int, error) {
-	applog.Infof("[task-svc] DeleteAllCompleted called for project=%s", projectID)
-
-	// Get all completed tasks for this project to delete their attachments
-	tasks, err := s.repo.ListByProject(ctx, projectID, string(models.CategoryCompleted))
-	if err != nil {
-		applog.Infof("[task-svc] DeleteAllCompleted error listing completed tasks: %v", err)
-		return 0, fmt.Errorf("listing completed tasks: %w", err)
-	}
-
-	// Delete attachments for each completed task
-	totalAttachments := 0
-	for _, task := range tasks {
-		attachments, err := s.attachmentRepo.ListByTask(ctx, task.ID)
-		if err != nil {
-			applog.Infof("[task-svc] DeleteAllCompleted error listing attachments for task %s: %v", task.ID, err)
-			continue
-		}
-
-		// Delete physical files
-		for _, att := range attachments {
-			if err := os.Remove(att.FilePath); err != nil && !os.IsNotExist(err) {
-				applog.Infof("[task-svc] DeleteAllCompleted warning: failed to delete file %s: %v", att.FilePath, err)
-			}
-		}
-
-		// Delete attachment records
-		if err := s.attachmentRepo.DeleteByTask(ctx, task.ID); err != nil {
-			applog.Infof("[task-svc] DeleteAllCompleted error deleting attachments for task %s: %v", task.ID, err)
-		} else {
-			totalAttachments += len(attachments)
-		}
-	}
-
-	// Delete the tasks themselves
-	count, err := s.repo.DeleteAllCompleted(ctx, projectID)
-	if err != nil {
-		applog.Infof("[task-svc] DeleteAllCompleted error: %v", err)
-		return 0, err
-	}
-	applog.Infof("[task-svc] DeleteAllCompleted deleted %d tasks and %d attachments for project %s", count, totalAttachments, projectID)
-	return count, nil
+	return s.deleteAllByCategory(ctx, projectID, models.CategoryCompleted)
 }
 
 func (s *TaskService) DeleteAllBacklog(ctx context.Context, projectID string) (int, error) {
-	applog.Infof("[task-svc] DeleteAllBacklog called for project=%s", projectID)
-
-	// Get all backlog tasks for this project to delete their attachments
-	tasks, err := s.repo.ListByProject(ctx, projectID, string(models.CategoryBacklog))
-	if err != nil {
-		applog.Infof("[task-svc] DeleteAllBacklog error listing backlog tasks: %v", err)
-		return 0, fmt.Errorf("listing backlog tasks: %w", err)
-	}
-
-	// Delete attachments for each backlog task
-	totalAttachments := 0
-	for _, task := range tasks {
-		attachments, err := s.attachmentRepo.ListByTask(ctx, task.ID)
-		if err != nil {
-			applog.Infof("[task-svc] DeleteAllBacklog error listing attachments for task %s: %v", task.ID, err)
-			continue
-		}
-
-		// Delete physical files
-		for _, att := range attachments {
-			if err := os.Remove(att.FilePath); err != nil && !os.IsNotExist(err) {
-				applog.Infof("[task-svc] DeleteAllBacklog warning: failed to delete file %s: %v", att.FilePath, err)
-			}
-		}
-
-		// Delete attachment records
-		if err := s.attachmentRepo.DeleteByTask(ctx, task.ID); err != nil {
-			applog.Infof("[task-svc] DeleteAllBacklog error deleting attachments for task %s: %v", task.ID, err)
-		} else {
-			totalAttachments += len(attachments)
-		}
-	}
-
-	// Delete the tasks themselves
-	count, err := s.repo.DeleteAllBacklog(ctx, projectID)
-	if err != nil {
-		applog.Infof("[task-svc] DeleteAllBacklog error: %v", err)
-		return 0, err
-	}
-	applog.Infof("[task-svc] DeleteAllBacklog deleted %d tasks and %d attachments for project %s", count, totalAttachments, projectID)
-	return count, nil
+	return s.deleteAllByCategory(ctx, projectID, models.CategoryBacklog)
 }
 
 func (s *TaskService) DeleteAllChat(ctx context.Context, projectID string) (int, error) {
-	applog.Infof("[task-svc] DeleteAllChat called for project=%s", projectID)
-	count, err := s.repo.DeleteAllChat(ctx, projectID)
+	return s.deleteAllByCategory(ctx, projectID, models.CategoryChat)
+}
+
+func (s *TaskService) deleteAllByCategory(ctx context.Context, projectID string, category models.TaskCategory) (int, error) {
+	applog.Infof("[task-svc] delete all category=%s project=%s", category, projectID)
+	tasks, err := s.repo.ListByProject(ctx, projectID, string(category))
 	if err != nil {
-		applog.Infof("[task-svc] DeleteAllChat error: %v", err)
-		return 0, err
+		return 0, fmt.Errorf("listing %s tasks: %w", category, err)
 	}
-	applog.Infof("[task-svc] DeleteAllChat deleted %d tasks for project %s", count, projectID)
-	return count, nil
+
+	deleted := 0
+	var deletionErrors []error
+	for _, task := range tasks {
+		wasDeleted, deleteErr := s.deleteTask(ctx, task.ID, projectID, category)
+		if wasDeleted {
+			deleted++
+		}
+		if deleteErr != nil {
+			deletionErrors = append(deletionErrors, fmt.Errorf("deleting task %s: %w", task.ID, deleteErr))
+		}
+	}
+	if err := errors.Join(deletionErrors...); err != nil {
+		return deleted, err
+	}
+	applog.Infof("[task-svc] deleted %d category=%s tasks for project=%s", deleted, category, projectID)
+	return deleted, nil
 }
 
 func (s *TaskService) ActivateAllBacklog(ctx context.Context, projectID string) (int, error) {

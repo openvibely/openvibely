@@ -60,6 +60,7 @@ type streamingResponseParams struct {
 	AgentDefinition             *models.Agent
 	ChatHistory                 []models.Execution
 	ProjectID                   string
+	PrincipalID                 string
 	SystemContext               string
 	WorkDir                     string
 	ImageAttachments            []models.Attachment
@@ -79,7 +80,8 @@ type streamingResponseParams struct {
 	// uses these tools for this turn instead of rebuilding the generic handler
 	// runtime, so switch_project and other channel-sensitive tools execute through
 	// the channel service handler rather than the informational web/API path.
-	RuntimeTools *llmcontracts.RuntimeTools
+	RuntimeTools      *llmcontracts.RuntimeTools
+	AutomationContext *models.AutomationContext
 
 	// DeferHistoryLoad signals processStreamingResponse to load ChatHistory,
 	// SystemContext, and WorkDir lazily after acquiring worker slots. Set by
@@ -96,6 +98,10 @@ type streamingResponseParams struct {
 	steeringHistoryStarted bool
 	steeringOutputCursor   string
 	lifecycleUserMessage   string
+
+	// Tests that inspect steering recovery before a later queued turn starts
+	// suppress the asynchronous promotion launched during finalization.
+	suppressQueuedTurnPromotion bool
 }
 
 func streamingTransportScope(params streamingResponseParams) string {
@@ -135,6 +141,46 @@ func (h *Handler) prepareChatMemoryRecall(ctx context.Context, task models.Task)
 		return ctx
 	}
 	return h.workerSvc.PrepareRecallOnlyLifecycleTurn(ctx, task).Ctx
+}
+
+func (h *Handler) prepareAutomationTaskFollowup(ctx context.Context, params *streamingResponseParams) error {
+	if params == nil || !params.IsTaskFollowup || strings.TrimSpace(params.TaskID) == "" {
+		return nil
+	}
+	if params.Task == nil {
+		task, err := h.taskRepo.GetByID(ctx, params.TaskID)
+		if err != nil {
+			return fmt.Errorf("loading task-thread follow-up task: %w", err)
+		}
+		if task == nil {
+			return fmt.Errorf("task-thread follow-up task not found: %s", params.TaskID)
+		}
+		params.Task = task
+	}
+	if params.AutomationContext != nil {
+		return nil
+	}
+	var automationContext models.AutomationContext
+	var err error
+	if h.automationGraphSvc != nil && strings.TrimSpace(params.ExecID) != "" {
+		automationContext, err = h.automationGraphSvc.ContextForExecution(ctx, params.ProjectID, params.ExecID)
+		if err != nil {
+			return fmt.Errorf("loading task-thread Automation execution context: %w", err)
+		}
+	}
+	if h.automationGraphSvc != nil && len(automationContext.Bindings) == 0 {
+		automationContext, err = h.automationGraphSvc.ContextForTask(ctx, params.ProjectID, params.TaskID)
+		if err != nil {
+			return fmt.Errorf("loading task-thread Automation task context: %w", err)
+		}
+	}
+	if len(automationContext.Bindings) == 0 && repository.IsAutomationTaskCreatedVia(params.Task.CreatedVia) {
+		automationContext = models.AutomationContext{ProjectID: params.Task.ProjectID, OriginTask: true}
+	}
+	if len(automationContext.Bindings) > 0 || automationContext.OriginTask {
+		params.AutomationContext = &automationContext
+	}
+	return nil
 }
 
 func (h *Handler) processStreamingResponse(params streamingResponseParams) {
@@ -277,6 +323,18 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	}
 
 	startRuntimeCancellation()
+	if err := h.prepareAutomationTaskFollowup(ctx, &params); err != nil {
+		applog.Infof("[handler] processStreamingResponse exec=%s task=%s Automation follow-up context error: %v", params.ExecID, params.TaskID, err)
+		h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), 0, params.ChannelReply)
+		h.finalizeStreamingTurn(params, "")
+		return
+	}
+	if params.AutomationContext != nil {
+		ctx = service.WithAutomationContext(ctx, *params.AutomationContext)
+		if params.TaskID != "" && params.ExecID != "" {
+			ctx = service.WithAutomationExecution(ctx, params.TaskID, params.ExecID)
+		}
+	}
 	defer cleanupRuntimeCancellation()
 	if ctx.Err() != nil {
 		applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled before model preparation: %v", params.ExecID, params.TaskID, ctx.Err())
@@ -319,6 +377,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 	}
 
+	actionCollector := newChatActionSummaryCollector()
 	// Inject request-scoped action tools when the provider supports runtime tool
 	// calling. Tool definitions are derived from the canonical chatcontrol registry
 	// filtered by mode and surface. In plan mode only read actions are available.
@@ -347,23 +406,41 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				defs = filterAssignedAgentRuntimeToolDefs(defs, agentDef)
 			}
 		}
+		var hardenedAutomationGitHubRT *llmcontracts.RuntimeTools
+		if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
+			hardenedAutomationGitHubRT = h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs)
+		}
 		if params.RuntimeTools != nil && len(params.RuntimeTools.Definitions) > 0 {
-			// Channel-provided runtime takes priority over the handler's generic tools.
-			// Channel-sensitive tools (e.g. switch_project with active-project
-			// persistence) are resolved by the channel service handler; any tools not
-			// covered by the channel runtime fall through to the handler's generic
-			// executor. This correctly handles both complete channel runtimes
-			// (Discord, Slack, Telegram) and partial ones (Email: project tools only).
-			genericRT := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
-			merged := llmcontracts.CompositeRuntimeTools(params.RuntimeTools, genericRT)
-			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), merged))
+			// Automation-specific GitHub handlers take priority over channel and
+			// generic handlers. Channel-specific handlers retain priority for all
+			// other tools and generic handlers remain the final fallback.
+			genericRT := h.buildChatActionToolRuntimeFromDefs(params, actionCollector, defs, chatMode, surface)
+			merged := llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, genericRT)
+			ctx = llmcontracts.WithRuntimeTools(ctx, merged)
 			applog.Infof("[handler] processStreamingResponse exec=%s injected channel+generic runtime action tools surface=%s followup=%v channel_defs=%d generic_defs=%d",
 				params.ExecID, surface, params.IsTaskFollowup, len(params.RuntimeTools.Definitions), len(defs))
 		} else if len(defs) > 0 {
-			rt := h.buildChatActionToolRuntimeFromDefs(params, nil, defs, chatMode, surface)
-			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), rt))
+			rt := h.buildChatActionToolRuntimeFromDefs(params, actionCollector, defs, chatMode, surface)
+			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), rt))
 			applog.Infof("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
 				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
+		}
+		if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
+			bootstrapRT := h.llmSvc.AutomationBootstrapRuntimeTools(ctx, *params.Task)
+			if bootstrapRT != nil {
+				ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(llmcontracts.RuntimeToolsFromContext(ctx), bootstrapRT))
+			}
+		}
+	}
+	if !params.IsTaskFollowup && h.automationConfirmationSvc != nil && params.TaskID != "" && params.ExecID != "" {
+		principal := automationActionPrincipal(params)
+		pending, confirmationErr := h.automationConfirmationSvc.PrepareChatConfirmation(ctx, params.ProjectID, principal, params.TaskID, params.ExecID, params.Message)
+		if confirmationErr != nil {
+			applog.Infof("[handler] processStreamingResponse exec=%s automation confirmation preparation failed: %v", params.ExecID, confirmationErr)
+		} else if pending != nil {
+			controlContext := fmt.Sprintf("Pending Automation save confirmation was marked affirmative by the Chat host. Call save_automation with confirmation_token=%q and confirming_user_input_id=%q. Do not substitute either value.",
+				pending.Token, pending.ConfirmingUserInputID)
+			params.SystemContext = combineContexts(params.SystemContext, controlContext)
 		}
 	}
 	// Lazy-load chat history, system context, and work dir for task-thread
@@ -510,7 +587,7 @@ modelLoop:
 		applog.Infof("[handler] processStreamingResponse exec=%s prepared %d steering inputs for continuation", params.ExecID, pendingSteering.count())
 	}
 	durationMs := time.Since(start).Milliseconds()
-	output := result.Output
+	output := actionCollector.appendAutomationPlans(result.Output)
 	textOnlyOutput := result.TextOnlyOutput
 	tokensUsed := result.Usage.TotalTokens
 
@@ -562,8 +639,16 @@ modelLoop:
 	applog.Infof("[handler] processStreamingResponse exec=%s task=%s success tokens=%d duration=%dms output_len=%d",
 		params.ExecID, params.TaskID, tokensUsed, durationMs, len(output))
 
+	if replayErr := h.persistSteeringReplayHistory(ctx, params, result.Output); replayErr != nil {
+		finalizeLifecycle(replayErr, result.ChatContext)
+		applog.Infof("[handler] processStreamingResponse exec=%s error preserving steering replay history: %v", params.ExecID, replayErr)
+		h.completeWithFailure(ctx, params.ExecID, params.TaskID, replayErr.Error(), durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
+		h.finalizeStreamingTurn(params, output)
+		return
+	}
 	completionOutcome := h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 	if completionOutcome == repository.CompleteSuccessCompleted {
+		h.issueStoredAutomationPlanConfirmations(ctx, actionCollector)
 		h.recordStreamingUsage(ctx, params, result, string(models.ExecCompleted), "", durationMs)
 	}
 	if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
@@ -572,7 +657,7 @@ modelLoop:
 		return
 	}
 	if completionOutcome == repository.CompleteSuccessPendingSteering {
-		prepared, steeringErr := h.preparePendingSteeringInputs(ctx, &params, output)
+		prepared, steeringErr := h.preparePendingSteeringInputsFromPersistedReplay(ctx, &params, output)
 		if steeringErr != nil {
 			finalizeLifecycle(steeringErr, result.ChatContext)
 			applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering after deferred completion: %v", params.ExecID, steeringErr)
@@ -619,6 +704,17 @@ modelLoop:
 	}
 
 	h.finalizeStreamingTurn(params, output)
+}
+
+func (h *Handler) issueStoredAutomationPlanConfirmations(ctx context.Context, collector *chatActionSummaryCollector) {
+	if h == nil || h.automationConfirmationSvc == nil || collector == nil {
+		return
+	}
+	for _, pending := range collector.pendingAutomationPlan {
+		if _, err := h.automationConfirmationSvc.Issue(ctx, pending.Issue); err != nil {
+			applog.Infof("[handler] automation plan receipt issue failed name=%q: %v", pending.Issue.AutomationName, err)
+		}
+	}
 }
 
 type preparedSteeringBatch struct {
@@ -743,13 +839,30 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 			assistantDelta = previousAssistantOutput[len(params.steeringOutputCursor):]
 		}
 		if strings.TrimSpace(params.Message) != "" || strings.TrimSpace(assistantDelta) != "" {
+			reasoningContent := ""
+			var replayMessages []models.ExecutionReplayMessage
+			if h.execRepo != nil && strings.TrimSpace(params.ExecID) != "" {
+				if exec, execErr := h.execRepo.GetByID(ctx, params.ExecID); execErr == nil && exec != nil {
+					reasoningContent = exec.ReasoningContent
+					replayByID, replayErr := h.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{params.ExecID})
+					if replayErr != nil {
+						applog.Infof("[handler] preparePendingSteeringInputs exec=%s error loading replay context: %v", params.ExecID, replayErr)
+					} else {
+						replayMessages = replayByID[params.ExecID]
+					}
+				} else if execErr != nil {
+					applog.Infof("[handler] preparePendingSteeringInputs exec=%s error loading reasoning context: %v", params.ExecID, execErr)
+				}
+			}
 			params.ChatHistory = append(params.ChatHistory, models.Execution{
-				ID:         fmt.Sprintf("%s-steering-context-%d", params.ExecID, len(params.ChatHistory)+1),
-				TaskID:     params.TaskID,
-				Status:     models.ExecCompleted,
-				PromptSent: params.Message,
-				Output:     assistantDelta,
-				IsFollowup: params.IsTaskFollowup,
+				ID:               nextSteeringContextID(*params),
+				TaskID:           params.TaskID,
+				Status:           models.ExecCompleted,
+				PromptSent:       params.Message,
+				Output:           assistantDelta,
+				IsFollowup:       params.IsTaskFollowup,
+				ReasoningContent: reasoningContent,
+				ReplayMessages:   replayMessages,
 			})
 		}
 		params.Message = steeringInstruction
@@ -761,6 +874,126 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 	params.steeringHistoryStarted = true
 	params.steeringOutputCursor = previousAssistantOutput
 	return batch, nil
+}
+
+func (h *Handler) preparePendingSteeringInputsFromPersistedReplay(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
+	batch, err := h.preparePendingSteeringInputs(ctx, params, previousAssistantOutput)
+	if err != nil || batch.count() == 0 {
+		return batch, err
+	}
+	// Completion persists one replay containing every synthetic steering turn.
+	// Keep only the newly appended context that owns that replay, or the prior
+	// turns would be sent both individually and through the combined replay.
+	collapseSteeringContextsCoveredByLatestReplay(params)
+	return batch, nil
+}
+
+func nextSteeringContextID(params streamingResponseParams) string {
+	prefix := strings.TrimSpace(params.ExecID) + "-steering-context-"
+	used := make(map[string]struct{}, len(params.ChatHistory))
+	for _, exec := range params.ChatHistory {
+		used[exec.ID] = struct{}{}
+	}
+	for suffix := len(params.ChatHistory) + 1; ; suffix++ {
+		id := fmt.Sprintf("%s%d", prefix, suffix)
+		if _, exists := used[id]; !exists {
+			return id
+		}
+	}
+}
+
+func collapseSteeringContextsCoveredByLatestReplay(params *streamingResponseParams) {
+	prefix := strings.TrimSpace(params.ExecID) + "-steering-context-"
+	latestIndex := -1
+	for i := range params.ChatHistory {
+		if strings.HasPrefix(params.ChatHistory[i].ID, prefix) {
+			latestIndex = i
+		}
+	}
+	if latestIndex < 0 || len(params.ChatHistory[latestIndex].ReplayMessages) == 0 {
+		return
+	}
+
+	history := params.ChatHistory[:0]
+	for i, exec := range params.ChatHistory {
+		if strings.HasPrefix(exec.ID, prefix) && i != latestIndex {
+			continue
+		}
+		history = append(history, exec)
+	}
+	params.ChatHistory = history
+}
+
+func steeringContextHistory(params streamingResponseParams) []models.Execution {
+	prefix := strings.TrimSpace(params.ExecID) + "-steering-context-"
+	if prefix == "-steering-context-" {
+		return nil
+	}
+	history := make([]models.Execution, 0)
+	for _, exec := range params.ChatHistory {
+		if strings.HasPrefix(exec.ID, prefix) {
+			history = append(history, exec)
+		}
+	}
+	return history
+}
+
+func (h *Handler) persistSteeringReplayHistory(ctx context.Context, params streamingResponseParams, finalOutput string) error {
+	steeringHistory := steeringContextHistory(params)
+	if len(steeringHistory) == 0 || h.execRepo == nil || strings.TrimSpace(params.ExecID) == "" {
+		return nil
+	}
+	exec, err := h.execRepo.GetByID(ctx, params.ExecID)
+	if err != nil {
+		return fmt.Errorf("load current reasoning content: %w", err)
+	}
+	if exec == nil {
+		return fmt.Errorf("load current reasoning content: execution %s not found", params.ExecID)
+	}
+
+	replay := make([]models.ExecutionReplayMessage, 0, len(steeringHistory)+1)
+	var reasoning strings.Builder
+	for _, turn := range steeringHistory {
+		if len(turn.ReplayMessages) > 0 {
+			replay = append(replay, turn.ReplayMessages...)
+			for _, message := range turn.ReplayMessages {
+				reasoning.WriteString(message.ReasoningContent)
+			}
+			continue
+		}
+		replay = append(replay, models.ExecutionReplayMessage{
+			UserContent:      turn.PromptSent,
+			AssistantContent: turn.Output,
+			ReasoningContent: turn.ReasoningContent,
+		})
+		reasoning.WriteString(turn.ReasoningContent)
+	}
+	currentReplayByID, err := h.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{params.ExecID})
+	if err != nil {
+		return fmt.Errorf("load current replay history: %w", err)
+	}
+	if currentReplay := currentReplayByID[params.ExecID]; len(currentReplay) > 0 {
+		replay = append(replay, currentReplay...)
+		for _, message := range currentReplay {
+			reasoning.WriteString(message.ReasoningContent)
+		}
+	} else {
+		finalAssistantOutput := finalOutput
+		if strings.HasPrefix(finalOutput, params.steeringOutputCursor) {
+			finalAssistantOutput = finalOutput[len(params.steeringOutputCursor):]
+		}
+		replay = append(replay, models.ExecutionReplayMessage{
+			UserContent:      params.Message,
+			AssistantContent: finalAssistantOutput,
+			ReasoningContent: exec.ReasoningContent,
+		})
+		reasoning.WriteString(exec.ReasoningContent)
+	}
+
+	if err := h.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), params.ExecID, reasoning.String(), replay); err != nil {
+		return fmt.Errorf("persist steering replay history: %w", err)
+	}
+	return nil
 }
 
 func (h *Handler) publishThreadInputAppliedEvents(params streamingResponseParams, inputs []models.ThreadInput) {
@@ -917,7 +1150,9 @@ func (h *Handler) finalizeStreamingTurn(params streamingResponseParams, output s
 			IsTaskFollowup:  params.IsTaskFollowup,
 		})
 	}
-	go h.startNextQueuedTurnAfter(context.Background(), params, "")
+	if !params.suppressQueuedTurnPromotion {
+		go h.startNextQueuedTurnAfter(context.Background(), params, "")
+	}
 }
 
 func (h *Handler) resolveTaskAgentDefinitionForTask(ctx context.Context, taskID string, current *models.Agent) *models.Agent {
@@ -1258,8 +1493,14 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		PromptSent:    failed.PromptSent,
 		IsFollowup:    true,
 	}
-	if err := h.execRepo.CreateDirectTaskFollowup(ctx, exec); err != nil {
+	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: failed.PromptSent, Source: models.TaskOriginWeb}
+	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
+	if err != nil {
 		return err
+	}
+	if !started {
+		go h.PromoteQueuedTaskThreadInput(taskID)
+		return nil
 	}
 	if err := h.applySwarmChildFollowupRetryStart(ctx, task, failed.PromptSent); err != nil {
 		h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)
@@ -1296,18 +1537,28 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
 		return nil
 	}
+	var automationContext *models.AutomationContext
+	if h.automationGraphSvc != nil {
+		if value, contextErr := h.automationGraphSvc.ContextForExecution(ctx, task.ProjectID, failed.ID); contextErr != nil {
+			return contextErr
+		} else if len(value.Bindings) > 0 {
+			automationContext = &value
+		}
+	}
 	go h.processStreamingResponse(streamingResponseParams{
-		ExecID:          exec.ID,
-		TaskID:          taskID,
-		Message:         failed.PromptSent,
-		Agent:           *agent,
-		AgentDefinition: agentDef,
-		ChatHistory:     priorHistory,
-		ProjectID:       task.ProjectID,
-		SystemContext:   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:         workDir,
-		IsTaskFollowup:  true,
-		InputOrigin:     models.TaskOriginWeb,
+		ExecID:            exec.ID,
+		TaskID:            taskID,
+		Message:           failed.PromptSent,
+		Agent:             *agent,
+		AgentDefinition:   agentDef,
+		ChatHistory:       priorHistory,
+		ProjectID:         task.ProjectID,
+		SystemContext:     combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:           workDir,
+		IsTaskFollowup:    true,
+		InputOrigin:       models.TaskOriginWeb,
+		Task:              task,
+		AutomationContext: automationContext,
 	})
 	return nil
 }
@@ -1421,21 +1672,31 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		go h.startNextQueuedTurnAfter(context.Background(), streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, exec.ID)
 		return nil
 	}
+	var automationContext *models.AutomationContext
+	if h.automationGraphSvc != nil {
+		if value, contextErr := h.automationGraphSvc.ContextForThreadInput(ctx, task.ProjectID, input.ID); contextErr != nil {
+			applog.Infof("[handler] startQueuedTaskThreadInput input=%s automation context load failed: %v", input.ID, contextErr)
+		} else if len(value.Bindings) > 0 {
+			automationContext = &value
+		}
+	}
 	go h.processStreamingResponse(streamingResponseParams{
-		ExecID:           exec.ID,
-		TaskID:           exec.TaskID,
-		Message:          input.Content,
-		Agent:            *agent,
-		AgentDefinition:  agentDef,
-		ChatHistory:      priorHistory,
-		ProjectID:        task.ProjectID,
-		SystemContext:    combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
-		WorkDir:          workDir,
-		ImageAttachments: imageAttachments,
-		IsTaskFollowup:   true,
-		ChannelReply:     channelReplyFromThreadInput(input),
-		InputOrigin:      string(input.Source),
-		InputOriginAgent: input.OriginAgent,
+		ExecID:            exec.ID,
+		TaskID:            exec.TaskID,
+		Message:           input.Content,
+		Agent:             *agent,
+		AgentDefinition:   agentDef,
+		ChatHistory:       priorHistory,
+		ProjectID:         task.ProjectID,
+		SystemContext:     combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
+		WorkDir:           workDir,
+		ImageAttachments:  imageAttachments,
+		IsTaskFollowup:    true,
+		ChannelReply:      channelReplyFromThreadInput(input),
+		InputOrigin:       string(input.Source),
+		InputOriginAgent:  input.OriginAgent,
+		Task:              task,
+		AutomationContext: automationContext,
 	})
 	return nil
 }
@@ -1913,8 +2174,15 @@ func filterChatHistory(executions []models.Execution, currentExecID string) []mo
 		return []models.Execution{}
 	}
 
-	result := make([]models.Execution, 0, len(executions))
-	for i := range executions {
+	start := 0
+	for i := len(executions) - 1; i >= 0; i-- {
+		if executions[i].StartsNewContext && executions[i].ID != currentExecID {
+			start = i
+			break
+		}
+	}
+	result := make([]models.Execution, 0, len(executions)-start)
+	for i := start; i < len(executions); i++ {
 		if executions[i].ID == currentExecID || executions[i].Status == models.ExecRunning {
 			continue
 		}
@@ -2446,12 +2714,17 @@ func (h *Handler) executeChatScheduleRequests(ctx context.Context, projectID str
 		// Convert to UTC for storage
 		runAtUTC := runAt.UTC()
 
+		clearContextOnStart := true
+		if req.ClearContextOnStart != nil {
+			clearContextOnStart = *req.ClearContextOnStart
+		}
 		schedule := &models.Schedule{
-			TaskID:         task.ID,
-			RunAt:          runAtUTC,
-			RepeatType:     repeatType,
-			RepeatInterval: repeatInterval,
-			Enabled:        true,
+			TaskID:              task.ID,
+			RunAt:               runAtUTC,
+			RepeatType:          repeatType,
+			RepeatInterval:      repeatInterval,
+			Enabled:             true,
+			ClearContextOnStart: clearContextOnStart,
 		}
 
 		if err := h.scheduleRepo.Create(ctx, schedule); err != nil {
@@ -2643,7 +2916,10 @@ func (h *Handler) executeChatModifyScheduleRequests(ctx context.Context, project
 				changes = append(changes, "enabled→false")
 			}
 		}
-
+		if req.ClearContextOnStart != nil {
+			schedule.ClearContextOnStart = *req.ClearContextOnStart
+			changes = append(changes, fmt.Sprintf("clear_context_on_start→%t", *req.ClearContextOnStart))
+		}
 		if len(changes) == 0 {
 			results = append(results, fmt.Sprintf("- No changes specified for schedule on task \"%s\"", task.Title))
 			continue
@@ -3493,7 +3769,11 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 		queued.EmailSubject = reply.EmailSubject
 		queued.EmailSessionKey = reply.EmailSessionKey
 	}
-	if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+	if automationContext, ok := service.AutomationContextFromContext(ctx); ok && automationContext.ProjectID == task.ProjectID {
+		if err := h.threadInputRepo.CreateQueuedWithAutomationContext(ctx, queued, automationContext, "causal"); err != nil {
+			return nil, err
+		}
+	} else if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
 		return nil, err
 	}
 	if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(ctx, queued); err != nil {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -74,6 +76,7 @@ func TestUploadChatAttachment_AllFileTypes(t *testing.T) {
 	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
 	h := &Handler{
 		chatAttachmentRepo: chatAttachmentRepo,
+		threadInputRepo:    repository.NewThreadInputRepo(db),
 	}
 
 	e := echo.New()
@@ -179,7 +182,10 @@ func TestUploadChatAttachment_AppendsToExistingPendingSession(t *testing.T) {
 	useTempUploadsDir(t)
 
 	db := testutil.NewTestDB(t)
-	h := &Handler{chatAttachmentRepo: repository.NewChatAttachmentRepo(db)}
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    repository.NewThreadInputRepo(db),
+	}
 	e := echo.New()
 
 	firstSessionID := uploadChatAttachmentForTest(t, e, h, "screenshot.png", []byte("first"), "image/png", "")
@@ -193,11 +199,106 @@ func TestUploadChatAttachment_AppendsToExistingPendingSession(t *testing.T) {
 	assert.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", firstSessionID, "second.png"))
 }
 
+func TestUploadChatAttachment_RejectsRetiredSessionWithoutRecreatingDirectory(t *testing.T) {
+	useTempUploadsDir(t)
+
+	db := testutil.NewTestDB(t)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    threadInputRepo,
+	}
+	e := echo.New()
+	const sessionID = "dddddddddddddddddddddddddddddddd"
+	_, err := db.Exec(`INSERT INTO retired_attachment_sessions(session_id) VALUES (?)`, sessionID)
+	require.NoError(t, err)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("files", "late.txt")
+	require.NoError(t, err)
+	_, err = io.Copy(part, bytes.NewReader([]byte("late")))
+	require.NoError(t, err)
+	require.NoError(t, writer.WriteField("attachment_session_id", sessionID))
+	require.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	err = h.UploadChatAttachment(e.NewContext(req, rec))
+
+	require.Error(t, err)
+	httpErr, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusConflict, httpErr.Code)
+	require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", sessionID))
+}
+
+func TestUploadChatAttachment_SerializesPublicationWithConcurrentRetirement(t *testing.T) {
+	useTempUploadsDir(t)
+
+	db := testutil.NewTestDB(t)
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    repository.NewThreadInputRepo(db),
+	}
+	e := echo.New()
+	const sessionID = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+	publicationPaused := make(chan struct{})
+	continuePublication := make(chan struct{})
+	h.pendingPublicationHook = func(gotSessionID string) {
+		assert.Equal(t, sessionID, gotSessionID)
+		close(publicationPaused)
+		<-continuePublication
+	}
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("files", "racing.txt")
+	require.NoError(t, err)
+	_, err = io.Copy(part, bytes.NewReader([]byte("racing")))
+	require.NoError(t, err)
+	require.NoError(t, writer.WriteField("attachment_session_id", sessionID))
+	require.NoError(t, writer.Close())
+	req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+
+	uploadResult := make(chan error, 1)
+	go func() {
+		uploadResult <- h.UploadChatAttachment(e.NewContext(req, rec))
+	}()
+	<-publicationPaused
+
+	cleanupStarted := make(chan struct{})
+	cleanupResult := make(chan error, 1)
+	go func() {
+		close(cleanupStarted)
+		cleanupResult <- h.cleanupUnpublishedPendingAttachmentSession(context.Background(), sessionID)
+	}()
+	<-cleanupStarted
+	select {
+	case err := <-cleanupResult:
+		t.Fatalf("cleanup completed while same-session publication was paused: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(continuePublication)
+	require.NoError(t, <-uploadResult)
+	require.NoError(t, <-cleanupResult)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", sessionID))
+}
+
 func TestUploadChatAttachment_AppendsDuplicateNamesWithoutOverwriting(t *testing.T) {
 	useTempUploadsDir(t)
 
 	db := testutil.NewTestDB(t)
-	h := &Handler{chatAttachmentRepo: repository.NewChatAttachmentRepo(db)}
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    repository.NewThreadInputRepo(db),
+	}
 	e := echo.New()
 
 	firstSessionID := uploadChatAttachmentForTest(t, e, h, "screenshot.png", []byte("first"), "image/png", "")
@@ -217,7 +318,10 @@ func TestUploadChatAttachment_ExistingPendingSessionMaxFilesLimit(t *testing.T) 
 	useTempUploadsDir(t)
 
 	db := testutil.NewTestDB(t)
-	h := &Handler{chatAttachmentRepo: repository.NewChatAttachmentRepo(db)}
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    repository.NewThreadInputRepo(db),
+	}
 	e := echo.New()
 
 	sessionID := uploadChatAttachmentForTest(t, e, h, "one.png", []byte("one"), "image/png", "")
@@ -252,6 +356,7 @@ func TestUploadChatAttachment_FileSizeLimit(t *testing.T) {
 	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
 	h := &Handler{
 		chatAttachmentRepo: chatAttachmentRepo,
+		threadInputRepo:    repository.NewThreadInputRepo(db),
 	}
 
 	e := echo.New()
@@ -295,6 +400,7 @@ func TestUploadChatAttachment_MaxFilesLimit(t *testing.T) {
 	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
 	h := &Handler{
 		chatAttachmentRepo: chatAttachmentRepo,
+		threadInputRepo:    repository.NewThreadInputRepo(db),
 	}
 
 	e := echo.New()

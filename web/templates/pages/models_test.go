@@ -17,7 +17,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	// HTML <option> elements and the JS modelOptionsByProvider catalog.
 	agents := []models.LLMConfig{}
 	var buf bytes.Buffer
-	err := ModelsContent(agents, nil).Render(context.Background(), &buf)
+	err := ModelsContent(agents, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
@@ -26,6 +26,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	// HTML <option> elements
 	for _, model := range []string{
 		"claude-sonnet-5",
+		"claude-opus-5",
 		"claude-fable-5",
 		"claude-mythos-5",
 		"claude-opus-4-8",
@@ -47,6 +48,7 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 		"gpt-5.4-mini",
 		"gpt-5.3-codex-spark",
 		"claude-sonnet-5",
+		"claude-opus-5",
 		"claude-fable-5",
 		"claude-mythos-5",
 		"claude-opus-4-8",
@@ -73,6 +75,37 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if !strings.Contains(out, "{ value: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high', 'max']") {
 		t.Error("expected Claude Sonnet 5 effort options")
 	}
+	if !strings.Contains(out, "{ value: 'claude-opus-5', label: 'Claude Opus 5', efforts: ['low', 'medium', 'high', 'max']") {
+		t.Error("expected Claude Opus 5 effort options")
+	}
+	if !strings.Contains(out, "{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max']") {
+		t.Error("expected GPT-5.6 Sol effort options")
+	}
+	for _, model := range []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"} {
+		if !strings.Contains(out, "{ value: '"+model+"'") {
+			t.Errorf("expected current Moonshot model %q in selector", model)
+		}
+	}
+	if !strings.Contains(out, "{ value: 'kimi-k3', label: 'Kimi K3', efforts: ['low', 'high', 'max']") {
+		t.Error("expected Kimi K3 reasoning effort options")
+	}
+	if !strings.Contains(out, "Kimi Reasoning Effort") {
+		t.Error("expected Kimi reasoning effort label")
+	}
+	if strings.Contains(out, "{ value: 'kimi-k2-0711-preview'") {
+		t.Error("did not expect discontinued Kimi K2 preview in selector")
+	}
+	for _, model := range []string{"glm-5.2", "glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.7-flashx", "glm-4.7-flash", "glm-4.6"} {
+		if !strings.Contains(out, "{ value: '"+model+"'") {
+			t.Errorf("expected current Z.AI model %q in selector", model)
+		}
+	}
+	if !strings.Contains(out, "{ value: 'glm-5.2', label: 'GLM 5.2', efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']") {
+		t.Error("expected GLM 5.2 reasoning effort options")
+	}
+	if !strings.Contains(out, "GLM Reasoning Effort") {
+		t.Error("expected GLM reasoning effort label")
+	}
 	if !strings.Contains(out, "{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max']") {
 		t.Error("expected Claude Fable 5 effort options")
 	}
@@ -93,7 +126,7 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 	// 2. Claude Fable 5 and Claude Mythos 5 remain as selectable options.
 	// 3. Neither Fable 5 nor Mythos 5 is the first option (i.e., neither is auto-selected).
 	var buf bytes.Buffer
-	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -167,7 +200,7 @@ func TestModelsContent_AnthropicDefaultModelSelection(t *testing.T) {
 func TestModelsContent_ModelFormUsesHTMXSubmit(t *testing.T) {
 	agents := []models.LLMConfig{}
 	var buf bytes.Buffer
-	err := ModelsContent(agents, nil).Render(context.Background(), &buf)
+	err := ModelsContent(agents, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
@@ -243,7 +276,7 @@ func TestModelsContent_ModelMutationsPreserveActiveProject(t *testing.T) {
 		{ID: "model-b", Name: "Model B", Provider: models.ProviderOpenAI, Model: "gpt-5", IsDefault: true},
 	}
 	var buf bytes.Buffer
-	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -283,7 +316,7 @@ func TestModelsContent_ModelMutationsPreserveActiveProject(t *testing.T) {
 
 func TestModelsContent_ModelModalJavaScriptShape(t *testing.T) {
 	var buf bytes.Buffer
-	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -342,7 +375,7 @@ func TestModelsContent_DefaultCardCarriesCompleteEditData(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -382,9 +415,50 @@ func TestModelsContent_DefaultCardCarriesCompleteEditData(t *testing.T) {
 	}
 }
 
+func TestModelsContent_CompatibleModelCardsShowEffectiveSettings(t *testing.T) {
+	agents := []models.LLMConfig{
+		{
+			ID:              "kimi-model",
+			Name:            "Kimi",
+			Provider:        models.ProviderOpenAICompatible,
+			Model:           "kimi-k3",
+			ReasoningEffort: "max",
+			Temperature:     0.7,
+		},
+		{
+			ID:              "glm-model",
+			Name:            "GLM",
+			Provider:        models.ProviderOpenAICompatible,
+			Model:           "glm-5.2",
+			ReasoningEffort: "high",
+			Temperature:     0.4,
+		},
+	}
+	var buf bytes.Buffer
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+
+	kimiCard := renderedModelCard(t, buf.String(), "kimi-model")
+	if strings.Contains(kimiCard, "Temperature:") {
+		t.Fatalf("Kimi card should not show an unused temperature:\n%s", kimiCard)
+	}
+	if !strings.Contains(kimiCard, "Reasoning effort: max") {
+		t.Fatalf("Kimi card should show its reasoning effort:\n%s", kimiCard)
+	}
+
+	glmCard := renderedModelCard(t, buf.String(), "glm-model")
+	if !strings.Contains(glmCard, "Temperature: 0.4") {
+		t.Fatalf("GLM card should show its effective temperature:\n%s", glmCard)
+	}
+	if !strings.Contains(glmCard, "Reasoning effort: high") {
+		t.Fatalf("GLM card should show its reasoning effort:\n%s", glmCard)
+	}
+}
+
 func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 	var buf bytes.Buffer
-	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -393,10 +467,15 @@ func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 		`id="model_field"`,
 		`if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');`,
 		`id="model_temperature_field"`,
-		`var temperatureField = document.getElementById('model_temperature_field');`,
-		`var temperatureInput = document.getElementById('model_temperature');`,
-		`if (temperatureField) temperatureField.classList.toggle('hidden', provider === 'mixture');`,
-		`if (temperatureInput) temperatureInput.disabled = provider === 'mixture';`,
+		`function modelSupportsTemperature(provider, model)`,
+		`indexOf('kimi-') !== 0`,
+		`function updateTemperatureField(provider, model)`,
+		`field.classList.toggle('hidden', !supported);`,
+		`input.disabled = !supported;`,
+		`updateTemperatureField(provider, model);`,
+		`function mixtureConfigValue(value, fallback)`,
+		`mixtureConfigValue(cfg.reference_temperature, 0.6)`,
+		`mixtureConfigValue(cfg.aggregator_temperature, 0.4)`,
 		`id="model_mixture_reference_available"`,
 		`id="model_mixture_references"`,
 		`id="model_mixture_reference_ids_order"`,
@@ -447,7 +526,7 @@ func TestModelsContent_MixtureEditHydratesSavedReferenceOrder(t *testing.T) {
 		{ID: "mix", Name: "Ordered Mix", Provider: models.ProviderMixture, Model: "mixture", MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"ref-b"},{"agent_config_id":"ref-a"}],"aggregator":{"agent_config_id":"ref-a"}}`},
 	}
 	var buf bytes.Buffer
-	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -516,7 +595,7 @@ func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
 		{ID: "internal", Name: "Internal", Provider: models.LLMProvider("internal"), AuthMethod: models.AuthMethodAPIKey, Model: "internal"},
 	}
 	var buf bytes.Buffer
-	if err := ModelsContent(agents, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -543,7 +622,7 @@ func TestModelsContent_MixturePickerFiltersNonCallableModels(t *testing.T) {
 
 func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 	var buf bytes.Buffer
-	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -819,7 +898,7 @@ func balancedJavaScriptBraces(value string) error {
 // Anthropic or OpenAI connection-method selects.
 func TestModelsContent_NoCLIOptionInAuthSelects(t *testing.T) {
 	var buf bytes.Buffer
-	if err := ModelsContent(nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := ModelsContent(nil, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
@@ -837,7 +916,7 @@ func TestModelsContent_NoCLIOptionInAuthSelects(t *testing.T) {
 	}
 }
 
-func TestModelsContent_OAuthLinksLaunchInSystemBrowser(t *testing.T) {
+func TestModelsContent_OAuthLinksUseRuntimeSpecificLaunch(t *testing.T) {
 	agents := []models.LLMConfig{
 		{
 			ID:         "openai-oauth",
@@ -849,25 +928,39 @@ func TestModelsContent_OAuthLinksLaunchInSystemBrowser(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := ModelsContent(agents, nil).Render(context.Background(), &buf)
+	err := ModelsContent(agents, nil, false).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 
 	out := buf.String()
-	if !strings.Contains(out, "return launchOAuthInSystemBrowser(this.dataset.oauthPath)") {
-		t.Fatal("expected OAuth links to launch through system-browser helper")
+	if !strings.Contains(out, "return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)") {
+		t.Fatal("expected OAuth links to use the runtime-specific launch helper")
 	}
 	if !strings.Contains(out, "data-oauth-path=\"/models/openai-oauth/oauth/initiate\"") {
 		t.Fatal("expected OAuth links to expose model-specific oauth path via data attribute")
 	}
+	if !strings.Contains(out, "data-oauth-external=\"false\"") {
+		t.Fatal("expected server-rendered OAuth links to use normal browser navigation")
+	}
+	if strings.Contains(out, "getAttribute('data-runtime')") {
+		t.Fatal("expected OAuth launch mode not to depend on client-side runtime detection")
+	}
 	if !strings.Contains(out, "external=1") {
-		t.Fatal("expected system-browser helper to request backend external launch mode")
+		t.Fatal("expected desktop OAuth launcher to request backend external launch mode")
 	}
 	if !strings.Contains(out, "fetch(externalURL") {
-		t.Fatal("expected OAuth launcher to call backend in background via fetch")
+		t.Fatal("expected desktop OAuth launcher to call backend in background via fetch")
 	}
 	if strings.Contains(out, "window.location.href = externalURL") {
-		t.Fatal("expected OAuth launcher to avoid page navigation")
+		t.Fatal("expected desktop OAuth launcher to avoid WebView navigation")
+	}
+
+	buf.Reset()
+	if err := ModelsContent(agents, nil, true).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render desktop models content: %v", err)
+	}
+	if !strings.Contains(buf.String(), "data-oauth-external=\"true\"") {
+		t.Fatal("expected desktop OAuth links to request external browser launch")
 	}
 }

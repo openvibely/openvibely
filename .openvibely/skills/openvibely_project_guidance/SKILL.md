@@ -1,6 +1,6 @@
 ---
 kind: openvibely.agent_skill
-version: 1
+version: 4
 skill:
     key: openvibely_project_guidance
     name: OpenVibely Project Guidance
@@ -68,13 +68,13 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - For task-execution actions, prefer exact entity targeting by `task_id` or `title`; reserve tag/priority filters for explicit group execution requests.
 - When a user requests a task or application mutation, use only an authorized runtime tool or direct local API actually exposed for the turn. Model-emitted bracket text is ordinary prose and must never be used as a mutation fallback; do not claim success without a successful tool/API result. Use `category=backlog` when the task must remain non-running.
 - If tasks run in isolated worktrees, include explicit worktree orientation in the model prompt while keeping runtime workdir enforcement as the source of truth.
+- When implementing, debugging, or explaining custom Automation graph tasks, treat `Task` as one generic public node capability. Derive behavior from the exact topology: an ordinary Task is materialized when the Automation is saved, while `GitHub inbox -> Task -> Open pull request` configures issue-specific tasks that are created later by the inbox and must not create one shared task during Save. Keep legacy published `role=implementation` graphs runnable and normalize that role to `task` when edited/saved. Runtime task-template lookup must require the exact persisted inbox/Task/PR topology; never classify an arbitrary connected Task or ordinary Task-to-Task chain as issue-specific work.
 
 ## Project Overview Requests
 
 - When the user asks to explain or summarize this project, inspect the README plus a small set of current entry points or package directories before answering; do not rely only on remembered project context.
 - Do not run build or test validation for read-only overview requests unless the user asks for verification.
 - Only include setup or run commands in the summary when you have read exact commands from repository files. Quote those actual commands, and omit the commands section entirely rather than leaving empty fenced code blocks, placeholders, or guessed commands.
-
 
 ## Adding Features
 
@@ -95,7 +95,6 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - Production baseline should not assume a default model config. In tests, use `testutil.NewTestDB(t)` or create one explicitly.
 - Run `templ generate` after modifying `.templ` files.
 - After main Go app code changes, run the required validation chain at the end: `go build ./cmd/server && go test ./internal/... -count=1 -timeout 60s`. Include `templ generate &&` first if `.templ` files changed.
-
 
 ## Running
 
@@ -130,6 +129,7 @@ go test ./internal/... -count=1 -timeout 60s  # Focused/internal tests; use the 
 - Repositories use raw SQL, not an ORM.
 - Prefer `QueryRowContext` with `RETURNING` for inserts that need created row data.
 - Enforce cross-row invariants inside repository transactions so behavior remains correct when handlers or UI bypass optional workflows.
+- When a repository transaction runs on a dedicated connection, do not commit and then call a repository read through `*sql.DB` while that connection is still held. Single-connection tests can deadlock waiting for the same connection; assemble the result with transaction-scoped queries before commit, or release the connection before the follow-up read.
 - When adding columns, update every SELECT that scans the struct, not only `GetByID` or list methods.
 - Task SELECT mappings must include all current task columns, including follow-up, worktree, merge, lineage, origin, and agent-definition fields.
 - Valid CHECK values include agent provider `anthropic`, `openai`, `ollama`, `test`; auth method `cli`, `oauth`, `api_key`; task status `pending`, `queued`, `running`, `completed`, `failed`, `cancelled`, `blocked`; task merge status `''`, `pending`, `merged`, `failed`, `conflict`; schedule repeat type `once`, `seconds`, `minutes`, `hours`, `daily`, `weekly`, `monthly`.

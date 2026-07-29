@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-07-18
-source: consolidation
-source_id: memory_consolidation_2026_07_17
+updated: 2026-07-21
+source: task_turn
+source_id: 7aa83462a27399272b03aa9dbcfded2d
 confidence: high
 title: Provider Architecture
 ---
@@ -33,7 +33,7 @@ Provider/model selection facts:
 - Interactive chat selection differs: explicit `agent_id` uses that model config, `agent_id=default` uses the global default, and empty/`auto` triggers complexity/vision-based model selection.
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not the provider/model.
 - OpenAI supports Responses API, Completions API, and Codex CLI fallback. OpenAI Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
-- OpenAI supports `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; `gpt-5.6-sol` is the default for empty or unknown first-party OpenAI model selections. All three use a 372,000-token context window, support `low`, `medium`, `high`, `xhigh`, and `max` reasoning, and default to `low` for Sol and `medium` for Terra/Luna.
+- OpenAI supports `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; `gpt-5.6-sol` is the default for empty or unknown first-party OpenAI model selections. All three use a 1,050,000-token context window, have a 128,000-token maximum output, support `none`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning, and default to `medium`.
 - The GPT-5.6 Sol/Terra/Luna family uses the Codex Responses Lite request shape for both OpenAI API-key and ChatGPT OAuth configurations. The primary transport is the Responses WebSocket beta, with Responses Lite HTTP streaming fallback when WebSockets are unavailable. Lite request transformation carries all-turn reasoning context, encrypted reasoning content, developer instructions/additional function tools, and strips unsupported hosted web-search/image-generation tools and image detail fields.
 - Responses Lite WebSocket state is conversation-scoped and credential/account-aware rather than shared across every request for one model config. Reusable states serialize turns per conversation, send compatible incremental turns with `previous_response_id`, reconnect a stale reused socket once, avoid replay after partial output, and fall back to HTTP for subsequent turns after an unrecoverable transport failure. The adapter leases active states, bounds the idle cache, closes evicted/private sockets, and prevents credential rotation or OAuth account changes from reusing an old authenticated connection.
 - Anthropic uses `ProviderAnthropic`; OAuth/API key path uses `pkg/anthropicclient`; CLI path uses subprocess. Helpers live in `models/llm_config.go`.
@@ -43,6 +43,7 @@ Provider/model selection facts:
 - External HTTP retry policy is centralized in `internal/httpretry` and shared by OpenAI, OpenAI-compatible, Anthropic, and Ollama paths. The default permits three retries with exponential backoff capped at 30 seconds, honors `Retry-After`, retries transient network failures and HTTP 408/429/500/502/503/504/529 responses, and requires explicit replay permission for unsafe requests. Streaming calls retry only before any text, thinking, or tool activity is observed, and nested HTTP helpers do not multiply the stream-owned retry budget.
 - Provider adapter retries include a steering retry-reset hook so rows claimed during a failed retryable attempt are restored to guarded steering before the next attempt.
 - Default model request deadlines for the primary HTTP model clients are 10 minutes for Anthropic, OpenAI, and Ollama; lifecycle `after_complete` hook execution also uses a 10-minute deadline.
+- Known streaming-timeout defects are tracked in `openvibely/openvibely#54`, the Claude CLI follow-up-specific report `openvibely/openvibely#64`, and SDK tool-argument streaming report `openvibely/openvibely#68`. CLI Chat and follow-up paths suppress Claude/Codex thinking via `WriteEvent(..., skipThinking=true)`, while inactivity reset currently occurs only through `Writer.Write`, so actively emitted hidden reasoning can be canceled as inactive. Separately, OpenAI `response.function_call_arguments.delta` and Anthropic `input_json_delta` are buffered without invoking a writer callback, so a continuously advancing tool call can be canceled before tool-use completion. Validation should cover both hidden-thinking and tool-argument deltas resetting inactivity without requiring rendered output. Check all three issues before filing further reports because their scopes may overlap.
 - OpenAI and Anthropic task/chat requests use the shared base system prompt plus provider-neutral worktree/project/lifecycle instructions; removed OpenAI OAuth-specific `working_with_user` prompt files should not be reintroduced.
 
 OpenAI-compatible provider facts:
@@ -90,7 +91,8 @@ OAuth and model-specific facts:
 - Provider 401 recovery reloads the model config from DB and may refresh/persist rotated tokens; it does not reread OAuth token material from disk, keychain, or environment variables.
 - Anthropic refresh-token expiry should be treated as opaque/server-controlled, not a fixed duration.
 - Anthropic OAuth refresh failures with provider `invalid_grant` are permanent reauthorization failures: mark model config `oauth_needs_reauth`, surface `needs_reauth`/“Re-auth Required,” and clear the flag after successful refresh.
-- Current incident (2026-07-18): configured Anthropic `Claude Opus 4.8` and `Claude Sonnet 5` model configs have each failed OAuth token refresh with HTTP 400 on repeated task-agent attempts, preventing repository work or validation. Pending task runs should use a working non-failing provider/model configuration or repair/re-authorize the affected Anthropic configurations rather than treating the blocked attempts as implementation evidence.
+- Recorded incident (2026-07-18): configured Anthropic `Claude Opus 4.8` and `Claude Sonnet 5` model configs repeatedly failed OAuth refresh with HTTP 400, blocking task-agent execution. Verify current configuration state before relying on those rows; if still affected, use a working provider/model or repair/re-authorize them rather than treating blocked attempts as implementation evidence.
+- Claude Opus 5 (`claude-opus-5`) is a supported Anthropic model ID. It has a 1M context window, supports up to 128k output tokens, and uses adaptive thinking rather than fixed `budget_tokens`. Native Anthropic API/OAuth requests pass a configured, model-supported effort as `output_config.effort`; unsupported model/effort combinations are cleared when saved and omitted defensively when requests are serialized so older models such as Claude Sonnet 4.5 are not sent an invalid effort parameter.
 - Claude Fable 5 (`claude-fable-5`) and Claude Mythos 5 (`claude-mythos-5`) are supported Anthropic model IDs and should remain selectable where Anthropic model options are listed. They should not be preselected, recommended, or first-position defaults for new Anthropic model configs; use a broadly stable Anthropic default. They default to a 1M context window, support up to 128k output tokens, require adaptive thinking without fixed `budget_tokens`, do not return raw thinking blocks, and can return HTTP 200 refusal responses that should surface as unsuccessful/refusal results.
 
 Provider-native tools and runtime tools:

@@ -2,7 +2,7 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-07-17
+updated: 2026-07-24
 source: consolidation
 source_id: memory_consolidation_2026_07_17
 confidence: high
@@ -21,6 +21,7 @@ Agent and catalog facts:
 - Project-scoped agent create/update/delete and related agent-specific UI/API requests must preserve or recover project context. Backend cleanup/materialization should prefer the agent's persisted `ProjectID` when resolving the project skill root, and frontend agent-specific URLs should carry the active `project_id` query.
 - Standalone skills are filesystem-backed packages. `<root>/skills/SKILLS.md` headings are canonical handles and match `<root>/skills/<handle>/SKILL.md`.
 - An indexed standalone skill is unusable unless the matching package body exists in the checkout the running app loads; creating the package only inside an isolated task worktree leaves the main catalog pointing at a dead path.
+- Bundled-skill startup sync overwrites the embedded `SKILL.md` and merges the bundled index, but does not prune extra support files already present in the installed global package. A global skill may therefore retain `references/` or `templates/` added by an earlier import, update, or Skill Curator operation even when the current repository built-in package ships only `SKILL.md`; a fresh installation from that repository will not receive those absent support files.
 - Project scope overrides global scope for matching standalone or agent-owned skill keys. Product direction favors explicit import/index maintenance over automatic disk auto-discovery.
 - `skill.enabled: false` disables a skill for task execution, lifecycle hooks, routing, `skill_view`, and context injection; management/admin listings still show disabled skills.
 - Standalone top-level `always_use` metadata is catalog control data and does not appear in model-visible `<available_skills>` rendering.
@@ -62,6 +63,7 @@ Goal and Loop Agent facts:
 - Goal runtime tool IDs such as `get_task_goal`, `send_to_task`, `mark_task_goal_achieved`, and `report_task_goal_blocked` are part of the agent tool catalog/UI so grants survive saves.
 - `send_message` is part of the agent tool catalog/UI and agent tool normalization, so users can select and persist it in the agent create/edit dialog. Ordinary task execution and task-thread follow-ups may still expose their own narrow default outbound-message runtime independent of that persisted grant; task-send availability is governed by runtime-tool support and channel configuration, not by the catalog checkbox alone.
 - Dynamic task-loop wakeups use the protected Loop Agent after-complete hook. Its `schedule_task_wakeup` runtime tool is lifecycle-only and should not be exposed to ordinary task agents by default.
+- Runtime agents can mutate schedules but currently lack a project-scoped way to discover schedule identifiers; a bounded schedule-discovery tool surface is proposed in `openvibely/openvibely#84`.
 - Loop Agent wakeups are task-thread continuations enqueued through durable `thread_inputs`, not direct worker submissions or separate worker tasks.
 - Loop Agent wakeup scheduling is server-side blocked when a task goal is achieved, paused, cleared, blocked, or failed.
 - Lifecycle-origin `send_to_task` continuations are rejected when the hook evaluated an older execution and a newer execution exists for the same source task. Freshness checks compare against the hook source task/run and use each logical task run's head/first lifecycle row rather than detached hook-row timestamps.

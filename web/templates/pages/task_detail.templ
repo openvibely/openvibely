@@ -531,18 +531,26 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 										<span class="text-sm opacity-60" id="repeat-interval-label">day(s)</span>
 									</div>
 								</div>
-								<div class="flex gap-2">
-									<button type="submit" class="btn btn-primary btn-sm">
-										Add Schedule
-									</button>
-									<button
-										type="button"
-										class="btn btn-ghost btn-sm"
-										onclick="document.getElementById('schedule-form-container').classList.add('hidden'); document.getElementById('add-schedule-btn').classList.remove('hidden')"
-									>
-										Cancel
-									</button>
-								</div>
+									<div class="form-control mb-4">
+										<input type="hidden" name="clear_context_on_start" value="false"/>
+										<label class="label cursor-pointer justify-start gap-3">
+											<input type="checkbox" name="clear_context_on_start" value="true" class="checkbox checkbox-sm" checked/>
+											<span class="label-text">Clear context on start</span>
+										</label>
+										<label class="label"><span class="label-text-alt opacity-60">Start each scheduled run without prior model conversation context</span></label>
+									</div>
+									<div class="flex gap-2">
+										<button type="submit" class="btn btn-primary btn-sm">
+											Add Schedule
+										</button>
+										<button
+											type="button"
+											class="btn btn-ghost btn-sm"
+											onclick="document.getElementById('schedule-form-container').classList.add('hidden'); document.getElementById('add-schedule-btn').classList.remove('hidden')"
+										>
+											Cancel
+										</button>
+									</div>
 							</form>
 							<script>
 									(function() {
@@ -765,17 +773,25 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 													<span class="text-sm opacity-60" id={ fmt.Sprintf("edit-repeat-label-%s", s.ID) }>day(s)</span>
 												</div>
 											</div>
-											<div class="flex gap-2">
-												<button type="submit" class="btn btn-primary btn-sm">
-													Save Changes
-												</button>
-												<button
-													type="button"
-													class="btn btn-ghost btn-sm"
-													onclick={ templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-edit-%s').classList.add('hidden'); document.getElementById('schedule-view-%s').classList.remove('hidden')", s.ID, s.ID)} }
-												>
-													Cancel
-												</button>
+										<div class="form-control mb-4">
+											<input type="hidden" name="clear_context_on_start" value="false"/>
+											<label class="label cursor-pointer justify-start gap-3">
+												<input type="checkbox" name="clear_context_on_start" value="true" class="checkbox checkbox-sm" checked?={ s.ClearContextOnStart }/>
+												<span class="label-text">Clear context on start</span>
+											</label>
+											<label class="label"><span class="label-text-alt opacity-60">Start each scheduled run without prior model conversation context</span></label>
+										</div>
+										<div class="flex gap-2">
+											<button type="submit" class="btn btn-primary btn-sm">
+												Save Changes
+											</button>
+											<button
+												type="button"
+												class="btn btn-ghost btn-sm"
+												onclick={ templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-edit-%s').classList.add('hidden'); document.getElementById('schedule-view-%s').classList.remove('hidden')", s.ID, s.ID)} }
+											>
+												Cancel
+											</button>
 											</div>
 										</form>
 										<script>

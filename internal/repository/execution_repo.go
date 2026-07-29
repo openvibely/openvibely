@@ -3,19 +3,26 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	llmtranscript "github.com/openvibely/openvibely/internal/llm/transcript"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
 type ExecutionRepo struct {
-	db *sql.DB
+	db             *sql.DB
+	automationRepo *AutomationRepo
 }
 
 func NewExecutionRepo(db *sql.DB) *ExecutionRepo {
 	return &ExecutionRepo{db: db}
+}
+
+func (r *ExecutionRepo) SetAutomationRepo(repo *AutomationRepo) {
+	r.automationRepo = repo
 }
 
 func (r *ExecutionRepo) DB() *sql.DB {
@@ -25,26 +32,26 @@ func (r *ExecutionRepo) DB() *sql.DB {
 	return r.db
 }
 
-const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
-	tokens_used, duration_ms, is_followup, diff_output, cli_session_id, started_at, completed_at`
+const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, reasoning_content, error_message,
+		tokens_used, duration_ms, is_followup, starts_new_context, diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
-// executionSelectColumnsLight omits diff_output (substituting an empty string) so that
-// list/pagination queries don't load the potentially very large diff blob on every request.
+// executionSelectColumnsLight omits reasoning_content and diff_output (substituting
+// empty strings) so list/pagination queries don't load potentially very large blobs.
 // The scan shape matches executionSelectColumns, so scanExecutionRow still works; the
-// resulting Execution will have DiffOutput == "".
-const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, error_message,
-	tokens_used, duration_ms, is_followup, '' AS diff_output, cli_session_id, started_at, completed_at`
+// resulting Execution will have ReasoningContent == "" and DiffOutput == "".
+const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, '' AS reasoning_content, error_message,
+		tokens_used, duration_ms, is_followup, starts_new_context, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
-const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.error_message,
-	e.tokens_used, e.duration_ms, e.is_followup, '' AS diff_output, e.cli_session_id, e.started_at, e.completed_at`
+const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, '' AS reasoning_content, e.error_message,
+		e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
 
 func scanExecutionRow(scanner interface {
 	Scan(dest ...interface{}) error
 }) (models.Execution, error) {
 	var e models.Execution
 	err := scanner.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
-		&e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup,
-		&e.DiffOutput, &e.CliSessionID, &e.StartedAt, &e.CompletedAt)
+		&e.Output, &e.ReasoningContent, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup,
+		&e.StartsNewContext, &e.DiffOutput, &e.CliSessionID, &e.DispatchID, &e.StartedAt, &e.CompletedAt)
 	return e, err
 }
 
@@ -177,10 +184,10 @@ func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
 		isFollowup = 1
 	}
 	err := r.db.QueryRowContext(ctx,
-		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
-		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?)
+		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
+		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
 		 RETURNING id, started_at`,
-		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup).
+		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
 		Scan(&e.ID, &e.StartedAt)
 	if err != nil {
 		return fmt.Errorf("creating execution: %w", err)
@@ -188,37 +195,82 @@ func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
 	return nil
 }
 
+// CreateDirectTaskFollowupOrQueue atomically either starts a direct follow-up or
+// appends it to the task's durable FIFO queue when another run owns admission.
+// The task status is the ordinary-worker claim before its execution row exists;
+// Automation reservations provide the equivalent prepared-run ownership signal.
+func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *models.Execution, input *models.ThreadInput) (bool, error) {
+	if e == nil || input == nil {
+		return false, fmt.Errorf("execution and queued input are required")
+	}
+	threadRepo := NewThreadInputRepo(r.db)
+	started := false
+	err := threadRepo.WithImmediateTx(ctx, func(dbexec SQLExecutor) error {
+		var status models.TaskStatus
+		var projectID string
+		if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
+			return fmt.Errorf("loading task for follow-up admission: %w", err)
+		}
+		var protected int
+		if err := dbexec.QueryRowContext(ctx, `SELECT EXISTS (
+			SELECT 1 FROM executions WHERE task_id = ? AND status = 'running'
+			UNION ALL SELECT 1 FROM automation_task_run_reservations WHERE task_id = ?
+			UNION ALL SELECT 1 FROM thread_inputs
+			 WHERE scope = 'task_thread' AND task_id = ? AND input_status = 'pending'
+		)`, e.TaskID, e.TaskID, e.TaskID).Scan(&protected); err != nil {
+			return fmt.Errorf("checking task follow-up admission: %w", err)
+		}
+		if status == models.StatusRunning || status == models.StatusQueued || protected != 0 {
+			input.Scope = models.ThreadInputScopeTask
+			input.ProjectID = projectID
+			input.TaskID = e.TaskID
+			input.InputMode = models.ThreadInputModeQueued
+			input.InputStatus = models.ThreadInputPending
+			return threadRepo.CreateQueuedWithExecutor(ctx, dbexec, input)
+		}
+		if _, err := dbexec.ExecContext(ctx, `UPDATE tasks
+			SET status = 'queued', category = 'active', updated_at = datetime('now') WHERE id = ?`, e.TaskID); err != nil {
+			return fmt.Errorf("reactivating task for direct follow-up: %w", err)
+		}
+		isFollowup := 0
+		if e.IsFollowup {
+			isFollowup = 1
+		}
+		if err := dbexec.QueryRowContext(ctx, `INSERT INTO executions
+			(id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
+			VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
+			RETURNING id, started_at`, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
+			Scan(&e.ID, &e.StartedAt); err != nil {
+			return fmt.Errorf("creating direct task follow-up execution: %w", err)
+		}
+		started = true
+		return nil
+	})
+	return started, err
+}
+
+var ErrTaskExecutionAdmissionReserved = errors.New("task execution admission is reserved")
+
 func (r *ExecutionRepo) CreateDirectTaskFollowup(ctx context.Context, e *models.Execution) error {
 	if e == nil {
 		return fmt.Errorf("execution is required")
 	}
-	isFollowup := 0
-	if e.IsFollowup {
-		isFollowup = 1
-	}
-	tx, err := r.db.BeginTx(ctx, nil)
+	input := &models.ThreadInput{AgentConfigID: e.AgentConfigID, Content: e.PromptSent}
+	started, err := r.CreateDirectTaskFollowupOrQueue(ctx, e, input)
 	if err != nil {
-		return fmt.Errorf("starting direct task follow-up transaction: %w", err)
+		return err
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE tasks
-		SET status = CASE WHEN status IN ('running', 'queued') THEN status ELSE 'queued' END,
-		    category = 'active',
-		    updated_at = datetime('now')
-		WHERE id = ?`, e.TaskID); err != nil {
-		return fmt.Errorf("reactivating task for direct follow-up: %w", err)
+	if !started {
+		return ErrTaskExecutionAdmissionReserved
 	}
-	if err := tx.QueryRowContext(ctx,
-		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
-		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?)
-		 RETURNING id, started_at`,
-		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup).
-		Scan(&e.ID, &e.StartedAt); err != nil {
-		return fmt.Errorf("creating direct task follow-up execution: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("committing direct task follow-up execution: %w", err)
+	return nil
+}
+
+func (r *ExecutionRepo) SetAgentConfigIfEmpty(ctx context.Context, id, agentConfigID string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE executions SET agent_config_id = NULLIF(?, '')
+		WHERE id = ? AND (agent_config_id IS NULL OR agent_config_id = '')`, agentConfigID, id)
+	if err != nil {
+		return fmt.Errorf("updating execution agent config: %w", err)
 	}
 	return nil
 }
@@ -230,6 +282,131 @@ func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output stri
 		return fmt.Errorf("updating execution output: %w", err)
 	}
 	return nil
+}
+
+func (r *ExecutionRepo) UpdateReasoningContent(ctx context.Context, id, reasoningContent string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE executions SET reasoning_content = ? WHERE id = ?`, reasoningContent, id)
+	if err != nil {
+		return fmt.Errorf("updating execution reasoning content: %w", err)
+	}
+	return nil
+}
+
+func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasoningContent string, messages []models.ExecutionReplayMessage) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("starting execution replay transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE executions SET reasoning_content = ? WHERE id = ?`, reasoningContent, id); err != nil {
+		return fmt.Errorf("updating execution reasoning content: %w", err)
+	}
+	if err := replaceExecutionReplayMessages(ctx, tx, id, messages); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing execution replay messages: %w", err)
+	}
+	return nil
+}
+
+func replaceExecutionReplayMessages(ctx context.Context, tx *sql.Tx, id string, messages []models.ExecutionReplayMessage) error {
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM execution_replay_messages WHERE execution_id = ?`, id); err != nil {
+		return fmt.Errorf("clearing execution replay messages: %w", err)
+	}
+	for sequence, message := range messages {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO execution_replay_messages (
+				execution_id, sequence, user_content, assistant_content, reasoning_content, transcript_json
+			) VALUES (?, ?, ?, ?, ?, ?)`,
+			id, sequence, message.UserContent, message.AssistantContent, message.ReasoningContent, message.TranscriptJSON); err != nil {
+			return fmt.Errorf("inserting execution replay message %d: %w", sequence, err)
+		}
+	}
+	return nil
+}
+
+func (r *ExecutionRepo) ReplayMessagesByExecutionIDs(ctx context.Context, ids []string) (map[string][]models.ExecutionReplayMessage, error) {
+	result := make(map[string][]models.ExecutionReplayMessage)
+	placeholders, args := uniqueExecutionIDArgs(ids)
+	if len(args) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT execution_id, user_content, assistant_content, reasoning_content, transcript_json
+		FROM execution_replay_messages
+		WHERE execution_id IN (`+strings.Join(placeholders, ",")+`)
+		ORDER BY execution_id, sequence`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("loading execution replay messages: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		var message models.ExecutionReplayMessage
+		if err := rows.Scan(&id, &message.UserContent, &message.AssistantContent, &message.ReasoningContent, &message.TranscriptJSON); err != nil {
+			return nil, fmt.Errorf("scanning execution replay message: %w", err)
+		}
+		result[id] = append(result[id], message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating execution replay messages: %w", err)
+	}
+	return result, nil
+}
+
+func (r *ExecutionRepo) ReasoningContentByIDs(ctx context.Context, ids []string) (map[string]string, error) {
+	result := make(map[string]string)
+	placeholders, args := uniqueExecutionIDArgs(ids)
+	if len(args) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, COALESCE(reasoning_content, '') FROM executions WHERE id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("loading execution reasoning content: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, reasoningContent string
+		if err := rows.Scan(&id, &reasoningContent); err != nil {
+			return nil, fmt.Errorf("scanning execution reasoning content: %w", err)
+		}
+		if reasoningContent != "" {
+			result[id] = reasoningContent
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating execution reasoning content: %w", err)
+	}
+	return result, nil
+}
+
+func uniqueExecutionIDArgs(ids []string) ([]string, []interface{}) {
+	placeholders := make([]string, 0, len(ids))
+	args := make([]interface{}, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	return placeholders, args
 }
 
 func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.ExecutionStatus, output, errMsg string, tokensUsed int, durationMs int64) error {
@@ -245,6 +422,47 @@ func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.E
 		status, output, output, errMsg, tokensUsed, durationMs, id)
 	if err != nil {
 		return fmt.Errorf("completing execution: %w", err)
+	}
+	if err := r.syncAutomationActivitiesForExecution(ctx, id, status, errMsg); err != nil {
+		applog.Infof("[execution-repo] automation activity projection deferred execution=%s: %v", id, err)
+		return nil
+	}
+	if err := r.finalizeAutomationExecution(ctx, id, status); err != nil {
+		applog.Infof("[execution-repo] automation terminal projection deferred execution=%s: %v", id, err)
+	}
+	return nil
+}
+
+func (r *ExecutionRepo) finalizeAutomationExecution(ctx context.Context, executionID string, status models.ExecutionStatus) error {
+	if r.automationRepo == nil {
+		return nil
+	}
+	var projectID string
+	if err := r.db.QueryRowContext(ctx, `SELECT t.project_id FROM executions e JOIN tasks t ON t.id = e.task_id WHERE e.id = ?`, executionID).Scan(&projectID); err != nil {
+		return fmt.Errorf("loading automation execution project: %w", err)
+	}
+	if err := r.automationRepo.FinalizeExecutionProjection(ctx, projectID, executionID, status); err != nil {
+		return fmt.Errorf("finalizing automation execution projection: %w", err)
+	}
+	return nil
+}
+
+func (r *ExecutionRepo) syncAutomationActivitiesForExecution(ctx context.Context, executionID string, status models.ExecutionStatus, message string) error {
+	activityStatus := models.AutomationActivityCompleted
+	if status == models.ExecFailed {
+		activityStatus = models.AutomationActivityFailed
+	} else if status == models.ExecCancelled {
+		activityStatus = models.AutomationActivityCancelled
+	} else if status == models.ExecRunning {
+		activityStatus = models.AutomationActivityRunning
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE automation_activities SET status = ?,
+		completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN CURRENT_TIMESTAMP ELSE NULL END,
+		error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
+		AND id IN (SELECT activity_id FROM automation_activity_resources
+		WHERE resource_type = 'execution' AND resource_id = ?)`, activityStatus, activityStatus, strings.TrimSpace(message), executionID)
+	if err != nil {
+		return fmt.Errorf("updating automation execution activities: %w", err)
 	}
 	return nil
 }
@@ -314,6 +532,11 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 	}
 	changed, _ := res.RowsAffected()
 	if changed > 0 {
+		if err := r.syncAutomationActivitiesForExecution(ctx, id, models.ExecCompleted, ""); err != nil {
+			applog.Infof("[execution-repo] automation steering activity projection deferred execution=%s: %v", id, err)
+		} else if err := r.finalizeAutomationExecution(ctx, id, models.ExecCompleted); err != nil {
+			applog.Infof("[execution-repo] automation steering terminal projection deferred execution=%s: %v", id, err)
+		}
 		return CompleteSuccessCompleted, nil
 	}
 
@@ -330,17 +553,86 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 	return CompleteSuccessPendingSteering, nil
 }
 
+func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Context) (int64, error) {
+	threadRepo := NewThreadInputRepo(r.db)
+	var recovered int64
+	err := threadRepo.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+		// No direct or promoted task-thread runner survives a process restart.
+		// Automation dispatches retain a durable dispatch identity/reservation and
+		// are deliberately left to Automation reconciliation.
+		if _, err := exec.ExecContext(ctx, `
+			UPDATE thread_inputs
+			SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
+			WHERE input_status = 'pending'
+			  AND input_mode = 'steering'
+			  AND run_execution_id IN (
+			      SELECT e.id
+			      FROM executions e
+			      JOIN tasks t ON t.id = e.task_id
+			      WHERE e.status = 'running'
+			        AND e.dispatch_id IS NULL
+			        AND t.category != 'chat'
+			        AND t.status = 'queued'
+			        AND NOT EXISTS (
+			          SELECT 1 FROM automation_task_run_reservations reservation
+			          WHERE reservation.task_id = t.id
+			        )
+			  )`); err != nil {
+			return fmt.Errorf("requeueing pre-restart task steering inputs: %w", err)
+		}
+		if _, err := exec.ExecContext(ctx, `
+			UPDATE tasks
+			SET status = 'failed', category = 'backlog', updated_at = datetime('now')
+			WHERE status = 'queued'
+			  AND category != 'chat'
+			  AND NOT EXISTS (
+			    SELECT 1 FROM automation_task_run_reservations reservation
+			    WHERE reservation.task_id = tasks.id
+			  )
+			  AND EXISTS (
+			    SELECT 1 FROM executions interrupted
+			    WHERE interrupted.task_id = tasks.id
+			      AND interrupted.status = 'running'
+			      AND interrupted.dispatch_id IS NULL
+			  )`); err != nil {
+			return fmt.Errorf("terminalizing pre-restart task-thread tasks: %w", err)
+		}
+		result, err := exec.ExecContext(ctx, `
+			UPDATE executions
+			SET status = 'failed',
+			    error_message = CASE
+			      WHEN COALESCE(error_message, '') = '' THEN 'Recovered interrupted task-thread execution after restart'
+			      ELSE error_message
+			    END,
+			    completed_at = datetime('now')
+			WHERE status = 'running'
+			  AND dispatch_id IS NULL
+			  AND EXISTS (
+			    SELECT 1 FROM tasks t
+			    WHERE t.id = executions.task_id
+			      AND t.category = 'backlog'
+			      AND t.status = 'failed'
+			      AND NOT EXISTS (
+			        SELECT 1 FROM automation_task_run_reservations reservation
+			        WHERE reservation.task_id = t.id
+			      )
+			  )`)
+		if err != nil {
+			return fmt.Errorf("recovering pre-restart task-thread executions: %w", err)
+		}
+		recovered, err = result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("counting pre-restart task-thread executions: %w", err)
+		}
+		return nil
+	})
+	return recovered, err
+}
+
 func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (int64, error) {
-	// A running execution is only stale if its own task row is no longer in a
-	// worker-runnable state. Swarm children are independent runnable work: their
-	// parent is an orchestration container and may be terminal, queued, inactive,
-	// or otherwise out of sync with a still-running child execution. Therefore the
-	// recovery sweep must not infer child staleness from parent/container state.
-	//
-	// Active and scheduled are the categories the worker pool dispatches/keeps
-	// running (see WorkerService.dispatchNext's queue-pruning check). Queued and
-	// running statuses can still have a live goroutine or capacity-waiting
-	// follow-up; pending/terminal statuses cannot own an already-running execution.
+	// Automation dispatch executions are recovered by AutomationReconciler from
+	// their durable outbox/reservation identity. Generic recovery must not
+	// terminalize them before prepared resubmission can occur.
 	staleTaskPredicate := `
 			t.category != 'chat'
 			AND (t.status NOT IN ('queued', 'running')
@@ -355,6 +647,7 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 		      FROM executions e
 		      JOIN tasks t ON t.id = e.task_id
 		      WHERE e.status = 'running'
+		        AND e.dispatch_id IS NULL
 		        AND `+staleTaskPredicate+`
 		  )`); err != nil {
 		return 0, fmt.Errorf("requeueing stale running task steering inputs: %w", err)
@@ -371,6 +664,7 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 			END,
 			completed_at = datetime('now')
 		WHERE status = 'running'
+		  AND dispatch_id IS NULL
 		  AND EXISTS (
 		      SELECT 1
 		      FROM tasks t

@@ -129,6 +129,8 @@ func alertMetadataJSON(alert models.Alert) string {
 
 templ alertRow(alert models.Alert, currentProjectID string) {
 	<div
+		id={ "alert-" + alert.ID }
+		data-alert-id={ alert.ID }
 		class={ "card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil) }
 		data-search-card
 		data-search-text={ alertSearchText(alert) }

@@ -144,6 +144,30 @@ func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
 	return r.list(ctx, `SELECT `+agentColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
 }
 
+func (r *AgentRepo) ListSelectableForProject(ctx context.Context, projectID string, limit int) ([]models.Agent, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT `+agentColumns+` FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND COALESCE(enabled, 1) = 1 AND COALESCE(selectable_as_primary, 1) = 1
+		  AND (project_id IS NULL OR project_id = '' OR project_id = ?)
+		ORDER BY name ASC, id ASC LIMIT ?`, projectID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing selectable project agents: %w", err)
+	}
+	defer rows.Close()
+	var agents []models.Agent
+	for rows.Next() {
+		agent, err := scanAgent(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning selectable project agent: %w", err)
+		}
+		agents = append(agents, *agent)
+	}
+	return agents, rows.Err()
+}
+
 // ListIncludingArchived returns every agent row, including generated agents that
 // were archived/absorbed. Most callers should use List; this is for narrow
 // reconciliation paths that need to remove obsolete rows from earlier cleanups.

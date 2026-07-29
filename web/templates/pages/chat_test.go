@@ -54,12 +54,16 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		t.Fatalf("render chat content: %v", err)
 	}
 	content := buf.String()
+	if count := strings.Count(content, `data-scroll-intent-scope="project-scroll"`); count != 2 {
+		t.Fatalf("global Chat transcript and composer must share project-scoped send intent, got %d markers", count)
+	}
 
 	if !strings.Contains(content, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true"`) {
 		t.Fatal("global Chat must hide its initial transcript until hydration and scroll restoration settle")
 	}
 	for _, required := range []string{
 		"var chatScrollStateKey = 'chat-scroll-' + projectId;",
+		"window._chatPageTracker = window.resolveScrollTracker('scrollTracker_chat-messages', chatMessages);",
 		"window.saveChatTranscriptScrollState(chatScrollStateKey, chatMessages, window._chatPageTracker);",
 		"window.restoreChatTranscriptScroll({",
 		"stateKey: chatScrollStateKey",
@@ -80,6 +84,17 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 	}
 	if strings.Contains(content, "// Scroll to bottom on page load to show latest messages") {
 		t.Fatal("global Chat must not unconditionally jump before transcript hydration finishes")
+	}
+	chatRestoreStart := strings.Index(content, "return window.restoreChatTranscriptScroll({")
+	if chatRestoreStart < 0 {
+		t.Fatal("could not isolate global Chat transcript restore options")
+	}
+	chatRestoreEnd := strings.Index(content[chatRestoreStart:], "});")
+	if chatRestoreEnd < 0 {
+		t.Fatal("could not find end of global Chat transcript restore options")
+	}
+	if strings.Contains(content[chatRestoreStart:chatRestoreStart+chatRestoreEnd], "waitForImages") {
+		t.Fatal("task-thread delayed-image reveal policy must not change global Chat scroll restoration")
 	}
 }
 

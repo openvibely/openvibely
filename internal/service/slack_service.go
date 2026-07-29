@@ -1053,7 +1053,19 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		TaskSvc:       s.taskSvc,
 		LLMConfigRepo: s.llmConfigRepo,
 		Collector:     collector,
-		OnTasksCreated: func(ctx context.Context, createdTasks []models.Task) {
+		PrepareTaskCreation: func(ctx context.Context, request *TaskCreationRequest) error {
+			if callerTaskID == "" || s.llmSvc == nil {
+				return nil
+			}
+			return s.llmSvc.prepareAutomationTaskCreation(ctx, projectID, request)
+		},
+		CreatePreparedTask: func(ctx context.Context, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
+			if callerTaskID == "" || s.llmSvc == nil {
+				return nil, "", false, nil
+			}
+			return s.llmSvc.createPreparedAutomationTask(ctx, projectID, request, agents)
+		},
+		OnTasksCreated: func(ctx context.Context, _ []TaskCreationRequest, createdTasks []models.Task) error {
 			for _, t := range createdTasks {
 				if s.taskRepo != nil {
 					if err := s.taskRepo.UpdateSlackOrigin(ctx, t.ID); err != nil {
@@ -1064,6 +1076,7 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 					_ = s.slackTaskContextRepo.Upsert(ctx, &models.SlackTaskContext{TaskID: t.ID, SlackTeamID: actionCtx.TeamID, SlackChannelID: actionCtx.ChannelID, SlackThreadTS: actionCtx.ThreadTS, SlackUserID: actionCtx.UserID})
 				}
 			}
+			return nil
 		},
 	})
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskGoalSvc}))

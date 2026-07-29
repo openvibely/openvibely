@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,9 +57,28 @@ func TestTaskThreadNavigationScrollStateInChrome(t *testing.T) {
 		})
 	}
 
+	attachments := map[string][]models.ChatAttachment{
+		executions[0].ID: {
+			{
+				ID:          "delayed-image",
+				ExecutionID: executions[0].ID,
+				FileName:    "delayed-history.svg",
+				MediaType:   "image/svg+xml",
+				FileSize:    128,
+			},
+			{
+				ID:          "stalled-image",
+				ExecutionID: executions[0].ID,
+				FileName:    "stalled-history.svg",
+				MediaType:   "image/svg+xml",
+				FileSize:    128,
+			},
+		},
+	}
+
 	renderTaskFragment := func() string {
 		var rendered bytes.Buffer
-		if err := components.TaskThreadView(task, executions, nil, nil, nil, nil, false, 30).Render(context.Background(), &rendered); err != nil {
+		if err := components.TaskThreadView(task, executions, nil, nil, attachments, nil, false, 30).Render(context.Background(), &rendered); err != nil {
 			t.Fatalf("render production TaskThreadView: %v", err)
 		}
 		return `<div id="task-page-root"><span hidden data-openvibely-page-title="Task Thread navigation fixture - OpenVibely"></span><div id="thread-content" data-task-id="task-browser" data-loaded="true">` + rendered.String() + `</div></div>`
@@ -75,6 +95,13 @@ window.renderChatMarkdown = function(text) {
 window.renderChatMarkdownAsync = null;
 window.addCodeCopyButtons = function() {};
 window.addEventListener('DOMContentLoaded', function() {
+  window._taskThreadTestSwapTargets = [];
+  document.body.addEventListener('htmx:beforeSwap', function(event) {
+    window._taskThreadTestSwapTargets.push('before:' + ((event.detail && event.detail.target && event.detail.target.id) || ''));
+  });
+  document.body.addEventListener('htmx:afterSwap', function(event) {
+    window._taskThreadTestSwapTargets.push('after:' + ((event.detail && event.detail.target && event.detail.target.id) || ''));
+  });
   function fail(message) { throw new Error(message); }
   function waitFor(check, label, timeout) {
     var started = performance.now();
@@ -88,7 +115,14 @@ window.addEventListener('DOMContentLoaded', function() {
     });
   }
   function messages() { return document.getElementById('task-thread-messages'); }
+  function historyImage() { return messages() && messages().querySelector('img[alt="delayed-history.svg"]'); }
+  function stalledHistoryImage() { return messages() && messages().querySelector('img[alt="stalled-history.svg"]'); }
   function bottomDistance() { var el = messages(); return el.scrollHeight - el.scrollTop - el.clientHeight; }
+  function waitForTaskDOM(stage) {
+    return waitFor(function() {
+      return document.getElementById('task-page-root') && messages() && historyImage();
+    }, stage + ' Task Thread DOM');
+  }
   function waitForTask(stage) {
     return waitFor(function() {
       return document.getElementById('task-page-root') && messages() && messages().style.visibility !== 'hidden';
@@ -106,19 +140,37 @@ window.addEventListener('DOMContentLoaded', function() {
     reportResult('fail', message);
   }
   async function assertPinned(stage) {
-    await waitFor(function() { return bottomDistance() <= 1; }, stage + ' true bottom');
+    try {
+      await waitFor(function() { return bottomDistance() <= 1; }, stage + ' true bottom');
+    } catch (error) {
+      var state = window._taskThreadScrollStates && window._taskThreadScrollStates['task-thread-scroll-task-browser'];
+      fail(stage + ' did not restore true bottom: distance=' + bottomDistance() + '; top=' + messages().scrollTop + '; height=' + messages().scrollHeight + '; trackerUp=' + !!(window._taskThreadPageTracker && window._taskThreadPageTracker.userScrolledUp) + '; state=' + JSON.stringify(state) + '; swaps=' + JSON.stringify(window._taskThreadTestSwapTargets) + '; fresh=' + JSON.stringify(window._taskThreadFreshOpenTasks));
+    }
     if (bottomDistance() > 1) fail(stage + ' did not restore true bottom: ' + bottomDistance());
   }
-  async function assertReading(stage, expectedTop) {
-    await waitFor(function() { return Math.abs(messages().scrollTop - expectedTop) <= 2; }, stage + ' reading position');
+  async function assertFreshBottom(stage) {
+    await assertPinned(stage);
     var state = window._taskThreadScrollStates && window._taskThreadScrollStates['task-thread-scroll-task-browser'];
-    if (Math.abs(messages().scrollTop - expectedTop) > 2 || !window._taskThreadPageTracker || !window._taskThreadPageTracker.userScrolledUp || !state || !state.userScrolledUp) {
-      fail(stage + ' lost upward reading state: top=' + messages().scrollTop + '; trackerUp=' + !!(window._taskThreadPageTracker && window._taskThreadPageTracker.userScrolledUp) + '; state=' + JSON.stringify(state));
+    if (window._taskThreadPageTracker && window._taskThreadPageTracker.userScrolledUp) {
+      fail(stage + ' restored stale upward intent');
     }
+    if (state && state.userScrolledUp) fail(stage + ' retained stale upward snapshot: ' + JSON.stringify(state));
   }
 
   (async function() {
+    await waitForTaskDOM('initial delayed image');
+    await waitFor(function() { return !historyImage().complete; }, 'delayed historical image request');
+    await new Promise(function(resolve) { setTimeout(resolve, 80); });
+    if (messages().style.visibility !== 'hidden') {
+      fail('initial transcript became visible before delayed historical image loaded');
+    }
     await waitForTask('initial');
+    if (!historyImage().complete || historyImage().naturalHeight < 1) {
+      fail('initial transcript became visible before historical image decode completed');
+    }
+    if (stalledHistoryImage().style.display !== 'none' || stalledHistoryImage().hasAttribute('src')) {
+      fail('stalled historical image was not removed from layout before reveal');
+    }
     await assertPinned('direct load');
 
     await window.openVibelyNavigate('/other');
@@ -150,18 +202,35 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitForOther();
     await window.openVibelyNavigate('/tasks/task-browser?tab=chat');
     await waitForTask('direct reading return');
-    await assertReading('direct reading return', 80);
+    await assertFreshBottom('direct reading return');
+
+    var reopenedMessages = messages();
+    reopenedMessages.dispatchEvent(new WheelEvent('wheel', {deltaY: -160, bubbles: true}));
+    reopenedMessages.scrollTop = 80;
+    reopenedMessages.dispatchEvent(new Event('scroll'));
+    await waitFor(function() {
+      return window._taskThreadPageTracker && window._taskThreadPageTracker.userScrolledUp;
+    }, 'post-open upward reading intent');
+    var postOpenTop = reopenedMessages.scrollTop;
+    var growth = document.createElement('div');
+    growth.setAttribute('data-execution-pair', 'true');
+    growth.style.minHeight = '240px';
+    reopenedMessages.appendChild(growth);
+    await new Promise(function(resolve) { setTimeout(resolve, 80); });
+    if (Math.abs(reopenedMessages.scrollTop - postOpenTop) > 2) {
+      fail('post-open asynchronous growth overrode upward reading intent: before=' + postOpenTop + '; after=' + reopenedMessages.scrollTop);
+    }
 
     await window.openVibelyNavigate('/other');
     await waitForOther();
     history.back();
     await waitForTask('reading Back');
-    await assertReading('reading Back', 80);
+    await assertFreshBottom('reading Back');
     history.forward();
     await waitForOther();
     history.back();
     await waitForTask('reading Forward/Back');
-    await assertReading('reading Forward/Back', 80);
+    await assertFreshBottom('reading Forward/Back');
 
     document.getElementById('task-page-root').setAttribute('data-test-result', 'pass');
     await reportResult('pass', '');
@@ -180,11 +249,23 @@ html, body, #main-content { height: 100%; margin: 0; }
 </style>`
 
 	browserResult := make(chan string, 16)
+	var stalledImageRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
+		case "/chat/attachments/delayed-image/download":
+			w.Header().Set("Content-Type", "image/svg+xml")
+			w.Header().Set("Cache-Control", "no-store")
+			time.Sleep(300 * time.Millisecond)
+			_, _ = w.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="480" viewBox="0 0 320 480"><rect width="320" height="480" fill="#7480ff"/></svg>`))
+		case "/chat/attachments/stalled-image/download":
+			if stalledImageRequests.Add(1) == 1 {
+				<-r.Context().Done()
+				return
+			}
+			http.Error(w, "fixture image unavailable", http.StatusNotFound)
 		case "/tasks/task-browser":
 			fragment := renderTaskFragment()
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -231,7 +312,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 		server.URL+"/tasks/task-browser?tab=chat",
 	)
 	cmd.Stderr = stderrFile
-	if err := cmd.Start(); err != nil {
+	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome Task Thread navigation fixture: %v", err)
 	}
 
@@ -241,10 +322,7 @@ html, body, #main-content { height: 100%; margin: 0; }
 	case <-time.After(30 * time.Second):
 		outcome = "fail:timed out waiting for browser result callback"
 	}
-	if cmd.Process != nil {
-		_ = cmd.Process.Kill()
-	}
-	_ = cmd.Wait()
+	stopBrowserProcess(cmd)
 
 	if outcome != "pass:" {
 		stderr, _ := os.ReadFile(stderrPath)

@@ -14,9 +14,9 @@ Why this matters:
 
 ## Recommended Setup
 
-**Start with Codex `gpt-5.5` at `high` reasoning effort.** This is the default model and the setup OpenVibely is tuned against. It handles the full range of tasks — code generation, multi-file edits, test writing, debugging — and the `high` effort level gives it enough reasoning depth to produce solid results without the latency cost of `xhigh`. For most teams this is the only model config they need.
+**Start with Codex `gpt-5.6-sol` at `medium` reasoning effort.** This is the default model and the setup OpenVibely is tuned against. It is the flagship GPT-5.6 tier for complex coding and professional work, while `medium` is the model's balanced default. For most teams this is the only model config they need.
 
-If a task is complex enough that `high` is producing shallow plans or missing edge cases, switch that model config to `xhigh`. Reserve `xhigh` for the tasks where deeper reasoning is worth the extra time.
+For lower cost, use `gpt-5.6-terra`; for efficient high-volume work, use `gpt-5.6-luna`. Increase effort to `high`, `xhigh`, or `max` only when representative tasks show a useful quality gain. Use `none` or `low` for latency-sensitive work.
 
 **Secondary: Claude Opus** for teams that prefer Anthropic. Opus at `medium` effort performs comparably for most coding tasks at a lower latency and cost than higher effort levels.
 
@@ -40,10 +40,14 @@ If a task is complex enough that `high` is producing shallow plans or missing ed
 
 | Model | Effort Options | Notes |
 |---|---|---|
-| Claude Opus 4.8 (`claude-opus-4-8`) | low / medium / high / max | Latest Opus generation. |
+| Claude Opus 5 (`claude-opus-5`) | low / medium / high / max | Latest Opus generation. 128k max output, 1M context. |
+| Claude Sonnet 5 (`claude-sonnet-5`) | low / medium / high / max | Latest Sonnet generation. 128k max output, 1M context. |
+| Claude Fable 5 (`claude-fable-5`) | low / medium / high / max | 128k max output, 1M context; adaptive thinking is always on. |
+| Claude Mythos 5 (`claude-mythos-5`) | low / medium / high / max | Limited-availability model. 128k max output, 1M context; adaptive thinking is always on. |
+| Claude Opus 4.8 (`claude-opus-4-8`) | low / medium / high / max | 128k max output, 1M context. |
 | Claude Opus 4.7 (`claude-opus-4-7`) | low / medium / high / max | 128k max output, 1M context. |
 | Claude Sonnet 4.6 (`claude-sonnet-4-6`) | low / medium / high / max | 64k max output, 1M context. |
-| Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | low / medium / high / max | Legacy. |
+| Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`) | none | Supports manual extended thinking, but not the newer effort parameter. Legacy. |
 | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | none | No reasoning effort support. Legacy. |
 | Claude Opus 4.6 (`claude-opus-4-6`) | low / medium / high / max | Legacy. |
 
@@ -51,12 +55,15 @@ If a task is complex enough that `high` is producing shallow plans or missing ed
 
 | Model | Reasoning Efforts | Notes |
 |---|---|---|
+| gpt-5.6-sol | none / low / medium / high / xhigh / max | Default flagship tier. 1.05M context, 128k max output. |
+| gpt-5.6-terra | none / low / medium / high / xhigh / max | Balances intelligence and cost. 1.05M context, 128k max output. |
+| gpt-5.6-luna | none / low / medium / high / xhigh / max | Efficient high-volume tier. 1.05M context, 128k max output. |
 | gpt-5.5 | low / medium / high / xhigh | Codex 5.5 frontier model. |
 | gpt-5.5-pro | low / medium / high / xhigh | Pro/Enterprise tier. |
 | gpt-5.4 | low / medium / high / xhigh | |
-| gpt-5.4-mini | low / medium / high | Smaller, faster variant. |
+| gpt-5.4-mini | low / medium / high / xhigh | Smaller, faster variant. |
 | gpt-5.3-codex | low / medium / high / xhigh | Legacy. |
-| gpt-5.3-codex-spark | low / medium / high | Fast research preview. |
+| gpt-5.3-codex-spark | low / medium / high / xhigh | Fast research preview. |
 | gpt-5.2-codex | low / medium / high / xhigh | Legacy. |
 | gpt-5.1-codex-max | low / medium / high / xhigh | Legacy. |
 | gpt-5.1-codex / mini | low / medium / high | Legacy. |
@@ -73,12 +80,13 @@ Where a low-level provider API still requires an output limit, OpenVibely choose
 ### Anthropic
 
 - Supports API key or OAuth-based flows.
-- `Claude Effort` (`low`, `medium`, `high`, `max`) is translated into an extended-thinking budget for API/OAuth calls. Blank/legacy saved configs keep the provider default behavior.
+- For supported models, `Claude Effort` (`low`, `medium`, `high`, `max`) is sent to API/OAuth calls as `output_config.effort`. The selected value is validated against the model before it is saved and again before a request is sent.
+- Effort and thinking mode are separate controls. Claude 5 models use adaptive thinking; older models may use manual extended thinking budgets. Blank or unsupported effort values are omitted so the provider default applies.
 
 ### OpenAI
 
 - Auth options include API key and OAuth.
-- For supported Codex models, `Codex Reasoning Effort` is available.
+- For supported Codex models, `Codex Reasoning Effort` is available. GPT-5.6 supports `none`, `low`, `medium`, `high`, `xhigh`, and `max`; its default is `medium`.
 - First-party OpenAI configs use OpenVibely's OpenAI/Codex provider path, not the generic OpenAI-compatible Chat Completions adapter.
 
 ### OpenAI-Compatible Chat Completions

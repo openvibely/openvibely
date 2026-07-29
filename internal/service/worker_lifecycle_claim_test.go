@@ -12,6 +12,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 // TestWorkerService_TaskClaimedBeforeLifecycleHooks verifies the fix for the
@@ -29,6 +30,173 @@ import (
 //     status is already "running" — proving the claim happened first.
 //  4. Asserts that a TaskStatusChanged(pending -> running) event was
 //     published before the lifecycle hook fired.
+func TestWorkerService_TaskAdmissionQueuesFollowupAfterPersistedClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	inputRepo := repository.NewThreadInputRepo(db)
+	project := &models.Project{Name: "task admission claim race"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "Admission Agent", Provider: models.ProviderTest, Model: "test-model", MaxTokens: 4096, AuthMethod: models.AuthMethodCLI, IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Claimed ordinary task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	caller := testutil.NewMockLLMCaller()
+	caller.Response = "ordinary run complete"
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, repository.NewAttachmentRepo(db))
+	llmSvc.SetLLMCaller(caller)
+	worker := NewWorkerService(llmSvc, 1, projectRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetTaskRepo(taskRepo)
+	worker.SetExecutionRepo(execRepo)
+	claimed := make(chan struct{})
+	releaseClaim := make(chan struct{})
+	worker.afterOrdinaryTaskClaim = func(models.Task) {
+		close(claimed)
+		<-releaseClaim
+	}
+	worker.Start(ctx)
+	defer worker.Stop()
+	worker.Submit(*task)
+
+	select {
+	case <-claimed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for persisted task claim")
+	}
+	for _, content := range []string{"first follow-up", "second follow-up"} {
+		exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: content, IsFollowup: true}
+		input := &models.ThreadInput{AgentConfigID: agent.ID, Content: content, Source: models.TaskOriginWeb}
+		started, err := execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, input)
+		if err != nil {
+			t.Fatalf("admit %q: %v", content, err)
+		}
+		if started {
+			t.Fatalf("follow-up %q started behind persisted ordinary-task claim", content)
+		}
+	}
+	if caller.CallCount() != 0 {
+		t.Fatalf("model called while worker was paused before execution insertion: %d", caller.CallCount())
+	}
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil || len(execs) != 0 {
+		t.Fatalf("expected no execution before releasing claim barrier, got %#v err=%v", execs, err)
+	}
+	pending, err := inputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil || len(pending) != 2 || pending[0].Content != "first follow-up" || pending[1].Content != "second follow-up" {
+		t.Fatalf("expected FIFO follow-ups behind claim, got %#v err=%v", pending, err)
+	}
+
+	close(releaseClaim)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		stored, getErr := taskRepo.GetByID(ctx, task.ID)
+		if getErr == nil && stored != nil && stored.Status == models.StatusCompleted && caller.CallCount() == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	stored, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil || stored.Status != models.StatusCompleted || caller.CallCount() != 1 {
+		t.Fatalf("ordinary run did not terminalize once: task=%#v calls=%d err=%v", stored, caller.CallCount(), err)
+	}
+	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil || len(execs) != 1 || execs[0].PromptSent != task.Prompt || execs[0].Status != models.ExecCompleted {
+		t.Fatalf("expected one completed original-prompt execution, got %#v err=%v", execs, err)
+	}
+
+	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: pending[0].Content, IsFollowup: true}
+	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, pending[0].ID, promoted); err != nil {
+		t.Fatalf("promote FIFO head: %v", err)
+	}
+	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, pending[0].ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}); err != repository.ErrInputNotPending {
+		t.Fatalf("expected exactly-once promotion rejection, got %v", err)
+	}
+	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
+	if err != nil || len(execs) != 2 || execs[1].ID != promoted.ID || execs[1].PromptSent != "first follow-up" {
+		t.Fatalf("expected exactly one FIFO promotion, got %#v err=%v", execs, err)
+	}
+	remaining, err := inputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil || len(remaining) != 1 || remaining[0].Content != "second follow-up" {
+		t.Fatalf("expected second follow-up to remain pending, got %#v err=%v", remaining, err)
+	}
+}
+
+func TestWorkerService_TaskAdmissionRunsFirstTurnWhenFollowupArrivesBeforeClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	inputRepo := repository.NewThreadInputRepo(db)
+	project := &models.Project{Name: "follow-up before task claim"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent := &models.LLMConfig{Name: "Reverse Admission Agent", Provider: models.ProviderTest, Model: "test-model", MaxTokens: 4096, AuthMethod: models.AuthMethodCLI, IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Fresh ordinary task", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt", AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	caller := testutil.NewMockLLMCaller()
+	caller.Response = "ordinary run complete"
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, nil, repository.NewAttachmentRepo(db))
+	llmSvc.SetLLMCaller(caller)
+	worker := NewWorkerService(llmSvc, 1, projectRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetTaskRepo(taskRepo)
+	worker.SetExecutionRepo(execRepo)
+	beforeClaim := make(chan struct{})
+	releaseClaim := make(chan struct{})
+	worker.beforeOrdinaryTaskClaim = func(models.Task) {
+		close(beforeClaim)
+		<-releaseClaim
+	}
+	worker.Start(ctx)
+	defer worker.Stop()
+	worker.Submit(*task)
+
+	select {
+	case <-beforeClaim:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pre-claim barrier")
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "follow-up before claim", Source: models.TaskOriginWeb}
+	require.NoError(t, inputRepo.CreateQueued(ctx, queued))
+	close(releaseClaim)
+
+	require.Eventually(t, func() bool {
+		stored, err := taskRepo.GetByID(ctx, task.ID)
+		return err == nil && stored != nil && stored.Status == models.StatusCompleted && caller.CallCount() == 1
+	}, 5*time.Second, 10*time.Millisecond)
+	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	require.Equal(t, task.Prompt, execs[0].PromptSent)
+	require.Equal(t, models.ExecCompleted, execs[0].Status)
+
+	pending, err := inputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, queued.ID, pending[0].ID)
+	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
+	require.NoError(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted))
+	require.ErrorIs(t, inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, &models.Execution{TaskID: task.ID, Status: models.ExecRunning}), repository.ErrInputNotPending)
+	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 2)
+	require.Equal(t, queued.Content, execs[1].PromptSent)
+}
+
 func TestWorkerService_TaskClaimedBeforeLifecycleHooks(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	broadcaster := events.NewBroadcaster()

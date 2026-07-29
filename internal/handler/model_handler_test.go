@@ -2273,12 +2273,24 @@ func TestNormalizeProviderReasoningEffort(t *testing.T) {
 		input    string
 		want     string
 	}{
+		{"openai none", models.ProviderOpenAI, "gpt-5.6-sol", "none", "none"},
 		{"openai xhigh", models.ProviderOpenAI, "gpt-5.6-sol", "xhigh", "xhigh"},
 		{"openai max", models.ProviderOpenAI, "gpt-5.6-sol", "max", "max"},
 		{"openai rejects max for older model", models.ProviderOpenAI, "gpt-5.4-mini", "max", ""},
 		{"openai rejects ultra", models.ProviderOpenAI, "gpt-5.6-sol", "ultra", ""},
 		{"anthropic max", models.ProviderAnthropic, "claude-opus-4-6", "max", "max"},
 		{"anthropic rejects xhigh", models.ProviderAnthropic, "claude-opus-4-6", "xhigh", ""},
+		{"anthropic opus 5 low", models.ProviderAnthropic, "claude-opus-5", "low", "low"},
+		{"anthropic rejects effort for sonnet 4.5", models.ProviderAnthropic, "claude-sonnet-4-5-20250929", "low", ""},
+		{"anthropic rejects max for opus 4.5", models.ProviderAnthropic, "claude-opus-4-5-20251101", "max", ""},
+		{"kimi k3 low", models.ProviderOpenAICompatible, "kimi-k3", "low", "low"},
+		{"kimi k3 max", models.ProviderOpenAICompatible, " KIMI-K3 ", "max", "max"},
+		{"kimi k3 rejects medium", models.ProviderOpenAICompatible, "kimi-k3", "medium", ""},
+		{"kimi k2.7 rejects effort", models.ProviderOpenAICompatible, "kimi-k2.7-code", "high", ""},
+		{"glm 5.2 minimal", models.ProviderOpenAICompatible, "glm-5.2", "minimal", "minimal"},
+		{"glm 5.2 max", models.ProviderOpenAICompatible, " GLM-5.2 ", "max", "max"},
+		{"glm 5.2 rejects ultra", models.ProviderOpenAICompatible, "glm-5.2", "ultra", ""},
+		{"glm 5.1 rejects effort", models.ProviderOpenAICompatible, "glm-5.1", "high", ""},
 		{"ollama clears effort", models.ProviderOllama, "llama", "high", ""},
 	}
 

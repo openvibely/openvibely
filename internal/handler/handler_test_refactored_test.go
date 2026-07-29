@@ -279,15 +279,16 @@ func TestHandler_TaskThreadFollowup_Refactored(t *testing.T) {
 		Contains("chat-bubble-user-msg").
 		Contains("Can you explain what you did?")
 
-	// Verify task was reactivated (status is "queued" because the transition to
-	// "running" happens asynchronously in processStreamingResponse goroutine)
+	// Verify task was reactivated. The asynchronous response goroutine may
+	// acquire a worker slot and transition it from queued to running before this
+	// assertion executes.
 	updatedTask, err := tc.taskRepo.GetByID(testContext(), task.ID)
 	if err != nil {
 		t.Fatalf("failed to get task: %v", err)
 	}
 
-	if updatedTask.Status != models.StatusQueued {
-		t.Errorf("expected task to be queued after follow-up, got %v", updatedTask.Status)
+	if updatedTask.Status != models.StatusQueued && updatedTask.Status != models.StatusRunning {
+		t.Errorf("expected task to be queued or running after follow-up, got %v", updatedTask.Status)
 	}
 	if updatedTask.Category != models.CategoryActive {
 		t.Errorf("expected task to be active after follow-up, got %v", updatedTask.Category)

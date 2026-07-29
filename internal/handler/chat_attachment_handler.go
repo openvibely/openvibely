@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/attachmentsession"
 	"github.com/openvibely/openvibely/web/templates/components"
 )
 
@@ -58,6 +61,27 @@ func (h *Handler) UploadChatAttachment(c echo.Context) error {
 	if !isValidPendingAttachmentSessionID(sessionID) {
 		sessionID = generateSessionID()
 	}
+	if h.threadInputRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "attachment session storage is unavailable")
+	}
+
+	// Retirement and pending-file publication are coordinated per session. This
+	// prevents a stale upload from recreating a directory after cleanup commits,
+	// without holding SQLite or blocking unrelated attachment sessions during I/O.
+	unlockSession := attachmentsession.Lock(sessionID)
+	defer unlockSession()
+	retired, err := h.threadInputRepo.IsAttachmentSessionRetired(c.Request().Context(), sessionID)
+	if err != nil {
+		applog.Infof("[handler] UploadChatAttachment error checking session retirement: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to validate attachment session")
+	}
+	if retired {
+		return echo.NewHTTPError(http.StatusConflict, "attachment upload session has expired")
+	}
+	if h.pendingPublicationHook != nil {
+		h.pendingPublicationHook(sessionID)
+	}
+
 	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
 	if err := os.MkdirAll(sessionDir, 0755); err != nil {
 		applog.Infof("[handler] UploadChatAttachment error creating directory: %v", err)
@@ -183,6 +207,35 @@ func (h *Handler) DeleteChatAttachment(c echo.Context) error {
 	// Return updated attachments list for this execution
 	attachments, _ := h.chatAttachmentRepo.ListByExecution(c.Request().Context(), executionID)
 	return render(c, http.StatusOK, components.ChatAttachmentListOnly(attachments))
+}
+
+func (h *Handler) cleanupUnpublishedPendingAttachmentSession(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	if !isValidPendingAttachmentSessionID(sessionID) {
+		return fmt.Errorf("invalid pending attachment session: %q", sessionID)
+	}
+	if h.threadInputRepo == nil {
+		return errors.New("thread input repository is unavailable")
+	}
+	unlockSession := attachmentsession.Lock(sessionID)
+	defer unlockSession()
+	retired, err := h.threadInputRepo.RetireAttachmentSessionIfUnowned(context.WithoutCancel(ctx), sessionID)
+	if err != nil {
+		return err
+	}
+	if !retired {
+		return nil
+	}
+	if h.pendingRemovalHook != nil {
+		h.pendingRemovalHook(sessionID)
+	}
+	if err := os.RemoveAll(filepath.Join(uploadsDir, "chat", "pending", sessionID)); err != nil {
+		return fmt.Errorf("removing unpublished pending attachment session %s: %w", sessionID, err)
+	}
+	return nil
 }
 
 func isValidPendingAttachmentSessionID(sessionID string) bool {

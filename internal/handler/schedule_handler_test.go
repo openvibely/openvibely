@@ -55,6 +55,9 @@ func TestCreateSchedule_Success_Redirect(t *testing.T) {
 	if len(schedules) != 1 {
 		t.Fatalf("expected 1 schedule, got %d", len(schedules))
 	}
+	if !schedules[0].ClearContextOnStart {
+		t.Fatal("new schedules must default ClearContextOnStart to true")
+	}
 }
 
 func TestCreateSchedule_HTMX_Success(t *testing.T) {

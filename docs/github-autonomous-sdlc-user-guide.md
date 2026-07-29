@@ -17,7 +17,7 @@ Why this matters:
 
 Before creating the loop:
 
-1. Create or select the OpenVibely project for the repository.
+1. Create or select the OpenVibely project for the repository. Configure its GitHub repository URL, or ensure the project's local checkout has a GitHub remote; the explicit project URL takes precedence when both exist.
 2. Configure GitHub in `/channels` using a PAT or GitHub App.
 3. Add the GitHub user or bot accounts OpenVibely should trust under `Authorized Users` in GitHub Runtime Settings.
 4. For PAT setups, assign GitHub issues to the PAT owner when you want OpenVibely scheduled tasks to notice them.
@@ -26,7 +26,7 @@ Before creating the loop:
 
 A PAT identifies a real GitHub user, so scheduled tasks can call `github_list_my_assigned_issues` to find issues assigned to that user. A GitHub App installation may be installed on an organization, which is not an issue assignee; use `github_get_project_inbox` to read the Authorized Users and pass those logins to `github_list_assigned_issues`.
 
-GitHub issue API tools default to the current project repository, but prompts may pass `repo_url` when they name a specific GitHub repository URL. This applies to issue create/read/list/comment/label tools. Pull request tools remain tied to the current OpenVibely task/project because they publish task worktree branches through the configured GitHub token/API and persist task PR records.
+For this Automation loop, do not pass `repo_url` overrides. Automation-bound GitHub tools use only the selected project's configured GitHub repository URL and fall back to a GitHub remote in that project's local checkout when the URL is blank. Pull request tools use that same project boundary because they publish task worktree branches through the configured GitHub token/API and persist task PR records.
 
 ## Bootstrap Skill
 
@@ -38,23 +38,28 @@ Use the OpenVibely GitHub Autonomous SDLC Bootstrap skill to set up the GitHub S
 
 The skill creates or updates normal visible tasks and schedules; it does not start a hidden daemon. Setup should create one visible task per loop role and schedule that same task, not create separate standalone runner tasks plus scheduled duplicates. The first setup action should create/run `GitHub Offering Manager: Vision Suggestions` immediately so it can open initial suggestion issues, then attach its daily schedule and create the Dev Inbox, Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor schedules afterward.
 
-## Minimum Visible Loop
+## Maintained Visible Loop
 
-Start with two scheduled tasks before adding more scanner/finder loops.
+Create all six scheduled roles as part of the maintained setup.
 
 | Task | Cadence | Purpose |
 |---|---:|---|
 | `GitHub Offering Manager: Vision Suggestions` | Daily | Reads project vision/source files and opens suggestion issues only. |
 | `GitHub Dev Inbox` | Hourly | Forwards authorized PR comments/reviews to linked implementation tasks, then checks open issues assigned to the PAT user or configured GitHub Authorized Users and links/updates eligible work. |
+| `GitHub Bug Finder` | Daily | Inspects one focused area for likely defects and opens bug issues only. |
+| `GitHub Optimization Finder` | Daily | Inspects one focused area for measurable performance or efficiency improvements and opens performance issues only. |
+| `GitHub Redundancy Finder` | Daily | Inspects one focused area for duplicated or redundant code and opens duplication issues only. |
+| `GitHub Loop Auditor` | Weekly | Reviews stale labels, blocked work, duplicate tasks, missing issue/task/PR links, and unexpected assignments. |
 
-You can later add Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks using the same pattern. These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks.
+These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks. Loop Auditor is required in the maintained setup.
 
 Initial setup order:
 
 1. Create `GitHub Offering Manager: Vision Suggestions` first and run that same task immediately. If no explicit run-existing-task action is available, create it as `active` for the first run, then attach the daily schedule to that same task after the creation/start action is accepted.
-2. Create `GitHub Dev Inbox`, `GitHub Bug Finder`, `GitHub Optimization Finder`, `GitHub Redundancy Finder`, and optional Loop Auditor tasks as their own scheduled tasks and attach their recurring schedules without setting persisted task goals.
+2. Create `GitHub Dev Inbox`, `GitHub Bug Finder`, `GitHub Optimization Finder`, `GitHub Redundancy Finder`, and `GitHub Loop Auditor` as their own scheduled tasks and attach their recurring schedules without setting persisted task goals.
 3. Do not create separate standalone one-off runner tasks in addition to the scheduled loop tasks. Do not immediately start Dev Inbox or scanner/finder tasks during bootstrap unless the user explicitly asks for an immediate poll/scan pass.
 4. Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues, or when the user explicitly asks for goal-driven continuation.
+5. After all six tasks and schedules exist, call `register_automation_resources` once with adapter key `github_sdlc`, stable key `github-sdlc/default`, and the actual task and schedule IDs. Bind each task and its schedule to the same canonical node key: `vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `dev_inbox`, and `auditor`. Do not infer or register pre-feature resources.
 
 ## Dev Inbox Prompt Pattern
 
@@ -71,7 +76,7 @@ For each returned issue, inspect it with `github_get_issue`. Treat assignment to
 
 Treat an eligible issue as actionable when it is assigned to the PAT owner or one of the configured Authorized Users. Optional labels such as `approved`, `feature`, `bug`, `performance`, or `duplication` may refine priority/scope, but do not require an `approved` label unless your workflow explicitly says to require one.
 
-Before creating anything, call `list_tasks` (a read-only, current-project task discovery tool) with the GitHub issue number and/or URL as the `query` to reconcile existing implementation work; if it returns a matching task, continue that task instead of creating a duplicate. For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue. If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR. Include the GitHub issue number, URL, title, and acceptance notes in the task prompt, then call `set_task_goal` for the created task so it implements the issue and opens/reuses a PR with `github_open_pull_request` when done. Comment concise status on the issue with `github_comment_on_issue` and add `task-created` / `in-progress` labels when work is started.
+Before creating anything, call `list_tasks` (a read-only, current-project task discovery tool) with the GitHub issue number and/or URL as the `query` to reconcile existing implementation work; if it returns a matching task, continue that task instead of creating a duplicate. For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue. If no existing task is evident from available task/thread context, call `create_task` immediately with `category=active`; do not wait for an existing PR. A newly created Active task is submitted automatically. Do not call `execute_tasks` for a newly created Active task, because that can submit the same task twice. Set `source_github_issue_number` to the exact issue number returned by this inbox execution. Do not set `source_github_repo_url`; the server resolves Automation provenance from the selected project's configured repository URL, or from a GitHub remote in its local checkout when that URL is blank. Include the GitHub issue number, URL, title, and acceptance notes in the task prompt, then call `set_task_goal` for the created or reconciled task so it implements the issue and opens/reuses a PR with `github_open_pull_request` when done. For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled, and pass that exact existing task ID so approved implementation resumes. Never call `execute_tasks` for an Active pending, queued, running, or completed task. Do not leave approved implementation work in Backlog or merely reconcile a task without starting it when it still needs execution. Comment concise status on the issue with `github_comment_on_issue` and add `task-created` / `in-progress` labels only after the task is confirmed started.
 
 Use unprefixed labels only, such as `task-created`, `in-progress`, `blocked`, `needs-human`, and `pr-opened`. Never use labels beginning with `openvibely:`.
 
@@ -89,27 +94,22 @@ Review the configured project vision/source files and identify small, reviewable
 
 Open GitHub suggestion issues only. Use `github_create_issue` with unprefixed labels such as `suggestion` and `feature`. Do not create implementation tasks and do not modify code.
 
-Include enough context for a human to approve, reject, or assign the issue. Avoid duplicates by searching or inspecting existing visible work when the available tools allow it.
+Include enough context for a human to approve, reject, or assign the issue. Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call `github_create_issue` for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 ```
 
 Offering, Bug Finder, Optimization Finder, and Redundancy Finder tasks should open issues only. They should not modify code, create OpenVibely implementation tasks, or open PRs. Dev Inbox acts on issues assigned to the PAT owner or configured Authorized Users and creates the implementation tasks that later open PRs. Add labels such as `approved`, `feature`, `bug`, `performance`, or `duplication` when useful for human organization, but assignment is the default approval signal for entering the implementation mailbox.
 
-## Finder Prompt Pattern
+## Role-Specific Finder Prompts
 
-Create separate visible scheduled tasks for bug, optimization, and redundancy discovery with prompts like:
+Create separate visible scheduled tasks for bug, optimization, and redundancy discovery. Never give one finder a menu of all three roles and expect it to infer its identity from the task title.
 
-```text
-Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
+- Bug Finder starts with `You are the Bug Finder.`, requires a concrete correctness failure path plus expected versus actual behavior and regression coverage, and creates issues only with the `bug` label.
+- Optimization Finder starts with `You are the Optimization Finder.`, requires measurable evidence or a measurement plan plus before-and-after criteria, and creates issues only with the `performance` label.
+- Redundancy Finder starts with `You are the Redundancy Finder.`, identifies the repeated locations and smallest safe consolidation without over-engineering, and creates issues only with the `duplication` label.
 
-Look only for issues in this task's scope:
-- Bug Finder: likely defects, edge-case failures, broken behavior, or missing tests that indicate a bug.
-- Optimization Finder: measurable performance, latency, memory, build, or workflow efficiency improvements.
-- Redundancy Finder: duplicated or redundant code that could be made generic without over-engineering.
+Every finder chooses one focused component or workflow and varies it over time. Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call `github_create_issue` for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state. Include evidence, risk, and acceptance criteria.
 
-Open GitHub issues only using `github_create_issue` with unprefixed labels matching the scope, such as `bug`, `performance`, or `duplication`. Include the inspected component, evidence, risk, and suggested acceptance criteria.
-
-Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.
-```
+Finders do not modify code, create OpenVibely implementation tasks, or open PRs. The Dev Inbox creates implementation tasks later only after a human assigns the issue to the configured OpenVibely GitHub inbox identity.
 
 ## Labels
 

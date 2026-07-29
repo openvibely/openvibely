@@ -96,6 +96,47 @@ func TestCompletionsOptions_DefaultMaxTurnsNoLimit(t *testing.T) {
 	}
 }
 
+func TestSendCompletionsDistinguishesZeroFromOmittedTemperature(t *testing.T) {
+	tests := []struct {
+		name        string
+		temperature float64
+		wantPresent bool
+	}{
+		{name: "omitted", temperature: OmittedTemperature()},
+		{name: "explicit zero", wantPresent: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+					t.Fatalf("decode body: %v", err)
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+			}))
+			defer srv.Close()
+
+			client := NewWithCompatibleAPIKey("test-key", srv.URL+"/v1", "", "")
+			_, err := client.SendCompletions(context.Background(), "test", &CompletionsOptions{
+				DisableTools: true,
+				Temperature:  tt.temperature,
+			})
+			if err != nil {
+				t.Fatalf("SendCompletions: %v", err)
+			}
+			gotTemperature, present := gotBody["temperature"]
+			if present != tt.wantPresent {
+				t.Fatalf("temperature present = %v, want %v; body=%#v", present, tt.wantPresent, gotBody)
+			}
+			if present && gotTemperature != float64(0) {
+				t.Fatalf("temperature = %#v, want 0", gotTemperature)
+			}
+		})
+	}
+}
+
 func TestSendCompletions_CompatibleBaseURLAuthAndUsage(t *testing.T) {
 	var gotPath string
 	var gotAuth string
@@ -145,6 +186,99 @@ func TestSendCompletions_CompatibleBaseURLAuthAndUsage(t *testing.T) {
 	}
 	if resp.Text != "Hello" || resp.InputTokens != 12 || resp.OutputTokens != 3 || resp.TotalTokens != 15 || resp.CachedInputTokens != 4 || resp.ReasoningTokens != 2 {
 		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestSendCompletionsPreservesReasoningAcrossRequests(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"current thought\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	client := NewWithCompatibleAPIKey("test-key", srv.URL+"/v1", "", "")
+	client.SetCompletionsHistory([]CompletionsHistoryMessage{
+		{Role: "user", Content: "prior question"},
+		{Role: "assistant", Content: "prior answer", ReasoningContent: "prior thought"},
+	})
+	_, err := client.SendCompletions(context.Background(), "next question", &CompletionsOptions{DisableTools: true})
+	if err != nil {
+		t.Fatalf("SendCompletions: %v", err)
+	}
+
+	messages, _ := gotBody["messages"].([]any)
+	if len(messages) < 3 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	assistant, _ := messages[1].(map[string]any)
+	if assistant["reasoning_content"] != "prior thought" {
+		t.Fatalf("reasoning_content = %#v, want prior thought", assistant["reasoning_content"])
+	}
+	if got := client.LastCompletionsReasoningContent(); got != "current thought" {
+		t.Fatalf("LastCompletionsReasoningContent() = %q", got)
+	}
+}
+
+func TestSendCompletionsCapturesCompleteToolTranscript(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			_, _ = w.Write([]byte(
+				"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"tool thought\",\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]}}]}\n\n" +
+					"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n" +
+					"data: [DONE]\n\n",
+			))
+			return
+		}
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"final thought\",\"content\":\"answer\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	client := NewWithCompatibleAPIKey("test-key", srv.URL+"/v1", "", "")
+	_, err := client.SendCompletions(context.Background(), "question", &CompletionsOptions{
+		ExtraTools: []ToolDefinition{{
+			Type:       "function",
+			Name:       "lookup",
+			Parameters: json.RawMessage(`{"type":"object"}`),
+		}},
+		ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+			return "tool result", false, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendCompletions: %v", err)
+	}
+
+	transcript := client.LastCompletionsTranscript()
+	if len(transcript) != 4 {
+		t.Fatalf("transcript = %#v, want four messages", transcript)
+	}
+	if transcript[0].Role != "user" || transcript[0].Content != "question" {
+		t.Fatalf("user transcript = %#v", transcript[0])
+	}
+	if transcript[1].Role != "assistant" || transcript[1].ReasoningContent != "tool thought" ||
+		len(transcript[1].ToolCalls) != 1 || transcript[1].ToolCalls[0].ID != "call_1" {
+		t.Fatalf("tool-call transcript = %#v", transcript[1])
+	}
+	if transcript[2].Role != "tool" || transcript[2].ToolCallID != "call_1" || transcript[2].Content != "tool result" {
+		t.Fatalf("tool-result transcript = %#v", transcript[2])
+	}
+	if transcript[3].Role != "assistant" || transcript[3].ReasoningContent != "final thought" || transcript[3].Content != "answer" {
+		t.Fatalf("final transcript = %#v", transcript[3])
 	}
 }
 

@@ -68,7 +68,7 @@ templ analyticsContent(currentProject *models.Project) {
 									<select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select>
 								</div>
 							</div>
-							<div class="h-64"><canvas id="usageRateChart"></canvas></div>
+							<div class="relative h-64"><canvas id="usageRateChart"></canvas></div>
 						</div>
 					</div>
 					<div class="card bg-base-100 shadow-sm border border-base-300">
@@ -100,7 +100,7 @@ templ analyticsContent(currentProject *models.Project) {
 				<div class="card bg-base-100 shadow-sm border border-base-300">
 					<div class="card-body">
 						<h3 class="card-title text-lg">Success/Failure Rates Over Time</h3>
-						<div class="h-64">
+						<div class="relative h-64">
 							<canvas id="successFailureChart"></canvas>
 						</div>
 					</div>
@@ -158,7 +158,7 @@ templ analyticsContent(currentProject *models.Project) {
 								<h3 class="card-title text-lg">Skill Activity Over Time</h3>
 								<p class="text-sm opacity-60">Created, edited, and used skill activity.</p>
 							</div>
-							<div class="h-64">
+							<div class="relative h-64">
 								<canvas id="skillUsageTrendChart"></canvas>
 							</div>
 						</div>
@@ -361,10 +361,74 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 
 
-								function lineDataset(label, data, color) {
-									return { label: label, data: data, borderColor: color, backgroundColor: color, tension: 0.25, fill: false, pointRadius: 2, pointHoverRadius: 4 };
-								}
+									const analyticsActivePointOnTop = {
+										id: 'analyticsActivePointOnTop',
+										afterEvent: function(chart, args) {
+											const event = args.event;
+											const previous = chart.$analyticsHoveredPoint || null;
+											if (!event || event.type === 'mouseout' || !args.inChartArea) {
+												chart.$analyticsHoveredPoint = null;
+											} else {
+												const nearest = chart.getElementsAtEventForMode(event, 'nearest', { intersect: false }, false);
+												chart.$analyticsHoveredPoint = nearest.length > 0 ? nearest[0] : null;
+											}
+											const current = chart.$analyticsHoveredPoint;
+											if ((!previous && current) || (previous && !current) || (previous && current && (previous.datasetIndex !== current.datasetIndex || previous.index !== current.index))) {
+												args.changed = true;
+											}
+										},
+										afterDraw: function(chart) {
+											let marker = chart.$analyticsHoverMarker;
+											if (!marker) {
+												marker = document.createElement('span');
+												marker.setAttribute('data-analytics-hover-marker', '');
+												marker.setAttribute('aria-hidden', 'true');
+												marker.style.position = 'absolute';
+												marker.style.width = '12px';
+												marker.style.height = '12px';
+												marker.style.boxSizing = 'border-box';
+												marker.style.border = '3px solid rgba(255, 255, 255, 0.96)';
+												marker.style.borderRadius = '9999px';
+												marker.style.transform = 'translate(-50%, -50%)';
+												marker.style.pointerEvents = 'none';
+												marker.style.zIndex = '2';
+												chart.canvas.parentElement.appendChild(marker);
+												chart.$analyticsHoverMarker = marker;
+											}
+											const point = chart.$analyticsHoveredPoint;
+											const tooltip = chart.tooltip;
+											if (!tooltip || tooltip.opacity === 0 || !point) {
+												marker.style.display = 'none';
+												return;
+											}
+											const element = point.element;
+											const canvasRect = chart.canvas.getBoundingClientRect();
+											const parentRect = chart.canvas.parentElement.getBoundingClientRect();
+											const scaleX = chart.width ? canvasRect.width / chart.width : 1;
+											const scaleY = chart.height ? canvasRect.height / chart.height : 1;
+											const dataset = chart.data.datasets[point.datasetIndex] || {};
+											const datasetColor = dataset.borderColor || element.options?.borderColor || element.options?.backgroundColor;
+											const markerLeft = canvasRect.left - parentRect.left + element.x * scaleX;
+											const markerTop = canvasRect.top - parentRect.top + element.y * scaleY;
+											const chartLeft = canvasRect.left - parentRect.left + chart.chartArea.left * scaleX;
+											const chartTop = canvasRect.top - parentRect.top + chart.chartArea.top * scaleY;
+											const chartRight = canvasRect.left - parentRect.left + chart.chartArea.right * scaleX;
+											const chartBottom = canvasRect.top - parentRect.top + chart.chartArea.bottom * scaleY;
+											marker.style.left = markerLeft + 'px';
+											marker.style.top = markerTop + 'px';
+											marker.style.clipPath = 'inset(' + Math.max(0, chartTop - markerTop + 6) + 'px ' + Math.max(0, markerLeft + 6 - chartRight) + 'px ' + Math.max(0, markerTop + 6 - chartBottom) + 'px ' + Math.max(0, chartLeft - markerLeft + 6) + 'px)';
+											marker.style.backgroundColor = typeof datasetColor === 'string' ? datasetColor : 'rgb(59, 130, 246)';
+											marker.style.display = 'block';
+										},
+										beforeDestroy: function(chart) {
+											chart.$analyticsHoverMarker?.remove();
+											chart.$analyticsHoverMarker = null;
+										}
+									};
 
+									function lineDataset(label, data, color) {
+										return { label: label, data: data, borderColor: color, backgroundColor: color, tension: 0.25, fill: false, pointRadius: 2, pointHoverRadius: 4 };
+									}
 								function renderSkillUsageTrend(totals) {
 									if (charts.skillUsageTrend) charts.skillUsageTrend.destroy();
 									const canvas = document.getElementById('skillUsageTrendChart');
@@ -378,8 +442,9 @@ templ analyticsContent(currentProject *models.Project) {
 									];
 									charts.skillUsageTrend = new Chart(canvas.getContext('2d'), {
 										type: 'line',
+										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: { position: 'nearest', caretPadding: 6 } }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -550,8 +615,9 @@ templ analyticsContent(currentProject *models.Project) {
 									}
 									charts.usageRate = new Chart(rateCtx.getContext('2d'), {
 										type: 'line',
+										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: { position: 'nearest', caretPadding: 6 } }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -666,6 +732,7 @@ templ analyticsContent(currentProject *models.Project) {
 						if (!ctx) return;
 						charts.successFailure = new Chart(ctx.getContext('2d'), {
 							type: 'line',
+							plugins: [analyticsActivePointOnTop],
 							data: {
 								labels: data.map(d => d.Period || 'N/A'),
 								datasets: [
@@ -689,6 +756,7 @@ templ analyticsContent(currentProject *models.Project) {
 								responsive: true,
 								maintainAspectRatio: false,
 								interaction: { mode: 'index', intersect: false },
+								plugins: { tooltip: { position: 'nearest', caretPadding: 6 } },
 								scales: {
 									y: { type: 'linear', display: true, position: 'left', max: 100, title: { display: true, text: 'Success Rate (%)' } },
 									y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Total Executions' }, grid: { drawOnChartArea: false } }

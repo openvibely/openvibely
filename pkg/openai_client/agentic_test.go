@@ -2538,7 +2538,7 @@ func TestOpenAIAutoCompactionTokenLimit_GPT56UsesExpandedContext(t *testing.T) {
 	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
 		t.Run(model, func(t *testing.T) {
 			got := openAIAutoCompactionTokenLimit(model)
-			want := (372000 * 95) / 100
+			want := (272000 * 95) / 100
 			if got != want {
 				t.Fatalf("openAIAutoCompactionTokenLimit(%q) = %d, want %d", model, got, want)
 			}

@@ -5,6 +5,7 @@ skill:
     key: openvibely_native_autonomous_sdlc_bootstrap
     name: OpenVibely Native Autonomous SDLC Bootstrap
     scope: global
+    enabled: false
     description: Bootstrap a review-gated autonomous SDLC loop using project-scoped OpenVibely notifications, visible scheduled tasks, and implementation tasks.
 ---
 
@@ -18,40 +19,48 @@ Human approval authorizes creation of an OpenVibely implementation task only. It
 
 ## Bootstrap
 
-1. Create one visible suggestion-producing task and one visible notification-inbox task in the current project. Recurrence comes from schedules, so do not set persisted goals on recurring loop tasks unless the user explicitly requests goal-driven continuation.
-2. Schedule the suggestion producer at the requested audit cadence. Its prompt should inspect one focused area, avoid duplicates, and call `create_notification` with a stable `idempotency_key`, a generic `type`, a concise title/message, a detailed body, and structured metadata. It must not create implementation tasks or modify code.
-3. Schedule the notification inbox, commonly hourly. Its prompt must call `list_alerts` with `decision_state=approved`, then inspect each result with `get_alert` before attempting `claim_alert`.
+1. Create one visible scheduled OpenVibely task for each maintained loop role: Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, Notification Inbox, and Loop Auditor. Do not create separate runner tasks. The task attached to the schedule owns the loop prompt. Recurrence comes from schedules, so do not set persisted goals on recurring loop tasks unless the user explicitly requests goal-driven continuation.
+2. Schedule Vision Suggestions and the three finder tasks at the requested audit cadence, usually daily. Their prompts should inspect one focused area and call `create_notification` with a stable `idempotency_key`, a generic `type`, a concise title/message, a detailed body, and structured metadata. Native notification idempotency is the duplicate-prevention boundary. Do not list, search, or inspect GitHub issues for duplicate detection. They must not create implementation tasks or modify code.
+3. Schedule the Notification Inbox, commonly hourly. Its prompt must call `list_alerts` without `project_id`, using `decision_state=approved` and `implementation_task_linked=false`, then inspect each result with `get_alert` before attempting `claim_alert`. The runtime automatically uses the scheduled task's persisted project. Never reuse a project ID from prior messages, examples, memory, or tool output.
 4. For each claimed notification, call `create_alert_implementation_task`. This operation atomically creates and links one Backlog task, and is idempotent on retries. Put the notification ID, reviewed body, metadata, acceptance criteria, and the approval boundary in the task prompt.
 5. After successful linkage, call `complete_alert_processing`. If work cannot be linked, call `fail_alert_processing` with a concise retry diagnostic. Use `release_alert_claim` only when no implementation task was linked and another scan should retry immediately.
-6. Report the visible tasks and schedules created, plus any missing runtime-tool or model capability.
+6. Schedule the Loop Auditor, usually weekly. It should inspect stale notifications, expired or failed claims, missing notification/task links, duplicate implementation work, and blocked tasks using only Native notification and task state. Do not list, search, or inspect GitHub issues for duplicate detection. It reports findings through Native notifications and does not bypass approval or alter implementation work itself.
+7. After all tasks and schedules exist, call `register_automation_resources` once with `adapter_key: native_sdlc`, stable key `native-sdlc/default`, and the actual IDs. Bind both the task and its schedule to the same node key: `vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `inbox`, and `auditor`. Do not use separate trigger node keys, pass topology JSON, or infer old resources. A setup rerun reuses the same Automation identity.
+8. Report the visible tasks and schedules created, the returned Automation URL, plus any missing runtime-tool or model capability.
 
 Do not supply another project's `project_id`. Runtime tools bind to the executing task's persisted project and reject mismatches. Do not derive project ownership from the active browser project.
 
-## Suggestion Producer Prompt
+## Suggested Visible Tasks
 
-```text
-Inspect one focused project area for a small, reviewable improvement. Do not modify code and do not create implementation tasks.
+- `Native Vision Suggestions`, daily. Reads project vision/source-of-truth files and creates reviewable feature notifications only.
+- `Native Notification Inbox`, hourly. Processes approved notifications into one linked implementation task each.
+- `Native Bug Finder`, daily. Audits a focused component for likely defects and creates bug notifications only.
+- `Native Optimization Finder`, daily. Looks for measurable performance or workflow improvements and creates optimization notifications only.
+- `Native Redundancy Finder`, daily. Looks for duplicated or redundant code and creates maintenance notifications only.
+- `Native Loop Auditor`, weekly. Reviews stale notifications, claims, missing task links, duplicate tasks, and blocked work.
 
-For each actionable suggestion, call `create_notification` with:
-- a generic type such as `product_suggestion`, `bug_suggestion`, `performance_suggestion`, or `maintenance_suggestion`;
-- a concise title and message;
-- a detailed body with evidence, scope, risk, and acceptance criteria;
-- structured metadata identifying the inspected component and evidence;
-- a stable idempotency key derived from the project-independent finding identity.
+## Role-Specific Discovery Prompts
 
-The notification will remain pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.
-```
+Give each finder its own prompt. Never use one shared three-role menu and expect it to infer its identity from the task title.
+
+- Bug Finder: start with `You are the Bug Finder.` Inspect only likely correctness defects, edge-case failures, broken behavior, or missing regression coverage. Require a concrete failure path, expected versus actual behavior, and needed regression coverage. Create only `bug_suggestion` notifications.
+- Optimization Finder: start with `You are the Optimization Finder.` Inspect only measurable performance, latency, throughput, memory, build, or workflow efficiency bottlenecks. Require evidence or a measurement plan and before-and-after criteria. Create only `performance_suggestion` notifications.
+- Redundancy Finder: start with `You are the Redundancy Finder.` Inspect only demonstrated duplicated or redundant code, configuration, or workflow logic. Name the repeated locations and propose the smallest safe consolidation without over-engineering. Create only `maintenance_suggestion` notifications.
+
+Every discovery prompt must choose one focused project component or workflow, vary it over time, and forbid modifying code or creating implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification idempotency is the duplicate-prevention boundary. For every actionable finding, call `create_notification` with the role's exact type, a concise title and message, a detailed body with evidence, scope, risk, and acceptance criteria, structured metadata, and a stable idempotency key.
+
+The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.
 
 ## Notification Inbox Prompt
 
 ```text
 Process approved actionable notifications for this scheduled task's own project.
 
-Call `list_alerts` with `decision_state=approved`, `implementation_task_linked=false`, a bounded limit, and stable pagination. Do not pass a different project ID. For each result, call `get_alert` and inspect the full body and metadata before claiming it.
+Call `list_alerts` without `project_id`, using `decision_state=approved`, `implementation_task_linked=false`, a bounded limit, and stable pagination. Do not pass the `read` filter: both read and unread approved notifications are eligible for implementation. The runtime automatically uses this scheduled task's persisted project. Never reuse a project ID from prior messages, examples, memory, or tool output. For each result, call `get_alert` and inspect the full body and metadata before claiming it.
 
-Call `claim_alert` for each notification you can process. If the claim succeeds, call `create_alert_implementation_task` with a focused Backlog task title and prompt. Include the notification ID, reviewed context, acceptance criteria, and the rule that human approval authorized task creation only. The operation atomically links at most one task and is safe to retry after a crash.
+Call `claim_alert` for each notification you can process. If the claim succeeds, call `create_alert_implementation_task` with a focused Backlog task title and prompt. Include the notification ID, reviewed context, acceptance criteria, and the rule that human approval authorized task creation only. The operation atomically links at most one task and is safe to retry after a crash. Use the returned `implementation_task_id` to call `execute_tasks` with that exact task ID so approved work starts immediately. Do not leave the created task waiting in Backlog.
 
-Call `complete_alert_processing` after the implementation task is linked. If creation/linkage fails before a task is linked, call `fail_alert_processing` with a concise error so a later scan can retry. Release a claim only when no task was linked and immediate retry by another scan is appropriate.
+Only after `execute_tasks` succeeds, call `complete_alert_processing`. If creation, linkage, or task execution fails, call `fail_alert_processing` with a concise error so the linked task can be inspected and recovered; do not report processing complete. Release a claim only when no task was linked and immediate retry by another scan is appropriate.
 ```
 
 ## Recovery

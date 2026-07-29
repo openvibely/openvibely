@@ -500,6 +500,115 @@ func TestTaskPullRequestServiceOpenForTaskRecoversAlreadyExistsByFindingPR(t *te
 	}
 }
 
+func TestTaskPullRequestServiceAutomationOperationsUseProjectURLOrLocalGitRemote(t *testing.T) {
+	ctx := context.Background()
+	t.Run("open", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		projectRepo := repository.NewProjectRepo(db)
+		taskRepo := repository.NewTaskRepo(db, nil)
+		prRepo := repository.NewTaskPullRequestRepo(db)
+		project := &models.Project{Name: "Automation PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+		if err := projectRepo.Create(ctx, project); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+		task := &models.Task{ProjectID: project.ID, Title: "Automation PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/automation-pr"}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create Automation task: %v", err)
+		}
+		var resolvedURL, resolvedPath string
+		resolveCalls := 0
+		svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+			resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+				resolveCalls++
+				resolvedURL, resolvedPath = repoURL, repoPath
+				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+			},
+		}, prRepo)
+
+		if _, err := svc.OpenForAutomationTask(ctx, project, task, OpenTaskPullRequestOptions{}); err != nil {
+			t.Fatalf("OpenForAutomationTask: %v", err)
+		}
+		if resolvedURL != project.RepoURL || resolvedPath != "" {
+			t.Fatalf("Automation repository resolution must use only the explicit URL, got url=%q path=%q", resolvedURL, resolvedPath)
+		}
+
+		project.RepoURL = ""
+		localRemoteTask := &models.Task{ProjectID: project.ID, Title: "Local remote", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/local-remote"}
+		if err := taskRepo.Create(ctx, localRemoteTask); err != nil {
+			t.Fatalf("create local-remote Automation task: %v", err)
+		}
+		if _, err := svc.OpenForAutomationTask(ctx, project, localRemoteTask, OpenTaskPullRequestOptions{}); err != nil {
+			t.Fatalf("Automation PR open must use the project local Git remote when repo_url is absent: %v", err)
+		}
+		if resolvedURL != "" || resolvedPath != project.RepoPath {
+			t.Fatalf("Automation repository resolution must fall back to repo_path, got url=%q path=%q", resolvedURL, resolvedPath)
+		}
+
+		ordinaryTask := &models.Task{ProjectID: project.ID, Title: "Ordinary PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/ordinary-pr"}
+		if err := taskRepo.Create(ctx, ordinaryTask); err != nil {
+			t.Fatalf("create ordinary task: %v", err)
+		}
+		if _, err := svc.OpenForTask(ctx, project, ordinaryTask, OpenTaskPullRequestOptions{}); err != nil {
+			t.Fatalf("ordinary OpenForTask must retain repository-path fallback: %v", err)
+		}
+		if resolvedURL != "" || resolvedPath != project.RepoPath {
+			t.Fatalf("ordinary repository resolution must retain repo_path fallback, got url=%q path=%q", resolvedURL, resolvedPath)
+		}
+	})
+
+	t.Run("replace branch", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		projectRepo := repository.NewProjectRepo(db)
+		taskRepo := repository.NewTaskRepo(db, nil)
+		prRepo := repository.NewTaskPullRequestRepo(db)
+		project := &models.Project{Name: "Automation Replace Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+		if err := projectRepo.Create(ctx, project); err != nil {
+			t.Fatalf("create project: %v", err)
+		}
+		task := &models.Task{ProjectID: project.ID, Title: "Replace Automation PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: t.TempDir(), WorktreeBranch: "task/replace"}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task: %v", err)
+		}
+		if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://github.com/openvibely/openvibely/pull/42", PRState: "open"}); err != nil {
+			t.Fatalf("seed PR record: %v", err)
+		}
+		var resolvedURL, resolvedPath string
+		resolveCalls := 0
+		svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+			resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+				resolveCalls++
+				resolvedURL, resolvedPath = repoURL, repoPath
+				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+			},
+			getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+				return &GitHubPullRequest{Number: number, HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely"}, nil
+			},
+		}, prRepo)
+
+		if _, err := svc.ReplaceBranchHeadForAutomationTask(ctx, project, task, strings.Repeat("a", 40)); err != nil {
+			t.Fatalf("ReplaceBranchHeadForAutomationTask: %v", err)
+		}
+		if resolvedURL != project.RepoURL || resolvedPath != "" {
+			t.Fatalf("Automation branch replacement must resolve only the explicit URL, got url=%q path=%q", resolvedURL, resolvedPath)
+		}
+
+		project.RepoURL = ""
+		if _, err := svc.ReplaceBranchHeadForAutomationTask(ctx, project, task, strings.Repeat("a", 40)); err != nil {
+			t.Fatalf("Automation branch replacement must use the project local Git remote when repo_url is absent: %v", err)
+		}
+		if resolvedURL != "" || resolvedPath != project.RepoPath {
+			t.Fatalf("Automation branch replacement must fall back to repo_path, got url=%q path=%q", resolvedURL, resolvedPath)
+		}
+
+		if _, err := svc.ReplaceBranchHeadForTask(ctx, project, task, strings.Repeat("a", 40)); err != nil {
+			t.Fatalf("ordinary ReplaceBranchHeadForTask must retain repository-path fallback: %v", err)
+		}
+		if resolvedURL != "" || resolvedPath != project.RepoPath {
+			t.Fatalf("ordinary replacement resolution must retain repo_path fallback, got url=%q path=%q", resolvedURL, resolvedPath)
+		}
+	})
+}
+
 func TestTaskPullRequestServiceOpenForTaskRequiresWorktreeBranch(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

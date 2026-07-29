@@ -18,6 +18,7 @@ import (
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -39,13 +40,13 @@ func (h *Handler) ListModels(c echo.Context) error {
 
 	// For HTMX requests, return just the agents content
 	if isHTMX {
-		return render(c, http.StatusOK, pages.ModelsContent(agents, modelWorkerStats))
+		return render(c, http.StatusOK, pages.ModelsContent(agents, modelWorkerStats, h.desktopMode))
 	}
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
 	projects, _ := h.projectSvc.List(c.Request().Context())
 
-	return render(c, http.StatusOK, pages.Models(projects, currentProjectID, agents, modelWorkerStats))
+	return render(c, http.StatusOK, pages.Models(projects, currentProjectID, agents, modelWorkerStats, h.desktopMode))
 }
 
 // resolveProviderAndAuth maps UI form values to DB provider and auth_method.
@@ -245,10 +246,9 @@ func parseMixtureConfigForm(c echo.Context) (llmmixture.Config, error) {
 	if raw != "" {
 		return llmmixture.ParseConfig(raw)
 	}
-	cfg := llmmixture.Config{
-		Enabled:    c.FormValue("mixture_enabled") != "" && c.FormValue("mixture_enabled") != "false" && c.FormValue("mixture_enabled") != "0",
-		Aggregator: llmmixture.ModelSlot{AgentConfigID: strings.TrimSpace(c.FormValue("mixture_aggregator_id"))},
-	}
+	cfg := llmmixture.DefaultConfig()
+	cfg.Enabled = c.FormValue("mixture_enabled") != "" && c.FormValue("mixture_enabled") != "false" && c.FormValue("mixture_enabled") != "0"
+	cfg.Aggregator = llmmixture.ModelSlot{AgentConfigID: strings.TrimSpace(c.FormValue("mixture_aggregator_id"))}
 	if cfg.Enabled == false && c.FormValue("mixture_enabled") == "" {
 		cfg.Enabled = true
 	}
@@ -485,7 +485,7 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents)))
+		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
 	}
 	redirectURL := "/models"
 	if projectID := c.QueryParam("project_id"); projectID != "" {
@@ -618,7 +618,7 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 		if err != nil {
 			return err
 		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents)))
+		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
 	}
 	redirectURL := "/models"
 	if projectID := c.QueryParam("project_id"); projectID != "" {
@@ -654,7 +654,7 @@ func (h *Handler) SetDefaultModel(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents)))
+		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
 	}
 	return c.Redirect(http.StatusSeeOther, "/models")
 }
@@ -726,7 +726,7 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 		if err != nil {
 			return err
 		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents)))
+		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
 	}
 	return c.Redirect(http.StatusSeeOther, "/models")
 }
@@ -745,7 +745,36 @@ func normalizeProviderReasoningEffort(provider models.LLMProvider, model, value 
 	case models.ProviderOpenAI:
 		return normalizeOpenAIReasoningEffort(model, value)
 	case models.ProviderAnthropic:
-		return normalizeAnthropicEffort(value)
+		return anthropicclient.NormalizeEffort(model, value)
+	case models.ProviderOpenAICompatible:
+		if effort := normalizeKimiReasoningEffort(model, value); effort != "" {
+			return effort
+		}
+		return normalizeGLMReasoningEffort(model, value)
+	default:
+		return ""
+	}
+}
+
+func normalizeKimiReasoningEffort(model, value string) string {
+	if !strings.EqualFold(strings.TrimSpace(model), "kimi-k3") {
+		return ""
+	}
+	switch effort := strings.ToLower(strings.TrimSpace(value)); effort {
+	case "low", "high", "max":
+		return effort
+	default:
+		return ""
+	}
+}
+
+func normalizeGLMReasoningEffort(model, value string) string {
+	if !strings.EqualFold(strings.TrimSpace(model), "glm-5.2") {
+		return ""
+	}
+	switch effort := strings.ToLower(strings.TrimSpace(value)); effort {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return effort
 	default:
 		return ""
 	}
@@ -757,15 +786,6 @@ func normalizeOpenAIReasoningEffort(model, value string) string {
 		return effort
 	}
 	return ""
-}
-
-func normalizeAnthropicEffort(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "low", "medium", "high", "max":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return ""
-	}
 }
 
 func formValueIfPresent(c echo.Context, key string) (string, bool) {

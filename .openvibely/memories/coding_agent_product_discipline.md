@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-07-17
-source: consolidation
-source_id: memory_consolidation_2026_07_17
+updated: 2026-07-25
+source: task_conversation
+source_id: e109ce8999815c5518324d5ce39b470b:8235368c9cf07508
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -16,6 +16,8 @@ User interaction preferences:
 - Do not describe unreleased feature contracts as legacy or preserve compatibility shims for unreleased API/UI shapes unless the user explicitly asks for migration compatibility.
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
 - Treat requests explicitly limited to memory or skill maintenance as a hard scope boundary: do not add implementation, generated-file, test, rebase, or other repository changes unless the user separately requests them; clearly distinguish any pre-existing or later-instructed code work when reporting the diff.
+- Treat explicit audit exclusions as equally hard scope boundaries. In particular, when the user excludes managed memory, do not inspect, cite, reconcile, or use managed or tracked memory as audit evidence; audit only the requested repository/publication artifacts.
+- Do not delegate tasks or create child-agent work. This prohibition applies especially to memory updates; use only direct capabilities available in the current task and report a capability blocker when direct work is unavailable.
 - When diagnosing autonomous integration loops, do not manually forward, wake, or otherwise push one live message through as a substitute for fixing the product path. The user wants the implementation to work properly end-to-end; validation should prove the scheduled/tool/runtime behavior works without ad hoc live intervention unless the user explicitly asks for a one-off operational action.
 - When the user has already explicitly requested an outbound action such as sending an email/message, attempt the available configured/runtime mechanism instead of asking for redundant confirmation; if no viable send path exists, report the completed work and the send limitation clearly.
 - Prefer plain, direct explanations over jargon-heavy phrasing; if the user asks for “no word salad,” respond with a terse concrete summary rather than audit-style detail. For user-facing UI/docs copy, avoid internal tool-name or architecture jargon unless it is clearly marked as advanced/reference text.
@@ -26,6 +28,7 @@ User interaction preferences:
 - When multiple findings are variants of one bug class, fix or audit the whole analogous class instead of narrowly addressing one instance.
 - When reviewing a messy fix stack after a difficult bug, inspect the actual commit diffs and rerun relevant validation before recommending keep/drop; distinguish the commit that directly fixed the observed symptom from defensive hardening that may still be useful.
 - Draft reusable skills that the user has not approved for publication should stay local/ignored by default. If the user wants in-app testing before release, keep the skill indexed and ensure the package body exists in the checkout the app loads; do not hide it by removing the index.
+- When a feature must consume an established skill's prompts or assets, keep the skill's existing behavior and documentation intact unless redesign was explicitly requested. Prefer the smallest shared canonical asset extraction or mirroring needed by the new consumer; do not substantially rewrite the skill or replace broad skill-content tests as incidental feature work. If the implementation reuses prompt bodies from an unchanged canonical file, explicitly state that provenance, explain why the bodies are absent from the diff, and disclose any runtime dependency on that file's formatting.
 
 Model-facing prompt preferences:
 - Use direct role/capability wording over low-value internal/product labels unless the label affects authorization, routing, or correctness.
@@ -52,14 +55,13 @@ Release-note preferences:
 - Release notes are AI-synthesized from structured unreleased commit context because commit subjects are often terse.
 - `Highlights` must summarize what is new in the target release from the changelog/commit range, not repeat static product feature bullets from previous releases; `What's Changed` is the detailed changelog section.
 - Describe user-facing capability by what it does, not by incidental UI controls or generic labels.
-- For the 0.2.0 skill work, describe the Skill Curator as a recursive self-improvement loop that creates/patches skills from task learnings, not as a generic “Skills overhaul.”
 - Do not call out minor model-selector additions as standalone release-note features unless the user explicitly asks or the model integration is itself a major release theme.
 - High-level release notes should omit CI/test infrastructure, terminal log verbosity, low-level bug/reliability patches, and minor UI polish unless the audience explicitly needs those details or the fix affects a core workflow.
 - Release-note bullets should use bolded lead labels/sections, following `- **Feature or theme** — Details...`.
 
-Current release facts and boundaries:
-- Recorded release state: latest public release was `v0.3.0` (2026-06-24), whose canonical annotated tag targets `bfcc37d479e4f5f2c6784a900f5a6672ec754bdb`. `origin/main` was later fast-forwarded to the `v0.4.0` candidate `a13ab410c84a9ff26128d72ff6165841bcabfbf7`, but no `v0.4.0` tag or GitHub release had been created at the last recorded state. Verify live refs and GitHub release state before resuming release work.
-- The recorded `v0.4.0` themes are multi-agent swarms, Discord/Email and project-scoped outbound messaging, autonomous GitHub issue-to-PR workflows, and Mixture of Models.
+Release boundaries:
+- Verify live git refs, tags, and GitHub release state before resuming any release; stored release snapshots are not authoritative.
 - Release artifacts normally cover macOS desktop bundles and darwin/linux/Windows server archives with checksums. Windows desktop packaging requires a MinGW cross-compiler; Docker publishing remains pending when credentials are unavailable.
 - Release version policy is centralized in `.openvibely/skills/openvibely_release_workflow/scripts/release-version.sh`: all release entrypoints and validation use the same side-effect-free `X.Y.Z`/optional-leading-`v` rules and reject invalid versions before performing release work.
 - Release-build invariants include preserving `OpenVibely.app` as the zip root, making dry runs fully non-writing, avoiding managed worktree cleanup paths for real builds, and using script-default or absolute dist paths.
+- `.openvibely/skills/openvibely_release_workflow/scripts/release.sh` is currently tracked without its executable bit; invoke release rehearsals through `bash` until the repository mode is corrected. Direct execution fails with exit 126 before the script starts.

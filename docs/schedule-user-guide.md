@@ -32,6 +32,7 @@ Use this to plan load across days/hours instead of crowding everything into one 
    - `Run At`
    - `Repeat` (`Once`, `Every N Seconds`, `Every N Minutes`, `Every N Hours`, `Daily`, `Weekly`, `Monthly`)
    - `Repeat Every` interval (shown when repeat is not `Once`)
+   - `Clear context on start` (selected by default)
 4. Click `Create Scheduled Task`.
 
 ## Repeat Types
@@ -74,7 +75,9 @@ From `/tasks/{id}` -> `Schedules` tab:
 - Pause or resume schedules without deleting them
 - Remove schedules
 
-Pausing a schedule keeps its timing configuration and next-run value stored, but prevents it from starting new task runs until you resume it. Resuming reactivates the saved schedule so future runs can continue from the existing cadence.
+Pausing a schedule keeps its timing configuration, context setting, and next-run value stored, but prevents it from starting new task runs until you resume it. Resuming reactivates the saved schedule so future runs can continue from the existing cadence.
+
+When `Clear context on start` is selected, each scheduled run starts a new model conversation segment. Earlier task-thread messages, executions, lifecycle records, goals, and audit history remain visible and stored; they are not sent as model conversation context for the new segment. Clear the checkbox when a recurring run should continue using earlier task conversation context. Existing schedules created before this option was introduced keep their previous context behavior until you change the setting.
 
 This is useful for precise per-task schedule maintenance.
 

@@ -886,6 +886,37 @@ func TestSend_OAuthGPT56Live(t *testing.T) {
 	}
 }
 
+func TestNormalizeReasoningEffort_PreservesNone(t *testing.T) {
+	if got := normalizeReasoningEffort(" NONE "); got != "none" {
+		t.Fatalf("normalizeReasoningEffort = %q, want none", got)
+	}
+}
+
+func TestClearHistoryClearsCompletionsReasoningState(t *testing.T) {
+	client := NewWithAPIKey("test-key")
+	client.SetCompletionsHistory([]CompletionsHistoryMessage{
+		{Role: "user", Content: "question"},
+		{Role: "assistant", Content: "answer", ReasoningContent: "private thought"},
+	})
+	client.lastCompletionsReasoning = "latest private thought"
+	client.lastCompletionsTranscript = []CompletionsHistoryMessage{{Role: "assistant", Content: "answer"}}
+
+	client.ClearHistory()
+
+	if client.History != nil {
+		t.Fatalf("History = %#v, want nil", client.History)
+	}
+	if client.completionsHistory != nil {
+		t.Fatalf("completionsHistory = %#v, want nil", client.completionsHistory)
+	}
+	if got := client.LastCompletionsReasoningContent(); got != "" {
+		t.Fatalf("LastCompletionsReasoningContent() = %q, want empty", got)
+	}
+	if got := client.LastCompletionsTranscript(); got != nil {
+		t.Fatalf("LastCompletionsTranscript() = %#v, want nil", got)
+	}
+}
+
 func TestSend_StreamingPreservesSpacesInDeltas(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

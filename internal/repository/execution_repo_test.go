@@ -43,6 +43,9 @@ func TestExecutionRepo_CreateAndComplete(t *testing.T) {
 	if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "output text", "", 100, 500); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
+	if err := execRepo.UpdateReasoningContent(ctx, exec.ID, "private reasoning"); err != nil {
+		t.Fatalf("UpdateReasoningContent: %v", err)
+	}
 
 	// Verify
 	got, err := execRepo.GetByID(ctx, exec.ID)
@@ -55,11 +58,72 @@ func TestExecutionRepo_CreateAndComplete(t *testing.T) {
 	if got.Output != "output text" {
 		t.Errorf("expected Output=output text, got %q", got.Output)
 	}
+	if got.ReasoningContent != "private reasoning" {
+		t.Errorf("expected ReasoningContent=private reasoning, got %q", got.ReasoningContent)
+	}
 	if got.TokensUsed != 100 {
 		t.Errorf("expected TokensUsed=100, got %d", got.TokensUsed)
 	}
 	if got.DurationMs != 500 {
 		t.Errorf("expected DurationMs=500, got %d", got.DurationMs)
+	}
+}
+
+func TestExecutionRepo_ReplaceReasoningReplay(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	agentRepo := NewLLMConfigRepo(db)
+	execRepo := NewExecutionRepo(db)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "Replay Test", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	agent, err := agentRepo.GetDefault(ctx)
+	if err != nil {
+		t.Fatalf("get default agent: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "first question"}
+	if err := execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+
+	want := []models.ExecutionReplayMessage{
+		{UserContent: "first question", AssistantContent: "first answer", ReasoningContent: "first thought", TranscriptJSON: `[{"role":"user","content":"first question"}]`},
+		{UserContent: "steer", AssistantContent: "second answer", ReasoningContent: "second thought"},
+	}
+	if err := execRepo.ReplaceReasoningReplay(ctx, exec.ID, "first thoughtsecond thought", want); err != nil {
+		t.Fatalf("replace reasoning replay: %v", err)
+	}
+
+	stored, err := execRepo.GetByID(ctx, exec.ID)
+	if err != nil {
+		t.Fatalf("get execution: %v", err)
+	}
+	if stored.ReasoningContent != "first thoughtsecond thought" {
+		t.Fatalf("reasoning content = %q", stored.ReasoningContent)
+	}
+	replay, err := execRepo.ReplayMessagesByExecutionIDs(ctx, []string{"", exec.ID, exec.ID})
+	if err != nil {
+		t.Fatalf("get replay messages: %v", err)
+	}
+	if !reflect.DeepEqual(replay[exec.ID], want) {
+		t.Fatalf("replay messages = %#v, want %#v", replay[exec.ID], want)
+	}
+
+	replacement := []models.ExecutionReplayMessage{
+		{UserContent: "replacement", AssistantContent: "answer", ReasoningContent: "thought"},
+	}
+	if err := execRepo.ReplaceReasoningReplay(ctx, exec.ID, "thought", replacement); err != nil {
+		t.Fatalf("replace replay again: %v", err)
+	}
+	replay, err = execRepo.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
+	if err != nil {
+		t.Fatalf("get replaced replay messages: %v", err)
+	}
+	if !reflect.DeepEqual(replay[exec.ID], replacement) {
+		t.Fatalf("replaced replay messages = %#v, want %#v", replay[exec.ID], replacement)
 	}
 }
 
@@ -225,9 +289,14 @@ func TestExecutionRepo_ListByTask(t *testing.T) {
 	agent, _ := agentRepo.GetDefault(ctx)
 
 	// Create two executions
+	var executionIDs []string
 	for i := 0; i < 2; i++ {
 		exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "test"}
 		execRepo.Create(ctx, exec)
+		executionIDs = append(executionIDs, exec.ID)
+	}
+	if err := execRepo.UpdateReasoningContent(ctx, executionIDs[0], "large private reasoning"); err != nil {
+		t.Fatalf("UpdateReasoningContent: %v", err)
 	}
 
 	execs, err := execRepo.ListByTask(ctx, task.ID)
@@ -236,6 +305,19 @@ func TestExecutionRepo_ListByTask(t *testing.T) {
 	}
 	if len(execs) != 2 {
 		t.Errorf("expected 2 executions, got %d", len(execs))
+	}
+	for _, exec := range execs {
+		if exec.ReasoningContent != "" {
+			t.Errorf("lightweight list loaded reasoning content for %q", exec.ID)
+		}
+	}
+
+	reasoningByID, err := execRepo.ReasoningContentByIDs(ctx, []string{executionIDs[0], executionIDs[0], ""})
+	if err != nil {
+		t.Fatalf("ReasoningContentByIDs: %v", err)
+	}
+	if got := reasoningByID[executionIDs[0]]; got != "large private reasoning" {
+		t.Errorf("ReasoningContentByIDs[%q] = %q", executionIDs[0], got)
 	}
 }
 

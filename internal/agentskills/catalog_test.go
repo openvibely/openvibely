@@ -206,6 +206,34 @@ func TestBuildCatalog_LoadsTrackedOpenVibelyProjectGuidance(t *testing.T) {
 	}
 }
 
+func TestBuiltInSDLCAutomationBootstrapSkillsAreDisabledForRuntimeRouting(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	builtinRoot := filepath.Clean(filepath.Join(wd, "..", "builtinskills", "builtin"))
+
+	runtimeCatalog, err := BuildCatalog("runtime", builtinRoot, "")
+	if err != nil {
+		t.Fatalf("build runtime catalog: %v", err)
+	}
+	managementCatalog, err := BuildCatalogAll("management", builtinRoot, "")
+	if err != nil {
+		t.Fatalf("build management catalog: %v", err)
+	}
+	for _, handle := range []string{
+		"openvibely_github_autonomous_sdlc_bootstrap",
+		"openvibely_native_autonomous_sdlc_bootstrap",
+	} {
+		if _, ok := runtimeCatalog.Lookup(handle); ok {
+			t.Errorf("disabled bootstrap skill %q must not be available to lifecycle routing", handle)
+		}
+		if _, ok := managementCatalog.Lookup(handle); !ok {
+			t.Errorf("disabled bootstrap skill %q must remain visible to management", handle)
+		}
+	}
+}
+
 func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -248,13 +276,91 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
 		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
-		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
-		"then call `set_task_goal` for the created task so it implements the issue",
+		"If no existing task is evident from available task/thread context, call `create_task` immediately with `category=active`; do not wait for an existing PR",
+		"Set `source_github_issue_number` to the exact issue number returned by this inbox execution",
+		"Do not set `source_github_repo_url`",
+		"then call `set_task_goal` for the created or reconciled task so it implements the issue",
+		"Do not call `execute_tasks` for a newly created Active task",
+		"For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled",
+		"Never call `execute_tasks` for an Active pending, queued, running, or completed task",
 		"For PAT setups, use `github_list_my_assigned_issues` to find open issues assigned to the authenticated PAT user",
 		"For GitHub App setups, do not treat the installation owner or organization as an issue assignee",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("GitHub bootstrap skill missing %q", want)
+		}
+	}
+}
+
+func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	repoRoot := filepath.Clean(filepath.Join(wd, "..", ".."))
+
+	skillPath := filepath.Join(repoRoot, "internal", "builtinskills", "builtin", SkillsDir, "openvibely_native_autonomous_sdlc_bootstrap", SkillFile)
+	skillBody, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("read built-in Native bootstrap skill: %v", err)
+	}
+	skillText := string(skillBody)
+
+	guidePath := filepath.Join(repoRoot, "docs", "openvibely-native-autonomous-sdlc-user-guide.md")
+	guideBody, err := os.ReadFile(guidePath)
+	if err != nil {
+		t.Fatalf("read Native autonomous SDLC guide: %v", err)
+	}
+	guideText := string(guideBody)
+
+	for _, want := range []string{
+		"Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, Notification Inbox, and Loop Auditor",
+		"Do not create separate runner tasks",
+		"usually daily",
+		"commonly hourly",
+		"usually weekly",
+		"must not create implementation tasks or modify code",
+		"Do not list, search, or inspect GitHub issues for duplicate detection",
+		"Native notification idempotency",
+		"Call `list_alerts` without `project_id`",
+		"pass the `read` filter",
+		"both read and unread approved notifications",
+		"call `execute_tasks` with that exact task ID",
+		"Only after `execute_tasks` succeeds",
+		"Never reuse a project ID from prior messages, examples, memory, or tool output",
+		"create_alert_implementation_task",
+		"register_automation_resources",
+		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `inbox`, and `auditor`",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("Native bootstrap skill missing %q", want)
+		}
+		if !strings.Contains(guideText, want) {
+			t.Fatalf("Native autonomous SDLC guide missing %q", want)
+		}
+	}
+
+	for _, want := range []string{
+		"Give each finder its own prompt",
+		"one shared three-role menu",
+		"bug_suggestion",
+		"performance_suggestion",
+		"maintenance_suggestion",
+	} {
+		if !strings.Contains(skillText, want) {
+			t.Fatalf("Native bootstrap skill missing role-specific finder guidance %q", want)
+		}
+		if !strings.Contains(guideText, want) {
+			t.Fatalf("Native autonomous SDLC guide missing role-specific finder guidance %q", want)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"Create a scheduled suggestion producer and a project-scoped approved-notification inbox",
+		"A typical setup schedules the suggestion producer daily and the approved-notification inbox hourly",
+	} {
+		if strings.Contains(guideText, forbidden) {
+			t.Fatalf("Native autonomous SDLC guide contains stale two-task guidance %q", forbidden)
 		}
 	}
 }
@@ -284,6 +390,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"visible scheduled OpenVibely tasks",
 		"generic GitHub runtime tools",
 		"Do not create hidden daemon or poller services",
+		"For this Automation bootstrap, do not pass `repo_url` overrides",
+		"Automation-bound GitHub tools resolve only the selected project's configured GitHub repository URL",
+		"falling back to a GitHub remote in that project's local checkout",
 		"github_list_my_assigned_issues",
 		"github_list_assigned_issues",
 		"github_list_assigned_issues_with_prs",
@@ -310,8 +419,13 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
 		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
-		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
-		"then call `set_task_goal` for the created task so it implements the issue",
+		"If no existing task is evident from available task/thread context, call `create_task` immediately with `category=active`; do not wait for an existing PR",
+		"Set `source_github_issue_number` to the exact issue number returned by this inbox execution",
+		"Do not set `source_github_repo_url`",
+		"then call `set_task_goal` for the created or reconciled task so it implements the issue",
+		"Do not call `execute_tasks` for a newly created Active task",
+		"For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled",
+		"Never call `execute_tasks` for an Active pending, queued, running, or completed task",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("GitHub bootstrap skill missing %q", want)
@@ -321,6 +435,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	for _, want := range []string{
 		"There is no hidden GitHub poller daemon",
 		"GitHub Runtime Settings",
+		"For this Automation loop, do not pass `repo_url` overrides",
+		"Automation-bound GitHub tools use only the selected project's configured GitHub repository URL",
+		"fall back to a GitHub remote in that project's local checkout",
 		"github_list_my_assigned_issues",
 		"github_list_assigned_issues",
 		"github_list_assigned_issues_with_prs",
@@ -339,17 +456,81 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues",
 		"Do not set a persisted goal on the Dev Inbox scheduled task itself",
 		"Do not immediately start Dev Inbox or scanner/finder tasks during bootstrap unless the user explicitly asks for an immediate poll/scan pass",
-		"Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks",
+		"`GitHub Offering Manager: Vision Suggestions` | Daily",
+		"`GitHub Dev Inbox` | Hourly",
+		"`GitHub Bug Finder` | Daily",
+		"`GitHub Optimization Finder` | Daily",
+		"`GitHub Redundancy Finder` | Daily",
+		"`GitHub Loop Auditor` | Weekly",
 		"These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks",
 		"Offering, Bug Finder, Optimization Finder, and Redundancy Finder tasks should open issues only",
+		"register_automation_resources",
+		"`github_sdlc`",
+		"`github-sdlc/default`",
+		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `dev_inbox`, and `auditor`",
+		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
+		"the server prevents duplicate Automation-created issues using trusted local state",
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
 		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
-		"If no existing task is evident from available task/thread context, call `create_task` immediately; do not wait for an existing PR",
-		"then call `set_task_goal` for the created task so it implements the issue",
+		"If no existing task is evident from available task/thread context, call `create_task` immediately with `category=active`; do not wait for an existing PR",
+		"Set `source_github_issue_number` to the exact issue number returned by this inbox execution",
+		"Do not set `source_github_repo_url`",
+		"then call `set_task_goal` for the created or reconciled task so it implements the issue",
+		"Do not call `execute_tasks` for a newly created Active task",
+		"For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled",
+		"Never call `execute_tasks` for an Active pending, queued, running, or completed task",
 	} {
 		if !strings.Contains(guideText, want) {
 			t.Fatalf("GitHub autonomous SDLC guide missing %q", want)
+		}
+	}
+
+	for _, text := range []struct {
+		name string
+		body string
+	}{{name: "GitHub bootstrap skill", body: skillText}, {name: "GitHub autonomous SDLC guide", body: guideText}} {
+		for _, want := range []string{
+			"Never give one finder a menu of all three roles",
+			"You are the Bug Finder.",
+			"You are the Optimization Finder.",
+			"You are the Redundancy Finder.",
+			"`bug` label",
+			"`performance` label",
+			"`duplication` label",
+		} {
+			if !strings.Contains(text.body, want) {
+				t.Fatalf("%s missing role-specific finder guidance %q", text.name, want)
+			}
+		}
+	}
+
+	for _, text := range []struct {
+		name string
+		body string
+	}{{name: "GitHub bootstrap skill", body: skillText}, {name: "GitHub autonomous SDLC guide", body: guideText}} {
+		for _, want := range []string{
+			"Do not require a repository-wide issue or pull-request listing/search before publication",
+			"Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated",
+			"Call `github_create_issue` for each actionable finding; the server performs trusted local duplicate prevention",
+		} {
+			if strings.Count(text.body, want) < 2 {
+				t.Fatalf("%s must include Offering Manager and finder duplicate-boundary guidance %q", text.name, want)
+			}
+		}
+	}
+
+	for _, forbidden := range []string{
+		"Avoid duplicates by searching or inspecting existing visible work",
+		"Avoid duplicates by searching/inspecting existing visible work",
+		"Start with two scheduled tasks before adding more scanner/finder loops",
+		"You can later add Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks",
+		"optional Loop Auditor",
+		"When a prompt names a specific GitHub repository URL, pass `repo_url` to issue create/read/list/comment/label tools",
+		"prompts may pass `repo_url` when they name a specific GitHub repository URL",
+	} {
+		if strings.Contains(skillText, forbidden) || strings.Contains(guideText, forbidden) {
+			t.Fatalf("GitHub bootstrap guidance contains stale or contradictory guidance %q", forbidden)
 		}
 	}
 
@@ -365,8 +546,22 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read GitHub channel setup guide: %v", err)
 	}
-	if !strings.Contains(string(githubSetupBody), "[GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md)") {
+	githubSetupText := string(githubSetupBody)
+	if !strings.Contains(githubSetupText, "[GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md)") {
 		t.Fatalf("GitHub channel setup guide does not link GitHub autonomous SDLC guide")
+	}
+	for _, want := range []string{
+		"Ordinary non-Automation GitHub issue tools may accept `repo_url`",
+		"Automation-bound GitHub tools ignore model-supplied `repo_url` overrides",
+		"selected project's configured GitHub repository URL",
+		"GitHub remote in that project's local checkout",
+	} {
+		if !strings.Contains(githubSetupText, want) {
+			t.Fatalf("GitHub channel setup guide missing repository-boundary guidance %q", want)
+		}
+	}
+	if strings.Contains(githubSetupText, "GitHub issue API tools default to the current project repository, but can accept `repo_url` when a prompt names a specific GitHub repository URL") {
+		t.Fatalf("GitHub channel setup guide contains stale repository-override guidance")
 	}
 }
 

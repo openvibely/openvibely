@@ -38,11 +38,12 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 
 	now := time.Now().UTC()
 	sched := &models.Schedule{
-		TaskID:         task.ID,
-		RunAt:          now.Add(-1 * time.Minute),
-		RepeatType:     models.RepeatOnce,
-		RepeatInterval: 1,
-		Enabled:        true,
+		TaskID:              task.ID,
+		RunAt:               now.Add(-1 * time.Minute),
+		RepeatType:          models.RepeatOnce,
+		RepeatInterval:      1,
+		Enabled:             true,
+		ClearContextOnStart: true,
 	}
 	scheduleRepo.Create(ctx, sched)
 
@@ -58,6 +59,9 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 		if submitted.AgentDefinitionID == nil || *submitted.AgentDefinitionID != agent.ID {
 			t.Errorf("expected submitted primary agent %s, got %v", agent.ID, submitted.AgentDefinitionID)
 		}
+		if !submitted.StartsNewContext {
+			t.Error("expected clear-context schedule to mark the submitted run as a new context")
+		}
 	case <-time.After(100 * time.Millisecond):
 		t.Error("expected due task to be submitted")
 	}
@@ -66,6 +70,157 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 	updated, _ := scheduleRepo.GetByID(ctx, sched.ID)
 	if updated.LastRun == nil {
 		t.Error("expected LastRun to be set after checkDueTasks")
+	}
+}
+
+func TestSchedulerService_CheckDueTasks_PersistsContextBoundaryAfterWorkerReload(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	model := &models.LLMConfig{Name: "Scheduled context model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, model); err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mockLLM := testutil.NewMockLLMCaller()
+	mockLLM.Response = "scheduled run complete"
+	mockLLM.TextOnly = mockLLM.Response
+	llmSvc.SetLLMCaller(mockLLM)
+
+	workerSvc := NewWorkerService(llmSvc, 1, projectRepo)
+	workerSvc.SetTaskRepo(taskRepo)
+	workerSvc.SetLLMConfigRepo(llmConfigRepo)
+	workerSvc.SetExecutionRepo(execRepo)
+	workerSvc.Start(ctx)
+	defer workerSvc.Stop()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Clear context after worker reload",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "run with a fresh context",
+		AgentID:   &model.ID,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	now := time.Now().UTC()
+	schedule := &models.Schedule{
+		TaskID:              task.ID,
+		RunAt:               now.Add(-time.Minute),
+		RepeatType:          models.RepeatOnce,
+		RepeatInterval:      1,
+		Enabled:             true,
+		ClearContextOnStart: true,
+	}
+	if err := scheduleRepo.Create(ctx, schedule); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+
+	NewSchedulerService(scheduleRepo, taskRepo, workerSvc).checkDueTasks(ctx)
+
+	var execution *models.Execution
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		executions, err := execRepo.ListByTask(ctx, task.ID)
+		if err != nil {
+			t.Fatalf("list executions: %v", err)
+		}
+		if len(executions) > 0 && executions[0].Status != models.ExecRunning {
+			execution = &executions[0]
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if execution == nil {
+		t.Fatal("timed out waiting for scheduled execution")
+	}
+	if !execution.StartsNewContext {
+		t.Fatal("expected persisted scheduled execution to start a new context after worker task reload")
+	}
+}
+
+func TestSchedulerService_CheckDueTasks_SwarmPlannerPersistsContextBoundary(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	model := &models.LLMConfig{Name: "Scheduled swarm context model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, model); err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	mockLLM := testutil.NewMockLLMCaller()
+	mockLLM.Response = `{"workers":[{"title":"Inspect","prompt":"Inspect the task","worker_kind":"analysis","required":true,"read_only":true}]}`
+	mockLLM.TextOnly = mockLLM.Response
+	llmSvc.SetLLMCaller(mockLLM)
+
+	workerSvc := NewWorkerService(llmSvc, 1, projectRepo)
+	workerSvc.SetTaskRepo(taskRepo)
+	workerSvc.SetLLMConfigRepo(llmConfigRepo)
+	workerSvc.SetExecutionRepo(execRepo)
+	workerSvc.Start(ctx)
+	defer workerSvc.Stop()
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, workerSvc)
+	taskSvc.SetSwarmService(swarmSvc)
+
+	parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{
+		ProjectID: "default", Title: "Scheduled swarm context", Prompt: "Plan on schedule", Category: models.CategoryBacklog,
+		MaxWorkers: 2, ReviewerEnabled: true, MergerEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create swarm: %v", err)
+	}
+	now := time.Now().UTC()
+	schedule := &models.Schedule{
+		TaskID: parent.ID, RunAt: now.Add(-time.Minute), RepeatType: models.RepeatOnce, RepeatInterval: 1,
+		Enabled: true, ClearContextOnStart: true,
+	}
+	if err := scheduleRepo.Create(ctx, schedule); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+	scheduler := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	scheduler.SetSwarmPlannerStarter(swarmSvc)
+	scheduler.checkDueTasks(ctx)
+
+	planner, err := taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("load planner: planner=%#v err=%v", planner, err)
+	}
+	var execution *models.Execution
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		executions, listErr := execRepo.ListByTask(ctx, planner.ID)
+		if listErr != nil {
+			t.Fatalf("list planner executions: %v", listErr)
+		}
+		if len(executions) > 0 {
+			execution = &executions[0]
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if execution == nil {
+		t.Fatal("timed out waiting for planner execution")
+	}
+	if !execution.StartsNewContext {
+		t.Fatal("expected scheduled swarm planner execution to persist a new-context boundary")
 	}
 }
 
@@ -215,6 +370,69 @@ func TestSchedulerService_CheckDueTasks_SkipsRunningTask(t *testing.T) {
 		t.Error("running task should not be submitted again")
 	case <-time.After(100 * time.Millisecond):
 		// Expected - not submitted
+	}
+}
+
+func TestSchedulerService_CheckActiveTasks_DoesNotSubmitBehindDirectFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	task := &models.Task{ProjectID: "default", Title: "Follow-up owns admission", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "active direct follow-up", IsFollowup: true}
+	started, err := repository.NewExecutionRepo(db).CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent, Source: models.TaskOriginWeb})
+	if err != nil || !started {
+		t.Fatalf("admit direct follow-up: started=%v err=%v", started, err)
+	}
+
+	svc := NewSchedulerService(repository.NewScheduleRepo(db), taskRepo, workerSvc)
+	for i := 0; i < 5; i++ {
+		svc.checkActiveTasks(ctx)
+	}
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("scheduler resubmitted original prompt behind direct follow-up: %#v", submitted)
+	case <-time.After(100 * time.Millisecond):
+	}
+	execs, err := repository.NewExecutionRepo(db).ListByTaskChronological(ctx, task.ID)
+	if err != nil || len(execs) != 1 || execs[0].ID != exec.ID || execs[0].PromptSent != "active direct follow-up" {
+		t.Fatalf("expected only direct follow-up execution, got %#v err=%v", execs, err)
+	}
+}
+
+func TestSchedulerService_CheckActiveTasks_DoesNotRecoverStaleQueuedFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	task := &models.Task{ProjectID: "default", Title: "long follow-up", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "long direct follow-up", IsFollowup: true}
+	started, err := repository.NewExecutionRepo(db).CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent})
+	if err != nil || !started {
+		t.Fatalf("admit follow-up: started=%v err=%v", started, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = datetime('now', '-15 minutes') WHERE id = ?`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	NewSchedulerService(repository.NewScheduleRepo(db), taskRepo, workerSvc).checkActiveTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("stale recovery submitted original prompt behind active follow-up: %#v", submitted)
+	case <-time.After(100 * time.Millisecond):
+	}
+	stored, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != models.StatusQueued {
+		t.Fatalf("active follow-up ownership must preserve queued task status, got %s", stored.Status)
 	}
 }
 
@@ -709,6 +927,53 @@ func TestSchedulerService_RecoverStaleQueuedTasks(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected stale queued task to be submitted")
+	}
+}
+
+func TestSchedulerService_RestartRecoveryPromotesQueuedFollowupBeforeOriginalPrompt(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	inputRepo := repository.NewThreadInputRepo(db)
+	workerSvc := newTestWorkerService(t)
+	svc := NewSchedulerService(repository.NewScheduleRepo(db), taskRepo, workerSvc)
+
+	task := &models.Task{ProjectID: "default", Title: "restart admission", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "stored original prompt"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "durable follow-up"}
+	if err := inputRepo.CreateQueued(ctx, queued); err != nil {
+		t.Fatal(err)
+	}
+	if reset, err := taskRepo.ResetOrphanedRunning(ctx); err != nil || reset != 1 {
+		t.Fatalf("restart reset: count=%d err=%v", reset, err)
+	}
+	resetTask, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil || resetTask.Status != models.StatusFailed || resetTask.Category != models.CategoryBacklog {
+		t.Fatalf("durable follow-up must retain admission across restart: task=%#v err=%v", resetTask, err)
+	}
+
+	// Exercise the former startup ordering as an adversarial interleaving. The
+	// database guards must remain sufficient even though production now offers
+	// queued-input recovery before starting scheduler scans.
+	svc.checkActiveTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("scheduler submitted original prompt ahead of durable follow-up: %#v", submitted)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	agent, err := repository.NewLLMConfigRepo(db).GetDefault(ctx)
+	if err != nil || agent == nil {
+		t.Fatalf("load default model: %#v err=%v", agent, err)
+	}
+	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
+	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted); err != nil {
+		t.Fatalf("promote durable follow-up after restart: %v", err)
+	}
+	if promoted.PromptSent != "durable follow-up" {
+		t.Fatalf("promoted wrong prompt: %q", promoted.PromptSent)
 	}
 }
 

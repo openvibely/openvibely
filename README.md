@@ -37,7 +37,7 @@ Useful starting points:
 | Reusable agents | Capture system prompts, personalities, tools, skills, plugins, permissions, routing hints, and lifecycle behavior as reusable worker profiles. |
 | Memory curation | Autonomously create, recall, update, and consolidate durable project memory so repeated context does not have to be re-explained. |
 | Skill curation | Learn from completed work and improve reusable standalone or agent-owned skills for future tasks. |
-| Automation | Schedule recurring work, chain dependent tasks, and split complex goals into planner, worker, reviewer, and merger swarm tasks. |
+| Automation Graphs | Build project-scoped graphs from schedules, Tasks and Agents, Native approvals, GitHub actions, and outcomes; save them into real resources and watch current state on the Live graph. |
 | External channels | Create, monitor, and proactively message through Slack, Telegram, Discord, Email, GitHub, inbound webhooks, and the REST API. |
 | Model providers | Run with Anthropic, OpenAI, Ollama, OpenAI-compatible Chat Completions providers, or Mixture of Models virtual configs that combine reference models through an aggregator. |
 | Operations footprint | Self-host a single Go binary with SQLite by default, plus optional Docker/VPS and desktop modes. |
@@ -99,8 +99,8 @@ The published documentation at <a href="https://docs.openvibely.ai" target="_bla
 In-repo user guides are also available in [`docs/user-guides.md`](./docs/user-guides.md), including:
 
 - Channels: Slack, Telegram, Discord, Email, GitHub, and outbound message targets
-- Pages: Project Setup, Models, Agents, Workers, Tasks, Chat, Schedule
-- Automation: swarm tasks and the GitHub autonomous SDLC loop
+- Pages: Project Setup, Models, Agents, Workers, Tasks, Chat, Schedule, Automation Graphs
+- Orchestration: task chains, swarm tasks, and Native or GitHub autonomous SDLC loops
 
 ## API and Swagger
 

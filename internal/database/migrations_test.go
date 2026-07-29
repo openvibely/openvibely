@@ -12,6 +12,573 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "task-deletion-indexes-130.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 129); err != nil {
+		t.Fatal(err)
+	}
+
+	if plan := explainQueryPlan(t, db, `SELECT rowid FROM alerts WHERE execution_id = ?`, "execution"); !strings.Contains(plan, "SCAN alerts") {
+		t.Fatalf("migration 129 alerts execution lookup plan = %q, want table scan baseline", plan)
+	}
+	if err := goose.UpTo(db, ".", 130); err != nil {
+		t.Fatal(err)
+	}
+
+	queries := map[string]string{
+		"idx_alerts_execution_id":                 `SELECT rowid FROM alerts WHERE execution_id = ?`,
+		"idx_alerts_task_id":                      `SELECT rowid FROM alerts WHERE task_id = ?`,
+		"idx_alerts_source_task_id":               `SELECT rowid FROM alerts WHERE source_task_id = ?`,
+		"idx_architect_tasks_task_id":             `SELECT rowid FROM architect_tasks WHERE task_id = ?`,
+		"idx_automation_dispatch_outbox_task":     `SELECT rowid FROM automation_dispatch_outbox WHERE task_id = ?`,
+		"idx_conflict_history_task_a":             `SELECT rowid FROM conflict_history WHERE task_a_id = ?`,
+		"idx_conflict_history_task_b":             `SELECT rowid FROM conflict_history WHERE task_b_id = ?`,
+		"idx_insights_task_id":                    `SELECT rowid FROM insights WHERE task_id = ?`,
+		"idx_llm_usage_events_task":               `SELECT rowid FROM llm_usage_events WHERE task_id = ?`,
+		"idx_schedules_task_id":                   `SELECT rowid FROM schedules WHERE task_id = ?`,
+		"idx_skill_analytics_events_task":         `SELECT rowid FROM skill_analytics_events WHERE task_id = ?`,
+		"idx_task_attachments_file_path":          `SELECT rowid FROM task_attachments WHERE file_path = ?`,
+		"idx_chat_attachments_file_path":          `SELECT rowid FROM chat_attachments WHERE file_path = ?`,
+		"idx_thread_inputs_attachment_session_id": `SELECT rowid FROM thread_inputs WHERE attachment_session_id = ? AND attachment_session_id IS NOT NULL AND attachment_session_id <> ''`,
+	}
+	for indexName, query := range queries {
+		plan := explainQueryPlan(t, db, query, "task")
+		if !strings.Contains(plan, "USING COVERING INDEX "+indexName) {
+			t.Errorf("query plan for %s = %q, want covering index", indexName, plan)
+		}
+	}
+	manifestPlan := explainQueryPlan(t, db, `
+		WITH owned_sessions(attachment_session_id) AS (
+			SELECT ti.attachment_session_id
+			FROM thread_inputs ti
+			WHERE ti.task_id = ?
+			  AND ti.attachment_session_id IS NOT NULL AND ti.attachment_session_id <> ''
+			UNION
+			SELECT ti.attachment_session_id
+			FROM executions owner_execution
+			CROSS JOIN thread_inputs ti INDEXED BY idx_thread_inputs_steering_turn
+				ON ti.run_execution_id = owner_execution.id
+			WHERE owner_execution.task_id = ? AND ti.task_id IS NULL
+			  AND ti.attachment_session_id IS NOT NULL AND ti.attachment_session_id <> ''
+		)
+		SELECT owned.attachment_session_id
+		FROM owned_sessions owned
+		WHERE NOT EXISTS (
+			SELECT 1 FROM thread_inputs other
+			WHERE other.attachment_session_id IS NOT NULL AND other.attachment_session_id <> ''
+			  AND other.attachment_session_id = owned.attachment_session_id
+			  AND (
+				(other.task_id IS NOT NULL AND other.task_id <> ?)
+				OR (other.task_id IS NULL AND NOT EXISTS (
+					SELECT 1 FROM executions other_execution
+					WHERE other_execution.id = other.run_execution_id AND other_execution.task_id = ?
+				))
+			  )
+		  )`, "task", "task", "task", "task")
+	if strings.Contains(manifestPlan, "SCAN ti") || strings.Contains(manifestPlan, "SCAN other") {
+		t.Fatalf("pending upload manifest plan = %q, want indexed thread input searches", manifestPlan)
+	}
+	if !strings.Contains(manifestPlan, "idx_thread_inputs_pending_task") ||
+		!strings.Contains(manifestPlan, "idx_thread_inputs_steering_turn") ||
+		!strings.Contains(manifestPlan, "idx_thread_inputs_attachment_session_id") {
+		t.Fatalf("pending upload manifest plan = %q, want task, execution, and shared-session indexes", manifestPlan)
+	}
+}
+
+func TestMigration130AllowsLegacyDatabaseWithoutArchitectTables(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-task-deletion-indexes-130.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 129); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, table := range []string{"architect_tasks", "architect_messages", "architect_sessions", "architect_templates"} {
+		if _, err := db.Exec(`DROP TABLE ` + table); err != nil {
+			t.Fatalf("dropping legacy-absent table %s: %v", table, err)
+		}
+	}
+	if err := goose.UpTo(db, ".", 130); err != nil {
+		t.Fatalf("migration 130 on legacy database without architect tables: %v", err)
+	}
+
+	var indexCount int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'index' AND name = 'idx_architect_tasks_task_id'
+	`).Scan(&indexCount); err != nil {
+		t.Fatal(err)
+	}
+	if indexCount != 0 {
+		t.Fatalf("legacy architect task index count = %d, want 0", indexCount)
+	}
+	if plan := explainQueryPlan(t, db, `SELECT rowid FROM alerts WHERE execution_id = ?`, "execution"); !strings.Contains(plan, "USING COVERING INDEX idx_alerts_execution_id") {
+		t.Fatalf("legacy alerts execution lookup plan = %q, want migration 130 index", plan)
+	}
+}
+
+func TestMigration132IndexesLifecycleExecutionParentForeignKey(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lifecycle-parent-index-132.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 131); err != nil {
+		t.Fatal(err)
+	}
+
+	query := `SELECT rowid FROM lifecycle_executions WHERE parent_execution_id = ?`
+	if plan := explainQueryPlan(t, db, query, "parent"); !strings.Contains(plan, "SCAN lifecycle_executions") {
+		t.Fatalf("migration 131 lifecycle parent lookup plan = %q, want table scan baseline", plan)
+	}
+	if err := goose.UpTo(db, ".", 132); err != nil {
+		t.Fatal(err)
+	}
+	if plan := explainQueryPlan(t, db, query, "parent"); !strings.Contains(plan, "USING COVERING INDEX idx_lifecycle_executions_parent_execution_id") {
+		t.Fatalf("migration 132 lifecycle parent lookup plan = %q, want covering index", plan)
+	}
+}
+
+func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "retired-attachment-sessions-131.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatal(err)
+	}
+
+	const sessionID = "0123456789abcdef0123456789abcdef"
+	if _, err := db.Exec(`INSERT INTO retired_attachment_sessions(session_id) VALUES (?)`, sessionID); err != nil {
+		t.Fatalf("retiring attachment session: %v", err)
+	}
+	_, err = db.Exec(`
+		INSERT INTO thread_inputs
+			(id, scope, project_id, input_mode, input_status, content, attachment_session_id, queue_position)
+		VALUES ('late-owner', 'chat', 'default', 'queued', 'pending', 'late', ?, 1)`, sessionID)
+	if err == nil || !strings.Contains(err.Error(), "attachment session retired") {
+		t.Fatalf("late owner error = %v, want attachment session retired", err)
+	}
+
+	plan := explainQueryPlan(t, db, `
+		SELECT 1 FROM thread_inputs
+		WHERE attachment_session_id = ?
+		  AND attachment_session_id IS NOT NULL AND attachment_session_id <> ''`, sessionID)
+	if !strings.Contains(plan, "USING COVERING INDEX idx_thread_inputs_attachment_session_id") {
+		t.Fatalf("attachment session ownership plan = %q, want covering ownership index", plan)
+	}
+}
+
+func explainQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(details, "; ")
+}
+
+func TestMigration122DeletesFailedPublicationCreatedSchedulesBeforeDroppingJournal(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automation-publication-schedules-122.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 121); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-122', 'Migration 122', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+			VALUES ('automation-122', 'project-122', 'automation-122', 'Automation 122', 'custom', 'active');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key, published_at)
+			VALUES ('published-version-122', 'project-122', 'automation-122', 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP);
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('failed-version-122', 'project-122', 'automation-122', 2, 'draft', 'manual', 'custom');
+		UPDATE automations SET published_version_id = 'published-version-122' WHERE id = 'automation-122';
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('published-node-122', 'project-122', 'automation-122', 'published-version-122', 'published', 'Published', 'trigger', 'schedule');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('published-task-122', 'project-122', 'Published task', 'scheduled', 2, 'pending', 'published');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('failed-task-122', 'project-122', 'Failed task', 'scheduled', 2, 'pending', 'failed');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('ordinary-task-122', 'project-122', 'Ordinary task', 'scheduled', 2, 'pending', 'ordinary');
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('published-schedule-122', 'published-task-122', CURRENT_TIMESTAMP, 'daily', 1, 1, CURRENT_TIMESTAMP);
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('failed-schedule-122', 'failed-task-122', CURRENT_TIMESTAMP, 'daily', 1, 0, CURRENT_TIMESTAMP);
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('ordinary-schedule-122', 'ordinary-task-122', CURRENT_TIMESTAMP, 'daily', 1, 1, CURRENT_TIMESTAMP);
+		INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES ('project-122', 'automation-122', 'published-version-122', 'published-node-122', 'schedule', 'published-schedule-122', 'owned');
+		INSERT INTO automation_trigger_owners
+			(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+			VALUES ('published-schedule-122', 'project-122', 'automation-122', 'published-version-122', 'published-node-122', 'active');
+		INSERT INTO automation_publication_attempts
+			(id, project_id, automation_id, version_id, plan_revision, status)
+			VALUES ('failed-attempt-122', 'project-122', 'automation-122', 'failed-version-122', 'failed-revision', 'failed');
+		INSERT INTO automation_publication_steps
+			(attempt_id, step_key, operation, target_key, status, resource_type, resource_id)
+			VALUES ('failed-attempt-122', 'schedule:failed', 'create', 'schedule:failed', 'completed', 'schedule', 'failed-schedule-122');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 122); err != nil {
+		t.Fatal(err)
+	}
+
+	for scheduleID, want := range map[string]int{
+		"failed-schedule-122":    0,
+		"published-schedule-122": 1,
+		"ordinary-schedule-122":  1,
+	} {
+		var got int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE id = ?`, scheduleID).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("schedule %s count = %d, want %d", scheduleID, got, want)
+		}
+	}
+	var tasks int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE id IN ('published-task-122','failed-task-122','ordinary-task-122')`).Scan(&tasks); err != nil {
+		t.Fatal(err)
+	}
+	if tasks != 3 {
+		t.Fatalf("backing task count = %d, want 3", tasks)
+	}
+}
+
+func TestMigration124_BackfillsOnlyFeatureOwnedAutomationIssueTasks(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automation-issue-origin-124.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 123); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-124', 'Migration 124', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+			VALUES ('automation-124', 'project-124', 'automation-124', 'Automation 124', 'custom', 'active');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-124', 'project-124', 'automation-124', 1, 'published', 'manual', 'custom');
+		UPDATE automations SET published_version_id = 'version-124' WHERE id = 'automation-124';
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('task-node-124', 'project-124', 'automation-124', 'version-124', 'implementation', 'Implementation', 'agent_task', 'task');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('action-node-124', 'project-124', 'automation-124', 'version-124', 'create-task', 'Create task', 'action', 'create_task');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, created_via)
+			VALUES ('feature-task-124', 'project-124', 'Feature issue task', 'backlog', 2, 'pending', 'feature', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, created_via)
+			VALUES ('generic-task-124', 'project-124', 'Generic task', 'backlog', 2, 'pending', 'generic', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, created_via)
+			VALUES ('wrong-node-task-124', 'project-124', 'Wrong node task', 'backlog', 2, 'pending', 'wrong node', '');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
+			VALUES ('feature-work-124', 'project-124', 'automation-124', 'version-124', 'feature-work-124');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
+			VALUES ('generic-work-124', 'project-124', 'automation-124', 'version-124', 'generic-work-124');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
+			VALUES ('wrong-node-work-124', 'project-124', 'automation-124', 'version-124', 'wrong-node-work-124');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+			VALUES ('feature-activity-124', 'project-124', 'automation-124', 'version-124', 'task-node-124', 'feature-work-124', 'work-item:feature-work-124:implementation-task', 'create_task', 'completed');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+			VALUES ('generic-activity-124', 'project-124', 'automation-124', 'version-124', 'task-node-124', 'generic-work-124', 'execution:generic:create-task', 'create_task', 'completed');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+			VALUES ('wrong-node-activity-124', 'project-124', 'automation-124', 'version-124', 'action-node-124', 'wrong-node-work-124', 'work-item:wrong-node-work-124:implementation-task', 'create_task', 'completed');
+		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
+			VALUES ('feature-activity-124', 'task', 'feature-task-124', 'child');
+		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
+			VALUES ('generic-activity-124', 'task', 'generic-task-124', 'child');
+		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
+			VALUES ('wrong-node-activity-124', 'task', 'wrong-node-task-124', 'child');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 124); err != nil {
+		t.Fatal(err)
+	}
+
+	for taskID, want := range map[string]string{
+		"feature-task-124":    "automation:automation-124:implementation",
+		"generic-task-124":    "",
+		"wrong-node-task-124": "",
+	} {
+		var got string
+		if err := db.QueryRow(`SELECT created_via FROM tasks WHERE id = ?`, taskID).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("task %s created_via = %q, want %q", taskID, got, want)
+		}
+	}
+}
+
+func TestMigration127FailsClosedForExistingGitHubIssueClaims(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automation-github-issue-dedup-127.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 126); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-127', 'Migration 127', '', '');
+		INSERT INTO automation_github_issue_dedup_leases
+			(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at)
+			VALUES ('project-127', 'example/runtime', 'uncertain', 'uncertain-owner', '2020-01-01 00:00:00');
+		INSERT INTO automation_github_issue_dedup_leases
+			(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at, created_issue_number)
+			VALUES ('project-127', 'example/runtime', 'completed', 'completed-owner', '2020-01-01 00:00:00', 91);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 127); err != nil {
+		t.Fatal(err)
+	}
+
+	for fingerprint, want := range map[string]string{"uncertain": "dispatched", "completed": "completed"} {
+		var got string
+		if err := db.QueryRow(`SELECT mutation_state FROM automation_github_issue_dedup_leases
+			WHERE project_id = 'project-127' AND repository_full_name = 'example/runtime' AND title_fingerprint = ?`, fingerprint).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("claim %s mutation_state = %q, want %q", fingerprint, got, want)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO automation_github_issue_dedup_leases
+		(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at)
+		VALUES ('project-127', 'example/runtime', 'new-reservation', 'new-owner', CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	var newState string
+	if err := db.QueryRow(`SELECT mutation_state FROM automation_github_issue_dedup_leases
+		WHERE project_id = 'project-127' AND title_fingerprint = 'new-reservation'`).Scan(&newState); err != nil {
+		t.Fatal(err)
+	}
+	if newState != "reserved" {
+		t.Fatalf("new claim mutation_state = %q, want reserved", newState)
+	}
+}
+
+func TestMigration128LeavesHistoricalGitHubIssueProjectionSourceUnknown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automation-github-issue-projection-source-128.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 127); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-128', 'Migration 128', '', '');
+		INSERT INTO automation_github_issue_dedup_leases
+			(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at, created_issue_number, mutation_state)
+			VALUES ('project-128', 'example/runtime', 'completed', 'completed-owner', '2020-01-01 00:00:00', 92, 'completed');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 128); err != nil {
+		t.Fatal(err)
+	}
+	var source string
+	if err := db.QueryRow(`SELECT projection_source_json FROM automation_github_issue_dedup_leases
+		WHERE project_id = 'project-128' AND title_fingerprint = 'completed'`).Scan(&source); err != nil {
+		t.Fatal(err)
+	}
+	if source != "" {
+		t.Fatalf("historical projection source = %q, want empty fail-closed provenance", source)
+	}
+}
+
+func TestMigration125_RemovesLegacyDraftGraphsAndUnsavedAutomationShells(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automation-current-graph-125.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 124); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-125', 'Migration 125', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+			VALUES ('saved-automation-125', 'project-125', 'saved-125', 'Saved', 'custom', 'active');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key, published_at)
+			VALUES ('published-version-125', 'project-125', 'saved-automation-125', 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP);
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('failed-draft-version-125', 'project-125', 'saved-automation-125', 2, 'draft', 'manual', 'custom');
+		UPDATE automations SET published_version_id = 'published-version-125' WHERE id = 'saved-automation-125';
+		INSERT INTO automation_graph_metadata (version_id, project_id, automation_id, candidate_json)
+			VALUES ('failed-draft-version-125', 'project-125', 'saved-automation-125', '{"schema_version":1}');
+
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state)
+			VALUES ('draft-shell-125', 'project-125', 'draft-125', 'Unsaved draft', 'custom', 'draft');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('draft-shell-version-125', 'project-125', 'draft-shell-125', 1, 'draft', 'manual', 'custom');
+		INSERT INTO automation_graph_metadata (version_id, project_id, automation_id, candidate_json)
+			VALUES ('draft-shell-version-125', 'project-125', 'draft-shell-125', '{"schema_version":1}');
+
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('published-node-125', 'project-125', 'saved-automation-125', 'published-version-125', 'published', 'Published', 'trigger', 'schedule');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('failed-node-125', 'project-125', 'saved-automation-125', 'failed-draft-version-125', 'failed', 'Failed', 'trigger', 'schedule');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('shell-node-125', 'project-125', 'draft-shell-125', 'draft-shell-version-125', 'shell', 'Shell', 'trigger', 'schedule');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('published-task-125', 'project-125', 'Published task', 'scheduled', 2, 'pending', 'published');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('failed-task-125', 'project-125', 'Failed task', 'scheduled', 2, 'pending', 'failed');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('shell-task-125', 'project-125', 'Shell task', 'scheduled', 2, 'pending', 'shell');
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('published-schedule-125', 'published-task-125', CURRENT_TIMESTAMP, 'daily', 1, 1, CURRENT_TIMESTAMP);
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('failed-schedule-125', 'failed-task-125', CURRENT_TIMESTAMP, 'daily', 1, 0, CURRENT_TIMESTAMP);
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('shell-schedule-125', 'shell-task-125', CURRENT_TIMESTAMP, 'daily', 1, 0, CURRENT_TIMESTAMP);
+		INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES ('project-125', 'saved-automation-125', 'published-version-125', 'published-node-125', 'schedule', 'published-schedule-125', 'owned');
+		INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES ('project-125', 'saved-automation-125', 'failed-draft-version-125', 'failed-node-125', 'schedule', 'failed-schedule-125', 'owned');
+		INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES ('project-125', 'draft-shell-125', 'draft-shell-version-125', 'shell-node-125', 'schedule', 'shell-schedule-125', 'owned');
+		INSERT INTO automation_trigger_owners
+			(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+			VALUES ('published-schedule-125', 'project-125', 'saved-automation-125', 'published-version-125', 'published-node-125', 'active');
+		INSERT INTO automation_trigger_owners
+			(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+			VALUES ('failed-schedule-125', 'project-125', 'saved-automation-125', 'failed-draft-version-125', 'failed-node-125', 'active');
+		INSERT INTO automation_trigger_owners
+			(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+			VALUES ('shell-schedule-125', 'project-125', 'draft-shell-125', 'draft-shell-version-125', 'shell-node-125', 'active');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 125); err != nil {
+		t.Fatal(err)
+	}
+
+	var graphCount, version, draftShells, retainedMetadata, admissionTable int
+	if err := db.QueryRow(`SELECT COUNT(*), MIN(version) FROM automation_versions WHERE automation_id = 'saved-automation-125'`).Scan(&graphCount, &version); err != nil {
+		t.Fatal(err)
+	}
+	if graphCount != 1 || version != 1 {
+		t.Fatalf("saved Automation graphs = %d at version %d, want exactly one current graph at version 1", graphCount, version)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automations WHERE id = 'draft-shell-125'`).Scan(&draftShells); err != nil {
+		t.Fatal(err)
+	}
+	if draftShells != 0 {
+		t.Fatalf("unsaved draft Automation shells = %d, want 0", draftShells)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_graph_metadata WHERE version_id IN ('failed-draft-version-125','draft-shell-version-125')`).Scan(&retainedMetadata); err != nil {
+		t.Fatal(err)
+	}
+	if retainedMetadata != 0 {
+		t.Fatalf("retained legacy draft metadata = %d, want 0", retainedMetadata)
+	}
+	for scheduleID, want := range map[string]int{
+		"published-schedule-125": 1,
+		"failed-schedule-125":    0,
+		"shell-schedule-125":     0,
+	} {
+		var got int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE id = ?`, scheduleID).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("schedule %s count = %d, want %d", scheduleID, got, want)
+		}
+	}
+	var preservedTasks int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM tasks WHERE id IN ('published-task-125','failed-task-125','shell-task-125')`).Scan(&preservedTasks); err != nil {
+		t.Fatal(err)
+	}
+	if preservedTasks != 3 {
+		t.Fatalf("backing task count = %d, want 3", preservedTasks)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'automation_paused_task_admissions'`).Scan(&admissionTable); err != nil {
+		t.Fatal(err)
+	}
+	if admissionTable != 1 {
+		t.Fatal("automation_paused_task_admissions table was not created")
+	}
+}
+
 func TestMigration112_BackfillsOperationalAlertsWithoutInferringProject(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "alerts-112.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -122,8 +689,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 112 {
-		t.Fatalf("max goose version = %d, want 112", maxVersion)
+	if maxVersion != 133 {
+		t.Fatalf("max goose version = %d, want 133", maxVersion)
 	}
 }
 
@@ -274,8 +841,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 112 {
-		t.Fatalf("max goose version = %d, want 112", maxVersion)
+	if maxVersion != 133 {
+		t.Fatalf("max goose version = %d, want 133", maxVersion)
 	}
 }
 
@@ -761,8 +1328,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 112 {
-		t.Fatalf("max goose version = %d, want 112", maxVersion)
+	if maxVersion != 133 {
+		t.Fatalf("max goose version = %d, want 133", maxVersion)
 	}
 }
 
@@ -1113,8 +1680,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 112 {
-		t.Fatalf("max goose version = %d, want 112", maxVersion)
+	if maxVersion != 133 {
+		t.Fatalf("max goose version = %d, want 133", maxVersion)
 	}
 }
 
@@ -1308,5 +1875,331 @@ func TestMigration110_GitHubAuthorizationAndProjectInbox(t *testing.T) {
 	}
 	if _, err := db.Exec(`INSERT INTO github_project_inboxes (project_id, github_login) VALUES ('github-inbox-project-two', 'DEV-BOT')`); err != nil {
 		t.Fatalf("same GitHub inbox login should be reusable by another project: %v", err)
+	}
+}
+
+func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automations-113.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 113); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"automations", "automation_versions", "automation_nodes", "automation_edges", "automation_definition_resources", "automation_trigger_owners"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s after migration up", table)
+		}
+	}
+	if err := goose.DownTo(db, ".", 112); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"automation_trigger_owners", "automation_definition_resources", "automation_edges", "automation_nodes", "automation_versions", "automations"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("expected table %s removed after migration down", table)
+		}
+	}
+}
+
+func TestMigration121And122LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automations-atomic-save.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 119); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('atomic-project', 'Atomic', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state)
+			VALUES ('atomic-automation', 'atomic-project', 'atomic/test', 'Atomic', 'draft');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('atomic-version', 'atomic-project', 'atomic-automation', 1, 'draft', 'manual', 'vision_driver');
+		INSERT INTO automation_publication_attempts (id, project_id, automation_id, version_id, plan_revision, status)
+			VALUES ('atomic-attempt', 'atomic-project', 'atomic-automation', 'atomic-version', 'obsolete-revision', 'completed');
+		INSERT INTO automation_chat_confirmation_receipts
+			(token_id, project_id, automation_id, version_id, plan_revision, principal_id, thread_id,
+			 plan_message_id, automation_name, source, candidate_json, expires_at, consumed_attempt_id,
+			 confirming_user_input_id, confirmation_method, consumed_at)
+			VALUES ('atomic-token', 'atomic-project', 'atomic-automation', 'atomic-version', 'obsolete-revision',
+			 'principal', 'thread', 'plan-message', 'Atomic', 'manual', '{"schema_version":1}',
+			 datetime('now', '+30 minutes'), 'atomic-attempt', 'confirmation-input', 'button', CURRENT_TIMESTAMP);
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatal(err)
+	}
+
+	var confirmationMethod string
+	if err := db.QueryRow(`SELECT confirmation_method FROM automation_chat_confirmation_receipts WHERE token_id = 'atomic-token'`).Scan(&confirmationMethod); err != nil {
+		t.Fatal(err)
+	}
+	if confirmationMethod != "command" {
+		t.Fatalf("migrated confirmation method = %q, want command", confirmationMethod)
+	}
+
+	for _, table := range []string{"automation_graph_metadata", "automation_chat_confirmation_receipts", "automation_chat_confirmation_inputs"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("expected atomic Save table %s: count=%d err=%v", table, count, err)
+		}
+	}
+	for _, table := range []string{"automation_draft_metadata", "automation_publication_attempts", "automation_publication_steps"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("obsolete Save table %s still exists: count=%d err=%v", table, count, err)
+		}
+	}
+	for _, column := range []string{"automation_id", "version_id", "plan_revision", "consumed_attempt_id"} {
+		if tableHasColumn(t, db, "automation_chat_confirmation_receipts", column) {
+			t.Fatalf("obsolete confirmation column automation_chat_confirmation_receipts.%s still exists", column)
+		}
+	}
+	for _, column := range []string{"automation_id", "version_id"} {
+		if tableHasColumn(t, db, "automation_chat_confirmation_inputs", column) {
+			t.Fatalf("obsolete confirmation column automation_chat_confirmation_inputs.%s still exists", column)
+		}
+	}
+}
+
+func TestMigration115AutomationPublicationUpAndDown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automations-115.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 115); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"automation_draft_metadata", "automation_publication_attempts", "automation_publication_steps", "automation_chat_confirmation_receipts", "automation_chat_confirmation_inputs"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("expected publication table %s after up migration: count=%d err=%v", table, count, err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('publication-project', 'Publication', '', '')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state) VALUES ('publication-automation', 'publication-project', 'draft/test', 'Draft', 'draft')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key) VALUES ('publication-version', 'publication-project', 'publication-automation', 1, 'draft', 'manual', 'native_sdlc')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_draft_metadata (version_id, project_id, automation_id, candidate_json) VALUES ('publication-version', 'publication-project', 'publication-automation', '{"schema_version":1}')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_publication_attempts (id, project_id, automation_id, version_id, plan_revision, status) VALUES ('publication-attempt', 'publication-project', 'publication-automation', 'publication-version', 'revision', 'publishing')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_publication_steps (attempt_id, step_key, operation, target_key, status) VALUES ('publication-attempt', 'task:one', 'create', 'task:one', 'pending')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_chat_confirmation_receipts (token_id, project_id, automation_id, version_id, plan_revision, principal_id, thread_id, plan_message_id, expires_at) VALUES ('token', 'publication-project', 'publication-automation', 'publication-version', 'revision', 'principal', 'thread', 'plan-message', datetime('now', '+30 minutes'))`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_chat_confirmation_receipts (token_id, project_id, automation_id, version_id, plan_revision, principal_id, thread_id, plan_message_id, expires_at, consumed_at) VALUES ('invalid-token', 'publication-project', 'publication-automation', 'publication-version', 'revision', 'principal', 'thread', 'plan-message', datetime('now', '+30 minutes'), CURRENT_TIMESTAMP)`); err == nil {
+		t.Fatal("expected partial consumed confirmation state to be rejected")
+	}
+	if _, err := db.Exec(`DELETE FROM projects WHERE id = 'publication-project'`); err != nil {
+		t.Fatalf("project deletion must cascade publication metadata: %v", err)
+	}
+	for _, table := range []string{"automation_draft_metadata", "automation_publication_attempts", "automation_publication_steps", "automation_chat_confirmation_receipts", "automation_chat_confirmation_inputs"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("expected project cascade to clear %s: count=%d err=%v", table, count, err)
+		}
+	}
+	if err := goose.DownTo(db, ".", 114); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"automation_draft_metadata", "automation_publication_attempts", "automation_publication_steps", "automation_chat_confirmation_receipts", "automation_chat_confirmation_inputs"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("expected publication table %s removed after down migration: count=%d err=%v", table, count, err)
+		}
+	}
+	var definitions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='automations'`).Scan(&definitions); err != nil || definitions != 1 {
+		t.Fatalf("definition tables must remain after migration 115 down: count=%d err=%v", definitions, err)
+	}
+}
+
+func TestMigration114AutomationRuntimeUpAndDown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "automations-114.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 114); err != nil {
+		t.Fatal(err)
+	}
+	tables := []string{"automation_invocations", "automation_dispatch_outbox", "automation_task_run_reservations", "automation_work_items", "automation_work_item_positions", "automation_thread_input_bindings", "automation_activities", "automation_activity_resources", "automation_transitions"}
+	for _, table := range tables {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("expected runtime table %s after up migration: count=%d err=%v", table, count, err)
+		}
+	}
+	var dispatchColumn int
+	rows, err := db.Query(`PRAGMA table_info(executions)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, kind string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatal(err)
+		}
+		if name == "dispatch_id" {
+			dispatchColumn++
+		}
+	}
+	_ = rows.Close()
+	if dispatchColumn != 1 {
+		t.Fatal("expected executions.dispatch_id after migration 114")
+	}
+	if err := goose.DownTo(db, ".", 113); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range tables {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("expected runtime table %s removed after down migration: count=%d err=%v", table, count, err)
+		}
+	}
+	var definitions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='automations'`).Scan(&definitions); err != nil || definitions != 1 {
+		t.Fatalf("phase 1 definition tables must remain after migration 114 down: count=%d err=%v", definitions, err)
+	}
+}
+
+func TestMigration129PreservesExistingScheduleContextSemantics(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "schedule-context-129.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 128); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-129', 'Migration 129', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('task-129', 'project-129', 'Existing scheduled task', 'scheduled', 2, 'completed', 'run');
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('schedule-129', 'task-129', CURRENT_TIMESTAMP, 'daily', 1, 1, CURRENT_TIMESTAMP);
+		INSERT INTO executions (id, task_id, status, prompt_sent, output)
+			VALUES ('execution-129', 'task-129', 'completed', 'old prompt', 'old output');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 129); err != nil {
+		t.Fatal(err)
+	}
+	var clearContext, startsNewContext bool
+	if err := db.QueryRow(`SELECT clear_context_on_start FROM schedules WHERE id = 'schedule-129'`).Scan(&clearContext); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT starts_new_context FROM executions WHERE id = 'execution-129'`).Scan(&startsNewContext); err != nil {
+		t.Fatal(err)
+	}
+	if clearContext || startsNewContext {
+		t.Fatalf("existing rows must preserve prior context semantics: clear=%t boundary=%t", clearContext, startsNewContext)
+	}
+}
+
+func TestMigration133UsesAutomationLifecycleForScheduleEnablement(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "automation-schedule-lifecycle-133.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 132); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-133', 'Migration 133', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt) VALUES
+			('task-active-133', 'project-133', 'Active schedule', 'scheduled', 2, 'pending', 'run'),
+			('task-paused-133', 'project-133', 'Paused schedule', 'scheduled', 2, 'pending', 'run');
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run) VALUES
+			('schedule-active-133', 'task-active-133', CURRENT_TIMESTAMP, 'daily', 1, 0, CURRENT_TIMESTAMP),
+			('schedule-paused-133', 'task-paused-133', CURRENT_TIMESTAMP, 'daily', 1, 0, CURRENT_TIMESTAMP);
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state, published_version_id) VALUES
+			('automation-active-133', 'project-133', 'active-133', 'Active Automation', 'active', 'version-active-133'),
+			('automation-paused-133', 'project-133', 'paused-133', 'Paused Automation', 'paused', 'version-paused-133');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key) VALUES
+			('version-active-133', 'project-133', 'automation-active-133', 1, 'published', 'template', 'native_sdlc'),
+			('version-paused-133', 'project-133', 'automation-paused-133', 1, 'published', 'template', 'native_sdlc');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role) VALUES
+			('node-active-133', 'project-133', 'automation-active-133', 'version-active-133', 'schedule', 'Schedule', 'trigger', 'fixed_schedule'),
+			('node-paused-133', 'project-133', 'automation-paused-133', 'version-paused-133', 'schedule', 'Schedule', 'trigger', 'fixed_schedule');
+		INSERT INTO automation_trigger_owners (schedule_id, project_id, automation_id, version_id, node_id, ownership_state) VALUES
+			('schedule-active-133', 'project-133', 'automation-active-133', 'version-active-133', 'node-active-133', 'active'),
+			('schedule-paused-133', 'project-133', 'automation-paused-133', 'version-paused-133', 'node-paused-133', 'paused');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 133); err != nil {
+		t.Fatal(err)
+	}
+	var activeEnabled, pausedEnabled bool
+	if err := db.QueryRow(`SELECT enabled FROM schedules WHERE id = 'schedule-active-133'`).Scan(&activeEnabled); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT enabled FROM schedules WHERE id = 'schedule-paused-133'`).Scan(&pausedEnabled); err != nil {
+		t.Fatal(err)
+	}
+	if !activeEnabled || pausedEnabled {
+		t.Fatalf("migration 133 must enable only active Automation schedules: active=%t paused=%t", activeEnabled, pausedEnabled)
 	}
 }

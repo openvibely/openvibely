@@ -18,15 +18,17 @@ import (
 
 // TaskCreationRequest represents a typed task creation action request.
 type TaskCreationRequest struct {
-	Title             string                     `json:"title"`
-	Prompt            string                     `json:"prompt"`
-	Goal              string                     `json:"goal"`                // Optional persisted task goal
-	Category          string                     `json:"category"`            // "active" or "backlog" (default: "backlog")
-	Priority          int                        `json:"priority"`            // 1=Low, 2=Normal, 3=High, 4=Urgent (default: 2)
-	AgentID           string                     `json:"agent_id"`            // Optional: specific LLM config ID (empty = auto-select or default)
-	AgentDefinitionID string                     `json:"agent_definition_id"` // Optional: known agent definition ID
-	Agent             string                     `json:"agent"`               // Optional: agent definition name (resolved to AgentDefinitionID)
-	Chain             *models.ChainConfiguration `json:"chain,omitempty"`     // Optional: chain config for sequential task execution
+	Title                   string                     `json:"title"`
+	Prompt                  string                     `json:"prompt"`
+	Goal                    string                     `json:"goal"`                // Optional persisted task goal
+	Category                string                     `json:"category"`            // "active" or "backlog" (default: "backlog")
+	Priority                int                        `json:"priority"`            // 1=Low, 2=Normal, 3=High, 4=Urgent (default: 2)
+	AgentID                 string                     `json:"agent_id"`            // Optional: specific LLM config ID (empty = auto-select or default)
+	AgentDefinitionID       string                     `json:"agent_definition_id"` // Optional: known agent definition ID
+	Agent                   string                     `json:"agent"`               // Optional: agent definition name (resolved to AgentDefinitionID)
+	Chain                   *models.ChainConfiguration `json:"chain,omitempty"`     // Optional: chain config for sequential task execution
+	SourceGitHubIssueNumber int                        `json:"source_github_issue_number,omitempty"`
+	SourceGitHubRepoURL     string                     `json:"source_github_repo_url,omitempty"`
 }
 
 // EffectiveTaskCreationCategory resolves the category a task creation request would
@@ -953,12 +955,13 @@ type SendToTaskRequest struct {
 
 // ScheduleTaskRequest represents a typed request to schedule a task.
 type ScheduleTaskRequest struct {
-	TaskID   string   `json:"task_id"`  // Task ID to schedule
-	Title    string   `json:"title"`    // Optional: task title for fuzzy search
-	Time     string   `json:"time"`     // Required: HH:MM format (24-hour)
-	Repeat   string   `json:"repeat"`   // once, daily, weekly, monthly, hours, minutes, seconds (default: daily)
-	Interval int      `json:"interval"` // Optional: repeat interval (e.g., 2 = every 2 days/hours/etc., default: 1)
-	Days     []string `json:"days"`     // Optional: day abbreviations for weekly (mon,tue,wed,thu,fri,sat,sun)
+	TaskID              string   `json:"task_id"`                // Task ID to schedule
+	Title               string   `json:"title"`                  // Optional: task title for fuzzy search
+	Time                string   `json:"time"`                   // Required: HH:MM format (24-hour)
+	Repeat              string   `json:"repeat"`                 // once, daily, weekly, monthly, hours, minutes, seconds (default: daily)
+	Interval            int      `json:"interval"`               // Optional: repeat interval (e.g., 2 = every 2 days/hours/etc., default: 1)
+	Days                []string `json:"days"`                   // Optional: day abbreviations for weekly (mon,tue,wed,thu,fri,sat,sun)
+	ClearContextOnStart *bool    `json:"clear_context_on_start"` // Optional; defaults to true for new schedules
 }
 
 // DeleteScheduleRequest represents a typed request to delete a schedule entry.
@@ -970,14 +973,15 @@ type DeleteScheduleRequest struct {
 
 // ModifyScheduleRequest represents a typed request to modify a schedule entry.
 type ModifyScheduleRequest struct {
-	ScheduleID string   `json:"schedule_id"` // Direct schedule ID
-	TaskID     string   `json:"task_id"`     // Task ID to find schedule for
-	Title      string   `json:"title"`       // Optional: task title for fuzzy search
-	Time       string   `json:"time"`        // New time in HH:MM format (optional)
-	Repeat     string   `json:"repeat"`      // New repeat type (optional)
-	Interval   *int     `json:"interval"`    // New interval (optional, pointer to distinguish 0 from unset)
-	Days       []string `json:"days"`        // New days for weekly (optional)
-	Enabled    *bool    `json:"enabled"`     // Enable/disable (optional, pointer to distinguish false from unset)
+	ScheduleID          string   `json:"schedule_id"`            // Direct schedule ID
+	TaskID              string   `json:"task_id"`                // Task ID to find schedule for
+	Title               string   `json:"title"`                  // Optional: task title for fuzzy search
+	Time                string   `json:"time"`                   // New time in HH:MM format (optional)
+	Repeat              string   `json:"repeat"`                 // New repeat type (optional)
+	Interval            *int     `json:"interval"`               // New interval (optional, pointer to distinguish 0 from unset)
+	Days                []string `json:"days"`                   // New days for weekly (optional)
+	Enabled             *bool    `json:"enabled"`                // Enable/disable (optional, pointer to distinguish false from unset)
+	ClearContextOnStart *bool    `json:"clear_context_on_start"` // Clear model replay context at each scheduled start (optional)
 }
 
 // CreateAlertRequest represents a request to create an alert from chat.

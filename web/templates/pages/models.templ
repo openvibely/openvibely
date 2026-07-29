@@ -11,15 +11,15 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
-templ Models(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelWorkerStats map[string]int) {
+templ Models(projects []models.Project, currentProjectID string, agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
 	@layout.Base("Models", projects, currentProjectID) {
-		@modelsContent(agents, modelWorkerStats)
+		@modelsContent(agents, modelWorkerStats, desktopMode)
 	}
 }
 
 // AgentsContent renders just the agents content for HTMX requests
-templ ModelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) {
-	@modelsContent(agents, modelWorkerStats)
+templ ModelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
+	@modelsContent(agents, modelWorkerStats, desktopMode)
 }
 
 func hasDefault(agents []models.LLMConfig) bool {
@@ -29,6 +29,14 @@ func hasDefault(agents []models.LLMConfig) bool {
 		}
 	}
 	return false
+}
+
+func modelCardShowsTemperature(agent models.LLMConfig) bool {
+	if agent.Provider == models.ProviderMixture {
+		return false
+	}
+	return agent.Provider != models.ProviderOpenAICompatible ||
+		!strings.HasPrefix(strings.ToLower(strings.TrimSpace(agent.Model)), "kimi-")
 }
 
 func oauthStatusText(agent models.LLMConfig) string {
@@ -172,7 +180,7 @@ templ providerIcon(provider models.LLMProvider) {
 	}
 }
 
-templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) {
+templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
 	<div id="models-container" data-search-container>
 		@layout.PageTitle("Models")
 	<div class="flex items-center justify-between mb-6">
@@ -317,11 +325,12 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 									if agent.Provider == models.ProviderMixture {
 										<p class="text-sm opacity-60">Aggregator: { mixtureAggregatorSummary(agent, agents) }</p>
 										<p class="text-sm opacity-60">References: { fmt.Sprintf("%d", mixtureReferenceCount(agent)) }</p>
-									} else {
+									} else if modelCardShowsTemperature(agent) {
 										<p class="text-sm opacity-60">
 											{ fmt.Sprintf("Temperature: %.1f", agent.Temperature) }
 										</p>
-									}								if agent.Provider == models.ProviderOpenAI && agent.ReasoningEffort != "" {
+									}
+									if agent.ReasoningEffort != "" {
 									<p class="text-sm opacity-60">
 										Reasoning effort: { agent.ReasoningEffort }
 									</p>
@@ -332,11 +341,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 											{ oauthStatusText(agent) }
 										</span>
 									if !agent.HasValidOAuthToken() {
-											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } class="btn btn-xs btn-outline" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath)">
+											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } data-oauth-external={ fmt.Sprintf("%t", desktopMode) } class="btn btn-xs btn-outline" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">
 											Connect with OAuth
 										</a>
 									} else {
-											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } class="btn btn-xs btn-ghost" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath)">
+											<a href={ templ.SafeURL(fmt.Sprintf("/models/%s/oauth/initiate", agent.ID)) } data-oauth-path={ fmt.Sprintf("/models/%s/oauth/initiate", agent.ID) } data-oauth-external={ fmt.Sprintf("%t", desktopMode) } class="btn btn-xs btn-ghost" onclick="event.stopPropagation(); return launchOAuthInSystemBrowser(this.dataset.oauthPath, this)">
 												Re-authorize
 											</a>
 									}
@@ -486,6 +495,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							<label class="label"><span class="label-text">Model</span></label>
 							<select name="model" id="model_id" class="select select-bordered" onchange="handleModelChange()">
 							<option value="claude-sonnet-5">Claude Sonnet 5</option>
+							<option value="claude-opus-5">Claude Opus 5</option>
 							<option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
 							<option value="claude-opus-4-8">Claude Opus 4.8</option>
 							<option value="claude-opus-4-7">Claude Opus 4.7</option>
@@ -745,10 +755,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 		</style>
 
 			<script>
-					function launchOAuthInSystemBrowser(path) {
+					function launchOAuthInSystemBrowser(path, anchor) {
 						var href = path || '';
 						if (!href) return false;
 						href = modelMutationURL(href);
+						if (!anchor || anchor.dataset.oauthExternal !== 'true') {
+							if (anchor) anchor.href = href;
+							return true;
+						}
 						var externalURL = href;
 						if (externalURL.indexOf('?') === -1) {
 							externalURL += '?external=1';
@@ -856,6 +870,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				}
 
 				var reasoningEffortOptions = {
+					none: 'None',
+					minimal: 'Minimal',
 					low: 'Low',
 					medium: 'Medium',
 					high: 'High',
@@ -865,18 +881,19 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 			var modelOptionsByProvider = {
 					anthropic: [
 						{ value: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high', 'max'] },
+						{ value: 'claude-opus-5', label: 'Claude Opus 5', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-opus-4-8', label: 'Claude Opus 4.8', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-opus-4-7', label: 'Claude Opus 4.7', efforts: ['low', 'medium', 'high', 'max'] },
-						{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', efforts: ['low', 'medium', 'high', 'max'] },
+						{ value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', efforts: [] },
 						{ value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', efforts: [] },
 						{ value: 'claude-opus-4-6', label: 'Claude Opus 4.6', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-fable-5', label: 'Claude Fable 5', efforts: ['low', 'medium', 'high', 'max'] },
 						{ value: 'claude-mythos-5', label: 'Claude Mythos 5', efforts: ['low', 'medium', 'high', 'max'] }
 				],				openai: [
-					{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
-					{ value: 'gpt-5.6-luna', label: 'gpt-5.6-luna', efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+					{ value: 'gpt-5.6-sol', label: 'gpt-5.6-sol', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
+					{ value: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
+					{ value: 'gpt-5.6-luna', label: 'gpt-5.6-luna', efforts: ['none', 'low', 'medium', 'high', 'xhigh', 'max'] },
 					{ value: 'gpt-5.5', label: 'gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.5-pro', label: 'gpt-5.5-pro', efforts: ['low', 'medium', 'high', 'xhigh'] },
 					{ value: 'gpt-5.4', label: 'gpt-5.4', efforts: ['low', 'medium', 'high', 'xhigh'] },
@@ -940,7 +957,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							{ value: 'deepseek-reasoner', label: 'DeepSeek Reasoner', efforts: [] }
 						],
 						openai_compatible_moonshot: [
-							{ value: 'kimi-k2-0711-preview', label: 'Moonshot Kimi K2', efforts: [] },
+							{ value: 'kimi-k3', label: 'Kimi K3', efforts: ['low', 'high', 'max'] },
+							{ value: 'kimi-k2.7-code', label: 'Kimi K2.7 Code', efforts: [] },
+							{ value: 'kimi-k2.7-code-highspeed', label: 'Kimi K2.7 Code High-Speed', efforts: [] },
+							{ value: 'kimi-k2.6', label: 'Kimi K2.6', efforts: [] },
+							{ value: 'kimi-k2.5', label: 'Kimi K2.5', efforts: [] },
 							{ value: 'moonshot-v1-128k', label: 'Moonshot v1 128k', efforts: [] }
 						],
 						openai_compatible_dashscope: [
@@ -956,6 +977,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						openai_compatible_alibaba_coding_plan: [
 						],
 						openai_compatible_zai_glm: [
+							{ value: 'glm-5.2', label: 'GLM 5.2', efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] },
+							{ value: 'glm-5.1', label: 'GLM 5.1', efforts: [] },
+							{ value: 'glm-5-turbo', label: 'GLM 5 Turbo', efforts: [] },
+							{ value: 'glm-5', label: 'GLM 5', efforts: [] },
+							{ value: 'glm-4.7', label: 'GLM 4.7', efforts: [] },
+							{ value: 'glm-4.7-flashx', label: 'GLM 4.7 FlashX', efforts: [] },
+							{ value: 'glm-4.7-flash', label: 'GLM 4.7 Flash (Free)', efforts: [] },
+							{ value: 'glm-4.6', label: 'GLM 4.6', efforts: [] },
 							{ value: 'glm-4.5', label: 'GLM 4.5', efforts: [] },
 							{ value: 'glm-4.5-air', label: 'GLM 4.5 Air', efforts: [] }
 						],
@@ -1033,7 +1062,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				return null;
 			}
 
-				function preferredReasoningEffort(supportedEfforts) {
+				function preferredReasoningEffort(supportedEfforts, provider, model) {
+					var normalizedModel = (model || '').trim().toLowerCase();
+					if (isOpenAICompatibleProvider(provider) && (normalizedModel === 'kimi-k3' || normalizedModel === 'glm-5.2') && supportedEfforts.indexOf('max') !== -1) {
+						return 'max';
+					}
 					var preferred = ['medium', 'high', 'low', 'xhigh', 'max'];				for (var i = 0; i < preferred.length; i++) {
 					if (supportedEfforts.indexOf(preferred[i]) !== -1) {
 						return preferred[i];
@@ -1068,6 +1101,12 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					if (provider === 'anthropic') {
 						reasoningLabel.textContent = 'Claude Effort';
 						reasoningHelp.textContent = 'Matches Claude Code effort: low, medium, high, or max. Blank saved configs keep the provider default.';
+					} else if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'kimi-k3') {
+						reasoningLabel.textContent = 'Kimi Reasoning Effort';
+						reasoningHelp.textContent = 'Controls Kimi K3 reasoning effort: low, high, or max.';
+					} else if (isOpenAICompatibleProvider(provider) && (model || '').trim().toLowerCase() === 'glm-5.2') {
+						reasoningLabel.textContent = 'GLM Reasoning Effort';
+						reasoningHelp.textContent = 'Controls GLM 5.2 reasoning effort from none through max.';
 					} else {
 						reasoningLabel.textContent = 'Codex Reasoning Effort';
 						reasoningHelp.textContent = 'Matches Codex reasoning effort for supported OpenAI models.';
@@ -1085,7 +1124,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					reasoningSelect.value = normalizedSelected;
 					return;
 				}
-				reasoningSelect.value = preferredReasoningEffort(supportedEfforts);
+				reasoningSelect.value = preferredReasoningEffort(supportedEfforts, provider, model);
 			}
 
 				function setModelOptions(provider, selectedModel) {
@@ -1127,10 +1166,25 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					var provider = document.getElementById('model_provider').value;
 					var model = document.getElementById('model_id').value;
 					var selectedEffort = document.getElementById('model_reasoning_effort').value;
-					setReasoningEffortOptions(canonicalProvider(provider), model, selectedEffort);
+					setReasoningEffortOptions(provider, model, selectedEffort);
+					updateTemperatureField(provider, model);
 					if (isOpenAICompatibleProvider(provider)) {
 						document.getElementById('model_openai_compatible_custom_model').value = model;
 					}
+				}
+
+				function modelSupportsTemperature(provider, model) {
+					if (provider === 'mixture') return false;
+					if (!isOpenAICompatibleProvider(provider)) return true;
+					return (model || '').trim().toLowerCase().indexOf('kimi-') !== 0;
+				}
+
+				function updateTemperatureField(provider, model) {
+					var supported = modelSupportsTemperature(provider, model);
+					var field = document.getElementById('model_temperature_field');
+					var input = document.getElementById('model_temperature');
+					if (field) field.classList.toggle('hidden', !supported);
+					if (input) input.disabled = !supported;
 				}
 				var openAICompatiblePresetDefaults = {
 					openrouter: 'https://openrouter.ai/api/v1/',
@@ -1346,15 +1400,19 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 							});
 						}
 
-							function applyMixtureConfig(raw) {
-								var cfg = {};
-								try { cfg = raw ? JSON.parse(raw) : {}; } catch(e) { cfg = {}; }
-								document.getElementById('model_mixture_enabled').checked = cfg.enabled !== false;
-								document.getElementById('model_mixture_aggregator').value = (cfg.aggregator && cfg.aggregator.agent_config_id) || '';
-								var selectedIDs = [];
-								(cfg.reference_models || []).forEach(function(ref) { if (ref.agent_config_id) selectedIDs.push(ref.agent_config_id); });
-								renderMixtureReferenceOptions(selectedIDs);
-								document.getElementById('model_mixture_reference_temperature').value = (cfg.reference_temperature || 0.6).toString();							document.getElementById('model_mixture_aggregator_temperature').value = (cfg.aggregator_temperature || 0.4).toString();
+								function mixtureConfigValue(value, fallback) {
+									return value === undefined || value === null ? fallback : value;
+								}
+
+								function applyMixtureConfig(raw) {
+									var cfg = {};
+									try { cfg = raw ? JSON.parse(raw) : {}; } catch(e) { cfg = {}; }
+									document.getElementById('model_mixture_enabled').checked = cfg.enabled !== false;
+									document.getElementById('model_mixture_aggregator').value = (cfg.aggregator && cfg.aggregator.agent_config_id) || '';
+									var selectedIDs = [];
+									(cfg.reference_models || []).forEach(function(ref) { if (ref.agent_config_id) selectedIDs.push(ref.agent_config_id); });
+									renderMixtureReferenceOptions(selectedIDs);
+									document.getElementById('model_mixture_reference_temperature').value = mixtureConfigValue(cfg.reference_temperature, 0.6).toString();							document.getElementById('model_mixture_aggregator_temperature').value = mixtureConfigValue(cfg.aggregator_temperature, 0.4).toString();
 							document.getElementById('model_mixture_timeout').value = (cfg.reference_timeout_seconds || 90).toString();
 							document.getElementById('model_mixture_max_workers').value = (cfg.max_reference_workers || Math.min(8, Math.max(1, (cfg.reference_models || []).length))).toString();
 							updateMixtureCostWarning();
@@ -1411,6 +1469,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 						if (selectModel !== false) {
 							modelSelect.value = modelID;
 							document.getElementById('model_openai_compatible_custom_model').value = modelID;
+							updateTemperatureField(document.getElementById('model_provider').value, modelID);
 						}
 					}
 
@@ -1636,8 +1695,6 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				var provider = document.getElementById('model_provider').value;
 				var effectiveProvider = canonicalProvider(provider);
 				var modelField = document.getElementById('model_field');
-				var temperatureField = document.getElementById('model_temperature_field');
-				var temperatureInput = document.getElementById('model_temperature');
 				var apiKeyField = document.getElementById('api_key_field');
 				var apiKeyInput = document.getElementById('model_api_key');
 				var anthropicAuthTypeField = document.getElementById('anthropic_auth_type_field');
@@ -1651,8 +1708,6 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 				hideAllInfoBoxes();
 				var activeModel = setModelOptions(provider, selectedModel);
 				if (modelField) modelField.classList.toggle('hidden', provider === 'mixture');
-				if (temperatureField) temperatureField.classList.toggle('hidden', provider === 'mixture');
-				if (temperatureInput) temperatureInput.disabled = provider === 'mixture';
 				if (provider === 'anthropic') {
 					anthropicAuthTypeField.classList.remove('hidden');
 					openaiAuthTypeField.classList.add('hidden');
@@ -1707,7 +1762,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int) 
 					document.getElementById('model_auth_method').disabled = true;
 					document.getElementById('model_openai_connection_method').disabled = true;
 				}
-						setReasoningEffortOptions(effectiveProvider, activeModel, selectedReasoningEffort);				}
+						setReasoningEffortOptions(provider, activeModel, selectedReasoningEffort);
+						updateTemperatureField(provider, activeModel);
+					}
 
 				function isEditingModelForm() {
 					return document.getElementById('model_form').dataset.mode === 'edit';

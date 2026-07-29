@@ -50,6 +50,14 @@ func NewTaskPullRequestService(github TaskPullRequestGitHubProvider, repo *repos
 }
 
 func (s *TaskPullRequestService) ReplaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
+	return s.replaceBranchHeadForTask(ctx, project, task, expectedHead)
+}
+
+func (s *TaskPullRequestService) ReplaceBranchHeadForAutomationTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
+	return s.replaceBranchHeadForTask(ctx, project, task, expectedHead)
+}
+
+func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is required")
 	}
@@ -85,7 +93,11 @@ func (s *TaskPullRequestService) ReplaceBranchHeadForTask(ctx context.Context, p
 	if !ok {
 		return nil, fmt.Errorf("github integration does not support branch replacement")
 	}
-	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	repoPathForResolution := ""
+	if strings.TrimSpace(project.RepoURL) == "" {
+		repoPathForResolution = project.RepoPath
+	}
+	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, repoPathForResolution)
 	if err != nil {
 		return nil, fmt.Errorf("resolving repository: %w", err)
 	}
@@ -117,6 +129,14 @@ func (s *TaskPullRequestService) ReplaceBranchHeadForTask(ctx context.Context, p
 }
 
 func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
+	return s.openForTask(ctx, project, task, opts)
+}
+
+func (s *TaskPullRequestService) OpenForAutomationTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
+	return s.openForTask(ctx, project, task, opts)
+}
+
+func (s *TaskPullRequestService) openForTask(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions) (*OpenTaskPullRequestResult, error) {
 	if task == nil {
 		return nil, fmt.Errorf("task is required")
 	}
@@ -141,7 +161,11 @@ func (s *TaskPullRequestService) OpenForTask(ctx context.Context, project *model
 		return nil, fmt.Errorf("checking existing pull request: %w", err)
 	}
 
-	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	repoPathForResolution := ""
+	if strings.TrimSpace(project.RepoURL) == "" {
+		repoPathForResolution = project.RepoPath
+	}
+	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, repoPathForResolution)
 	if err != nil {
 		return nil, fmt.Errorf("resolving repository: %w", err)
 	}

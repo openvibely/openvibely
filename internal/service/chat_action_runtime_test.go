@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -153,7 +154,12 @@ func TestAlertRuntimeFiltersPaginationAuthorizationAndRecovery(t *testing.T) {
 	second := create("Second", "security", "agent-b")
 	third := create("Third", "product", "agent-a")
 	require.NoError(t, alertSvc.MarkRead(ctx, project.ID, first.ID))
+	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, first.ID, models.AlertDecisionApproved))
 	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, second.ID, models.AlertDecisionRejected))
+
+	approvedAcrossReadStates, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"approved","implementation_task_linked":false}`))
+	require.NoError(t, err)
+	require.Contains(t, approvedAcrossReadStates, first.ID, "omitting read must keep a read approved notification eligible")
 
 	pageOne, err := handlers["list_alerts"](ctx, json.RawMessage(`{"limit":2,"offset":0}`))
 	require.NoError(t, err)
@@ -245,6 +251,44 @@ func TestRunChannelChatFirstTurnBuildsRuntimeAfterPersistingCallerTask(t *testin
 	require.Equal(t, task.ID, factoryTaskID)
 	require.Equal(t, task.ID, runReq.TaskID)
 	require.NotNil(t, runReq.RuntimeTools)
+}
+
+func TestTaskControlRuntimeExposesExecuteTasksAndStartsExactBacklogTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Scheduled Inbox Runtime"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	inboxTask := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "process approvals", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, inboxTask))
+	implementationTask := &models.Task{ProjectID: project.ID, Title: "Approved implementation", Prompt: "implement", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, implementationTask))
+	workerSvc := NewWorkerService(nil, 1, projectRepo)
+	atomic.StoreInt32(&workerSvc.totalRunning, 1) // Keep the submitted task queued; this test verifies admission, not LLM execution.
+	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
+	svc := &LLMService{taskRepo: taskRepo, taskSvc: taskSvc}
+
+	runtime := svc.taskControlRuntimeTools(*inboxTask)
+	require.NotNil(t, runtime)
+	require.True(t, runtime.HasDefinition("execute_tasks"))
+	payload, err := json.Marshal(TaskExecutionRequest{TaskID: implementationTask.ID})
+	require.NoError(t, err)
+	output, handled, isErr, err := runtime.Executor(ctx, "execute_tasks", payload)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, implementationTask.ID)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, implementationTask.ID, submitted.ID)
+	default:
+		t.Fatal("expected exact implementation task to be submitted")
+	}
+	updated, err := taskRepo.GetByID(ctx, implementationTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, updated.Category)
+	require.Equal(t, models.StatusPending, updated.Status)
 }
 
 func TestTaskControlRuntimeExposesCreateNotificationForScheduledTask(t *testing.T) {
@@ -352,12 +396,16 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, schedules, 1)
+	require.True(t, schedules[0].ClearContextOnStart)
 
-	modifyOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","time":"10:45","enabled":false}`))
+	modifyOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","time":"10:45","enabled":false,"clear_context_on_start":false}`))
 	require.NoError(t, err)
 	require.Contains(t, modifyOut, "Updated schedule")
 	require.Contains(t, modifyOut, "time→10:45")
 	require.Contains(t, modifyOut, "enabled→false")
+	modified, err := scheduleRepo.GetByID(ctx, schedules[0].ID)
+	require.NoError(t, err)
+	require.False(t, modified.ClearContextOnStart)
 }
 
 func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *testing.T) {
@@ -406,10 +454,11 @@ func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallbac
 		TaskSvc:       NewTaskService(taskRepo, nil, nil),
 		LLMConfigRepo: llmConfigRepo,
 		Collector:     collector,
-		OnTasksCreated: func(_ context.Context, tasks []models.Task) {
+		OnTasksCreated: func(_ context.Context, _ []TaskCreationRequest, tasks []models.Task) error {
 			for _, task := range tasks {
 				callbackTaskIDs = append(callbackTaskIDs, task.ID)
 			}
+			return nil
 		},
 	})
 	payload, err := json.Marshal(TaskCreationRequest{Title: "Shared action task", Prompt: "Do shared work"})
@@ -446,10 +495,11 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 		ProjectID: project.ID,
 		TaskSvc:   taskSvc,
 		Collector: collector,
-		OnTasksCreated: func(_ context.Context, tasks []models.Task) {
+		OnTasksCreated: func(_ context.Context, _ []TaskCreationRequest, tasks []models.Task) error {
 			for _, task := range tasks {
 				callbackTaskIDs = append(callbackTaskIDs, task.ID)
 			}
+			return nil
 		},
 	})
 	payload, err := json.Marshal(channelCreateSwarmTaskInput{Title: "Shared swarm", Prompt: "Split this across workers", ProjectID: foreignProject.ID, Category: string(models.CategoryBacklog)})

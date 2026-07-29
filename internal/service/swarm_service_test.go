@@ -215,6 +215,46 @@ func TestSwarmServiceStartPlannerDisambiguatesRepeatedTitleCollisions(t *testing
 	}
 }
 
+func TestSwarmServiceScheduledStartMarksExistingPlannerBoundary(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	workerSvc := newTestWorkerService(t)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+	parent, err := svc.CreateSwarmTask(context.Background(), CreateSwarmTaskRequest{
+		ProjectID: "default", Title: "Recurring scheduled swarm", Prompt: "Plan again", MaxWorkers: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	planner, err := repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: %v", err)
+	}
+	if err := repo.UpdateCategory(context.Background(), planner.ID, models.CategoryBacklog); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateStatus(context.Background(), planner.ID, models.StatusFailed); err != nil {
+		t.Fatal(err)
+	}
+	svc.workerSvc = workerSvc
+
+	if err := svc.StartPlannerForScheduledRun(context.Background(), parent.ID, true); err != nil {
+		t.Fatalf("StartPlannerForScheduledRun: %v", err)
+	}
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != planner.ID {
+			t.Fatalf("submitted task ID=%s, want planner %s", submitted.ID, planner.ID)
+		}
+		if !submitted.StartsNewContext {
+			t.Fatal("scheduled planner restart must carry the new-context boundary")
+		}
+	default:
+		t.Fatal("expected planner to be submitted")
+	}
+}
+
 func TestSwarmServicePlannerCallbackPersistsApplicationError(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -1134,6 +1174,9 @@ func TestSwarmServiceStartPlannerReactivatesExistingPlannerBeforeSubmit(t *testi
 		}
 		if submitted.Category != models.CategoryActive || submitted.Status != models.StatusPending {
 			t.Fatalf("submitted planner not runnable: category=%s status=%s", submitted.Category, submitted.Status)
+		}
+		if submitted.StartsNewContext {
+			t.Fatal("manual planner start must not add a scheduled context boundary")
 		}
 	default:
 		t.Fatal("expected planner to be submitted")

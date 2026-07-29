@@ -2853,6 +2853,18 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					document.addEventListener('htmx:afterSwap', syncOpenVibelyTitleFromHTMX);
 					document.addEventListener('htmx:historyRestore', syncOpenVibelyTitleFromHTMX);
 
+					window.openVibelySubmitNavigate = function(form) {
+						if (!form || !window.htmx) return Promise.reject(new Error('HTMX navigation unavailable'));
+						var values = {};
+						new FormData(form).forEach(function(value, key) { values[key] = value; });
+						return htmx.ajax((form.getAttribute('method') || 'POST').toUpperCase(), form.getAttribute('action'), {
+							source: form,
+							target: '#main-content',
+							swap: 'innerHTML',
+							values: values
+						});
+					};
+
 				// Scroll position restoration for drop zones
 				let savedScrollPositions = new Map();
 

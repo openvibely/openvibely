@@ -96,6 +96,93 @@ func TestHandler_GetTask_FromSchedulePage(t *testing.T) {
 	}
 }
 
+func TestHandler_GetTask_EditFormOmitsScheduleContextControls(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Edit Scheduled Task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    "Original prompt",
+	}
+	if err := h.taskSvc.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	createSchedule(t, h, task.ID, time.Now().Add(time.Hour), func(schedule *models.Schedule) {
+		schedule.ClearContextOnStart = true
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=details&from=schedule", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, unwanted := range []string{
+		`name="schedule_context_settings_present"`,
+		`name="schedule_context_schedule_ids"`,
+		`name="clear_context_schedule_ids"`,
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("expected Edit Task form to omit %q", unwanted)
+		}
+	}
+}
+
+func TestHandler_UpdateTask_DoesNotModifyScheduleContextPolicy(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "Scheduled Context Policy", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "run"}
+	if err := h.taskSvc.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	clearSchedule := createSchedule(t, h, task.ID, time.Now().Add(time.Hour), func(schedule *models.Schedule) {
+		schedule.ClearContextOnStart = true
+	})
+	retainedSchedule := createSchedule(t, h, task.ID, time.Now().Add(2*time.Hour), func(schedule *models.Schedule) {
+		schedule.ClearContextOnStart = false
+	})
+
+	form := url.Values{
+		"title":                             {"Updated Scheduled Context Policy"},
+		"prompt":                            {task.Prompt},
+		"category":                          {string(task.Category)},
+		"priority":                          {"2"},
+		"tag":                               {""},
+		"schedule_context_settings_present": {"1"},
+		"schedule_context_schedule_ids":     {clearSchedule.ID, retainedSchedule.ID},
+		"clear_context_schedule_ids":        {retainedSchedule.ID},
+	}
+	req := httptest.NewRequest(http.MethodPut, "/tasks/"+task.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected status 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	gotClear, err := h.scheduleRepo.GetByID(ctx, clearSchedule.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotRetained, err := h.scheduleRepo.GetByID(ctx, retainedSchedule.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gotClear.ClearContextOnStart {
+		t.Fatal("ordinary Task Details edit must preserve a true schedule context policy")
+	}
+	if gotRetained.ClearContextOnStart {
+		t.Fatal("ordinary Task Details edit must preserve a false schedule context policy")
+	}
+}
+
 func TestHandler_UpdateTask_FromSchedulePage(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

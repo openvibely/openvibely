@@ -320,7 +320,7 @@ func TestAddMultipleComments_SameFile(t *testing.T) {
 	}
 }
 
-func TestSubmitReview_WorktreeFailurePromotesQueuedFollowup(t *testing.T) {
+func TestSubmitReview_WorktreeFailurePreservesExistingQueuedFIFO(t *testing.T) {
 	h, e, reviewRepo, execRepo, _, taskID := setupReviewHandler(t)
 	ctx := context.Background()
 
@@ -367,8 +367,8 @@ func TestSubmitReview_WorktreeFailurePromotesQueuedFollowup(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		execs, listErr := execRepo.ListByTaskChronological(ctx, taskID)
-		return listErr == nil && len(execs) == 2 && execs[1].PromptSent == queued.Content
-	}, time.Second, 10*time.Millisecond, "expected worktree failure to promote the queued follow-up")
+		return listErr == nil && len(execs) == 2 && execs[0].PromptSent == queued.Content && strings.Contains(execs[1].PromptSent, "Fix this")
+	}, time.Second, 10*time.Millisecond, "expected existing queued input to run before the newer review follow-up")
 }
 
 func TestSubmitReview_CreatesFollowupExecutionAndClearsComments(t *testing.T) {

@@ -148,8 +148,14 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 		PromptSent:    message,
 		IsFollowup:    true,
 	}
-	if err := h.execRepo.CreateDirectTaskFollowup(ctx, exec); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create execution")
+	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: message, Source: models.TaskOriginWeb}
+	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
+	}
+	if !started {
+		go h.PromoteQueuedTaskThreadInput(task.ID)
+		return c.JSON(http.StatusOK, map[string]string{"status": "queued", "queued_input_id": queued.ID})
 	}
 	if err := h.applySwarmChildFollowupStart(ctx, task, message); err != nil {
 		h.completeWithFailure(ctx, exec.ID, task.ID, err.Error(), 0)

@@ -471,6 +471,20 @@ func TestFilterChatHistory_ReturnsNonNilForEmpty(t *testing.T) {
 	}
 }
 
+func TestFilterChatHistory_StopsAtLatestNewContextBoundary(t *testing.T) {
+	executions := []models.Execution{
+		{ID: "old", Status: models.ExecCompleted, PromptSent: "old prompt"},
+		{ID: "boundary", Status: models.ExecCompleted, PromptSent: "scheduled run", StartsNewContext: true},
+		{ID: "new", Status: models.ExecCompleted, PromptSent: "follow-up"},
+		{ID: "current", Status: models.ExecRunning},
+	}
+
+	result := filterChatHistory(executions, "current")
+	require.Len(t, result, 2)
+	assert.Equal(t, "boundary", result[0].ID)
+	assert.Equal(t, "new", result[1].ID)
+}
+
 func TestCombineContexts_BothPresent(t *testing.T) {
 	result := combineContexts("task context here", "attachment context here")
 	if result != "task context here\nattachment context here" {
@@ -1505,6 +1519,13 @@ func TestHandler_InitialTaskTurnQueuesRuntimeFollowupBeforeExecutionExistsAndPro
 	require.Empty(t, queued.RunExecutionID)
 	require.Equal(t, models.ThreadInputPending, queued.InputStatus)
 
+	dispatchClaim, claimed, err := h.taskRepo.ClaimTaskForDispatch(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, claimed, "a generic follow-up queued before the first execution must not block the original worker claim")
+	require.NotNil(t, dispatchClaim)
+	require.Equal(t, models.StatusRunning, dispatchClaim.Task.Status)
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending), "restore fixture for direct LLM execution")
+
 	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
 	require.Empty(t, execs, "pre-execution queueing must not create a follow-up execution")
@@ -2000,6 +2021,92 @@ func TestHandler_WorkerCompletionPromotesQueuedTaskThreadInput(t *testing.T) {
 	if len(inputs) != 0 {
 		t.Fatalf("expected no stranded pending queued inputs, got %#v", inputs)
 	}
+}
+
+func TestHandler_RecoverQueuedTaskThreadInputsDrainsMoreThanOneBatch(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Recover Batched Task Thread Queue Project")
+	const taskCount = 101
+	tasks := make([]*models.Task, 0, taskCount)
+	inputs := make([]*models.ThreadInput, 0, taskCount)
+	for i := 0; i < taskCount; i++ {
+		task := createTask(t, h, project.ID, fmt.Sprintf("Recover Batched Task %03d", i), func(tk *models.Task) {
+			tk.Category = models.CategoryCompleted
+			tk.Status = models.StatusCompleted
+			tk.AgentID = &agent.ID
+		})
+		input := &models.ThreadInput{
+			Scope:         models.ThreadInputScopeTask,
+			ProjectID:     project.ID,
+			TaskID:        task.ID,
+			AgentConfigID: agent.ID,
+			InputMode:     models.ThreadInputModeQueued,
+			Content:       fmt.Sprintf("recover follow-up %03d", i),
+		}
+		require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+		tasks = append(tasks, task)
+		inputs = append(inputs, input)
+	}
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "recovered"
+	mock.TextOnly = "recovered"
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.RecoverQueuedTaskThreadInputs(ctx)
+
+	for i, input := range inputs {
+		stored, err := h.threadInputRepo.GetByID(ctx, input.ID)
+		require.NoError(t, err)
+		require.Equalf(t, models.ThreadInputApplied, stored.InputStatus, "input %d was stranded beyond the recovery batch", i)
+		execs, err := h.execRepo.ListByTaskChronological(ctx, tasks[i].ID)
+		require.NoError(t, err)
+		require.Lenf(t, execs, 1, "task %d should have exactly one promoted execution", i)
+		require.Equal(t, input.Content, execs[0].PromptSent)
+	}
+}
+
+func TestHandler_RecoverQueuedTaskThreadInputsPromotesUnboundInputAfterClaimCrash(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Recover Unbound Task Thread Queue Project")
+	task := createTask(t, h, project.ID, "Recover Unbound Task Thread Queue Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.Prompt = "stored original prompt"
+		tk.AgentID = &agent.ID
+	})
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "follow-up queued before execution insertion"}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending), "startup resets the abandoned ordinary claim")
+
+	started := make(chan string, 1)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "recovered"
+	mock.TextOnly = "recovered"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) { started <- call.Prompt }
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.RecoverQueuedTaskThreadInputs(ctx)
+	select {
+	case got := <-started:
+		if got != queued.Content {
+			t.Fatalf("expected unbound FIFO follow-up, got %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for unbound queued follow-up recovery")
+	}
+	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1)
+	require.Equal(t, queued.Content, execs[0].PromptSent, "startup must not rerun the stored original prompt")
 }
 
 func TestHandler_RecoverQueuedTaskThreadInputsPromotesStrandedInput(t *testing.T) {
@@ -2819,6 +2926,7 @@ func TestStartQueuedTaskThreadInputUsesQueuedChannelReplyContext(t *testing.T) {
 	h.llmSvc.SetLLMCaller(mock)
 
 	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
 	require.Eventually(t, func() bool { return sentChannel == "C1" }, 2*time.Second, 25*time.Millisecond)
@@ -3039,6 +3147,7 @@ func TestStartQueuedTaskThreadInputFailureUsesQueuedChannelReplyContext(t *testi
 		sentErr = errMsg
 		sentUser = userID
 	}})
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 
 	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 	require.Eventually(t, func() bool { return sentChannel == "Cfail" }, 2*time.Second, 25*time.Millisecond)
@@ -3374,6 +3483,7 @@ func TestStartQueuedTaskThreadInputProcessesSavedAttachmentSession(t *testing.T)
 	defer broadcaster.Unsubscribe(sub)
 
 	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
 	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
 
 	var started events.TaskEvent
@@ -3496,6 +3606,104 @@ func TestProcessStreamingResponse_AppliesPendingSteeringBeforeModelCall(t *testi
 	if applied.InputStatus != models.ThreadInputApplied {
 		t.Fatalf("expected steering input applied, got %s", applied.InputStatus)
 	}
+}
+
+func TestPreparePendingSteeringInputsPreservesCurrentReasoningContent(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Reasoning Steering Project")
+	task := createTask(t, h, project.ID, "Reasoning Steering Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "first private reasoning plus detail"))
+
+	steering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "continue with this constraint",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	params := streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "active prompt",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+		ChatHistory: []models.Execution{{
+			ID:               exec.ID + "-steering-context-1",
+			PromptSent:       "first prompt",
+			Output:           "first answer",
+			ReasoningContent: "first private reasoning",
+		}},
+	}
+	batch, err := h.preparePendingSteeringInputs(ctx, &params, "assistant answer")
+	require.NoError(t, err)
+	require.Equal(t, 1, batch.count())
+	require.Len(t, params.ChatHistory, 2)
+	require.Equal(t, "assistant answer", params.ChatHistory[1].Output)
+	require.Equal(t, "first private reasoning plus detail", params.ChatHistory[1].ReasoningContent)
+
+	require.NoError(t, h.execRepo.UpdateReasoningContent(ctx, exec.ID, "final private reasoning"))
+	require.NoError(t, h.persistSteeringReplayHistory(ctx, params, "assistant answerfinal answer"))
+	stored, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, "first private reasoningfirst private reasoning plus detailfinal private reasoning", stored.ReasoningContent)
+
+	replay, err := h.execRepo.ReplayMessagesByExecutionIDs(ctx, []string{exec.ID})
+	require.NoError(t, err)
+	require.Equal(t, []models.ExecutionReplayMessage{
+		{
+			UserContent:      "first prompt",
+			AssistantContent: "first answer",
+			ReasoningContent: "first private reasoning",
+		},
+		{
+			UserContent:      "active prompt",
+			AssistantContent: "assistant answer",
+			ReasoningContent: "first private reasoning plus detail",
+		},
+		{
+			UserContent:      formatSteeringInstruction("continue with this constraint"),
+			AssistantContent: "final answer",
+			ReasoningContent: "final private reasoning",
+		},
+	}, replay[exec.ID])
+
+	lateSteering := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: exec.ID,
+		InputMode:      models.ThreadInputModeSteering,
+		InputStatus:    models.ThreadInputPending,
+		TurnID:         exec.ID,
+		ExpectedTurnID: exec.ID,
+		Content:        "late completion constraint",
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, lateSteering, exec.ID))
+
+	batch, err = h.preparePendingSteeringInputsFromPersistedReplay(ctx, &params, "assistant answerfinal answer")
+	require.NoError(t, err)
+	require.Equal(t, 1, batch.count())
+	require.Len(t, params.ChatHistory, 1)
+	require.Equal(t, replay[exec.ID], params.ChatHistory[0].ReplayMessages)
+	require.Equal(t, formatSteeringInstruction("late completion constraint"), params.Message)
 }
 
 func TestClaimPendingTextSteeringInputsSkipsAttachmentSteering(t *testing.T) {
@@ -3634,14 +3842,14 @@ func TestProcessStreamingResponse_DoesNotApplyPreparedSteeringWhenProviderCallFa
 		Content:        "retry this steering",
 	}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
-
 	h.processStreamingResponse(streamingResponseParams{
-		ExecID:         exec.ID,
-		TaskID:         task.ID,
-		Message:        "active prompt",
-		Agent:          *agent,
-		ProjectID:      project.ID,
-		IsTaskFollowup: true,
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
 	})
 
 	require.Equal(t, 1, mock.CallCount())
@@ -3841,14 +4049,14 @@ func TestProcessStreamingResponse_DoesNotMovePreparedSteeringAttachmentsWhenProv
 		AttachmentSessionID: sessionID,
 	}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
-
 	h.processStreamingResponse(streamingResponseParams{
-		ExecID:         exec.ID,
-		TaskID:         task.ID,
-		Message:        "active prompt",
-		Agent:          *agent,
-		ProjectID:      project.ID,
-		IsTaskFollowup: true,
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
 	})
 
 	require.Equal(t, 1, mock.CallCount())
@@ -3907,14 +4115,14 @@ func TestProcessStreamingResponse_RequeuesPreparedSteeringWhenCommitFailsAfterPr
 		AttachmentSessionID: sessionID,
 	}
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
-
 	h.processStreamingResponse(streamingResponseParams{
-		ExecID:         exec.ID,
-		TaskID:         task.ID,
-		Message:        "active prompt",
-		Agent:          *agent,
-		ProjectID:      project.ID,
-		IsTaskFollowup: true,
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
 	})
 
 	require.Equal(t, 1, mock.CallCount())
@@ -3984,12 +4192,13 @@ func TestProcessStreamingResponse_RequeuesOnlyUncommittedSteeringWhenLaterCommit
 	h.chatAttachmentRepo = nil
 
 	h.processStreamingResponse(streamingResponseParams{
-		ExecID:         exec.ID,
-		TaskID:         task.ID,
-		Message:        "active prompt",
-		Agent:          *agent,
-		ProjectID:      project.ID,
-		IsTaskFollowup: true,
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
 	})
 
 	require.Equal(t, 1, mock.CallCount())
@@ -4028,7 +4237,6 @@ func TestProcessStreamingResponse_DoesNotApplySteeringCreatedDuringFailedModelCa
 		ex.PromptSent = "active prompt"
 		ex.IsFollowup = true
 	})
-
 	var steeringID string
 	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
 		steering := &models.ThreadInput{
@@ -4047,12 +4255,13 @@ func TestProcessStreamingResponse_DoesNotApplySteeringCreatedDuringFailedModelCa
 	}
 
 	h.processStreamingResponse(streamingResponseParams{
-		ExecID:         exec.ID,
-		TaskID:         task.ID,
-		Message:        "active prompt",
-		Agent:          *agent,
-		ProjectID:      project.ID,
-		IsTaskFollowup: true,
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
 	})
 
 	require.Equal(t, 1, mock.CallCount())
@@ -6519,12 +6728,13 @@ func TestProcessStreamingResponse_ReaddsRecoveredPreparedSteeringToRealtimeUI(t 
 	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
 
 	h.processStreamingResponse(streamingResponseParams{
-		ExecID:         exec.ID,
-		TaskID:         task.ID,
-		Message:        "active prompt",
-		Agent:          *agent,
-		ProjectID:      project.ID,
-		IsTaskFollowup: true,
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
 	})
 
 	var sawRemoval bool

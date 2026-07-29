@@ -335,12 +335,13 @@ func (s *MemoryService) ensureConsolidationTaskSchedule(ctx context.Context, pro
 	}
 	runAt := time.Now().UTC().Add(24 * time.Hour)
 	return s.scheduleRepo.Create(ctx, &models.Schedule{
-		TaskID:         task.ID,
-		RunAt:          runAt,
-		RepeatType:     models.RepeatDaily,
-		RepeatInterval: 1,
-		Enabled:        true,
-		NextRun:        &runAt,
+		TaskID:              task.ID,
+		RunAt:               runAt,
+		RepeatType:          models.RepeatDaily,
+		RepeatInterval:      1,
+		Enabled:             true,
+		ClearContextOnStart: true,
+		NextRun:             &runAt,
 	})
 }
 

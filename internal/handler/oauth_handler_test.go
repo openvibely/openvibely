@@ -85,8 +85,45 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		require.Contains(t, location, "code=true")
 	})
 
-	t.Run("opens oauth in external browser when requested", func(t *testing.T) {
+	t.Run("ignores external browser request outside desktop mode", func(t *testing.T) {
 		h, e, llmConfigRepo := setupTestHandler(t)
+
+		openCalls := 0
+		origOpenOAuthURL := openOAuthURL
+		openOAuthURL = func(string) error {
+			openCalls++
+			return nil
+		}
+		t.Cleanup(func() { openOAuthURL = origOpenOAuthURL })
+
+		model := &models.LLMConfig{
+			Name:            "Test Claude OAuth Web External",
+			Provider:        models.ProviderAnthropic,
+			AuthMethod:      models.AuthMethodOAuth,
+			Model:           "claude-3.5-sonnet",
+			Temperature:     0.7,
+			ReasoningEffort: "medium",
+			MaxTokens:       4096,
+		}
+		err := llmConfigRepo.Create(context.Background(), model)
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate?external=1", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(model.ID)
+
+		err = h.OAuthInitiate(c)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+		require.Zero(t, openCalls)
+		require.Contains(t, rec.Header().Get("Location"), oauthAuthorizeURL)
+	})
+
+	t.Run("opens oauth in external browser when requested in desktop mode", func(t *testing.T) {
+		h, e, llmConfigRepo := setupTestHandler(t)
+		h.SetDesktopMode(true)
 
 		openedURL := ""
 		origOpenOAuthURL := openOAuthURL

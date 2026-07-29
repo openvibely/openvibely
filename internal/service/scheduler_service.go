@@ -23,18 +23,20 @@ const staleQueuedTaskTimeout = 10 * time.Minute
 // time (not catching up on all missed occurrences).
 type SwarmPlannerStarter interface {
 	StartPlanner(ctx context.Context, parentTaskID string) error
+	StartPlannerForScheduledRun(ctx context.Context, parentTaskID string, startsNewContext bool) error
 }
 
 type SchedulerService struct {
-	scheduleRepo  *repository.ScheduleRepo
-	taskRepo      *repository.TaskRepo
-	workerSvc     *WorkerService
-	worktreeSvc   *WorktreeService
-	swarmStarter  SwarmPlannerStarter
-	interval      time.Duration
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	lastCleanupAt time.Time
+	scheduleRepo   *repository.ScheduleRepo
+	taskRepo       *repository.TaskRepo
+	automationRepo *repository.AutomationRepo
+	workerSvc      *WorkerService
+	worktreeSvc    *WorktreeService
+	swarmStarter   SwarmPlannerStarter
+	interval       time.Duration
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	lastCleanupAt  time.Time
 }
 
 func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *repository.TaskRepo, workerSvc *WorkerService) *SchedulerService {
@@ -47,6 +49,10 @@ func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *reposi
 }
 
 // SetWorktreeService sets the worktree service for automatic cleanup.
+func (s *SchedulerService) SetAutomationRepo(repo *repository.AutomationRepo) {
+	s.automationRepo = repo
+}
+
 func (s *SchedulerService) SetWorktreeService(wts *WorktreeService) {
 	s.worktreeSvc = wts
 }
@@ -116,6 +122,27 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 	applog.Infof("[scheduler] checkDueTasks found %d due schedules", len(schedules))
 
 	for _, sched := range schedules {
+		if s.automationRepo != nil {
+			owner, ownerErr := s.automationRepo.GetTriggerOwner(ctx, sched.ID)
+			if ownerErr != nil {
+				applog.Infof("[scheduler] automation trigger owner lookup failed schedule=%s: %v", sched.ID, ownerErr)
+				continue
+			}
+			if owner != nil {
+				nextRun := sched.ComputeNextRun(now)
+				invocation, dispatch, claimErr := s.automationRepo.ClaimScheduledOccurrence(ctx, sched, now, nextRun)
+				if claimErr != nil {
+					if claimErr != repository.ErrAutomationScheduleChanged {
+						applog.Infof("[scheduler] automation occurrence claim failed schedule=%s automation=%s: %v", sched.ID, owner.AutomationID, claimErr)
+					}
+					continue
+				}
+				if invocation != nil {
+					applog.Infof("[scheduler] automation occurrence claimed automation=%s invocation=%s status=%s dispatch=%v", owner.AutomationID, invocation.ID, invocation.Status, dispatch != nil)
+				}
+				continue
+			}
+		}
 		task, err := s.taskRepo.GetByID(ctx, sched.TaskID)
 		if err != nil || task == nil {
 			applog.Infof("[scheduler] checkDueTasks error getting task %s: %v", sched.TaskID, err)
@@ -164,6 +191,10 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			applog.Infof("[scheduler] checkDueTasks reset task %s category from %q to %q for recurring schedule", task.ID, prevCategory, models.CategoryScheduled)
 		}
 
+		// A clear-context schedule starts a new replay segment without deleting
+		// earlier executions, lifecycle records, goals, or audit history.
+		task.StartsNewContext = sched.ClearContextOnStart
+
 		// Log if this is a missed schedule (next_run is significantly in the past)
 		if sched.NextRun != nil && sched.NextRun.Before(now.Add(-1*time.Minute)) {
 			timeSinceDue := now.Sub(*sched.NextRun)
@@ -174,7 +205,7 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 				task.ID, task.Title, sched.ID, sched.RepeatType)
 		}
 		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
-			if err := s.swarmStarter.StartPlanner(ctx, task.ID); err != nil {
+			if err := s.swarmStarter.StartPlannerForScheduledRun(ctx, task.ID, sched.ClearContextOnStart); err != nil {
 				applog.Infof("[scheduler] checkDueTasks error starting swarm planner task=%s: %v", task.ID, err)
 				continue
 			}
@@ -232,12 +263,16 @@ func (s *SchedulerService) checkActiveTasks(ctx context.Context) {
 		return
 	}
 	for _, task := range staleTasks {
-		applog.Infof("[scheduler] checkActiveTasks recovering stale queued task id=%s title=%q (queued for >%s)",
-			task.ID, task.Title, staleQueuedTaskTimeout)
-		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
-			applog.Infof("[scheduler] checkActiveTasks error resetting stale task %s to pending: %v", task.ID, err)
+		claimed, err := s.taskRepo.ReclaimStaleQueuedTask(ctx, task.ID, staleQueuedTaskTimeout)
+		if err != nil {
+			applog.Infof("[scheduler] checkActiveTasks error reclaiming stale task %s: %v", task.ID, err)
 			continue
 		}
+		if !claimed {
+			continue
+		}
+		applog.Infof("[scheduler] checkActiveTasks recovering stale queued task id=%s title=%q (queued for >%s)",
+			task.ID, task.Title, staleQueuedTaskTimeout)
 		task.Status = models.StatusPending
 		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
 			applog.Infof("[scheduler] checkActiveTasks starting swarm planner for recovered stale queued task id=%s title=%q project=%s",

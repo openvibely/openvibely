@@ -32,6 +32,7 @@ const (
 type AgenticOptions struct {
 	Model        string
 	MaxTokens    int
+	Effort       string // output_config.effort; empty preserves the provider default
 	System       string
 	WorkDir      string // working directory for tool execution
 	MaxTurns     int    // max agentic loop iterations (default 25)
@@ -44,7 +45,7 @@ type AgenticOptions struct {
 	// When true with BudgetTokens=0, uses adaptive thinking on supported models
 	// (Opus 4.6+), falls back to fixed budget on others.
 	// When true with BudgetTokens>0, uses that fixed budget except on models
-	// that only support adaptive thinking (Fable 5 and Mythos 5).
+	// that only support adaptive thinking.
 	EnableThinking bool
 	BudgetTokens   int
 
@@ -85,6 +86,37 @@ type AgenticOptions struct {
 	// OnToolBoundarySteering is called after local tool results are appended and before the next model request.
 	OnToolBoundarySteering func(ctx context.Context) (string, error)
 	OnCompaction           func(summary string) // called when context is compacted
+}
+
+// NormalizeEffort returns an API-supported effort for the selected model.
+// Unsupported models and model/effort combinations return an empty string so
+// callers preserve the provider default instead of sending an invalid request.
+func NormalizeEffort(model, value string) string {
+	effort := strings.ToLower(strings.TrimSpace(value))
+	switch effort {
+	case "low", "medium", "high", "max":
+	default:
+		return ""
+	}
+
+	m := strings.ToLower(strings.TrimSpace(model))
+	switch {
+	case strings.Contains(m, "claude-opus-5"),
+		strings.Contains(m, "claude-sonnet-5"),
+		strings.Contains(m, "claude-fable-5"),
+		strings.Contains(m, "claude-mythos-5"),
+		strings.Contains(m, "claude-mythos-preview"),
+		strings.Contains(m, "claude-opus-4-8"),
+		strings.Contains(m, "claude-opus-4-7"),
+		strings.Contains(m, "claude-opus-4-6"),
+		strings.Contains(m, "claude-sonnet-4-6"):
+		return effort
+	case strings.Contains(m, "claude-opus-4-5"):
+		if effort != "max" {
+			return effort
+		}
+	}
+	return ""
 }
 
 // AgenticResponse is the result of an agentic send.
@@ -139,6 +171,10 @@ type thinkingConfig struct {
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
 }
 
+type outputConfig struct {
+	Effort string `json:"effort,omitempty"`
+}
+
 // systemBlock is a system prompt content block with optional cache_control.
 type systemBlock struct {
 	Type         string        `json:"type"`
@@ -186,6 +222,7 @@ type agenticRequest struct {
 	Stream            bool                     `json:"stream,omitempty"`
 	System            []systemBlock            `json:"system,omitempty"`
 	Thinking          *thinkingConfig          `json:"thinking,omitempty"`
+	OutputConfig      *outputConfig            `json:"output_config,omitempty"`
 	ContextManagement *contextManagementConfig `json:"context_management,omitempty"`
 	// rawTools overrides Tools when set. Used when the tools array contains
 	// mixed types (e.g. client tools + server tools for web search).
@@ -798,7 +835,10 @@ const ContextManagementBetaHeader = "context-management-2025-06-27"
 
 func requiresAdaptiveThinking(model string) bool {
 	m := strings.ToLower(strings.TrimSpace(model))
-	return strings.Contains(m, "fable-5") || strings.Contains(m, "mythos-5")
+	return strings.Contains(m, "claude-opus-5") ||
+		strings.Contains(m, "claude-sonnet-5") ||
+		strings.Contains(m, "fable-5") ||
+		strings.Contains(m, "mythos-5")
 }
 
 func usesAdaptiveThinking(model string) bool {
@@ -872,6 +912,9 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 		Stream:    true,
 		System:    sysBlocks,
 	}
+	if effort := NormalizeEffort(opts.Model, opts.Effort); effort != "" {
+		req.OutputConfig = &outputConfig{Effort: effort}
+	}
 
 	// Add provider-native web tools when web search is enabled.
 	// Anthropic expects direct versioned tool types in the tools array, not a
@@ -898,7 +941,8 @@ func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMess
 
 	if opts.EnableThinking {
 		if requiresAdaptiveThinking(opts.Model) {
-			// Fable 5 and Mythos 5 only support adaptive thinking; fixed budget_tokens errors.
+			// Current Claude 5 models only support adaptive thinking;
+			// fixed budget_tokens errors.
 			req.Thinking = &thinkingConfig{Type: "adaptive"}
 		} else if opts.BudgetTokens > 0 {
 			// Fixed budget: use "enabled" with explicit budget_tokens

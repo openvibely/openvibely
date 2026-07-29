@@ -1810,8 +1810,8 @@ func TestContextManagementEdits_BothTypes(t *testing.T) {
 	}
 }
 
-func TestSendAgentic_FableAndMythosUseAdaptiveThinkingWithoutBudget(t *testing.T) {
-	models := []string{"claude-fable-5", "claude-mythos-5"}
+func TestSendAgentic_Claude5ModelsUseAdaptiveThinkingWithoutBudget(t *testing.T) {
+	models := []string{"claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-mythos-5"}
 	for _, model := range models {
 		t.Run(model, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1828,7 +1828,11 @@ func TestSendAgentic_FableAndMythosUseAdaptiveThinkingWithoutBudget(t *testing.T
 					t.Fatalf("thinking.type = %v, want adaptive", got)
 				}
 				if _, ok := thinking["budget_tokens"]; ok {
-					t.Fatalf("fable/mythos adaptive thinking must not send budget_tokens: %v", thinking)
+					t.Fatalf("Claude 5 adaptive thinking must not send budget_tokens: %v", thinking)
+				}
+				outputConfig, ok := reqBody["output_config"].(map[string]interface{})
+				if !ok || outputConfig["effort"] != "low" {
+					t.Fatalf("output_config = %v, want effort low", reqBody["output_config"])
 				}
 
 				w.Header().Set("Content-Type", "text/event-stream")
@@ -1857,11 +1861,35 @@ func TestSendAgentic_FableAndMythosUseAdaptiveThinkingWithoutBudget(t *testing.T
 				MaxTokens:      8192,
 				EnableThinking: true,
 				BudgetTokens:   4000,
+				Effort:         " LOW ",
 				DisableTools:   true,
 				MaxTurns:       1,
 			})
 			if err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestNormalizeEffortRejectsUnsupportedModelCombinations(t *testing.T) {
+	tests := []struct {
+		model  string
+		effort string
+		want   string
+	}{
+		{"claude-opus-5", " LOW ", "low"},
+		{"claude-sonnet-4-6", "max", "max"},
+		{"claude-opus-4-5-20251101", "high", "high"},
+		{"claude-opus-4-5-20251101", "max", ""},
+		{"claude-sonnet-4-5-20250929", "low", ""},
+		{"claude-haiku-4-5-20251001", "high", ""},
+		{"claude-future-model", "low", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model+"/"+tt.effort, func(t *testing.T) {
+			if got := NormalizeEffort(tt.model, tt.effort); got != tt.want {
+				t.Fatalf("NormalizeEffort(%q, %q) = %q, want %q", tt.model, tt.effort, got, tt.want)
 			}
 		})
 	}

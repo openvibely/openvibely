@@ -59,12 +59,14 @@ type channelActionSummaryCollector struct {
 }
 
 type channelTaskActionHandlerOptions struct {
-	ProjectID      string
-	TaskSvc        *TaskService
-	SwarmSvc       *SwarmService
-	LLMConfigRepo  *repository.LLMConfigRepo
-	Collector      *channelActionSummaryCollector
-	OnTasksCreated func(context.Context, []models.Task)
+	ProjectID           string
+	TaskSvc             *TaskService
+	SwarmSvc            *SwarmService
+	LLMConfigRepo       *repository.LLMConfigRepo
+	Collector           *channelActionSummaryCollector
+	PrepareTaskCreation func(context.Context, *TaskCreationRequest) error
+	CreatePreparedTask  func(context.Context, TaskCreationRequest, []models.LLMConfig) ([]models.Task, string, bool, error)
+	OnTasksCreated      func(context.Context, []TaskCreationRequest, []models.Task) error
 }
 
 // channelCreateSwarmTaskInput mirrors the canonical create_swarm_task runtime
@@ -150,6 +152,11 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
+			if opts.PrepareTaskCreation != nil {
+				if err := opts.PrepareTaskCreation(ctx, &req); err != nil {
+					return "", err
+				}
+			}
 			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
 				return "", fmt.Errorf("create_task requires title and prompt")
 			}
@@ -160,9 +167,23 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			if opts.LLMConfigRepo != nil {
 				agents, _ = opts.LLMConfigRepo.List(ctx)
 			}
-			createdTasks, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, opts.ProjectID, opts.TaskSvc, agents)
-			if opts.OnTasksCreated != nil && len(createdTasks) > 0 {
-				opts.OnTasksCreated(ctx, createdTasks)
+			createdTasks := []models.Task(nil)
+			summary := ""
+			creationHandled := false
+			if opts.CreatePreparedTask != nil {
+				var err error
+				createdTasks, summary, creationHandled, err = opts.CreatePreparedTask(ctx, req, agents)
+				if err != nil {
+					return "", err
+				}
+			}
+			if !creationHandled {
+				createdTasks, summary = ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, opts.ProjectID, opts.TaskSvc, agents)
+			}
+			if !creationHandled && opts.OnTasksCreated != nil && len(createdTasks) > 0 {
+				if err := opts.OnTasksCreated(ctx, []TaskCreationRequest{req}, createdTasks); err != nil {
+					return "", err
+				}
 			}
 			if opts.Collector != nil {
 				opts.Collector.addCreated(summary)
@@ -208,7 +229,9 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 				return "", err
 			}
 			if opts.OnTasksCreated != nil {
-				opts.OnTasksCreated(ctx, []models.Task{*parent})
+				if err := opts.OnTasksCreated(ctx, nil, []models.Task{*parent}); err != nil {
+					return "", err
+				}
 			}
 			plannerMessage := "Planner starts when the swarm parent is Active."
 			summary := fmt.Sprintf("Created swarm task: %s.\n%s\n- \"%s\" (%s) [TASK_ID:%s]", parent.Title, plannerMessage, parent.Title, parent.Category, parent.ID)
@@ -586,7 +609,11 @@ func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandle
 		repeatInterval = req.Interval
 	}
 	runAt := channelScheduleRunAt(time.Now().Local(), hourVal, minuteVal, repeatType, req.Days)
-	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt.UTC(), RepeatType: repeatType, RepeatInterval: repeatInterval, Enabled: true}
+	clearContextOnStart := true
+	if req.ClearContextOnStart != nil {
+		clearContextOnStart = *req.ClearContextOnStart
+	}
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt.UTC(), RepeatType: repeatType, RepeatInterval: repeatInterval, Enabled: true, ClearContextOnStart: clearContextOnStart}
 	if err := opts.ScheduleRepo.Create(ctx, schedule); err != nil {
 		return fmt.Sprintf("Error scheduling task %q: %v", task.Title, err)
 	}
@@ -774,6 +801,10 @@ func applyChannelScheduleChanges(schedule *models.Schedule, req ModifyScheduleRe
 		} else {
 			changes = append(changes, "enabled→false")
 		}
+	}
+	if req.ClearContextOnStart != nil {
+		schedule.ClearContextOnStart = *req.ClearContextOnStart
+		changes = append(changes, fmt.Sprintf("clear_context_on_start→%t", *req.ClearContextOnStart))
 	}
 	if len(changes) == 0 {
 		return changes, false, ""

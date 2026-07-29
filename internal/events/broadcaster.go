@@ -18,20 +18,26 @@ var ErrMaxSubscribers = errors.New("maximum subscriber limit reached")
 type TaskEventType string
 
 const (
-	TaskStatusChanged          TaskEventType = "task_status_changed"
-	TaskCategoryChanged        TaskEventType = "task_category_changed"
-	TaskThreadExecutionStarted TaskEventType = "task_thread_execution_started"
-	TaskThreadInputApplied     TaskEventType = "task_thread_input_applied"
-	TaskThreadInputQueued      TaskEventType = "task_thread_input_queued"
-	TaskThreadInputCancelled   TaskEventType = "task_thread_input_cancelled"
-	TaskGoalUpdated            TaskEventType = "task_goal_updated"
-	TaskGoalPaused             TaskEventType = "task_goal_paused"
-	TaskGoalResumed            TaskEventType = "task_goal_resumed"
-	TaskGoalCleared            TaskEventType = "task_goal_cleared"
-	TaskGoalEvaluated          TaskEventType = "task_goal_evaluated"
-	TaskGoalFollowupQueued     TaskEventType = "task_goal_followup_queued"
-	MixtureProgress            TaskEventType = "mixture_progress"
-	AlertCreated               TaskEventType = "alert_created"
+	TaskStatusChanged           TaskEventType = "task_status_changed"
+	TaskCategoryChanged         TaskEventType = "task_category_changed"
+	TaskThreadExecutionStarted  TaskEventType = "task_thread_execution_started"
+	TaskThreadInputApplied      TaskEventType = "task_thread_input_applied"
+	TaskThreadInputQueued       TaskEventType = "task_thread_input_queued"
+	TaskThreadInputCancelled    TaskEventType = "task_thread_input_cancelled"
+	TaskGoalUpdated             TaskEventType = "task_goal_updated"
+	TaskGoalPaused              TaskEventType = "task_goal_paused"
+	TaskGoalResumed             TaskEventType = "task_goal_resumed"
+	TaskGoalCleared             TaskEventType = "task_goal_cleared"
+	TaskGoalEvaluated           TaskEventType = "task_goal_evaluated"
+	TaskGoalFollowupQueued      TaskEventType = "task_goal_followup_queued"
+	MixtureProgress             TaskEventType = "mixture_progress"
+	AlertCreated                TaskEventType = "alert_created"
+	AutomationDefinitionUpdated TaskEventType = "automation_definition_updated"
+	AutomationInvocationStarted TaskEventType = "automation_invocation_started"
+	AutomationInvocationUpdated TaskEventType = "automation_invocation_updated"
+	AutomationWorkItemUpdated   TaskEventType = "automation_work_item_updated"
+	AutomationTransitionCreated TaskEventType = "automation_transition_created"
+	AutomationResourceLinked    TaskEventType = "automation_resource_linked"
 )
 
 // TaskEvent represents a task state change event
@@ -57,6 +63,11 @@ type TaskEvent struct {
 	GoalReason          string        `json:"goal_reason,omitempty"`
 	BlockerKey          string        `json:"blocker_key,omitempty"`
 	BlockerCount        int           `json:"blocker_count,omitempty"`
+	AutomationID        string        `json:"automation_id,omitempty"`
+	VersionID           string        `json:"version_id,omitempty"`
+	InvocationID        string        `json:"invocation_id,omitempty"`
+	WorkItemID          string        `json:"work_item_id,omitempty"`
+	NodeID              string        `json:"node_id,omitempty"`
 }
 
 // Subscriber is a channel that receives task events

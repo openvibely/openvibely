@@ -235,6 +235,12 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		}
 		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
 			applog.Infof("[handler] APIChatMessage error creating queued input: %v", err)
+			if attachmentSessionID != "" {
+				pendingDir := filepath.Join(uploadsDir, "chat", "pending", attachmentSessionID)
+				if cleanupErr := os.RemoveAll(pendingDir); cleanupErr != nil {
+					applog.Infof("[handler] APIChatMessage error removing unpublished queued attachment session %s: %v", attachmentSessionID, cleanupErr)
+				}
+			}
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to queue chat message"})
 		}
 		if h.chatBroadcaster != nil {
@@ -358,6 +364,10 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			}
 			if err := h.chatAttachmentRepo.Create(c.Request().Context(), chatAtt); err != nil {
 				applog.Infof("[handler] APIChatMessage error creating attachment record: %v", err)
+				if cleanupErr := os.Remove(destPath); cleanupErr != nil && !os.IsNotExist(cleanupErr) {
+					applog.Infof("[handler] APIChatMessage error removing unpublished attachment %s: %v", destPath, cleanupErr)
+				}
+				_ = os.Remove(execDir) // Remove only when no published attachment still owns the directory.
 				continue
 			}
 
@@ -427,6 +437,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		Agent:            *agent,
 		ChatHistory:      priorHistory,
 		ProjectID:        projectID,
+		PrincipalID:      h.authPrincipalID(c),
 		SystemContext:    fullContext,
 		WorkDir:          workDir,
 		ImageAttachments: imageAttachments,

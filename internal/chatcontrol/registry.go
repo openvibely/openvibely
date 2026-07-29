@@ -90,6 +90,7 @@ const (
 	DomainSettings    Domain = "settings"
 	DomainMessaging   Domain = "messaging"
 	DomainGitHub      Domain = "github"
+	DomainAutomations Domain = "automations"
 	DomainMemory      Domain = "memory"
 	DomainChat        Domain = "chat"
 )
@@ -130,7 +131,7 @@ type ActionDef struct {
 const chainSchemaProperties = `{"type":"object","properties":{"enabled":{"type":"boolean","description":"true to enable chaining, false to disable"},"trigger":{"type":"string","enum":["on_completion","on_planning_complete"],"description":"When to trigger the child task"},"child_title":{"type":"string","description":"Title for the child task (defaults to '{parent title} (Implementation)')"},"child_prompt_prefix":{"type":"string","description":"Text prepended to parent output to form the child prompt"},"child_category":{"type":"string","enum":["active","backlog"],"description":"Category for child task (defaults to parent category)"},"child_agent_id":{"type":"string","description":"Agent/model config ID for the child task"},"child_chain_config":{"type":"object","description":"Nested chain config for multi-step sequences"}},"required":["enabled"]}`
 
 // createTaskParams is the full JSON Schema for the create_task tool.
-const createTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the task. If set, the Goal Agent may continue the task across turns until this condition is satisfied."},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"chain":` + chainSchemaProperties + `},"required":["title","prompt"],"additionalProperties":false}`
+const createTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the task. If set, the Goal Agent may continue the task across turns until this condition is satisfied."},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"chain":` + chainSchemaProperties + `,"source_github_issue_number":{"type":"integer","minimum":1,"description":"For a GitHub Dev Inbox implementation task, the exact assigned issue number returned by this execution."},"source_github_repo_url":{"type":"string","description":"Optional repository URL for source_github_issue_number. Defaults to the current project repository."}},"required":["title","prompt"],"additionalProperties":false}`
 
 const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"project_id":{"type":"string","description":"Optional project id; defaults to current project."},"category":{"type":"string","enum":["active","backlog"],"description":"Active starts the planner now; backlog defers planning until the swarm parent is run or moved to Active."},"max_workers":{"type":"integer","minimum":1,"maximum":8},"worker_isolation":{"type":"string","enum":["worktree","read_only","shared"]}},"required":["title","prompt"],"additionalProperties":false}`
 
@@ -450,7 +451,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}}},"required":["time"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"clear_context_on_start":{"type":"boolean","description":"Clear prior model conversation context when each scheduled run starts; defaults to true."}},"required":["time"],"additionalProperties":false}`),
 	},
 	{
 		Name:              "delete_schedule",
@@ -471,7 +472,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"enabled":{"type":"boolean"}},"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"enabled":{"type":"boolean"},"clear_context_on_start":{"type":"boolean","description":"Whether each scheduled start clears prior model conversation context."}},"additionalProperties":false}`),
 	},
 
 	// --- Alerts and actionable notifications domain ---
@@ -483,7 +484,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"decision_state":{"type":"string","enum":["not_required","pending","approved","rejected","dismissed"]},"processing_state":{"type":"string","enum":["not_applicable","unclaimed","claimed","implementation_task_linked","completed","failed"]},"type":{"type":"string"},"source":{"type":"string"},"read":{"type":"boolean"},"implementation_task_linked":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":100},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional same-project assertion. Omit it to use the persisted caller task's project context; never discover or reuse a project ID."},"decision_state":{"type":"string","enum":["not_required","pending","approved","rejected","dismissed"]},"processing_state":{"type":"string","enum":["not_applicable","unclaimed","claimed","implementation_task_linked","completed","failed"]},"type":{"type":"string"},"source":{"type":"string"},"read":{"type":"boolean","description":"Optional read-state filter. Omit it to include both read and unread alerts."},"implementation_task_linked":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":100},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}`),
 	},
 	{
 		Name:         "get_alert",
@@ -727,6 +728,38 @@ var registry = []ActionDef{
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"handle":{"type":"string","description":"Selected memory handle/file, e.g. provider_architecture.md"}},"required":["handle"],"additionalProperties":false}`),
+	},
+
+	// --- Automations domain (project-scoped definition control) ---
+	{
+		Name:         "preview_automation_description",
+		Description:  "Generate and validate an ephemeral custom or maintained-template Automation graph from a description using the same surfaced capabilities as the visual builder. This does not persist a draft or create runtime resources.",
+		Domain:       DomainAutomations,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"description":{"type":"string","minLength":1,"maxLength":4000}},"required":["description"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "plan_automation_save",
+		Description:  "Generate, validate, and display the exact save plan for a custom or maintained-template Automation using the same surfaced capabilities as the visual builder. This creates no runtime resources and requires a later user confirmation before Save.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000}},"required":["source"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "save_automation",
+		Description:  "Save a previously displayed Automation plan only after a later exact user confirmation in the same thread.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"confirmation_token":{"type":"string"},"confirming_user_input_id":{"type":"string"}},"required":["confirmation_token","confirming_user_input_id"],"additionalProperties":false}`),
 	},
 
 	// --- Chat domain ---

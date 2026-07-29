@@ -60,6 +60,7 @@ func setupTestHandlerWithDB(t *testing.T) (*Handler, *echo.Echo, *repository.LLM
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	taskSvc.SetDeletionUploadsDir(uploadsDir)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 	alertSvc := service.NewAlertService(alertRepo, nil)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
@@ -270,6 +271,7 @@ func setupTestHandlerWithInsights(t *testing.T) (*Handler, *echo.Echo) {
 	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
 	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	taskSvc.SetDeletionUploadsDir(uploadsDir)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 	alertSvc := service.NewAlertService(alertRepo, nil)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
@@ -904,6 +906,40 @@ func TestHandler_ListModels(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 	rec := htmxGet(e, "/models")
 	assertCode(t, rec, http.StatusOK)
+}
+
+func TestHandler_ListModels_RendersAuthoritativeDesktopOAuthMode(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	h.SetDesktopMode(true)
+	if err := llmConfigRepo.Create(context.Background(), &models.LLMConfig{
+		Name:       "Desktop OAuth",
+		Provider:   models.ProviderOpenAI,
+		AuthMethod: models.AuthMethodOAuth,
+		Model:      "gpt-5.4",
+	}); err != nil {
+		t.Fatalf("create oauth model: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		htmx bool
+	}{
+		{name: "full page"},
+		{name: "htmx fragment", htmx: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/models", nil)
+			if tc.htmx {
+				req.Header.Set("HX-Request", "true")
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			assertCode(t, rec, http.StatusOK)
+			if !strings.Contains(rec.Body.String(), `data-oauth-external="true"`) {
+				t.Fatal("expected desktop handler mode to be rendered into OAuth links")
+			}
+		})
+	}
 }
 
 func TestHandler_ListModels_DeleteConfirmationDialog(t *testing.T) {
@@ -4610,6 +4646,71 @@ func TestHandler_TaskThreadSend_CancelledTaskIgnoresAndRepairsStaleRunningExecut
 	assert.Equal(t, "follow up after cancelled task", execs[1].PromptSent)
 }
 
+func TestHandler_TaskThreadSend_QueuesDuringClaimedRerunBeforeExecutionExists(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Claimed Rerun Project")
+	task := createTask(t, h, project.ID, "Thread Claimed Rerun Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.Prompt = "stored original prompt"
+		tk.AgentID = &agent.ID
+	})
+	createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+		ex.PromptSent = "prior turn"
+	})
+
+	form := url.Values{}
+	form.Set("message", "follow up during claimed rerun")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "follow up during claimed rerun")
+	assertContains(t, rec, `data-input-mode="queued"`)
+
+	execs, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, execs, 1, "follow-up must not create an execution while the claimed rerun is in lifecycle setup")
+
+	inputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, "follow up during claimed rerun", inputs[0].Content)
+	assert.Empty(t, inputs[0].RunExecutionID)
+}
+
+func TestHandler_TaskThreadSend_FollowupBeforeFirstWorkerClaimDoesNotBlockDispatch(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Followup Before Claim Project")
+	task := createTask(t, h, project.ID, "Thread Followup Before Claim Task", func(tk *models.Task) {
+		tk.Status = models.StatusPending
+		tk.Category = models.CategoryActive
+		tk.Prompt = "stored original prompt"
+		tk.AgentID = &agent.ID
+	})
+
+	form := url.Values{}
+	form.Set("message", "follow-up before worker claim")
+	rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `data-input-mode="queued"`)
+
+	claim, claimed, err := h.taskRepo.ClaimTaskForDispatch(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, claimed, "queued first-turn follow-up must not deadlock the original worker dispatch")
+	require.NotNil(t, claim)
+	require.Equal(t, models.StatusRunning, claim.Task.Status)
+
+	inputs, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, "follow-up before worker claim", inputs[0].Content)
+	assert.Empty(t, inputs[0].RunExecutionID)
+}
+
 func TestHandler_TaskThreadSend_QueuesDuringStartingFirstTurnBeforeExecutionExists(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -4855,8 +4956,8 @@ func TestHandler_TaskThreadSend_BacklogMovesToActive(t *testing.T) {
 	if updatedTask.Category != models.CategoryActive {
 		t.Errorf("expected category active, got %s", updatedTask.Category)
 	}
-	if updatedTask.Status != models.StatusQueued {
-		t.Errorf("expected status queued, got %s", updatedTask.Status)
+	if updatedTask.Status != models.StatusQueued && updatedTask.Status != models.StatusRunning {
+		t.Errorf("expected status queued or running, got %s", updatedTask.Status)
 	}
 }
 

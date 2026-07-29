@@ -86,7 +86,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
 		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
-		Temperature:      req.Agent.Temperature,
+		Temperature:      compatibleTemperature(req.Agent),
 		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
@@ -98,6 +98,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		ToolExecutor:     toolExecutor(ctx, workDir),
 		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate),
 	})
+	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		return "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
 	}
@@ -138,7 +139,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	resp, err := client.SendCompletions(ctx, fullPrompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
 		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
-		Temperature:      req.Agent.Temperature,
+		Temperature:      compatibleTemperature(req.Agent),
 		System:           llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)),
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
@@ -153,6 +154,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		OnToolUse:        streamToolUse(sw),
 		OnToolResult:     streamToolResult(sw),
 	})
+	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
@@ -170,7 +172,11 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
-	client.History = append(client.History, buildClientHistory(req.ChatHistory)...)
+	history, err := a.prepareClientHistory(ctx, req.Agent, req.ChatHistory)
+	if err != nil {
+		return "", llmusage.FromTotal(0), err
+	}
+	client.SetCompletionsHistory(history)
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
 	if req.ChatMode == models.ChatModeOrchestrate {
@@ -190,7 +196,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	resp, err := client.SendCompletions(ctx, req.Message, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
 		MaxOutputTokens:  req.Agent.GetDefaultMaxTokens(defaultOutputBudget),
-		Temperature:      req.Agent.Temperature,
+		Temperature:      compatibleTemperature(req.Agent),
 		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     disableTools,
@@ -205,12 +211,89 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		OnToolUse:        streamToolUse(sw),
 		OnToolResult:     streamToolResult(sw),
 	})
+	err = a.persistReasoningContent(ctx, req.ExecID, req.Agent, client, err)
 	if err != nil {
 		sw.Flush()
 		return "", llmusage.FromTotal(0), fmt.Errorf("openai-compatible chat completions: %w", err)
 	}
 	sw.Flush()
 	return sw.String(), usageFromResponse(resp), stopError(resp.StopReason)
+}
+
+func compatibleTemperature(agent models.LLMConfig) float64 {
+	// Kimi models use model-defined fixed temperatures. Detect the model rather
+	// than the preset so manually configured Moonshot endpoints behave correctly.
+	if isKimiModel(agent.Model) {
+		return openaiclient.OmittedTemperature()
+	}
+	return agent.Temperature
+}
+
+func isKimiModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(model)), "kimi-")
+}
+
+func supportsReasoningContentReplay(agent models.LLMConfig) bool {
+	switch strings.ToLower(strings.TrimSpace(agent.Model)) {
+	case "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed":
+		return true
+	case "kimi-k2.6":
+		body, err := parseObjectJSON(agent.ExtraBodyJSON)
+		if err != nil {
+			return false
+		}
+		thinking, _ := body["thinking"].(map[string]interface{})
+		if thinking == nil {
+			return true
+		}
+		thinkingType, _ := thinking["type"].(string)
+		if strings.EqualFold(strings.TrimSpace(thinkingType), "disabled") {
+			return false
+		}
+		if keep, exists := thinking["keep"]; exists {
+			keepValue, ok := keep.(string)
+			return ok && strings.EqualFold(strings.TrimSpace(keepValue), "all")
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Adapter) persistReasoningContent(ctx context.Context, execID string, agent models.LLMConfig, client *openaiclient.Client, callErr error) error {
+	if !supportsReasoningContentReplay(agent) || a.execRepo == nil || strings.TrimSpace(execID) == "" || client == nil {
+		return callErr
+	}
+	transcript := client.LastCompletionsTranscript()
+	if len(transcript) == 0 {
+		return callErr
+	}
+	transcriptJSON, err := json.Marshal(transcript)
+	if err != nil {
+		if callErr != nil {
+			return callErr
+		}
+		return fmt.Errorf("marshal reasoning replay transcript: %w", err)
+	}
+	var reasoning strings.Builder
+	for _, message := range transcript {
+		if message.Role == "assistant" {
+			reasoning.WriteString(message.ReasoningContent)
+		}
+	}
+	replay := []models.ExecutionReplayMessage{{
+		ReasoningContent: reasoning.String(),
+		TranscriptJSON:   string(transcriptJSON),
+	}}
+	err = a.execRepo.ReplaceReasoningReplay(context.WithoutCancel(ctx), execID, reasoning.String(), replay)
+	if err != nil {
+		if callErr != nil {
+			applog.Infof("[openai-compatible] preserve reasoning replay after call error execution=%s: %v", execID, err)
+			return callErr
+		}
+		return fmt.Errorf("persist reasoning replay: %w", err)
+	}
+	return callErr
 }
 
 func compatibleRequestExtras(agent models.LLMConfig) (map[string]string, map[string]interface{}, error) {
@@ -222,7 +305,58 @@ func compatibleRequestExtras(agent models.LLMConfig) (map[string]string, map[str
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse extra body JSON: %w", err)
 	}
+	if effort := compatibleReasoningEffort(agent); effort != "" {
+		if body == nil {
+			body = make(map[string]interface{})
+		}
+		body["reasoning_effort"] = effort
+	}
+	if strings.EqualFold(strings.TrimSpace(agent.Model), "kimi-k2.6") {
+		if body == nil {
+			body = make(map[string]interface{})
+		}
+		thinking, _ := body["thinking"].(map[string]interface{})
+		if thinking == nil {
+			thinking = make(map[string]interface{})
+		}
+		thinkingType, _ := thinking["type"].(string)
+		if _, exists := thinking["type"]; !exists {
+			thinking["type"] = "enabled"
+			thinkingType = "enabled"
+		}
+		if !strings.EqualFold(strings.TrimSpace(thinkingType), "disabled") {
+			if _, exists := thinking["keep"]; !exists {
+				thinking["keep"] = "all"
+			}
+		}
+		body["thinking"] = thinking
+	}
+	if isKimiModel(agent.Model) {
+		for key := range body {
+			if strings.EqualFold(strings.TrimSpace(key), "temperature") {
+				delete(body, key)
+			}
+		}
+	}
 	return headers, body, nil
+}
+
+func compatibleReasoningEffort(agent models.LLMConfig) string {
+	model := strings.ToLower(strings.TrimSpace(agent.Model))
+	effort := strings.ToLower(strings.TrimSpace(agent.ReasoningEffort))
+	switch model {
+	case "kimi-k3":
+		switch effort {
+		case "low", "high", "max":
+			return effort
+		}
+	case "glm-5.2":
+		switch effort {
+		case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+			return effort
+		}
+	}
+	return ""
 }
 
 func parseStringMapJSON(raw string) (map[string]string, error) {
@@ -364,18 +498,109 @@ func planModeAllowsReadOnlyTool(name string) bool {
 	}
 }
 
-func buildClientHistory(chatHistory []models.Execution) []openaiclient.Message {
+func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent bool) []openaiclient.CompletionsHistoryMessage {
+	return buildClientHistoryWithReplay(chatHistory, preserveReasoningContent, nil)
+}
+
+func buildClientHistoryWithReplay(
+	chatHistory []models.Execution,
+	preserveReasoningContent bool,
+	replayByExecutionID map[string][]models.ExecutionReplayMessage,
+) []openaiclient.CompletionsHistoryMessage {
 	history := llmprompt.LimitChatHistory(chatHistory)
-	messages := make([]openaiclient.Message, 0, len(history)*2)
+	messages := make([]openaiclient.CompletionsHistoryMessage, 0, len(history)*2)
 	for _, exec := range history {
+		replay := replayByExecutionID[exec.ID]
+		if len(replay) == 0 {
+			replay = exec.ReplayMessages
+		}
+		if len(replay) > 0 {
+			for _, turn := range replay {
+				if transcript, ok := decodeReplayTranscript(turn.TranscriptJSON); ok {
+					for _, message := range transcript {
+						if !preserveReasoningContent {
+							message.ReasoningContent = ""
+						}
+						messages = append(messages, message)
+					}
+					continue
+				}
+				if turn.UserContent != "" {
+					messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: turn.UserContent})
+				}
+				if turn.AssistantContent != "" || (preserveReasoningContent && turn.ReasoningContent != "") {
+					reasoningContent := ""
+					if preserveReasoningContent {
+						reasoningContent = turn.ReasoningContent
+					}
+					messages = append(messages, openaiclient.CompletionsHistoryMessage{
+						Role:             "assistant",
+						Content:          turn.AssistantContent,
+						ReasoningContent: reasoningContent,
+					})
+				}
+			}
+			continue
+		}
 		if exec.PromptSent != "" {
-			messages = append(messages, openaiclient.Message{Role: "user", Content: exec.PromptSent})
+			messages = append(messages, openaiclient.CompletionsHistoryMessage{Role: "user", Content: exec.PromptSent})
 		}
 		if replay := llmprompt.ReplayAssistantContent(exec); replay != "" {
-			messages = append(messages, openaiclient.Message{Role: "assistant", Content: replay})
+			reasoningContent := ""
+			if preserveReasoningContent {
+				reasoningContent = exec.ReasoningContent
+			}
+			messages = append(messages, openaiclient.CompletionsHistoryMessage{
+				Role:             "assistant",
+				Content:          replay,
+				ReasoningContent: reasoningContent,
+			})
 		}
 	}
 	return messages
+}
+
+func decodeReplayTranscript(raw string) ([]openaiclient.CompletionsHistoryMessage, bool) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, false
+	}
+	var messages []openaiclient.CompletionsHistoryMessage
+	if err := json.Unmarshal([]byte(raw), &messages); err != nil || len(messages) == 0 {
+		return nil, false
+	}
+	return messages, true
+}
+
+func (a *Adapter) prepareClientHistory(ctx context.Context, agent models.LLMConfig, chatHistory []models.Execution) ([]openaiclient.CompletionsHistoryMessage, error) {
+	preserveReasoningContent := supportsReasoningContentReplay(agent)
+	if a.execRepo == nil {
+		return buildClientHistory(chatHistory, preserveReasoningContent), nil
+	}
+
+	limitedHistory := llmprompt.LimitChatHistory(chatHistory)
+	history := append([]models.Execution(nil), limitedHistory...)
+	ids := make([]string, 0, len(history))
+	for _, exec := range history {
+		if strings.TrimSpace(exec.ID) != "" {
+			ids = append(ids, exec.ID)
+		}
+	}
+	if preserveReasoningContent {
+		reasoningByID, err := a.execRepo.ReasoningContentByIDs(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("load Kimi reasoning history: %w", err)
+		}
+		for i := range history {
+			if reasoningContent, ok := reasoningByID[history[i].ID]; ok {
+				history[i].ReasoningContent = reasoningContent
+			}
+		}
+	}
+	replayByExecutionID, err := a.execRepo.ReplayMessagesByExecutionIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("load execution replay history: %w", err)
+	}
+	return buildClientHistoryWithReplay(history, preserveReasoningContent, replayByExecutionID), nil
 }
 
 func convertAttachments(attachments []models.Attachment) ([]*openaiclient.FileAttachment, error) {
