@@ -3148,6 +3148,23 @@ templ ChatAutoScrollScript() {
 				if (tracker) tracker.userScrolledUp = !pinned;
 				if (messages.getAttribute('data-transcript-hydrating') === 'true') messages.style.visibility = 'hidden';
 
+				function waitForImages() {
+					if (!options.waitForImages) return Promise.resolve();
+					var images = messages.querySelectorAll('img[data-chat-attachment-image="true"]');
+					return Promise.all(Array.prototype.map.call(images, function(img) {
+						function decodeImage() {
+							if (typeof img.decode !== 'function') return Promise.resolve();
+							return Promise.resolve(img.decode()).catch(function() {});
+						}
+						if (img.complete) return decodeImage();
+						return new Promise(function(resolve) {
+							function settled() { decodeImage().then(resolve, resolve); }
+							img.addEventListener('load', settled, { once: true });
+							img.addEventListener('error', resolve, { once: true });
+							if (img.loading === 'lazy') img.loading = 'eager';
+						});
+					}));
+				}
 				function waitForFonts() {
 					if (!document.fonts || !document.fonts.ready) return Promise.resolve();
 					return Promise.race([
@@ -3160,7 +3177,7 @@ templ ChatAutoScrollScript() {
 						requestAnimationFrame(function() { requestAnimationFrame(resolve); });
 					});
 				}
-				return Promise.resolve(options.renderPromise).catch(function() { return false; }).then(waitForFonts).then(waitForLayout).then(function() {
+				return Promise.resolve(options.renderPromise).catch(function() { return false; }).then(waitForImages).then(waitForFonts).then(waitForLayout).then(function() {
 					if (!messages.isConnected) return false;
 					tracker = typeof options.getTracker === 'function' ? options.getTracker() : tracker;
 					var intentChanged = tracker && tracker.intentRevision !== initialIntentRevision;

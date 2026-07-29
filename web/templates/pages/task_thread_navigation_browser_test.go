@@ -56,9 +56,21 @@ func TestTaskThreadNavigationScrollStateInChrome(t *testing.T) {
 		})
 	}
 
+	attachments := map[string][]models.ChatAttachment{
+		executions[0].ID: {
+			{
+				ID:          "delayed-image",
+				ExecutionID: executions[0].ID,
+				FileName:    "delayed-history.svg",
+				MediaType:   "image/svg+xml",
+				FileSize:    128,
+			},
+		},
+	}
+
 	renderTaskFragment := func() string {
 		var rendered bytes.Buffer
-		if err := components.TaskThreadView(task, executions, nil, nil, nil, nil, false, 30).Render(context.Background(), &rendered); err != nil {
+		if err := components.TaskThreadView(task, executions, nil, nil, attachments, nil, false, 30).Render(context.Background(), &rendered); err != nil {
 			t.Fatalf("render production TaskThreadView: %v", err)
 		}
 		return `<div id="task-page-root"><span hidden data-openvibely-page-title="Task Thread navigation fixture - OpenVibely"></span><div id="thread-content" data-task-id="task-browser" data-loaded="true">` + rendered.String() + `</div></div>`
@@ -95,7 +107,13 @@ window.addEventListener('DOMContentLoaded', function() {
     });
   }
   function messages() { return document.getElementById('task-thread-messages'); }
+  function historyImage() { return messages() && messages().querySelector('img[data-chat-attachment-image="true"]'); }
   function bottomDistance() { var el = messages(); return el.scrollHeight - el.scrollTop - el.clientHeight; }
+  function waitForTaskDOM(stage) {
+    return waitFor(function() {
+      return document.getElementById('task-page-root') && messages() && historyImage();
+    }, stage + ' Task Thread DOM');
+  }
   function waitForTask(stage) {
     return waitFor(function() {
       return document.getElementById('task-page-root') && messages() && messages().style.visibility !== 'hidden';
@@ -131,7 +149,16 @@ window.addEventListener('DOMContentLoaded', function() {
   }
 
   (async function() {
+    await waitForTaskDOM('initial delayed image');
+    await waitFor(function() { return !historyImage().complete; }, 'delayed historical image request');
+    await new Promise(function(resolve) { setTimeout(resolve, 80); });
+    if (messages().style.visibility !== 'hidden') {
+      fail('initial transcript became visible before delayed historical image loaded');
+    }
     await waitForTask('initial');
+    if (!historyImage().complete || historyImage().naturalHeight < 1) {
+      fail('initial transcript became visible before historical image decode completed');
+    }
     await assertPinned('direct load');
 
     await window.openVibelyNavigate('/other');
@@ -215,6 +242,11 @@ html, body, #main-content { height: 100%; margin: 0; }
 		case "/htmx-2.0.4.min.js":
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
+		case "/chat/attachments/delayed-image/download":
+			w.Header().Set("Content-Type", "image/svg+xml")
+			w.Header().Set("Cache-Control", "no-store")
+			time.Sleep(300 * time.Millisecond)
+			_, _ = w.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="480" viewBox="0 0 320 480"><rect width="320" height="480" fill="#7480ff"/></svg>`))
 		case "/tasks/task-browser":
 			fragment := renderTaskFragment()
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

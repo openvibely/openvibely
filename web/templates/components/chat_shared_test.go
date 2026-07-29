@@ -4276,6 +4276,11 @@ func TestTranscriptScrollCoordinatorStabilizesInitialHydrationAndAsyncLayout(t *
 		"if (typeof self.onIntentChange === 'function') self.onIntentChange();",
 		"messages.style.visibility = 'hidden';",
 		"Promise.resolve(options.renderPromise)",
+		"if (!options.waitForImages) return Promise.resolve();",
+		"img[data-chat-attachment-image=\"true\"]",
+		"if (img.loading === 'lazy') img.loading = 'eager';",
+		"decodeImage().then(resolve, resolve);",
+		".then(waitForImages).then(waitForFonts).then(waitForLayout)",
 		"messages.style.visibility = '';",
 		"if (!tracker || !tracker.shouldAutoScroll()) return;",
 		"new ResizeObserver",
@@ -4300,6 +4305,9 @@ func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testi
 	}
 	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
 		t.Fatal("task thread must reveal and position the transcript through the shared render barrier")
+	}
+	if !strings.Contains(content, "waitForImages: true,") {
+		t.Fatal("task thread initial reveal must wait for historical attachment image load and decode")
 	}
 }
 

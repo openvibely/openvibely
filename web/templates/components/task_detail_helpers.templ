@@ -464,6 +464,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 						stateKey: stateKey,
 						state: state,
 						defaultPinned: !userScrolledUp,
+						waitForImages: true,
 						renderPromise: renderPromise
 					}).then(function(restored) {
 						_saveTaskThreadScrollState();

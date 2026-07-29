@@ -85,6 +85,17 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 	if strings.Contains(content, "// Scroll to bottom on page load to show latest messages") {
 		t.Fatal("global Chat must not unconditionally jump before transcript hydration finishes")
 	}
+	chatRestoreStart := strings.Index(content, "return window.restoreChatTranscriptScroll({")
+	if chatRestoreStart < 0 {
+		t.Fatal("could not isolate global Chat transcript restore options")
+	}
+	chatRestoreEnd := strings.Index(content[chatRestoreStart:], "});")
+	if chatRestoreEnd < 0 {
+		t.Fatal("could not find end of global Chat transcript restore options")
+	}
+	if strings.Contains(content[chatRestoreStart:chatRestoreStart+chatRestoreEnd], "waitForImages") {
+		t.Fatal("task-thread delayed-image reveal policy must not change global Chat scroll restoration")
+	}
 }
 
 func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
