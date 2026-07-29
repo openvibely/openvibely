@@ -168,6 +168,8 @@ func TestAutomationDescriptionPromptMatchesStrictCustomValidationContract(t *tes
 		require.Contains(t, prompt, "Initiate processing of approved issues")
 		require.Contains(t, prompt, "Review the assigned issue queue")
 		require.Contains(t, prompt, "exactly one Task target")
+		require.Contains(t, prompt, "that Task must use category active")
+		require.Contains(t, prompt, "human assignment starts implementation immediately")
 		require.Contains(t, prompt, "Open pull request must have exactly one incoming edge")
 		require.Contains(t, prompt, "Human review must have exactly one outgoing edge to one Outcome")
 		require.Contains(t, prompt, "Native mailbox family")

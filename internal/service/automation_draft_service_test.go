@@ -608,6 +608,15 @@ func TestCustomAutomationValidatesGitHubHandoffsAndRejectsHumanBoundaryBypasses(
 
 	require.Empty(t, svc.ValidateCandidate(candidate), "the GitHub graph must map to the existing assignment, inbox, task, PR, and review machinery")
 
+	backlogImplementation := candidate
+	backlogImplementation.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
+	for i := range backlogImplementation.Nodes {
+		if backlogImplementation.Nodes[i].Key == "implementation" {
+			backlogImplementation.Nodes[i].Config = map[string]any{"prompt": "Implement the accepted issue and run relevant validation.", "category": "backlog", "priority": 3}
+		}
+	}
+	require.Contains(t, issueCodes(svc.ValidateCandidate(backlogImplementation)), "category", "the issue-linked Task must be Active because GitHub assignment approves immediate submission")
+
 	missingAssignment := candidate
 	missingAssignment.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
 	missingAssignment.Edges[1].To = "inbox"

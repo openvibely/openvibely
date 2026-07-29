@@ -720,6 +720,10 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 			switch node.Role {
 			case "task":
 				if customAutomationGitHubIssueTask(candidate, node.Key) {
+					category, categoryOK := node.Config["category"].(string)
+					if !categoryOK || category != string(models.CategoryActive) {
+						issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "category", Message: "A Task between a GitHub inbox and Open pull request must use the active category so assignment starts implementation immediately."})
+					}
 					break
 				}
 				parents := 0
