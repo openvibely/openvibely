@@ -89,10 +89,11 @@ func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, 
 		resourceNodes = nil
 		for _, node := range normalized.Nodes {
 			allowed := map[string]bool{}
-			if node.Type == models.AutomationNodeTrigger {
-				allowed["task"], allowed["schedule"] = true, true
-			} else if node.Type == models.AutomationNodeAgentTask && !customAutomationGitHubIssueTask(normalized, node.Key) {
+			if customAutomationNodeMaterializesTask(normalized, node) {
 				allowed["task"] = true
+			}
+			if node.Type == models.AutomationNodeTrigger {
+				allowed["schedule"] = true
 			}
 			resourceNodes = append(resourceNodes, AutomationAdapterNode{Key: node.Key, Name: node.Name, AllowedResources: allowed})
 		}
@@ -106,6 +107,15 @@ func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, 
 		}
 	}
 	return plan, normalized, nil
+}
+
+func customAutomationNodeMaterializesTask(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) bool {
+	if node.Type == models.AutomationNodeTrigger {
+		return true
+	}
+	return node.Type == models.AutomationNodeAgentTask &&
+		!customAutomationGitHubIssueTask(candidate, node.Key) &&
+		!customAutomationNativeImplementation(candidate, node.Key)
 }
 
 // Save validates and applies one complete Automation graph in a single SQLite
@@ -176,13 +186,10 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		resourceNodes = make([]AutomationAdapterNode, 0, len(candidate.Nodes))
 		for _, node := range candidate.Nodes {
 			resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
-			switch node.Type {
-			case models.AutomationNodeAgentTask:
-				if !customAutomationGitHubIssueTask(candidate, node.Key) && !customAutomationNativeImplementation(candidate, node.Key) {
-					resource.AllowedResources["task"] = true
-				}
-			case models.AutomationNodeTrigger:
+			if customAutomationNodeMaterializesTask(candidate, node) {
 				resource.AllowedResources["task"] = true
+			}
+			if node.Type == models.AutomationNodeTrigger {
 				resource.AllowedResources["schedule"] = true
 			}
 			resourceNodes = append(resourceNodes, resource)

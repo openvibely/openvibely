@@ -364,6 +364,22 @@ func customNativeMailboxCandidate(name string) models.AutomationDraftCandidate {
 	}}
 }
 
+func TestAutomationSavePreviewExcludesCustomNativeImplementationPlaceholderTask(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Custom Native mailbox preview")
+	plan, _, err := h.compiler.PreviewSave(context.Background(), h.project.ID, customNativeMailboxCandidate("Custom Native mailbox preview"))
+	require.NoError(t, err)
+	require.Empty(t, plan.Validation)
+	require.ElementsMatch(t, []models.AutomationSaveEffect{
+		{Operation: "create", ResourceType: "task", Name: "Daily review"},
+		{Operation: "create", ResourceType: "schedule", Name: "Daily review"},
+		{Operation: "create", ResourceType: "task", Name: "Approved inbox"},
+		{Operation: "create", ResourceType: "schedule", Name: "Approved inbox"},
+	}, plan.Effects)
+	for _, effect := range plan.Effects {
+		require.False(t, effect.Name == "Implementation" && effect.ResourceType == "task", "Native implementation is projection-only")
+	}
+}
+
 func TestAutomationSaveCreatesCustomNativeMailboxWithoutImplementationPlaceholderTask(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Custom Native mailbox")
 	saved, err := h.compiler.Save(context.Background(), AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Custom Native mailbox")})
