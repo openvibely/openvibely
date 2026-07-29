@@ -2016,6 +2016,51 @@ func TestHandler_WorkerCompletionPromotesQueuedTaskThreadInput(t *testing.T) {
 	}
 }
 
+func TestHandler_RecoverQueuedTaskThreadInputsDrainsMoreThanOneBatch(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Recover Batched Task Thread Queue Project")
+	const taskCount = 101
+	tasks := make([]*models.Task, 0, taskCount)
+	inputs := make([]*models.ThreadInput, 0, taskCount)
+	for i := 0; i < taskCount; i++ {
+		task := createTask(t, h, project.ID, fmt.Sprintf("Recover Batched Task %03d", i), func(tk *models.Task) {
+			tk.Category = models.CategoryCompleted
+			tk.Status = models.StatusCompleted
+			tk.AgentID = &agent.ID
+		})
+		input := &models.ThreadInput{
+			Scope:         models.ThreadInputScopeTask,
+			ProjectID:     project.ID,
+			TaskID:        task.ID,
+			AgentConfigID: agent.ID,
+			InputMode:     models.ThreadInputModeQueued,
+			Content:       fmt.Sprintf("recover follow-up %03d", i),
+		}
+		require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+		tasks = append(tasks, task)
+		inputs = append(inputs, input)
+	}
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "recovered"
+	mock.TextOnly = "recovered"
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.RecoverQueuedTaskThreadInputs(ctx)
+
+	for i, input := range inputs {
+		stored, err := h.threadInputRepo.GetByID(ctx, input.ID)
+		require.NoError(t, err)
+		require.Equalf(t, models.ThreadInputApplied, stored.InputStatus, "input %d was stranded beyond the recovery batch", i)
+		execs, err := h.execRepo.ListByTaskChronological(ctx, tasks[i].ID)
+		require.NoError(t, err)
+		require.Lenf(t, execs, 1, "task %d should have exactly one promoted execution", i)
+		require.Equal(t, input.Content, execs[0].PromptSent)
+	}
+}
+
 func TestHandler_RecoverQueuedTaskThreadInputsPromotesUnboundInputAfterClaimCrash(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

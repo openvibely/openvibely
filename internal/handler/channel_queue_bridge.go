@@ -48,13 +48,21 @@ func (h *Handler) RecoverQueuedTaskThreadInputs(ctx context.Context) {
 	if h.threadInputRepo == nil {
 		return
 	}
-	ids, err := h.threadInputRepo.ListRecoverableQueuedTaskIDs(ctx, 100)
-	if err != nil {
-		applog.Infof("[handler] RecoverQueuedTaskThreadInputs list error: %v", err)
-		return
-	}
-	for _, taskID := range ids {
-		applog.Infof("[handler] RecoverQueuedTaskThreadInputs promoting stranded queued input task=%s", taskID)
-		h.PromoteQueuedTaskThreadInput(taskID)
+	const batchSize = 100
+	afterTaskID := ""
+	for {
+		ids, err := h.threadInputRepo.ListRecoverableQueuedTaskIDsAfter(ctx, afterTaskID, batchSize)
+		if err != nil {
+			applog.Infof("[handler] RecoverQueuedTaskThreadInputs list error: %v", err)
+			return
+		}
+		for _, taskID := range ids {
+			applog.Infof("[handler] RecoverQueuedTaskThreadInputs promoting stranded queued input task=%s", taskID)
+			h.PromoteQueuedTaskThreadInput(taskID)
+		}
+		if len(ids) < batchSize {
+			return
+		}
+		afterTaskID = ids[len(ids)-1]
 	}
 }

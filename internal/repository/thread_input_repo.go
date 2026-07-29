@@ -381,6 +381,13 @@ func (r *ThreadInputRepo) FindOldestQueuedForChat(ctx context.Context, projectID
 }
 
 func (r *ThreadInputRepo) ListRecoverableQueuedTaskIDs(ctx context.Context, limit int) ([]string, error) {
+	return r.ListRecoverableQueuedTaskIDsAfter(ctx, "", limit)
+}
+
+// ListRecoverableQueuedTaskIDsAfter returns a stable keyset page of tasks whose
+// oldest pending follow-up can be promoted. Task-ID ordering is only for paging;
+// promotion still claims each task's oldest queue_position in FIFO order.
+func (r *ThreadInputRepo) ListRecoverableQueuedTaskIDsAfter(ctx context.Context, afterTaskID string, limit int) ([]string, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -393,6 +400,7 @@ func (r *ThreadInputRepo) ListRecoverableQueuedTaskIDs(ctx context.Context, limi
 		  AND ti.input_mode = 'queued'
 		  AND ti.input_status = 'pending'
 		  AND COALESCE(ti.task_id, '') != ''
+		  AND ti.task_id > ?
 		  AND (ti.run_execution_id IS NULL OR guarded.status IN ('completed', 'failed', 'cancelled'))
 		  AND NOT EXISTS (
 		    SELECT 1 FROM executions active
@@ -403,8 +411,8 @@ func (r *ThreadInputRepo) ListRecoverableQueuedTaskIDs(ctx context.Context, limi
 		    WHERE reservation.task_id = ti.task_id
 		  )
 		GROUP BY ti.task_id
-		ORDER BY MIN(ti.queue_position), MIN(ti.created_at), MIN(ti.rowid)
-		LIMIT ?`, limit)
+		ORDER BY ti.task_id
+		LIMIT ?`, afterTaskID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing recoverable queued task ids: %w", err)
 	}
