@@ -249,6 +249,12 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	prompt := automationCompiledTaskPrompt(candidate, candidate.Nodes[0])
 	require.Contains(t, prompt, "or from a GitHub remote in its local checkout when that URL is blank")
 	require.NotContains(t, prompt, "restricted to this project's explicit repository URL")
+	require.Contains(t, prompt, "Set source_github_issue_number to the exact issue number returned by this inbox execution")
+	require.Contains(t, prompt, "Create each new issue task with category active; Active creation submits it automatically")
+	require.Contains(t, prompt, "Do not call execute_tasks for a newly created Active task")
+	require.Contains(t, prompt, "For a reconciled existing task, call execute_tasks only when list_tasks shows category Backlog or status failed/cancelled")
+	require.Contains(t, prompt, "Never call execute_tasks for an Active pending, queued, running, or completed task")
+	require.NotContains(t, prompt, "Finally, call execute_tasks with that exact task ID")
 }
 
 func TestGitHubSDLCTemplateOwnsItsPrompts(t *testing.T) {
