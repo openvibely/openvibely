@@ -380,6 +380,27 @@ func TestAutomationSavePreviewExcludesCustomNativeImplementationPlaceholderTask(
 	}
 }
 
+func TestAutomationCompiledCustomNativeInboxScopeIsLimitedToItsApprovalBranch(t *testing.T) {
+	candidate := customNativeMailboxCandidate("Two Native mailbox branches")
+	candidate.Nodes = append(candidate.Nodes,
+		models.AutomationDraftNode{Key: "other_producer", Name: "Weekly security review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Find security hardening proposals only."}},
+		models.AutomationDraftNode{Key: "other_notification", Name: "Create security notification", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{}},
+		models.AutomationDraftNode{Key: "other_approval", Name: "Security approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{}},
+		models.AutomationDraftNode{Key: "other_inbox", Name: "Security approved inbox", Type: models.AutomationNodeTrigger, Role: "native_inbox", Config: map[string]any{"prompt": "Process approved security proposals."}},
+	)
+	candidate.Edges = append(candidate.Edges,
+		models.AutomationDraftEdge{Key: "other_producer_notification", From: "other_producer", To: "other_notification"},
+		models.AutomationDraftEdge{Key: "other_notification_approval", From: "other_notification", To: "other_approval"},
+		models.AutomationDraftEdge{Key: "other_approval_inbox", From: "other_approval", To: "other_inbox"},
+	)
+
+	prompt := automationCompiledTaskPrompt(candidate, candidate.Nodes[3])
+	require.Contains(t, prompt, `Producer: "Daily review"`)
+	require.Contains(t, prompt, `Purpose: "Review one focused area and prepare an actionable notification."`)
+	require.NotContains(t, prompt, "Weekly security review")
+	require.NotContains(t, prompt, "Find security hardening proposals only.")
+}
+
 func TestAutomationSaveHardensCustomNativeInboxPersistedProjectPrompt(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Custom Native inbox prompt")
 	candidate := customNativeMailboxCandidate("Custom Native inbox prompt")
@@ -389,8 +410,9 @@ func TestAutomationSaveHardensCustomNativeInboxPersistedProjectPrompt(t *testing
 	require.NoError(t, err)
 	inboxTask, err := h.taskRepo.GetByID(context.Background(), automationResourceID(t, saved.Definition, "custom_approved_inbox", "task"))
 	require.NoError(t, err)
-	require.Contains(t, inboxTask.Prompt, "Only process approved notifications created by the connected upstream producers in this same Automation")
-	require.Contains(t, inboxTask.Prompt, `The eligible producer stages are: "Daily review"`)
+	require.Contains(t, inboxTask.Prompt, "Only process approved notifications created by the connected upstream producers on this inbox's approval branch in this same Automation")
+	require.Contains(t, inboxTask.Prompt, `Producer: "Daily review"`)
+	require.Contains(t, inboxTask.Prompt, `Purpose: "Review one focused area and prepare an actionable notification."`)
 	require.Contains(t, inboxTask.Prompt, "Skip every unrelated project notification")
 	require.Contains(t, inboxTask.Prompt, "Call list_alerts without project_id")
 	require.Contains(t, inboxTask.Prompt, "Do not pass the read filter")
@@ -825,6 +847,36 @@ func TestAutomationSaveSubmitsExistingRootsThatBecomePendingActive(t *testing.T)
 	}
 }
 
+func TestAutomationCompiledCustomGitHubInboxScopeIsLimitedToItsAssignmentBranch(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{AdapterKey: AutomationAdapterCustom, Nodes: []models.AutomationDraftNode{
+		{Key: "model_producer", Name: "Daily model release review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Find newly released AI models requiring support."}},
+		{Key: "model_issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{}},
+		{Key: "model_assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{}},
+		{Key: "model_inbox", Type: models.AutomationNodeTrigger, Role: "github_inbox", Config: map[string]any{"prompt": "Process assigned model support issues."}},
+		{Key: "model_implementation", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement model support.", "category": "active", "priority": 2}},
+		{Key: "model_pr", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open the model support pull request."}},
+		{Key: "security_producer", Name: "Weekly security review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Find security hardening work only."}},
+		{Key: "security_issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{}},
+		{Key: "security_assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{}},
+		{Key: "security_inbox", Type: models.AutomationNodeTrigger, Role: "github_inbox", Config: map[string]any{"prompt": "Process assigned security issues."}},
+	}, Edges: []models.AutomationDraftEdge{
+		{Key: "model_producer_issue", From: "model_producer", To: "model_issue"},
+		{Key: "model_issue_assignment", From: "model_issue", To: "model_assignment"},
+		{Key: "model_assignment_inbox", From: "model_assignment", To: "model_inbox"},
+		{Key: "model_inbox_implementation", From: "model_inbox", To: "model_implementation"},
+		{Key: "model_implementation_pr", From: "model_implementation", To: "model_pr"},
+		{Key: "security_producer_issue", From: "security_producer", To: "security_issue"},
+		{Key: "security_issue_assignment", From: "security_issue", To: "security_assignment"},
+		{Key: "security_assignment_inbox", From: "security_assignment", To: "security_inbox"},
+	}}
+
+	prompt := automationCompiledTaskPrompt(candidate, candidate.Nodes[3])
+	require.Contains(t, prompt, `Producer: "Daily model release review"`)
+	require.Contains(t, prompt, `Purpose: "Find newly released AI models requiring support."`)
+	require.NotContains(t, prompt, "Weekly security review")
+	require.NotContains(t, prompt, "Find security hardening work only.")
+}
+
 func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRelay(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Scheduled GitHub inbox")
 	ctx := context.Background()
@@ -868,8 +920,9 @@ func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRela
 	}
 	inboxTask, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "inbox", "task"))
 	require.NoError(t, err)
-	require.Contains(t, inboxTask.Prompt, "Only process assigned issues created by the connected upstream producers in this same Automation")
-	require.Contains(t, inboxTask.Prompt, `The eligible producer stages are: "Find model releases"`)
+	require.Contains(t, inboxTask.Prompt, "Only process assigned issues created by the connected upstream producers on this inbox's assignment branch in this same Automation")
+	require.Contains(t, inboxTask.Prompt, `Producer: "Find model releases"`)
+	require.Contains(t, inboxTask.Prompt, `Purpose: "Find relevant model releases."`)
 	require.Contains(t, inboxTask.Prompt, "Skip every unrelated repository issue")
 	require.Contains(t, inboxTask.Prompt, "Create at most one visible task per actionable assigned issue")
 	require.NotContains(t, inboxTask.Prompt, "Connected Task handoff")

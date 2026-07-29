@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -179,14 +181,14 @@ func TestAutomationDescriptionPromptMatchesStrictCustomValidationContract(t *tes
 		require.Contains(t, prompt, "Native mailbox family")
 		require.Contains(t, prompt, "Human approval -> Approved inbox -> Implementation -> Outcome")
 		require.Contains(t, prompt, "Approved inbox is itself the scheduled Task")
-		require.Contains(t, prompt, "Only process approved notifications created by connected upstream producers in the same Automation")
+		require.Contains(t, prompt, "Only process approved notifications created by connected upstream producers on that inbox's own approval branch in the same Automation")
 		require.Contains(t, prompt, "skip unrelated project notifications")
 		require.Contains(t, prompt, "Call list_alerts without project_id")
 		require.Contains(t, prompt, "Do not pass the read filter")
 		require.Contains(t, prompt, "runtime automatically uses this scheduled Task's persisted project")
 		require.Contains(t, prompt, "Never search for or reuse a project ID")
 		require.Contains(t, prompt, "GitHub mailbox family")
-		require.Contains(t, prompt, "only process assigned issues created by connected upstream producers in the same Automation")
+		require.Contains(t, prompt, "only process assigned issues created by connected upstream producers on that inbox's own assignment branch in the same Automation")
 		require.Contains(t, prompt, "skip unrelated repository issues")
 		require.Contains(t, prompt, "Never combine Native mailbox nodes and GitHub mailbox nodes in one custom graph")
 		require.Contains(t, prompt, "If requested work depends on an external capability")
@@ -194,6 +196,20 @@ func TestAutomationDescriptionPromptMatchesStrictCustomValidationContract(t *tes
 		return string(candidateJSON), nil
 	})
 	require.NoError(t, err)
+}
+
+func TestAutomationDocumentationUsesGitHubInboxOwnedScheduleContract(t *testing.T) {
+	for _, path := range []string{
+		filepath.Join("..", "..", "docs", "specs", "automations", "IMPLEMENTATION.md"),
+		filepath.Join("..", "..", "docs", "automations-user-guide.md"),
+	} {
+		body, err := os.ReadFile(path)
+		require.NoError(t, err)
+		documentation := string(body)
+		require.Contains(t, documentation, "GitHub inbox is itself a substantive scheduled Task and owns its schedule; do not add a separate Schedule before it.")
+		require.NotContains(t, documentation, "GitHub inbox's required substantive Schedule source")
+		require.NotContains(t, documentation, "separate substantive Schedule source for GitHub inbox polling")
+	}
 }
 
 func TestAutomationDescriptionPromptIncludesCanonicalMaintainedAdapters(t *testing.T) {

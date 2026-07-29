@@ -34,7 +34,7 @@ Select `Add node` to add a supported step:
 
 Configure each node, then connect its right output to the next node's left input. The builder supports selecting, moving, deleting, and reconnecting nodes and edges, plus pan, zoom, Fit, and Reset controls. Schedule nodes do not have individual enable or disable controls: every current schedule runs while its Automation is Active, Pause disables all of its schedules, and Resume re-enables them.
 
-Mailbox graphs must use one complete family. Native uses `Create notification → Human approval → Approved inbox → Implementation → Outcome`. GitHub uses `Create GitHub issue → Human assignment → GitHub inbox → Task → Open pull request → Human review → Outcome`, with a separate substantive Schedule source for GitHub inbox polling. Native and GitHub approval, inbox, implementation, and review stages cannot be mixed in one custom graph.
+Mailbox graphs must use one complete family. Native uses `Create notification → Human approval → Approved inbox → Implementation → Outcome`. GitHub uses `Create GitHub issue → Human assignment → GitHub inbox → Task → Open pull request → Human review → Outcome`. GitHub inbox is itself a substantive scheduled Task and owns its schedule; do not add a separate Schedule before it. Native and GitHub approval, inbox, implementation, and review stages cannot be mixed in one custom graph.
 
 Save rejects unsupported or ambiguous handoffs, invalid connector directions, unsafe cycles, missing configuration, and project references that are unavailable or belong to another project. The builder does not expose the hidden Workflow subsystem or arbitrary executable nodes.
 

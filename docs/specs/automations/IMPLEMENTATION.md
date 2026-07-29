@@ -39,7 +39,7 @@ A Schedule can perform recurring work without a second Task. `Schedule → Task`
 
 Only the exact `GitHub inbox → Task → Open pull request` shape treats the generic Task as issue-specific configuration for Tasks created later by the inbox. A Native `Approved inbox` is itself a substantive scheduled Task and connects to a projection-only Native `Implementation` stage representing the real Task created through approved-notification processing; Save does not create a placeholder implementation Task.
 
-Custom mailbox graphs use one complete integration family. Native uses `Create notification → Human approval → Approved inbox → Implementation → Outcome`, with an optional rejected Outcome. GitHub uses `Create GitHub issue → Human assignment → GitHub inbox → Task → Open pull request → Human review → Outcome` plus the GitHub inbox's required substantive Schedule source. Native approval/inbox/implementation stages and GitHub assignment/inbox/PR/review stages cannot be mixed in one custom graph.
+Custom mailbox graphs use one complete integration family. Native uses `Create notification → Human approval → Approved inbox → Implementation → Outcome`, with an optional rejected Outcome. GitHub uses `Create GitHub issue → Human assignment → GitHub inbox → Task → Open pull request → Human review → Outcome`. GitHub inbox is itself a substantive scheduled Task and owns its schedule; do not add a separate Schedule before it. Native approval/inbox/implementation stages and GitHub assignment/inbox/PR/review stages cannot be mixed in one custom graph.
 
 ## Connections
 
