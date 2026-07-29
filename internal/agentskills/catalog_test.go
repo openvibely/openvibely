@@ -422,6 +422,21 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		}
 	}
 
+	for _, text := range []struct {
+		name string
+		body string
+	}{{name: "GitHub bootstrap skill", body: skillText}, {name: "GitHub autonomous SDLC guide", body: guideText}} {
+		for _, want := range []string{
+			"Do not require a repository-wide issue or pull-request listing/search before publication",
+			"Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated",
+			"Call `github_create_issue` for each actionable finding; the server performs trusted local duplicate prevention",
+		} {
+			if strings.Count(text.body, want) < 2 {
+				t.Fatalf("%s must include Offering Manager and finder duplicate-boundary guidance %q", text.name, want)
+			}
+		}
+	}
+
 	for _, forbidden := range []string{
 		"Avoid duplicates by searching or inspecting existing visible work",
 		"Avoid duplicates by searching/inspecting existing visible work",

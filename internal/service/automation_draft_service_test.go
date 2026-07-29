@@ -173,8 +173,16 @@ func TestGitHubSDLCTemplateAcceptsBrowserSubmittedActionSettings(t *testing.T) {
 func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *testing.T) {
 	require.Contains(t, githubSDLCDevInboxPrompt, "or from a GitHub remote in its local checkout when that URL is blank")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "restricted to the selected project's explicit repository URL")
-	require.Contains(t, githubSDLCOfferingManagerPrompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection")
-	require.NotContains(t, githubSDLCOfferingManagerPrompt, "searching/inspecting existing visible work")
+	for name, prompt := range map[string]string{
+		"offering manager": githubSDLCOfferingManagerPrompt,
+		"finder":           githubSDLCFinderPrompt,
+	} {
+		require.Contains(t, prompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection", name)
+		require.Contains(t, prompt, "Do not require a repository-wide issue or pull-request listing/search before publication", name)
+		require.Contains(t, prompt, "Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated", name)
+		require.Contains(t, prompt, "Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention", name)
+		require.NotContains(t, prompt, "searching/inspecting existing visible work", name)
+	}
 
 	candidate := models.AutomationDraftCandidate{
 		AdapterKey: AutomationAdapterCustom,

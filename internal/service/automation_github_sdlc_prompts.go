@@ -33,7 +33,7 @@ const githubSDLCOfferingManagerPrompt = `Review the configured project vision/so
 
 Open GitHub suggestion issues only. Use ` + "`" + `github_create_issue` + "`" + ` with unprefixed labels such as ` + "`" + `suggestion` + "`" + ` and ` + "`" + `feature` + "`" + `. Do not create implementation tasks and do not modify code.
 
-Include enough context for a human to approve, reject, or assign the issue. Do not list, search, or inspect existing GitHub issues for duplicate detection; the server prevents duplicate Automation-created issues using trusted local state.`
+Include enough context for a human to approve, reject, or assign the issue. Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.`
 
 const githubSDLCFinderPrompt = `Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
 
@@ -43,6 +43,8 @@ Look only for issues in this task's scope:
 - Redundancy Finder: duplicated or redundant code that could be made generic without over-engineering.
 
 Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with unprefixed labels matching the scope, such as ` + "`" + `bug` + "`" + `, ` + "`" + `performance` + "`" + `, or ` + "`" + `duplication` + "`" + `. Include the inspected component, evidence, risk, and suggested acceptance criteria.
+
+Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 
 Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.`
 
