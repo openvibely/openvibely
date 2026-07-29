@@ -42,6 +42,7 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 			require.Equal(t, node.Key, draftNode.Config["target_node_key"])
 			require.Equal(t, string(models.CategoryScheduled), draftNode.Config["category"])
 			require.NotEmpty(t, draftNode.Config["prompt"])
+			require.Equal(t, true, draftNode.Config["clear_context_on_start"], "%s/%s must explicitly clear context on each scheduled start", adapterKey, node.Key)
 		}
 	}
 }

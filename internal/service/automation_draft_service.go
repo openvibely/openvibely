@@ -142,6 +142,7 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 			config["repeat_type"] = string(models.RepeatDaily)
 			config["repeat_interval"] = 1
 			config["enabled"] = true
+			config["clear_context_on_start"] = true
 			if node.AllowedResources["task"] {
 				config["category"] = string(models.CategoryScheduled)
 			}
