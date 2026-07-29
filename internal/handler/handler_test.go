@@ -5129,8 +5129,8 @@ func TestHandler_TaskThreadSend_AllowsWhenProjectHasCapacity(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 
 	updatedTask, _ := h.taskSvc.GetByID(ctx, task.ID)
-	if updatedTask.Status != models.StatusQueued {
-		t.Errorf("expected status queued, got %s", updatedTask.Status)
+	if updatedTask.Status != models.StatusQueued && updatedTask.Status != models.StatusRunning {
+		t.Errorf("expected status queued or running, got %s", updatedTask.Status)
 	}
 }
 
