@@ -807,6 +807,53 @@ func TestAutomationSaveSubmitsExistingRootsThatBecomePendingActive(t *testing.T)
 	}
 }
 
+func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRelay(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Scheduled GitHub inbox")
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(h.db)
+	h.project.RepoURL = "https://github.com/example/automation.git"
+	require.NoError(t, projectRepo.Update(ctx, &h.project))
+	settingsRepo := repository.NewSettingsRepo(h.db)
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
+	githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
+	h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
+
+	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Scheduled inbox", AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
+		Nodes: []models.AutomationDraftNode{
+			{Key: "producer", Name: "Find model releases", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Find relevant model releases.", "category": "scheduled", "priority": 2, "run_at": "04:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+			{Key: "issue", Name: "Create issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Open one focused model support issue.", "labels": []any{"model-support"}}},
+			{Key: "assignment", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
+			{Key: "inbox", Name: "Scheduled model support inbox", Type: models.AutomationNodeTrigger, Role: "github_inbox", Config: map[string]any{"prompt": "Process assigned model support issues and create or continue issue-linked implementation tasks.", "category": "scheduled", "priority": 2, "run_at": "04:15", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+			{Key: "implementation", Name: "Issue implementation configuration", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the accepted model support issue.", "category": "active", "priority": 2}},
+			{Key: "open_pr", Name: "Open pull request", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a reviewable pull request.", "base": "main", "draft": false}},
+			{Key: "review", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},
+			{Key: "complete", Name: "Completed", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+		},
+		Edges: []models.AutomationDraftEdge{
+			{Key: "producer_issue", From: "producer", To: "issue", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "issue_assignment", From: "issue", To: "assignment", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "assignment_inbox", From: "assignment", To: "inbox", FromPort: "right", ToPort: "left", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
+			{Key: "inbox_implementation", From: "inbox", To: "implementation", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "implementation_pr", From: "implementation", To: "open_pr", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "pr_review", From: "open_pr", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			{Key: "review_complete", From: "review", To: "complete", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		}}
+
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.NotEmpty(t, automationResourceID(t, saved.Definition, "inbox", "task"))
+	require.NotEmpty(t, automationResourceID(t, saved.Definition, "inbox", "schedule"))
+	for _, resource := range saved.Definition.Resources {
+		require.False(t, resource.NodeKey == "implementation" && resource.ResourceType == "task", "issue-specific implementation is created only when the scheduled inbox processes an assigned issue")
+	}
+	inboxTask, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "inbox", "task"))
+	require.NoError(t, err)
+	require.Contains(t, inboxTask.Prompt, "Create at most one visible task per actionable assigned issue")
+	require.NotContains(t, inboxTask.Prompt, "Connected Task handoff")
+}
+
 func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Deferred scheduled GitHub inbox")
 	ctx := context.Background()

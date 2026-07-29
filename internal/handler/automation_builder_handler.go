@@ -376,8 +376,8 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 			nodeType, role = models.AutomationNodeHumanGate, "github_assignment"
 			config = map[string]any{"approval_method": "github_assignment"}
 		case "github_inbox":
-			nodeType, role = models.AutomationNodeAgentTask, "github_inbox"
-			config = map[string]any{"prompt": "Process newly assigned GitHub issues.", "category": string(models.CategoryBacklog), "priority": 2}
+			nodeType, role = models.AutomationNodeTrigger, "github_inbox"
+			config = map[string]any{"prompt": "Process newly assigned GitHub issues and create or continue one issue-linked implementation task per approved issue.", "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatHours), "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}
 		case "open_pull_request":
 			nodeType, role = models.AutomationNodeAction, "open_pull_request"
 			config = map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "", "draft": false}

@@ -241,7 +241,7 @@ func customAutomationTaskNeighbors(candidate models.AutomationDraftCandidate, no
 		target := nodes[edge.To]
 		isTaskHandoff := (source.Type == models.AutomationNodeTrigger && target.Type == models.AutomationNodeAgentTask && (target.Role == "task" || target.Role == "github_inbox")) ||
 			(source.Type == models.AutomationNodeAgentTask && source.Role == "task" && target.Type == models.AutomationNodeAgentTask && target.Role == "task")
-		if !isTaskHandoff {
+		if !isTaskHandoff || customAutomationGitHubIssueTask(candidate, target.Key) {
 			continue
 		}
 		if edge.To == nodeKey {

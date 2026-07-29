@@ -575,7 +575,7 @@ func customAutomationGitHubIssueTask(candidate models.AutomationDraftCandidate, 
 		if edge.To == nodeKey {
 			incoming++
 			source := nodes[edge.From]
-			if source.Type == models.AutomationNodeAgentTask && source.Role == "github_inbox" {
+			if source.Role == "github_inbox" && (source.Type == models.AutomationNodeAgentTask || source.Type == models.AutomationNodeTrigger) {
 				inboxSources++
 			}
 		}
@@ -617,8 +617,8 @@ func customAutomationHandoffSupported(from, to models.AutomationDraftNode) bool 
 		from.Type == models.AutomationNodeTrigger && from.Role == "native_inbox" && to.Type == models.AutomationNodeAgentTask && to.Role == "implementation" ||
 		from.Type == models.AutomationNodeAgentTask && from.Role == "implementation" && to.Type == models.AutomationNodeOutcome ||
 		from.Type == models.AutomationNodeAction && from.Role == "create_github_issue" && to.Type == models.AutomationNodeHumanGate && to.Role == "github_assignment" ||
-		from.Type == models.AutomationNodeHumanGate && from.Role == "github_assignment" && to.Type == models.AutomationNodeAgentTask && to.Role == "github_inbox" ||
-		from.Type == models.AutomationNodeAgentTask && from.Role == "github_inbox" && to.Type == models.AutomationNodeAgentTask && to.Role == "task" ||
+		from.Type == models.AutomationNodeHumanGate && from.Role == "github_assignment" && (to.Type == models.AutomationNodeAgentTask || to.Type == models.AutomationNodeTrigger) && to.Role == "github_inbox" ||
+		(from.Type == models.AutomationNodeAgentTask || from.Type == models.AutomationNodeTrigger) && from.Role == "github_inbox" && to.Type == models.AutomationNodeAgentTask && to.Role == "task" ||
 		from.Type == models.AutomationNodeAction && from.Role == "open_pull_request" && to.Type == models.AutomationNodeHumanGate && to.Role == "pull_request_review" ||
 		from.Type == models.AutomationNodeHumanGate && from.Role == "pull_request_review" && to.Type == models.AutomationNodeOutcome
 }
@@ -642,7 +642,7 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 		}
 		switch node.Type {
 		case models.AutomationNodeTrigger:
-			if node.Role != "fixed_schedule" && node.Role != "native_inbox" {
+			if node.Role != "fixed_schedule" && node.Role != "native_inbox" && node.Role != "github_inbox" {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_capability", Message: "This Schedule role is not executable in custom automations yet."})
 			}
 		case models.AutomationNodeAgentTask:
@@ -712,6 +712,20 @@ func validateCustomAutomationTopology(candidate models.AutomationDraftCandidate)
 				}
 				if len(outgoing[node.Key]) != 1 || nodes[outgoing[node.Key][0].To].Role != "implementation" {
 					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "native_inbox_target", Message: "An Approved inbox needs exactly one Native implementation target."})
+				}
+			} else if node.Role == "github_inbox" {
+				assignments := 0
+				for _, edge := range incoming[node.Key] {
+					state, ok := customAutomationEdgeConditionState(edge.Condition)
+					if nodes[edge.From].Role == "github_assignment" && ok && state == "assigned" {
+						assignments++
+					}
+				}
+				if assignments != 1 || len(incoming[node.Key]) != 1 {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_inbox_sources", Message: "A scheduled GitHub inbox needs exactly one assigned connection from Human assignment."})
+				}
+				if customAutomationGitHubIssueTaskTarget(candidate, node.Key) == nil {
+					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "github_inbox_target", Message: "A GitHub inbox needs one Task projection connected to an Open pull request action."})
 				}
 			} else if len(incoming[node.Key]) != 0 {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "schedule_parents", Message: "A Schedule starts its own task and cannot have an incoming connection."})
@@ -912,7 +926,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	validRole := false
 	switch node.Type {
 	case models.AutomationNodeTrigger:
-		validRole = node.Role == "fixed_schedule" || node.Role == "native_inbox"
+		validRole = node.Role == "fixed_schedule" || node.Role == "native_inbox" || node.Role == "github_inbox"
 	case models.AutomationNodeAgentTask:
 		validRole = node.Role == "task" || node.Role == "github_inbox" || node.Role == "implementation"
 	case models.AutomationNodeAction:
