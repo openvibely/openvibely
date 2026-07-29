@@ -113,7 +113,11 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 		require.Contains(t, inboxPrompt, required)
 	}
 	require.Contains(t, inboxPrompt, "atomically links at most one task")
-	require.Contains(t, inboxPrompt, "human approval authorized task creation only")
+	require.Contains(t, inboxPrompt, "The created task is the implementation task")
+	require.Contains(t, inboxPrompt, "directly instruct it to implement the reviewed change")
+	require.Contains(t, inboxPrompt, "must not create or look for another implementation task")
+	require.Contains(t, inboxPrompt, "must not run notification intake or call get_alert")
+	require.NotContains(t, inboxPrompt, "implementation approval")
 	require.Contains(t, inboxPrompt, "Call list_alerts without project_id")
 	require.Contains(t, inboxPrompt, "Do not pass the read filter")
 	require.Contains(t, inboxPrompt, "both read and unread approved notifications")

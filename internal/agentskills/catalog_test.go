@@ -329,6 +329,10 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"Only after `execute_tasks` succeeds",
 		"Never reuse a project ID from prior messages, examples, memory, or tool output",
 		"create_alert_implementation_task",
+		"The created task is the implementation task",
+		"must not create or look for another implementation task",
+		"run notification intake",
+		"destructive remediation",
 		"register_automation_resources",
 		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `inbox`, and `auditor`",
 	} {

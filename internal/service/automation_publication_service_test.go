@@ -418,6 +418,11 @@ func TestAutomationSaveHardensCustomNativeInboxPersistedProjectPrompt(t *testing
 	require.Contains(t, inboxTask.Prompt, "Do not pass the read filter")
 	require.Contains(t, inboxTask.Prompt, "runtime automatically uses this scheduled Task's persisted project")
 	require.Contains(t, inboxTask.Prompt, "Never search for or reuse a project ID")
+	require.Contains(t, inboxTask.Prompt, "The created task is the implementation task")
+	require.Contains(t, inboxTask.Prompt, "directly instruct it to implement the reviewed change")
+	require.Contains(t, inboxTask.Prompt, "must not create or look for another implementation task")
+	require.Contains(t, inboxTask.Prompt, "must not run notification intake or call get_alert")
+	require.NotContains(t, inboxTask.Prompt, "implementation approval")
 }
 
 func TestAutomationSaveCreatesCustomNativeMailboxWithoutImplementationPlaceholderTask(t *testing.T) {
