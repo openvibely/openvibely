@@ -399,6 +399,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		"list_tasks":                       true,
 		"create_task":                      true,
 		"create_swarm_task":                true,
+		"execute_tasks":                    true,
 		"set_task_goal":                    true,
 		"clear_task_goal":                  true,
 		"get_task_goal":                    true,

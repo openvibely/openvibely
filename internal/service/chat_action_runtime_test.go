@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -250,6 +251,44 @@ func TestRunChannelChatFirstTurnBuildsRuntimeAfterPersistingCallerTask(t *testin
 	require.Equal(t, task.ID, factoryTaskID)
 	require.Equal(t, task.ID, runReq.TaskID)
 	require.NotNil(t, runReq.RuntimeTools)
+}
+
+func TestTaskControlRuntimeExposesExecuteTasksAndStartsExactBacklogTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Scheduled Inbox Runtime"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	inboxTask := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "process approvals", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, inboxTask))
+	implementationTask := &models.Task{ProjectID: project.ID, Title: "Approved implementation", Prompt: "implement", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, implementationTask))
+	workerSvc := NewWorkerService(nil, 1, projectRepo)
+	atomic.StoreInt32(&workerSvc.totalRunning, 1) // Keep the submitted task queued; this test verifies admission, not LLM execution.
+	taskSvc := NewTaskService(taskRepo, nil, workerSvc)
+	svc := &LLMService{taskRepo: taskRepo, taskSvc: taskSvc}
+
+	runtime := svc.taskControlRuntimeTools(*inboxTask)
+	require.NotNil(t, runtime)
+	require.True(t, runtime.HasDefinition("execute_tasks"))
+	payload, err := json.Marshal(TaskExecutionRequest{TaskID: implementationTask.ID})
+	require.NoError(t, err)
+	output, handled, isErr, err := runtime.Executor(ctx, "execute_tasks", payload)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, implementationTask.ID)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, implementationTask.ID, submitted.ID)
+	default:
+		t.Fatal("expected exact implementation task to be submitted")
+	}
+	updated, err := taskRepo.GetByID(ctx, implementationTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, updated.Category)
+	require.Equal(t, models.StatusPending, updated.Status)
 }
 
 func TestTaskControlRuntimeExposesCreateNotificationForScheduledTask(t *testing.T) {
