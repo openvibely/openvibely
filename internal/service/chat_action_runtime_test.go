@@ -291,6 +291,71 @@ func TestTaskControlRuntimeExposesExecuteTasksAndStartsExactBacklogTask(t *testi
 	require.Equal(t, models.StatusPending, updated.Status)
 }
 
+func TestTaskControlRuntimeListAlertsUsesPersistedProjectAcrossReadStates(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Scheduled Alert Inbox"}
+	foreign := &models.Project{Name: "Foreign Alert Inbox"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	inboxTask := &models.Task{ProjectID: project.ID, Title: "Approved inbox", Prompt: "process approvals", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, inboxTask))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	createNotification := func(title string, read bool) models.Alert {
+		created, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: project.ID, Scope: models.AlertScopeProject, Type: "product_suggestion", Title: title, Source: "producer"})
+		require.NoError(t, err)
+		require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.ID, models.AlertDecisionApproved))
+		if read {
+			require.NoError(t, alertSvc.MarkRead(ctx, project.ID, created.ID))
+		}
+		return *created
+	}
+	readNotification := createNotification("Read approval", true)
+	unreadNotification := createNotification("Unread approval", false)
+	svc := &LLMService{taskRepo: taskRepo, alertSvc: alertSvc}
+
+	runtime := svc.taskControlRuntimeTools(*inboxTask)
+	require.NotNil(t, runtime)
+	var listSchema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	for _, definition := range runtime.Definitions {
+		if definition.Name == "list_alerts" {
+			require.NoError(t, json.Unmarshal(definition.Parameters, &listSchema))
+			break
+		}
+	}
+	require.NotEmpty(t, listSchema.Properties)
+	require.NotContains(t, listSchema.Properties, "project_id")
+	require.NotContains(t, listSchema.Properties, "read")
+
+	output, handled, isErr, err := runtime.Executor(ctx, "list_alerts", json.RawMessage(`{"project_id":"`+foreign.ID+`","read":false,"decision_state":"approved","implementation_task_linked":false,"limit":50,"offset":0}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, output, readNotification.ID)
+	require.Contains(t, output, unreadNotification.ID)
+	require.Contains(t, output, `"project_id":"`+project.ID+`"`)
+
+	ordinaryRuntime := svc.taskControlRuntimeTools(models.Task{ProjectID: project.ID, Category: models.CategoryActive})
+	require.NotNil(t, ordinaryRuntime)
+	for _, definition := range ordinaryRuntime.Definitions {
+		if definition.Name != "list_alerts" {
+			continue
+		}
+		var ordinarySchema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		require.NoError(t, json.Unmarshal(definition.Parameters, &ordinarySchema))
+		require.Contains(t, ordinarySchema.Properties, "project_id")
+		require.Contains(t, ordinarySchema.Properties, "read")
+		return
+	}
+	t.Fatal("ordinary task runtime is missing list_alerts")
+}
+
 func TestTaskControlRuntimeExposesCreateNotificationForScheduledTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

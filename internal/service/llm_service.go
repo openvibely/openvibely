@@ -421,9 +421,26 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		"list_capabilities":                true,
 	}
 	for _, def := range defs {
-		if allowed[strings.ToLower(strings.TrimSpace(def.Name))] {
-			filtered = append(filtered, def)
+		name := strings.ToLower(strings.TrimSpace(def.Name))
+		if !allowed[name] {
+			continue
 		}
+		if name == "list_alerts" && task.Category == models.CategoryScheduled {
+			var schema map[string]json.RawMessage
+			var properties map[string]json.RawMessage
+			if json.Unmarshal(def.Parameters, &schema) == nil && json.Unmarshal(schema["properties"], &properties) == nil {
+				delete(properties, "project_id")
+				delete(properties, "read")
+				if encodedProperties, err := json.Marshal(properties); err == nil {
+					schema["properties"] = encodedProperties
+					if encodedSchema, err := json.Marshal(schema); err == nil {
+						def.Parameters = encodedSchema
+					}
+				}
+			}
+			def.Description += " Uses the persisted caller task's project and includes both read and unread alerts."
+		}
+		filtered = append(filtered, def)
 	}
 	if len(filtered) == 0 {
 		return nil
@@ -460,6 +477,21 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
 	}))
+	if task.Category == models.CategoryScheduled {
+		if listAlerts := handlers["list_alerts"]; listAlerts != nil {
+			handlers["list_alerts"] = func(ctx context.Context, input json.RawMessage) (string, error) {
+				var request map[string]json.RawMessage
+				if json.Unmarshal(input, &request) == nil {
+					delete(request, "project_id")
+					delete(request, "read")
+					if normalized, err := json.Marshal(request); err == nil {
+						input = normalized
+					}
+				}
+				return listAlerts(ctx, input)
+			}
+		}
+	}
 	handlers["list_capabilities"] = func(_ context.Context, _ json.RawMessage) (string, error) {
 		return formatChannelCapabilities(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)), nil
 	}
