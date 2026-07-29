@@ -389,6 +389,9 @@ func TestAutomationSaveHardensCustomNativeInboxPersistedProjectPrompt(t *testing
 	require.NoError(t, err)
 	inboxTask, err := h.taskRepo.GetByID(context.Background(), automationResourceID(t, saved.Definition, "custom_approved_inbox", "task"))
 	require.NoError(t, err)
+	require.Contains(t, inboxTask.Prompt, "Only process approved notifications created by the connected upstream producers in this same Automation")
+	require.Contains(t, inboxTask.Prompt, `The eligible producer stages are: "Daily review"`)
+	require.Contains(t, inboxTask.Prompt, "Skip every unrelated project notification")
 	require.Contains(t, inboxTask.Prompt, "Call list_alerts without project_id")
 	require.Contains(t, inboxTask.Prompt, "Do not pass the read filter")
 	require.Contains(t, inboxTask.Prompt, "runtime automatically uses this scheduled Task's persisted project")
@@ -865,6 +868,9 @@ func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRela
 	}
 	inboxTask, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "inbox", "task"))
 	require.NoError(t, err)
+	require.Contains(t, inboxTask.Prompt, "Only process assigned issues created by the connected upstream producers in this same Automation")
+	require.Contains(t, inboxTask.Prompt, `The eligible producer stages are: "Find model releases"`)
+	require.Contains(t, inboxTask.Prompt, "Skip every unrelated repository issue")
 	require.Contains(t, inboxTask.Prompt, "Create at most one visible task per actionable assigned issue")
 	require.NotContains(t, inboxTask.Prompt, "Connected Task handoff")
 }
