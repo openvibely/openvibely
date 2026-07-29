@@ -316,6 +316,9 @@ func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, nod
 			"\nWhen the suggestion is ready, call github_create_issue exactly once for the current project's repository. Use the suggestion as the issue title/body and these labels: " + strings.Join(normalizeDraftReferences(labels), ", ") +
 			". Do not assign the issue. A human assignment in GitHub is the approval signal; creating the issue must not approve, implement, merge, release, or deploy anything."
 	}
+	if candidate.AdapterKey == AutomationAdapterCustom && node.Role == "native_inbox" {
+		prompt += "\n\nNative approved-notification handoff:\nCall list_alerts without project_id, using decision_state=approved, implementation_task_linked=false, a bounded limit, and stable pagination. Do not pass the read filter: both read and unread approved notifications are eligible. The runtime automatically uses this scheduled Task's persisted project. Never search for or reuse a project ID from prior messages, examples, memory, tool output, the project snapshot, or the user description. After create_alert_implementation_task links a Backlog Task, call execute_tasks with the exact returned implementation_task_id. Only call complete_alert_processing after task execution starts; otherwise call fail_alert_processing."
+	}
 	if node.Role == "github_inbox" {
 		if issueTask := customAutomationGitHubIssueTaskTarget(candidate, node.Key); issueTask != nil {
 			issueTaskPrompt := automationCompiledGitHubIssueTaskPrompt(candidate, *issueTask)

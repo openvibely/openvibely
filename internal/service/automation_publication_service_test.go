@@ -380,6 +380,21 @@ func TestAutomationSavePreviewExcludesCustomNativeImplementationPlaceholderTask(
 	}
 }
 
+func TestAutomationSaveHardensCustomNativeInboxPersistedProjectPrompt(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Custom Native inbox prompt")
+	candidate := customNativeMailboxCandidate("Custom Native inbox prompt")
+	candidate.Nodes[3].Config["prompt"] = "Process approved notifications safely."
+
+	saved, err := h.compiler.Save(context.Background(), AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	inboxTask, err := h.taskRepo.GetByID(context.Background(), automationResourceID(t, saved.Definition, "custom_approved_inbox", "task"))
+	require.NoError(t, err)
+	require.Contains(t, inboxTask.Prompt, "Call list_alerts without project_id")
+	require.Contains(t, inboxTask.Prompt, "Do not pass the read filter")
+	require.Contains(t, inboxTask.Prompt, "runtime automatically uses this scheduled Task's persisted project")
+	require.Contains(t, inboxTask.Prompt, "Never search for or reuse a project ID")
+}
+
 func TestAutomationSaveCreatesCustomNativeMailboxWithoutImplementationPlaceholderTask(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Custom Native mailbox")
 	saved, err := h.compiler.Save(context.Background(), AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Custom Native mailbox")})

@@ -425,6 +425,27 @@ func TestRegistry_AlertFlowActions(t *testing.T) {
 			t.Errorf("%s should be read, got %s", name, def.Access)
 		}
 	}
+
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Description string `json:"description"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(Get("list_alerts").Parameters, &schema); err != nil {
+		t.Fatalf("decode list_alerts schema: %v", err)
+	}
+	for _, required := range schema.Required {
+		if required == "project_id" || required == "read" {
+			t.Fatalf("list_alerts must leave %s optional", required)
+		}
+	}
+	if description := schema.Properties["project_id"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "persisted caller task") {
+		t.Fatalf("project_id omission contract missing from list_alerts schema: %q", description)
+	}
+	if description := schema.Properties["read"].Description; !strings.Contains(description, "Omit") || !strings.Contains(description, "both read and unread") {
+		t.Fatalf("read omission contract missing from list_alerts schema: %q", description)
+	}
 }
 
 func TestRegistry_ModelFlowActions(t *testing.T) {

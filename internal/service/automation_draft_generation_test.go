@@ -179,6 +179,10 @@ func TestAutomationDescriptionPromptMatchesStrictCustomValidationContract(t *tes
 		require.Contains(t, prompt, "Native mailbox family")
 		require.Contains(t, prompt, "Human approval -> Approved inbox -> Implementation -> Outcome")
 		require.Contains(t, prompt, "Approved inbox is itself the scheduled Task")
+		require.Contains(t, prompt, "Call list_alerts without project_id")
+		require.Contains(t, prompt, "Do not pass the read filter")
+		require.Contains(t, prompt, "runtime automatically uses this scheduled Task's persisted project")
+		require.Contains(t, prompt, "Never search for or reuse a project ID")
 		require.Contains(t, prompt, "GitHub mailbox family")
 		require.Contains(t, prompt, "Never combine Native mailbox nodes and GitHub mailbox nodes in one custom graph")
 		require.Contains(t, prompt, "If requested work depends on an external capability")
@@ -458,6 +462,10 @@ func TestAutomationDescriptionGenerationRepairReceivesExactNestedSchema(t *testi
 		}
 		require.Contains(t, prompt, "Edges use exactly these fields: key, from, to, from_port, to_port, label, condition.")
 		require.Contains(t, prompt, "Never use source or target as edge field names.")
+		require.Contains(t, prompt, "Call list_alerts without project_id")
+		require.Contains(t, prompt, "Do not pass the read filter")
+		require.Contains(t, prompt, "runtime automatically uses this scheduled Task's persisted project")
+		require.Contains(t, prompt, "Never search for or reuse a project ID")
 		require.Contains(t, prompt, "Review vision daily", "the independent repair call must receive the original request context")
 		return string(validJSON), nil
 	})
