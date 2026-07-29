@@ -263,12 +263,16 @@ func (s *SchedulerService) checkActiveTasks(ctx context.Context) {
 		return
 	}
 	for _, task := range staleTasks {
-		applog.Infof("[scheduler] checkActiveTasks recovering stale queued task id=%s title=%q (queued for >%s)",
-			task.ID, task.Title, staleQueuedTaskTimeout)
-		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
-			applog.Infof("[scheduler] checkActiveTasks error resetting stale task %s to pending: %v", task.ID, err)
+		claimed, err := s.taskRepo.ReclaimStaleQueuedTask(ctx, task.ID, staleQueuedTaskTimeout)
+		if err != nil {
+			applog.Infof("[scheduler] checkActiveTasks error reclaiming stale task %s: %v", task.ID, err)
 			continue
 		}
+		if !claimed {
+			continue
+		}
+		applog.Infof("[scheduler] checkActiveTasks recovering stale queued task id=%s title=%q (queued for >%s)",
+			task.ID, task.Title, staleQueuedTaskTimeout)
 		task.Status = models.StatusPending
 		if task.SwarmRole == models.SwarmRoleParent && s.swarmStarter != nil {
 			applog.Infof("[scheduler] checkActiveTasks starting swarm planner for recovered stale queued task id=%s title=%q project=%s",

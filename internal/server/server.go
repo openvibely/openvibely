@@ -888,7 +888,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workerSvc.Start(srvCtx)
 	automationReconciler.Start(srvCtx)
 	automationDispatcher.Start(srvCtx)
-	schedulerSvc.Start(srvCtx)
 
 	// HTTP Server
 	e := echo.New()
@@ -1002,6 +1001,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		llmSvc.SetTelegramService(telegramSvc)
 	}
 	h.RecoverQueuedTaskThreadInputs(context.Background())
+	// Start scheduler scans only after durable queued task-thread inputs have
+	// been offered for promotion. Repository admission guards remain authoritative
+	// if recovery and a later scan overlap.
+	schedulerSvc.Start(srvCtx)
 	h.RegisterRoutes(e)
 
 	// Bind listener explicitly so we know the actual port before serving.

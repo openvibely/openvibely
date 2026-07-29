@@ -403,6 +403,39 @@ func TestSchedulerService_CheckActiveTasks_DoesNotSubmitBehindDirectFollowup(t *
 	}
 }
 
+func TestSchedulerService_CheckActiveTasks_DoesNotRecoverStaleQueuedFollowup(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	task := &models.Task{ProjectID: "default", Title: "long follow-up", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "stored original prompt"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	exec := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "long direct follow-up", IsFollowup: true}
+	started, err := repository.NewExecutionRepo(db).CreateDirectTaskFollowupOrQueue(ctx, exec, &models.ThreadInput{Content: exec.PromptSent})
+	if err != nil || !started {
+		t.Fatalf("admit follow-up: started=%v err=%v", started, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = datetime('now', '-15 minutes') WHERE id = ?`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	NewSchedulerService(repository.NewScheduleRepo(db), taskRepo, workerSvc).checkActiveTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("stale recovery submitted original prompt behind active follow-up: %#v", submitted)
+	case <-time.After(100 * time.Millisecond):
+	}
+	stored, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != models.StatusQueued {
+		t.Fatalf("active follow-up ownership must preserve queued task status, got %s", stored.Status)
+	}
+}
+
 func TestSchedulerService_CheckActiveTasks(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)
@@ -894,6 +927,49 @@ func TestSchedulerService_RecoverStaleQueuedTasks(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected stale queued task to be submitted")
+	}
+}
+
+func TestSchedulerService_RestartRecoveryPromotesQueuedFollowupBeforeOriginalPrompt(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	inputRepo := repository.NewThreadInputRepo(db)
+	workerSvc := newTestWorkerService(t)
+	svc := NewSchedulerService(repository.NewScheduleRepo(db), taskRepo, workerSvc)
+
+	task := &models.Task{ProjectID: "default", Title: "restart admission", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "stored original prompt"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: task.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "durable follow-up"}
+	if err := inputRepo.CreateQueued(ctx, queued); err != nil {
+		t.Fatal(err)
+	}
+	if reset, err := taskRepo.ResetOrphanedRunning(ctx); err != nil || reset != 1 {
+		t.Fatalf("restart reset: count=%d err=%v", reset, err)
+	}
+
+	// Exercise the former startup ordering as an adversarial interleaving. The
+	// database guards must remain sufficient even though production now offers
+	// queued-input recovery before starting scheduler scans.
+	svc.checkActiveTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("scheduler submitted original prompt ahead of durable follow-up: %#v", submitted)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	agent, err := repository.NewLLMConfigRepo(db).GetDefault(ctx)
+	if err != nil || agent == nil {
+		t.Fatalf("load default model: %#v err=%v", agent, err)
+	}
+	promoted := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: queued.Content, IsFollowup: true}
+	if err := inputRepo.ClaimQueuedForTaskExecution(ctx, queued.ID, promoted); err != nil {
+		t.Fatalf("promote durable follow-up after restart: %v", err)
+	}
+	if promoted.PromptSent != "durable follow-up" {
+		t.Fatalf("promoted wrong prompt: %q", promoted.PromptSent)
 	}
 }
 

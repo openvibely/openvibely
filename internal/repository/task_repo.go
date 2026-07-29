@@ -635,7 +635,10 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 	}
 	result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'running', updated_at = datetime('now')
 		WHERE id = ? AND status = 'pending' AND category IN ('active','scheduled')
-		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)`, id)
+		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		  AND NOT EXISTS (SELECT 1 FROM thread_inputs i
+		                  WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')`, id)
 	if err != nil {
 		return nil, false, fmt.Errorf("claiming task for dispatch: %w", err)
 	}
@@ -1032,6 +1035,9 @@ func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error)
 		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE category = 'active' AND status = 'pending'
 		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		 AND NOT EXISTS (SELECT 1 FROM thread_inputs i
+		                 WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
 		 ORDER BY priority DESC, display_order ASC, created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing active pending tasks: %w", err)
@@ -1058,6 +1064,10 @@ func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE category = 'active' AND status = 'queued' AND updated_at < ?
+		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		 AND NOT EXISTS (SELECT 1 FROM thread_inputs i
+		                 WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')
 		 ORDER BY priority DESC, display_order ASC, created_at ASC`, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("listing stale queued tasks: %w", err)
@@ -1074,6 +1084,28 @@ func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.
 		tasks = append(tasks, t)
 	}
 	return tasks, rows.Err()
+}
+
+// ReclaimStaleQueuedTask atomically returns an ownerless stale queued task to
+// pending. The ownership guards close the window between stale-task listing and
+// recovery so a newly admitted follow-up or reservation cannot be overwritten.
+func (r *TaskRepo) ReclaimStaleQueuedTask(ctx context.Context, id string, staleDuration time.Duration) (bool, error) {
+	cutoff := time.Now().UTC().Add(-staleDuration).Format("2006-01-02 15:04:05")
+	result, err := r.db.ExecContext(ctx, `UPDATE tasks
+		SET status = 'pending', updated_at = datetime('now')
+		WHERE id = ? AND category = 'active' AND status = 'queued' AND updated_at < ?
+		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
+		  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		  AND NOT EXISTS (SELECT 1 FROM thread_inputs i
+		                  WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')`, id, cutoff)
+	if err != nil {
+		return false, fmt.Errorf("reclaiming stale queued task: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("checking stale queued task reclaim: %w", err)
+	}
+	return changed == 1, nil
 }
 
 // TaskWithSchedule represents a task with its schedule information for calendar view

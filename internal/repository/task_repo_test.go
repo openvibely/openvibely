@@ -2330,6 +2330,131 @@ func TestTaskRepo_ListStaleQueuedTasks(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_AdmissionOwnershipExcludesSchedulerRecoveryAndClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	inputRepo := NewThreadInputRepo(db)
+
+	withRunningFollowup := &models.Task{ProjectID: "default", Title: "running follow-up", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "original"}
+	if err := taskRepo.Create(ctx, withRunningFollowup); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, withRunningFollowup.ID, models.StatusQueued); err != nil {
+		t.Fatal(err)
+	}
+	active := &models.Execution{TaskID: withRunningFollowup.ID, Status: models.ExecRunning, PromptSent: "follow-up", IsFollowup: true}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatal(err)
+	}
+
+	withPendingInput := &models.Task{ProjectID: "default", Title: "pending input", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "original"}
+	if err := taskRepo.Create(ctx, withPendingInput); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, withPendingInput.ID, models.StatusQueued); err != nil {
+		t.Fatal(err)
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "default", TaskID: withPendingInput.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "queued follow-up"}
+	if err := inputRepo.CreateQueued(ctx, queued); err != nil {
+		t.Fatal(err)
+	}
+
+	withReservation := &models.Task{ProjectID: "default", Title: "reserved run", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "original"}
+	if err := taskRepo.Create(ctx, withReservation); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, withReservation.ID, models.StatusQueued); err != nil {
+		t.Fatal(err)
+	}
+	reservationFixture := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO automations (id, project_id, stable_key, name) VALUES ('admission-auto', 'default', 'admission-auto', 'Admission')`, nil},
+		{`INSERT INTO automation_versions (id, project_id, automation_id, version, adapter_key) VALUES ('admission-version', 'default', 'admission-auto', 1, 'test')`, nil},
+		{`INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role) VALUES ('admission-node', 'default', 'admission-auto', 'admission-version', 'trigger', 'Trigger', 'trigger', 'trigger')`, nil},
+		{`INSERT INTO automation_invocations (id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key) VALUES ('admission-invocation', 'default', 'admission-auto', 'admission-version', 'admission-node', 'schedule', 'fixture', 'fixture')`, nil},
+		{`INSERT INTO automation_dispatch_outbox (id, invocation_id, task_id) VALUES ('admission-dispatch', 'admission-invocation', ?)`, []any{withReservation.ID}},
+		{`INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id) VALUES (?, 'admission-dispatch', 'default')`, []any{withReservation.ID}},
+	}
+	for _, statement := range reservationFixture {
+		if _, err := db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("create reservation fixture: %v", err)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = datetime('now', '-15 minutes') WHERE id IN (?, ?, ?)`, withRunningFollowup.ID, withPendingInput.ID, withReservation.ID); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := taskRepo.ListStaleQueuedTasks(ctx, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale) != 0 {
+		t.Fatalf("admission-owned tasks must not be stale-recovery candidates: %#v", stale)
+	}
+
+	if err := taskRepo.UpdateStatus(ctx, withRunningFollowup.ID, models.StatusPending); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := taskRepo.ClaimTaskForDispatch(ctx, withRunningFollowup.ID); err != nil || claimed {
+		t.Fatalf("atomic dispatch claim must reject a running follow-up: claimed=%v err=%v", claimed, err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, withPendingInput.ID, models.StatusPending); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := taskRepo.ClaimTaskForDispatch(ctx, withPendingInput.ID); err != nil || claimed {
+		t.Fatalf("atomic dispatch claim must reject a pending FIFO input: claimed=%v err=%v", claimed, err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, withReservation.ID, models.StatusPending); err != nil {
+		t.Fatal(err)
+	}
+	if _, claimed, err := taskRepo.ClaimTaskForDispatch(ctx, withReservation.ID); err != nil || claimed {
+		t.Fatalf("atomic dispatch claim must reject an Automation reservation: claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestTaskRepo_ReclaimStaleQueuedTaskRejectsOwnerAddedAfterListing(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	task := &models.Task{ProjectID: "default", Title: "stale snapshot race", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "original"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskRepo.UpdateStatus(ctx, task.ID, models.StatusQueued); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = datetime('now', '-15 minutes') WHERE id = ?`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := taskRepo.ListStaleQueuedTasks(ctx, 10*time.Minute)
+	if err != nil || len(stale) != 1 || stale[0].ID != task.ID {
+		t.Fatalf("expected ownerless stale snapshot: %#v err=%v", stale, err)
+	}
+
+	active := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "follow-up admitted after listing", IsFollowup: true}
+	if err := NewExecutionRepo(db).Create(ctx, active); err != nil {
+		t.Fatal(err)
+	}
+	reclaimed, err := taskRepo.ReclaimStaleQueuedTask(ctx, task.ID, 10*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reclaimed {
+		t.Fatal("stale reclaim must lose when ownership appears after listing")
+	}
+	stored, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != models.StatusQueued {
+		t.Fatalf("owner-added race changed task status to %s", stored.Status)
+	}
+}
+
 func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
