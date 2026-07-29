@@ -216,7 +216,10 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.Contains(t, githubSDLCDevInboxPrompt, "or from a GitHub remote in its local checkout when that URL is blank")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "restricted to the selected project's explicit repository URL")
 	require.Contains(t, githubSDLCDevInboxPrompt, "category=active")
-	require.Contains(t, githubSDLCDevInboxPrompt, "call execute_tasks with that exact task ID")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Do not call `execute_tasks` for a newly created Active task")
+	require.Contains(t, githubSDLCDevInboxPrompt, "For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Never call `execute_tasks` for an Active pending, queued, running, or completed task")
+	require.NotContains(t, githubSDLCDevInboxPrompt, "Finally, call execute_tasks with that exact task ID")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not leave approved implementation work in Backlog")
 	for name, prompt := range map[string]string{
 		"offering manager":    githubSDLCOfferingManagerPrompt,

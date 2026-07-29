@@ -278,7 +278,9 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
 		"If no existing task is evident from available task/thread context, call `create_task` immediately with `category=active`; do not wait for an existing PR",
 		"then call `set_task_goal` for the created or reconciled task so it implements the issue",
-		"call `execute_tasks` with that exact task ID so approved implementation starts immediately",
+		"Do not call `execute_tasks` for a newly created Active task",
+		"For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled",
+		"Never call `execute_tasks` for an Active pending, queued, running, or completed task",
 		"For PAT setups, use `github_list_my_assigned_issues` to find open issues assigned to the authenticated PAT user",
 		"For GitHub App setups, do not treat the installation owner or organization as an issue assignee",
 	} {
@@ -417,7 +419,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
 		"If no existing task is evident from available task/thread context, call `create_task` immediately with `category=active`; do not wait for an existing PR",
 		"then call `set_task_goal` for the created or reconciled task so it implements the issue",
-		"call `execute_tasks` with that exact task ID so approved implementation starts immediately",
+		"Do not call `execute_tasks` for a newly created Active task",
+		"For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled",
+		"Never call `execute_tasks` for an Active pending, queued, running, or completed task",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("GitHub bootstrap skill missing %q", want)
@@ -467,7 +471,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
 		"If no existing task is evident from available task/thread context, call `create_task` immediately with `category=active`; do not wait for an existing PR",
 		"then call `set_task_goal` for the created or reconciled task so it implements the issue",
-		"call `execute_tasks` with that exact task ID so approved implementation starts immediately",
+		"Do not call `execute_tasks` for a newly created Active task",
+		"For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled",
+		"Never call `execute_tasks` for an Active pending, queued, running, or completed task",
 	} {
 		if !strings.Contains(guideText, want) {
 			t.Fatalf("GitHub autonomous SDLC guide missing %q", want)
