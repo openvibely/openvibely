@@ -186,9 +186,6 @@ func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context
 	if parseErr == nil {
 		issues = s.ValidateCandidateWithCapabilities(candidate, snapshot)
 		if len(issues) == 0 {
-			issues = generatedAutomationDescriptionIssues(candidate)
-		}
-		if len(issues) == 0 {
 			return draftPreviewResult(candidate, nil), nil
 		}
 	}
@@ -214,59 +211,10 @@ func (s *AutomationDraftService) generateCandidateWithRepair(ctx context.Context
 	normalizeGeneratedTaskPriorities(&candidate)
 	normalizeGeneratedRequiredNativeApprovals(&candidate)
 	issues = s.ValidateCandidateWithCapabilities(candidate, snapshot)
-	if len(issues) == 0 {
-		issues = generatedAutomationDescriptionIssues(candidate)
-	}
 	if len(issues) > 0 {
 		return nil, fmt.Errorf("automation generation repair failed: %s", issues[0].Message)
 	}
 	return draftPreviewResult(candidate, nil), nil
-}
-
-func generatedAutomationDescriptionIssues(candidate models.AutomationDraftCandidate) []models.AutomationValidationIssue {
-	if candidate.AdapterKey != AutomationAdapterCustom {
-		return nil
-	}
-	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
-	for _, node := range candidate.Nodes {
-		nodes[node.Key] = node
-	}
-	for _, edge := range candidate.Edges {
-		from, fromOK := nodes[edge.From]
-		to, toOK := nodes[edge.To]
-		if !fromOK || !toOK || from.Type != models.AutomationNodeTrigger || from.Role != "fixed_schedule" || to.Role != "github_inbox" {
-			continue
-		}
-		prompt, _ := from.Config["prompt"].(string)
-		if generatedGitHubInboxRelayPrompt(prompt) {
-			return []models.AutomationValidationIssue{{
-				NodeKey: from.Key,
-				Code:    "github_inbox_relay",
-				Message: "A generated Schedule connected to a GitHub inbox must perform concrete scheduled work, not merely initiate or trigger inbox processing.",
-			}}
-		}
-	}
-	return nil
-}
-
-func generatedGitHubInboxRelayPrompt(prompt string) bool {
-	words := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(prompt)), func(r rune) bool {
-		return r < 'a' || r > 'z'
-	})
-	if len(words) == 0 || len(words) > 12 {
-		return false
-	}
-	normalized := strings.Join(words, " ")
-	for _, relay := range []string{
-		"initiate processing", "start processing", "begin processing", "trigger processing",
-		"initiate inbox", "start inbox", "start the inbox", "begin inbox", "trigger inbox", "trigger the inbox",
-		"run inbox", "run the inbox", "invoke inbox", "invoke the inbox", "hand off to inbox", "hand off processing",
-	} {
-		if strings.HasPrefix(normalized, relay) {
-			return true
-		}
-	}
-	return false
 }
 
 func normalizeGeneratedRequiredNativeApprovals(candidate *models.AutomationDraftCandidate) {
