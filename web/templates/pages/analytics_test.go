@@ -9,6 +9,32 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
+	project := &models.Project{ID: "project-1", Name: "Project One"}
+
+	var buf bytes.Buffer
+	if err := AnalyticsContent(project).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render analytics content: %v", err)
+	}
+
+	content := buf.String()
+	for _, expected := range []string{
+		`id: 'analyticsActivePointOnTop'`,
+		`afterDraw: function(chart)`,
+		`const activePoints = chart.getActiveElements();`,
+		`point.element.draw(chart.ctx, chart.chartArea);`,
+		`position: 'nearest'`,
+		`caretPadding: 6`,
+	} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("Analytics line-chart hover marker should paint after the tooltip; missing %q", expected)
+		}
+	}
+	if got := strings.Count(content, `plugins: [analyticsActivePointOnTop]`); got != 3 {
+		t.Fatalf("expected all 3 Analytics line charts to use the hover layering plugin, got %d", got)
+	}
+}
+
 func TestAnalyticsContent_TokenUsageModelSelectStaysWithinCard(t *testing.T) {
 	project := &models.Project{ID: "project-1", Name: "Project One"}
 

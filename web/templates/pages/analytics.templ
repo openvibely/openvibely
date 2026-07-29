@@ -361,10 +361,29 @@ templ analyticsContent(currentProject *models.Project) {
 								}
 
 
-								function lineDataset(label, data, color) {
-									return { label: label, data: data, borderColor: color, backgroundColor: color, tension: 0.25, fill: false, pointRadius: 2, pointHoverRadius: 4 };
-								}
+									const analyticsActivePointOnTop = {
+										id: 'analyticsActivePointOnTop',
+										afterDraw: function(chart) {
+											const activePoints = chart.getActiveElements();
+											const tooltip = chart.tooltip;
+											if (!tooltip || tooltip.opacity === 0 || activePoints.length === 0) return;
+											const point = activePoints.reduce(function(nearest, candidate) {
+												const candidateDistance = Math.hypot(candidate.element.x - tooltip.caretX, candidate.element.y - tooltip.caretY);
+												const nearestDistance = Math.hypot(nearest.element.x - tooltip.caretX, nearest.element.y - tooltip.caretY);
+												return candidateDistance < nearestDistance ? candidate : nearest;
+											});
+											chart.ctx.save();
+											chart.ctx.beginPath();
+											chart.ctx.rect(chart.chartArea.left, chart.chartArea.top, chart.chartArea.right - chart.chartArea.left, chart.chartArea.bottom - chart.chartArea.top);
+											chart.ctx.clip();
+											point.element.draw(chart.ctx, chart.chartArea);
+											chart.ctx.restore();
+										}
+									};
 
+									function lineDataset(label, data, color) {
+										return { label: label, data: data, borderColor: color, backgroundColor: color, tension: 0.25, fill: false, pointRadius: 2, pointHoverRadius: 4 };
+									}
 								function renderSkillUsageTrend(totals) {
 									if (charts.skillUsageTrend) charts.skillUsageTrend.destroy();
 									const canvas = document.getElementById('skillUsageTrendChart');
@@ -378,8 +397,9 @@ templ analyticsContent(currentProject *models.Project) {
 									];
 									charts.skillUsageTrend = new Chart(canvas.getContext('2d'), {
 										type: 'line',
+										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: { position: 'nearest', caretPadding: 6 } }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -550,8 +570,9 @@ templ analyticsContent(currentProject *models.Project) {
 									}
 									charts.usageRate = new Chart(rateCtx.getContext('2d'), {
 										type: 'line',
+										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: { position: 'nearest', caretPadding: 6 } }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -666,6 +687,7 @@ templ analyticsContent(currentProject *models.Project) {
 						if (!ctx) return;
 						charts.successFailure = new Chart(ctx.getContext('2d'), {
 							type: 'line',
+							plugins: [analyticsActivePointOnTop],
 							data: {
 								labels: data.map(d => d.Period || 'N/A'),
 								datasets: [
@@ -689,6 +711,7 @@ templ analyticsContent(currentProject *models.Project) {
 								responsive: true,
 								maintainAspectRatio: false,
 								interaction: { mode: 'index', intersect: false },
+								plugins: { tooltip: { position: 'nearest', caretPadding: 6 } },
 								scales: {
 									y: { type: 'linear', display: true, position: 'left', max: 100, title: { display: true, text: 'Success Rate (%)' } },
 									y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Total Executions' }, grid: { drawOnChartArea: false } }
