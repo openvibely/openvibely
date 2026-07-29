@@ -363,20 +363,38 @@ templ analyticsContent(currentProject *models.Project) {
 
 									const analyticsActivePointOnTop = {
 										id: 'analyticsActivePointOnTop',
+										afterEvent: function(chart, args) {
+											const event = args.event;
+											const previous = chart.$analyticsHoveredPoint || null;
+											if (!event || event.type === 'mouseout' || !args.inChartArea) {
+												chart.$analyticsHoveredPoint = null;
+											} else {
+												const nearest = chart.getElementsAtEventForMode(event, 'nearest', { intersect: false }, false);
+												chart.$analyticsHoveredPoint = nearest.length > 0 ? nearest[0] : null;
+											}
+											const current = chart.$analyticsHoveredPoint;
+											if ((!previous && current) || (previous && !current) || (previous && current && (previous.datasetIndex !== current.datasetIndex || previous.index !== current.index))) {
+												args.changed = true;
+											}
+										},
 										afterDraw: function(chart) {
-											const activePoints = chart.getActiveElements();
+											const point = chart.$analyticsHoveredPoint;
 											const tooltip = chart.tooltip;
-											if (!tooltip || tooltip.opacity === 0 || activePoints.length === 0) return;
-											const point = activePoints.reduce(function(nearest, candidate) {
-												const candidateDistance = Math.hypot(candidate.element.x - tooltip.caretX, candidate.element.y - tooltip.caretY);
-												const nearestDistance = Math.hypot(nearest.element.x - tooltip.caretX, nearest.element.y - tooltip.caretY);
-												return candidateDistance < nearestDistance ? candidate : nearest;
-											});
+											if (!tooltip || tooltip.opacity === 0 || !point) return;
+											const element = point.element;
+											const pointColor = element.options?.backgroundColor || chart.data.datasets[point.datasetIndex]?.borderColor || 'rgb(59, 130, 246)';
 											chart.ctx.save();
 											chart.ctx.beginPath();
 											chart.ctx.rect(chart.chartArea.left, chart.chartArea.top, chart.chartArea.right - chart.chartArea.left, chart.chartArea.bottom - chart.chartArea.top);
 											chart.ctx.clip();
-											point.element.draw(chart.ctx, chart.chartArea);
+											chart.ctx.beginPath();
+											chart.ctx.arc(element.x, element.y, 6, 0, Math.PI * 2);
+											chart.ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+											chart.ctx.fill();
+											chart.ctx.beginPath();
+											chart.ctx.arc(element.x, element.y, 3.5, 0, Math.PI * 2);
+											chart.ctx.fillStyle = pointColor;
+											chart.ctx.fill();
 											chart.ctx.restore();
 										}
 									};
