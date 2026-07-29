@@ -45,7 +45,7 @@ func nativeSDLCRolePrompt(role string) (string, error) {
 	case "bug_finder", "optimization_finder", "redundancy_finder":
 		return nativeSDLCFinderPrompt, nil
 	case "native_inbox":
-		return nativeSDLCNotificationInboxPrompt, nil
+		return NativeSDLCNotificationInboxPrompt, nil
 	case "loop_auditor":
 		return nativeSDLCLoopAuditorPrompt, nil
 	default:
