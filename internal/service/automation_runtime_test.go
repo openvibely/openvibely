@@ -1002,7 +1002,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 			return &GitHubIssue{Number: 42, URL: "https://github.com/example/runtime/issues/42", Title: req.Title, State: "open"}, nil
 		},
 		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
-			return &GitHubAuthenticatedUser{Login: "dev"}, []GitHubIssue{{Number: 42, Title: "Exact issue", State: "open"}, {Number: 43, Title: "Second issue", State: "open"}, {Number: 44, Title: "Local remote issue", State: "open"}}, nil
+			return &GitHubAuthenticatedUser{Login: "dev"}, []GitHubIssue{{Number: 42, Title: "Exact issue", State: "open"}, {Number: 43, Title: "Second owned issue", State: "open"}, {Number: 44, Title: "Local remote issue", State: "open"}, {Number: 45, Title: "Unrelated assigned issue", State: "open"}}, nil
 		},
 		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
 			return &GitHubPullRequest{Number: 7, URL: "https://github.com/example/runtime/pull/7", State: "open"}, nil
@@ -1023,6 +1023,11 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	ambiguousInput := githubCreateIssueRuntimeInput{Title: "Ambiguous issue", Body: "body", Labels: []string{}}
 	repoRef, err := provider.ResolveRepo(ctx, fixture.project.RepoURL, fixture.project.RepoPath)
 	require.NoError(t, err)
+	for _, ownedIssue := range []GitHubIssue{{Number: 43, Title: "Second owned issue"}, {Number: 44, Title: "Local remote issue"}} {
+		recorded, recordErr := recordGitHubIssueCreated(ctx, opts, repoRef, &ownedIssue, fmt.Sprintf("owned-issue-%d", ownedIssue.Number))
+		require.NoError(t, recordErr)
+		require.Equal(t, 1, recorded)
+	}
 	ambiguousKey := githubIssueCreationActivityKey(ctx, repoRef, ambiguousInput)
 	resourceID, err := fixture.repo.ReserveExternalActivity(ctx, fixture.project.ID, binding, ambiguousKey, "create_github_issue", "github_issue")
 	require.NoError(t, err)
@@ -1038,11 +1043,15 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	_, err = handlers["github_create_issue"](inboxCtx, json.RawMessage(`{"title":"Unauthorized inbox issue"}`))
 	require.ErrorContains(t, err, "not authorized by the caller's Automation graph")
 	require.Equal(t, int32(1), createCalls.Load(), "an Automation node without a create-issue edge must fail closed")
-	_, err = handlers["github_list_my_assigned_issues"](inboxCtx, json.RawMessage(`{}`))
+	assignedOutput, err := handlers["github_list_my_assigned_issues"](inboxCtx, json.RawMessage(`{}`))
 	require.NoError(t, err)
+	require.Contains(t, assignedOutput, `"Number":42`)
+	require.Contains(t, assignedOutput, `"Number":43`)
+	require.Contains(t, assignedOutput, `"Number":44`)
+	require.NotContains(t, assignedOutput, `"Number":45`)
 	var issueItems int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND kind = 'github_issue'`, fixture.definition.Automation.ID).Scan(&issueItems))
-	require.Equal(t, 3, issueItems, "one shared inbox execution must preserve distinct issue work items")
+	require.Equal(t, 3, issueItems, "the inbox must retain only issues created by its Automation producers")
 
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(fixture.taskRepo, nil, workerSvc)
@@ -1220,7 +1229,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activity_resources WHERE resource_type = 'pull_request' AND resource_id = 'github:example/runtime:pull:7'`).Scan(&prResources))
 	require.Equal(t, 1, prResources)
 	edgeExpectations := map[string]int{
-		"bug_to_issue": 1, "issue_to_assignment": 1, "assignment_to_inbox": 3,
+		"bug_to_issue": 3, "issue_to_assignment": 3, "assignment_to_inbox": 3,
 		"inbox_to_implementation": 3, "implementation_to_pr": 1, "pr_to_review": 1,
 	}
 	for edgeKey, expected := range edgeExpectations {
@@ -2035,6 +2044,60 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	require.NoError(t, err)
 	require.Empty(t, provider.resolvedURL)
 	require.Equal(t, fixture.project.RepoPath, provider.resolvedPath, "Automation external refresh must fall back to the project's local Git remote")
+}
+
+func TestAutomationRuntimeCustomNativeInboxRequiresExactProducerProvenance(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Scoped Native runtime")
+	ctx := context.Background()
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("First Native mailbox")})
+	require.NoError(t, err)
+	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("Second Native mailbox")})
+	require.NoError(t, err)
+
+	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo.SetAutomationRepo(h.automationRepo)
+	alertSvc := NewAlertService(alertRepo, nil)
+	createApproved := func(definition *models.AutomationDefinition, title, key string) *models.Alert {
+		producer := automationNodeByKey(t, definition, "custom_producer")
+		producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+			AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: producer.ID,
+		}}})
+		alert, createErr := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: title, IdempotencyKey: key})
+		require.NoError(t, createErr)
+		require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, alert.ID, models.AlertDecisionApproved))
+		return alert
+	}
+	firstAlert := createApproved(first.Definition, "First finding", "first-finding")
+	secondAlert := createApproved(second.Definition, "Second finding", "second-finding")
+
+	provenance, ok := firstAlert.Metadata[models.AlertAutomationProvenanceMetadataKey].([]any)
+	require.True(t, ok)
+	require.Len(t, provenance, 1)
+	entry, ok := provenance[0].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, first.Definition.Automation.ID, entry["automation_id"])
+	require.Equal(t, automationNodeByKey(t, first.Definition, "custom_approved_inbox").ID, entry["inbox_node_id"])
+
+	firstInbox := automationNodeByKey(t, first.Definition, "custom_approved_inbox")
+	forgedAlert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Forged finding", IdempotencyKey: "forged-finding", Metadata: map[string]any{
+		models.AlertAutomationProvenanceMetadataKey: []any{map[string]any{"automation_id": first.Definition.Automation.ID, "version_id": first.Definition.Version.ID, "inbox_node_id": firstInbox.ID}},
+	}})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, forgedAlert.ID, models.AlertDecisionApproved))
+	inboxCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: first.Definition.Automation.ID, VersionID: first.Definition.Version.ID, NodeID: firstInbox.ID,
+	}}})
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: h.project.ID, CallerTaskID: "first-inbox", AlertSvc: alertSvc, TaskRepo: h.taskRepo})
+	output, err := handlers["list_alerts"](inboxCtx, json.RawMessage(`{"decision_state":"approved","processing_state":"unclaimed"}`))
+	require.NoError(t, err)
+	require.Contains(t, output, firstAlert.ID)
+	require.NotContains(t, output, secondAlert.ID)
+	require.NotContains(t, output, forgedAlert.ID)
+
+	_, err = handlers["claim_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+secondAlert.ID+`","lease_seconds":60}`))
+	require.ErrorContains(t, err, "not owned by this Automation inbox")
+	_, err = handlers["claim_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+forgedAlert.ID+`","lease_seconds":60}`))
+	require.ErrorContains(t, err, "not owned by this Automation inbox")
 }
 
 func TestAutomationRuntimeCustomNativeMailboxUsesRoleTopologyInsteadOfMaintainedNodeKeys(t *testing.T) {

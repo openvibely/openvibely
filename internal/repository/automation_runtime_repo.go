@@ -1913,6 +1913,29 @@ func (r *AutomationRepo) AutomationExternalState(ctx context.Context, projectID,
 	return state, nil
 }
 
+func (r *AutomationRepo) GitHubIssueOwnedByInbox(ctx context.Context, projectID string, binding models.AutomationBinding, resourceID string) (bool, error) {
+	var owned bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1
+		FROM automation_activities activity
+		JOIN automation_activity_resources resource ON resource.activity_id = activity.id
+		JOIN automation_edges issue_edge ON issue_edge.source_node_id = activity.node_id
+			AND issue_edge.project_id = activity.project_id AND issue_edge.automation_id = activity.automation_id
+			AND issue_edge.version_id = activity.version_id
+		JOIN automation_nodes assignment ON assignment.id = issue_edge.target_node_id
+			AND assignment.project_id = activity.project_id AND assignment.automation_id = activity.automation_id
+			AND assignment.version_id = activity.version_id
+		JOIN automation_edges inbox_edge ON inbox_edge.source_node_id = assignment.id
+			AND inbox_edge.project_id = activity.project_id AND inbox_edge.automation_id = activity.automation_id
+			AND inbox_edge.version_id = activity.version_id
+		WHERE activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+			AND activity.activity_type = 'create_github_issue' AND resource.resource_type = 'github_issue'
+			AND resource.resource_id = ? AND assignment.role = 'github_assignment'
+			AND inbox_edge.target_node_id = ?
+	)`, projectID, binding.AutomationID, binding.VersionID, resourceID, binding.NodeID).Scan(&owned)
+	return owned, err
+}
+
 func (r *AutomationRepo) BindingsForActivityResource(ctx context.Context, projectID, automationID, resourceType, resourceID string) (models.AutomationContext, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT a.automation_id, a.version_id, COALESCE(a.invocation_id, ''),
 		a.node_id, COALESCE(a.work_item_id, '')

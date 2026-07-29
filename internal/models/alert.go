@@ -14,6 +14,10 @@ type AlertScope string
 
 const AlertScopeProject AlertScope = "project"
 
+// AlertAutomationProvenanceMetadataKey identifies server-owned Automation routing metadata.
+// Runtime creation overwrites any model-supplied value at this key.
+const AlertAutomationProvenanceMetadataKey = "openvibely_automation_provenance"
+
 type AlertDecisionState string
 
 const (
@@ -79,6 +83,7 @@ type AlertListFilter struct {
 	Source                   string
 	Read                     *bool
 	ImplementationTaskLinked *bool
+	AutomationInboxBindings  []AutomationBinding
 	Limit                    int
 	Offset                   int
 }

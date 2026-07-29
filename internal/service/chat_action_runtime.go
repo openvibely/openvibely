@@ -1147,6 +1147,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if len(source) > 100 {
 				return "", fmt.Errorf("source must be at most 100 characters")
 			}
+			delete(req.Metadata, models.AlertAutomationProvenanceMetadataKey)
 			a := &models.Alert{ProjectID: opts.ProjectID, Scope: models.AlertScopeProject, Type: models.AlertType(req.Type),
 				Severity: severity, Title: req.Title, Message: req.Message, Body: req.Body, Source: source,
 				Metadata: req.Metadata, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey)}
@@ -1193,7 +1194,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if req.ProcessingState != "" && req.ProcessingState != string(models.AlertProcessingNotApplicable) && req.ProcessingState != string(models.AlertProcessingUnclaimed) && req.ProcessingState != string(models.AlertProcessingClaimed) && req.ProcessingState != string(models.AlertProcessingImplementationTaskLinked) && req.ProcessingState != string(models.AlertProcessingCompleted) && req.ProcessingState != string(models.AlertProcessingFailed) {
 				return "", fmt.Errorf("invalid processing_state %q", req.ProcessingState)
 			}
-			alerts, err := opts.AlertSvc.ListFiltered(ctx, opts.ProjectID, models.AlertListFilter{
+			alerts, err := opts.AlertSvc.ListFilteredForRuntime(ctx, opts.ProjectID, models.AlertListFilter{
 				DecisionState: models.AlertDecisionState(req.DecisionState), ProcessingState: models.AlertProcessingState(req.ProcessingState),
 				Type: models.AlertType(req.Type), Source: req.Source, Read: req.Read,
 				ImplementationTaskLinked: req.ImplementationTaskLinked, Limit: req.Limit, Offset: req.Offset,
@@ -1248,6 +1249,9 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := requireService(); err != nil {
 				return "", err
 			}
+			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
+				return "", err
+			}
 			lease := time.Duration(req.LeaseSeconds) * time.Second
 			a, err := opts.AlertSvc.ClaimApproved(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, lease)
 			if err != nil {
@@ -1276,6 +1280,9 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := requireService(); err != nil {
 				return "", err
 			}
+			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
+				return "", err
+			}
 			task, err := opts.AlertSvc.CreateImplementationTask(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, models.AlertImplementationTaskInput{
 				Title: req.Title, Prompt: req.Prompt, Priority: req.Priority, Tag: req.Tag,
 			})
@@ -1302,6 +1309,9 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := requireService(); err != nil {
 				return "", err
 			}
+			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
+				return "", err
+			}
 			if err := opts.AlertSvc.LinkImplementationTask(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, req.TaskID); err != nil {
 				return "", err
 			}
@@ -1324,6 +1334,9 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				return "", err
 			}
 			if err := requireService(); err != nil {
+				return "", err
+			}
+			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
 				return "", err
 			}
 			if err := opts.AlertSvc.ReleaseClaim(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID); err != nil {
@@ -1355,6 +1368,9 @@ func alertTerminalRuntimeHandler(opts AlertRuntimeOptions, state models.AlertPro
 		}
 		if opts.AlertSvc == nil {
 			return "", fmt.Errorf("alert service not available")
+		}
+		if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
+			return "", err
 		}
 		if err := opts.AlertSvc.MarkProcessing(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, state, req.Message); err != nil {
 			return "", err

@@ -101,10 +101,6 @@ func (r *AlertRepo) CreateIdempotent(ctx context.Context, a *models.Alert) (*mod
 	if err := normalizeAlert(a); err != nil {
 		return nil, err
 	}
-	metadata, err := json.Marshal(a.Metadata)
-	if err != nil {
-		return nil, fmt.Errorf("encoding alert metadata: %w", err)
-	}
 	hasAutomationContext := a.AutomationContext != nil && r.automationRepo != nil
 	var automationContext models.AutomationContext
 	if hasAutomationContext {
@@ -117,6 +113,15 @@ func (r *AlertRepo) CreateIdempotent(ctx context.Context, a *models.Alert) (*mod
 	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return nil, err
+	}
+	if hasAutomationContext {
+		if err := applyAlertAutomationProvenance(ctx, conn, a, automationContext); err != nil {
+			return nil, err
+		}
+	}
+	metadata, err := json.Marshal(a.Metadata)
+	if err != nil {
+		return nil, fmt.Errorf("encoding alert metadata: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -201,6 +206,56 @@ func (r *AlertRepo) ListByProject(ctx context.Context, projectID string, limit i
 	return r.ListFiltered(ctx, projectID, models.AlertListFilter{Limit: limit})
 }
 
+func (r *AlertRepo) NativeInboxBindings(ctx context.Context, automationContext models.AutomationContext) ([]models.AutomationBinding, error) {
+	bindings := make([]models.AutomationBinding, 0, len(automationContext.Bindings))
+	for _, binding := range automationContext.Bindings {
+		var role string
+		err := r.db.QueryRowContext(ctx, `SELECT role FROM automation_nodes
+			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND id = ?`,
+			automationContext.ProjectID, binding.AutomationID, binding.VersionID, binding.NodeID).Scan(&role)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if role == "native_inbox" {
+			bindings = append(bindings, binding)
+		}
+	}
+	return bindings, nil
+}
+
+func (r *AlertRepo) AlertOwnedByAutomationInbox(ctx context.Context, projectID, alertID string, bindings []models.AutomationBinding) (bool, error) {
+	for _, binding := range bindings {
+		var owned bool
+		if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1
+			FROM automation_activities activity
+			JOIN automation_activity_resources resource ON resource.activity_id = activity.id
+			JOIN automation_edges approval_edge ON approval_edge.source_node_id = activity.node_id
+				AND approval_edge.project_id = activity.project_id AND approval_edge.automation_id = activity.automation_id
+				AND approval_edge.version_id = activity.version_id
+			JOIN automation_nodes approval ON approval.id = approval_edge.target_node_id
+				AND approval.project_id = activity.project_id AND approval.automation_id = activity.automation_id
+				AND approval.version_id = activity.version_id
+			JOIN automation_edges inbox_edge ON inbox_edge.source_node_id = approval.id
+				AND inbox_edge.project_id = activity.project_id AND inbox_edge.automation_id = activity.automation_id
+				AND inbox_edge.version_id = activity.version_id
+			WHERE activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+				AND activity.activity_type = 'create_notification' AND resource.resource_type = 'alert'
+				AND resource.resource_id = ? AND approval.role = 'native_approval'
+				AND inbox_edge.target_node_id = ?
+		)`, projectID, binding.AutomationID, binding.VersionID, alertID, binding.NodeID).Scan(&owned); err != nil {
+			return false, err
+		}
+		if owned {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.Alert, error) {
 	if filter.Limit <= 0 {
 		filter.Limit = 50
@@ -239,6 +294,33 @@ func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter m
 		} else {
 			query += ` AND implementation_task_id IS NULL`
 		}
+	}
+	if len(filter.AutomationInboxBindings) > 0 {
+		query += ` AND (`
+		for i, binding := range filter.AutomationInboxBindings {
+			if i > 0 {
+				query += ` OR `
+			}
+			query += `EXISTS (
+				SELECT 1
+				FROM automation_activities activity
+				JOIN automation_activity_resources resource ON resource.activity_id = activity.id
+				JOIN automation_edges approval_edge ON approval_edge.source_node_id = activity.node_id
+					AND approval_edge.project_id = activity.project_id AND approval_edge.automation_id = activity.automation_id
+					AND approval_edge.version_id = activity.version_id
+				JOIN automation_nodes approval ON approval.id = approval_edge.target_node_id
+					AND approval.project_id = activity.project_id AND approval.automation_id = activity.automation_id
+					AND approval.version_id = activity.version_id
+				JOIN automation_edges inbox_edge ON inbox_edge.source_node_id = approval.id
+					AND inbox_edge.project_id = activity.project_id AND inbox_edge.automation_id = activity.automation_id
+					AND inbox_edge.version_id = activity.version_id
+				WHERE activity.project_id = alerts.project_id AND activity.automation_id = ? AND activity.version_id = ?
+					AND activity.activity_type = 'create_notification' AND resource.resource_type = 'alert'
+					AND resource.resource_id = alerts.id AND approval.role = 'native_approval'
+					AND inbox_edge.target_node_id = ?)`
+			args = append(args, binding.AutomationID, binding.VersionID, binding.NodeID)
+		}
+		query += `)`
 	}
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
 	args = append(args, filter.Limit, filter.Offset)

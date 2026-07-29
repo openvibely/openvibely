@@ -97,6 +97,47 @@ func (s *AlertService) ListFiltered(ctx context.Context, projectID string, filte
 	return s.alertRepo.ListFiltered(ctx, projectID, filter)
 }
 
+func (s *AlertService) ListFilteredForRuntime(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.Alert, error) {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound {
+		return s.alertRepo.ListFiltered(ctx, projectID, filter)
+	}
+	if automationContext.ProjectID != projectID {
+		return nil, fmt.Errorf("alert Automation project mismatch")
+	}
+	bindings, err := s.alertRepo.NativeInboxBindings(ctx, automationContext)
+	if err != nil {
+		return nil, err
+	}
+	if len(bindings) == 0 {
+		return s.alertRepo.ListFiltered(ctx, projectID, filter)
+	}
+	filter.AutomationInboxBindings = bindings
+	return s.alertRepo.ListFiltered(ctx, projectID, filter)
+}
+
+func (s *AlertService) RequireAutomationInboxOwnership(ctx context.Context, projectID, alertID string) error {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound {
+		return nil
+	}
+	if automationContext.ProjectID != projectID {
+		return fmt.Errorf("alert Automation project mismatch")
+	}
+	bindings, err := s.alertRepo.NativeInboxBindings(ctx, automationContext)
+	if err != nil {
+		return err
+	}
+	owned, err := s.alertRepo.AlertOwnedByAutomationInbox(ctx, projectID, alertID, bindings)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return fmt.Errorf("notification %q is not owned by this Automation inbox", alertID)
+	}
+	return nil
+}
+
 func (s *AlertService) CountUnread(ctx context.Context, projectID string) (int, error) {
 	return s.alertRepo.CountUnread(ctx, projectID)
 }

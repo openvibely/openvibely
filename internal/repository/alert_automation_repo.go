@@ -39,9 +39,9 @@ func automationTargetNodeIDByRole(ctx context.Context, exec SQLExecutor, project
 	return nodeID, err
 }
 
-func customAlertHandoffNodeIDs(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID, sourceNodeID string) (string, string, bool, error) {
-	var notificationNode, approvalNode string
-	err := exec.QueryRowContext(ctx, `SELECT notification.id, approval.id
+func alertHandoffNodeIDs(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID, sourceNodeID string) (string, string, string, bool, error) {
+	var notificationNode, approvalNode, inboxNode string
+	err := exec.QueryRowContext(ctx, `SELECT notification.id, approval.id, inbox.id
 		FROM automation_edges source_edge
 		JOIN automation_nodes notification ON notification.id = source_edge.target_node_id
 			AND notification.project_id = source_edge.project_id AND notification.automation_id = source_edge.automation_id
@@ -52,17 +52,53 @@ func customAlertHandoffNodeIDs(ctx context.Context, exec SQLExecutor, projectID,
 		JOIN automation_nodes approval ON approval.id = approval_edge.target_node_id
 			AND approval.project_id = source_edge.project_id AND approval.automation_id = source_edge.automation_id
 			AND approval.version_id = source_edge.version_id
+		JOIN automation_edges inbox_edge ON inbox_edge.source_node_id = approval.id
+			AND inbox_edge.project_id = source_edge.project_id AND inbox_edge.automation_id = source_edge.automation_id
+			AND inbox_edge.version_id = source_edge.version_id
+		JOIN automation_nodes inbox ON inbox.id = inbox_edge.target_node_id
+			AND inbox.project_id = source_edge.project_id AND inbox.automation_id = source_edge.automation_id
+			AND inbox.version_id = source_edge.version_id
 		WHERE source_edge.project_id = ? AND source_edge.automation_id = ? AND source_edge.version_id = ?
 			AND source_edge.source_node_id = ? AND notification.node_type = 'action'
 			AND notification.role = 'create_notification' AND approval.node_type = 'human_gate'
-			AND approval.role = 'native_approval'`, projectID, automationID, versionID, sourceNodeID).Scan(&notificationNode, &approvalNode)
+			AND approval.role = 'native_approval' AND inbox.role = 'native_inbox'`,
+		projectID, automationID, versionID, sourceNodeID).Scan(&notificationNode, &approvalNode, &inboxNode)
 	if err == sql.ErrNoRows {
-		return "", "", false, nil
+		return "", "", "", false, nil
 	}
 	if err != nil {
-		return "", "", false, err
+		return "", "", "", false, err
 	}
-	return notificationNode, approvalNode, true, nil
+	return notificationNode, approvalNode, inboxNode, true, nil
+}
+
+func applyAlertAutomationProvenance(ctx context.Context, exec SQLExecutor, alert *models.Alert, automationContext models.AutomationContext) error {
+	entries := make([]any, 0, len(automationContext.Bindings))
+	for _, binding := range automationContext.Bindings {
+		notificationNode, approvalNode, inboxNode, found, err := alertHandoffNodeIDs(ctx, exec, alert.ProjectID, binding.AutomationID, binding.VersionID, binding.NodeID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			continue
+		}
+		entries = append(entries, map[string]any{
+			"automation_id":        binding.AutomationID,
+			"version_id":           binding.VersionID,
+			"producer_node_id":     binding.NodeID,
+			"notification_node_id": notificationNode,
+			"approval_node_id":     approvalNode,
+			"inbox_node_id":        inboxNode,
+		})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if alert.Metadata == nil {
+		alert.Metadata = map[string]any{}
+	}
+	alert.Metadata[models.AlertAutomationProvenanceMetadataKey] = entries
+	return nil
 }
 
 func recordAlertCreatedProjection(ctx context.Context, exec SQLExecutor, alert *models.Alert, automationContext models.AutomationContext) error {
@@ -89,7 +125,7 @@ func recordAlertCreatedProjection(ctx context.Context, exec SQLExecutor, alert *
 			}
 		} else if adapterKey == "custom" {
 			var found bool
-			notificationNode, approvalNode, found, err = customAlertHandoffNodeIDs(ctx, exec, alert.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, sourceBinding.NodeID)
+			notificationNode, approvalNode, _, found, err = alertHandoffNodeIDs(ctx, exec, alert.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, sourceBinding.NodeID)
 			if err != nil {
 				return err
 			}

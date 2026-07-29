@@ -413,7 +413,7 @@ func TestAutomationSaveHardensCustomNativeInboxPersistedProjectPrompt(t *testing
 	require.Contains(t, inboxTask.Prompt, "Only process approved notifications created by the connected upstream producers on this inbox's approval branch in this same Automation")
 	require.Contains(t, inboxTask.Prompt, `Producer: "Daily review"`)
 	require.Contains(t, inboxTask.Prompt, `Purpose: "Review one focused area and prepare an actionable notification."`)
-	require.Contains(t, inboxTask.Prompt, "Skip every unrelated project notification")
+	require.Contains(t, inboxTask.Prompt, "exact trusted Automation, graph-version, and inbox-branch provenance")
 	require.Contains(t, inboxTask.Prompt, "Call list_alerts without project_id")
 	require.Contains(t, inboxTask.Prompt, "Do not pass the read filter")
 	require.Contains(t, inboxTask.Prompt, "runtime automatically uses this scheduled Task's persisted project")
@@ -923,7 +923,7 @@ func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRela
 	require.Contains(t, inboxTask.Prompt, "Only process assigned issues created by the connected upstream producers on this inbox's assignment branch in this same Automation")
 	require.Contains(t, inboxTask.Prompt, `Producer: "Find model releases"`)
 	require.Contains(t, inboxTask.Prompt, `Purpose: "Find relevant model releases."`)
-	require.Contains(t, inboxTask.Prompt, "Skip every unrelated repository issue")
+	require.Contains(t, inboxTask.Prompt, "exact trusted local Automation, graph-version, and producer-branch creation records")
 	require.Contains(t, inboxTask.Prompt, "Create at most one visible task per actionable assigned issue")
 	require.NotContains(t, inboxTask.Prompt, "Connected Task handoff")
 }
