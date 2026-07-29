@@ -96,13 +96,13 @@ func TestHandler_GetTask_FromSchedulePage(t *testing.T) {
 	}
 }
 
-func TestHandler_GetTask_EditFormHydratesScheduleClearContext(t *testing.T) {
+func TestHandler_GetTask_EditFormOmitsScheduleContextControls(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 
 	task := &models.Task{
 		ProjectID: "default",
-		Title:     "Edit Scheduled Context",
+		Title:     "Edit Scheduled Task",
 		Category:  models.CategoryScheduled,
 		Status:    models.StatusPending,
 		Prompt:    "Original prompt",
@@ -110,7 +110,7 @@ func TestHandler_GetTask_EditFormHydratesScheduleClearContext(t *testing.T) {
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	schedule := createSchedule(t, h, task.ID, time.Now().Add(time.Hour), func(schedule *models.Schedule) {
+	createSchedule(t, h, task.ID, time.Now().Add(time.Hour), func(schedule *models.Schedule) {
 		schedule.ClearContextOnStart = true
 	})
 
@@ -123,68 +123,41 @@ func TestHandler_GetTask_EditFormHydratesScheduleClearContext(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{
-		`name="schedule_context_settings_present" value="1"`,
-		`name="schedule_context_schedule_ids" value="` + schedule.ID + `"`,
-		`name="clear_context_schedule_ids" value="` + schedule.ID + `"`,
-		`Clear context on start`,
+	for _, unwanted := range []string{
+		`name="schedule_context_settings_present"`,
+		`name="schedule_context_schedule_ids"`,
+		`name="clear_context_schedule_ids"`,
 	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("expected Edit Task form to contain %q", want)
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("expected Edit Task form to omit %q", unwanted)
 		}
-	}
-	checkbox := `name="clear_context_schedule_ids" value="` + schedule.ID + `"`
-	start := strings.Index(body, checkbox)
-	if start < 0 || !strings.Contains(body[start:min(len(body), start+200)], "checked") {
-		t.Fatal("expected persisted clear-context schedule to render checked in Edit Task form")
 	}
 }
 
-func TestHandler_UpdateTask_UpdatesOnlyOwnedScheduleContextSettings(t *testing.T) {
+func TestHandler_UpdateTask_DoesNotModifyScheduleContextPolicy(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
 
-	task := &models.Task{ProjectID: "default", Title: "Scheduled Context Settings", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "run"}
-	otherTask := &models.Task{ProjectID: "default", Title: "Other Scheduled Context", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "other"}
+	task := &models.Task{ProjectID: "default", Title: "Scheduled Context Policy", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "run"}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	if err := h.taskSvc.Create(ctx, otherTask); err != nil {
-		t.Fatalf("create other task: %v", err)
-	}
-	first := createSchedule(t, h, task.ID, time.Now().Add(time.Hour), func(schedule *models.Schedule) {
+	clearSchedule := createSchedule(t, h, task.ID, time.Now().Add(time.Hour), func(schedule *models.Schedule) {
 		schedule.ClearContextOnStart = true
-		schedule.RepeatType = models.RepeatHours
-		schedule.RepeatInterval = 3
 	})
-	second := createSchedule(t, h, task.ID, time.Now().Add(2*time.Hour), func(schedule *models.Schedule) {
-		schedule.RepeatType = models.RepeatDaily
-		schedule.RepeatInterval = 2
+	retainedSchedule := createSchedule(t, h, task.ID, time.Now().Add(2*time.Hour), func(schedule *models.Schedule) {
+		schedule.ClearContextOnStart = false
 	})
-	other := createSchedule(t, h, otherTask.ID, time.Now().Add(3*time.Hour), func(schedule *models.Schedule) { schedule.ClearContextOnStart = true })
-	// Simulate a schedule created after the Edit Task modal was rendered. It is
-	// current DB state, but absent from the form's represented schedule IDs.
-	later := createSchedule(t, h, task.ID, time.Now().Add(4*time.Hour), func(schedule *models.Schedule) { schedule.ClearContextOnStart = true })
-	firstLastRun := time.Now().UTC().Truncate(time.Second)
-	firstNextRun := firstLastRun.Add(3 * time.Hour)
-	secondLastRun := firstLastRun.Add(time.Minute)
-	secondNextRun := secondLastRun.Add(48 * time.Hour)
-	if err := h.scheduleRepo.MarkRan(ctx, first.ID, firstLastRun, &firstNextRun); err != nil {
-		t.Fatalf("mark first schedule ran: %v", err)
-	}
-	if err := h.scheduleRepo.MarkRan(ctx, second.ID, secondLastRun, &secondNextRun); err != nil {
-		t.Fatalf("mark second schedule ran: %v", err)
-	}
 
 	form := url.Values{
-		"title":                             {task.Title},
+		"title":                             {"Updated Scheduled Context Policy"},
 		"prompt":                            {task.Prompt},
 		"category":                          {string(task.Category)},
 		"priority":                          {"2"},
 		"tag":                               {""},
 		"schedule_context_settings_present": {"1"},
-		"schedule_context_schedule_ids":     {first.ID, second.ID},
-		"clear_context_schedule_ids":        {second.ID, other.ID},
+		"schedule_context_schedule_ids":     {clearSchedule.ID, retainedSchedule.ID},
+		"clear_context_schedule_ids":        {retainedSchedule.ID},
 	}
 	req := httptest.NewRequest(http.MethodPut, "/tasks/"+task.ID, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -194,45 +167,19 @@ func TestHandler_UpdateTask_UpdatesOnlyOwnedScheduleContextSettings(t *testing.T
 		t.Fatalf("expected status 303, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	gotFirst, err := h.scheduleRepo.GetByID(ctx, first.ID)
+	gotClear, err := h.scheduleRepo.GetByID(ctx, clearSchedule.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotSecond, err := h.scheduleRepo.GetByID(ctx, second.ID)
+	gotRetained, err := h.scheduleRepo.GetByID(ctx, retainedSchedule.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotOther, err := h.scheduleRepo.GetByID(ctx, other.ID)
-	if err != nil {
-		t.Fatal(err)
+	if !gotClear.ClearContextOnStart {
+		t.Fatal("ordinary Task Details edit must preserve a true schedule context policy")
 	}
-	gotLater, err := h.scheduleRepo.GetByID(ctx, later.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotFirst.ClearContextOnStart {
-		t.Fatal("unchecked owned schedule must be updated to false")
-	}
-	if !gotSecond.ClearContextOnStart {
-		t.Fatal("checked owned schedule must be updated to true")
-	}
-	if !gotOther.ClearContextOnStart {
-		t.Fatal("unrelated schedule must not be changed")
-	}
-	if !gotLater.ClearContextOnStart {
-		t.Fatal("schedule created after form rendering must not be changed")
-	}
-	if !gotFirst.RunAt.Equal(first.RunAt) || gotFirst.RepeatType != models.RepeatHours || gotFirst.RepeatInterval != 3 || !gotFirst.Enabled {
-		t.Fatalf("first schedule configuration changed: %#v", gotFirst)
-	}
-	if gotFirst.LastRun == nil || !gotFirst.LastRun.Equal(firstLastRun) || gotFirst.NextRun == nil || !gotFirst.NextRun.Equal(firstNextRun) {
-		t.Fatalf("first schedule timing changed: last=%v next=%v", gotFirst.LastRun, gotFirst.NextRun)
-	}
-	if !gotSecond.RunAt.Equal(second.RunAt) || gotSecond.RepeatType != models.RepeatDaily || gotSecond.RepeatInterval != 2 || !gotSecond.Enabled {
-		t.Fatalf("second schedule configuration changed: %#v", gotSecond)
-	}
-	if gotSecond.LastRun == nil || !gotSecond.LastRun.Equal(secondLastRun) || gotSecond.NextRun == nil || !gotSecond.NextRun.Equal(secondNextRun) {
-		t.Fatalf("second schedule timing changed: last=%v next=%v", gotSecond.LastRun, gotSecond.NextRun)
+	if gotRetained.ClearContextOnStart {
+		t.Fatal("ordinary Task Details edit must preserve a false schedule context policy")
 	}
 }
 

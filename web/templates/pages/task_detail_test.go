@@ -1055,7 +1055,7 @@ func TestTaskDetailContent_ScheduleEnabledState(t *testing.T) {
 	}
 }
 
-func TestTaskDetailScheduleClearContextControlsDefaultAndHydrate(t *testing.T) {
+func TestTaskDetailScheduleSurfacesDefaultAndHydrateClearContext(t *testing.T) {
 	task := &models.Task{ID: "task-schedule-context", ProjectID: "default", Title: "Scheduled context"}
 	schedules := []models.Schedule{
 		{ID: "clear", TaskID: task.ID, RunAt: time.Now(), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true},
@@ -1069,8 +1069,8 @@ func TestTaskDetailScheduleClearContextControlsDefaultAndHydrate(t *testing.T) {
 	if strings.Count(html, `name="clear_context_on_start" value="true"`) != 3 {
 		t.Fatalf("expected add and two schedule edit controls, got %d", strings.Count(html, `name="clear_context_on_start" value="true"`))
 	}
-	if strings.Count(html, `name="clear_context_schedule_ids"`) != 2 {
-		t.Fatalf("expected two task edit controls, got %d", strings.Count(html, `name="clear_context_schedule_ids"`))
+	if strings.Contains(html, `name="clear_context_schedule_ids"`) {
+		t.Fatal("Task Details edit form must not render schedule context controls")
 	}
 	clearCardStart := strings.Index(html, `id="schedule-card-clear"`)
 	keepCardStart := strings.Index(html, `id="schedule-card-keep"`)

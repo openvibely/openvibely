@@ -1124,39 +1124,6 @@ func (h *Handler) updateTaskGoalFromEditForm(c echo.Context, taskID string) erro
 	return nil
 }
 
-func (h *Handler) updateTaskScheduleContextFromEditForm(c echo.Context, taskID string) error {
-	if c.FormValue("schedule_context_settings_present") == "" {
-		return nil
-	}
-	represented := make(map[string]bool)
-	for _, scheduleID := range c.Request().Form["schedule_context_schedule_ids"] {
-		represented[scheduleID] = true
-	}
-	selected := make(map[string]bool)
-	for _, scheduleID := range c.Request().Form["clear_context_schedule_ids"] {
-		if represented[scheduleID] {
-			selected[scheduleID] = true
-		}
-	}
-	schedules, err := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-	if err != nil {
-		return err
-	}
-	for i := range schedules {
-		if !represented[schedules[i].ID] {
-			continue
-		}
-		clearContextOnStart := selected[schedules[i].ID]
-		if schedules[i].ClearContextOnStart == clearContextOnStart {
-			continue
-		}
-		if err := h.scheduleRepo.UpdateClearContextOnStart(c.Request().Context(), schedules[i].ID, taskID, clearContextOnStart); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (h *Handler) UpdateTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] UpdateTask id=%s", taskID)
@@ -1229,10 +1196,6 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
 		}
 		applog.Infof("[handler] UpdateTask error: %v", err)
-		return err
-	}
-	if err := h.updateTaskScheduleContextFromEditForm(c, taskID); err != nil {
-		applog.Infof("[handler] UpdateTask schedule context update error: %v", err)
 		return err
 	}
 	if err := h.updateTaskGoalFromEditForm(c, taskID); err != nil {
