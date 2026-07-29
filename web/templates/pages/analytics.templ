@@ -68,7 +68,7 @@ templ analyticsContent(currentProject *models.Project) {
 									<select id="usageRateModelSelect" class="select select-bordered select-xs w-full max-w-full sm:min-w-48"></select>
 								</div>
 							</div>
-							<div class="h-64"><canvas id="usageRateChart"></canvas></div>
+							<div class="relative h-64"><canvas id="usageRateChart"></canvas></div>
 						</div>
 					</div>
 					<div class="card bg-base-100 shadow-sm border border-base-300">
@@ -100,7 +100,7 @@ templ analyticsContent(currentProject *models.Project) {
 				<div class="card bg-base-100 shadow-sm border border-base-300">
 					<div class="card-body">
 						<h3 class="card-title text-lg">Success/Failure Rates Over Time</h3>
-						<div class="h-64">
+						<div class="relative h-64">
 							<canvas id="successFailureChart"></canvas>
 						</div>
 					</div>
@@ -158,7 +158,7 @@ templ analyticsContent(currentProject *models.Project) {
 								<h3 class="card-title text-lg">Skill Activity Over Time</h3>
 								<p class="text-sm opacity-60">Created, edited, and used skill activity.</p>
 							</div>
-							<div class="h-64">
+							<div class="relative h-64">
 								<canvas id="skillUsageTrendChart"></canvas>
 							</div>
 						</div>
@@ -378,24 +378,51 @@ templ analyticsContent(currentProject *models.Project) {
 											}
 										},
 										afterDraw: function(chart) {
+											let marker = chart.$analyticsHoverMarker;
+											if (!marker) {
+												marker = document.createElement('span');
+												marker.setAttribute('data-analytics-hover-marker', '');
+												marker.setAttribute('aria-hidden', 'true');
+												marker.style.position = 'absolute';
+												marker.style.width = '12px';
+												marker.style.height = '12px';
+												marker.style.boxSizing = 'border-box';
+												marker.style.border = '3px solid rgba(255, 255, 255, 0.96)';
+												marker.style.borderRadius = '9999px';
+												marker.style.transform = 'translate(-50%, -50%)';
+												marker.style.pointerEvents = 'none';
+												marker.style.zIndex = '2';
+												chart.canvas.parentElement.appendChild(marker);
+												chart.$analyticsHoverMarker = marker;
+											}
 											const point = chart.$analyticsHoveredPoint;
 											const tooltip = chart.tooltip;
-											if (!tooltip || tooltip.opacity === 0 || !point) return;
+											if (!tooltip || tooltip.opacity === 0 || !point) {
+												marker.style.display = 'none';
+												return;
+											}
 											const element = point.element;
-											const pointColor = element.options?.backgroundColor || chart.data.datasets[point.datasetIndex]?.borderColor || 'rgb(59, 130, 246)';
-											chart.ctx.save();
-											chart.ctx.beginPath();
-											chart.ctx.rect(chart.chartArea.left, chart.chartArea.top, chart.chartArea.right - chart.chartArea.left, chart.chartArea.bottom - chart.chartArea.top);
-											chart.ctx.clip();
-											chart.ctx.beginPath();
-											chart.ctx.arc(element.x, element.y, 6, 0, Math.PI * 2);
-											chart.ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
-											chart.ctx.fill();
-											chart.ctx.beginPath();
-											chart.ctx.arc(element.x, element.y, 3.5, 0, Math.PI * 2);
-											chart.ctx.fillStyle = pointColor;
-											chart.ctx.fill();
-											chart.ctx.restore();
+											const canvasRect = chart.canvas.getBoundingClientRect();
+											const parentRect = chart.canvas.parentElement.getBoundingClientRect();
+											const scaleX = chart.width ? canvasRect.width / chart.width : 1;
+											const scaleY = chart.height ? canvasRect.height / chart.height : 1;
+											const dataset = chart.data.datasets[point.datasetIndex] || {};
+											const datasetColor = dataset.borderColor || element.options?.borderColor || element.options?.backgroundColor;
+											const markerLeft = canvasRect.left - parentRect.left + element.x * scaleX;
+											const markerTop = canvasRect.top - parentRect.top + element.y * scaleY;
+											const chartLeft = canvasRect.left - parentRect.left + chart.chartArea.left * scaleX;
+											const chartTop = canvasRect.top - parentRect.top + chart.chartArea.top * scaleY;
+											const chartRight = canvasRect.left - parentRect.left + chart.chartArea.right * scaleX;
+											const chartBottom = canvasRect.top - parentRect.top + chart.chartArea.bottom * scaleY;
+											marker.style.left = markerLeft + 'px';
+											marker.style.top = markerTop + 'px';
+											marker.style.clipPath = 'inset(' + Math.max(0, chartTop - markerTop + 6) + 'px ' + Math.max(0, markerLeft + 6 - chartRight) + 'px ' + Math.max(0, markerTop + 6 - chartBottom) + 'px ' + Math.max(0, chartLeft - markerLeft + 6) + 'px)';
+											marker.style.backgroundColor = typeof datasetColor === 'string' ? datasetColor : 'rgb(59, 130, 246)';
+											marker.style.display = 'block';
+										},
+										beforeDestroy: function(chart) {
+											chart.$analyticsHoverMarker?.remove();
+											chart.$analyticsHoverMarker = null;
 										}
 									};
 

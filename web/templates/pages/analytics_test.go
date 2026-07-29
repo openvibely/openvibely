@@ -23,9 +23,12 @@ func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 		`afterEvent: function(chart, args)`,
 		`chart.getElementsAtEventForMode(event, 'nearest', { intersect: false }, false)`,
 		`afterDraw: function(chart)`,
-		`chart.$analyticsHoveredPoint`,
-		`position: 'nearest'`,
-		`caretPadding: 6`,
+		`data-analytics-hover-marker`,
+		`pointerEvents = 'none'`,
+		`zIndex = '2'`,
+		`marker.style.clipPath = 'inset('`,
+		`beforeDestroy: function(chart)`,
+		`position: 'nearest'`, `caretPadding: 6`,
 	} {
 		if !strings.Contains(content, expected) {
 			t.Fatalf("Analytics line-chart hover marker should paint after the tooltip; missing %q", expected)
@@ -33,6 +36,12 @@ func TestAnalyticsContent_LineChartHoverMarkerPaintsAfterTooltip(t *testing.T) {
 	}
 	if got := strings.Count(content, `plugins: [analyticsActivePointOnTop]`); got != 3 {
 		t.Fatalf("expected all 3 Analytics line charts to use the hover layering plugin, got %d", got)
+	}
+	for _, canvasID := range []string{"usageRateChart", "successFailureChart", "skillUsageTrendChart"} {
+		expected := `<div class="relative h-64"><canvas id="` + canvasID + `"` // templ generation compacts adjacent markup.
+		if !strings.Contains(content, expected) {
+			t.Fatalf("expected %s to have a positioned overlay container", canvasID)
+		}
 	}
 }
 
@@ -62,44 +71,48 @@ func TestAnalyticsContent_LineChartHoverMarkerBehaviorInChrome(t *testing.T) {
   window.Chart = function(_canvasContext, config) {
     if (!config.plugins || config.plugins.length === 0) return;
     var plugin = config.plugins[0];
-    var operations = [];
     var points = [
-      {datasetIndex: 0, index: 0, element: {x: 40, y: 80, options: {backgroundColor: 'rgb(34, 197, 94)'}}},
-      {datasetIndex: 1, index: 0, element: {x: 40, y: 20, options: {backgroundColor: 'rgb(59, 130, 246)'}}}
+      {datasetIndex: 0, index: 0, element: {x: 40, y: 80, options: {backgroundColor: 'rgba(34, 197, 94, 0.12)'}}},
+      {datasetIndex: 1, index: 0, element: {x: 40, y: 2, options: {backgroundColor: 'rgba(59, 130, 246, 0.12)'}}}
     ];
+    var canvas = _canvasContext.canvas;
+    canvas.getBoundingClientRect = function() { return {left: 10, top: 20, width: 200, height: 200, right: 210, bottom: 220}; };
+    canvas.parentElement.getBoundingClientRect = function() { return {left: 10, top: 20, width: 200, height: 200, right: 210, bottom: 220}; };
     var chart = {
+      canvas: canvas,
+      width: 100,
+      height: 100,
+      data: {datasets: [
+        {borderColor: 'rgb(34, 197, 94)'},
+        {borderColor: 'rgb(59, 130, 246)'}
+      ]},
       $analyticsHoveredPoint: null,
       chartArea: {left: 0, top: 0, right: 100, bottom: 100},
       tooltip: {opacity: 1},
       getElementsAtEventForMode: function(event, mode, options, useFinalPosition) {
         if (mode !== 'nearest' || options.intersect !== false || useFinalPosition !== false) fail('plugin did not request one pointer-nearest point');
         return event.y < 50 ? [points[1]] : [points[0]];
-      },
-      ctx: {
-        save: function() { operations.push(['save']); },
-        restore: function() { operations.push(['restore']); },
-        beginPath: function() { operations.push(['beginPath']); },
-        rect: function() { operations.push(['rect']); },
-        clip: function() { operations.push(['clip']); },
-        arc: function(x, y, radius) { operations.push(['arc', x, y, radius]); },
-        fill: function() { operations.push(['fill', this.fillStyle]); },
-        set fillStyle(value) { this._fillStyle = value; },
-        get fillStyle() { return this._fillStyle; }
       }
     };
-    var hoverArgs = {event: {type: 'mousemove', x: 40, y: 22}, inChartArea: true, changed: false};
+    var hoverArgs = {event: {type: 'mousemove', x: 40, y: 2}, inChartArea: true, changed: false};
     if (typeof plugin.afterEvent !== 'function') fail('plugin does not track the pointer-nearest point');
     plugin.afterEvent(chart, hoverArgs);
     if (chart.$analyticsHoveredPoint !== points[1]) fail('plugin selected the wrong series point under index interaction');
     if (!hoverArgs.changed) fail('plugin did not schedule a redraw when the nearest series point changed');
     plugin.afterDraw(chart);
-    var arcs = operations.filter(function(operation) { return operation[0] === 'arc'; });
-    var fills = operations.filter(function(operation) { return operation[0] === 'fill'; });
-    if (arcs.length !== 2 || arcs[0][1] !== 40 || arcs[0][2] !== 20 || arcs[0][3] <= arcs[1][3]) fail('plugin did not paint a larger halo and inner marker at the selected point');
-    if (fills.length !== 2 || fills[0][1] === fills[1][1] || fills[1][1] !== 'rgb(59, 130, 246)') fail('plugin marker lacks a contrasting halo or dataset-colored center');
+    var marker = chart.canvas.parentElement.querySelector('[data-analytics-hover-marker]');
+    if (!marker) fail('plugin did not create a DOM marker above the canvas tooltip');
+    if (marker.style.pointerEvents !== 'none' || marker.style.zIndex !== '2') fail('DOM marker does not preserve pointer tracking or layer above the canvas');
+    if (marker.style.left !== '80px' || marker.style.top !== '4px') fail('DOM marker is not responsively positioned over the selected point');
+    var markerClipPath = getComputedStyle(marker).clipPath;
+    if (markerClipPath === 'none' || markerClipPath.indexOf('2px') < 0) fail('DOM marker does not preserve chart-area clipping at an edge point: ' + markerClipPath);
+    if (marker.style.backgroundColor !== 'rgb(59, 130, 246)' || marker.style.borderColor !== 'rgba(255, 255, 255, 0.96)') fail('DOM marker lacks an opaque dataset-colored center and contrasting halo');
     var outArgs = {event: {type: 'mouseout'}, inChartArea: false, changed: false};
     plugin.afterEvent(chart, outArgs);
-    if (chart.$analyticsHoveredPoint !== null || !outArgs.changed) fail('plugin did not clear and redraw the marker on mouseout');
+    plugin.afterDraw(chart);
+    if (chart.$analyticsHoveredPoint !== null || !outArgs.changed || marker.style.display !== 'none') fail('plugin did not clear and hide the marker on mouseout');
+    plugin.beforeDestroy(chart);
+    if (chart.$analyticsHoverMarker !== null || marker.isConnected) fail('plugin did not remove the overlay marker when the chart was destroyed');
     window.__analyticsPluginChecks = (window.__analyticsPluginChecks || 0) + 1;
     if (window.__analyticsPluginChecks === 3) document.getElementById('reconnect-result').setAttribute('data-test-result', 'pass');
   };
