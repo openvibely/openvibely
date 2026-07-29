@@ -135,6 +135,9 @@ func (s *AlertService) RequireAutomationInboxOwnership(ctx context.Context, proj
 	if !owned {
 		return fmt.Errorf("notification %q is not owned by this Automation inbox", alertID)
 	}
+	if err := s.alertRepo.RebindAlertToAutomationInbox(ctx, projectID, alertID, bindings); err != nil {
+		return fmt.Errorf("projecting notification onto the current Automation graph: %w", err)
+	}
 	return nil
 }
 

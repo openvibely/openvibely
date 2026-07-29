@@ -689,8 +689,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 133 {
-		t.Fatalf("max goose version = %d, want 133", maxVersion)
+	if maxVersion != 134 {
+		t.Fatalf("max goose version = %d, want 134", maxVersion)
 	}
 }
 
@@ -841,8 +841,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 133 {
-		t.Fatalf("max goose version = %d, want 133", maxVersion)
+	if maxVersion != 134 {
+		t.Fatalf("max goose version = %d, want 134", maxVersion)
 	}
 }
 
@@ -1328,8 +1328,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 133 {
-		t.Fatalf("max goose version = %d, want 133", maxVersion)
+	if maxVersion != 134 {
+		t.Fatalf("max goose version = %d, want 134", maxVersion)
 	}
 }
 
@@ -1680,8 +1680,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 133 {
-		t.Fatalf("max goose version = %d, want 133", maxVersion)
+	if maxVersion != 134 {
+		t.Fatalf("max goose version = %d, want 134", maxVersion)
 	}
 }
 
@@ -2150,6 +2150,63 @@ func TestMigration129PreservesExistingScheduleContextSemantics(t *testing.T) {
 	}
 	if clearContext || startsNewContext {
 		t.Fatalf("existing rows must preserve prior context semantics: clear=%t boundary=%t", clearContext, startsNewContext)
+	}
+}
+
+func TestMigration134ArtifactMailboxOwnershipSurvivesGraphReplacementWithoutBackfill(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "automation-artifact-mailbox-134.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 133); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-134', 'Migration 134', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state, published_version_id)
+			VALUES ('automation-134', 'project-134', 'artifact-owner-134', 'Artifact owner', 'active', 'version-134');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-134', 'project-134', 'automation-134', 1, 'published', 'manual', 'custom');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 134); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("migration 134 must not infer or backfill historical ownership: got %d rows", count)
+	}
+	if _, err := db.Exec(`INSERT INTO automation_artifact_mailbox_owners
+		(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+		VALUES ('project-134', 'automation-134', 'alert', 'alert-134', 'producer', 'notification', 'approval', 'inbox')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM automation_versions WHERE id = 'version-134'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners WHERE artifact_id = 'alert-134'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("logical mailbox ownership must survive graph replacement: got %d rows", count)
+	}
+	if _, err := db.Exec(`DELETE FROM automations WHERE id = 'automation-134'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("logical mailbox ownership must cascade when the stable Automation is deleted: got %d rows", count)
 	}
 }
 

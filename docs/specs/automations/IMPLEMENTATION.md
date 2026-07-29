@@ -97,6 +97,8 @@ A newly admitted standalone root resolves Automation context from exact current-
 
 Live displays only the current graph's projection. Replacement deletes prior invocation, dispatch, reservation, work-item, activity, transition, and position rows through graph ownership cascades. No older-graph positions are mapped into current nodes, and there is no “Earlier activity” compatibility block. Existing domain Task executions may continue independently after their old Automation projection is removed, but cannot continue through a deleted graph.
 
+Pending external handoffs are not graph history. A newly created Native Alert or GitHub issue records trusted local mailbox ownership using the stable Automation ID plus the logical producer, action, human-gate, and inbox node keys. That ownership survives replacement of the internal current-graph ID. An updated graph may list and process the artifact only when the same logical branch still exists under the same Automation; another Automation or a renamed/removed branch cannot adopt it. Native processing reconstructs current-graph projection before claim/link work, and GitHub assigned-issue discovery projects the accepted issue onto the current graph. Internal graph IDs remain mandatory for stale running-execution checks, issue-creation mutation deduplication/reconciliation, and current Live projection. Migration does not infer or backfill ownership for artifacts created without this trusted record.
+
 Only Schedule and Task nodes with exact current `task` resource bindings are links. A Schedule opens its Schedule-owned Task. Action, gate, Outcome, and unbound nodes remain inert.
 
 ## Native Alert Boundary

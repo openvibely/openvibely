@@ -230,23 +230,34 @@ func (r *AlertRepo) AlertOwnedByAutomationInbox(ctx context.Context, projectID, 
 	for _, binding := range bindings {
 		var owned bool
 		if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(
-			SELECT 1
-			FROM automation_activities activity
-			JOIN automation_activity_resources resource ON resource.activity_id = activity.id
-			JOIN automation_edges approval_edge ON approval_edge.source_node_id = activity.node_id
-				AND approval_edge.project_id = activity.project_id AND approval_edge.automation_id = activity.automation_id
-				AND approval_edge.version_id = activity.version_id
-			JOIN automation_nodes approval ON approval.id = approval_edge.target_node_id
-				AND approval.project_id = activity.project_id AND approval.automation_id = activity.automation_id
-				AND approval.version_id = activity.version_id
-			JOIN automation_edges inbox_edge ON inbox_edge.source_node_id = approval.id
-				AND inbox_edge.project_id = activity.project_id AND inbox_edge.automation_id = activity.automation_id
-				AND inbox_edge.version_id = activity.version_id
-			WHERE activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
-				AND activity.activity_type = 'create_notification' AND resource.resource_type = 'alert'
-				AND resource.resource_id = ? AND approval.role = 'native_approval'
-				AND inbox_edge.target_node_id = ?
-		)`, projectID, binding.AutomationID, binding.VersionID, alertID, binding.NodeID).Scan(&owned); err != nil {
+				SELECT 1
+				FROM automation_artifact_mailbox_owners owner
+				JOIN automation_nodes inbox ON inbox.project_id = owner.project_id
+					AND inbox.automation_id = owner.automation_id AND inbox.version_id = ?
+					AND inbox.id = ? AND inbox.node_key = owner.mailbox_node_key AND inbox.role = 'native_inbox'
+				JOIN automation_edges inbox_edge ON inbox_edge.target_node_id = inbox.id
+					AND inbox_edge.project_id = inbox.project_id AND inbox_edge.automation_id = inbox.automation_id
+					AND inbox_edge.version_id = inbox.version_id
+				JOIN automation_nodes approval ON approval.id = inbox_edge.source_node_id
+					AND approval.project_id = inbox.project_id AND approval.automation_id = inbox.automation_id
+					AND approval.version_id = inbox.version_id AND approval.node_key = owner.gate_node_key
+					AND approval.role = 'native_approval'
+				JOIN automation_edges approval_edge ON approval_edge.target_node_id = approval.id
+					AND approval_edge.project_id = approval.project_id AND approval_edge.automation_id = approval.automation_id
+					AND approval_edge.version_id = approval.version_id
+				JOIN automation_nodes action ON action.id = approval_edge.source_node_id
+					AND action.project_id = approval.project_id AND action.automation_id = approval.automation_id
+					AND action.version_id = approval.version_id AND action.node_key = owner.action_node_key
+					AND action.role = 'create_notification'
+				JOIN automation_edges producer_edge ON producer_edge.target_node_id = action.id
+					AND producer_edge.project_id = action.project_id AND producer_edge.automation_id = action.automation_id
+					AND producer_edge.version_id = action.version_id
+				JOIN automation_nodes producer ON producer.id = producer_edge.source_node_id
+					AND producer.project_id = action.project_id AND producer.automation_id = action.automation_id
+					AND producer.version_id = action.version_id AND producer.node_key = owner.producer_node_key
+				WHERE owner.project_id = ? AND owner.automation_id = ?
+					AND owner.artifact_type = 'alert' AND owner.artifact_id = ?
+			)`, binding.VersionID, binding.NodeID, projectID, binding.AutomationID, alertID).Scan(&owned); err != nil {
 			return false, err
 		}
 		if owned {
@@ -254,6 +265,31 @@ func (r *AlertRepo) AlertOwnedByAutomationInbox(ctx context.Context, projectID, 
 		}
 	}
 	return false, nil
+}
+
+func (r *AlertRepo) RebindAlertToAutomationInbox(ctx context.Context, projectID, alertID string, bindings []models.AutomationBinding) error {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	if err := rebindAlertAutomationProjection(ctx, conn, projectID, alertID, bindings); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.Alert, error) {
@@ -302,23 +338,34 @@ func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter m
 				query += ` OR `
 			}
 			query += `EXISTS (
-				SELECT 1
-				FROM automation_activities activity
-				JOIN automation_activity_resources resource ON resource.activity_id = activity.id
-				JOIN automation_edges approval_edge ON approval_edge.source_node_id = activity.node_id
-					AND approval_edge.project_id = activity.project_id AND approval_edge.automation_id = activity.automation_id
-					AND approval_edge.version_id = activity.version_id
-				JOIN automation_nodes approval ON approval.id = approval_edge.target_node_id
-					AND approval.project_id = activity.project_id AND approval.automation_id = activity.automation_id
-					AND approval.version_id = activity.version_id
-				JOIN automation_edges inbox_edge ON inbox_edge.source_node_id = approval.id
-					AND inbox_edge.project_id = activity.project_id AND inbox_edge.automation_id = activity.automation_id
-					AND inbox_edge.version_id = activity.version_id
-				WHERE activity.project_id = alerts.project_id AND activity.automation_id = ? AND activity.version_id = ?
-					AND activity.activity_type = 'create_notification' AND resource.resource_type = 'alert'
-					AND resource.resource_id = alerts.id AND approval.role = 'native_approval'
-					AND inbox_edge.target_node_id = ?)`
-			args = append(args, binding.AutomationID, binding.VersionID, binding.NodeID)
+					SELECT 1
+					FROM automation_artifact_mailbox_owners owner
+					JOIN automation_nodes inbox ON inbox.project_id = owner.project_id
+						AND inbox.automation_id = owner.automation_id AND inbox.version_id = ?
+						AND inbox.id = ? AND inbox.node_key = owner.mailbox_node_key AND inbox.role = 'native_inbox'
+					JOIN automation_edges inbox_edge ON inbox_edge.target_node_id = inbox.id
+						AND inbox_edge.project_id = inbox.project_id AND inbox_edge.automation_id = inbox.automation_id
+						AND inbox_edge.version_id = inbox.version_id
+					JOIN automation_nodes approval ON approval.id = inbox_edge.source_node_id
+						AND approval.project_id = inbox.project_id AND approval.automation_id = inbox.automation_id
+						AND approval.version_id = inbox.version_id AND approval.node_key = owner.gate_node_key
+						AND approval.role = 'native_approval'
+					JOIN automation_edges approval_edge ON approval_edge.target_node_id = approval.id
+						AND approval_edge.project_id = approval.project_id AND approval_edge.automation_id = approval.automation_id
+						AND approval_edge.version_id = approval.version_id
+					JOIN automation_nodes action ON action.id = approval_edge.source_node_id
+						AND action.project_id = approval.project_id AND action.automation_id = approval.automation_id
+						AND action.version_id = approval.version_id AND action.node_key = owner.action_node_key
+						AND action.role = 'create_notification'
+					JOIN automation_edges producer_edge ON producer_edge.target_node_id = action.id
+						AND producer_edge.project_id = action.project_id AND producer_edge.automation_id = action.automation_id
+						AND producer_edge.version_id = action.version_id
+					JOIN automation_nodes producer ON producer.id = producer_edge.source_node_id
+						AND producer.project_id = action.project_id AND producer.automation_id = action.automation_id
+						AND producer.version_id = action.version_id AND producer.node_key = owner.producer_node_key
+					WHERE owner.project_id = alerts.project_id AND owner.automation_id = ?
+						AND owner.artifact_type = 'alert' AND owner.artifact_id = alerts.id)`
+			args = append(args, binding.VersionID, binding.NodeID, binding.AutomationID)
 		}
 		query += `)`
 	}

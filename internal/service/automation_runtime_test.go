@@ -2046,6 +2046,172 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	require.Equal(t, fixture.project.RepoPath, provider.resolvedPath, "Automation external refresh must fall back to the project's local Git remote")
 }
 
+func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Native ownership replacement")
+	ctx := context.Background()
+	candidate := customNativeMailboxCandidate("Native ownership replacement")
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+
+	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo.SetAutomationRepo(h.automationRepo)
+	alertSvc := NewAlertService(alertRepo, nil)
+	producer := automationNodeByKey(t, first.Definition, "custom_producer")
+	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: first.Definition.Automation.ID, VersionID: first.Definition.Version.ID, NodeID: producer.ID,
+	}}})
+	alert, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Survive Native edit", IdempotencyKey: "survive-native-edit"})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, alert.ID, models.AlertDecisionApproved))
+
+	candidate.Description = "Updated configuration with the same logical mailbox."
+	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.NotEqual(t, first.Definition.Version.ID, second.Definition.Version.ID)
+	require.Equal(t, 0, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE id = ?`, first.Definition.Version.ID), "Save must still delete the replaced graph revision")
+
+	inbox := automationNodeByKey(t, second.Definition, "custom_approved_inbox")
+	inboxCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: second.Definition.Automation.ID, VersionID: second.Definition.Version.ID, NodeID: inbox.ID,
+	}}})
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: h.project.ID, CallerTaskID: "updated-native-inbox", AlertSvc: alertSvc, TaskRepo: h.taskRepo})
+	output, err := handlers["list_alerts"](inboxCtx, json.RawMessage(`{"decision_state":"approved","processing_state":"unclaimed"}`))
+	require.NoError(t, err)
+	require.Contains(t, output, alert.ID, "the same logical inbox must retain approved work across Save replacement")
+	_, err = handlers["claim_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+alert.ID+`","lease_seconds":60}`))
+	require.NoError(t, err, "the updated logical inbox must be allowed to process its retained alert")
+	_, err = handlers["create_alert_implementation_task"](inboxCtx, json.RawMessage(`{
+		"alert_id":"`+alert.ID+`","title":"Implement retained Native alert","prompt":"Implement the approved change.","priority":2
+	}`))
+	require.NoError(t, err)
+	linkedAlert, err := alertSvc.GetByID(ctx, h.project.ID, alert.ID)
+	require.NoError(t, err)
+	require.NotNil(t, linkedAlert.ImplementationTaskID)
+	implementationContext, err := h.automationRepo.ContextForTask(ctx, h.project.ID, *linkedAlert.ImplementationTaskID)
+	require.NoError(t, err)
+	require.Len(t, implementationContext.Bindings, 1)
+	require.Equal(t, second.Definition.Version.ID, implementationContext.Bindings[0].VersionID, "retained work must project onto the current graph revision")
+}
+
+func customGitHubMailboxCandidate(name string) models.AutomationDraftCandidate {
+	return models.AutomationDraftCandidate{SchemaVersion: 1, Name: name, AutomationType: "custom", AdapterKey: AutomationAdapterCustom, Nodes: []models.AutomationDraftNode{
+		{Key: "producer_schedule", Name: "Daily suggestions", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "producer", Name: "Find improvements", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Find one focused improvement.", "category": "backlog", "priority": 2}},
+		{Key: "issue", Name: "Create issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Open one reviewable suggestion issue.", "labels": []any{"suggestion"}}},
+		{Key: "assignment", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
+		{Key: "inbox_schedule", Name: "Hourly inbox", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:15", "repeat_type": "hours", "repeat_interval": 1, "enabled": true}},
+		{Key: "inbox", Name: "Process assigned issues", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process newly assigned issues.", "category": "backlog", "priority": 3}},
+		{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the accepted issue and run relevant validation.", "category": "active", "priority": 3}},
+		{Key: "open_pr", Name: "Open pull request", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "main", "draft": false}},
+		{Key: "review", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},
+		{Key: "complete", Name: "Merged", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+	}, Edges: []models.AutomationDraftEdge{
+		{Key: "producer_schedule_to_producer", From: "producer_schedule", To: "producer", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "producer_to_issue", From: "producer", To: "issue", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "issue_to_assignment", From: "issue", To: "assignment", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "inbox_schedule_to_inbox", From: "inbox_schedule", To: "inbox", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "assignment_to_inbox", From: "assignment", To: "inbox", FromPort: "right", ToPort: "left", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
+		{Key: "inbox_to_implementation", From: "inbox", To: "implementation", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "implementation_to_pr", From: "implementation", To: "open_pr", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "pr_to_review", From: "open_pr", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+		{Key: "review_to_complete", From: "review", To: "complete", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+	}}
+}
+
+func TestAutomationRuntimeGitHubInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {
+	h := newAutomationSaveHarness(t, "GitHub ownership replacement")
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(h.db)
+	h.project.RepoURL = "https://github.com/example/runtime.git"
+	require.NoError(t, projectRepo.Update(ctx, &h.project))
+	settingsRepo := repository.NewSettingsRepo(h.db)
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
+	githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
+	h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
+	candidate := customGitHubMailboxCandidate("GitHub ownership replacement")
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+
+	repoRef := &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}
+	issue := GitHubIssue{Number: 42, URL: "https://github.com/example/runtime/issues/42", Title: "Survive GitHub edit", State: "open"}
+	producer := automationNodeByKey(t, first.Definition, "producer")
+	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: first.Definition.Automation.ID, VersionID: first.Definition.Version.ID, NodeID: producer.ID,
+	}}})
+	opts := githubIssueRuntimeOptions{ProjectID: h.project.ID, AutomationRepo: h.automationRepo}
+	recorded, err := recordGitHubIssueCreated(producerCtx, opts, repoRef, &issue, "survive-github-edit")
+	require.NoError(t, err)
+	require.Equal(t, 1, recorded)
+
+	candidate.Description = "Updated configuration with the same logical mailbox."
+	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.NotEqual(t, first.Definition.Version.ID, second.Definition.Version.ID)
+	require.Equal(t, 0, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE id = ?`, first.Definition.Version.ID), "Save must still delete the replaced graph revision")
+
+	inbox := automationNodeByKey(t, second.Definition, "inbox")
+	inboxCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: second.Definition.Automation.ID, VersionID: second.Definition.Version.ID, NodeID: inbox.ID,
+	}}})
+	filtered, err := filterGitHubAssignedIssuesForAutomationInbox(inboxCtx, opts, repoRef, []GitHubIssue{issue})
+	require.NoError(t, err)
+	require.Len(t, filtered, 1, "the same logical inbox must retain assigned work across Save replacement")
+	require.Equal(t, issue.Number, filtered[0].Number)
+	require.NoError(t, recordGitHubAssignedIssues(inboxCtx, opts, repoRef, filtered))
+	issueContext, err := h.automationRepo.BindingsForWorkItemKey(ctx, h.project.ID, githubIssueResourceID(repoRef, issue.Number))
+	require.NoError(t, err)
+	require.Len(t, issueContext.Bindings, 1)
+	require.Equal(t, second.Definition.Version.ID, issueContext.Bindings[0].VersionID, "retained issue work must project onto the current graph revision")
+}
+
+func TestAutomationRuntimeNativeInboxOwnershipDoesNotMoveToRenamedMailbox(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Renamed Native mailbox")
+	ctx := context.Background()
+	candidate := customNativeMailboxCandidate("Renamed Native mailbox")
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+
+	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo.SetAutomationRepo(h.automationRepo)
+	alertSvc := NewAlertService(alertRepo, nil)
+	producer := automationNodeByKey(t, first.Definition, "custom_producer")
+	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: first.Definition.Automation.ID, VersionID: first.Definition.Version.ID, NodeID: producer.ID,
+	}}})
+	alert, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Do not move", IdempotencyKey: "do-not-move"})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, alert.ID, models.AlertDecisionApproved))
+
+	for i := range candidate.Nodes {
+		if candidate.Nodes[i].Key == "custom_approved_inbox" {
+			candidate.Nodes[i].Key = "replacement_inbox"
+			candidate.Nodes[i].Name = "Replacement approved inbox"
+		}
+	}
+	for i := range candidate.Edges {
+		if candidate.Edges[i].From == "custom_approved_inbox" {
+			candidate.Edges[i].From = "replacement_inbox"
+		}
+		if candidate.Edges[i].To == "custom_approved_inbox" {
+			candidate.Edges[i].To = "replacement_inbox"
+		}
+	}
+	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	inbox := automationNodeByKey(t, second.Definition, "replacement_inbox")
+	inboxCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: second.Definition.Automation.ID, VersionID: second.Definition.Version.ID, NodeID: inbox.ID,
+	}}})
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: h.project.ID, CallerTaskID: "replacement-native-inbox", AlertSvc: alertSvc, TaskRepo: h.taskRepo})
+	output, err := handlers["list_alerts"](inboxCtx, json.RawMessage(`{"decision_state":"approved","processing_state":"unclaimed"}`))
+	require.NoError(t, err)
+	require.NotContains(t, output, alert.ID)
+	_, err = handlers["claim_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+alert.ID+`","lease_seconds":60}`))
+	require.ErrorContains(t, err, "not owned by this Automation inbox")
+}
+
 func TestAutomationRuntimeCustomNativeInboxRequiresExactProducerProvenance(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Scoped Native runtime")
 	ctx := context.Background()

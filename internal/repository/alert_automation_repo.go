@@ -260,6 +260,97 @@ func recordAlertDecisionProjection(ctx context.Context, exec SQLExecutor, projec
 	return nil
 }
 
+func rebindAlertAutomationProjection(ctx context.Context, exec SQLExecutor, projectID, alertID string, bindings []models.AutomationBinding) error {
+	var title string
+	var decision models.AlertDecisionState
+	var sourceTaskID, executionID sql.NullString
+	if err := exec.QueryRowContext(ctx, `SELECT title, decision_state, source_task_id, execution_id
+		FROM alerts WHERE project_id = ? AND id = ?`, projectID, alertID).Scan(&title, &decision, &sourceTaskID, &executionID); err != nil {
+		return err
+	}
+	for _, inboxBinding := range bindings {
+		rows, err := exec.QueryContext(ctx, `SELECT producer.id, action.id, gate.id, inbox.id
+			FROM automation_artifact_mailbox_owners owner
+			JOIN automation_nodes inbox ON inbox.project_id = owner.project_id AND inbox.automation_id = owner.automation_id
+				AND inbox.version_id = ? AND inbox.id = ? AND inbox.node_key = owner.mailbox_node_key AND inbox.role = 'native_inbox'
+			JOIN automation_edges inbox_edge ON inbox_edge.target_node_id = inbox.id
+				AND inbox_edge.project_id = inbox.project_id AND inbox_edge.automation_id = inbox.automation_id AND inbox_edge.version_id = inbox.version_id
+			JOIN automation_nodes gate ON gate.id = inbox_edge.source_node_id AND gate.project_id = inbox.project_id
+				AND gate.automation_id = inbox.automation_id AND gate.version_id = inbox.version_id
+				AND gate.node_key = owner.gate_node_key AND gate.role = 'native_approval'
+			JOIN automation_edges gate_edge ON gate_edge.target_node_id = gate.id
+				AND gate_edge.project_id = gate.project_id AND gate_edge.automation_id = gate.automation_id AND gate_edge.version_id = gate.version_id
+			JOIN automation_nodes action ON action.id = gate_edge.source_node_id AND action.project_id = gate.project_id
+				AND action.automation_id = gate.automation_id AND action.version_id = gate.version_id
+				AND action.node_key = owner.action_node_key AND action.role = 'create_notification'
+			JOIN automation_edges producer_edge ON producer_edge.target_node_id = action.id
+				AND producer_edge.project_id = action.project_id AND producer_edge.automation_id = action.automation_id AND producer_edge.version_id = action.version_id
+			JOIN automation_nodes producer ON producer.id = producer_edge.source_node_id AND producer.project_id = action.project_id
+				AND producer.automation_id = action.automation_id AND producer.version_id = action.version_id
+				AND producer.node_key = owner.producer_node_key
+			WHERE owner.project_id = ? AND owner.automation_id = ? AND owner.artifact_type = 'alert' AND owner.artifact_id = ?`,
+			inboxBinding.VersionID, inboxBinding.NodeID, projectID, inboxBinding.AutomationID, alertID)
+		if err != nil {
+			return err
+		}
+		type path struct{ producerID, actionID, gateID, inboxID string }
+		var paths []path
+		for rows.Next() {
+			var value path
+			if err := rows.Scan(&value.producerID, &value.actionID, &value.gateID, &value.inboxID); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			paths = append(paths, value)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, value := range paths {
+			binding := inboxBinding
+			binding.NodeID = value.actionID
+			resources := []models.AutomationActivityResource{{ResourceType: "alert", ResourceID: alertID}}
+			if sourceTaskID.Valid && sourceTaskID.String != "" {
+				resources = append(resources, models.AutomationActivityResource{ResourceType: "task", ResourceID: sourceTaskID.String})
+			}
+			if executionID.Valid && executionID.String != "" {
+				resources = append(resources, models.AutomationActivityResource{ResourceType: "execution", ResourceID: executionID.String})
+			}
+			item, _, err := recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+				Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+				WorkItemKey: "alert:" + alertID, WorkItemKind: "suggestion", WorkItemTitle: title, WorkItemStatus: models.AutomationWorkItemWaiting,
+				ActivityKey: "alert:" + alertID + ":create", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
+				Resources: resources, EventKey: "alert:" + alertID + ":created:notification", FromNodeID: value.producerID,
+				ToNodeID: value.actionID, Transition: models.AutomationTransitionEntered,
+			})
+			if err != nil {
+				return err
+			}
+			binding.WorkItemID = item.ID
+			if _, _, err := recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+				Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+				ActivityKey: "alert:" + alertID + ":create", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
+				Resources: resources, EventKey: "alert:" + alertID + ":created:waiting", FromNodeID: value.actionID,
+				ToNodeID: value.gateID, Transition: models.AutomationTransitionWaiting,
+			}); err != nil {
+				return err
+			}
+			if decision == models.AlertDecisionApproved {
+				binding.NodeID = value.gateID
+				if _, _, err := recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+					Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+					ActivityKey: "alert:" + alertID + ":decision:" + string(decision), ActivityType: "human_decision", ActivityStatus: models.AutomationActivityCompleted,
+					Resources: resources, EventKey: "alert:" + alertID + ":decision:" + string(decision), FromNodeID: value.gateID,
+					ToNodeID: value.inboxID, Transition: models.AutomationTransitionEntered,
+				}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func recordAlertClaimProjection(ctx context.Context, exec SQLExecutor, projectID, alertID, claimant string) error {
 	targets, err := alertAutomationWorkItems(ctx, exec, projectID, alertID)
 	if err != nil {

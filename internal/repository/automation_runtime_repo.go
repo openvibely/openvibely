@@ -1126,7 +1126,66 @@ func upsertAutomationActivity(ctx context.Context, exec SQLExecutor, in Automati
 			return nil, fmt.Errorf("linking automation activity resource: %w", err)
 		}
 	}
+	if err := recordAutomationArtifactMailboxOwners(ctx, exec, in, binding); err != nil {
+		return nil, err
+	}
 	return activity, nil
+}
+
+func recordAutomationArtifactMailboxOwners(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding) error {
+	var artifactType, actionRole, gateRole, mailboxRole string
+	switch strings.TrimSpace(in.ActivityType) {
+	case "create_notification":
+		artifactType, actionRole, gateRole, mailboxRole = "alert", "create_notification", "native_approval", "native_inbox"
+	case "create_github_issue":
+		artifactType, actionRole, gateRole, mailboxRole = "github_issue", "create_github_issue", "github_assignment", "github_inbox"
+	default:
+		return nil
+	}
+
+	var producerKey, actionKey, gateKey, mailboxKey string
+	err := exec.QueryRowContext(ctx, `SELECT producer.node_key, action.node_key, gate.node_key, mailbox.node_key
+		FROM automation_nodes producer
+		JOIN automation_edges action_edge ON action_edge.source_node_id = producer.id
+			AND action_edge.project_id = producer.project_id AND action_edge.automation_id = producer.automation_id
+			AND action_edge.version_id = producer.version_id
+		JOIN automation_nodes action ON action.id = action_edge.target_node_id
+			AND action.project_id = producer.project_id AND action.automation_id = producer.automation_id
+			AND action.version_id = producer.version_id
+		JOIN automation_edges gate_edge ON gate_edge.source_node_id = action.id
+			AND gate_edge.project_id = action.project_id AND gate_edge.automation_id = action.automation_id
+			AND gate_edge.version_id = action.version_id
+		JOIN automation_nodes gate ON gate.id = gate_edge.target_node_id
+			AND gate.project_id = action.project_id AND gate.automation_id = action.automation_id
+			AND gate.version_id = action.version_id
+		JOIN automation_edges mailbox_edge ON mailbox_edge.source_node_id = gate.id
+			AND mailbox_edge.project_id = action.project_id AND mailbox_edge.automation_id = action.automation_id
+			AND mailbox_edge.version_id = action.version_id
+		JOIN automation_nodes mailbox ON mailbox.id = mailbox_edge.target_node_id
+			AND mailbox.project_id = action.project_id AND mailbox.automation_id = action.automation_id
+			AND mailbox.version_id = action.version_id
+		WHERE producer.project_id = ? AND producer.automation_id = ? AND producer.version_id = ? AND producer.id = ?
+			AND action.id = ? AND action.role = ? AND gate.role = ? AND mailbox.role = ?`, in.Context.ProjectID,
+		binding.AutomationID, binding.VersionID, in.FromNodeID, binding.NodeID, actionRole, gateRole, mailboxRole).Scan(&producerKey, &actionKey, &gateKey, &mailboxKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("resolving Automation artifact mailbox ownership: %w", err)
+	}
+	for _, resource := range in.Resources {
+		if strings.TrimSpace(resource.ResourceType) != artifactType || strings.TrimSpace(resource.ResourceID) == "" {
+			continue
+		}
+		if _, err := exec.ExecContext(ctx, `INSERT INTO automation_artifact_mailbox_owners
+			(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key) DO NOTHING`,
+			in.Context.ProjectID, binding.AutomationID, artifactType, strings.TrimSpace(resource.ResourceID), producerKey, actionKey, gateKey, mailboxKey); err != nil {
+			return fmt.Errorf("recording Automation artifact mailbox ownership: %w", err)
+		}
+	}
+	return nil
 }
 
 func validateAutomationActivityResource(ctx context.Context, exec SQLExecutor, projectID, resourceType, resourceID string) error {
@@ -1917,22 +1976,33 @@ func (r *AutomationRepo) GitHubIssueOwnedByInbox(ctx context.Context, projectID 
 	var owned bool
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(
 		SELECT 1
-		FROM automation_activities activity
-		JOIN automation_activity_resources resource ON resource.activity_id = activity.id
-		JOIN automation_edges issue_edge ON issue_edge.source_node_id = activity.node_id
-			AND issue_edge.project_id = activity.project_id AND issue_edge.automation_id = activity.automation_id
-			AND issue_edge.version_id = activity.version_id
-		JOIN automation_nodes assignment ON assignment.id = issue_edge.target_node_id
-			AND assignment.project_id = activity.project_id AND assignment.automation_id = activity.automation_id
-			AND assignment.version_id = activity.version_id
-		JOIN automation_edges inbox_edge ON inbox_edge.source_node_id = assignment.id
-			AND inbox_edge.project_id = activity.project_id AND inbox_edge.automation_id = activity.automation_id
-			AND inbox_edge.version_id = activity.version_id
-		WHERE activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
-			AND activity.activity_type = 'create_github_issue' AND resource.resource_type = 'github_issue'
-			AND resource.resource_id = ? AND assignment.role = 'github_assignment'
-			AND inbox_edge.target_node_id = ?
-	)`, projectID, binding.AutomationID, binding.VersionID, resourceID, binding.NodeID).Scan(&owned)
+		FROM automation_artifact_mailbox_owners owner
+		JOIN automation_nodes inbox ON inbox.project_id = owner.project_id
+			AND inbox.automation_id = owner.automation_id AND inbox.version_id = ?
+			AND inbox.id = ? AND inbox.node_key = owner.mailbox_node_key AND inbox.role = 'github_inbox'
+		JOIN automation_edges inbox_edge ON inbox_edge.target_node_id = inbox.id
+			AND inbox_edge.project_id = inbox.project_id AND inbox_edge.automation_id = inbox.automation_id
+			AND inbox_edge.version_id = inbox.version_id
+		JOIN automation_nodes assignment ON assignment.id = inbox_edge.source_node_id
+			AND assignment.project_id = inbox.project_id AND assignment.automation_id = inbox.automation_id
+			AND assignment.version_id = inbox.version_id AND assignment.node_key = owner.gate_node_key
+			AND assignment.role = 'github_assignment'
+		JOIN automation_edges assignment_edge ON assignment_edge.target_node_id = assignment.id
+			AND assignment_edge.project_id = assignment.project_id AND assignment_edge.automation_id = assignment.automation_id
+			AND assignment_edge.version_id = assignment.version_id
+		JOIN automation_nodes action ON action.id = assignment_edge.source_node_id
+			AND action.project_id = assignment.project_id AND action.automation_id = assignment.automation_id
+			AND action.version_id = assignment.version_id AND action.node_key = owner.action_node_key
+			AND action.role = 'create_github_issue'
+		JOIN automation_edges producer_edge ON producer_edge.target_node_id = action.id
+			AND producer_edge.project_id = action.project_id AND producer_edge.automation_id = action.automation_id
+			AND producer_edge.version_id = action.version_id
+		JOIN automation_nodes producer ON producer.id = producer_edge.source_node_id
+			AND producer.project_id = action.project_id AND producer.automation_id = action.automation_id
+			AND producer.version_id = action.version_id AND producer.node_key = owner.producer_node_key
+		WHERE owner.project_id = ? AND owner.automation_id = ?
+			AND owner.artifact_type = 'github_issue' AND owner.artifact_id = ?
+	)`, binding.VersionID, binding.NodeID, projectID, binding.AutomationID, resourceID).Scan(&owned)
 	return owned, err
 }
 
