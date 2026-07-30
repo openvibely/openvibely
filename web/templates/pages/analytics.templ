@@ -363,7 +363,7 @@ templ analyticsContent(currentProject *models.Project) {
 
 									const analyticsActivePointOnTop = {
 										id: 'analyticsActivePointOnTop',
-										afterEvent: function(chart, args) {
+										beforeEvent: function(chart, args) {
 											const event = args.event;
 											const previous = chart.$analyticsHoveredPoint || null;
 											if (!event || event.type === 'mouseout' || !args.inChartArea) {
@@ -426,6 +426,21 @@ templ analyticsContent(currentProject *models.Project) {
 										}
 									};
 
+									function analyticsLineTooltipOptions() {
+										return {
+											position: 'nearest',
+											caretPadding: 6,
+											itemSort: function(a, b) {
+												const hovered = a.chart?.$analyticsHoveredPoint || b.chart?.$analyticsHoveredPoint;
+												if (!hovered) return 0;
+												const aIsHovered = a.datasetIndex === hovered.datasetIndex;
+												const bIsHovered = b.datasetIndex === hovered.datasetIndex;
+												if (aIsHovered === bIsHovered) return 0;
+												return aIsHovered ? -1 : 1;
+											}
+										};
+									}
+
 									function lineDataset(label, data, color) {
 										return { label: label, data: data, borderColor: color, backgroundColor: color, tension: 0.25, fill: false, pointRadius: 2, pointHoverRadius: 4 };
 									}
@@ -444,7 +459,7 @@ templ analyticsContent(currentProject *models.Project) {
 										type: 'line',
 										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: { position: 'nearest', caretPadding: 6 } }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -617,7 +632,7 @@ templ analyticsContent(currentProject *models.Project) {
 										type: 'line',
 										plugins: [analyticsActivePointOnTop],
 										data: { labels: labels, datasets: datasets },
-										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: { position: 'nearest', caretPadding: 6 } }, scales: { y: { beginAtZero: true } } }
+										options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'bottom' }, tooltip: analyticsLineTooltipOptions() }, scales: { y: { beginAtZero: true } } }
 									});
 								}
 
@@ -756,7 +771,7 @@ templ analyticsContent(currentProject *models.Project) {
 								responsive: true,
 								maintainAspectRatio: false,
 								interaction: { mode: 'index', intersect: false },
-								plugins: { tooltip: { position: 'nearest', caretPadding: 6 } },
+								plugins: { tooltip: analyticsLineTooltipOptions() },
 								scales: {
 									y: { type: 'linear', display: true, position: 'left', max: 100, title: { display: true, text: 'Success Rate (%)' } },
 									y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Total Executions' }, grid: { drawOnChartArea: false } }
