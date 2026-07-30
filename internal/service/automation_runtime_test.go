@@ -313,6 +313,47 @@ func TestAutomationRuntimeSchedulerRoutesOwnedTriggerAtomically(t *testing.T) {
 	}
 }
 
+func TestAutomationRuntimeMonthlyMonthEndClaimPersistsNextRunSequence(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+
+	anchor := time.Date(2026, time.January, 31, 10, 0, 0, 0, time.Local)
+	fixture.schedule.RunAt = anchor.UTC()
+	fixture.schedule.NextRun = &fixture.schedule.RunAt
+	fixture.schedule.RepeatType = models.RepeatMonthly
+	fixture.schedule.RepeatInterval = 1
+	require.NoError(t, fixture.schedRepo.Update(ctx, &fixture.schedule))
+
+	expected := []time.Time{
+		time.Date(2026, time.February, 28, 10, 0, 0, 0, time.Local).UTC(),
+		time.Date(2026, time.March, 31, 10, 0, 0, 0, time.Local).UTC(),
+		time.Date(2026, time.April, 30, 10, 0, 0, 0, time.Local).UTC(),
+		time.Date(2026, time.May, 31, 10, 0, 0, 0, time.Local).UTC(),
+	}
+
+	for i, want := range expected {
+		stored, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
+		require.NoError(t, err)
+		require.NotNil(t, stored.NextRun)
+		due := *stored.NextRun
+		nextRun := stored.ComputeNextRun(due)
+		require.NotNil(t, nextRun)
+
+		invocation, _, err := fixture.repo.ClaimScheduledOccurrence(ctx, *stored, due, nextRun)
+		require.NoError(t, err, "claim %d", i)
+		require.NotNil(t, invocation, "claim %d", i)
+		require.NotNil(t, invocation.ScheduledFor, "claim %d", i)
+		require.True(t, invocation.ScheduledFor.Equal(due), "claim %d scheduled_for = %v, want %v", i, invocation.ScheduledFor, due)
+
+		persisted, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
+		require.NoError(t, err)
+		require.NotNil(t, persisted.LastRun)
+		require.True(t, persisted.LastRun.Equal(due), "claim %d last_run = %v, want %v", i, persisted.LastRun, due)
+		require.NotNil(t, persisted.NextRun)
+		require.True(t, persisted.NextRun.Equal(want), "claim %d next_run = %v, want %v", i, persisted.NextRun, want)
+	}
+}
+
 func TestAutomationRuntimeConcurrentSchedulePollersShareOneOccurrence(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
