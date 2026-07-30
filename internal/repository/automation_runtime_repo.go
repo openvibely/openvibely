@@ -833,7 +833,7 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 		JOIN automation_nodes pull_request ON pull_request.project_id = delivery.project_id AND pull_request.automation_id = delivery.automation_id
 			AND pull_request.version_id = delivery.version_id AND pull_request.id = delivery.target_node_id AND pull_request.role = 'open_pull_request'
 		JOIN automation_work_items work_item ON work_item.project_id = automation.project_id AND work_item.automation_id = automation.id
-			AND work_item.origin_version_id = source.version_id AND work_item.id = ? AND work_item.origin_invocation_id = ?
+			AND work_item.origin_version_id = source.version_id AND work_item.id = ?
 		JOIN automation_activities discovery ON discovery.project_id = automation.project_id AND discovery.automation_id = automation.id
 			AND discovery.version_id = source.version_id AND discovery.node_id = source.id
 			AND discovery.invocation_id = ? AND discovery.work_item_id = work_item.id AND discovery.activity_type = 'discover_assigned_issue'
@@ -843,7 +843,7 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 			AND issue_resource.resource_type = 'github_issue' AND issue_resource.resource_id = ?
 		WHERE automation.project_id = ? AND automation.id = ? AND automation.published_version_id = ?
 			AND automation.lifecycle_state = 'active'`, binding.NodeID, in.TargetNodeID, binding.WorkItemID,
-		binding.InvocationID, binding.InvocationID, in.ExecutionID, in.IssueResourceID, in.ProjectID,
+		binding.InvocationID, in.ExecutionID, in.IssueResourceID, in.ProjectID,
 		binding.AutomationID, binding.VersionID).Scan(&valid)
 	if err != nil {
 		return nil, false, fmt.Errorf("validating Automation GitHub issue task provenance: %w", err)

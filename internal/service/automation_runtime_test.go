@@ -968,6 +968,89 @@ func TestAutomationRuntimeThreadInputBindingSurvivesPromotion(t *testing.T) {
 	require.ErrorContains(t, fixture.repo.BindThreadInput(ctx, foreignInput.ID, automationContext, "foreign"), "project mismatch")
 }
 
+func TestAutomationRuntimeGitHubIssueTaskCreationAllowsLaterInboxInvocation(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime.git"
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+
+	provider := &fakeGitHubIssueRuntimeProvider{resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+		return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+	}}
+	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
+		AutomationRepo: fixture.repo, GitHub: provider}
+	repoRef, err := provider.ResolveRepo(ctx, fixture.project.RepoURL, "")
+	require.NoError(t, err)
+	issue := GitHubIssue{Number: 91, URL: "https://github.com/example/runtime/issues/91", Title: "Created before inbox run", State: "open"}
+
+	producerCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "bug_finder", "producer-invocation-a")
+	recorded, err := recordGitHubIssueCreated(producerCtx, opts, repoRef, &issue, "cross-invocation-issue")
+	require.NoError(t, err)
+	require.Equal(t, 1, recorded)
+
+	inboxCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "dev_inbox", "inbox-invocation-b")
+	filtered, err := filterGitHubAssignedIssuesForAutomationInbox(inboxCtx, opts, repoRef, []GitHubIssue{issue})
+	require.NoError(t, err)
+	require.Len(t, filtered, 1)
+	require.NoError(t, recordGitHubAssignedIssues(inboxCtx, opts, repoRef, filtered))
+
+	producerAutomationCtx, ok := AutomationContextFromContext(producerCtx)
+	require.True(t, ok)
+	inboxAutomationCtx, ok := AutomationContextFromContext(inboxCtx)
+	require.True(t, ok)
+	require.NotEqual(t, producerAutomationCtx.Bindings[0].InvocationID, inboxAutomationCtx.Bindings[0].InvocationID,
+		"issue creation and later inbox discovery must use distinct invocations")
+	var originInvocationID, discoveryInvocationID string
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT work_item.origin_invocation_id, discovery.invocation_id
+		FROM automation_work_items work_item
+		JOIN automation_activities discovery ON discovery.work_item_id = work_item.id
+			AND discovery.activity_type = 'discover_assigned_issue'
+		JOIN automation_activity_resources resource ON resource.activity_id = discovery.id
+			AND resource.resource_type = 'github_issue' AND resource.resource_id = ?
+		WHERE work_item.project_id = ? AND work_item.automation_id = ?`, githubIssueResourceID(repoRef, issue.Number),
+		fixture.project.ID, fixture.definition.Automation.ID).Scan(&originInvocationID, &discoveryInvocationID))
+	require.Equal(t, producerAutomationCtx.Bindings[0].InvocationID, originInvocationID)
+	require.Equal(t, inboxAutomationCtx.Bindings[0].InvocationID, discoveryInvocationID)
+
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(fixture.taskRepo, nil, workerSvc)
+	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
+		taskRepo: fixture.taskRepo, taskSvc: taskSvc}
+	runtime := llmSvc.taskControlRuntimeTools(fixture.task)
+	require.NotNil(t, runtime)
+	wrongExecution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "wrong inbox execution"}
+	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &wrongExecution))
+	wrongExecutionCtx := withAutomationExecution(inboxCtx, fixture.task.ID, wrongExecution.ID)
+	_, handled, isErr, err := runtime.Executor(wrongExecutionCtx, "create_task", json.RawMessage(`{
+		"title":"Reject different execution","prompt":"must not persist","category":"backlog",
+		"source_github_issue_number":91
+	}`))
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.ErrorContains(t, err, "not discovered by this exact current Automation execution")
+	rejectedTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Reject different execution")
+	require.NoError(t, err)
+	require.Nil(t, rejectedTask)
+
+	output, handled, isErr, err := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
+		"title":"Implement issue from prior invocation","prompt":"implement issue 91","category":"backlog",
+		"source_github_issue_number":91
+	}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+	implementationTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Implement issue from prior invocation")
+	require.NoError(t, err)
+	require.Contains(t, output, implementationTask.ID)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, implementationTask.ID, submitted.ID)
+	case <-time.After(time.Second):
+		t.Fatal("approved GitHub issue task was not submitted")
+	}
+}
+
 func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
