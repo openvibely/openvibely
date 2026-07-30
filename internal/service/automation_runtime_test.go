@@ -1974,22 +1974,30 @@ func TestAutomationLiveTaskRetryReplacesEarlierFailedDispatchState(t *testing.T)
 			InvocationID: invocationID, NodeID: producer.ID}
 	}
 	failedBinding := newInvocationBinding("retry:failed")
-
-	_, failedActivity, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
-		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{failedBinding}}, Binding: failedBinding,
-		ActivityKey: "retry:failed", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityFailed,
-		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}},
-	})
+	const (
+		failedActivityID    = "ffffffffffffffffffffffffffffffff"
+		completedActivityID = "00000000000000000000000000000000"
+		sameStartedAt       = "2026-07-30 12:34:56"
+	)
+	_, err := fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_activities
+		(id, project_id, automation_id, version_id, node_id, invocation_id, activity_key, activity_type, status, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'retry:failed', 'task_execution', 'failed', ?, ?)`, failedActivityID,
+		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, producer.ID,
+		failedBinding.InvocationID, sameStartedAt, sameStartedAt)
 	require.NoError(t, err)
-	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `UPDATE automation_activities
-		SET started_at = datetime('now', '-1 hour'), completed_at = datetime('now', '-1 hour') WHERE id = ?
-		RETURNING id`, failedActivity.ID).Scan(&failedActivity.ID))
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_activity_resources
+		(activity_id, resource_type, resource_id, relation) VALUES (?, 'task', ?, 'subject')`, failedActivityID, fixture.task.ID)
+	require.NoError(t, err)
+
 	completedBinding := newInvocationBinding("retry:completed")
-	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
-		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{completedBinding}}, Binding: completedBinding,
-		ActivityKey: "retry:completed", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityCompleted,
-		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}},
-	})
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_activities
+		(id, project_id, automation_id, version_id, node_id, invocation_id, activity_key, activity_type, status, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'retry:completed', 'task_execution', 'completed', ?, ?)`, completedActivityID,
+		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, producer.ID,
+		completedBinding.InvocationID, sameStartedAt, sameStartedAt)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_activity_resources
+		(activity_id, resource_type, resource_id, relation) VALUES (?, 'task', ?, 'subject')`, completedActivityID, fixture.task.ID)
 	require.NoError(t, err)
 
 	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())

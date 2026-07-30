@@ -1386,7 +1386,7 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 			ROW_NUMBER() OVER (PARTITION BY a.node_id, CASE
 				WHEN a.work_item_id IS NULL AND task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
 				ELSE 'activity:' || a.id END
-				ORDER BY datetime(a.started_at) DESC, a.id DESC) AS activity_rank
+				ORDER BY a.rowid DESC) AS activity_rank
 		FROM automation_activities a
 		LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
 			AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
@@ -1459,7 +1459,7 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 			ROW_NUMBER() OVER (PARTITION BY a.automation_id, CASE
 				WHEN a.work_item_id IS NULL AND task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
 				ELSE 'activity:' || a.id END
-				ORDER BY datetime(a.started_at) DESC, a.id DESC) AS activity_rank
+				ORDER BY a.rowid DESC) AS activity_rank
 		FROM automation_activities a
 		LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
 			AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
