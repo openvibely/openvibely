@@ -112,7 +112,7 @@ func (s *Schedule) ComputeNextRun(from time.Time) *time.Time {
 		next := anchor
 		for !next.After(fromLocal) {
 			months += s.RepeatInterval
-			next = addMonthsClamped(anchor, months)
+			next = AddMonthsClamped(anchor, months)
 		}
 		nextUTC := next.UTC()
 		return &nextUTC
@@ -122,12 +122,12 @@ func (s *Schedule) ComputeNextRun(from time.Time) *time.Time {
 	}
 }
 
-// addMonthsClamped adds months to anchor while preserving the anchor's
+// AddMonthsClamped adds months to anchor while preserving the anchor's
 // day-of-month when the target month contains it, and clamping to the target
 // month's final day when it does not. It preserves the anchor's time-of-day.
 // Unlike time.AddDate, this never rolls a month-end date into the following
 // month (e.g. Jan 31 + 1 month yields Feb 28/29, not Mar 3).
-func addMonthsClamped(anchor time.Time, months int) time.Time {
+func AddMonthsClamped(anchor time.Time, months int) time.Time {
 	year := anchor.Year()
 	// Zero-based month index makes arithmetic across year boundaries simple.
 	monthIdx := int(anchor.Month()) - 1 + months

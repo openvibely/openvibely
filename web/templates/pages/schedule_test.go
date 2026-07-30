@@ -18,6 +18,101 @@ func localKey(t time.Time) string {
 	return fmt.Sprintf("%s-%02d", local.Format("2006-01-02"), local.Hour())
 }
 
+func TestScheduleCalendarMonthlyProjectionClampsMonthEnd(t *testing.T) {
+	anchor := time.Date(2026, time.January, 31, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		current  time.Time
+		next     bool
+		expected time.Time
+	}{
+		{
+			name:     "forward January 31 clamps to February 28",
+			current:  anchor,
+			next:     true,
+			expected: time.Date(2026, time.February, 28, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			name:     "forward February 28 recovers to March 31",
+			current:  time.Date(2026, time.February, 28, 10, 0, 0, 0, time.UTC),
+			next:     true,
+			expected: time.Date(2026, time.March, 31, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			name:     "rewind March 31 clamps to February 28",
+			current:  time.Date(2026, time.March, 31, 10, 0, 0, 0, time.UTC),
+			expected: time.Date(2026, time.February, 28, 10, 0, 0, 0, time.UTC),
+		},
+		{
+			name:     "rewind February 28 recovers to January 31",
+			current:  time.Date(2026, time.February, 28, 10, 0, 0, 0, time.UTC),
+			expected: anchor,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got time.Time
+			if tt.next {
+				got = schedNextOccurrence(tt.current, anchor, models.RepeatMonthly, 1)
+			} else {
+				got = schedPrevOccurrence(tt.current, anchor, models.RepeatMonthly, 1)
+			}
+			if !got.Equal(tt.expected) {
+				t.Fatalf("got %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBuildTaskOccurrenceMap_MonthlyMonthEndProjectionAndRewind(t *testing.T) {
+	anchor := time.Date(2026, time.January, 31, 10, 0, 0, 0, time.Local)
+	tests := []struct {
+		name        string
+		nextRun     time.Time
+		startOfWeek time.Time
+		expected    time.Time
+	}{
+		{
+			name:        "projects forward from clamped February to anchored March",
+			nextRun:     time.Date(2026, time.February, 28, 10, 0, 0, 0, time.Local),
+			startOfWeek: time.Date(2026, time.March, 29, 0, 0, 0, 0, time.Local),
+			expected:    time.Date(2026, time.March, 31, 10, 0, 0, 0, time.Local),
+		},
+		{
+			name:        "rewinds from anchored March to clamped February",
+			nextRun:     time.Date(2026, time.March, 31, 10, 0, 0, 0, time.Local),
+			startOfWeek: time.Date(2026, time.February, 22, 0, 0, 0, 0, time.Local),
+			expected:    time.Date(2026, time.February, 28, 10, 0, 0, 0, time.Local),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runAtUTC := anchor.UTC()
+			nextRunUTC := tt.nextRun.UTC()
+			task := repository.TaskWithSchedule{
+				Task: models.Task{ID: "task1", ProjectID: "project1", Title: "Monthly task"},
+				Schedule: &models.Schedule{
+					ID:             "schedule1",
+					TaskID:         "task1",
+					RunAt:          runAtUTC,
+					NextRun:        &nextRunUTC,
+					RepeatType:     models.RepeatMonthly,
+					RepeatInterval: 1,
+					Enabled:        true,
+				},
+			}
+
+			occurrences := buildTaskOccurrenceMap([]repository.TaskWithSchedule{task}, tt.startOfWeek)
+			key := fmt.Sprintf("%s-%02d", tt.expected.Format("2006-01-02"), tt.expected.Hour())
+			if got := occurrences[key]; len(got) != 1 || !got[0].OccurrenceTime.Equal(tt.expected) {
+				t.Fatalf("occurrences[%s] = %#v, want one occurrence at %v", key, got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestBuildTaskOccurrenceMap_UsesNextRunForRecurring verifies that for recurring tasks,
 // the timeline uses NextRun as the starting point for generating occurrences.
 // After rescheduling, both RunAt and NextRun are updated to the new time.

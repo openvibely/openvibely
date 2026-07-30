@@ -31,8 +31,7 @@ type TimeSlot struct {
 }
 
 // schedNextOccurrence returns the next occurrence after t, preserving local time-of-day across DST.
-// Uses AddDate (calendar-day arithmetic) instead of Add(24h) to avoid DST-related time shifts.
-func schedNextOccurrence(t time.Time, repeatType models.RepeatType, interval int) time.Time {
+func schedNextOccurrence(t, anchor time.Time, repeatType models.RepeatType, interval int) time.Time {
 	switch repeatType {
 	case models.RepeatSeconds:
 		return t.Add(time.Duration(interval) * time.Second)
@@ -45,14 +44,14 @@ func schedNextOccurrence(t time.Time, repeatType models.RepeatType, interval int
 	case models.RepeatWeekly:
 		return t.AddDate(0, 0, 7*interval)
 	case models.RepeatMonthly:
-		return t.AddDate(0, interval, 0)
+		return schedMonthlyOccurrence(anchor, t, interval)
 	default:
 		return t.AddDate(0, 0, 1)
 	}
 }
 
 // schedPrevOccurrence returns the previous occurrence before t, preserving local time-of-day across DST.
-func schedPrevOccurrence(t time.Time, repeatType models.RepeatType, interval int) time.Time {
+func schedPrevOccurrence(t, anchor time.Time, repeatType models.RepeatType, interval int) time.Time {
 	switch repeatType {
 	case models.RepeatSeconds:
 		return t.Add(-time.Duration(interval) * time.Second)
@@ -65,10 +64,15 @@ func schedPrevOccurrence(t time.Time, repeatType models.RepeatType, interval int
 	case models.RepeatWeekly:
 		return t.AddDate(0, 0, -7*interval)
 	case models.RepeatMonthly:
-		return t.AddDate(0, -interval, 0)
+		return schedMonthlyOccurrence(anchor, t, -interval)
 	default:
 		return t.AddDate(0, 0, -1)
 	}
+}
+
+func schedMonthlyOccurrence(anchor, current time.Time, monthDelta int) time.Time {
+	monthsFromAnchor := (current.Year()-anchor.Year())*12 + int(current.Month()-anchor.Month())
+	return models.AddMonthsClamped(anchor, monthsFromAnchor+monthDelta)
 }
 
 // formatRepeatLabel returns a human-readable label for a sub-daily repeat schedule.
@@ -141,7 +145,8 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 				// DB stores UTC; calendar grid uses local dates/hours.
 				// Use NextRun if set (indicates task has executed or been rescheduled),
 				// otherwise use RunAt (new schedule that hasn't run yet).
-				var currentRun time.Time
+					anchor := task.Schedule.RunAt.Local()
+					var currentRun time.Time
 				if task.Schedule.NextRun != nil {
 					currentRun = (*task.Schedule.NextRun).Local()
 				} else {
@@ -151,7 +156,7 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 				// Rewind to find the first occurrence at or after startOfWeek.
 				// Uses AddDate for DST-aware calendar day arithmetic (not fixed 24h durations).
 				for !currentRun.Before(startOfWeek) {
-					prevRun := schedPrevOccurrence(currentRun, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
+						prevRun := schedPrevOccurrence(currentRun, anchor, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
 					if prevRun.Before(startOfWeek) {
 						break
 					}
@@ -160,12 +165,11 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 
 				// Fast-forward to the first occurrence in the week if still before it
 				for currentRun.Before(startOfWeek) {
-					currentRun = schedNextOccurrence(currentRun, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
+						currentRun = schedNextOccurrence(currentRun, anchor, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
 				}
 
-				// Generate occurrences up to the end of the week.
-				// Uses AddDate-based advancement (not ComputeNextRun which is anchored to RunAt
-				// and would skip days when viewing weeks before RunAt).
+					// Generate occurrences up to the end of the week. Monthly advancement
+					// remains anchored to RunAt so clamped dates do not drift.
 				for !currentRun.After(endOfWeek) {
 					if !currentRun.Before(startOfWeek) {
 						dateTimeKey := fmt.Sprintf("%s-%02d", currentRun.Format("2006-01-02"), currentRun.Hour())
@@ -174,7 +178,7 @@ func buildTaskOccurrenceMap(tasks []repository.TaskWithSchedule, startOfWeek tim
 							OccurrenceTime: currentRun,
 						})
 					}
-					currentRun = schedNextOccurrence(currentRun, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
+						currentRun = schedNextOccurrence(currentRun, anchor, task.Schedule.RepeatType, task.Schedule.RepeatInterval)
 				}
 			} else {
 				// For one-time tasks, use NextRun if set (rescheduled), otherwise use RunAt
