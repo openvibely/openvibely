@@ -1959,6 +1959,57 @@ func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T
 	require.Greater(t, metrics["automation.graph.payload_bytes"].Max, int64(0))
 }
 
+func TestAutomationLiveTaskRetryReplacesEarlierFailedDispatchState(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
+	newInvocationBinding := func(occurrence string) models.AutomationBinding {
+		t.Helper()
+		var invocationID string
+		require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `INSERT INTO automation_invocations
+			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status, started_at)
+			VALUES (?, ?, ?, ?, 'schedule', ?, ?, 'running', CURRENT_TIMESTAMP) RETURNING id`, fixture.project.ID,
+			fixture.definition.Automation.ID, fixture.definition.Version.ID, producer.ID, fixture.schedule.ID, occurrence).Scan(&invocationID))
+		return models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
+			InvocationID: invocationID, NodeID: producer.ID}
+	}
+	failedBinding := newInvocationBinding("retry:failed")
+
+	_, failedActivity, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{failedBinding}}, Binding: failedBinding,
+		ActivityKey: "retry:failed", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityFailed,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}},
+	})
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `UPDATE automation_activities
+		SET started_at = datetime('now', '-1 hour'), completed_at = datetime('now', '-1 hour') WHERE id = ?
+		RETURNING id`, failedActivity.ID).Scan(&failedActivity.ID))
+	completedBinding := newInvocationBinding("retry:completed")
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{completedBinding}}, Binding: completedBinding,
+		ActivityKey: "retry:completed", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityCompleted,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}},
+	})
+	require.NoError(t, err)
+
+	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
+	require.NoError(t, err)
+	for _, node := range graph.Nodes {
+		if node.ID != producer.ID {
+			continue
+		}
+		require.Zero(t, node.Counts.Failed, "a successful retry of the same task must replace its earlier failed dispatch state")
+		require.Equal(t, 1, node.Counts.CompletedRecently)
+		require.Equal(t, "recently_completed", node.DisplayState)
+	}
+
+	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
+	require.NoError(t, err)
+	require.Len(t, cards, 1)
+	require.Zero(t, cards[0].Counts.Failed, "portfolio state must use the latest dispatch for the same task")
+	require.Equal(t, 1, cards[0].Counts.CompletedRecently)
+}
+
 func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
