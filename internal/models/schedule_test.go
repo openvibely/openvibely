@@ -125,6 +125,14 @@ func TestSchedule_ComputeNextRun_MonthlyMonthEnd(t *testing.T) {
 			from:     time.Date(2026, 1, 30, 9, 30, 0, 0, time.UTC),
 			expected: time.Date(2026, 2, 28, 9, 30, 0, 0, time.UTC),
 		},
+		// January 30 recovers to March 30 after clamping in a non-leap February.
+		{
+			name:     "jan30 recovers to mar30 non-leap",
+			runAt:    time.Date(2026, 1, 30, 9, 30, 0, 0, time.UTC),
+			interval: 1,
+			from:     time.Date(2026, 2, 28, 9, 30, 0, 0, time.UTC),
+			expected: time.Date(2026, 3, 30, 9, 30, 0, 0, time.UTC),
+		},
 		// January 29 clamps to Feb 28 in a non-leap year.
 		{
 			name:     "jan29 to feb28 non-leap",
@@ -132,6 +140,14 @@ func TestSchedule_ComputeNextRun_MonthlyMonthEnd(t *testing.T) {
 			interval: 1,
 			from:     time.Date(2026, 1, 29, 8, 0, 0, 0, time.UTC),
 			expected: time.Date(2026, 2, 28, 8, 0, 0, 0, time.UTC),
+		},
+		// January 29 recovers to March 29 after clamping in a non-leap February.
+		{
+			name:     "jan29 recovers to mar29 non-leap",
+			runAt:    time.Date(2026, 1, 29, 8, 0, 0, 0, time.UTC),
+			interval: 1,
+			from:     time.Date(2026, 2, 28, 8, 0, 0, 0, time.UTC),
+			expected: time.Date(2026, 3, 29, 8, 0, 0, 0, time.UTC),
 		},
 		// January 29 lands exactly on Feb 29 in a leap year (2028).
 		{
@@ -141,6 +157,14 @@ func TestSchedule_ComputeNextRun_MonthlyMonthEnd(t *testing.T) {
 			from:     time.Date(2028, 1, 29, 8, 0, 0, 0, time.UTC),
 			expected: time.Date(2028, 2, 29, 8, 0, 0, 0, time.UTC),
 		},
+		// January 29 retains its anchor through leap February and into March.
+		{
+			name:     "jan29 leap recovers to mar29",
+			runAt:    time.Date(2028, 1, 29, 8, 0, 0, 0, time.UTC),
+			interval: 1,
+			from:     time.Date(2028, 2, 29, 8, 0, 0, 0, time.UTC),
+			expected: time.Date(2028, 3, 29, 8, 0, 0, 0, time.UTC),
+		},
 		// January 30 clamps to Feb 29 in a leap year.
 		{
 			name:     "jan30 to feb29 leap",
@@ -148,6 +172,14 @@ func TestSchedule_ComputeNextRun_MonthlyMonthEnd(t *testing.T) {
 			interval: 1,
 			from:     time.Date(2028, 1, 30, 8, 0, 0, 0, time.UTC),
 			expected: time.Date(2028, 2, 29, 8, 0, 0, 0, time.UTC),
+		},
+		// January 30 recovers to March 30 after clamping in a leap February.
+		{
+			name:     "jan30 leap recovers to mar30",
+			runAt:    time.Date(2028, 1, 30, 8, 0, 0, 0, time.UTC),
+			interval: 1,
+			from:     time.Date(2028, 2, 29, 8, 0, 0, 0, time.UTC),
+			expected: time.Date(2028, 3, 30, 8, 0, 0, 0, time.UTC),
 		},
 		// January 31 clamps to Feb 29 in a leap year, then recovers in March.
 		{
