@@ -428,6 +428,23 @@ func TestAutomationLiveControlsOverlayGraphViewport(t *testing.T) {
 	}
 }
 
+func TestAutomationLiveSingleNodeUsesMinimumGraphViewingArea(t *testing.T) {
+	node := models.AutomationLiveNode{AutomationNode: models.AutomationNode{PositionX: 0, PositionY: 0}}
+	viewBox := automationLiveGraphViewBox([]models.AutomationLiveNode{node})
+	var x, y, width, height float64
+	if _, err := fmt.Sscanf(viewBox, "%f %f %f %f", &x, &y, &width, &height); err != nil {
+		t.Fatalf("parse one-node Live viewBox %q: %v", viewBox, err)
+	}
+	if width < 900 || height < 540 {
+		t.Fatalf("one-node Live graph must retain a usable viewing area, got %s", viewBox)
+	}
+	nodeLeft := automationGraphLayoutX(node.PositionX)
+	nodeTop := automationGraphLayoutY(node.PositionY)
+	if nodeLeft < x || nodeTop < y || nodeLeft+automationGraphNodeWidth > x+width || nodeTop+automationGraphNodeHeight > y+height {
+		t.Fatalf("one-node Live graph is not centered within its viewing area, got %s", viewBox)
+	}
+}
+
 func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{ID: "automation-live-height", Name: "Full height", LifecycleState: models.AutomationActive},
@@ -441,15 +458,15 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 
 	for _, want := range []string{
 		`id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto"`,
-		`class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 flex flex-1 flex-col" data-automation-readonly-canvas`,
-		`class="automation-canvas-shell relative min-h-[34rem] w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
+		`class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas`,
+		`class="automation-canvas-shell relative min-h-[20rem] md:min-h-0 w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected Automation Live viewport-filling layout to contain %q", want)
 		}
 	}
-	if strings.Contains(body, `automation-canvas-shell h-[34rem]`) {
-		t.Error("Automation Live canvas must grow beyond the old fixed 34rem height")
+	if strings.Contains(body, `min-h-[34rem]`) {
+		t.Error("Automation Live canvas must not force the card below the desktop page viewport")
 	}
 }
 
@@ -511,21 +528,19 @@ func TestAutomationBlankBuilderCanvasFitsNonEditPage(t *testing.T) {
 
 	blank := render("blank", "")
 	for _, want := range []string{
-		`flex flex-col overflow-y-hidden`,
-		`flex min-h-0 flex-1 flex-col`,
-		`min-h-0 flex-1`,
+		`h-[calc(100dvh-22rem)]`,
+		`min-h-[28rem]`,
+		`max-h-[42rem]`,
 		`data-automation-canvas`,
 		`h-full`,
-		`data-automation-node-settings`,
-		`builder.classList.toggle('overflow-y-auto', nodeSettings.open)`,
 	} {
 		if !strings.Contains(blank, want) {
 			t.Errorf("expected blank builder page-fit contract to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`h-[calc(100dvh-22rem)]`, `min-h-[28rem]`, `max-h-[42rem]`, `min-h-[calc(100dvh-15rem)]`, `min-h-[42rem]`} {
+	for _, forbidden := range []string{`overflow-y-hidden`, `flex min-h-0 flex-1 flex-col`, `min-h-[calc(100dvh-15rem)]`, `min-h-[42rem]`} {
 		if strings.Contains(blank, forbidden) {
-			t.Errorf("new blank builder must not force fixed canvas sizing %q", forbidden)
+			t.Errorf("new blank builder must remain scroll-safe and omit %q", forbidden)
 		}
 	}
 
@@ -847,7 +862,13 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (nodeFill === 'rgb(0, 0, 0)' || nodeFill === 'rgba(0, 0, 0, 0)') fail('node fill fell back to black: ' + nodeFill);
 	    if (labelColor === 'rgb(0, 0, 0)') fail('label color fell back to black: ' + labelColor);
 	    var canvasRect = document.querySelector('[data-automation-canvas]').getBoundingClientRect();
+	    var liveRootRect = document.getElementById('automation-live').getBoundingClientRect();
+	    var liveCanvasShellRect = document.querySelector('[aria-label="Live automation graph"]').getBoundingClientRect();
+	    if (liveCanvasShellRect.bottom > liveRootRect.bottom + 4) fail('single-node Live canvas extends below the page viewport');
+	    var liveViewBox = document.querySelector('#automation-live [data-automation-canvas]').getAttribute('viewBox').split(/\s+/).map(Number);
+	    if (liveViewBox[2] < 900 || liveViewBox[3] < 540) fail('single-node Live graph uses an undersized viewBox: ' + liveViewBox.join(' '));
 	    var nodeRect = node.getBoundingClientRect();
+	    if (nodeRect.width > canvasRect.width * 0.35 || nodeRect.height > canvasRect.height * 0.35) fail('single Live node is magnified instead of fitted within the canvas');
 	    if (nodeRect.top < canvasRect.top - 1 || nodeRect.bottom > canvasRect.bottom + 1) fail('negative-position node is clipped by graph viewport');
 	    var labelRect = label.getBoundingClientRect();
 	    if (labelRect.left < nodeRect.left - 1 || labelRect.right > nodeRect.right + 1 || labelRect.top < nodeRect.top - 1 || labelRect.bottom > nodeRect.bottom + 1) fail('node label escapes its node bounds');
@@ -1009,19 +1030,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	    await report('progress', 'add-node-submitted');
 	    await waitFor(function() { return !!document.querySelector('[data-node-key="first_step"]'); }, 'new node on blank canvas');
 	    var oneNodeBuilder = document.getElementById('automation-builder');
-	    var oneNodeCanvasSection = oneNodeBuilder.querySelector('[data-automation-draft-canvas]');
-	    var oneNodeCanvasShell = oneNodeCanvasSection.querySelector('.automation-canvas-shell');
-	    var oneNodeCanvas = oneNodeCanvasSection.querySelector('[data-automation-canvas]');
+	    var oneNodeCanvas = oneNodeBuilder.querySelector('[data-automation-draft-canvas] [data-automation-canvas]');
 	    var oneNodeCanvasRect = oneNodeCanvas.getBoundingClientRect();
-	    if (getComputedStyle(oneNodeBuilder).display !== 'flex' || getComputedStyle(oneNodeBuilder).flexDirection !== 'column') fail('one-node Custom builder is not using the page-fit flex layout');
-	    if (getComputedStyle(oneNodeCanvasSection).flexGrow !== '1' || getComputedStyle(oneNodeCanvasShell).flexGrow !== '1') fail('one-node Custom canvas does not consume only the remaining builder height');
-	    if (getComputedStyle(oneNodeBuilder).overflowY !== 'hidden') fail('one-node Custom builder still allows page scrolling while settings are collapsed');
-	    if (oneNodeCanvasRect.bottom > oneNodeBuilder.getBoundingClientRect().bottom + 4) fail('one-node Custom canvas extends below the builder viewport');
-	    var oneNodeSettings = oneNodeBuilder.querySelector('[data-automation-node-settings]');
-	    oneNodeSettings.open = true;
-	    await waitFor(function() { return getComputedStyle(oneNodeBuilder).overflowY === 'auto'; }, 'one-node settings scrolling when expanded');
-	    oneNodeSettings.open = false;
-	    await waitFor(function() { return getComputedStyle(oneNodeBuilder).overflowY === 'hidden'; }, 'one-node page fit after settings collapse');
+	    if (getComputedStyle(oneNodeBuilder).overflowY !== 'auto') fail('one-node Custom builder does not preserve vertical scrolling on constrained pages');
+	    if (!oneNodeCanvasRect.height || oneNodeCanvasRect.height >= templateCanvasRect.height) fail('one-node Custom canvas lost its bounded non-edit sizing');
 	    click('#automation-builder [data-automation-add-node-open]', 'Add second node');	    nodeDialog = document.querySelector('[data-automation-node-dialog]');
 	    nodeDialog.querySelector('[name="node_name"]').value = 'Second step';
 	    nodeDialog.querySelector('[name="node_kind"]').value = 'task';
@@ -1192,11 +1204,13 @@ window.addEventListener('DOMContentLoaded', function() {
 		.flex-col { flex-direction: column; }
 		.flex-1 { flex: 1 1 0%; }
 		.min-h-0 { min-height: 0; }
+		[class~="min-h-[20rem]"] { min-height: 20rem; }
+		[class~="md:min-h-0"] { min-height: 0; }
 		.h-full { height: 100%; }
 		.block { display: block; }
 		.overflow-y-hidden { overflow-y: hidden !important; }
 		.overflow-y-auto { overflow-y: auto !important; }
-		#automation-builder { box-sizing: border-box; height: 900px; }
+		#automation-builder, #automation-live { box-sizing: border-box; height: 900px; }
 		[class~="h-[calc(100dvh-15rem)]"] { height: calc(100vh - 15rem); }
 		[class~="min-h-[calc(100dvh-15rem)]"] { min-height: calc(100vh - 15rem); }
 		[class~="min-h-[42rem]"] { min-height: 42rem; }

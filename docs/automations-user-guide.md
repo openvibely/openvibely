@@ -32,7 +32,7 @@ Select `Add node` to add a supported step:
 - `Create GitHub issue`, `Human assignment`, `GitHub inbox`, `Open pull request`, and `Human review` model supported GitHub handoffs.
 - `Outcome` marks a supported terminal result.
 
-Configure each node, then connect its right output to the next node's left input. The builder supports selecting, moving, deleting, and reconnecting nodes and edges, plus pan, zoom, Fit, and Reset controls. A new Custom canvas stays fitted within the builder pane, including after adding its first node; expand `Node and connection settings` when you need configuration fields, which enables normal vertical scrolling until the panel is collapsed. Schedule nodes do not have individual enable or disable controls: every current schedule runs while its Automation is Active, Pause disables all of its schedules, and Resume re-enables them.
+Configure each node, then connect its right output to the next node's left input. The builder supports selecting, moving, deleting, and reconnecting nodes and edges, plus pan, zoom, Fit, and Reset controls. A new Custom canvas uses a bounded height and the builder remains vertically scrollable on constrained screens. Schedule nodes do not have individual enable or disable controls: every current schedule runs while its Automation is Active, Pause disables all of its schedules, and Resume re-enables them.
 
 Mailbox graphs must use one complete family. Native uses `Create notification → Human approval → Approved inbox → Implementation → Outcome`. GitHub uses `Create GitHub issue → Human assignment → GitHub inbox → Task → Open pull request → Human review → Outcome`. GitHub inbox is itself a substantive scheduled Task and owns its schedule; do not add a separate Schedule before it. Native and GitHub approval, inbox, implementation, and review stages cannot be mixed in one custom graph.
 
@@ -48,7 +48,7 @@ There is no persisted editable Automation draft, separate Publish step, Definiti
 
 ## Use the Live Graph
 
-Open a saved Automation from `/automations` to see its full-width `Live` graph. Current waiting, running, blocked, failed, and completed state appears on the graph itself.
+Open a saved Automation from `/automations` to see its full-width `Live` graph. Current waiting, running, blocked, failed, and completed state appears on the graph itself. The graph card fits the available desktop page height, and a one-node Automation keeps a normal node scale rather than stretching the node to fill the canvas.
 
 Schedule and Task nodes link to their exact project Task when one is bound. Other node types remain visual. Editing starts a new browser-local copy of the current graph; the saved graph continues to run until a replacement Save succeeds.
 

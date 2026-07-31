@@ -367,7 +367,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 				</form>
 			</div>
 		}
-			<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 flex flex-1 flex-col" data-automation-readonly-canvas>
+			<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas>
 				<div class="mb-3 flex items-start justify-between gap-3" data-automation-live-card-heading>
 					<div class="min-w-0 pr-2"><h3 class="text-sm font-semibold">Node states</h3><p class="mt-1 text-xs text-base-content/55">A node’s border and label show the highest-priority work state currently present.</p></div>
 					<div class="shrink-0" data-automation-live-actions>
@@ -414,7 +414,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						<span class="badge badge-ghost" data-automation-live-health>{ string(graph.Automation.HealthState) }</span>
 					</div>
 				</div>
-				<div class="automation-canvas-shell relative min-h-[34rem] w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Live automation graph">
+				<div class="automation-canvas-shell relative min-h-[20rem] md:min-h-0 w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Live automation graph">
 					<div class="absolute right-3 top-3 z-10 flex gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" data-automation-live-viewport-controls>
 						<button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
@@ -557,7 +557,31 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 
 func automationGraphLayoutX(value float64) float64 { return value * 1.25 }
 func automationGraphLayoutY(value float64) float64 { return value * 1.15 }
-func automationLiveGraphViewBox(nodes []models.AutomationLiveNode) string { if len(nodes) == 0 { return "-60 -60 900 540" }; minX, minY := automationGraphLayoutX(nodes[0].PositionX), automationGraphLayoutY(nodes[0].PositionY); maxX, maxY := minX+automationGraphNodeWidth, minY+automationGraphNodeHeight; for _, node := range nodes { x, y := automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY); if x < minX { minX = x }; if y < minY { minY = y }; if x+automationGraphNodeWidth > maxX { maxX = x+automationGraphNodeWidth }; if y+automationGraphNodeHeight > maxY { maxY = y+automationGraphNodeHeight } }; return fmt.Sprintf("%.0f %.0f %.0f %.0f", minX-automationGraphPadding, minY-automationGraphPadding, maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding) }
+func automationLiveGraphViewBox(nodes []models.AutomationLiveNode) string {
+	if len(nodes) == 0 {
+		return "-60 -60 900 540"
+	}
+	minX, minY := automationGraphLayoutX(nodes[0].PositionX), automationGraphLayoutY(nodes[0].PositionY)
+	maxX, maxY := minX+automationGraphNodeWidth, minY+automationGraphNodeHeight
+	for _, node := range nodes {
+		x, y := automationGraphLayoutX(node.PositionX), automationGraphLayoutY(node.PositionY)
+		if x < minX { minX = x }
+		if y < minY { minY = y }
+		if x+automationGraphNodeWidth > maxX { maxX = x+automationGraphNodeWidth }
+		if y+automationGraphNodeHeight > maxY { maxY = y+automationGraphNodeHeight }
+	}
+	x, y := minX-automationGraphPadding, minY-automationGraphPadding
+	width, height := maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding
+	if width < 900 {
+		x -= (900 - width) / 2
+		width = 900
+	}
+	if height < 540 {
+		y -= (540 - height) / 2
+		height = 540
+	}
+	return fmt.Sprintf("%.0f %.0f %.0f %.0f", x, y, width, height)
+}
 func automationLiveEdgeNodes(nodes []models.AutomationLiveNode, edge models.AutomationEdge) (models.AutomationLiveNode, models.AutomationLiveNode, bool) { var source, target models.AutomationLiveNode; var foundSource, foundTarget bool; for _, n := range nodes { if n.ID == edge.SourceNodeID { source, foundSource = n, true }; if n.ID == edge.TargetNodeID { target, foundTarget = n, true } }; return source, target, foundSource && foundTarget }
 func automationLiveNodeClass(state string) string { base := "automation-graph-node automation-graph-node--idle"; switch state { case "failed": return "automation-graph-node automation-graph-node--failed"; case "blocked": return "automation-graph-node automation-graph-node--blocked"; case "waiting_human": return "automation-graph-node automation-graph-node--waiting"; case "running": return "automation-graph-node automation-graph-node--running"; case "recently_completed": return "automation-graph-node automation-graph-node--completed" }; return base }
 func automationStateLabel(state string) string { return strings.ReplaceAll(strings.Title(strings.ReplaceAll(state, "_", " ")), "Human", "human") }
@@ -573,7 +597,7 @@ templ AutomationBuilder(projects []models.Project, currentProjectID string, page
 }
 
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
-	<div id="automation-builder" class={ "h-full min-w-0 max-w-full", templ.KV("flex flex-col overflow-y-hidden", page.AutomationID == "" && page.Source == "blank"), templ.KV("overflow-y-auto", page.AutomationID != "" || page.Source != "blank") } data-automation-draft>
+	<div id="automation-builder" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-draft>
 		@layout.PageTitle(page.Result.Candidate.Name)
 		if page.AutomationID != "" {
 			<div class="mb-6 min-w-0" data-automation-builder-header>
@@ -645,7 +669,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</ul>
 				</details>
 			}
-			<section class={ "mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4", templ.KV("flex min-h-0 flex-1 flex-col", page.AutomationID == "" && page.Source == "blank") } data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
+			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 				<div class="flex flex-wrap items-start justify-between gap-3">
 					<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">{ automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect steps:</span> Drag from a node's right handle to another node's left handle. Select a line, then use its × control to delete it or drag an endpoint to reconnect it.</p></div>
 					<div data-automation-node-tool>
@@ -703,7 +727,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</div>
 					<form method="dialog" class="modal-backdrop"><button aria-label="Close add node dialog">close</button></form>
 				</dialog>
-				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("min-h-0 flex-1", page.AutomationID == "" && page.Source == "blank"), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID != "" || page.Source != "blank") } role="region" aria-label="Automation graph builder">
+				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-22rem)] min-h-[28rem] max-h-[42rem]", page.AutomationID == "" && page.Source == "blank"), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID != "" || page.Source != "blank") } role="region" aria-label="Automation graph builder">
 					<div class="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" aria-label="Canvas controls" data-automation-builder-viewport-controls>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
@@ -757,7 +781,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					}
 				</div>
 			</section>
-			<details class="mb-5 rounded-box border border-base-300 bg-base-100 p-4" data-automation-node-settings>
+			<details class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
 				<summary class="cursor-pointer font-semibold">Node and connection settings</summary>
 				<form id="automation-design-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="mt-4 space-y-4" data-automation-draft-form>
 					<input type="hidden" name="project_id" value={ currentProjectID }/>
@@ -1153,14 +1177,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					builder.addEventListener('htmx:beforeCleanupElement', function(event) {
 						if (event.target === builder) clearActiveConnection();
 					});
-					var nodeSettings = builder.querySelector('[data-automation-node-settings]');
-					if (nodeSettings && builder.classList.contains('overflow-y-hidden')) {
-						nodeSettings.addEventListener('toggle', function() {
-							builder.classList.toggle('overflow-y-hidden', !nodeSettings.open);
-							builder.classList.toggle('overflow-y-auto', nodeSettings.open);
-							if (!nodeSettings.open) builder.scrollTop = 0;
-						});
-					}
 					var automationName = builder.querySelector('[data-automation-name]');
 					if (automationName) automationName.addEventListener('input', syncCandidate);
 					builder.addEventListener('submit', syncCandidate);
