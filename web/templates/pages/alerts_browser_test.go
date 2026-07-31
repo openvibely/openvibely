@@ -117,7 +117,7 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 	  var transientTopJump = false;
 	  document.body.addEventListener('htmx:afterSwap', function(event) {
 	    var target = event.detail && event.detail.target;
-	    if (!detectTransientTopJump || !target || target.id !== 'alerts-container') return;
+	    if (!detectTransientTopJump || !target || target.id !== 'alerts-content') return;
 	    requestAnimationFrame(function() {
 	      var liveRoot = document.getElementById('alerts-container');
 	      if (liveRoot && liveRoot.scrollTop < 100) transientTopJump = true;
@@ -128,6 +128,7 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 	    await waitFor(function() { return window.htmx && row('item-15'); }, 'Alerts hydration');
 	    htmx.process(document.body);
 	    var root = document.getElementById('alerts-container');
+	    var originalScrollport = root;
 	    root.scrollTop = row('item-15').offsetTop - root.offsetTop - 70;
 	    await wait(50);
 	    var stableTop = row('item-14').getBoundingClientRect().top;
@@ -136,6 +137,7 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 	    await wait(250);
 	    detectTransientTopJump = false;
 	    root = document.getElementById('alerts-container');
+	    if (root !== originalScrollport) fail('single delete replaced the Alerts scrollport');
 	    if (transientTopJump) fail('single delete painted the Alerts scrollport at the top before restoration');
 	    assertNear(row('item-14').getBoundingClientRect().top, stableTop, 'actionable notification nearest surviving anchor');
 	    if (document.activeElement !== row('item-16').querySelector('[data-alert-delete]')) fail('focus did not move to the next delete control');

@@ -112,20 +112,20 @@ func alertsContent(alerts []models.Alert, currentProjectID string, unreadCount i
 			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"alerts-container\" class=\"h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0\" data-search-container hx-get=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"alerts-container\" class=\"h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0\" data-search-container><div id=\"alerts-content\" hx-get=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 22, Col: 65}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 23, Col: 66}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" hx-trigger=\"alertUpdate from:body\" hx-target=\"this\" hx-swap=\"outerHTML\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" hx-trigger=\"alertUpdate from:body\" hx-target=\"this\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -145,7 +145,7 @@ func alertsContent(alerts []models.Alert, currentProjectID string, unreadCount i
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", unreadCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 32, Col: 83}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 34, Col: 83}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -173,13 +173,13 @@ func alertsContent(alerts []models.Alert, currentProjectID string, unreadCount i
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/read-all?project_id=%s", currentProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 48, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 50, Col: 83}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" hx-target=\"#alerts-container\" hx-swap=\"outerHTML\">Mark all as read</a></li>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\" hx-target=\"#alerts-content\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML\">Mark all as read</a></li>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -192,7 +192,7 @@ func alertsContent(alerts []models.Alert, currentProjectID string, unreadCount i
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts?project_id=%s", currentProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 61, Col: 82}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 64, Col: 82}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var8)
 				if templ_7745c5c3_Err != nil {
@@ -237,7 +237,7 @@ func alertsContent(alerts []models.Alert, currentProjectID string, unreadCount i
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</div><!-- Task Detail Dialog Container --><script>\n\t\tfunction openAlertTaskDialog(taskId) {\n\t\t\twindow.openVibelyNavigate(\n\t\t\t\t'/tasks/' + taskId + '?tab=history&from=alerts',\n\t\t\t\t'/tasks/' + taskId + '?from=alerts'\n\t\t\t);\n\t\t}\n\n\t\tfunction deleteAlerts(url, target) {\n\t\t\tif (!url) return false;\n\t\t\thtmx.ajax('DELETE', url, {\n\t\t\t\ttarget: target || '#alerts-container',\n\t\t\t\tswap: 'outerHTML'\n\t\t\t});\n\t\t\treturn false;\n\t\t}\n\n\t\tfunction deleteAlertsFromDataset(el) {\n\t\t\tif (!el || !el.dataset) return false;\n\t\t\tvar url = el.dataset.deleteUrl || '';\n\t\t\tvar row = el.closest('[data-alert-scroll-anchor]');\n\t\t\tif (row && window.openVibelyAlertsViewport) {\n\t\t\t\twindow.openVibelyAlertsViewport.pendingFocusID = row.dataset.alertId || '';\n\t\t\t}\n\t\t\treturn deleteAlerts(url, '#alerts-container');\n\t\t}\n\n\t\t(function installAlertsViewportPreservation() {\n\t\t\tvar state = window.openVibelyAlertsViewport || (window.openVibelyAlertsViewport = {});\n\t\t\tif (state.installed) return;\n\t\t\tstate.installed = true;\n\n\t\t\tfunction alertRows(root) {\n\t\t\t\treturn Array.prototype.slice.call(root.querySelectorAll('[data-alert-scroll-anchor]'));\n\t\t\t}\n\n\t\t\tfunction visibleAlertRows(rows) {\n\t\t\t\treturn rows.filter(function(row) {\n\t\t\t\t\treturn row.getClientRects().length > 0;\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction focusCandidates(rows, activeID) {\n\t\t\t\tvar ids = visibleAlertRows(rows).map(function(row) { return row.dataset.alertId || ''; });\n\t\t\t\tvar index = ids.indexOf(activeID);\n\t\t\t\tif (index < 0) return [];\n\t\t\t\tvar candidates = [activeID];\n\t\t\t\tfor (var distance = 1; distance < ids.length; distance++) {\n\t\t\t\t\tif (index + distance < ids.length) candidates.push(ids[index + distance]);\n\t\t\t\t\tif (index - distance >= 0) candidates.push(ids[index - distance]);\n\t\t\t\t}\n\t\t\t\treturn candidates;\n\t\t\t}\n\n\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\tvar root = event.detail && event.detail.target;\n\t\t\t\tif (!root || root.id !== 'alerts-container') return;\n\n\t\t\t\tvar rows = alertRows(root);\n\t\t\t\tvar rootRect = root.getBoundingClientRect();\n\t\t\t\tvar anchors = visibleAlertRows(rows).map(function(row) {\n\t\t\t\t\treturn {id: row.dataset.alertId || '', top: row.getBoundingClientRect().top};\n\t\t\t\t}).sort(function(a, b) {\n\t\t\t\t\treturn Math.abs(a.top - rootRect.top) - Math.abs(b.top - rootRect.top);\n\t\t\t\t});\n\t\t\t\tvar activeDelete = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-alert-delete]');\n\t\t\t\tvar activeRow = activeDelete && activeDelete.closest('[data-alert-scroll-anchor]');\n\t\t\t\tvar focusID = state.pendingFocusID || (activeRow && activeRow.dataset.alertId) || '';\n\n\t\t\t\tstate.swap = {\n\t\t\t\t\tanchors: anchors,\n\t\t\t\t\trootScrollTop: root.scrollTop,\n\t\t\t\t\twindowScrollY: window.scrollY,\n\t\t\t\t\tfocusIDs: focusCandidates(rows, focusID)\n\t\t\t\t};\n\t\t\t\tstate.pendingFocusID = '';\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tvar swappedTarget = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tvar saved = state.swap;\n\t\t\t\tif (!swappedTarget || swappedTarget.id !== 'alerts-container' || !root || !saved) return;\n\n\t\t\t\tif (typeof window.refreshCardSearches === 'function') {\n\t\t\t\t\twindow.refreshCardSearches(root);\n\t\t\t\t}\n\t\t\t\troot.scrollTop = saved.rootScrollTop;\n\t\t\t\tvar anchor = null;\n\t\t\t\tvar savedAnchor = null;\n\t\t\t\tfor (var i = 0; i < saved.anchors.length; i++) {\n\t\t\t\t\tanchor = root.querySelector('[data-alert-scroll-anchor=\"' + CSS.escape(saved.anchors[i].id) + '\"]');\n\t\t\t\t\tif (anchor) {\n\t\t\t\t\t\tsavedAnchor = saved.anchors[i];\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (anchor && savedAnchor) {\n\t\t\t\t\tvar delta = anchor.getBoundingClientRect().top - savedAnchor.top;\n\t\t\t\t\tif (root.scrollHeight > root.clientHeight) root.scrollTop += delta;\n\t\t\t\t\telse window.scrollBy(0, delta);\n\t\t\t\t} else if (Math.abs(window.scrollY - saved.windowScrollY) > 1) {\n\t\t\t\t\twindow.scrollTo(0, saved.windowScrollY);\n\t\t\t\t}\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:afterSettle', function(event) {\n\t\t\t\tvar settledTarget = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tvar saved = state.swap;\n\t\t\t\tif (!settledTarget || settledTarget.id !== 'alerts-container' || !root || !saved) return;\n\t\t\t\tstate.swap = null;\n\n\t\t\t\tvar focusTarget = null;\n\t\t\t\tfor (var j = 0; j < saved.focusIDs.length; j++) {\n\t\t\t\t\tfocusTarget = root.querySelector('[data-alert-scroll-anchor=\"' + CSS.escape(saved.focusIDs[j]) + '\"] [data-alert-delete]');\n\t\t\t\t\tif (focusTarget) break;\n\t\t\t\t}\n\t\t\t\tif (!focusTarget && saved.focusIDs.length) focusTarget = root.querySelector('[data-card-search]');\n\t\t\t\tif (focusTarget) focusTarget.focus({preventScroll: true});\n\t\t\t});\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</div></div><!-- Task Detail Dialog Container --><script>\n\t\tfunction openAlertTaskDialog(taskId) {\n\t\t\twindow.openVibelyNavigate(\n\t\t\t\t'/tasks/' + taskId + '?tab=history&from=alerts',\n\t\t\t\t'/tasks/' + taskId + '?from=alerts'\n\t\t\t);\n\t\t}\n\n\t\tfunction deleteAlerts(url, target) {\n\t\t\tif (!url) return false;\n\t\t\thtmx.ajax('DELETE', url, {\n\t\t\t\ttarget: target || '#alerts-content',\n\t\t\t\tselect: '#alerts-content',\n\t\t\t\tswap: 'outerHTML'\n\t\t\t});\n\t\t\treturn false;\n\t\t}\n\n\t\tfunction deleteAlertsFromDataset(el) {\n\t\t\tif (!el || !el.dataset) return false;\n\t\t\tvar url = el.dataset.deleteUrl || '';\n\t\t\tvar row = el.closest('[data-alert-scroll-anchor]');\n\t\t\tif (row && window.openVibelyAlertsViewport) {\n\t\t\t\twindow.openVibelyAlertsViewport.pendingFocusID = row.dataset.alertId || '';\n\t\t\t}\n\t\t\treturn deleteAlerts(url, '#alerts-content');\n\t\t}\n\n\t\t(function installAlertsViewportPreservation() {\n\t\t\tvar state = window.openVibelyAlertsViewport || (window.openVibelyAlertsViewport = {});\n\t\t\tif (state.installed) return;\n\t\t\tstate.installed = true;\n\n\t\t\tfunction alertRows(root) {\n\t\t\t\treturn Array.prototype.slice.call(root.querySelectorAll('[data-alert-scroll-anchor]'));\n\t\t\t}\n\n\t\t\tfunction visibleAlertRows(rows) {\n\t\t\t\treturn rows.filter(function(row) {\n\t\t\t\t\treturn row.getClientRects().length > 0;\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction focusCandidates(rows, activeID) {\n\t\t\t\tvar ids = visibleAlertRows(rows).map(function(row) { return row.dataset.alertId || ''; });\n\t\t\t\tvar index = ids.indexOf(activeID);\n\t\t\t\tif (index < 0) return [];\n\t\t\t\tvar candidates = [activeID];\n\t\t\t\tfor (var distance = 1; distance < ids.length; distance++) {\n\t\t\t\t\tif (index + distance < ids.length) candidates.push(ids[index + distance]);\n\t\t\t\t\tif (index - distance >= 0) candidates.push(ids[index - distance]);\n\t\t\t\t}\n\t\t\t\treturn candidates;\n\t\t\t}\n\n\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tif (!target || target.id !== 'alerts-content' || !root) return;\n\n\t\t\t\tvar rows = alertRows(root);\n\t\t\t\tvar rootRect = root.getBoundingClientRect();\n\t\t\t\tvar anchors = visibleAlertRows(rows).map(function(row) {\n\t\t\t\t\treturn {id: row.dataset.alertId || '', top: row.getBoundingClientRect().top};\n\t\t\t\t}).sort(function(a, b) {\n\t\t\t\t\treturn Math.abs(a.top - rootRect.top) - Math.abs(b.top - rootRect.top);\n\t\t\t\t});\n\t\t\t\tvar activeDelete = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-alert-delete]');\n\t\t\t\tvar activeRow = activeDelete && activeDelete.closest('[data-alert-scroll-anchor]');\n\t\t\t\tvar focusID = state.pendingFocusID || (activeRow && activeRow.dataset.alertId) || '';\n\n\t\t\t\tstate.swap = {\n\t\t\t\t\tanchors: anchors,\n\t\t\t\t\trootScrollTop: root.scrollTop,\n\t\t\t\t\twindowScrollY: window.scrollY,\n\t\t\t\t\tfocusIDs: focusCandidates(rows, focusID)\n\t\t\t\t};\n\t\t\t\tstate.pendingFocusID = '';\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tvar swappedTarget = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tvar saved = state.swap;\n\t\t\t\tif (!swappedTarget || swappedTarget.id !== 'alerts-content' || !root || !saved) return;\n\n\t\t\t\tif (typeof window.refreshCardSearches === 'function') {\n\t\t\t\t\twindow.refreshCardSearches(root);\n\t\t\t\t}\n\t\t\t\troot.scrollTop = saved.rootScrollTop;\n\t\t\t\tvar anchor = null;\n\t\t\t\tvar savedAnchor = null;\n\t\t\t\tfor (var i = 0; i < saved.anchors.length; i++) {\n\t\t\t\t\tanchor = root.querySelector('[data-alert-scroll-anchor=\"' + CSS.escape(saved.anchors[i].id) + '\"]');\n\t\t\t\t\tif (anchor) {\n\t\t\t\t\t\tsavedAnchor = saved.anchors[i];\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (anchor && savedAnchor) {\n\t\t\t\t\tvar delta = anchor.getBoundingClientRect().top - savedAnchor.top;\n\t\t\t\t\tif (root.scrollHeight > root.clientHeight) root.scrollTop += delta;\n\t\t\t\t\telse window.scrollBy(0, delta);\n\t\t\t\t} else if (Math.abs(window.scrollY - saved.windowScrollY) > 1) {\n\t\t\t\t\twindow.scrollTo(0, saved.windowScrollY);\n\t\t\t\t}\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:afterSettle', function(event) {\n\t\t\t\tvar settledTarget = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tvar saved = state.swap;\n\t\t\t\tif (!settledTarget || settledTarget.id !== 'alerts-content' || !root || !saved) return;\n\t\t\t\tstate.swap = null;\n\n\t\t\t\tvar focusTarget = null;\n\t\t\t\tfor (var j = 0; j < saved.focusIDs.length; j++) {\n\t\t\t\t\tfocusTarget = root.querySelector('[data-alert-scroll-anchor=\"' + CSS.escape(saved.focusIDs[j]) + '\"] [data-alert-delete]');\n\t\t\t\t\tif (focusTarget) break;\n\t\t\t\t}\n\t\t\t\tif (!focusTarget && saved.focusIDs.length) focusTarget = root.querySelector('[data-card-search]');\n\t\t\t\tif (focusTarget) focusTarget.focus({preventScroll: true});\n\t\t\t});\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -290,7 +290,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue("alert-" + alert.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 232, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 238, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
@@ -303,7 +303,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(alert.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 233, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 239, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 		if templ_7745c5c3_Err != nil {
@@ -316,7 +316,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(alert.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 234, Col: 37}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 240, Col: 37}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
@@ -342,7 +342,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(alertSearchText(alert))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 237, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 243, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
@@ -360,7 +360,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var16 string
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(*alert.TaskID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 239, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 245, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 			if templ_7745c5c3_Err != nil {
@@ -420,7 +420,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 262, Col: 19}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 268, Col: 19}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
@@ -433,7 +433,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var20 string
 		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.Type))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 266, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 272, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 		if templ_7745c5c3_Err != nil {
@@ -469,7 +469,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.DecisionState))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 268, Col: 362}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 274, Col: 362}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
@@ -493,7 +493,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.ProcessingState))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 273, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 279, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
@@ -516,7 +516,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var25 string
 			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 277, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 283, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 			if templ_7745c5c3_Err != nil {
@@ -540,7 +540,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 				var templ_7745c5c3_Var26 string
 				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Body)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 283, Col: 76}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 289, Col: 76}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 				if templ_7745c5c3_Err != nil {
@@ -559,7 +559,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 				var templ_7745c5c3_Var27 string
 				templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(alertMetadataJSON(alert))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 286, Col: 141}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 292, Col: 141}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 				if templ_7745c5c3_Err != nil {
@@ -582,7 +582,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Source)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 291, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 297, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
@@ -595,7 +595,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 293, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 299, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
@@ -613,7 +613,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var30 string
 			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Claimant)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 295, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 301, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 			if templ_7745c5c3_Err != nil {
@@ -636,7 +636,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var31 string
 			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(alert.ProcessingError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 299, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 305, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 			if templ_7745c5c3_Err != nil {
@@ -655,7 +655,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(*alert.ImplementationTaskID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 302, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 308, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 			if templ_7745c5c3_Err != nil {
@@ -674,26 +674,26 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s/approve?project_id=%s", alert.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 306, Col: 131}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 312, Col: 131}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "\" hx-target=\"#alerts-container\" hx-swap=\"outerHTML\">Approve</button> <button class=\"btn btn-error btn-outline btn-sm\" hx-post=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "\" hx-target=\"#alerts-content\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML\">Approve</button> <button class=\"btn btn-error btn-outline btn-sm\" hx-post=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s/reject?project_id=%s", alert.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 307, Col: 140}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 313, Col: 140}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "\" hx-target=\"#alerts-container\" hx-swap=\"outerHTML\">Reject</button></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "\" hx-target=\"#alerts-content\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML\">Reject</button></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -710,13 +710,13 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s/read?project_id=%s", alert.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 315, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 321, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "\" hx-target=\"#alerts-container\" hx-swap=\"outerHTML\" title=\"Mark as read\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg></button> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "\" hx-target=\"#alerts-content\" hx-select=\"#alerts-content\" hx-swap=\"outerHTML\" title=\"Mark as read\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 13l4 4L19 7\"></path></svg></button> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -728,7 +728,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var36 string
 		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue("Delete alert " + alert.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 328, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 335, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 		if templ_7745c5c3_Err != nil {
@@ -741,7 +741,7 @@ func alertRow(alert models.Alert, currentProjectID string) templ.Component {
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s?project_id=%s", alert.ID, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 329, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 336, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 		if templ_7745c5c3_Err != nil {
@@ -784,7 +784,7 @@ func AlertBadge(count int) templ.Component {
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", count))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 344, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 351, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {

@@ -18,12 +18,14 @@ templ AlertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 }
 
 templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount int) {
-	<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container
-		hx-get={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
-		hx-trigger="alertUpdate from:body"
-		hx-target="this"
-		hx-swap="outerHTML"
-	>
+	<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container>
+		<div id="alerts-content"
+			hx-get={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
+			hx-trigger="alertUpdate from:body"
+			hx-target="this"
+			hx-select="#alerts-content"
+			hx-swap="outerHTML"
+		>
 		@layout.PageTitle("Alerts")
 		<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">
@@ -46,7 +48,8 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 								<li>
 									<a
 										hx-post={ fmt.Sprintf("/alerts/read-all?project_id=%s", currentProjectID) }
-										hx-target="#alerts-container"
+										hx-target="#alerts-content"
+										hx-select="#alerts-content"
 										hx-swap="outerHTML"
 									>
 										Mark all as read
@@ -88,6 +91,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				}
 			</div>
 		}
+		</div>
 	</div>
 	<!-- Task Detail Dialog Container -->
 	<script>
@@ -101,7 +105,8 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 		function deleteAlerts(url, target) {
 			if (!url) return false;
 			htmx.ajax('DELETE', url, {
-				target: target || '#alerts-container',
+				target: target || '#alerts-content',
+				select: '#alerts-content',
 				swap: 'outerHTML'
 			});
 			return false;
@@ -114,7 +119,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 			if (row && window.openVibelyAlertsViewport) {
 				window.openVibelyAlertsViewport.pendingFocusID = row.dataset.alertId || '';
 			}
-			return deleteAlerts(url, '#alerts-container');
+			return deleteAlerts(url, '#alerts-content');
 		}
 
 		(function installAlertsViewportPreservation() {
@@ -145,8 +150,9 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 			}
 
 			document.body.addEventListener('htmx:beforeSwap', function(event) {
-				var root = event.detail && event.detail.target;
-				if (!root || root.id !== 'alerts-container') return;
+				var target = event.detail && event.detail.target;
+				var root = document.getElementById('alerts-container');
+				if (!target || target.id !== 'alerts-content' || !root) return;
 
 				var rows = alertRows(root);
 				var rootRect = root.getBoundingClientRect();
@@ -172,7 +178,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				var swappedTarget = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
 				var saved = state.swap;
-				if (!swappedTarget || swappedTarget.id !== 'alerts-container' || !root || !saved) return;
+				if (!swappedTarget || swappedTarget.id !== 'alerts-content' || !root || !saved) return;
 
 				if (typeof window.refreshCardSearches === 'function') {
 					window.refreshCardSearches(root);
@@ -200,7 +206,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				var settledTarget = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
 				var saved = state.swap;
-				if (!settledTarget || settledTarget.id !== 'alerts-container' || !root || !saved) return;
+				if (!settledTarget || settledTarget.id !== 'alerts-content' || !root || !saved) return;
 				state.swap = null;
 
 				var focusTarget = null;
@@ -303,8 +309,8 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 					}
 					if alert.DecisionState == models.AlertDecisionPending {
 						<div class="mt-4 flex flex-wrap gap-2" onclick="event.stopPropagation()">
-							<button class="btn btn-success btn-sm" hx-post={ fmt.Sprintf("/alerts/%s/approve?project_id=%s", alert.ID, currentProjectID) } hx-target="#alerts-container" hx-swap="outerHTML">Approve</button>
-							<button class="btn btn-error btn-outline btn-sm" hx-post={ fmt.Sprintf("/alerts/%s/reject?project_id=%s", alert.ID, currentProjectID) } hx-target="#alerts-container" hx-swap="outerHTML">Reject</button>
+							<button class="btn btn-success btn-sm" hx-post={ fmt.Sprintf("/alerts/%s/approve?project_id=%s", alert.ID, currentProjectID) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML">Approve</button>
+							<button class="btn btn-error btn-outline btn-sm" hx-post={ fmt.Sprintf("/alerts/%s/reject?project_id=%s", alert.ID, currentProjectID) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML">Reject</button>
 						</div>
 					}
 				</div>
@@ -313,7 +319,8 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 						<button
 							class="btn btn-ghost btn-xs"
 							hx-post={ fmt.Sprintf("/alerts/%s/read?project_id=%s", alert.ID, currentProjectID) }
-							hx-target="#alerts-container"
+							hx-target="#alerts-content"
+							hx-select="#alerts-content"
 							hx-swap="outerHTML"
 							title="Mark as read"
 						>
