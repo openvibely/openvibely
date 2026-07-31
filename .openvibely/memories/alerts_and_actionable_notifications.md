@@ -2,9 +2,9 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-07-29
-source: task_completion
-source_id: e109ce8999815c5518324d5ce39b470b:850ae5a0a18c0bc2
+updated: 2026-07-31
+source: consolidation
+source_id: memory_consolidation_2026_07_31
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -16,6 +16,7 @@ Durable model and migration facts:
 - Existing operational alerts retain their persisted project IDs. Migration does not infer ownership from the active UI project or introduce implicit global visibility; legacy rows are backfilled as `scope=project`, `decision=not_required`, and `processing=not_applicable`.
 - Actionable notification decision state is separate from read/unread and automation processing state. Notifications carry project/scope, type, title/message/body, source and source-task identity, timestamps, structured metadata, optional project-scoped idempotency key, lease claimant/time, processing/failure state, and linked implementation task.
 - Deleting a task intentionally retains associated alerts as historical records while nulling their `task_id`, `source_task_id`, and `execution_id` references. Those alerts must be deleted separately if no longer wanted.
+- Migration 135 indexes the project-scoped stable list order as `alerts(project_id, created_at DESC, id DESC)` and removes the redundant single-column `idx_alerts_project_id`; the composite index continues to serve bare project-ID lookups. The repository benchmark uses 300,000 alerts across 100 projects and confirms the newest-100 `ListFiltered` query avoids SQLite's temporary order-by B-tree while preserving project scoping, ordering, and offset pagination.
 - Human approval authorizes creating and starting the configured downstream implementation task, which is expected to perform the reviewed implementation and validation. It does not authorize merge, release, deployment, destructive remediation, credential changes, or other higher-risk actions.
 
 Authorization, concurrency, and runtime facts:
@@ -31,13 +32,11 @@ Authorization, concurrency, and runtime facts:
 - If Native creation, linkage, or execution fails, the inbox records failed processing rather than reporting completion; claim release remains valid only before any task is linked.
 - Slack, Telegram, and Discord first-turn channel runtimes are constructed only after the channel Chat task is persisted, so channel lifecycle handlers receive trusted caller identity. Email uses the generic executor with its persisted Chat task.
 - All alert lifecycle mutations publish the existing project-scoped alert invalidation event, including claim, release, explicit linkage, atomic task creation, completion, failure, read, and delete operations.
-- Custom Automation graphs support Native Alert approval handoffs through the existing Alert runtime: a connected Agent task receives deterministic `create_notification` instructions from its immutable published Automation version, the Alert is created only when the task runs, and pending/approved/rejected state is projected onto the exact configured notification, human-gate, and outcome nodes. Publication creates no Alert and approval still grants no merge, release, or deploy authority.
-- Automation-produced notifications carry a reserved server-owned metadata marker with exact Automation, creation graph, producer, notification, approval, and inbox node identities. Runtime strips model-supplied values for that key. Durable authorization is stored separately in trusted local artifact-mailbox ownership keyed by project, stable Automation ID, alert ID, and logical producer/action/gate/mailbox node keys. Automation-bound inbox listing validates that logical branch against the current graph before pagination, and every implementation lifecycle mutation rejects notifications not owned by the caller's matching inbox branch; ordinary project and human alert operations remain unchanged.
-- Compatible Automation edits preserve unresolved approved notifications even though Save deletes the old graph projection. On first authorized V2 mutation, Native processing idempotently rebuilds the alert work item and decision path on the current graph before claiming/linking the implementation Task. Renamed or removed mailboxes, other Automations, forged metadata, and untracked historical artifacts remain fail-closed; migration 134 intentionally performs no ownership backfill.
-- Automation-bound idempotent notification retries may reuse an Alert only when the same persisted Automation source already owns the creation transition; a same-project, same-key Alert created outside that Automation is rejected rather than adopted.
+- Custom Automation graphs reuse the canonical Alert approval lifecycle, but Automation-specific topology, provenance, mailbox ownership, edit compatibility, and fail-closed authorization contracts are canonical in `automation_graphs.md`.
 
 Product surfaces:
 - The Alerts page supports inspection, approve/reject controls for pending notifications, decision and processing badges, claimant/failure details, linked-task navigation, project context, and project-filtered live refresh. Deleting one alert or all alerts for the selected project physically removes those rows and refreshes the list and unread badge; marking read only changes `is_read`, and dismissing only changes decision state.
+- Single-item alert deletion preserves the Alerts page scrollport across direct and project-scoped live-refresh `outerHTML` replacements of `#alerts-container`. Stable alert-row anchors restore the nearest surviving visual location, and focus transfers with `preventScroll` to the next or previous visible delete control under the persisted card-search filter. Filter reapplication and anchor restoration happen synchronously in `htmx:afterSwap` before paint; focus transfer remains in `afterSettle`. Viewport and focus candidates exclude hidden rows, end-of-list deletion stays bottom-anchored, and bulk-delete/empty-state behavior uses its existing paths. Real-browser coverage must detect a first-frame jump to the top as well as final settled position.
 - The Alerts page currently fetches only the newest 100 project alerts, while search is client-side and decision-state filters and pagination are absent. Older pending approvals can therefore become unreachable behind newer operational alerts; the durable product direction is server-side filtering/pagination so pending human decisions remain reachable.
 - The bundled `openvibely_native_autonomous_sdlc_bootstrap` skill provides an OpenVibely-native alternative to the GitHub-backed workflow. Suggestion producers use `create_notification`; scheduled inbox tasks inspect approved notifications regardless of read state, claim them, atomically create/link one implementation task, and start that exact task.
 - Maintained Automation prompts are point-in-time snapshots. Existing saved Native/GitHub inbox Automations must be explicitly Edit/Saved or recreated after deploying corrected defaults; already-created Backlog tasks are not retroactively started and require manual execution.

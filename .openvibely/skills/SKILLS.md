@@ -210,3 +210,7 @@ always_use:
 ## openvibely_github_implementation_inbox_workflow
 
 [OpenVibely GitHub Implementation Inbox Workflow](openvibely_github_implementation_inbox_workflow/SKILL.md) — Poll GitHub implementation mailboxes, reconcile assigned issues with OpenVibely tasks, and start approved work without duplicate submissions.
+
+## user_approval_gate_workflow
+
+[User Approval Gate Workflow](user_approval_gate_workflow/SKILL.md) — Preserve explicit plan-first and approval-before-editing gates during coding tasks.

@@ -54,6 +54,7 @@ Lifecycle facts:
 - Ordinary tasks may intentionally have no assigned primary agent. Explicit assigned primary agents skip standalone skill routing and use that agent's curated/default or manual skill selection.
 - Maintenance/system agents are excluded from auto-routing via `selectable_as_primary=false`.
 - Lifecycle visibility renders structured selected-skill and selected-memory route decisions as compact prompt-safe badges/pills; text summaries remain useful for non-route hook rows.
+- Known lifecycle-evidence gaps are tracked in `openvibely/openvibely#125` and `openvibely/openvibely#126`: prompt-safe lifecycle trace events are available through the API but not exposed in task details, and selected-memory activity is reduced to filenames even though richer prompt-safe context is available. The proposed slices are bounded visibility improvements rather than lifecycle-behavior changes.
 - Lifecycle output contracts constrain final stored/validated results, not the agent's working notes or tool use.
 - Lifecycle hook and task-mode terminal execution status writes must use a fresh short-timeout finalization context after hook/model work returns so LLM deadlines or cancellations do not leave rows `running`.
 
