@@ -12,15 +12,15 @@ Existing Tasks, schedules, Alerts, and GitHub objects never become Automations a
 
 ## Create an Automation
 
-Open `/automations`, select `New Automation`, and choose how to start:
+Open `/automations`, select `+ New Automation`, and choose how to start:
 
 | Starting Point | Use It For |
 |---|---|
-| Template | Start from a maintained Native or GitHub SDLC graph. Both include scheduled Vision Suggestions. |
-| Describe It | Describe the result you want and review a generated browser-local graph. |
-| Blank | Build a custom graph from an empty canvas. |
+| Template | Open a modal, choose a maintained Native or GitHub SDLC graph, and review the selected template's description before loading it. |
+| Describe | Open a modal, describe the result you want, and review a generated browser-local graph. |
+| Custom | Open the custom builder on an empty canvas. |
 
-Templates provide supported starting points. Selecting `Use template` loads the maintained graph into the browser-local builder without creating an Automation, Task, or schedule. Review or customize it, then select `Save changes`; Template, Blank, and Describe It use the same builder and atomic Save rules. The GitHub SDLC template owns complete Offering Manager, finder, Dev Inbox, and Loop Auditor prompts plus their cadences; it works without the bootstrap skill and adds saved graph identity, lifecycle controls, and Live visualization over the Tasks and Schedules it creates on Save.
+Templates provide supported starting points. Selecting `Use template` loads the maintained graph into the browser-local builder without creating an Automation, Task, or schedule. Review or customize it, then select `Save changes`; Template, Custom, and Describe use the same builder and atomic Save rules. The GitHub SDLC template owns complete Offering Manager, finder, Dev Inbox, and Loop Auditor prompts plus their cadences; it works without the bootstrap skill and adds saved graph identity, lifecycle controls, and Live visualization over the Tasks and Schedules it creates on Save.
 
 ## Build the Graph
 

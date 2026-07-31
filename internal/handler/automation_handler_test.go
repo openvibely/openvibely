@@ -484,10 +484,10 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndKeepsNodeActionsTransient(t 
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
-	newPage := tc.HTTP().Get("/automations/new?project_id=" + project.ID).Execute()
-	require.Equal(t, http.StatusOK, newPage.Code)
-	require.Contains(t, newPage.Body.String(), "Build your own runnable Automation")
-	require.Contains(t, newPage.Body.String(), "Open custom builder")
+	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, portfolio.Code)
+	require.Contains(t, portfolio.Body.String(), `data-automation-new-custom`)
+	require.Contains(t, portfolio.Body.String(), `name="source" value="blank"`)
 	opened := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
@@ -1030,18 +1030,34 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, capabilities, planner, compiler, confirmation, lifecycle)
 
-	newPage := tc.HTTP().Get("/automations/new?project_id=" + project.ID).Execute()
-	require.Equal(t, 200, newPage.Code)
-	for _, label := range []string{"Template", "Describe It", "Blank"} {
-		require.Contains(t, newPage.Body.String(), label)
+	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, portfolio.Code)
+	body := portfolio.Body.String()
+	for _, marker := range []string{
+		`>+ New Automation</`,
+		`data-automation-new-menu`,
+		`data-automation-new-template`,
+		`data-automation-new-describe`,
+		`data-automation-new-custom`,
+		`id="automation-template-modal"`,
+		`id="automation-describe-modal"`,
+		`name="source" value="template"`,
+		`name="source" value="describe"`,
+		`name="source" value="blank"`,
+		`Native SDLC`,
+		`GitHub SDLC`,
+		`data-template-description`,
+	} {
+		require.Contains(t, body, marker)
 	}
-	require.NotContains(t, newPage.Body.String(), `value="vision_driver"`)
-	require.NotContains(t, newPage.Body.String(), ">Vision Driver</option>")
-	require.NotContains(t, newPage.Body.String(), "Register Existing")
-	newPartial := tc.HTMX().Get("/automations/new?project_id=" + project.ID).Execute()
-	require.Equal(t, 200, newPartial.Code)
-	require.Contains(t, newPartial.Body.String(), `id="automation-new"`)
-	require.NotContains(t, newPartial.Body.String(), "<!DOCTYPE html>")
+	require.NotContains(t, body, `value="vision_driver"`)
+	require.NotContains(t, body, ">Vision Driver</option>")
+	require.NotContains(t, body, "Register Existing")
+
+	retiredNewPage := tc.HTTP().Get("/automations/new?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusNotFound, retiredNewPage.Code)
+	retiredNewPartial := tc.HTMX().Get("/automations/new?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusNotFound, retiredNewPartial.Code)
 
 	rejectedVisionTemplate := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterVisionDriver},
@@ -1333,7 +1349,9 @@ func TestAutomationDescribeFailureIsVisibleAndPreservesInput(t *testing.T) {
 	}).Execute()
 
 	require.Equal(t, http.StatusOK, response.Code, "HTMX only swaps successful responses by default")
-	require.Contains(t, response.Body.String(), `id="automation-new"`)
+	require.Equal(t, "#automation-describe-modal-content", response.Header().Get("HX-Retarget"))
+	require.Equal(t, "outerHTML", response.Header().Get("HX-Reswap"))
+	require.Contains(t, response.Body.String(), `id="automation-describe-modal-content"`)
 	require.Contains(t, response.Body.String(), `role="alert"`)
 	require.Contains(t, response.Body.String(), "Could not generate a supported Automation")
 	require.Contains(t, response.Body.String(), html.EscapeString(description))
@@ -1393,7 +1411,9 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewAndDirectSave(t *testing.T
 		"project_id": {project.ID}, "source": {"describe"}, "description": {"Describe an unsupported draft"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, failedDescribe.Code)
-	require.Contains(t, failedDescribe.Body.String(), `id="automation-new"`)
+	require.Equal(t, "#automation-describe-modal-content", failedDescribe.Header().Get("HX-Retarget"))
+	require.Equal(t, "outerHTML", failedDescribe.Header().Get("HX-Reswap"))
+	require.Contains(t, failedDescribe.Body.String(), `id="automation-describe-modal-content"`)
 	require.Contains(t, failedDescribe.Body.String(), "Could not generate a supported Automation")
 	require.Contains(t, failedDescribe.Body.String(), "automation generation repair failed")
 	require.Contains(t, failedDescribe.Body.String(), "Describe an unsupported draft")

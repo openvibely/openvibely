@@ -562,7 +562,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Automations (project-scoped via ?project_id= query param)
 	e.GET("/automations", h.ListAutomations)
-	e.GET("/automations/new", h.NewAutomationBuilder)
 	e.POST("/automations/builder", h.BuildAutomationWeb)
 	e.POST("/automations/:automationId/builder", h.EditAutomationBuilder)
 	e.POST("/automations/:automationId/run-now", h.RunAutomationNow)

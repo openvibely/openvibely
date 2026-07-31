@@ -383,17 +383,10 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 		}
 		return out.String()
 	}
-	renderNew := func() string {
-		var out bytes.Buffer
-		if err := AutomationNewContent(projectID).Render(context.Background(), &out); err != nil {
-			t.Fatalf("render new Automation choices: %v", err)
-		}
-		return out.String()
-	}
 	renderDescribeFailure := func(description string) string {
 		var out bytes.Buffer
-		if err := AutomationNewFailureContent(projectID, description, "Could not generate a supported Automation: unsupported price-result branch").Render(context.Background(), &out); err != nil {
-			t.Fatalf("render Describe It failure: %v", err)
+		if err := AutomationDescribeModalContent(projectID, description, "Could not generate a supported Automation: unsupported price-result branch").Render(context.Background(), &out); err != nil {
+			t.Fatalf("render Describe failure modal: %v", err)
 		}
 		return out.String()
 	}
@@ -592,28 +585,36 @@ window.addEventListener('DOMContentLoaded', function() {
     editedNodeDialog.close();
     await report('progress', 'edit-automation-builder-operable');
 
-	    await window.openVibelyNavigate('/automations/new?project_id=project-browser');
-	    await waitFor(function() { return !!document.querySelector('input[name="source"][value="blank"]'); }, 'new Automation choices');
-	    var stockDescription = 'Monitor a stock for price increases or decreases so I can buy or sell depending on the result';
-	    var describeStart = document.querySelector('input[name="source"][value="describe"]');
-	    var describeForm = describeStart && describeStart.closest('form');
-	    if (!describeForm) fail('Describe It form is missing');
-	    describeForm.querySelector('textarea[name="description"]').value = stockDescription;
-	    htmx.process(describeForm);
-	    describeForm.requestSubmit(describeForm.querySelector('button[type="submit"]'));
-	    await waitFor(function() { return !!document.querySelector('#automation-new [role="alert"]'); }, 'visible Describe It failure');
-	    var describeError = document.querySelector('#automation-new [role="alert"]');
-	    if (!describeError.textContent.includes('Could not generate a supported Automation')) fail('Describe It failure did not explain that generation failed');
-	    var retainedDescription = document.querySelector('#automation-new textarea[name="description"]');
-	    if (!retainedDescription || retainedDescription.value !== stockDescription) fail('Describe It failure discarded the submitted description');
-	    await report('progress', 'describe-failure-visible');
-	    var blankStart = document.querySelector('input[name="source"][value="blank"]');
-	    var blankStartForm = blankStart && blankStart.closest('form');
-	    if (!blankStartForm) fail('Blank creation form is missing');
-	    htmx.process(blankStartForm);
-	    blankStartForm.requestSubmit(blankStartForm.querySelector('button[type="submit"]'));
-	    await waitFor(function() { return !!document.querySelector('[data-automation-add-first-node]'); }, 'empty Blank Automation canvas');
-	    await report('progress', 'blank-canvas-loaded');
+		    await window.openVibelyNavigate('/automations?project_id=project-browser');
+		    await waitFor(portfolioReady, 'portfolio before new Automation menu');
+		    click('[data-automation-new-menu] button[data-automation-new-template]', 'Template creation menu option');
+		    var templateModal = document.getElementById('automation-template-modal');
+		    if (!templateModal || !templateModal.open) fail('Template option did not open its modal');
+		    var templateSelect = templateModal.querySelector('select[name="template_key"]');
+		    var templateDescription = templateModal.querySelector('[data-template-description]');
+		    var nativeDescription = templateDescription && templateDescription.textContent;
+		    templateSelect.value = 'github_sdlc';
+		    templateSelect.dispatchEvent(new Event('change', {bubbles:true}));
+		    if (!templateDescription || templateDescription.textContent === nativeDescription || !templateDescription.textContent.includes('GitHub')) fail('Template selection did not update its description');
+		    templateModal.close();
+		    click('[data-automation-new-menu] button[data-automation-new-describe]', 'Describe creation menu option');
+		    var describeModal = document.getElementById('automation-describe-modal');
+		    if (!describeModal || !describeModal.open) fail('Describe option did not open its modal');
+		    var stockDescription = 'Monitor a stock for price increases or decreases so I can buy or sell depending on the result';
+		    var describeForm = describeModal.querySelector('form[hx-post]');
+		    if (!describeForm) fail('Describe form is missing');
+		    describeForm.querySelector('textarea[name="description"]').value = stockDescription;
+		    htmx.process(describeForm);
+		    describeForm.requestSubmit(describeForm.querySelector('button[type="submit"]'));
+		    await waitFor(function() { return !!document.querySelector('#automation-describe-modal [role="alert"]'); }, 'visible Describe failure in modal');
+		    var describeError = document.querySelector('#automation-describe-modal [role="alert"]');
+		    if (!describeError.textContent.includes('Could not generate a supported Automation')) fail('Describe failure did not explain that generation failed');
+		    var retainedDescription = document.querySelector('#automation-describe-modal textarea[name="description"]');
+		    if (!retainedDescription || retainedDescription.value !== stockDescription) fail('Describe failure discarded the submitted description');
+		    await report('progress', 'describe-failure-visible');
+		    describeModal.close();
+		    click('[data-automation-new-menu] button[data-automation-new-custom]', 'Custom creation menu option');
+		    await waitFor(function() { return !!document.querySelector('[data-automation-add-first-node]'); }, 'empty Custom Automation canvas');	    await report('progress', 'blank-canvas-loaded');
 	    click('[data-automation-add-first-node]', 'Add first node action');
 	    var nodeDialog = document.querySelector('[data-automation-node-dialog]');
 	    if (!nodeDialog || !nodeDialog.open) fail('Add first node did not open the node dialog');
@@ -846,11 +847,11 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = w.Write([]byte(renderPortfolio()))
 		case "/automations/automation-b":
 			_, _ = w.Write([]byte(renderLive("automation-b", "Automation B")))
-		case "/automations/new":
-			_, _ = w.Write([]byte(renderNew()))
 		case "/automations/builder":
 			_ = r.ParseForm()
 			if r.FormValue("source") == "describe" {
+				w.Header().Set("HX-Retarget", "#automation-describe-modal-content")
+				w.Header().Set("HX-Reswap", "outerHTML")
 				_, _ = w.Write([]byte(renderDescribeFailure(r.FormValue("description"))))
 				return
 			}

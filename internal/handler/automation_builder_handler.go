@@ -11,18 +11,6 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-func (h *Handler) NewAutomationBuilder(c echo.Context) error {
-	projectID, err := h.getCurrentProjectID(c)
-	if err != nil {
-		return err
-	}
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.AutomationNewContent(projectID))
-	}
-	projects, _ := h.projectSvc.List(c.Request().Context())
-	return render(c, http.StatusOK, pages.AutomationNew(projects, projectID))
-}
-
 func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 	if h.automationDraftSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation builder unavailable")
@@ -64,12 +52,19 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 			message := "Could not generate a supported Automation: " + err.Error()
 			description := c.FormValue("description")
 			if isHTMX(c) {
-				// HTMX does not swap 4xx responses by default, so render the validation
-				// result as a successful fragment while preserving the submitted input.
-				return render(c, http.StatusOK, pages.AutomationNewFailureContent(projectID, description, message))
+				c.Response().Header().Set("HX-Retarget", "#automation-describe-modal-content")
+				c.Response().Header().Set("HX-Reswap", "outerHTML")
+				return render(c, http.StatusOK, pages.AutomationDescribeModalContent(projectID, description, message))
+			}
+			if h.automationGraphSvc == nil {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "automations unavailable")
+			}
+			cards, listErr := h.automationGraphSvc.List(ctx, projectID)
+			if listErr != nil {
+				return listErr
 			}
 			projects, _ := h.projectSvc.List(ctx)
-			return render(c, http.StatusUnprocessableEntity, pages.AutomationNewFailure(projects, projectID, description, message))
+			return render(c, http.StatusUnprocessableEntity, pages.AutomationsDescribeFailure(projects, projectID, cards, description, message))
 		}
 		return err
 	}
