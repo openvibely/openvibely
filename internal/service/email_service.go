@@ -178,29 +178,36 @@ type emailIMAPClient interface {
 	Logout() error
 }
 
+type emailInboundReceiptStore interface {
+	Exists(ctx context.Context, mailboxAddress, messageKey string) (bool, error)
+	Record(ctx context.Context, mailboxAddress, messageKey string) error
+	WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(repository.SQLExecutor) error) (bool, error)
+}
+
 type EmailService struct {
-	settingsRepo           *repository.SettingsRepo
-	projectRepo            *repository.ProjectRepo
-	llmConfigRepo          *repository.LLMConfigRepo
-	taskRepo               *repository.TaskRepo
-	execRepo               *repository.ExecutionRepo
-	scheduleRepo           *repository.ScheduleRepo
-	taskSvc                *TaskService
-	llmSvc                 *LLMService
-	workerSvc              *WorkerService
-	emailAuthRepo          *repository.EmailAuthRepo
-	emailTaskContextRepo   *repository.EmailTaskContextRepo
-	emailSenderProjectRepo *repository.EmailSenderProjectRepo
-	threadInputRepo        *repository.ThreadInputRepo
-	customPersonalityRepo  *repository.CustomPersonalityRepo
-	agentRepo              *repository.AgentRepo
-	chatBroadcaster        *events.ChatBroadcaster
-	executionStreamHub     *events.ExecutionStreamHub
-	queuedTurnPromoter     func(projectID string)
-	channelChatRunner      ChannelChatRunner
-	channelMessageRouter   *ChannelMessageRouter
-	chatAttachmentRepo     *repository.ChatAttachmentRepo
-	uploadsDir             string
+	settingsRepo             *repository.SettingsRepo
+	projectRepo              *repository.ProjectRepo
+	llmConfigRepo            *repository.LLMConfigRepo
+	taskRepo                 *repository.TaskRepo
+	execRepo                 *repository.ExecutionRepo
+	scheduleRepo             *repository.ScheduleRepo
+	taskSvc                  *TaskService
+	llmSvc                   *LLMService
+	workerSvc                *WorkerService
+	emailAuthRepo            *repository.EmailAuthRepo
+	emailTaskContextRepo     *repository.EmailTaskContextRepo
+	emailInboundReceiptStore emailInboundReceiptStore
+	emailSenderProjectRepo   *repository.EmailSenderProjectRepo
+	threadInputRepo          *repository.ThreadInputRepo
+	customPersonalityRepo    *repository.CustomPersonalityRepo
+	agentRepo                *repository.AgentRepo
+	chatBroadcaster          *events.ChatBroadcaster
+	executionStreamHub       *events.ExecutionStreamHub
+	queuedTurnPromoter       func(projectID string)
+	channelChatRunner        ChannelChatRunner
+	channelMessageRouter     *ChannelMessageRouter
+	chatAttachmentRepo       *repository.ChatAttachmentRepo
+	uploadsDir               string
 
 	mu                       sync.RWMutex
 	running                  bool
@@ -208,7 +215,7 @@ type EmailService struct {
 	cancel                   context.CancelFunc
 	connectIMAP              func(ctx context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error)
 	sendMail                 func(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, inReplyTo, references string) error
-	processIncomingMessageFn func(context.Context, EmailInboundMessage)
+	processIncomingMessageFn func(context.Context, EmailInboundMessage) bool
 }
 
 type EmailRuntimeConfig struct {
@@ -285,6 +292,9 @@ func (s *EmailService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 }
 func (s *EmailService) SetEmailSenderProjectRepo(repo *repository.EmailSenderProjectRepo) {
 	s.emailSenderProjectRepo = repo
+}
+func (s *EmailService) SetEmailInboundReceiptRepo(repo *repository.EmailInboundReceiptRepo) {
+	s.emailInboundReceiptStore = repo
 }
 func (s *EmailService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
 	s.chatAttachmentRepo = repo
@@ -452,7 +462,8 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 		return
 	}
 	defer client.Logout()
-	if _, err := client.Select("INBOX", false); err != nil {
+	mailbox, err := client.Select("INBOX", false)
+	if err != nil {
 		applog.Infof("[email] select inbox failed: %v", err)
 		return
 	}
@@ -468,12 +479,58 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 		applog.Infof("[email] fetch messages failed: %v", err)
 		return
 	}
-	for _, msg := range messages {
-		s.ProcessIncoming(ctx, msg)
+	mailboxIdentity := emailMailboxIdentity(cfg)
+	for _, fetched := range messages {
+		messageKey, ok := emailInboundMessageKey(fetched.Message, mailbox.UidValidity, fetched.UID)
+		if !ok {
+			applog.Infof("[email] message %d has no stable Message-ID or IMAP UID identity; leaving unread", fetched.ID)
+			continue
+		}
+		if s.emailInboundReceiptStore != nil {
+			received, err := s.emailInboundReceiptStore.Exists(ctx, mailboxIdentity, messageKey)
+			if err != nil {
+				applog.Infof("[email] check receipt for message %d failed: %v", fetched.ID, err)
+				continue
+			}
+			if received {
+				if err := storeSeen(client, []uint32{fetched.ID}); err != nil {
+					applog.Infof("[email] mark previously handed-off message %d seen failed: %v", fetched.ID, err)
+				}
+				continue
+			}
+		}
+		handled := false
+		if s.processIncomingMessageFn != nil {
+			handled = s.ProcessIncoming(ctx, fetched.Message)
+		} else {
+			handled = s.processIncomingMessage(ctx, fetched.Message, mailboxIdentity, messageKey)
+		}
+		if !handled {
+			continue
+		}
+		if s.emailInboundReceiptStore != nil {
+			if err := s.emailInboundReceiptStore.Record(ctx, mailboxIdentity, messageKey); err != nil {
+				applog.Infof("[email] record receipt for message %d failed: %v", fetched.ID, err)
+			}
+		}
+		if err := storeSeen(client, []uint32{fetched.ID}); err != nil {
+			applog.Infof("[email] mark message %d seen failed: %v", fetched.ID, err)
+		}
 	}
-	if err := storeSeen(client, ids); err != nil {
-		applog.Infof("[email] mark seen failed: %v", err)
+}
+
+func emailMailboxIdentity(cfg EmailRuntimeConfig) string {
+	return strings.ToLower(strings.TrimSpace(cfg.IMAPHost)) + "\x00" + repository.NormalizeEmailAddress(cfg.Address)
+}
+
+func emailInboundMessageKey(msg EmailInboundMessage, uidValidity, uid uint32) (string, bool) {
+	if messageID := strings.TrimSpace(msg.MessageID); messageID != "" {
+		return "message-id:" + messageID, true
 	}
+	if uidValidity == 0 || uid == 0 {
+		return "", false
+	}
+	return fmt.Sprintf("imap-uid:%d:%d", uidValidity, uid), true
 }
 
 func unseenCriteria() *imap.SearchCriteria {
@@ -501,26 +558,32 @@ func defaultEmailIMAPConnect(ctx context.Context, cfg EmailRuntimeConfig) (email
 	return client, nil
 }
 
-func fetchEmailMessages(client emailIMAPClient, ids []uint32, skipAttachments bool) ([]EmailInboundMessage, error) {
+type fetchedEmailMessage struct {
+	ID      uint32
+	UID     uint32
+	Message EmailInboundMessage
+}
+
+func fetchEmailMessages(client emailIMAPClient, ids []uint32, skipAttachments bool) ([]fetchedEmailMessage, error) {
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(ids...)
 	section := &imap.BodySectionName{}
-	items := []imap.FetchItem{imap.FetchEnvelope, section.FetchItem()}
+	items := []imap.FetchItem{imap.FetchEnvelope, imap.FetchUid, section.FetchItem()}
 	ch := make(chan *imap.Message, len(ids))
 	if err := client.Fetch(seqset, items, ch); err != nil {
 		return nil, err
 	}
-	var out []EmailInboundMessage
+	var out []fetchedEmailMessage
 	for msg := range ch {
 		if msg == nil {
 			continue
 		}
 		inbound, err := parseIMAPMessage(msg, section, skipAttachments)
 		if err != nil {
-			applog.Infof("[email] parse message failed: %v", err)
+			applog.Infof("[email] parse message %d failed: %v", msg.SeqNum, err)
 			continue
 		}
-		out = append(out, inbound)
+		out = append(out, fetchedEmailMessage{ID: msg.SeqNum, UID: msg.Uid, Message: inbound})
 	}
 	return out, nil
 }
@@ -667,32 +730,36 @@ func firstNonEmpty(a, b string) string {
 	return strings.TrimSpace(b)
 }
 
-func (s *EmailService) ProcessIncoming(ctx context.Context, msg EmailInboundMessage) {
+func (s *EmailService) ProcessIncoming(ctx context.Context, msg EmailInboundMessage) bool {
 	if s.processIncomingMessageFn != nil {
-		s.processIncomingMessageFn(ctx, msg)
-		return
+		return s.processIncomingMessageFn(ctx, msg)
 	}
-	s.processIncomingMessage(ctx, msg)
+	return s.processIncomingMessage(ctx, msg, "", "")
 }
 
-func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInboundMessage) {
+func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey string) bool {
 	if isIgnoredEmail(msg, s.getConfiguredAddress(ctx)) ||
 		(strings.TrimSpace(msg.Body) == "" && len(msg.Attachments) == 0) {
-		return
+		return true
 	}
 	if s.taskRepo == nil || s.execRepo == nil || s.llmConfigRepo == nil || s.llmSvc == nil || s.taskSvc == nil || s.projectRepo == nil {
-		applog.Infof("[email] incoming message ignored: service dependencies are not fully configured")
-		return
+		applog.Infof("[email] incoming message deferred: service dependencies are not fully configured")
+		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), emailProcessTimeout)
 	defer cancel()
-	projectID := s.resolveAuthorizedProject(ctx, msg.FromAddress)
-	if projectID == "" {
+	projectID, authorized, err := s.resolveAuthorizedProjectForInbound(ctx, msg.FromAddress)
+	if err != nil {
+		applog.Infof("[email] project authorization lookup failed for sender=%s: %v", redactEmail(msg.FromAddress), err)
+		return false
+	}
+	if !authorized || projectID == "" {
 		applog.Infof("[email] unauthorized or no project for sender=%s", redactEmail(msg.FromAddress))
-		return
+		return true
 	}
 	prompt := BuildEmailPrompt(msg)
 	sessionKey := EmailSessionKey(msg.FromAddress, msg.MessageID, msg.References, msg.Subject)
+	handedOff := false
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform:              "email",
 		ProjectID:             projectID,
@@ -728,16 +795,36 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 		NewQueuedInput: func() *models.ThreadInput {
 			return &models.ThreadInput{EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey}
 		},
+		CreateQueuedInput: func(ctx context.Context, input *models.ThreadInput) (bool, error) {
+			if s.threadInputRepo == nil {
+				return false, fmt.Errorf("thread input repository is not configured")
+			}
+			if s.emailInboundReceiptStore == nil || mailboxIdentity == "" || messageKey == "" {
+				return false, s.threadInputRepo.CreateQueued(ctx, input)
+			}
+			return s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(exec repository.SQLExecutor) error {
+				return s.threadInputRepo.CreateQueuedWithExecutor(ctx, exec, input)
+			})
+		},
 		OnAttachmentDownloadFailed: func(context.Context, string) { applog.Infof("[email] attachment processing failed") },
 		OnAttachmentStoreFailed:    func(context.Context, string) { applog.Infof("[email] attachment staging failed") },
 		OnModelSelectionFailed:     func(context.Context, error) { applog.Infof("[email] model selection failed") },
 		OnActiveLookupFailed:       func(context.Context) { applog.Infof("[email] active chat check failed") },
+		OnDurableHandoff:           func() { handedOff = true },
 		FirstTurn: channelChatIngressFirstTurnOptions{
 			Task:              &models.Task{Title: fmt.Sprintf("Email %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Subject, 47)), CreatedVia: models.TaskOriginEmail},
 			ReplyContext:      ChannelReplyContext{Source: models.TaskOriginEmail, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey},
 			ChannelChatRunner: s.channelChatRunner,
-			RuntimeTools:      s.buildEmailActionToolRuntime(projectID, msg.FromAddress),
-			LinkAttachments:   s.linkAttachmentsToExecution,
+			CreateExecution: func(ctx context.Context, execution *models.Execution) (bool, error) {
+				if s.emailInboundReceiptStore == nil || mailboxIdentity == "" || messageKey == "" {
+					return false, s.execRepo.Create(ctx, execution)
+				}
+				return s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(exec repository.SQLExecutor) error {
+					return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+				})
+			},
+			RuntimeTools:    s.buildEmailActionToolRuntime(projectID, msg.FromAddress),
+			LinkAttachments: s.linkAttachmentsToExecution,
 			AttachmentContextAndImages: func(atts []models.ChatAttachment) (string, []models.Attachment) {
 				return channelChatAttachmentContextAndImages(atts, emailMaxTextFileSize)
 			},
@@ -754,6 +841,7 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 			FilterChatHistory: filterEmailChatHistory,
 		},
 	})
+	return handedOff
 }
 
 // emailUploadsDir returns the configured uploads root, defaulting to "uploads"
@@ -848,27 +936,45 @@ func emailIncomingAttachmentsRequireVision(parts []EmailInboundAttachment) bool 
 }
 
 func (s *EmailService) resolveAuthorizedProject(ctx context.Context, sender string) string {
+	projectID, _, _ := s.resolveAuthorizedProjectForInbound(ctx, sender)
+	return projectID
+}
+
+func (s *EmailService) resolveAuthorizedProjectForInbound(ctx context.Context, sender string) (string, bool, error) {
 	if s.emailAuthRepo == nil || sender == "" || s.projectRepo == nil {
-		return ""
+		return "", false, fmt.Errorf("email authorization dependencies are not configured")
 	}
 	ok, err := s.emailAuthRepo.IsAuthorized(ctx, "", sender)
-	if err != nil || !ok {
-		return ""
+	if err != nil {
+		return "", false, err
+	}
+	if !ok {
+		return "", false, nil
 	}
 	if s.emailSenderProjectRepo != nil {
 		savedProjectID, err := s.emailSenderProjectRepo.GetSenderProject(ctx, sender)
-		if err == nil && savedProjectID != "" {
-			if project, projectErr := s.projectRepo.GetByID(ctx, savedProjectID); projectErr == nil && project != nil {
-				return savedProjectID
+		if err != nil {
+			return "", true, err
+		}
+		if savedProjectID != "" {
+			project, projectErr := s.projectRepo.GetByID(ctx, savedProjectID)
+			if projectErr != nil {
+				return "", true, projectErr
+			}
+			if project != nil {
+				return savedProjectID, true, nil
 			}
 			applog.Infof("[email] saved project %s no longer exists for sender=%s; using default", savedProjectID, redactEmail(sender))
 		}
 	}
 	projects, err := s.projectRepo.List(ctx)
-	if err != nil || len(projects) == 0 {
-		return ""
+	if err != nil {
+		return "", true, err
 	}
-	return projects[0].ID
+	if len(projects) == 0 {
+		return "", true, fmt.Errorf("no projects configured")
+	}
+	return projects[0].ID, true, nil
 }
 
 // buildEmailActionToolRuntime returns channel-specific RuntimeTools for an

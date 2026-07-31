@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/emersion/go-imap"
 	messagemail "github.com/emersion/go-message/mail"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -16,6 +18,395 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestEmailInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	receipts := repository.NewEmailInboundReceiptRepo(db)
+	mailbox, messageKey := "imap.example.com\x00bot@example.com", "message-id:<atomic@example.com>"
+
+	alreadyHandedOff, err := receipts.WithHandoff(ctx, mailbox, messageKey, func(repository.SQLExecutor) error {
+		return fmt.Errorf("simulated durable row failure")
+	})
+	require.Error(t, err)
+	assert.False(t, alreadyHandedOff)
+	exists, err := receipts.Exists(ctx, mailbox, messageKey)
+	require.NoError(t, err)
+	assert.False(t, exists, "failed durable work must roll back its receipt")
+
+	persistCalls := 0
+	alreadyHandedOff, err = receipts.WithHandoff(ctx, mailbox, messageKey, func(repository.SQLExecutor) error {
+		persistCalls++
+		return nil
+	})
+	require.NoError(t, err)
+	assert.False(t, alreadyHandedOff)
+
+	alreadyHandedOff, err = receipts.WithHandoff(ctx, mailbox, messageKey, func(repository.SQLExecutor) error {
+		persistCalls++
+		return nil
+	})
+	require.NoError(t, err)
+	assert.True(t, alreadyHandedOff)
+	assert.Equal(t, 1, persistCalls, "a receipt retry must not repeat durable work")
+}
+
+func TestEmailPollOnceDoesNotDeduplicateDistinctIdenticalMessagesWithoutMessageID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	client := newFakeEmailIMAPClient(
+		testIMAPMessageWithoutMessageID(1, 101, "same", "alice@example.com", "identical body"),
+		testIMAPMessageWithoutMessageID(2, 102, "same", "alice@example.com", "identical body"),
+	)
+	client.uidValidity = 77
+	processed := 0
+	svc := &EmailService{emailInboundReceiptStore: repository.NewEmailInboundReceiptRepo(db)}
+	svc.processIncomingMessageFn = func(_ context.Context, _ EmailInboundMessage) bool {
+		processed++
+		return true
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"})
+
+	assert.Equal(t, 2, processed)
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+}
+
+func TestEmailPollOnceDoesNotRepeatDurableHandoffAfterStoreFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	client := newFakeEmailIMAPClient(testIMAPMessage(1, "durable", "alice@example.com"))
+	client.storeFailures = 1
+	receipts := repository.NewEmailInboundReceiptRepo(db)
+	processed := 0
+	newService := func() *EmailService {
+		svc := &EmailService{emailInboundReceiptStore: receipts}
+		svc.processIncomingMessageFn = func(_ context.Context, _ EmailInboundMessage) bool {
+			processed++
+			return true
+		}
+		svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+		return svc
+	}
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+
+	newService().pollOnce(context.Background(), cfg)
+	require.Empty(t, client.seenIDs())
+	require.Equal(t, 1, processed)
+
+	newService().pollOnce(context.Background(), cfg)
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, 1, processed)
+}
+
+func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	projects, err := projectRepo.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	project := &projects[0]
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
+	agent := &models.LLMConfig{Name: "Email Poll Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
+	require.NoError(t, func() error {
+		_, err := db.Exec(`CREATE TRIGGER fail_email_task_insert BEFORE INSERT ON tasks
+			WHEN NEW.prompt LIKE '%transient task failure%'
+			BEGIN SELECT RAISE(FAIL, 'transient task failure'); END`)
+		return err
+	}())
+
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, nil)
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), taskSvc, llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) {})
+	svc.SetEmailInboundReceiptRepo(repository.NewEmailInboundReceiptRepo(db))
+	client := newFakeEmailIMAPClient(
+		testIMAPMessageWithBody(1, "successful", "alice@example.com", "normal request"),
+		testIMAPMessageWithBody(2, "retry", "alice@example.com", "transient task failure"),
+	)
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	cfg := EmailRuntimeConfig{Address: "bot@example.com"}
+
+	svc.pollOnce(ctx, cfg)
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Contains(t, tasks[0].Prompt, "normal request")
+
+	_, err = db.Exec(`DROP TRIGGER fail_email_task_insert`)
+	require.NoError(t, err)
+	client.messages[2] = testIMAPMessageWithBody(2, "retry", "alice@example.com", "transient task failure")
+	svc.pollOnce(ctx, cfg)
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	tasks, err = taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	assert.Len(t, tasks, 2)
+}
+
+func TestEmailPollOnceMixedBatchRetriesRealQueueWriteFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	projects, err := projectRepo.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	project := &projects[0]
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
+	agent := &models.LLMConfig{Name: "Email Queue Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
+
+	rootMessageID := "<queue-root@example.com>"
+	sessionKey := EmailSessionKey("alice@example.com", rootMessageID, "", "Queue thread")
+	activeTask := &models.Task{ProjectID: project.ID, Title: "Queue thread", Prompt: "root", Category: models.CategoryChat, Status: models.StatusRunning, CreatedVia: models.TaskOriginEmail, AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, activeTask))
+	activeExec := &models.Execution{TaskID: activeTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "root"}
+	require.NoError(t, execRepo.Create(ctx, activeExec))
+	require.NoError(t, emailTaskContextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: activeTask.ID, EmailFrom: "alice@example.com", EmailMessageID: rootMessageID, EmailSubject: "Queue thread", EmailSessionKey: sessionKey}))
+	require.NoError(t, func() error {
+		_, err := db.Exec(`CREATE TRIGGER fail_email_queue_insert BEFORE INSERT ON thread_inputs
+			WHEN NEW.content LIKE '%transient queue failure%'
+			BEGIN SELECT RAISE(FAIL, 'transient queue failure'); END`)
+		return err
+	}())
+
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), NewTaskService(taskRepo, attachmentRepo, nil), llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc.SetThreadInputRepo(threadInputRepo)
+	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) {})
+	svc.SetEmailInboundReceiptRepo(repository.NewEmailInboundReceiptRepo(db))
+	client := newFakeEmailIMAPClient(
+		testIMAPReplyWithBody(1, "Queue thread", "alice@example.com", rootMessageID, "normal queued request"),
+		testIMAPReplyWithBody(2, "Queue thread", "alice@example.com", rootMessageID, "transient queue failure"),
+	)
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+
+	svc.pollOnce(ctx, cfg)
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	inputs, err := threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Contains(t, inputs[0].Content, "normal queued request")
+
+	_, err = db.Exec(`DROP TRIGGER fail_email_queue_insert`)
+	require.NoError(t, err)
+	client.messages[2] = testIMAPReplyWithBody(2, "Queue thread", "alice@example.com", rootMessageID, "transient queue failure")
+	svc.pollOnce(ctx, cfg)
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	inputs, err = threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 2)
+}
+
+func TestEmailPollOnceAcknowledgesOnlySuccessfulMessagesAndRetriesFailures(t *testing.T) {
+	client := newFakeEmailIMAPClient(
+		testIMAPMessage(1, "success", "alice@example.com"),
+		testIMAPMessage(2, "retry", "alice@example.com"),
+	)
+	svc := &EmailService{}
+	attempts := map[string]int{}
+	svc.processIncomingMessageFn = func(_ context.Context, msg EmailInboundMessage) bool {
+		attempts[msg.Subject]++
+		return msg.Subject == "success" || attempts[msg.Subject] > 1
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, map[string]int{"success": 1, "retry": 1}, attempts)
+
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, map[string]int{"success": 1, "retry": 2}, attempts)
+}
+
+func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
+	client := newFakeEmailIMAPClient(testIMAPMessage(1, "malformed", ""))
+	svc := &EmailService{}
+	processed := 0
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processed++
+		return true
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
+
+	assert.Empty(t, client.seenIDs())
+	assert.Zero(t, processed)
+	assert.Equal(t, 2, client.fetchCount)
+}
+
+type fakeEmailIMAPClient struct {
+	messages      map[uint32]*imap.Message
+	seen          map[uint32]bool
+	fetchCount    int
+	storeFailures int
+	uidValidity   uint32
+}
+
+func newFakeEmailIMAPClient(messages ...*imap.Message) *fakeEmailIMAPClient {
+	client := &fakeEmailIMAPClient{messages: make(map[uint32]*imap.Message), seen: make(map[uint32]bool)}
+	for _, msg := range messages {
+		client.messages[msg.SeqNum] = msg
+	}
+	return client
+}
+
+func testIMAPMessage(id uint32, subject, from string) *imap.Message {
+	msg := &imap.Message{SeqNum: id, Envelope: &imap.Envelope{Subject: subject, MessageId: fmt.Sprintf("<message-%d@example.com>", id)}}
+	if from != "" {
+		parts := strings.SplitN(from, "@", 2)
+		msg.Envelope.From = []*imap.Address{{MailboxName: parts[0], HostName: parts[1]}}
+	}
+	return msg
+}
+
+func testIMAPMessageWithoutMessageID(id, uid uint32, subject, from, body string) *imap.Message {
+	parts := strings.SplitN(from, "@", 2)
+	raw := fmt.Sprintf("From: %s\r\nSubject: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s", from, subject, body)
+	return &imap.Message{
+		SeqNum:   id,
+		Uid:      uid,
+		Envelope: &imap.Envelope{Subject: subject, From: []*imap.Address{{MailboxName: parts[0], HostName: parts[1]}}},
+		Body:     map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)},
+	}
+}
+
+func testIMAPMessageWithBody(id uint32, subject, from, body string) *imap.Message {
+	msg := testIMAPMessage(id, subject, from)
+	raw := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s", from, subject, id, body)
+	msg.Body = map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)}
+	return msg
+}
+
+func testIMAPReplyWithBody(id uint32, subject, from, references, body string) *imap.Message {
+	msg := testIMAPMessage(id, subject, from)
+	raw := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\nReferences: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s", from, subject, id, references, body)
+	msg.Body = map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)}
+	return msg
+}
+
+func (c *fakeEmailIMAPClient) Login(string, string) error { return nil }
+func (c *fakeEmailIMAPClient) Select(string, bool) (*imap.MailboxStatus, error) {
+	return &imap.MailboxStatus{UidValidity: c.uidValidity}, nil
+}
+func (c *fakeEmailIMAPClient) Search(*imap.SearchCriteria) ([]uint32, error) {
+	var ids []uint32
+	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
+		if !c.seen[id] {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, _ []imap.FetchItem, ch chan *imap.Message) error {
+	c.fetchCount++
+	defer close(ch)
+	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
+		if seqset.Contains(id) {
+			ch <- c.messages[id]
+		}
+	}
+	return nil
+}
+func (c *fakeEmailIMAPClient) Store(seqset *imap.SeqSet, _ imap.StoreItem, _ interface{}, _ chan *imap.Message) error {
+	if c.storeFailures > 0 {
+		c.storeFailures--
+		return fmt.Errorf("transient store failure")
+	}
+	for id := range c.messages {
+		if seqset.Contains(id) {
+			c.seen[id] = true
+		}
+	}
+	return nil
+}
+func (c *fakeEmailIMAPClient) Logout() error { return nil }
+func (c *fakeEmailIMAPClient) seenIDs() []uint32 {
+	var ids []uint32
+	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
+		if c.seen[id] {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func TestChannelChatIngressReportsTaskAndQueuePersistenceFailures(t *testing.T) {
+	t.Run("task creation", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		taskRepo := repository.NewTaskRepo(db, nil)
+		execRepo := repository.NewExecutionRepo(db)
+		require.NoError(t, db.Close())
+
+		handedOff := false
+		handled, _ := runChannelChatFirstTurn(context.Background(), channelChatIngressFirstTurnOptions{
+			Platform:         "email",
+			ProjectID:        "project",
+			Message:          "hello",
+			Task:             &models.Task{Title: "email"},
+			Agent:            &models.LLMConfig{ID: "agent"},
+			TaskRepo:         taskRepo,
+			ExecRepo:         execRepo,
+			OnDurableHandoff: func() { handedOff = true },
+		})
+		assert.True(t, handled)
+		assert.False(t, handedOff)
+	})
+
+	t.Run("queue write", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		threadInputRepo := repository.NewThreadInputRepo(db)
+		require.NoError(t, db.Close())
+
+		handedOff := false
+		handled := runChannelChatQueuedInput(context.Background(), channelChatIngressQueueOptions{
+			Platform:         "email",
+			ProjectID:        "project",
+			ActiveExecID:     "execution",
+			AgentID:          "agent",
+			Message:          "hello",
+			ThreadInputRepo:  threadInputRepo,
+			OnDurableHandoff: func() { handedOff = true },
+		})
+		assert.True(t, handled)
+		assert.False(t, handedOff)
+	})
+}
+
+func TestEmailProcessIncomingAcknowledgesIntentionalIgnores(t *testing.T) {
+	svc := &EmailService{}
+	assert.True(t, svc.ProcessIncoming(context.Background(), EmailInboundMessage{FromAddress: "noreply@example.com", Body: "automated"}))
+
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	require.NoError(t, projectRepo.Create(context.Background(), &models.Project{Name: "Email"}))
+	svc = NewEmailService(nil, projectRepo, repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), &TaskService{}, &LLMService{}, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	assert.True(t, svc.ProcessIncoming(context.Background(), EmailInboundMessage{FromAddress: "unauthorized@example.com", Subject: "request", Body: "hello"}))
+}
 
 func TestNormalizeEmailPasswordForProvider(t *testing.T) {
 	assert.Equal(t, "abcdefghijklmnop", NormalizeEmailPasswordForProvider(EmailProviderGmail, " abcd efgh ijkl mnop "))

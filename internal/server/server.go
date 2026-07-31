@@ -653,6 +653,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	emailSvc.SetChatBroadcaster(chatBroadcaster)
 	emailSvc.SetExecutionStreamHub(executionStreamHub)
 	emailSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	emailSvc.SetEmailInboundReceiptRepo(repository.NewEmailInboundReceiptRepo(db))
 	emailSvc.SetAgentRepo(agentRepo)
 	discordSvc := service.NewDiscordService(
 		settingsRepo,

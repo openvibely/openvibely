@@ -179,11 +179,16 @@ func (r *ExecutionRepo) GetLatestCompletedByTask(ctx context.Context, taskID str
 }
 
 func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
+	return r.CreateWithExecutor(ctx, r.db, e)
+}
+
+// CreateWithExecutor persists an execution using the caller's transaction.
+func (r *ExecutionRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor, e *models.Execution) error {
 	isFollowup := 0
 	if e.IsFollowup {
 		isFollowup = 1
 	}
-	err := r.db.QueryRowContext(ctx,
+	err := exec.QueryRowContext(ctx,
 		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
 		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
 		 RETURNING id, started_at`,
