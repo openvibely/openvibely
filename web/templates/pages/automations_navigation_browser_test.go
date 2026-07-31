@@ -201,6 +201,43 @@ func TestAutomationLiveRunNowIsActiveOnly(t *testing.T) {
 	}
 }
 
+func TestAutomationLiveControlsOverlayGraphViewport(t *testing.T) {
+	graph := models.AutomationLiveGraph{
+		Automation: models.Automation{ID: "automation-live-controls", Name: "Viewport controls", LifecycleState: models.AutomationActive},
+	}
+
+	var out bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-controls", true).Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation Live: %v", err)
+	}
+	body := out.String()
+	viewportStart := strings.Index(body, `role="region" aria-label="Live automation graph"`)
+	if viewportStart < 0 {
+		t.Fatal("expected Live graph viewport")
+	}
+	viewportEnd := strings.Index(body[viewportStart:], `</svg></div>`)
+	if viewportEnd < 0 {
+		t.Fatal("expected Live graph viewport end")
+	}
+	viewport := body[viewportStart : viewportStart+viewportEnd]
+	for _, want := range []string{
+		`data-automation-live-viewport-controls`,
+		`data-automation-zoom-out`,
+		`data-automation-zoom-in`,
+		`data-automation-fit`,
+	} {
+		if !strings.Contains(viewport, want) {
+			t.Errorf("expected Live graph viewport to contain %q", want)
+		}
+		if got := strings.Count(body, " "+want); got != 1 {
+			t.Errorf("expected exactly one Live graph control attribute %q, got %d", want, got)
+		}
+	}
+	if strings.Index(viewport, `data-automation-live-viewport-controls`) > strings.Index(viewport, `<svg`) {
+		t.Error("expected Live graph controls to overlay the viewport outside the SVG")
+	}
+}
+
 func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{ID: "automation-live-height", Name: "Full height", LifecycleState: models.AutomationActive},
@@ -215,7 +252,7 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 	for _, want := range []string{
 		`id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto"`,
 		`class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 flex flex-1 flex-col" data-automation-readonly-canvas`,
-		`class="automation-canvas-shell min-h-[34rem] w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
+		`class="automation-canvas-shell relative min-h-[34rem] w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected Automation Live viewport-filling layout to contain %q", want)
@@ -223,6 +260,44 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 	}
 	if strings.Contains(body, `automation-canvas-shell h-[34rem]`) {
 		t.Error("Automation Live canvas must grow beyond the old fixed 34rem height")
+	}
+}
+
+func TestAutomationBuilderControlsOverlayGraphViewport(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion: 1, Name: "Builder controls", AutomationType: "custom", AdapterKey: "custom",
+	}
+	page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}}
+	var out bytes.Buffer
+	if err := AutomationBuilderContent(page, "project-builder-controls").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation builder: %v", err)
+	}
+	body := out.String()
+	viewportStart := strings.Index(body, `role="region" aria-label="Automation graph builder"`)
+	if viewportStart < 0 {
+		t.Fatal("expected Automation builder graph viewport")
+	}
+	viewportEnd := strings.Index(body[viewportStart:], `</section>`)
+	if viewportEnd < 0 {
+		t.Fatal("expected Automation builder graph viewport end")
+	}
+	viewport := body[viewportStart : viewportStart+viewportEnd]
+	for _, want := range []string{
+		`data-automation-builder-viewport-controls`,
+		`data-automation-zoom-out`,
+		`data-automation-zoom-in`,
+		`data-automation-fit`,
+		`data-automation-reset`,
+	} {
+		if !strings.Contains(viewport, want) {
+			t.Errorf("expected Automation builder graph viewport to contain %q", want)
+		}
+		if got := strings.Count(body, " "+want); got != 1 {
+			t.Errorf("expected exactly one Automation builder graph control attribute %q, got %d", want, got)
+		}
+	}
+	if strings.Index(viewport, `data-automation-builder-viewport-controls`) > strings.Index(viewport, `<svg`) {
+		t.Error("expected Automation builder graph controls to overlay the viewport outside the SVG")
 	}
 }
 
