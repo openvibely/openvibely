@@ -179,11 +179,6 @@ always_use:
 ## openvibely_github_pr_publication_workflow
 
 [OpenVibely GitHub PR Publication Workflow](openvibely_github_pr_publication_workflow/SKILL.md) — Implement and investigate idempotent API-backed task branch publication, PR reuse, and guarded history cleanup.
-
-## openvibely_github_finding_workflow
-
-[OpenVibely GitHub Finding Workflow](openvibely_github_finding_workflow/SKILL.md) — Run focused read-only OpenVibely repository scans and publish actionable findings as GitHub issues.
-
 ## openvibely_managed_memory_maintenance
 
 [OpenVibely Managed Memory Maintenance](openvibely_managed_memory_maintenance/SKILL.md) — Apply narrow, idempotent corrections to authoritative OpenVibely managed-memory topics and verify the saved result.
@@ -206,4 +201,12 @@ always_use:
 
 ## openvibely_alert_lifecycle_workflow
 
-[OpenVibely Alert Lifecycle Workflow](openvibely_alert_lifecycle_workflow/SKILL.md) — Implement and audit OpenVibely alert listing, read, dismiss, deletion, retention, and UI refresh semantics.
+[OpenVibely Alert Lifecycle Workflow](openvibely_alert_lifecycle_workflow/SKILL.md) — Implement, audit, and diagnose OpenVibely alert lifecycle behavior and project-scoped runtime authorization.
+
+## openvibely_model_release_audit_workflow
+
+[OpenVibely Model Release Audit Workflow](openvibely_model_release_audit_workflow/SKILL.md) — Audit authoritative provider releases against OpenVibely support and hand off only verified model-support gaps.
+
+## openvibely_github_implementation_inbox_workflow
+
+[OpenVibely GitHub Implementation Inbox Workflow](openvibely_github_implementation_inbox_workflow/SKILL.md) — Poll GitHub implementation mailboxes, reconcile assigned issues with OpenVibely tasks, and start approved work without duplicate submissions.

@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-07-25
-source: task_conversation
-source_id: e109ce8999815c5518324d5ce39b470b:8235368c9cf07508
+updated: 2026-07-29
+source: consolidation
+source_id: memory_consolidation_2026_07_29
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -13,6 +13,7 @@ This memory stores durable user preferences and product-discipline decisions for
 
 User interaction preferences:
 - For design, behavior, or feasibility questions, answer directly without making implementation changes unless explicitly requested.
+- Prefer prompt or configuration corrections when they are sufficient; do not change runtime or product code merely because a model-facing prompt can express the intended behavior. Add code enforcement only when an authoritative invariant must also cover manual, forged, or otherwise prompt-bypassing inputs.
 - Do not describe unreleased feature contracts as legacy or preserve compatibility shims for unreleased API/UI shapes unless the user explicitly asks for migration compatibility.
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
 - Treat requests explicitly limited to memory or skill maintenance as a hard scope boundary: do not add implementation, generated-file, test, rebase, or other repository changes unless the user separately requests them; clearly distinguish any pre-existing or later-instructed code work when reporting the diff.
@@ -20,7 +21,7 @@ User interaction preferences:
 - Do not delegate tasks or create child-agent work. This prohibition applies especially to memory updates; use only direct capabilities available in the current task and report a capability blocker when direct work is unavailable.
 - When diagnosing autonomous integration loops, do not manually forward, wake, or otherwise push one live message through as a substitute for fixing the product path. The user wants the implementation to work properly end-to-end; validation should prove the scheduled/tool/runtime behavior works without ad hoc live intervention unless the user explicitly asks for a one-off operational action.
 - When the user has already explicitly requested an outbound action such as sending an email/message, attempt the available configured/runtime mechanism instead of asking for redundant confirmation; if no viable send path exists, report the completed work and the send limitation clearly.
-- Prefer plain, direct explanations over jargon-heavy phrasing; if the user asks for “no word salad,” respond with a terse concrete summary rather than audit-style detail. For user-facing UI/docs copy, avoid internal tool-name or architecture jargon unless it is clearly marked as advanced/reference text.
+- Prefer plain, direct explanations over jargon-heavy phrasing; if the user asks for “no word salad,” respond with a terse concrete summary and one or two representative examples rather than audit-style detail. For user-facing UI/docs copy, avoid internal tool-name or architecture jargon unless it is clearly marked as advanced/reference text.
 - Bug explanations should include the causal chain, concrete failure mode, and exact affected path when the user asks for detail.
 - Summaries should be concrete: cite specific files, symbols, handlers, tests, behavior affected, verification performed, and whether a real git diff exists when available.
 - If a user challenges why there is no diff after a claimed coding change, inspect branch pointers, status, reflog, and file contents, then plainly correct any prior summary based on non-persisted or stale output.
@@ -47,6 +48,7 @@ Documentation, logging, and validation preferences:
 - Published docs links in README/project-facing docs should use new-tab HTML anchors where supported; local relative links stay normal Markdown.
 - Very high-frequency or low-value debug traces should be commented `applog.Debugf` examples instead of active gated calls when method-call overhead could accumulate, especially per LLM chunk, SSE delta, HTMX poll, diff broadcast tick, or action-routing check.
 - Full validation should prefer project Makefile targets or `go test ./... -count=1 -timeout 120s`; detailed test-state and timeout caveats live in `testing_coverage_and_performance.md`.
+- Match validation intensity to the change. For prompt-only changes, use focused prompt/template contract tests plus the normal build and, when shared templates are affected, the normal suite; do not run the race detector unless concurrency code changed or the user explicitly requests it.
 - Release workflow must include a documentation update pass for new or meaningfully changed features before publishing/tagging.
 - Release agents should install missing required local tools such as `gh` when feasible instead of treating them as immediate blockers; hand back only if installation/authentication fails or requires unavailable credentials/permissions.
 - Docker image publishing remains documented as a manual/pending release step unless explicit Docker credentials/tooling are present.

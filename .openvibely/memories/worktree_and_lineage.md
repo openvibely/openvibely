@@ -2,7 +2,7 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-07-27
+updated: 2026-07-31
 source: consolidation
 source_id: memory_consolidation_2026_07_27
 confidence: high
@@ -61,6 +61,7 @@ Merge and metadata direction:
 - Changes-tab and local merge handlers revalidate stale `merge_status` and recover conventional worktree metadata before hiding or rejecting merge actions.
 - A conflict-resolution commit made directly in a task worktree does not itself clear the task's persisted `MergeStatusConflict`; while that status remains, the Changes UI hides local merge actions. The task must be resumed/rerun in its owning project or otherwise pass through explicit merge-status reconciliation before the option reappears. Task controls are project-scoped, so an agent running under another project cannot perform that rerun.
 - Local worktree commits are not automatically remote publication: verify the configured remote and compare its task-branch tip before claiming a fix is available outside the local app/worktree.
+- Recorded PR-publication incidents (2026-07-30 through 2026-07-31): guarded branch replacement successfully moved one remote task branch, but the linked PR remained closed on its old head. `github_open_pull_request` reported the existing PR record as open/reused even while GitHub's cache-bypassed public API still reported the PR closed and `refs/pull/<number>/head` remained stale. Separately, issue #91's complete local implementation reached `b472960e` while live PR #100 remained on obsolete head `148d0ef3` because the caller's Automation authorization gate rejected `github_open_pull_request` before mutation. Issue #94 likewise completed provider-bound OAuth fallback coverage at local commit `2ed295da`; its one required `github_open_pull_request` attempt was rejected by the Automation authorization gate, so no issue #94 PR was created. Treat the live GitHub PR state/head as authoritative; a successful branch replacement, local commit, or local task-record response does not prove the linked PR is open or points at the complete implementation, and publication authorization failures must remain explicit blockers rather than being reported as completed handoff.
 - A task branch is already merged only when the task branch is fully reachable from the target.
 - Direct task-detail renders with `?tab=changes` hit the same Changes-tab recovery path as lazy tab loads.
 - Direct `/tasks/:id/changes/file` lazy-file requests recover stale conventional worktree metadata before resolving diff output, matching the full Changes-tab path.

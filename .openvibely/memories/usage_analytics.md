@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-07-20
+updated: 2026-07-30
 source: consolidation
-source_id: memory_consolidation_2026_07_20
+source_id: memory_consolidation_2026_07_29
 confidence: high
 title: Usage Analytics
 ---
@@ -47,6 +47,7 @@ Analytics surface facts:
 - Skill Curator Analytics appears immediately above the Failed Task Patterns card.
 - The usage chart label is `Token Usage`; token-count breakdowns are `Model Breakdown by Tokens`; execution-count breakdowns are `Model Breakdown by Executions`.
 - Token Usage chart card controls must stay within the card on narrow/mobile widths by keeping header/select wrappers shrink-safe and applying wider minimums only at larger breakpoints.
+- Analytics line graphs use Chart.js canvas rendering. Token Usage, Skill Activity Over Time, and Success/Failure Rates share pointer-nearest series highlighting while preserving index-mode tooltips. Their shared plugin records the current pointer-nearest point in `beforeEvent`, before Chart.js lays out the tooltip, and a stable tooltip `itemSort` promotes that dataset's row to the top while preserving every other row's relative order. The same plugin renders the active marker as a pointer-transparent DOM overlay above the canvas tooltip, using responsive canvas-to-CSS coordinates, chart-area clipping, an opaque dataset color with contrasting halo, pointer-exit hiding, and chart-destroy cleanup.
 - Account-limit cards use provider as the heading with normalized plan/subscription metadata underneath; raw plan types, account IDs, config IDs, emails, and provider identity fields are not public card labels.
 - Account-limit horizontal usage bars intentionally use explicit shared-theme track/fill meter markup instead of native/DaisyUI `<progress>` rendering because packaged macOS desktop light-mode WebView made native bars invisible.
 

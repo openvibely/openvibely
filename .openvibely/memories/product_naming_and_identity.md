@@ -1,8 +1,8 @@
 ---
 name: product_naming_and_identity
 type: project
-source: task_turn
-source_id: 563c38e7f870faf3ad25fa6da2a55b56
+source: consolidation
+source_id: memory_consolidation_2026_07_29
 confidence: high
 title: Product Naming and Identity
 ---

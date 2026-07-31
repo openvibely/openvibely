@@ -2,7 +2,7 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-07-24
+updated: 2026-07-29
 source: consolidation
 source_id: memory_consolidation_2026_07_17
 confidence: high
@@ -24,6 +24,7 @@ Agent and catalog facts:
 - Bundled-skill startup sync overwrites the embedded `SKILL.md` and merges the bundled index, but does not prune extra support files already present in the installed global package. A global skill may therefore retain `references/` or `templates/` added by an earlier import, update, or Skill Curator operation even when the current repository built-in package ships only `SKILL.md`; a fresh installation from that repository will not receive those absent support files.
 - Project scope overrides global scope for matching standalone or agent-owned skill keys. Product direction favors explicit import/index maintenance over automatic disk auto-discovery.
 - `skill.enabled: false` disables a skill for task execution, lifecycle hooks, routing, `skill_view`, and context injection; management/admin listings still show disabled skills.
+- The bundled `openvibely_github_autonomous_sdlc_bootstrap` and `openvibely_native_autonomous_sdlc_bootstrap` standalone skills are disabled by default so lifecycle routing cannot select setup guidance for maintained Automation tasks. They remain shipped and management-visible for deliberate administrator re-enablement, and bundled startup sync overwrites stale installed enabled copies. Maintained Native/GitHub Automations execute their stored Automation-owned prompts and do not depend on these bootstrap packages at runtime.
 - Standalone top-level `always_use` metadata is catalog control data and does not appear in model-visible `<available_skills>` rendering.
 - Generated/native OpenVibely declarations include explicit `kind` frontmatter. Explicit skill import surfaces, including `/skills/import` and `skill_import`, materialize packages through shared normalization into `<root>/skills/<handle>/SKILL.md` and update `<root>/skills/SKILLS.md`.
 - Skill import normalization guarantees YAML frontmatter with at least `name`, `description`, `kind: skill`, and `enabled: true`; it supports raw Markdown bodies, common top-level `name`/`description` packages, and existing OpenVibely declarations without wholesale clobbering valid fields.

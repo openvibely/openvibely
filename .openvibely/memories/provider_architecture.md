@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-07-21
-source: task_turn
-source_id: 7aa83462a27399272b03aa9dbcfded2d
+updated: 2026-07-31
+source: consolidation
+source_id: memory_consolidation_2026_07_29
 confidence: high
 title: Provider Architecture
 ---
@@ -34,7 +34,7 @@ Provider/model selection facts:
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not the provider/model.
 - OpenAI supports Responses API, Completions API, and Codex CLI fallback. OpenAI Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
 - OpenAI supports `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; `gpt-5.6-sol` is the default for empty or unknown first-party OpenAI model selections. All three use a 1,050,000-token context window, have a 128,000-token maximum output, support `none`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning, and default to `medium`.
-- The GPT-5.6 Sol/Terra/Luna family uses the Codex Responses Lite request shape for both OpenAI API-key and ChatGPT OAuth configurations. The primary transport is the Responses WebSocket beta, with Responses Lite HTTP streaming fallback when WebSockets are unavailable. Lite request transformation carries all-turn reasoning context, encrypted reasoning content, developer instructions/additional function tools, and strips unsupported hosted web-search/image-generation tools and image detail fields.
+- The GPT-5.6 Sol/Terra/Luna family uses the Codex Responses Lite request shape for both OpenAI API-key and ChatGPT OAuth configurations. The primary transport is the Responses WebSocket beta, with Responses Lite HTTP streaming fallback when WebSockets are unavailable. Lite request transformation carries all-turn reasoning context, encrypted reasoning content, developer instructions/additional function tools, and strips unsupported hosted web-search/image-generation tools. The production fix for `openvibely/openvibely#94` was already on `main` in commit `324849ec` (`Preserve GPT-5.6 Lite image detail`): it preserves exactly `detail: "auto"` for GPT-5.6 images in final API-key and OAuth payloads across WebSocket and HTTP fallback. Other models and unselected values such as `original` and `high` still omit `detail`; attachment defaults remain unchanged, and `original` requires a future explicit tested selection contract. The later branch commit `2ed295da` changed only `pkg/openai_client/client_test.go`, strengthening provider-bound OAuth HTTP fallback coverage through the public `Send` path rather than reimplementing production behavior. No issue #94 PR was created because the caller's Automation graph rejected the single authorized `github_open_pull_request` attempt.
 - Responses Lite WebSocket state is conversation-scoped and credential/account-aware rather than shared across every request for one model config. Reusable states serialize turns per conversation, send compatible incremental turns with `previous_response_id`, reconnect a stale reused socket once, avoid replay after partial output, and fall back to HTTP for subsequent turns after an unrecoverable transport failure. The adapter leases active states, bounds the idle cache, closes evicted/private sockets, and prevents credential rotation or OAuth account changes from reusing an old authenticated connection.
 - Anthropic uses `ProviderAnthropic`; OAuth/API key path uses `pkg/anthropicclient`; CLI path uses subprocess. Helpers live in `models/llm_config.go`.
 - Ollama uses `/api/chat`, `ollama_base_url` migration 056, defaulting to `http://localhost:11434`.
@@ -91,7 +91,6 @@ OAuth and model-specific facts:
 - Provider 401 recovery reloads the model config from DB and may refresh/persist rotated tokens; it does not reread OAuth token material from disk, keychain, or environment variables.
 - Anthropic refresh-token expiry should be treated as opaque/server-controlled, not a fixed duration.
 - Anthropic OAuth refresh failures with provider `invalid_grant` are permanent reauthorization failures: mark model config `oauth_needs_reauth`, surface `needs_reauth`/“Re-auth Required,” and clear the flag after successful refresh.
-- Recorded incident (2026-07-18): configured Anthropic `Claude Opus 4.8` and `Claude Sonnet 5` model configs repeatedly failed OAuth refresh with HTTP 400, blocking task-agent execution. Verify current configuration state before relying on those rows; if still affected, use a working provider/model or repair/re-authorize them rather than treating blocked attempts as implementation evidence.
 - Claude Opus 5 (`claude-opus-5`) is a supported Anthropic model ID. It has a 1M context window, supports up to 128k output tokens, and uses adaptive thinking rather than fixed `budget_tokens`. Native Anthropic API/OAuth requests pass a configured, model-supported effort as `output_config.effort`; unsupported model/effort combinations are cleared when saved and omitted defensively when requests are serialized so older models such as Claude Sonnet 4.5 are not sent an invalid effort parameter.
 - Claude Fable 5 (`claude-fable-5`) and Claude Mythos 5 (`claude-mythos-5`) are supported Anthropic model IDs and should remain selectable where Anthropic model options are listed. They should not be preselected, recommended, or first-position defaults for new Anthropic model configs; use a broadly stable Anthropic default. They default to a 1M context window, support up to 128k output tokens, require adaptive thinking without fixed `budget_tokens`, do not return raw thinking blocks, and can return HTTP 200 refusal responses that should surface as unsuccessful/refusal results.
 

@@ -3,8 +3,8 @@ name: openvibely_architecture
 type: project
 created: 2026-05-09
 updated: 2026-07-28
-source: consolidation_and_task_turns
-source_id: memory_consolidation_2026_07_27;abf902e6c55aa6881d2525168bc5e41c:47b8db2b38eb30b8
+source: consolidation
+source_id: memory_consolidation_2026_07_29
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -45,6 +45,11 @@ Worker capacity settings:
 - No environment/config override exists for the global worker limit; it is persisted in settings.
 - Task-thread follow-ups enforce finite global worker limits by atomically reserving global and project capacity before provider execution, while preserving cancellable queue waits, exact counter cleanup, and `0 = unlimited` behavior.
 
+Scheduling recurrence:
+- Open bug `#104`: scheduled-task create/update handlers enforce a minimum repeat interval but no maximum, and the database has no corresponding interval constraint. A forged oversized interval reaches `ComputeNextRun`, where integer-to-`time.Duration` multiplication can overflow negative and leave scheduler recurrence advancement in a non-terminating loop, halting scheduler processing. The fix needs bounded input/persistence behavior and regression coverage proving oversized intervals are rejected or handled without overflow and recurrence computation always terminates.
+- Open bug `#116`: direct schedule create/update handlers discard `strconv.Atoi` failures and coerce malformed or overflowing repeat intervals to `1`, silently changing the requested cadence; unsupported recurrence types reach SQLite's `CHECK` constraint and surface as internal repository errors instead of controlled HTTP 400 responses. Regression coverage should prove both endpoints reject malformed, overflowing, and unsupported recurrence values without persisting a schedule.
+- Open duplication issue `#115`: schedule create, update, and toggle HTMX mutation handlers independently rebuild the same task-detail schedules fragment, including loading task, executions, schedules, model configs, attachments, agent definitions, review comments, and goal before rendering. The smallest intended consolidation is one private shared renderer/helper that preserves the existing three response paths and their focused test behavior.
+
 OAuth and hosted deployment facts:
 - Model OAuth initiate/callback resolves absolute app URLs through shared URL-building behavior: `APP_BASE_URL` first, then forwarded/request host fallback.
 - `OAUTH_REDIRECT_MODE` controls the provider-facing callback URI, not where the authorization page opens. `auto` may use the public `APP_BASE_URL`, `hosted` requires it, and `localhost_manual` deliberately uses fixed localhost callbacks even when a public app URL exists.
@@ -62,7 +67,7 @@ OAuth and hosted deployment facts:
 - Hosted deployments use Docker Compose projects under `/docker/<project>/docker-compose.yml` and route app/docs containers through Traefik with persistent `/data` storage. Exact host inventory is operational state and must be verified live before acting on it.
 
 Live DB inspection facts:
-- For read-only diagnosis against the live app DB (`$HOME/.openvibely/openvibely.db`), the `tasks` table has no `role` column; swarm role/state live in `swarm_role`, `swarm_status`, `swarm_config`, `swarm_sequence` (plus `parent_task_id`, `category`, `status`, `worktree_path`, `worktree_branch`, `merge_status`). The `executions` table has no `created_at`/`diff` columns; use `started_at`/`completed_at` for timing and `error_message`/`diff_output` for failure text/diff. Run `PRAGMA table_info(<table>)` first when unsure rather than guessing column names.
+- For read-only diagnosis against the live app DB (`$HOME/.openvibely/openvibely.db`), inspect schema with `PRAGMA table_info(<table>)` before writing diagnostic SQL rather than guessing column names. The `tasks` table uses `created_at`, not `started_at`; execution timing belongs to `executions.started_at`/`executions.completed_at`. The `tasks` table also has no `role` column; swarm role/state live in `swarm_role`, `swarm_status`, `swarm_config`, `swarm_sequence` (plus `parent_task_id`, `category`, `status`, `worktree_path`, `worktree_branch`, `merge_status`). The `executions` table has no `created_at`/`diff` columns; use `error_message`/`diff_output` for failure text/diff.
 
 Shared conventions:
 - `internal/handler` is the Echo HTTP boundary: `handler.go` owns the shared `Handler` dependency graph and route registration, while feature-specific files attach methods for tasks, projects, chat, models, auth, integrations, SSE, worktrees, and HTMX/API surfaces.
