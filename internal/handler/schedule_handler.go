@@ -50,10 +50,13 @@ func (h *Handler) scheduleAgentAssignmentFromForm(c echo.Context, taskID string)
 	return true, agentDefinitionID, nil
 }
 
-func (h *Handler) renderScheduleTaskDetail(c echo.Context, taskID string, taskLookupErrorsAsNotFound bool) error {
+func (h *Handler) renderScheduleTaskDetail(c echo.Context, taskID, taskLookupErrorLog string, taskLookupErrorsAsNotFound bool) error {
 	ctx := c.Request().Context()
 	task, err := h.taskSvc.GetByID(ctx, taskID)
 	if err != nil {
+		if taskLookupErrorLog != "" {
+			applog.Infof("[handler] %s: %v", taskLookupErrorLog, err)
+		}
 		if taskLookupErrorsAsNotFound {
 			return echo.NewHTTPError(http.StatusNotFound, "task not found")
 		}
@@ -137,7 +140,7 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 
 	// For HTMX requests, return the updated task detail content
 	if isHTMX {
-		return h.renderScheduleTaskDetail(c, taskID, false)
+		return h.renderScheduleTaskDetail(c, taskID, "CreateSchedule error fetching task", false)
 	}
 
 	projectID := c.QueryParam("project_id")
@@ -238,7 +241,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 
 	// For HTMX requests, return the updated task detail content
 	if isHTMX {
-		return h.renderScheduleTaskDetail(c, schedule.TaskID, false)
+		return h.renderScheduleTaskDetail(c, schedule.TaskID, "UpdateSchedule error fetching task", false)
 	}
 
 	projectID := c.QueryParam("project_id")
@@ -331,7 +334,7 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 
 	taskID := result.schedule.TaskID
 	if isHTMX(c) {
-		return h.renderScheduleTaskDetail(c, taskID, true)
+		return h.renderScheduleTaskDetail(c, taskID, "", true)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
