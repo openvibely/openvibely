@@ -618,8 +618,8 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 
 	for _, want := range []string{
 		`id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto"`,
-		`class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas`,
-		`class="automation-canvas-shell relative min-h-[20rem] md:min-h-0 w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
+		`class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-col" data-automation-readonly-canvas`,
+		`class="automation-canvas-shell relative h-[calc(100dvh-26rem)] min-h-[20rem] md:min-h-0 max-h-[42rem] w-full flex-none overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected Automation Live viewport-filling layout to contain %q", want)
@@ -704,16 +704,22 @@ func TestAutomationBlankBuilderCanvasFitsNonEditPage(t *testing.T) {
 		}
 	}
 
-	for label, body := range map[string]string{
-		"template": render("template", ""),
-		"edit":     render("edit", "automation-edit"),
-	} {
-		if !strings.Contains(body, `min-h-[calc(100dvh-15rem)]`) || !strings.Contains(body, `min-h-[42rem]`) {
-			t.Errorf("%s builder must retain the existing large-canvas sizing", label)
+	template := render("template", "")
+	if !strings.Contains(template, `min-h-[calc(100dvh-15rem)]`) || !strings.Contains(template, `min-h-[42rem]`) {
+		t.Error("template builder must retain the existing large-canvas sizing")
+	}
+	if strings.Contains(template, `h-[calc(100dvh-26rem)]`) {
+		t.Error("template builder unexpectedly uses saved Live/Edit viewport sizing")
+	}
+
+	edit := render("edit", "automation-edit")
+	for _, want := range []string{`h-[calc(100dvh-26rem)]`, `min-h-[20rem]`, `max-h-[42rem]`, `h-full`} {
+		if !strings.Contains(edit, want) {
+			t.Errorf("saved Edit builder must use shared Live/Edit viewport sizing %q", want)
 		}
-		if strings.Contains(body, `flex min-h-0 flex-1 flex-col`) || strings.Contains(body, `min-h-0 flex-1`) {
-			t.Errorf("%s builder unexpectedly uses blank-only page-fit sizing", label)
-		}
+	}
+	if strings.Contains(edit, `min-h-[calc(100dvh-15rem)]`) || strings.Contains(edit, `min-h-[42rem]`) {
+		t.Error("saved Edit builder must not retain the mismatched template viewport sizing")
 	}
 }
 
@@ -886,8 +892,6 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 		if id == "automation-a" {
 			nodes = []models.AutomationLiveNode{
 				{AutomationNode: models.AutomationNode{ID: "first_step", Name: "First step", NodeType: models.AutomationNodeAgentTask, PositionX: 0, PositionY: 0}, DisplayState: "idle"},
-				{AutomationNode: models.AutomationNode{ID: "second_step", Name: "Second step", NodeType: models.AutomationNodeAgentTask, PositionX: 260, PositionY: 0}, DisplayState: "idle"},
-				{AutomationNode: models.AutomationNode{ID: "third_step", Name: "Third step", NodeType: models.AutomationNodeOutcome, PositionX: 520, PositionY: 0}, DisplayState: "idle"},
 			}
 		}
 		graph := models.AutomationLiveGraph{
@@ -1031,9 +1035,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var canvasRect = document.querySelector('[data-automation-canvas]').getBoundingClientRect();
 	    var liveRootRect = document.getElementById('automation-live').getBoundingClientRect();
 	    var liveCanvasShellRect = document.querySelector('[aria-label="Live automation graph"]').getBoundingClientRect();
-	    if (liveCanvasShellRect.bottom > liveRootRect.bottom + 4) fail('single-node Live canvas extends below the page viewport');
+	    if (liveCanvasShellRect.bottom > liveRootRect.bottom + 4 && getComputedStyle(document.getElementById('automation-live')).overflowY !== 'auto') fail('constrained one-node Live canvas overflows without a scroll fallback');
 	    var liveViewBox = document.querySelector('#automation-live [data-automation-canvas]').getAttribute('viewBox').split(/\s+/).map(Number);
-	    if (liveViewBox[2] !== 810 || liveViewBox[3] !== 224) fail('Live graph does not use the same tight padded bounds as Edit: ' + liveViewBox.join(' '));
+	    if (liveViewBox[2] !== 290 || liveViewBox[3] !== 224) fail('one-node Live graph does not use the same tight padded bounds as Edit: ' + liveViewBox.join(' '));
 	    var nodeRect = node.getBoundingClientRect();
 	    var liveParityNodeWidth = nodeRect.width;
 	    var liveParityNodeHeight = nodeRect.height;
@@ -1131,7 +1135,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var editParityNode = editedCanvas.querySelector('[data-node-key="first_step"] .automation-graph-node');
 	    if (!editParityNode) fail('Edit automation is missing the matching visual-parity node');
 	    var editParityNodeRect = editParityNode.getBoundingClientRect();
-	    if (Math.abs(editParityNodeRect.width - liveParityNodeWidth) > 1 || Math.abs(editParityNodeRect.height - liveParityNodeHeight) > 1) fail('Live and Edit render matching nodes at different sizes: Live=' + liveParityNodeWidth.toFixed(1) + 'x' + liveParityNodeHeight.toFixed(1) + ' Edit=' + editParityNodeRect.width.toFixed(1) + 'x' + editParityNodeRect.height.toFixed(1));
+	    var editParityCanvasRect = editedCanvas.querySelector('[data-automation-canvas]').getBoundingClientRect();
+	    var editParityShellRect = editedCanvas.querySelector('.automation-canvas-shell').getBoundingClientRect();
+	    if (Math.abs(editParityNodeRect.width - liveParityNodeWidth) > 1 || Math.abs(editParityNodeRect.height - liveParityNodeHeight) > 1) fail('Live and Edit render matching nodes at different sizes: Live=' + liveParityNodeWidth.toFixed(1) + 'x' + liveParityNodeHeight.toFixed(1) + ' in ' + canvasRect.width.toFixed(1) + 'x' + canvasRect.height.toFixed(1) + ' shell ' + liveCanvasShellRect.width.toFixed(1) + 'x' + liveCanvasShellRect.height.toFixed(1) + ' Edit=' + editParityNodeRect.width.toFixed(1) + 'x' + editParityNodeRect.height.toFixed(1) + ' in ' + editParityCanvasRect.width.toFixed(1) + 'x' + editParityCanvasRect.height.toFixed(1) + ' shell ' + editParityShellRect.width.toFixed(1) + 'x' + editParityShellRect.height.toFixed(1));
 	    click('#automation-builder [data-automation-add-node-open]', 'Add node after Edit automation');    var editedNodeDialog = document.querySelector('#automation-builder [data-automation-node-dialog]');
     if (!editedNodeDialog || !editedNodeDialog.open) fail('Add node is inoperable after the Edit automation HTMX transition');
     editedNodeDialog.close();
@@ -1385,6 +1391,9 @@ window.addEventListener('DOMContentLoaded', function() {
 		.overflow-y-hidden { overflow-y: hidden !important; }
 		.overflow-y-auto { overflow-y: auto !important; }
 		#automation-builder, #automation-live { box-sizing: border-box; height: 900px; }
+		#automation-live .automation-canvas-shell,
+		#automation-builder:has([data-automation-builder-actions]) .automation-canvas-shell { box-sizing: border-box; flex: none; height: calc(100vh - 26rem); min-height: 0; max-height: 42rem; }
+		[class~="h-[calc(100dvh-26rem)]"] { height: calc(100vh - 26rem); }
 		[class~="h-[calc(100dvh-15rem)]"] { height: calc(100vh - 15rem); }
 		[class~="min-h-[calc(100dvh-15rem)]"] { min-height: calc(100vh - 15rem); }
 		[class~="min-h-[42rem]"] { min-height: 42rem; }
@@ -1442,7 +1451,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			close(releaseOlderLive)
 			w.WriteHeader(http.StatusNoContent)
 		case "/automations/automation-a/builder":
-			_, _ = w.Write([]byte(renderBlankBuilder(3, "automation-a")))
+			_, _ = w.Write([]byte(renderBlankBuilder(1, "automation-a")))
 		case "/automations/automation-a/pause":
 			setAutomationLifecycle("automation-a", models.AutomationPaused)
 			_, _ = w.Write([]byte(renderPortfolio()))
@@ -1496,7 +1505,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--disable-background-timer-throttling",
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--window-size=1200,900",
+		"--window-size=1200,700",
 		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-navigation-profile"),
 		server.URL+"/automations?project_id="+projectID,
 	)

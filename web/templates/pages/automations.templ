@@ -367,7 +367,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 				</form>
 			</div>
 		}
-			<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas>
+			<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-col" data-automation-readonly-canvas>
 				<div class="mb-3 flex items-start justify-between gap-3" data-automation-live-card-heading>
 					<div class="min-w-0 pr-2"><h3 class="font-semibold">Node states</h3><p class="mt-1 text-sm text-base-content/60">A node’s border and label show the highest-priority work state currently present.</p></div>
 					<div class="shrink-0" data-automation-live-actions>
@@ -414,7 +414,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						<span class="badge badge-ghost" data-automation-live-health>{ string(graph.Automation.HealthState) }</span>
 					</div>
 				</div>
-				<div class="automation-canvas-shell relative min-h-[20rem] md:min-h-0 w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Live automation graph">
+				<div class="automation-canvas-shell relative h-[calc(100dvh-26rem)] min-h-[20rem] md:min-h-0 max-h-[42rem] w-full flex-none overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Live automation graph">
 					<div class="absolute right-3 top-3 z-10 flex gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" data-automation-live-viewport-controls>
 						<button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
@@ -727,14 +727,14 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</div>
 					<form method="dialog" class="modal-backdrop"><button aria-label="Close add node dialog">close</button></form>
 				</dialog>
-				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-22rem)] min-h-[28rem] max-h-[42rem]", page.AutomationID == "" && page.Source == "blank"), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID != "" || page.Source != "blank") } role="region" aria-label="Automation graph builder">
+				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-22rem)] min-h-[28rem] max-h-[42rem]", page.AutomationID == "" && page.Source == "blank"), templ.KV("h-[calc(100dvh-26rem)] min-h-[20rem] md:min-h-0 max-h-[42rem]", page.AutomationID != ""), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID == "" && page.Source != "blank") } role="region" aria-label="Automation graph builder">
 					<div class="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" aria-label="Canvas controls" data-automation-builder-viewport-controls>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button>
 					</div>
-					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class={ "block w-full touch-none select-none", templ.KV("h-full", page.AutomationID == "" && page.Source == "blank"), templ.KV("h-[calc(100dvh-15rem)] min-h-[42rem]", page.AutomationID != "" || page.Source != "blank") } role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
+					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class={ "block w-full touch-none select-none", templ.KV("h-full", page.Source == "blank" || page.AutomationID != ""), templ.KV("h-[calc(100dvh-15rem)] min-h-[42rem]", page.AutomationID == "" && page.Source != "blank") } role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
 						@automationGraphThemeStyles()
 						<defs>
 							<marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow automation-edge-foreground-arrow"></path></marker>
