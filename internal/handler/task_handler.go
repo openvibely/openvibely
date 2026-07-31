@@ -283,6 +283,11 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	if category == "" {
 		category = models.CategoryActive
 	}
+	if category == models.CategoryScheduled && c.FormValue("run_at") != "" {
+		if _, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval")); err != nil {
+			return err
+		}
+	}
 
 	// Creating an active task immediately submits it to the worker pool.
 	// Block this when no models are configured so tasks do not get stuck queued.
@@ -358,12 +363,11 @@ func (h *Handler) CreateTask(c echo.Context) error {
 				applog.Infof("[handler] CreateTask schedule parse error: %v", err)
 			} else {
 				runAt = runAt.UTC()
-				repeatInterval, _ := strconv.Atoi(c.FormValue("repeat_interval"))
-				if repeatInterval < 1 {
-					repeatInterval = 1
+				repeatInterval, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval"))
+				if err != nil {
+					return err
 				}
-				sched := &models.Schedule{
-					TaskID:              t.ID,
+				sched := &models.Schedule{TaskID: t.ID,
 					RunAt:               runAt,
 					RepeatType:          models.RepeatType(c.FormValue("repeat_type")),
 					RepeatInterval:      repeatInterval,

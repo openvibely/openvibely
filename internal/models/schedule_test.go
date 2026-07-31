@@ -1,9 +1,69 @@
 package models
 
 import (
+	"math"
 	"testing"
 	"time"
 )
+
+func TestSchedule_ComputeNextRun_RejectsOverflowedSubDailyIntervals(t *testing.T) {
+	tests := []struct {
+		name       string
+		repeatType RepeatType
+		unit       time.Duration
+	}{
+		{name: "seconds", repeatType: RepeatSeconds, unit: time.Second},
+		{name: "minutes", repeatType: RepeatMinutes, unit: time.Minute},
+		{name: "hours", repeatType: RepeatHours, unit: time.Hour},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			overflowInterval := int(int64(math.MaxInt64)/int64(tt.unit) + 1)
+			schedule := &Schedule{
+				RunAt:          time.Now().UTC().Add(-time.Hour),
+				RepeatType:     tt.repeatType,
+				RepeatInterval: overflowInterval,
+			}
+			result := make(chan *time.Time, 1)
+			go func() { result <- schedule.ComputeNextRun(time.Now().UTC()) }()
+
+			select {
+			case next := <-result:
+				if next != nil {
+					t.Fatalf("expected nil for overflowed interval %d, got %v", overflowInterval, next)
+				}
+			case <-time.After(100 * time.Millisecond):
+				t.Fatal("ComputeNextRun did not terminate for an overflowed interval")
+			}
+		})
+	}
+}
+
+func TestSchedule_ComputeNextRun_RejectsIntervalsOutsideBound(t *testing.T) {
+	for _, interval := range []int{0, -1, 366} {
+		schedule := &Schedule{RunAt: time.Now().UTC(), RepeatType: RepeatDaily, RepeatInterval: interval}
+		if next := schedule.ComputeNextRun(time.Now().UTC()); next != nil {
+			t.Fatalf("expected nil for invalid interval %d, got %v", interval, next)
+		}
+	}
+}
+
+func TestScheduleRepeatIntervalBounds(t *testing.T) {
+	if err := ValidateScheduleRepeatInterval(MaxScheduleRepeatInterval); err != nil {
+		t.Fatalf("largest supported interval rejected: %v", err)
+	}
+	if err := ValidateScheduleRepeatInterval(MaxScheduleRepeatInterval + 1); err == nil {
+		t.Fatal("expected first oversized interval to be rejected")
+	}
+	for _, repeatType := range []RepeatType{RepeatSeconds, RepeatMinutes, RepeatHours, RepeatDaily, RepeatWeekly, RepeatMonthly} {
+		runAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		schedule := &Schedule{RunAt: runAt, RepeatType: repeatType, RepeatInterval: MaxScheduleRepeatInterval}
+		if next := schedule.ComputeNextRun(runAt); next == nil || !next.After(runAt) {
+			t.Fatalf("largest supported interval did not recur safely for %s: %v", repeatType, next)
+		}
+	}
+}
 
 func TestSchedule_ComputeNextRun_Once(t *testing.T) {
 	s := &Schedule{RepeatType: RepeatOnce, RepeatInterval: 1}

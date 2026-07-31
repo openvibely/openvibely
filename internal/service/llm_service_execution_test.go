@@ -3154,7 +3154,7 @@ func TestLLMService_ExecuteTaskWithAgent_MovesRepeatOnceToCompleted(t *testing.T
 		TaskID:         task.ID,
 		RunAt:          time.Now(),
 		RepeatType:     models.RepeatOnce,
-		RepeatInterval: 0,
+		RepeatInterval: 1,
 		Enabled:        true,
 	}
 	if err := scheduleRepo.Create(ctx, schedule); err != nil {

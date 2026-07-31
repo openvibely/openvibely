@@ -32,6 +32,29 @@ func TestCreateSchedule_InvalidDate(t *testing.T) {
 	}
 }
 
+func TestCreateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+
+	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
+		"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+		"repeat_type":     {"seconds"},
+		"repeat_interval": {"366"},
+	}).Execute()
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized interval, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 0 {
+		t.Fatalf("expected oversized schedule not to be persisted, got %d schedules", len(schedules))
+	}
+}
+
 func TestCreateSchedule_Success_Redirect(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
@@ -400,6 +423,31 @@ func TestUpdateSchedule_InvalidDate(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestUpdateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	schedule := tc.CreateSchedule(task.ID).WithRepeatType(models.RepeatDaily).WithRepeatInterval(2).Build()
+	originalRunAt := schedule.RunAt
+
+	rec := tc.HTTP().Put("/schedules/" + schedule.ID).WithForm(url.Values{
+		"run_at":          {time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")},
+		"repeat_type":     {"hours"},
+		"repeat_interval": {"366"},
+	}).Execute()
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized interval, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	persisted, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.RepeatInterval != 2 || persisted.RepeatType != models.RepeatDaily || !persisted.RunAt.Equal(originalRunAt) {
+		t.Fatalf("oversized update changed persisted schedule: %+v", persisted)
 	}
 }
 

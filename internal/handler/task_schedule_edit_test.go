@@ -355,6 +355,37 @@ func TestHandler_CreateTask_FromSchedulePage_WithRepeatInterval(t *testing.T) {
 	}
 }
 
+func TestHandler_CreateTask_FromSchedulePage_RejectsOversizedInterval(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	form := url.Values{
+		"title":           {"Oversized interval task"},
+		"prompt":          {"must not persist"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"run_at":          {"2026-03-15T10:00"},
+		"repeat_type":     {"seconds"},
+		"repeat_interval": {"366"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default&from=schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	tasks, err := h.taskSvc.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasks {
+		if task.Title == "Oversized interval task" {
+			t.Fatal("oversized scheduled task was persisted")
+		}
+	}
+}
+
 func TestHandler_CreateTask_FromSchedulePage_DefaultsRepeatTypeToDailyWhenMissing(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

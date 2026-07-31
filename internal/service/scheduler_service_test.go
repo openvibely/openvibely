@@ -73,6 +73,61 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 	}
 }
 
+func TestSchedulerService_MalformedScheduleDoesNotBlockLaterValidSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	now := time.Now().UTC()
+
+	malformedTask := &models.Task{ProjectID: "default", Title: "Malformed schedule", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "bad"}
+	validTask := &models.Task{ProjectID: "default", Title: "Valid schedule", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "good"}
+	if err := taskRepo.Create(ctx, malformedTask); err != nil {
+		t.Fatal(err)
+	}
+	if err := taskRepo.Create(ctx, validTask); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO schedules
+		(id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+		VALUES (?, ?, ?, ?, ?, 1, ?)`,
+		"corrupt-interval", malformedTask.ID, now.Add(-2*time.Minute), models.RepeatSeconds, 9223372036854775807, now.Add(-2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	valid := &models.Schedule{TaskID: validTask.ID, RunAt: now.Add(-time.Minute), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	if err := scheduleRepo.Create(ctx, valid); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		svc.checkDueTasks(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("malformed schedule blocked processing of later valid schedules")
+	}
+
+	persisted, err := scheduleRepo.GetByID(ctx, valid.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.LastRun == nil {
+		t.Fatal("expected later valid schedule to be processed")
+	}
+	corrupt, err := scheduleRepo.GetByID(ctx, "corrupt-interval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corrupt.LastRun != nil {
+		t.Fatal("corrupt schedule should not be dispatched or marked as run")
+	}
+}
+
 func TestSchedulerService_CheckDueTasks_PersistsContextBoundaryAfterWorkerReload(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx, cancel := context.WithCancel(context.Background())

@@ -122,6 +122,10 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 	applog.Infof("[scheduler] checkDueTasks found %d due schedules", len(schedules))
 
 	for _, sched := range schedules {
+		if err := models.ValidateScheduleRepeatInterval(sched.RepeatInterval); err != nil {
+			applog.Infof("[scheduler] skipping invalid schedule %s: %v", sched.ID, err)
+			continue
+		}
 		if s.automationRepo != nil {
 			owner, ownerErr := s.automationRepo.GetTriggerOwner(ctx, sched.ID)
 			if ownerErr != nil {

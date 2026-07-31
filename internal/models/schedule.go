@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type RepeatType string
 
@@ -12,7 +15,16 @@ const (
 	RepeatDaily   RepeatType = "daily"
 	RepeatWeekly  RepeatType = "weekly"
 	RepeatMonthly RepeatType = "monthly"
+
+	MaxScheduleRepeatInterval = 365
 )
+
+func ValidateScheduleRepeatInterval(interval int) error {
+	if interval < 1 || interval > MaxScheduleRepeatInterval {
+		return fmt.Errorf("repeat interval must be between 1 and %d", MaxScheduleRepeatInterval)
+	}
+	return nil
+}
 
 // IsSubDaily returns true if the repeat type runs more frequently than once per day.
 func (rt RepeatType) IsSubDaily() bool {
@@ -38,6 +50,10 @@ type Schedule struct {
 // This preserves exact day-of-week (weekly), day-of-month (monthly), and time-of-day,
 // regardless of when the scheduler actually processes the schedule.
 func (s *Schedule) ComputeNextRun(from time.Time) *time.Time {
+	if ValidateScheduleRepeatInterval(s.RepeatInterval) != nil {
+		return nil
+	}
+
 	switch s.RepeatType {
 	case RepeatOnce:
 		return nil // One-time schedule has no next run

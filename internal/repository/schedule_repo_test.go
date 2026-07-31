@@ -24,6 +24,48 @@ func createTestTask(t *testing.T, taskRepo *TaskRepo) *models.Task {
 	return task
 }
 
+func TestScheduleRepo_RejectsOversizedIntervalOnCreateAndUpdate(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+	task := createTestTask(t, taskRepo)
+
+	oversized := &models.Schedule{
+		TaskID: task.ID, RunAt: time.Now().UTC(), RepeatType: models.RepeatSeconds,
+		RepeatInterval: 366, Enabled: true,
+	}
+	if err := repo.Create(ctx, oversized); err == nil {
+		t.Fatal("expected oversized interval creation to fail")
+	}
+	schedules, err := repo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 0 {
+		t.Fatalf("expected no persisted oversized schedule, got %d", len(schedules))
+	}
+
+	valid := &models.Schedule{
+		TaskID: task.ID, RunAt: time.Now().UTC(), RepeatType: models.RepeatDaily,
+		RepeatInterval: 1, Enabled: true,
+	}
+	if err := repo.Create(ctx, valid); err != nil {
+		t.Fatal(err)
+	}
+	valid.RepeatInterval = 366
+	if err := repo.Update(ctx, valid); err == nil {
+		t.Fatal("expected oversized interval update to fail")
+	}
+	persisted, err := repo.GetByID(ctx, valid.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.RepeatInterval != 1 {
+		t.Fatalf("oversized update was persisted: interval=%d", persisted.RepeatInterval)
+	}
+}
+
 func TestScheduleRepo_CreateAndGetByID(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)

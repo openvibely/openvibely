@@ -1083,7 +1083,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "<div class=\"form-control mb-4\" id=\"repeat-interval-container\"><label class=\"label\"><span class=\"label-text\">Repeat Every</span></label><div class=\"flex items-center gap-2\"><input type=\"number\" id=\"repeat-interval-input\" name=\"repeat_interval\" value=\"1\" min=\"1\" step=\"1\" class=\"input input-bordered input-sm w-20\"> <span class=\"text-sm opacity-60\" id=\"repeat-interval-label\">day(s)</span></div></div><div class=\"form-control mb-4\"><input type=\"hidden\" name=\"clear_context_on_start\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" name=\"clear_context_on_start\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Clear context on start</span></label> <label class=\"label\"><span class=\"label-text-alt opacity-60\">Start each scheduled run without prior model conversation context</span></label></div><div class=\"flex gap-2\"><button type=\"submit\" class=\"btn btn-primary btn-sm\">Add Schedule</button> <button type=\"button\" class=\"btn btn-ghost btn-sm\" onclick=\"document.getElementById('schedule-form-container').classList.add('hidden'); document.getElementById('add-schedule-btn').classList.remove('hidden')\">Cancel</button></div></form><script>\n\t\t\t\t\t\t\t\t\t(function() {\n\t\t\t\t\t\t\t\t\t\tvar repeatTypeSelect = document.getElementById('repeat-type-select');\n\t\t\t\t\t\t\t\t\t\tvar repeatIntervalContainer = document.getElementById('repeat-interval-container');\n\t\t\t\t\t\t\t\t\t\tvar repeatIntervalInput = document.getElementById('repeat-interval-input');\n\t\t\t\t\t\t\t\t\t\tvar repeatIntervalLabel = document.getElementById('repeat-interval-label');\n\t\t\t\t\t\t\t\t\t\tif (!repeatTypeSelect || !repeatIntervalContainer || !repeatIntervalInput || !repeatIntervalLabel) return;\n\n\t\t\t\t\t\t\t\t\t\tfunction applyIntervalValidity(enabled) {\n\t\t\t\t\t\t\t\t\t\t\tif (!enabled) {\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.value = '1';\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = true;\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = false;\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = false;\n\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = true;\n\t\t\t\t\t\t\t\t\t\t\tvar raw = (repeatIntervalInput.value || '').trim();\n\t\t\t\t\t\t\t\t\t\t\tif (raw === '' || !/^\\d+$/.test(raw) || Number(raw) < 1) {\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('Repeat interval must be a whole number of at least 1');\n\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\tfunction updateRepeatInterval() {\n\t\t\t\t\t\t\t\t\t\t\tvar repeatType = repeatTypeSelect.value;\n\t\t\t\t\t\t\t\t\t\t\tif (repeatType === 'once') {\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'none';\n\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(false);\n\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'block';\n\t\t\t\t\t\t\t\t\t\t\tswitch(repeatType) {\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'seconds': repeatIntervalLabel.textContent = 'second(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'minutes': repeatIntervalLabel.textContent = 'minute(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'hours': repeatIntervalLabel.textContent = 'hour(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'daily': repeatIntervalLabel.textContent = 'day(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'weekly': repeatIntervalLabel.textContent = 'week(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'monthly': repeatIntervalLabel.textContent = 'month(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tdefault: repeatIntervalLabel.textContent = 'time(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(true);\n\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\trepeatTypeSelect.addEventListener('change', updateRepeatInterval);\n\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.addEventListener('input', function() {\n\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(repeatTypeSelect.value !== 'once');\n\t\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\t\t\tupdateRepeatInterval();\n\t\t\t\t\t\t\t\t\t})();\n\t\t\t\t\t\t\t\t</script></div></div><!-- Existing Schedules List -->")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, "<div class=\"form-control mb-4\" id=\"repeat-interval-container\"><label class=\"label\"><span class=\"label-text\">Repeat Every</span></label><div class=\"flex items-center gap-2\"><input type=\"number\" id=\"repeat-interval-input\" name=\"repeat_interval\" value=\"1\" min=\"1\" max=\"365\" step=\"1\" class=\"input input-bordered input-sm w-20\"> <span class=\"text-sm opacity-60\" id=\"repeat-interval-label\">day(s)</span></div></div><div class=\"form-control mb-4\"><input type=\"hidden\" name=\"clear_context_on_start\" value=\"false\"> <label class=\"label cursor-pointer justify-start gap-3\"><input type=\"checkbox\" name=\"clear_context_on_start\" value=\"true\" class=\"checkbox checkbox-sm\" checked> <span class=\"label-text\">Clear context on start</span></label> <label class=\"label\"><span class=\"label-text-alt opacity-60\">Start each scheduled run without prior model conversation context</span></label></div><div class=\"flex gap-2\"><button type=\"submit\" class=\"btn btn-primary btn-sm\">Add Schedule</button> <button type=\"button\" class=\"btn btn-ghost btn-sm\" onclick=\"document.getElementById('schedule-form-container').classList.add('hidden'); document.getElementById('add-schedule-btn').classList.remove('hidden')\">Cancel</button></div></form><script>\n\t\t\t\t\t\t\t\t\t(function() {\n\t\t\t\t\t\t\t\t\t\tvar repeatTypeSelect = document.getElementById('repeat-type-select');\n\t\t\t\t\t\t\t\t\t\tvar repeatIntervalContainer = document.getElementById('repeat-interval-container');\n\t\t\t\t\t\t\t\t\t\tvar repeatIntervalInput = document.getElementById('repeat-interval-input');\n\t\t\t\t\t\t\t\t\t\tvar repeatIntervalLabel = document.getElementById('repeat-interval-label');\n\t\t\t\t\t\t\t\t\t\tif (!repeatTypeSelect || !repeatIntervalContainer || !repeatIntervalInput || !repeatIntervalLabel) return;\n\n\t\t\t\t\t\t\t\t\t\tfunction applyIntervalValidity(enabled) {\n\t\t\t\t\t\t\t\t\t\t\tif (!enabled) {\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.value = '1';\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = true;\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = false;\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = false;\n\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = true;\n\t\t\t\t\t\t\t\t\t\t\tvar raw = (repeatIntervalInput.value || '').trim();\n\t\t\t\t\t\t\t\t\t\t\tif (raw === '' || !/^\\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 365) {\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('Repeat interval must be a whole number between 1 and 365');\n\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\tfunction updateRepeatInterval() {\n\t\t\t\t\t\t\t\t\t\t\tvar repeatType = repeatTypeSelect.value;\n\t\t\t\t\t\t\t\t\t\t\tif (repeatType === 'once') {\n\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'none';\n\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(false);\n\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'block';\n\t\t\t\t\t\t\t\t\t\t\tswitch(repeatType) {\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'seconds': repeatIntervalLabel.textContent = 'second(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'minutes': repeatIntervalLabel.textContent = 'minute(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'hours': repeatIntervalLabel.textContent = 'hour(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'daily': repeatIntervalLabel.textContent = 'day(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'weekly': repeatIntervalLabel.textContent = 'week(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tcase 'monthly': repeatIntervalLabel.textContent = 'month(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\tdefault: repeatIntervalLabel.textContent = 'time(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(true);\n\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\trepeatTypeSelect.addEventListener('change', updateRepeatInterval);\n\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.addEventListener('input', function() {\n\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(repeatTypeSelect.value !== 'once');\n\t\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\t\t\tupdateRepeatInterval();\n\t\t\t\t\t\t\t\t\t})();\n\t\t\t\t\t\t\t\t</script></div></div><!-- Existing Schedules List -->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1096,7 +1096,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var57 string
 				templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-card-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 613, Col: 117}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 614, Col: 117}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 				if templ_7745c5c3_Err != nil {
@@ -1109,7 +1109,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var58 string
 				templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-view-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 616, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 617, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var58)
 				if templ_7745c5c3_Err != nil {
@@ -1127,7 +1127,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 					var templ_7745c5c3_Var59 string
 					templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(components.ScheduleRepeatLabel(s))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 620, Col: 82}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 621, Col: 82}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 					if templ_7745c5c3_Err != nil {
@@ -1145,7 +1145,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 					var templ_7745c5c3_Var60 string
 					templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinStringErrs(string(s.RepeatType))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 622, Col: 69}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 623, Col: 69}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
 					if templ_7745c5c3_Err != nil {
@@ -1163,7 +1163,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 						var templ_7745c5c3_Var61 string
 						templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", s.RepeatInterval))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 624, Col: 91}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 625, Col: 91}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var61))
 						if templ_7745c5c3_Err != nil {
@@ -1207,7 +1207,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 					var templ_7745c5c3_Var64 string
 					templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs(s.NextRun.Local().Format("2006-01-02 3:04 PM"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 632, Col: 68}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 633, Col: 68}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 					if templ_7745c5c3_Err != nil {
@@ -1230,7 +1230,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 					var templ_7745c5c3_Var65 string
 					templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedules/%s/toggle", s.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 640, Col: 65}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 641, Col: 65}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var65)
 					if templ_7745c5c3_Err != nil {
@@ -1248,7 +1248,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 					var templ_7745c5c3_Var66 string
 					templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedules/%s/toggle", s.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 649, Col: 65}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 650, Col: 65}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var66)
 					if templ_7745c5c3_Err != nil {
@@ -1279,7 +1279,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var68 string
 				templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(s.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 664, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 665, Col: 36}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 				if templ_7745c5c3_Err != nil {
@@ -1292,7 +1292,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var69 string
 				templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.Title)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 665, Col: 45}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 666, Col: 45}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
 				if templ_7745c5c3_Err != nil {
@@ -1305,7 +1305,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var70 string
 				templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("schedule-edit-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 676, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 677, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var70)
 				if templ_7745c5c3_Err != nil {
@@ -1318,7 +1318,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var71 string
 				templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(s.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 676, Col: 97}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 677, Col: 97}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var71)
 				if templ_7745c5c3_Err != nil {
@@ -1331,7 +1331,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var72 templ.SafeURL
 				templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.JoinURLErrs(fmt.Sprintf("/schedules/%s?project_id=%s", s.ID, task.ProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 679, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 680, Col: 83}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var72))
 				if templ_7745c5c3_Err != nil {
@@ -1344,7 +1344,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var73 string
 				templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedules/%s?project_id=%s", s.ID, task.ProjectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 680, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 681, Col: 83}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 				if templ_7745c5c3_Err != nil {
@@ -1357,7 +1357,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var74 string
 				templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(components.GetScheduleEditTime(s))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 693, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 694, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
 				if templ_7745c5c3_Err != nil {
@@ -1370,7 +1370,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var75 string
 				templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-type-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 704, Col: 126}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 705, Col: 126}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 				if templ_7745c5c3_Err != nil {
@@ -1471,7 +1471,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var76 string
 				templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-interval-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 759, Col: 91}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 760, Col: 91}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
 				if templ_7745c5c3_Err != nil {
@@ -1484,7 +1484,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var77 string
 				templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-interval-input-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 766, Col: 69}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 767, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var77)
 				if templ_7745c5c3_Err != nil {
@@ -1497,20 +1497,20 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				var templ_7745c5c3_Var78 string
 				templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", s.RepeatInterval))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 768, Col: 57}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 769, Col: 57}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var78)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "\" min=\"1\" step=\"1\" class=\"input input-bordered input-sm w-20\"> <span class=\"text-sm opacity-60\" id=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 157, "\" min=\"1\" max=\"365\" step=\"1\" class=\"input input-bordered input-sm w-20\"> <span class=\"text-sm opacity-60\" id=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var79 string
 				templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("edit-repeat-label-%s", s.ID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 773, Col: 92}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 775, Col: 92}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var79)
 				if templ_7745c5c3_Err != nil {
@@ -1543,7 +1543,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, "\">Cancel</button></div></form><script>\n\t\t\t\t\t\t\t\t\t\t\t\t\t(function() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar container = document.currentScript.closest('[data-schedule-id]');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar scheduleId = container.dataset.scheduleId;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatTypeSelect = document.getElementById('edit-repeat-type-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalContainer = document.getElementById('edit-repeat-interval-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalInput = document.getElementById('edit-repeat-interval-input-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalLabel = document.getElementById('edit-repeat-label-' + scheduleId);\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!repeatTypeSelect || !repeatIntervalContainer || !repeatIntervalInput || !repeatIntervalLabel) return;\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tfunction applyIntervalValidity(enabled) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!enabled) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.value = '1';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = true;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = false;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = false;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = true;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar raw = (repeatIntervalInput.value || '').trim();\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (raw === '' || !/^\\d+$/.test(raw) || Number(raw) < 1) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('Repeat interval must be a whole number of at least 1');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tfunction updateRepeatInterval() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatType = repeatTypeSelect.value;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (repeatType === 'once') {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'none';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(false);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'block';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tswitch(repeatType) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'seconds': repeatIntervalLabel.textContent = 'second(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'minutes': repeatIntervalLabel.textContent = 'minute(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'hours': repeatIntervalLabel.textContent = 'hour(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'daily': repeatIntervalLabel.textContent = 'day(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'weekly': repeatIntervalLabel.textContent = 'week(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'monthly': repeatIntervalLabel.textContent = 'month(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tdefault: repeatIntervalLabel.textContent = 'time(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(true);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatTypeSelect.addEventListener('change', updateRepeatInterval);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.addEventListener('input', function() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(repeatTypeSelect.value !== 'once');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tupdateRepeatInterval();\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t})();\n\t\t\t\t\t\t\t\t\t\t\t\t\t</script></div></div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 162, "\">Cancel</button></div></form><script>\n\t\t\t\t\t\t\t\t\t\t\t\t\t(function() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar container = document.currentScript.closest('[data-schedule-id]');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!container) return;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar scheduleId = container.dataset.scheduleId;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatTypeSelect = document.getElementById('edit-repeat-type-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalContainer = document.getElementById('edit-repeat-interval-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalInput = document.getElementById('edit-repeat-interval-input-' + scheduleId);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatIntervalLabel = document.getElementById('edit-repeat-label-' + scheduleId);\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!repeatTypeSelect || !repeatIntervalContainer || !repeatIntervalInput || !repeatIntervalLabel) return;\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tfunction applyIntervalValidity(enabled) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (!enabled) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.value = '1';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = true;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = false;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.disabled = false;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.required = true;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar raw = (repeatIntervalInput.value || '').trim();\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (raw === '' || !/^\\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 365) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('Repeat interval must be a whole number between 1 and 365');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.setCustomValidity('');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\tfunction updateRepeatInterval() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tvar repeatType = repeatTypeSelect.value;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tif (repeatType === 'once') {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'none';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(false);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalContainer.style.display = 'block';\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tswitch(repeatType) {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'seconds': repeatIntervalLabel.textContent = 'second(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'minutes': repeatIntervalLabel.textContent = 'minute(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'hours': repeatIntervalLabel.textContent = 'hour(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'daily': repeatIntervalLabel.textContent = 'day(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'weekly': repeatIntervalLabel.textContent = 'week(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tcase 'monthly': repeatIntervalLabel.textContent = 'month(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tdefault: repeatIntervalLabel.textContent = 'time(s)'; break;\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(true);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t}\n\n\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatTypeSelect.addEventListener('change', updateRepeatInterval);\n\t\t\t\t\t\t\t\t\t\t\t\t\t\trepeatIntervalInput.addEventListener('input', function() {\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tapplyIntervalValidity(repeatTypeSelect.value !== 'once');\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tupdateRepeatInterval();\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t})();\n\t\t\t\t\t\t\t\t\t\t\t\t\t</script></div></div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1660,7 +1660,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		var templ_7745c5c3_Var88 string
 		templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 895, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 897, Col: 61}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var88)
 		if templ_7745c5c3_Err != nil {
@@ -1695,7 +1695,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		var templ_7745c5c3_Var91 string
 		templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 983, Col: 54}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 985, Col: 54}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var91)
 		if templ_7745c5c3_Err != nil {
@@ -1708,7 +1708,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		var templ_7745c5c3_Var92 string
 		templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 986, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 988, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var92)
 		if templ_7745c5c3_Err != nil {
@@ -1726,7 +1726,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 			var templ_7745c5c3_Var93 string
 			templ_7745c5c3_Var93, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 989, Col: 118}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 991, Col: 118}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var93)
 			if templ_7745c5c3_Err != nil {
@@ -1771,7 +1771,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		var templ_7745c5c3_Var96 string
 		templ_7745c5c3_Var96, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/thread", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1012, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1014, Col: 53}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var96)
 		if templ_7745c5c3_Err != nil {
@@ -1784,7 +1784,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []mo
 		var templ_7745c5c3_Var97 string
 		templ_7745c5c3_Var97, templ_7745c5c3_Err = templ.ResolveAttributeValue(task.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1015, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1017, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var97)
 		if templ_7745c5c3_Err != nil {
@@ -1866,7 +1866,7 @@ func TaskDetailActions(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var99 string
 			templ_7745c5c3_Var99, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/run", task.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1699, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1701, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var99)
 			if templ_7745c5c3_Err != nil {
@@ -1930,7 +1930,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 		var templ_7745c5c3_Var102 string
 		templ_7745c5c3_Var102, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/detail-status", task.ID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1729, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1731, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var102)
 		if templ_7745c5c3_Err != nil {
@@ -1943,7 +1943,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 		var templ_7745c5c3_Var103 string
 		templ_7745c5c3_Var103, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(task.Status))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1733, Col: 40}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1735, Col: 40}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var103)
 		if templ_7745c5c3_Err != nil {
@@ -1956,7 +1956,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 		var templ_7745c5c3_Var104 string
 		templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.JoinStringErrs(string(task.Category))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1737, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1739, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var104))
 		if templ_7745c5c3_Err != nil {
@@ -1996,7 +1996,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 			var templ_7745c5c3_Var107 string
 			templ_7745c5c3_Var107, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(task.Status, task.Category))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1744, Col: 143}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1746, Col: 143}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var107))
 			if templ_7745c5c3_Err != nil {
@@ -2019,7 +2019,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 			var templ_7745c5c3_Var108 string
 			templ_7745c5c3_Var108, templ_7745c5c3_Err = templ.JoinStringErrs(components.TagLabel(task.Tag))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1750, Col: 108}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1752, Col: 108}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var108))
 			if templ_7745c5c3_Err != nil {
@@ -2047,7 +2047,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 			var templ_7745c5c3_Var109 string
 			templ_7745c5c3_Var109, templ_7745c5c3_Err = templ.JoinStringErrs(components.PriorityLabel(task.Priority))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1758, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1760, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var109))
 			if templ_7745c5c3_Err != nil {
@@ -2065,7 +2065,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 		var templ_7745c5c3_Var110 string
 		templ_7745c5c3_Var110, templ_7745c5c3_Err = templ.JoinStringErrs(taskModelLabel(task, agents))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1763, Col: 81}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1765, Col: 81}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var110))
 		if templ_7745c5c3_Err != nil {
@@ -2078,7 +2078,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 		var templ_7745c5c3_Var111 string
 		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(taskAgentLabel(task, agentDefs))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1767, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1769, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var111))
 		if templ_7745c5c3_Err != nil {
@@ -2096,7 +2096,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 			var templ_7745c5c3_Var112 string
 			templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.JoinStringErrs(components.FormatElapsedTime(executions[len(executions)-1].StartedAt))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1772, Col: 114}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1774, Col: 114}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var112))
 			if templ_7745c5c3_Err != nil {
@@ -2116,7 +2116,7 @@ func TaskDetailMetrics(task *models.Task, executions []models.Execution, agents 
 				var templ_7745c5c3_Var113 string
 				templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinStringErrs(dur)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1779, Col: 58}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1781, Col: 58}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var113))
 				if templ_7745c5c3_Err != nil {
@@ -2165,7 +2165,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var115 string
 			templ_7745c5c3_Var115, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmStatusDisplayName(task.SwarmStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1792, Col: 104}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1794, Col: 104}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var115))
 			if templ_7745c5c3_Err != nil {
@@ -2178,7 +2178,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var116 string
 			templ_7745c5c3_Var116, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(task.SwarmChildren)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1793, Col: 97}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1795, Col: 97}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var116))
 			if templ_7745c5c3_Err != nil {
@@ -2196,7 +2196,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				var templ_7745c5c3_Var117 string
 				templ_7745c5c3_Var117, templ_7745c5c3_Err = templ.JoinStringErrs(task.WorktreeBranch)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1795, Col: 135}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1797, Col: 135}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var117))
 				if templ_7745c5c3_Err != nil {
@@ -2246,7 +2246,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					var templ_7745c5c3_Var120 string
 					templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinStringErrs(components.StatusLabelForTask(child.Status, child.Category))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1802, Col: 145}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1804, Col: 145}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
 					if templ_7745c5c3_Err != nil {
@@ -2259,7 +2259,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					var templ_7745c5c3_Var121 templ.SafeURL
 					templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s", child.ID)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1803, Col: 93}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1805, Col: 93}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var121))
 					if templ_7745c5c3_Err != nil {
@@ -2272,7 +2272,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					var templ_7745c5c3_Var122 string
 					templ_7745c5c3_Var122, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", child.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1803, Col: 139}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1805, Col: 139}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var122)
 					if templ_7745c5c3_Err != nil {
@@ -2285,7 +2285,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					var templ_7745c5c3_Var123 string
 					templ_7745c5c3_Var123, templ_7745c5c3_Err = templ.JoinStringErrs(child.Title)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1803, Col: 220}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1805, Col: 220}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var123))
 					if templ_7745c5c3_Err != nil {
@@ -2298,7 +2298,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 					var templ_7745c5c3_Var124 string
 					templ_7745c5c3_Var124, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmRoleDisplayName(child.SwarmRole))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1804, Col: 84}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1806, Col: 84}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var124))
 					if templ_7745c5c3_Err != nil {
@@ -2316,7 +2316,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 						var templ_7745c5c3_Var125 templ.SafeURL
 						templ_7745c5c3_Var125, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s?tab=changes", child.ID)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1806, Col: 93}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1808, Col: 93}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var125))
 						if templ_7745c5c3_Err != nil {
@@ -2329,7 +2329,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 						var templ_7745c5c3_Var126 string
 						templ_7745c5c3_Var126, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s?tab=changes", child.ID))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1806, Col: 151}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1808, Col: 151}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var126)
 						if templ_7745c5c3_Err != nil {
@@ -2367,7 +2367,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				var templ_7745c5c3_Var127 templ.SafeURL
 				templ_7745c5c3_Var127, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/tasks/%s", *task.ParentTaskID)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1820, Col: 121}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1822, Col: 121}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var127))
 				if templ_7745c5c3_Err != nil {
@@ -2380,7 +2380,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				var templ_7745c5c3_Var128 string
 				templ_7745c5c3_Var128, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s", *task.ParentTaskID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1820, Col: 177}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1822, Col: 177}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var128)
 				if templ_7745c5c3_Err != nil {
@@ -2393,7 +2393,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				var templ_7745c5c3_Var129 string
 				templ_7745c5c3_Var129, templ_7745c5c3_Err = templ.JoinStringErrs(*task.ParentTaskID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1820, Col: 265}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1822, Col: 265}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var129))
 				if templ_7745c5c3_Err != nil {
@@ -2411,7 +2411,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var130 string
 			templ_7745c5c3_Var130, templ_7745c5c3_Err = templ.JoinStringErrs(components.SwarmRoleDisplayName(task.SwarmRole))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1822, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1824, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var130))
 			if templ_7745c5c3_Err != nil {
@@ -2429,7 +2429,7 @@ func SwarmContextPanel(task *models.Task) templ.Component {
 				var templ_7745c5c3_Var131 string
 				templ_7745c5c3_Var131, templ_7745c5c3_Err = templ.JoinStringErrs(task.WorktreeBranch)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1824, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1826, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var131))
 				if templ_7745c5c3_Err != nil {
@@ -2482,7 +2482,7 @@ func TaskPromptPanel(task *models.Task) templ.Component {
 			var templ_7745c5c3_Var133 string
 			templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.JoinStringErrs(task.Prompt)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1837, Col: 177}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1839, Col: 177}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var133))
 			if templ_7745c5c3_Err != nil {
@@ -2534,7 +2534,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 		var templ_7745c5c3_Var135 string
 		templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.ResolveAttributeValue(taskID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1846, Col: 104}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1848, Col: 104}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var135)
 		if templ_7745c5c3_Err != nil {
@@ -2562,7 +2562,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 			var templ_7745c5c3_Var136 string
 			templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.JoinStringErrs(goalStatusLabel(goal))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1856, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1858, Col: 62}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var136))
 			if templ_7745c5c3_Err != nil {
@@ -2585,7 +2585,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 			var templ_7745c5c3_Var137 string
 			templ_7745c5c3_Var137, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Objective)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1860, Col: 180}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1862, Col: 180}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var137))
 			if templ_7745c5c3_Err != nil {
@@ -2603,7 +2603,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 				var templ_7745c5c3_Var138 string
 				templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.JoinStringErrs(goal.Reason)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1862, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1864, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var138))
 				if templ_7745c5c3_Err != nil {
@@ -2626,7 +2626,7 @@ func TaskGoalPanel(taskID string, goal *models.TaskGoal) templ.Component {
 				var templ_7745c5c3_Var139 string
 				templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.JoinStringErrs(goal.LastCheckedAt.Local().Format("Jan 2, 2006 3:04 PM"))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1865, Col: 107}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1867, Col: 107}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var139))
 				if templ_7745c5c3_Err != nil {

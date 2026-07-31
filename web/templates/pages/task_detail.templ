@@ -525,6 +525,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 											name="repeat_interval"
 											value="1"
 											min="1"
+											max="365"
 											step="1"
 											class="input input-bordered input-sm w-20"
 										/>
@@ -571,8 +572,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 											repeatIntervalInput.disabled = false;
 											repeatIntervalInput.required = true;
 											var raw = (repeatIntervalInput.value || '').trim();
-											if (raw === '' || !/^\d+$/.test(raw) || Number(raw) < 1) {
-												repeatIntervalInput.setCustomValidity('Repeat interval must be a whole number of at least 1');
+											if (raw === '' || !/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 365) {
+												repeatIntervalInput.setCustomValidity('Repeat interval must be a whole number between 1 and 365');
 											} else {
 												repeatIntervalInput.setCustomValidity('');
 											}
@@ -767,6 +768,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 														name="repeat_interval"
 														value={ fmt.Sprintf("%d", s.RepeatInterval) }
 														min="1"
+														max="365"
 														step="1"
 														class="input input-bordered input-sm w-20"
 													/>
@@ -817,8 +819,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 															repeatIntervalInput.disabled = false;
 															repeatIntervalInput.required = true;
 															var raw = (repeatIntervalInput.value || '').trim();
-															if (raw === '' || !/^\d+$/.test(raw) || Number(raw) < 1) {
-																repeatIntervalInput.setCustomValidity('Repeat interval must be a whole number of at least 1');
+															if (raw === '' || !/^\d+$/.test(raw) || Number(raw) < 1 || Number(raw) > 365) {
+																repeatIntervalInput.setCustomValidity('Repeat interval must be a whole number between 1 and 365');
 															} else {
 																repeatIntervalInput.setCustomValidity('');
 															}
