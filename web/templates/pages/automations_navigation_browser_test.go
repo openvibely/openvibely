@@ -70,8 +70,14 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 		`id="delete-automation-card-name"`,
 		`id="delete-automation-card-form"`,
 		`data-automation-delete-url="/automations/automation-native/delete?project_id=project-search"`,
-		`<form class="w-full" method="post" action="/automations/automation-native/pause?project_id=project-search"`,
-		`<form class="w-full" method="post" action="/automations/automation-paused/resume?project_id=project-search"`,
+		`data-automation-card-pause="automation-native"`,
+		`hx-post="/automations/automation-native/pause?project_id=project-search"`,
+		`data-automation-lifecycle-form="pause-automation-card-form-automation-native"`,
+		`id="pause-automation-card-form-automation-native" class="hidden" method="post" action="/automations/automation-native/pause?project_id=project-search"`,
+		`data-automation-card-resume="automation-paused"`,
+		`hx-post="/automations/automation-paused/resume?project_id=project-search"`,
+		`data-automation-lifecycle-form="resume-automation-card-form-automation-paused"`,
+		`id="resume-automation-card-form-automation-paused" class="hidden" method="post" action="/automations/automation-paused/resume?project_id=project-search"`,
 		`class="pr-12 min-w-0 max-w-full"`,
 		`class="font-bold"`,
 		`class="text-sm opacity-60 mt-1 line-clamp-2"`,
@@ -331,6 +337,15 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 		{Automation: models.Automation{ID: "automation-b", Name: "Automation B", Description: "Second", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"}},
 		{Automation: models.Automation{ID: "automation-visual", Name: "Visual Automation", Description: "Published design", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{ID: "version-visual", Version: 1, State: models.AutomationVersionPublished, AdapterKey: "vision_driver"}},
 	}
+	setAutomationLifecycle := func(id string, state models.AutomationLifecycleState) {
+		for i := range cards {
+			if cards[i].Automation.ID == id {
+				cards[i].Automation.LifecycleState = state
+				return
+			}
+		}
+		t.Fatalf("missing Automation card %q", id)
+	}
 	renderPortfolio := func() string {
 		var out bytes.Buffer
 		if err := AutomationsContent(cards, projectID).Render(context.Background(), &out); err != nil {
@@ -427,6 +442,21 @@ window.addEventListener('DOMContentLoaded', function() {
     element.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, button: 0}));
     element.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, button: 0}));
   }
+  function clickMenuRowRightEdge(selector, label) {
+    var control = document.querySelector(selector);
+    if (!control) fail('missing ' + label);
+    control.scrollIntoView({block: 'center', inline: 'center'});
+    var row = control.closest('li');
+    var rect = row && row.getBoundingClientRect();
+    if (!rect || rect.width < 40) fail(label + ' has no usable menu-row bounds');
+    var x = rect.right - 8;
+    var y = rect.top + rect.height / 2;
+    var hit = document.elementFromPoint(x, y);
+    if (!hit) fail(label + ' right edge hit nothing');
+    hit.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y}));
+    hit.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y}));
+    hit.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y}));
+  }
   function liveID() { var root = document.getElementById('automation-live'); return root && root.dataset.automationId; }
   function portfolioReady() { return !!document.getElementById('automations-container'); }
   function assertAutomationBreadcrumb(rootSelector, name, finalLabel) {
@@ -496,6 +526,14 @@ window.addEventListener('DOMContentLoaded', function() {
     await report('progress', 'in-page-back-restored');
 	    await wait(100);
 		    var automationASelector = '[data-automation-url^="/automations/automation-a?"]';
+		click(automationASelector + ' [data-automation-card-action] label', 'Automation A kebab menu before Pause');
+		clickMenuRowRightEdge(automationASelector + ' [data-automation-card-pause]', 'Automation A Pause menu row');
+		await waitFor(function() { return !!document.querySelector(automationASelector + ' [data-automation-card-resume]'); }, 'Automation A Resume after right-edge Pause click');
+		await wait(50);
+		click(automationASelector + ' [data-automation-card-action] label', 'Automation A kebab menu before Resume');
+		clickMenuRowRightEdge(automationASelector + ' [data-automation-card-resume]', 'Automation A Resume menu row');
+		await waitFor(function() { return !!document.querySelector(automationASelector + ' [data-automation-card-pause]'); }, 'Automation A Pause after right-edge Resume click');
+		    await report('progress', 'automation-lifecycle-full-row-clicked');
 		    click(automationASelector + ' [data-automation-card-action] label', 'Automation A kebab menu');
 		    var originalHTMXAjax = window.htmx.ajax;
 		    var cardEditRequests = 0;
@@ -714,9 +752,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		    await report('pass', '');  })().catch(function(error) { report('fail', String(error && error.stack || error)); });});
 </script>`
 	style := `<style>
-	:root { --bc: 0.746477 0.0216 264.436; --b2: 0.253267 0.015896 252.417; --p: 0.6569 0.196 275.75; --er: 0.7176 0.221 22.18; --wa: 0.8471 0.199 83.87; --in: 0.7206 0.191 231.6; --su: 0.648 0.15 160; }
-	.hidden { display: none !important; }
-	</style>`
+		:root { --bc: 0.746477 0.0216 264.436; --b2: 0.253267 0.015896 252.417; --p: 0.6569 0.196 275.75; --er: 0.7176 0.221 22.18; --wa: 0.8471 0.199 83.87; --in: 0.7206 0.191 231.6; --su: 0.648 0.15 160; }
+		.hidden { display: none !important; }
+		.menu { box-sizing: border-box; display: flex; width: 12rem; flex-direction: column; padding: .5rem; }
+		.menu li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); }
+		.menu li > * { grid-column-start: 1; grid-row-start: 1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(auto, max-content) auto max-content; align-items: center; gap: .5rem; padding: .5rem 1rem; }
+		.w-full { width: 100%; }
+		.dropdown-content { position: relative; }
+		</style>`
 	browserResult := make(chan string, 16)
 	olderLiveStarted := make(chan struct{})
 	releaseOlderLive := make(chan struct{})
@@ -765,6 +808,12 @@ window.addEventListener('DOMContentLoaded', function() {
 			w.WriteHeader(http.StatusNoContent)
 		case "/automations/automation-a/builder":
 			_, _ = w.Write([]byte(renderBlankBuilder(true)))
+		case "/automations/automation-a/pause":
+			setAutomationLifecycle("automation-a", models.AutomationPaused)
+			_, _ = w.Write([]byte(renderPortfolio()))
+		case "/automations/automation-a/resume":
+			setAutomationLifecycle("automation-a", models.AutomationActive)
+			_, _ = w.Write([]byte(renderPortfolio()))
 		case "/automations/automation-b":
 			_, _ = w.Write([]byte(renderLive("automation-b", "Automation B")))
 		case "/automations/new":

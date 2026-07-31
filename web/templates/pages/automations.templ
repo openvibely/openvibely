@@ -62,20 +62,32 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 										</li>
 										if card.Automation.LifecycleState == models.AutomationActive {
 											<li>
-												<form class="w-full" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID) } hx-target="#automations-container" hx-swap="outerHTML">
-													<input type="hidden" name="project_id" value={ currentProjectID }/>
-													<input type="hidden" name="return_to" value="portfolio"/>
-													<button class="w-full" type="submit">Pause</button>
-												</form>
+												<button
+													class="w-full"
+													type="button"
+													hx-post={ fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID) }
+													hx-include={ fmt.Sprintf("#pause-automation-card-form-%s", card.Automation.ID) }
+													hx-target="#automations-container"
+													hx-swap="outerHTML"
+													data-automation-card-pause={ card.Automation.ID }
+													data-automation-lifecycle-form={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) }
+													onclick="submitAutomationLifecycleFallback(this)"
+												>Pause</button>
 											</li>
 										}
 										if card.Automation.LifecycleState == models.AutomationPaused {
 											<li>
-												<form class="w-full" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID) } hx-target="#automations-container" hx-swap="outerHTML">
-													<input type="hidden" name="project_id" value={ currentProjectID }/>
-													<input type="hidden" name="return_to" value="portfolio"/>
-													<button class="w-full" type="submit">Resume</button>
-												</form>
+												<button
+													class="w-full"
+													type="button"
+													hx-post={ fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID) }
+													hx-include={ fmt.Sprintf("#resume-automation-card-form-%s", card.Automation.ID) }
+													hx-target="#automations-container"
+													hx-swap="outerHTML"
+													data-automation-card-resume={ card.Automation.ID }
+													data-automation-lifecycle-form={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) }
+													onclick="submitAutomationLifecycleFallback(this)"
+												>Resume</button>
 											</li>
 										}
 										<li>
@@ -89,6 +101,18 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 											>Delete</button>
 										</li>
 									</ul>
+									if card.Automation.LifecycleState == models.AutomationActive {
+										<form id={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID)) }>
+											<input type="hidden" name="project_id" value={ currentProjectID }/>
+											<input type="hidden" name="return_to" value="portfolio"/>
+										</form>
+									}
+									if card.Automation.LifecycleState == models.AutomationPaused {
+										<form id={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID)) }>
+											<input type="hidden" name="project_id" value={ currentProjectID }/>
+											<input type="hidden" name="return_to" value="portfolio"/>
+										</form>
+									}
 								</div>
 							</div>
 							<div class="pr-12 min-w-0 max-w-full">
@@ -124,6 +148,12 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 			<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
 		</dialog>
 		<script>
+			window.submitAutomationLifecycleFallback = function(button) {
+				if (!button || window.htmx) return;
+				var form = document.getElementById(button.dataset.automationLifecycleForm || '');
+				if (form) form.requestSubmit();
+			};
+
 			window.openAutomationCardEdit = function(button) {
 				if (!button || !window.htmx) return;
 				var url = button.dataset.automationEditUrl || '';
