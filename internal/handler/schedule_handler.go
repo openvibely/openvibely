@@ -29,6 +29,32 @@ func parseScheduleRepeatInterval(raw string) (int, error) {
 	return interval, nil
 }
 
+type scheduleFormValues struct {
+	runAt          time.Time
+	repeatType     models.RepeatType
+	repeatInterval int
+}
+
+func parseScheduleForm(c echo.Context, defaultRepeatType models.RepeatType) (scheduleFormValues, error) {
+	runAt, err := time.ParseInLocation("2006-01-02T15:04", c.FormValue("run_at"), time.Local)
+	if err != nil {
+		return scheduleFormValues{}, err
+	}
+	repeatInterval, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval"))
+	if err != nil {
+		return scheduleFormValues{}, err
+	}
+	repeatType := models.RepeatType(c.FormValue("repeat_type"))
+	if repeatType == "" {
+		repeatType = defaultRepeatType
+	}
+	return scheduleFormValues{
+		runAt:          runAt.UTC(),
+		repeatType:     repeatType,
+		repeatInterval: repeatInterval,
+	}, nil
+}
+
 func (h *Handler) scheduleAgentAssignmentFromForm(c echo.Context, taskID string) (bool, *string, error) {
 	if c.FormValue("schedule_agent_definition_present") == "" {
 		return false, nil, nil
@@ -87,30 +113,22 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	applog.Infof("[handler] CreateSchedule task=%s run_at=%q repeat_type=%s interval=%s htmx=%v",
 		taskID, runAtStr, c.FormValue("repeat_type"), c.FormValue("repeat_interval"), isHTMX)
 
-	// Parse the time in local timezone since the browser sends datetime-local values,
-	// then convert to UTC for consistent storage
-	runAt, err := time.ParseInLocation("2006-01-02T15:04", runAtStr, time.Local)
+	formValues, err := parseScheduleForm(c, models.RepeatOnce)
 	if err != nil {
-		applog.Infof("[handler] CreateSchedule invalid date: %v", err)
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
-	}
-	runAt = runAt.UTC()
-
-	repeatInterval, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval"))
-	if err != nil {
+		if _, ok := err.(*time.ParseError); ok {
+			applog.Infof("[handler] CreateSchedule invalid date: %v", err)
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
+		}
 		return err
 	}
 
 	s := &models.Schedule{
 		TaskID:              taskID,
-		RunAt:               runAt,
-		RepeatType:          models.RepeatType(c.FormValue("repeat_type")),
-		RepeatInterval:      repeatInterval,
+		RunAt:               formValues.runAt,
+		RepeatType:          formValues.repeatType,
+		RepeatInterval:      formValues.repeatInterval,
 		Enabled:             true,
 		ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
-	}
-	if s.RepeatType == "" {
-		s.RepeatType = models.RepeatOnce
 	}
 
 	agentAssignmentPresent, agentDefinitionID, err := h.scheduleAgentAssignmentFromForm(c, taskID)
@@ -180,29 +198,19 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 		return err
 	}
 
-	// Parse the time in local timezone since the browser sends datetime-local values,
-	// then convert to UTC for consistent storage
-	runAt, err := time.ParseInLocation("2006-01-02T15:04", runAtStr, time.Local)
+	formValues, err := parseScheduleForm(c, models.RepeatOnce)
 	if err != nil {
-		applog.Infof("[handler] UpdateSchedule invalid date: %v", err)
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
-	}
-	runAt = runAt.UTC()
-
-	repeatInterval, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval"))
-	if err != nil {
+		if _, ok := err.(*time.ParseError); ok {
+			applog.Infof("[handler] UpdateSchedule invalid date: %v", err)
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid date/time format")
+		}
 		return err
 	}
 
-	repeatType := models.RepeatType(c.FormValue("repeat_type"))
-	if repeatType == "" {
-		repeatType = models.RepeatOnce
-	}
-
 	// Update schedule fields
-	schedule.RunAt = runAt
-	schedule.RepeatType = repeatType
-	schedule.RepeatInterval = repeatInterval
+	schedule.RunAt = formValues.runAt
+	schedule.RepeatType = formValues.repeatType
+	schedule.RepeatInterval = formValues.repeatInterval
 	if _, present := c.Request().PostForm["clear_context_on_start"]; present {
 		schedule.ClearContextOnStart = formBoolEnabled(c, "clear_context_on_start", schedule.ClearContextOnStart)
 	}
@@ -212,7 +220,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	// the missed occurrence, and advance NextRun to the next future time.
 	// Previously this pre-computed the next future occurrence for past RunAt,
 	// which skipped the current day's execution.
-	schedule.NextRun = &runAt
+	schedule.NextRun = &formValues.runAt
 
 	if err := h.scheduleRepo.Update(c.Request().Context(), schedule); err != nil {
 		applog.Infof("[handler] UpdateSchedule error: %v", err)

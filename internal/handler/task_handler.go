@@ -356,29 +356,19 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	if t.Category == models.CategoryScheduled {
 		runAtStr := c.FormValue("run_at")
 		if runAtStr != "" {
-			// Parse the time in local timezone since the browser sends datetime-local values,
-			// then convert to UTC for consistent storage
-			runAt, err := time.ParseInLocation("2006-01-02T15:04", runAtStr, time.Local)
+			formValues, err := parseScheduleForm(c, models.RepeatDaily)
 			if err != nil {
 				applog.Infof("[handler] CreateTask schedule parse error: %v", err)
 			} else {
-				runAt = runAt.UTC()
-				repeatInterval, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval"))
-				if err != nil {
-					return err
-				}
 				sched := &models.Schedule{TaskID: t.ID,
-					RunAt:               runAt,
-					RepeatType:          models.RepeatType(c.FormValue("repeat_type")),
-					RepeatInterval:      repeatInterval,
+					RunAt:               formValues.runAt,
+					RepeatType:          formValues.repeatType,
+					RepeatInterval:      formValues.repeatInterval,
 					Enabled:             true,
 					ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
 				}
-				if sched.RepeatType == "" {
-					sched.RepeatType = models.RepeatDaily
-				}
 				// For recurring schedules with a past RunAt, compute the next future occurrence immediately
-				if sched.RepeatType != models.RepeatOnce && !runAt.After(time.Now().UTC()) {
+				if sched.RepeatType != models.RepeatOnce && !formValues.runAt.After(time.Now().UTC()) {
 					nextRun := sched.ComputeNextRun(time.Now().UTC())
 					if nextRun != nil {
 						sched.NextRun = nextRun
