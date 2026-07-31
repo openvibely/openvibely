@@ -31,16 +31,16 @@ type ListSchedulesRequest struct {
 // schedule. It carries just enough identity for existing schedule mutation actions
 // (schedule_id, task_id) plus recurrence and state fields for informed follow-ups.
 type scheduleDiscoverySummary struct {
-	ScheduleID          string `json:"schedule_id"`
-	TaskID              string `json:"task_id"`
-	TaskTitle           string `json:"task_title"`
-	Enabled             bool   `json:"enabled"`
-	RepeatType          string `json:"repeat_type"`
-	RepeatInterval      int    `json:"repeat_interval"`
-	Recurrence          string `json:"recurrence"`
-	Days                string `json:"days,omitempty"`
-	NextRun             string `json:"next_run,omitempty"`
-	ClearContextOnStart bool   `json:"clear_context_on_start"`
+	ScheduleID          string  `json:"schedule_id"`
+	TaskID              string  `json:"task_id"`
+	TaskTitle           string  `json:"task_title"`
+	Enabled             bool    `json:"enabled"`
+	RepeatType          string  `json:"repeat_type"`
+	RepeatInterval      int     `json:"repeat_interval"`
+	Recurrence          string  `json:"recurrence"`
+	Days                string  `json:"days"`
+	NextRun             *string `json:"next_run"`
+	ClearContextOnStart bool    `json:"clear_context_on_start"`
 }
 
 type scheduleDiscoveryResult struct {
@@ -132,7 +132,8 @@ func buildScheduleDiscoverySummary(row repository.ScheduleDiscoveryRow) schedule
 		summary.Days = strings.ToLower(s.RunAt.Local().Weekday().String()[:3])
 	}
 	if s.NextRun != nil {
-		summary.NextRun = s.NextRun.UTC().Format("2006-01-02T15:04:05Z")
+		nextRun := s.NextRun.UTC().Format("2006-01-02T15:04:05Z")
+		summary.NextRun = &nextRun
 	}
 	return summary
 }

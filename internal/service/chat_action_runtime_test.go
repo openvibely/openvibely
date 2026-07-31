@@ -720,6 +720,38 @@ func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {
 	require.Contains(t, pageOut, `"has_more":true`)
 }
 
+func TestBuildChannelUtilityActionHandlersListSchedulesIncludesEmptyDaysAndNullNextRun(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule Discovery Contract"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "One time", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	_, err := db.ExecContext(ctx, `UPDATE schedules SET next_run = NULL WHERE id = ?`, schedule.ID)
+	require.NoError(t, err)
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ScheduleRepo: scheduleRepo})
+	out, err := handlers["list_schedules"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	var result struct {
+		Schedules []map[string]any `json:"schedules"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Len(t, result.Schedules, 1)
+	days, ok := result.Schedules[0]["days"]
+	require.True(t, ok, "days must always be present")
+	require.Equal(t, "", days)
+	nextRun, ok := result.Schedules[0]["next_run"]
+	require.True(t, ok, "next_run must always be present")
+	require.Nil(t, nextRun)
+}
+
 func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
