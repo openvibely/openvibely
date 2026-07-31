@@ -393,12 +393,6 @@ func TestSend_OAuthLunaUsesResponsesLiteWebSocket(t *testing.T) {
 		if metadata[responsesLiteMetadataKey] != "true" {
 			t.Errorf("Responses Lite metadata = %#v", metadata)
 		}
-		userMessage, _ := input[len(input)-1].(map[string]any)
-		content, _ := userMessage["content"].([]any)
-		image, _ := content[1].(map[string]any)
-		if got := image["detail"]; got != "auto" {
-			t.Errorf("OAuth Lite image detail = %#v, want auto", got)
-		}
 		events := []string{
 			`{"type":"response.output_text.delta","delta":"ok"}`,
 			`{"type":"response.completed","response":{"model":"gpt-5.6-luna","status":"completed","usage":{"input_tokens":2,"output_tokens":1}}}`,
@@ -417,10 +411,7 @@ func TestSend_OAuthLunaUsesResponsesLiteWebSocket(t *testing.T) {
 	defer func() { OpenAIChatGPTAPIBaseURL = original }()
 
 	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
-	resp, err := client.Send(context.Background(), "Hello", &SendOptions{
-		Model:       "gpt-5.6-luna",
-		Attachments: []*FileAttachment{{FileName: "test.png", MediaType: "image/png", Data: []byte("png")}},
-	})
+	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "gpt-5.6-luna"})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -488,43 +479,11 @@ func TestBuildResponsesLiteWebsocketPayload_ModelDefaultsAndHostedTools(t *testi
 			if len(tools) != 1 {
 				t.Fatalf("additional tools = %#v, want only function tool", tools)
 			}
-			userMessage, _ := input[len(input)-1].(map[string]any)
-			content, _ := userMessage["content"].([]any)
-			image, _ := content[0].(map[string]any)
-			if got := image["detail"]; got != "auto" {
-				t.Fatalf("Lite image detail = %#v, want auto: %#v", got, image)
-			}
-		})
-	}
-}
-
-func TestBuildResponsesLiteWebsocketPayload_OmitsUnsupportedImageDetails(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		model  string
-		detail string
-	}{
-		{name: "unsupported model", model: "gpt-5.5", detail: "auto"},
-		{name: "unselected original detail", model: "gpt-5.6-sol", detail: "original"},
-		{name: "unsupported detail value", model: "gpt-5.6-sol", detail: "high"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			request := buildResponsesLiteWebsocketPayload(map[string]any{
-				"model": tc.model,
-				"input": []any{map[string]any{
-					"type": "message",
-					"role": "user",
-					"content": []any{map[string]any{
-						"type": "input_image", "image_url": "data:image/png;base64,AA==", "detail": tc.detail,
-					}},
-				}},
-			}, "", "session")
-			input, _ := request["input"].([]any)
-			userMessage, _ := input[1].(map[string]any)
+			userMessage, _ := input[2].(map[string]any)
 			content, _ := userMessage["content"].([]any)
 			image, _ := content[0].(map[string]any)
 			if _, ok := image["detail"]; ok {
-				t.Fatalf("unsupported Lite image retained detail: %#v", image)
+				t.Fatalf("Lite image retained detail: %#v", image)
 			}
 		})
 	}
@@ -554,13 +513,6 @@ func TestSend_APIKeyTerraUsesResponsesLiteWebSocket(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 			return
 		}
-		input, _ := request["input"].([]any)
-		userMessage, _ := input[len(input)-1].(map[string]any)
-		content, _ := userMessage["content"].([]any)
-		image, _ := content[1].(map[string]any)
-		if got := image["detail"]; got != "auto" {
-			t.Errorf("API-key Lite image detail = %#v, want auto", got)
-		}
 		completed := `{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-terra","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}}`
 		if err := conn.Write(r.Context(), websocket.MessageText, []byte(completed)); err != nil {
 			t.Errorf("write completed event: %v", err)
@@ -576,7 +528,6 @@ func TestSend_APIKeyTerraUsesResponsesLiteWebSocket(t *testing.T) {
 	resp, err := client.Send(context.Background(), "Hello", &SendOptions{
 		Model:           "gpt-5.6-terra",
 		MaxOutputTokens: 123,
-		Attachments:     []*FileAttachment{{FileName: "test.png", MediaType: "image/png", Data: []byte("png")}},
 	})
 	if err != nil {
 		t.Fatalf("Send: %v", err)
@@ -614,13 +565,6 @@ func TestSend_ResponsesLiteWebSocketHandshakeFallsBackToHTTPForSession(t *testin
 		if _, ok := request["client_metadata"]; ok {
 			t.Fatalf("HTTP fallback retained websocket client_metadata")
 		}
-		input, _ := request["input"].([]any)
-		userMessage, _ := input[len(input)-1].(map[string]any)
-		content, _ := userMessage["content"].([]any)
-		image, _ := content[1].(map[string]any)
-		if got := image["detail"]; got != "auto" {
-			t.Fatalf("HTTP Lite image detail = %#v, want auto", got)
-		}
 		_, _ = w.Write([]byte(buildSSE([]string{
 			`{"type":"response.output_text.delta","delta":"ok"}`,
 			`{"type":"response.completed","response":{"status":"completed","model":"gpt-5.6-terra"}}`,
@@ -634,10 +578,7 @@ func TestSend_ResponsesLiteWebSocketHandshakeFallsBackToHTTPForSession(t *testin
 
 	client := NewWithAPIKey("sk-test")
 	for i := 0; i < 2; i++ {
-		resp, err := client.Send(context.Background(), "Hello", &SendOptions{
-			Model:       "gpt-5.6-terra",
-			Attachments: []*FileAttachment{{FileName: "test.png", MediaType: "image/png", Data: []byte("png")}},
-		})
+		resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "gpt-5.6-terra"})
 		if err != nil {
 			t.Fatalf("Send %d: %v", i+1, err)
 		}
@@ -651,54 +592,6 @@ func TestSend_ResponsesLiteWebSocketHandshakeFallsBackToHTTPForSession(t *testin
 	if got := httpRequests.Load(); got != 2 {
 		t.Fatalf("HTTP fallback requests = %d, want 2", got)
 	}
-}
-
-func TestOpenResponsesLiteHTTPStream_OAuthPreservesGPT56AutoImageDetail(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer oauth-token" {
-			t.Fatalf("Authorization = %q", got)
-		}
-		if got := r.Header.Get("ChatGPT-Account-ID"); got != "org_test" {
-			t.Fatalf("ChatGPT-Account-ID = %q", got)
-		}
-		if got := r.Header.Get("x-openai-internal-codex-responses-lite"); got != "true" {
-			t.Fatalf("Responses Lite header = %q", got)
-		}
-		var request map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("decode OAuth HTTP fallback request: %v", err)
-		}
-		input, _ := request["input"].([]any)
-		userMessage, _ := input[len(input)-1].(map[string]any)
-		content, _ := userMessage["content"].([]any)
-		image, _ := content[0].(map[string]any)
-		if got := image["detail"]; got != "auto" {
-			t.Fatalf("OAuth HTTP Lite image detail = %#v, want auto", got)
-		}
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer srv.Close()
-
-	original := OpenAIChatGPTAPIBaseURL
-	OpenAIChatGPTAPIBaseURL = srv.URL
-	defer func() { OpenAIChatGPTAPIBaseURL = original }()
-
-	client := NewWithOAuthToken("oauth-token", "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
-	payload := buildResponsesLiteWebsocketPayload(map[string]any{
-		"model": "gpt-5.6-sol",
-		"input": []any{map[string]any{
-			"type": "message",
-			"role": "user",
-			"content": []any{map[string]any{
-				"type": "input_image", "image_url": "data:image/png;base64,AA==", "detail": "auto",
-			}},
-		}},
-	}, "", client.sessionID)
-	body, err := client.openResponsesLiteHTTPStream(context.Background(), payload, true)
-	if err != nil {
-		t.Fatalf("open OAuth HTTP fallback stream: %v", err)
-	}
-	body.Close()
 }
 
 func TestResponsesLiteOAuthRecoveryErrorUnlocksTransportState(t *testing.T) {

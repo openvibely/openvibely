@@ -974,6 +974,65 @@ func TestToggleScheduleEnabled_DisabledExcludedFromListDue(t *testing.T) {
 	}
 }
 
+func TestScheduleToggleEndpoints_StaleNextRunParity(t *testing.T) {
+	endpoints := []struct {
+		name       string
+		path       func(string) string
+		statusCode int
+	}{
+		{
+			name:       "browser",
+			path:       func(id string) string { return "/schedules/" + id + "/toggle" },
+			statusCode: http.StatusSeeOther,
+		},
+		{
+			name:       "API",
+			path:       func(id string) string { return "/api/schedules/" + id + "/toggle" },
+			statusCode: http.StatusOK,
+		},
+	}
+
+	for _, endpoint := range endpoints {
+		t.Run(endpoint.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			task := tc.CreateTask(project.ID).Build()
+			stale := time.Now().Add(-25 * time.Hour)
+			schedule := tc.CreateSchedule(task.ID).WithRunAt(stale).WithRepeatType("daily").Build()
+
+			rec := tc.HTTP().Post(endpoint.path(schedule.ID)).Execute()
+			if rec.Code != endpoint.statusCode {
+				t.Fatalf("disable: expected %d, got %d (body: %s)", endpoint.statusCode, rec.Code, rec.Body.String())
+			}
+			disabled, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatalf("disable: get schedule: %v", err)
+			}
+			if disabled.Enabled {
+				t.Fatal("disable: expected schedule to be disabled")
+			}
+			if disabled.NextRun == nil || !disabled.NextRun.Equal(stale) {
+				t.Fatalf("disable: expected stale NextRun %v to be preserved, got %v", stale, disabled.NextRun)
+			}
+
+			rec = tc.HTTP().Post(endpoint.path(schedule.ID)).Execute()
+			if rec.Code != endpoint.statusCode {
+				t.Fatalf("re-enable: expected %d, got %d (body: %s)", endpoint.statusCode, rec.Code, rec.Body.String())
+			}
+			reEnabled, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatalf("re-enable: get schedule: %v", err)
+			}
+			if !reEnabled.Enabled {
+				t.Fatal("re-enable: expected schedule to be enabled")
+			}
+			if reEnabled.NextRun == nil || !reEnabled.NextRun.After(time.Now()) {
+				t.Fatalf("re-enable: expected NextRun to be recomputed into the future, got %v", reEnabled.NextRun)
+			}
+		})
+	}
+}
+
 // ---- APIToggleScheduleEnabled ----
 
 func TestAPIToggleScheduleEnabled_NotFound(t *testing.T) {
