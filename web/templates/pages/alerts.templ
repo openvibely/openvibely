@@ -126,10 +126,14 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				return Array.prototype.slice.call(root.querySelectorAll('[data-alert-scroll-anchor]'));
 			}
 
-			function focusCandidates(rows, activeID) {
-				var ids = rows.filter(function(row) {
+			function visibleAlertRows(rows) {
+				return rows.filter(function(row) {
 					return row.getClientRects().length > 0;
-				}).map(function(row) { return row.dataset.alertId || ''; });
+				});
+			}
+
+			function focusCandidates(rows, activeID) {
+				var ids = visibleAlertRows(rows).map(function(row) { return row.dataset.alertId || ''; });
 				var index = ids.indexOf(activeID);
 				if (index < 0) return [];
 				var candidates = [activeID];
@@ -146,7 +150,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 
 				var rows = alertRows(root);
 				var rootRect = root.getBoundingClientRect();
-				var anchors = rows.map(function(row) {
+				var anchors = visibleAlertRows(rows).map(function(row) {
 					return {id: row.dataset.alertId || '', top: row.getBoundingClientRect().top};
 				}).sort(function(a, b) {
 					return Math.abs(a.top - rootRect.top) - Math.abs(b.top - rootRect.top);
@@ -171,6 +175,9 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				if (!settledTarget || settledTarget.id !== 'alerts-container' || !root || !saved) return;
 				state.swap = null;
 
+				if (typeof window.refreshCardSearches === 'function') {
+					window.refreshCardSearches(root);
+				}
 				root.scrollTop = saved.rootScrollTop;
 				var anchor = null;
 				var savedAnchor = null;

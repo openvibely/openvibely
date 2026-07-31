@@ -28,7 +28,7 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 	alerts := make([]models.Alert, 30)
 	for i := range alerts {
 		message := strings.Repeat("Long alert content ", 5)
-		if i == 20 || i == 24 || i == 27 {
+		if i == 2 || i == 5 || i == 8 || i == 11 || i == 14 || i == 17 || i == 20 || i == 24 || i == 27 {
 			message += " filtered-focus"
 		}
 		alerts[i] = models.Alert{
@@ -159,12 +159,17 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 	    search.value = 'filtered-focus';
 	    search.dispatchEvent(new Event('input', {bubbles:true}));
 	    await wait(50);
-	    if (getComputedStyle(row('item-25')).display !== 'none') fail('card search did not hide the adjacent non-matching row');
-	    if (getComputedStyle(row('item-27')).display === 'none') fail('card search hid the expected focus fallback row');
-	    await remove('item-24');
+	    root = document.getElementById('alerts-container');
+	    root.scrollTop = row('item-11').offsetTop - root.offsetTop - 70;
+	    await wait(50);
+	    if (getComputedStyle(row('item-12')).display !== 'none') fail('card search did not hide the adjacent non-matching row');
+	    if (getComputedStyle(row('item-14')).display === 'none') fail('card search hid the expected focus fallback row');
+	    var filteredTop = row('item-08').getBoundingClientRect().top;
+	    await remove('item-11');
 	    await wait(250);
-	    if (document.activeElement !== row('item-27').querySelector('[data-alert-delete]')) fail('filtered delete did not focus the next visible delete control');
-	    if (getComputedStyle(row('item-25')).display !== 'none') fail('persisted card search was not reapplied after deletion');
+	    assertNear(row('item-08').getBoundingClientRect().top, filteredTop, 'filtered delete nearest surviving visible anchor');
+	    if (document.activeElement !== row('item-14').querySelector('[data-alert-delete]')) fail('filtered delete did not focus the next visible delete control');
+	    if (getComputedStyle(row('item-12')).display !== 'none') fail('persisted card search was not reapplied after deletion');
 	    await report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});
