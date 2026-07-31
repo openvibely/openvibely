@@ -58,6 +58,22 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 			invalid.Nodes[i].Config = config
 		}
 		require.Contains(t, issueCodes(drafts.ValidateCandidate(invalid)), "enabled", "%s must reject per-schedule disable intent", adapterKey)
+
+		oversized := candidate
+		oversized.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
+		for i := range oversized.Nodes {
+			if _, scheduled := oversized.Nodes[i].Config["run_at"]; !scheduled {
+				continue
+			}
+			config := make(map[string]any, len(oversized.Nodes[i].Config))
+			for key, value := range oversized.Nodes[i].Config {
+				config[key] = value
+			}
+			config["repeat_interval"] = models.MaxScheduleRepeatInterval + 1
+			oversized.Nodes[i].Config = config
+			break
+		}
+		require.Contains(t, issueCodes(drafts.ValidateCandidate(oversized)), "repeat_interval", "%s must reject oversized schedule intervals", adapterKey)
 	}
 }
 

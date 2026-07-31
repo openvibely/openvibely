@@ -15,6 +15,20 @@ import (
 // GlobalCapacityResponse contains global worker capacity information.
 // swagger:model
 
+func parseScheduleRepeatInterval(raw string) (int, error) {
+	if raw == "" {
+		return 1, nil
+	}
+	interval, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, echo.NewHTTPError(http.StatusBadRequest, "repeat interval must be a whole number")
+	}
+	if err := models.ValidateScheduleRepeatInterval(interval); err != nil {
+		return 0, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return interval, nil
+}
+
 func (h *Handler) scheduleAgentAssignmentFromForm(c echo.Context, taskID string) (bool, *string, error) {
 	if c.FormValue("schedule_agent_definition_present") == "" {
 		return false, nil, nil
@@ -53,9 +67,9 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	}
 	runAt = runAt.UTC()
 
-	repeatInterval, _ := strconv.Atoi(c.FormValue("repeat_interval"))
-	if repeatInterval < 1 {
-		repeatInterval = 1
+	repeatInterval, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval"))
+	if err != nil {
+		return err
 	}
 
 	s := &models.Schedule{
@@ -165,9 +179,9 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	}
 	runAt = runAt.UTC()
 
-	repeatInterval, _ := strconv.Atoi(c.FormValue("repeat_interval"))
-	if repeatInterval < 1 {
-		repeatInterval = 1
+	repeatInterval, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval"))
+	if err != nil {
+		return err
 	}
 
 	repeatType := models.RepeatType(c.FormValue("repeat_type"))

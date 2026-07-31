@@ -628,6 +628,9 @@ func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandle
 	if req.Interval > 0 {
 		repeatInterval = req.Interval
 	}
+	if err := models.ValidateScheduleRepeatInterval(repeatInterval); err != nil {
+		return fmt.Sprintf("Invalid interval %d: %v.", repeatInterval, err)
+	}
 	runAt := channelScheduleRunAt(time.Now().Local(), hourVal, minuteVal, repeatType, req.Days)
 	clearContextOnStart := true
 	if req.ClearContextOnStart != nil {
@@ -798,8 +801,8 @@ func applyChannelScheduleChanges(schedule *models.Schedule, req ModifyScheduleRe
 		timeChanged = true
 	}
 	if req.Interval != nil {
-		if *req.Interval < 1 {
-			return nil, false, fmt.Sprintf("Invalid interval %d.", *req.Interval)
+		if err := models.ValidateScheduleRepeatInterval(*req.Interval); err != nil {
+			return nil, false, fmt.Sprintf("Invalid interval %d: %v.", *req.Interval, err)
 		}
 		schedule.RepeatInterval = *req.Interval
 		changes = append(changes, fmt.Sprintf("interval→%d", *req.Interval))

@@ -105,6 +105,9 @@ func (r *ScheduleRepo) GetByID(ctx context.Context, id string) (*models.Schedule
 }
 
 func (r *ScheduleRepo) Create(ctx context.Context, s *models.Schedule) error {
+	if err := models.ValidateScheduleRepeatInterval(s.RepeatInterval); err != nil {
+		return fmt.Errorf("creating schedule: %w", err)
+	}
 	// Compute initial next_run
 	if s.NextRun == nil {
 		t := s.RunAt
@@ -123,6 +126,9 @@ func (r *ScheduleRepo) Create(ctx context.Context, s *models.Schedule) error {
 }
 
 func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
+	if err := models.ValidateScheduleRepeatInterval(s.RepeatInterval); err != nil {
+		return fmt.Errorf("updating schedule: %w", err)
+	}
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE schedules SET run_at = ?, repeat_type = ?, repeat_interval = ?,
 		 enabled = ?, clear_context_on_start = ?, next_run = ?, updated_at = datetime('now')

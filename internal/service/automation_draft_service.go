@@ -988,7 +988,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_type", Message: "Unsupported schedule repeat type."})
 		}
 		interval, intervalOK := draftInt(node.Config["repeat_interval"])
-		if !intervalOK || interval < 1 || interval > 365 {
+		if !intervalOK || models.ValidateScheduleRepeatInterval(interval) != nil {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
 		}
 		if enabled, enabledOK := node.Config["enabled"].(bool); !enabledOK || !enabled {
@@ -1127,7 +1127,7 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_type", Message: "Unsupported schedule repeat type."})
 		}
 		interval, ok := draftInt(node.Config["repeat_interval"])
-		if !ok || interval < 1 || interval > 365 {
+		if !ok || models.ValidateScheduleRepeatInterval(interval) != nil {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
 		}
 		if enabled, ok := node.Config["enabled"].(bool); !ok || !enabled {

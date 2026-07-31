@@ -2653,6 +2653,10 @@ func (h *Handler) executeChatScheduleRequests(ctx context.Context, projectID str
 		if req.Interval > 0 {
 			repeatInterval = req.Interval
 		}
+		if err := models.ValidateScheduleRepeatInterval(repeatInterval); err != nil {
+			results = append(results, fmt.Sprintf("- Invalid interval %d for task \"%s\" (%v)", repeatInterval, task.Title, err))
+			continue
+		}
 
 		// Build RunAt: today at the specified time in local timezone
 		now := time.Now().Local()
@@ -2842,8 +2846,8 @@ func (h *Handler) executeChatModifyScheduleRequests(ctx context.Context, project
 
 		// Update interval if provided
 		if req.Interval != nil {
-			if *req.Interval < 1 {
-				results = append(results, fmt.Sprintf("- Invalid interval %d for schedule on task \"%s\" (must be >= 1)", *req.Interval, task.Title))
+			if err := models.ValidateScheduleRepeatInterval(*req.Interval); err != nil {
+				results = append(results, fmt.Sprintf("- Invalid interval %d for schedule on task \"%s\" (%v)", *req.Interval, task.Title, err))
 				continue
 			}
 			schedule.RepeatInterval = *req.Interval

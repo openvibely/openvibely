@@ -327,6 +327,9 @@ func (c *AutomationCompiler) scheduleFromNode(taskID string, node models.Automat
 	}
 	repeat, _ := node.Config["repeat_type"].(string)
 	interval, _ := draftInt(node.Config["repeat_interval"])
+	if err := models.ValidateScheduleRepeatInterval(interval); err != nil {
+		return models.Schedule{}, fmt.Errorf("invalid repeat interval for %q: %w", node.Key, err)
+	}
 	clearContextOnStart, present := node.Config["clear_context_on_start"].(bool)
 	if !present {
 		clearContextOnStart = true

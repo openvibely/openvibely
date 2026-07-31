@@ -619,6 +619,13 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	require.NoError(t, taskRepo.Create(ctx, task))
 
 	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ScheduleRepo: scheduleRepo})
+	oversizedCreateOut, err := handlers["schedule_task"](ctx, json.RawMessage(`{"title":"Scheduled target","time":"09:30","repeat":"seconds","interval":366}`))
+	require.NoError(t, err)
+	require.Contains(t, oversizedCreateOut, "between 1 and 365")
+	beforeCreate, err := scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, beforeCreate)
+
 	scheduleOut, err := handlers["schedule_task"](ctx, json.RawMessage(`{"title":"Scheduled target","time":"09:30","repeat":"weekly","days":["mon"],"interval":2}`))
 	require.NoError(t, err)
 	require.Contains(t, scheduleOut, "Scheduled task")
@@ -631,6 +638,13 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	require.NoError(t, err)
 	require.Len(t, schedules, 1)
 	require.True(t, schedules[0].ClearContextOnStart)
+
+	oversizedModifyOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","interval":366}`))
+	require.NoError(t, err)
+	require.Contains(t, oversizedModifyOut, "between 1 and 365")
+	unchanged, err := scheduleRepo.GetByID(ctx, schedules[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, unchanged.RepeatInterval)
 
 	modifyOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","time":"10:45","enabled":false,"clear_context_on_start":false}`))
 	require.NoError(t, err)

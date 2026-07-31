@@ -76,6 +76,14 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 	if in.CreatedVia == "" {
 		in.CreatedVia = "web"
 	}
+	for _, schedule := range in.Schedules {
+		if schedule.ExistingScheduleID != "" && schedule.PreserveTiming {
+			continue
+		}
+		if err := models.ValidateScheduleRepeatInterval(schedule.RepeatInterval); err != nil {
+			return nil, nil, fmt.Errorf("invalid repeat interval for schedule node %q: %w", schedule.NodeKey, err)
+		}
+	}
 
 	conn, err := r.db.Conn(ctx)
 	if err != nil {

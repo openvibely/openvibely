@@ -2221,7 +2221,10 @@ func TestHandler_ViewSchedule_NewTaskDialogRepeatIntervalControls(t *testing.T) 
 	if !strings.Contains(body, `window.updateScheduleCreateRepeatInterval`) {
 		t.Fatal("expected schedule create dialog repeat interval behavior hook")
 	}
-	if !strings.Contains(body, `Repeat interval must be a whole number of at least 1`) {
+	if !strings.Contains(body, `max="365"`) {
+		t.Fatal("expected schedule create dialog to cap repeat intervals at 365")
+	}
+	if !strings.Contains(body, `Repeat interval must be a whole number between 1 and 365`) {
 		t.Fatal("expected schedule create dialog interval validation message")
 	}
 	if !strings.Contains(body, `<option value="daily" selected>Daily</option>`) {
