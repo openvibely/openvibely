@@ -180,7 +180,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 							<option value="github_sdlc" data-template-description="Finds repository improvements, creates GitHub issues, waits for human assignment and review, and prepares implementation pull requests.">GitHub SDLC</option>
 						</select>
 					</label>
-					<p class="rounded-box bg-base-200/60 p-3 text-sm text-base-content/70" data-template-description>Reviews project direction, proposes actionable work, waits for human approval, and hands approved work to an implementation task.</p>
+					<p class="rounded-box bg-base-200/60 p-3 text-sm text-base-content/70" data-template-description-card>Reviews project direction, proposes actionable work, waits for human approval, and hands approved work to an implementation task.</p>
 					<div class="modal-action">
 						<button class="btn" type="button" onclick="document.getElementById('automation-template-modal').close()">Cancel</button>
 						<button class="btn btn-primary" type="submit">Use template</button>
@@ -248,8 +248,10 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 				if (!select) return;
 				var option = select.options[select.selectedIndex];
 				var form = select.closest('form');
-				var description = form ? form.querySelector('[data-template-description]') : null;
-				if (description) description.textContent = option ? option.dataset.templateDescription || '' : '';
+				var description = form ? form.querySelector('[data-template-description-card]') : null;
+				if (description) {
+					description.textContent = option ? option.dataset.templateDescription || '' : '';
+				}
 			};
 
 			window.submitAutomationLifecycleFallback = function(button) {

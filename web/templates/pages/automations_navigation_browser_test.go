@@ -591,11 +591,13 @@ window.addEventListener('DOMContentLoaded', function() {
 		    var templateModal = document.getElementById('automation-template-modal');
 		    if (!templateModal || !templateModal.open) fail('Template option did not open its modal');
 		    var templateSelect = templateModal.querySelector('select[name="template_key"]');
-		    var templateDescription = templateModal.querySelector('[data-template-description]');
+		    var templateDescription = templateModal.querySelector('[data-template-description-card]');
 		    var nativeDescription = templateDescription && templateDescription.textContent;
+		    var templateLabels = Array.from(templateSelect.options).map(function(option) { return option.textContent; });
 		    templateSelect.value = 'github_sdlc';
 		    templateSelect.dispatchEvent(new Event('change', {bubbles:true}));
-		    if (!templateDescription || templateDescription.textContent === nativeDescription || !templateDescription.textContent.includes('GitHub')) fail('Template selection did not update its description');
+		    if (!templateDescription || templateDescription.textContent === nativeDescription || !templateDescription.textContent.includes('GitHub')) fail('Template selection did not update its description card');
+		    if (Array.from(templateSelect.options).some(function(option, index) { return option.textContent !== templateLabels[index]; })) fail('Template selection replaced an option label with its description');
 		    templateModal.close();
 		    click('[data-automation-new-menu] button[data-automation-new-describe]', 'Describe creation menu option');
 		    var describeModal = document.getElementById('automation-describe-modal');
