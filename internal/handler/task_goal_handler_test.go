@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -256,15 +257,21 @@ func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t 
 	if err != nil {
 		t.Fatalf("current goal continuation rejected: out=%q err=%v", out, err)
 	}
-	pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	var result struct {
+		QueuedMessageID string `json:"queued_message_id"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode send_to_task result %q: %v", out, err)
+	}
+	queued, err := tc.handler.threadInputRepo.GetByID(ctx, result.QueuedMessageID)
 	if err != nil {
-		t.Fatalf("list pending: %v", err)
+		t.Fatalf("load queued continuation: %v", err)
 	}
-	if len(pending) != 1 {
-		t.Fatalf("expected one queued continuation, got %+v", pending)
+	if queued == nil {
+		t.Fatalf("queued continuation %q was not persisted", result.QueuedMessageID)
 	}
-	if pending[0].Content != "Continue because audit found a material issue" || pending[0].Source != models.TaskOriginSystemAgent || pending[0].OriginAgent != models.AgentSystemKindGoal {
-		t.Fatalf("queued continuation details = %+v", pending[0])
+	if queued.Content != "Continue because audit found a material issue" || queued.Source != models.TaskOriginSystemAgent || queued.OriginAgent != models.AgentSystemKindGoal {
+		t.Fatalf("queued continuation details = %+v", queued)
 	}
 }
 

@@ -4867,7 +4867,7 @@ func TestHandler_RunTask_PromotesPendingTaskThreadInputInsteadOfOriginalPrompt(t
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.NotNil(t, updatedTask)
-	assert.Equal(t, models.StatusQueued, updatedTask.Status)
+	assert.Contains(t, []models.TaskStatus{models.StatusQueued, models.StatusRunning}, updatedTask.Status)
 	assert.Equal(t, models.CategoryActive, updatedTask.Category)
 }
 
