@@ -283,9 +283,12 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	if category == "" {
 		category = models.CategoryActive
 	}
+	var scheduledFormValues scheduleFormValues
+	var scheduledFormErr error
 	if category == models.CategoryScheduled && c.FormValue("run_at") != "" {
-		if _, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval")); err != nil {
-			return err
+		scheduledFormValues, scheduledFormErr = parseScheduleForm(c, models.RepeatDaily)
+		if _, ok := scheduledFormErr.(*echo.HTTPError); ok {
+			return scheduledFormErr
 		}
 	}
 
@@ -353,32 +356,28 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	applog.Infof("[handler] CreateTask success id=%s", t.ID)
 
 	// If category is scheduled and run_at is provided, create a schedule
-	if t.Category == models.CategoryScheduled {
-		runAtStr := c.FormValue("run_at")
-		if runAtStr != "" {
-			formValues, err := parseScheduleForm(c, models.RepeatDaily)
-			if err != nil {
-				applog.Infof("[handler] CreateTask schedule parse error: %v", err)
+	if t.Category == models.CategoryScheduled && c.FormValue("run_at") != "" {
+		if scheduledFormErr != nil {
+			applog.Infof("[handler] CreateTask schedule parse error: %v", scheduledFormErr)
+		} else {
+			sched := &models.Schedule{TaskID: t.ID,
+				RunAt:               scheduledFormValues.runAt,
+				RepeatType:          scheduledFormValues.repeatType,
+				RepeatInterval:      scheduledFormValues.repeatInterval,
+				Enabled:             true,
+				ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
+			}
+			// For recurring schedules with a past RunAt, compute the next future occurrence immediately
+			if sched.RepeatType != models.RepeatOnce && !scheduledFormValues.runAt.After(time.Now().UTC()) {
+				nextRun := sched.ComputeNextRun(time.Now().UTC())
+				if nextRun != nil {
+					sched.NextRun = nextRun
+				}
+			}
+			if err := h.scheduleRepo.Create(c.Request().Context(), sched); err != nil {
+				applog.Infof("[handler] CreateTask schedule create error: %v", err)
 			} else {
-				sched := &models.Schedule{TaskID: t.ID,
-					RunAt:               formValues.runAt,
-					RepeatType:          formValues.repeatType,
-					RepeatInterval:      formValues.repeatInterval,
-					Enabled:             true,
-					ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
-				}
-				// For recurring schedules with a past RunAt, compute the next future occurrence immediately
-				if sched.RepeatType != models.RepeatOnce && !formValues.runAt.After(time.Now().UTC()) {
-					nextRun := sched.ComputeNextRun(time.Now().UTC())
-					if nextRun != nil {
-						sched.NextRun = nextRun
-					}
-				}
-				if err := h.scheduleRepo.Create(c.Request().Context(), sched); err != nil {
-					applog.Infof("[handler] CreateTask schedule create error: %v", err)
-				} else {
-					applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
-				}
+				applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
 			}
 		}
 	}

@@ -36,11 +36,11 @@ type scheduleFormValues struct {
 }
 
 func parseScheduleForm(c echo.Context, defaultRepeatType models.RepeatType) (scheduleFormValues, error) {
-	runAt, err := time.ParseInLocation("2006-01-02T15:04", c.FormValue("run_at"), time.Local)
+	repeatInterval, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval"))
 	if err != nil {
 		return scheduleFormValues{}, err
 	}
-	repeatInterval, err := parseScheduleRepeatInterval(c.FormValue("repeat_interval"))
+	runAt, err := time.ParseInLocation("2006-01-02T15:04", c.FormValue("run_at"), time.Local)
 	if err != nil {
 		return scheduleFormValues{}, err
 	}

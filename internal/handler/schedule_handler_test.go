@@ -4,17 +4,37 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
 // ---- CreateSchedule ----
+
+func TestParseScheduleForm_ValidatesIntervalBeforeDate(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(url.Values{
+		"run_at":          {"not-a-date"},
+		"repeat_interval": {"366"},
+	}.Encode()))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+
+	_, err := parseScheduleForm(e.NewContext(req, httptest.NewRecorder()), models.RepeatDaily)
+	httpErr, ok := err.(*echo.HTTPError)
+	if !ok {
+		t.Fatalf("expected interval HTTP error before date error, got %T: %v", err, err)
+	}
+	if httpErr.Code != http.StatusBadRequest || httpErr.Message != "repeat interval must be between 1 and 365" {
+		t.Fatalf("unexpected interval error: %#v", httpErr)
+	}
+}
 
 func assertSchedulesTaskDetailFragment(t *testing.T, body string) {
 	t.Helper()
