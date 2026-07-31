@@ -160,6 +160,88 @@ func TestMigration132IndexesLifecycleExecutionParentForeignKey(t *testing.T) {
 	}
 }
 
+func TestMigration135IndexesProjectScopedAlertOrdering(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "alerts-project-created-index-135.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 134); err != nil {
+		t.Fatal(err)
+	}
+
+	// The production Alerts page newest-100 query filters by project and orders by
+	// (created_at DESC, id DESC). Populate enough rows across many projects so the
+	// planner makes a meaningful choice rather than trivially scanning.
+	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('target-135', 'Target 135', '', '')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 4000)
+		INSERT INTO alerts (project_id, title, created_at)
+		SELECT 'target-135', 'a' || n, datetime('now', '-' || n || ' seconds') FROM seq`); err != nil {
+		t.Fatal(err)
+	}
+
+	listQuery := `SELECT id FROM alerts WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 100 OFFSET 0`
+
+	before := explainQueryPlan(t, db, listQuery, "target-135")
+	if !strings.Contains(before, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("migration 134 alerts list plan = %q, want temporary sort baseline", before)
+	}
+
+	if err := goose.UpTo(db, ".", 135); err != nil {
+		t.Fatal(err)
+	}
+
+	after := explainQueryPlan(t, db, listQuery, "target-135")
+	if !strings.Contains(after, "idx_alerts_project_created") {
+		t.Fatalf("migration 135 alerts list plan = %q, want project-plus-order index", after)
+	}
+	if strings.Contains(after, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("migration 135 alerts list plan = %q, want no temporary sort", after)
+	}
+
+	// The composite index leads with project_id, so the narrow project-only index
+	// is redundant and must be dropped by the migration.
+	var projectOnly int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_alerts_project_id'`).Scan(&projectOnly); err != nil {
+		t.Fatal(err)
+	}
+	if projectOnly != 0 {
+		t.Fatalf("idx_alerts_project_id index count = %d, want 0 after migration 135", projectOnly)
+	}
+
+	// A bare project_id equality lookup must remain indexed by the composite index.
+	projectLookup := explainQueryPlan(t, db, `SELECT id FROM alerts WHERE project_id = ?`, "target-135")
+	if strings.Contains(projectLookup, "SCAN alerts") {
+		t.Fatalf("project lookup plan = %q, want indexed search after migration 135", projectLookup)
+	}
+
+	// The Down migration restores the narrow project-only index and drops the composite.
+	if err := goose.DownTo(db, ".", 134); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_alerts_project_id'`).Scan(&projectOnly); err != nil {
+		t.Fatal(err)
+	}
+	if projectOnly != 1 {
+		t.Fatalf("idx_alerts_project_id index count = %d, want 1 after migration 135 down", projectOnly)
+	}
+	var composite int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_alerts_project_created'`).Scan(&composite); err != nil {
+		t.Fatal(err)
+	}
+	if composite != 0 {
+		t.Fatalf("idx_alerts_project_created index count = %d, want 0 after migration 135 down", composite)
+	}
+}
+
 func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "retired-attachment-sessions-131.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -689,8 +771,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 134 {
-		t.Fatalf("max goose version = %d, want 134", maxVersion)
+	if maxVersion != 135 {
+		t.Fatalf("max goose version = %d, want 135", maxVersion)
 	}
 }
 
@@ -841,8 +923,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 134 {
-		t.Fatalf("max goose version = %d, want 134", maxVersion)
+	if maxVersion != 135 {
+		t.Fatalf("max goose version = %d, want 135", maxVersion)
 	}
 }
 
@@ -1328,8 +1410,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 134 {
-		t.Fatalf("max goose version = %d, want 134", maxVersion)
+	if maxVersion != 135 {
+		t.Fatalf("max goose version = %d, want 135", maxVersion)
 	}
 }
 
@@ -1680,8 +1762,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 134 {
-		t.Fatalf("max goose version = %d, want 134", maxVersion)
+	if maxVersion != 135 {
+		t.Fatalf("max goose version = %d, want 135", maxVersion)
 	}
 }
 
