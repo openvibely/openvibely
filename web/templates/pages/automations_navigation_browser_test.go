@@ -303,12 +303,24 @@ func TestAutomationLiveActionsUseCardKebab(t *testing.T) {
 		t.Fatal("expected Live Automation graph card before its viewport")
 	}
 	cardHeader := body[cardStart:viewportStart]
+	legendMarker := strings.Index(cardHeader, `data-automation-live-legend-row`)
+	if legendMarker < 0 {
+		t.Fatal("expected Live Automation legend row")
+	}
+	legendStart := strings.LastIndex(cardHeader[:legendMarker], `<div`)
+	if legendStart < 0 {
+		t.Fatal("expected Live Automation legend row opening element")
+	}
+	legend := cardHeader[legendStart:]
 	for _, want := range []string{
 		`data-automation-live-status`,
 		`>active</span>`,
 		`data-automation-live-health`,
 		`>healthy</span>`,
 		`data-automation-live-actions`,
+		`class="mb-3 flex items-start justify-between gap-3" data-automation-live-card-heading`,
+		`class="shrink-0" data-automation-live-actions`,
+		`class="dropdown dropdown-end"`,
 		`aria-label="More actions for Card actions"`,
 		`data-automation-live-edit`,
 		`data-automation-live-run-now="automation-live-actions"`,
@@ -318,6 +330,20 @@ func TestAutomationLiveActionsUseCardKebab(t *testing.T) {
 		if !strings.Contains(cardHeader, want) {
 			t.Errorf("expected Live Automation card header to contain %q", want)
 		}
+	}
+	for _, want := range []string{
+		`class="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2" data-automation-live-legend-row`,
+		`aria-label="Graph status legend"`,
+		`class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-badges`,
+		`data-automation-live-status`,
+		`data-automation-live-health`,
+	} {
+		if !strings.Contains(legend, want) {
+			t.Errorf("expected legend row to contain %q", want)
+		}
+	}
+	if strings.Index(legend, `aria-label="Graph status legend"`) > strings.Index(legend, `data-automation-live-badges`) {
+		t.Error("expected lifecycle and health badges after the graph status legend")
 	}
 	for _, label := range []string{"Edit automation", "Run now", "Pause", "Delete"} {
 		if !strings.Contains(cardHeader, ">"+label+"</button>") {
@@ -817,7 +843,12 @@ window.addEventListener('DOMContentLoaded', function() {
 
     var liveCard = document.querySelector('#automation-live [data-automation-readonly-canvas]');
     var liveActions = liveCard && liveCard.querySelector('[data-automation-live-actions]');
-    if (!liveActions || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation card is missing its status, health, or kebab menu');
+    var liveLegendRow = liveCard && liveCard.querySelector('[data-automation-live-legend-row]');
+    var liveLegend = liveLegendRow && liveLegendRow.querySelector('[aria-label="Graph status legend"]');
+    var liveBadges = liveLegendRow && liveLegendRow.querySelector('[data-automation-live-badges]');
+    if (!liveActions || !liveLegend || !liveBadges || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation card is missing its legend, status, health, or kebab menu');
+    if (!liveActions.closest('[data-automation-live-card-heading]')) fail('Live Automation kebab is not in the card heading row');
+    if (!liveBadges.closest('[data-automation-live-legend-row]')) fail('Live Automation status and health badges are not in the graph legend row');
     click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Delete');
     clickMenuRowRightEdge('#automation-live [data-automation-live-delete]', 'Live Automation Delete menu row');
     var liveDeleteModal = document.querySelector('#automation-live #delete-automation-modal');
