@@ -178,29 +178,35 @@ type emailIMAPClient interface {
 	Logout() error
 }
 
+type emailInboundReceiptStore interface {
+	Exists(ctx context.Context, mailboxAddress, messageKey string) (bool, error)
+	Record(ctx context.Context, mailboxAddress, messageKey string) error
+}
+
 type EmailService struct {
-	settingsRepo           *repository.SettingsRepo
-	projectRepo            *repository.ProjectRepo
-	llmConfigRepo          *repository.LLMConfigRepo
-	taskRepo               *repository.TaskRepo
-	execRepo               *repository.ExecutionRepo
-	scheduleRepo           *repository.ScheduleRepo
-	taskSvc                *TaskService
-	llmSvc                 *LLMService
-	workerSvc              *WorkerService
-	emailAuthRepo          *repository.EmailAuthRepo
-	emailTaskContextRepo   *repository.EmailTaskContextRepo
-	emailSenderProjectRepo *repository.EmailSenderProjectRepo
-	threadInputRepo        *repository.ThreadInputRepo
-	customPersonalityRepo  *repository.CustomPersonalityRepo
-	agentRepo              *repository.AgentRepo
-	chatBroadcaster        *events.ChatBroadcaster
-	executionStreamHub     *events.ExecutionStreamHub
-	queuedTurnPromoter     func(projectID string)
-	channelChatRunner      ChannelChatRunner
-	channelMessageRouter   *ChannelMessageRouter
-	chatAttachmentRepo     *repository.ChatAttachmentRepo
-	uploadsDir             string
+	settingsRepo             *repository.SettingsRepo
+	projectRepo              *repository.ProjectRepo
+	llmConfigRepo            *repository.LLMConfigRepo
+	taskRepo                 *repository.TaskRepo
+	execRepo                 *repository.ExecutionRepo
+	scheduleRepo             *repository.ScheduleRepo
+	taskSvc                  *TaskService
+	llmSvc                   *LLMService
+	workerSvc                *WorkerService
+	emailAuthRepo            *repository.EmailAuthRepo
+	emailTaskContextRepo     *repository.EmailTaskContextRepo
+	emailInboundReceiptStore emailInboundReceiptStore
+	emailSenderProjectRepo   *repository.EmailSenderProjectRepo
+	threadInputRepo          *repository.ThreadInputRepo
+	customPersonalityRepo    *repository.CustomPersonalityRepo
+	agentRepo                *repository.AgentRepo
+	chatBroadcaster          *events.ChatBroadcaster
+	executionStreamHub       *events.ExecutionStreamHub
+	queuedTurnPromoter       func(projectID string)
+	channelChatRunner        ChannelChatRunner
+	channelMessageRouter     *ChannelMessageRouter
+	chatAttachmentRepo       *repository.ChatAttachmentRepo
+	uploadsDir               string
 
 	mu                       sync.RWMutex
 	running                  bool
@@ -285,6 +291,9 @@ func (s *EmailService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 }
 func (s *EmailService) SetEmailSenderProjectRepo(repo *repository.EmailSenderProjectRepo) {
 	s.emailSenderProjectRepo = repo
+}
+func (s *EmailService) SetEmailInboundReceiptRepo(repo *repository.EmailInboundReceiptRepo) {
+	s.emailInboundReceiptStore = repo
 }
 func (s *EmailService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
 	s.chatAttachmentRepo = repo
@@ -468,14 +477,51 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 		applog.Infof("[email] fetch messages failed: %v", err)
 		return
 	}
+	mailboxIdentity := emailMailboxIdentity(cfg)
 	for _, fetched := range messages {
+		messageKey := emailInboundMessageKey(fetched.Message)
+		if s.emailInboundReceiptStore != nil {
+			received, err := s.emailInboundReceiptStore.Exists(ctx, mailboxIdentity, messageKey)
+			if err != nil {
+				applog.Infof("[email] check receipt for message %d failed: %v", fetched.ID, err)
+				continue
+			}
+			if received {
+				if err := storeSeen(client, []uint32{fetched.ID}); err != nil {
+					applog.Infof("[email] mark previously handed-off message %d seen failed: %v", fetched.ID, err)
+				}
+				continue
+			}
+		}
 		if !s.ProcessIncoming(ctx, fetched.Message) {
 			continue
+		}
+		if s.emailInboundReceiptStore != nil {
+			if err := s.emailInboundReceiptStore.Record(ctx, mailboxIdentity, messageKey); err != nil {
+				applog.Infof("[email] record receipt for message %d failed: %v", fetched.ID, err)
+			}
 		}
 		if err := storeSeen(client, []uint32{fetched.ID}); err != nil {
 			applog.Infof("[email] mark message %d seen failed: %v", fetched.ID, err)
 		}
 	}
+}
+
+func emailMailboxIdentity(cfg EmailRuntimeConfig) string {
+	return strings.ToLower(strings.TrimSpace(cfg.IMAPHost)) + "\x00" + repository.NormalizeEmailAddress(cfg.Address)
+}
+
+func emailInboundMessageKey(msg EmailInboundMessage) string {
+	if messageID := strings.TrimSpace(msg.MessageID); messageID != "" {
+		return "message-id:" + messageID
+	}
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00", repository.NormalizeEmailAddress(msg.FromAddress), msg.Subject, msg.Body, msg.References, msg.AutoSubmitted, msg.Precedence, msg.ListUnsub)
+	for _, attachment := range msg.Attachments {
+		_, _ = fmt.Fprintf(h, "%s\x00%s\x00%d\x00", attachment.FileName, attachment.ContentType, len(attachment.Data))
+		_, _ = h.Write(attachment.Data)
+	}
+	return "content-sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
 func unseenCriteria() *imap.SearchCriteria {
