@@ -934,6 +934,36 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					builder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });
 				}
 				function applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }
+				function fitBounds(bounds) {
+					var fitted = bounds.slice();
+					var width = svg.clientWidth, height = svg.clientHeight;
+					if (!width || !height) return fitted;
+					var viewportRatio = width / height, boundsRatio = fitted[2] / fitted[3];
+					if (boundsRatio < viewportRatio) {
+						var expandedWidth = fitted[3] * viewportRatio;
+						fitted[0] -= (expandedWidth - fitted[2]) / 2;
+						fitted[2] = expandedWidth;
+					} else if (boundsRatio > viewportRatio) {
+						var expandedHeight = fitted[2] / viewportRatio;
+						fitted[1] -= (expandedHeight - fitted[3]) / 2;
+						fitted[3] = expandedHeight;
+					}
+					return fitted;
+				}
+				function fitGraph() {
+					var groups = Array.from(svg.querySelectorAll('.automation-draft-node'));
+					if (!groups.length) {
+						viewBox = fitBounds(initialViewBox);
+						applyViewBox();
+						return;
+					}
+					var xs = groups.map(function(group) { return Number(group.dataset.nodeX); });
+					var ys = groups.map(function(group) { return Number(group.dataset.nodeY); });
+					var minX = Math.min.apply(null, xs) - 60, minY = Math.min.apply(null, ys) - 60;
+					var maxX = Math.max.apply(null, xs) + 250, maxY = Math.max.apply(null, ys) + 164;
+					viewBox = fitBounds([minX, minY, Math.max(360, maxX - minX), Math.max(240, maxY - minY)]);
+					applyViewBox();
+				}
 				function graphPoint(event) {
 					var point = svg.createSVGPoint();
 					point.x = event.clientX;
@@ -1137,18 +1167,10 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				}, {passive: false});
 				root.querySelector('[data-automation-zoom-in]').addEventListener('click', function() { zoom(0.82); });
 				root.querySelector('[data-automation-zoom-out]').addEventListener('click', function() { zoom(1.22); });
-				root.querySelector('[data-automation-fit]').addEventListener('click', function() {
-					var groups = Array.from(svg.querySelectorAll('.automation-draft-node'));
-					if (!groups.length) { viewBox = initialViewBox.slice(); applyViewBox(); return; }
-					var xs = groups.map(function(group) { return Number(group.dataset.nodeX); });
-					var ys = groups.map(function(group) { return Number(group.dataset.nodeY); });
-					var minX = Math.min.apply(null, xs) - 60, minY = Math.min.apply(null, ys) - 60;
-					var maxX = Math.max.apply(null, xs) + 250, maxY = Math.max.apply(null, ys) + 164;
-					viewBox = [minX, minY, Math.max(360, maxX - minX), Math.max(240, maxY - minY)]; applyViewBox();
-				});
+				root.querySelector('[data-automation-fit]').addEventListener('click', fitGraph);
 				root.querySelector('[data-automation-reset]').addEventListener('click', function() {
 					svg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); });
-					renderEdges(); syncCandidate(); viewBox = initialViewBox.slice(); applyViewBox();
+					renderEdges(); syncCandidate(); fitGraph();
 				});
 					builder.addEventListener('htmx:beforeCleanupElement', function(event) {
 						if (event.target === builder) clearActiveConnection();
@@ -1156,7 +1178,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					var automationName = builder.querySelector('[data-automation-name]');
 					if (automationName) automationName.addEventListener('input', syncCandidate);
 					builder.addEventListener('submit', syncCandidate);
-					renderEdges(); syncCandidate();
+					renderEdges(); syncCandidate(); fitGraph();
 				})();
 		</script>
 	</div>

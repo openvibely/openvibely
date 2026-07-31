@@ -70,7 +70,7 @@ Custom graph and Describe It contracts:
 
 UI and product surface:
 - The Automations item in the left navigation uses the standard outline lightning-bolt icon.
-- The builder supports node creation/placement, directed connection, selection/deletion/rewiring, pan/zoom, Fit/Reset, and keyboard controls. The Live graph places Zoom out, Zoom in, and Fit in a top-right overlay inside the graph display window. The Edit/Custom builder uses the same in-viewport overlay and also includes Reset layout; Add node remains in the builder header. Input/output handles remain visually directional with assistive labels.
+- The builder supports node creation/placement, directed connection, selection/deletion/rewiring, pan/zoom, Fit/Reset, and keyboard controls. Builder graphs fit their padded bounds to the rendered viewport aspect ratio on initial mount, Fit, and Reset, including one-node Custom, Template, Describe, and Edit graphs. The Live graph places Zoom out, Zoom in, and Fit in a top-right overlay inside the graph display window. The Edit/Custom builder uses the same in-viewport overlay and also includes Reset layout; Add node remains in the builder header. Input/output handles remain visually directional with assistive labels.
 - Schedule nodes are labeled `Schedule`, because each Schedule owns a substantive scheduled Task rather than acting as an empty trigger.
 - Automation detail is a single full-width `Live` graph. History, invocation, work-item, Definition, node-resource, and version pages are not product surfaces and return `404`.
 - Schedule and Task nodes with exact persisted Task bindings link to that project-scoped Task; unbound and non-Task nodes remain inert.

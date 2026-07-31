@@ -670,16 +670,20 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 		return out.String()
 	}
 
-	renderBlankBuilder := func(withNode bool, automationID string) string {
+	renderBlankBuilder := func(nodeCount int, automationID string) string {
 		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Blank Automation", AutomationType: "custom", AdapterKey: "custom"}
-		if withNode {
+		if nodeCount > 0 {
 			candidate.Nodes = []models.AutomationDraftNode{
 				{Key: "first_step", Name: "First step", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Describe the work this node should perform.", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
-				{Key: "second_step", Name: "Second step", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Continue the work.", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 260, Y: 0}},
-				{Key: "third_step", Name: "Third step", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
 			}
 		}
-		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, AutomationID: automationID}
+		if nodeCount > 1 {
+			candidate.Nodes = append(candidate.Nodes,
+				models.AutomationDraftNode{Key: "second_step", Name: "Second step", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Continue the work.", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 260, Y: 0}},
+				models.AutomationDraftNode{Key: "third_step", Name: "Third step", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
+			)
+		}
+		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, AutomationID: automationID, Source: "blank"}
 		var out bytes.Buffer
 		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render blank Automation builder: %v", err)
@@ -923,6 +927,19 @@ window.addEventListener('DOMContentLoaded', function() {
 	    nodeForm.requestSubmit(nodeDialog.querySelector('[data-automation-create-node]'));
 	    await report('progress', 'add-node-submitted');
 	    await waitFor(function() { return !!document.querySelector('[data-node-key="first_step"]'); }, 'new node on blank canvas');
+	    var oneNodeSVG = document.querySelector('[data-automation-draft-canvas] [data-automation-canvas]');
+	    var oneNodeRect = oneNodeSVG.getBoundingClientRect();
+	    var oneNodeViewBox = oneNodeSVG.getAttribute('viewBox').split(/\s+/).map(Number);
+	    if (!oneNodeRect.width || !oneNodeRect.height) fail('one-node Custom canvas has no rendered size');
+	    if (Math.abs(oneNodeViewBox[2] / oneNodeViewBox[3] - oneNodeRect.width / oneNodeRect.height) > 0.02) fail('one-node Custom graph was not fitted to the canvas aspect ratio');
+	    click('#automation-builder [data-automation-add-node-open]', 'Add second node');
+	    nodeDialog = document.querySelector('[data-automation-node-dialog]');
+	    nodeDialog.querySelector('[name="node_name"]').value = 'Second step';
+	    nodeDialog.querySelector('[name="node_kind"]').value = 'task';
+	    nodeForm = nodeDialog.querySelector('form[hx-post]');
+	    htmx.process(nodeForm);
+	    nodeForm.requestSubmit(nodeDialog.querySelector('[data-automation-create-node]'));
+	    await waitFor(function() { return !!document.querySelector('[data-node-key="second_step"]'); }, 'second node on blank canvas');
 	    var blankCandidateInput = document.querySelector('[data-automation-draft-form] [data-candidate-json]');
 	    dragCapturedConnection('first_step', 'right', 'second_step', 'left', 10);
 	    var blankCandidate = JSON.parse(blankCandidateInput.value);
@@ -1082,11 +1099,13 @@ window.addEventListener('DOMContentLoaded', function() {
 		.menu li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); }
 		.menu li > * { grid-column-start: 1; grid-row-start: 1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(auto, max-content) auto max-content; align-items: center; gap: .5rem; padding: .5rem 1rem; }
 		.w-full { width: 100%; }
+		[data-automation-draft-canvas] [data-automation-canvas] { width: 800px; height: 400px; }
 		.dropdown-content { position: relative; }
 		</style>`
 	browserResult := make(chan string, 16)
 	olderLiveStarted := make(chan struct{})
 	releaseOlderLive := make(chan struct{})
+	blankNodeRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.Header.Get("HX-Request") == "true" {
@@ -1131,7 +1150,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			close(releaseOlderLive)
 			w.WriteHeader(http.StatusNoContent)
 		case "/automations/automation-a/builder":
-			_, _ = w.Write([]byte(renderBlankBuilder(true, "automation-a")))
+			_, _ = w.Write([]byte(renderBlankBuilder(3, "automation-a")))
 		case "/automations/automation-a/pause":
 			setAutomationLifecycle("automation-a", models.AutomationPaused)
 			_, _ = w.Write([]byte(renderPortfolio()))
@@ -1148,7 +1167,10 @@ window.addEventListener('DOMContentLoaded', function() {
 				_, _ = w.Write([]byte(renderDescribeFailure(r.FormValue("description"))))
 				return
 			}
-			_, _ = w.Write([]byte(renderBlankBuilder(r.FormValue("builder_action") == "create_node", "")))
+			if r.FormValue("builder_action") == "create_node" {
+				blankNodeRequests++
+			}
+			_, _ = w.Write([]byte(renderBlankBuilder(blankNodeRequests, "")))
 		case "/automations/automation-visual":
 			_, _ = w.Write([]byte(renderLive("automation-visual", "Visual Automation")))
 		case "/automations/automation-visual/builder":
