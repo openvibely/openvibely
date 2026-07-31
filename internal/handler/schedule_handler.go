@@ -252,6 +252,56 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, redirectURL)
 }
 
+type scheduleToggleResult struct {
+	schedule          *models.Schedule
+	nextRunUpdateErr  error
+	errorOperation    string
+	finalLookupFailed bool
+}
+
+// toggleScheduleEnabled performs the schedule state transition shared by the
+// browser and JSON API transports.
+func (h *Handler) toggleScheduleEnabled(ctx context.Context, id string) (scheduleToggleResult, error) {
+	var result scheduleToggleResult
+	schedule, err := h.scheduleRepo.GetByID(ctx, id)
+	if err != nil {
+		result.errorOperation = "lookup"
+		return result, err
+	}
+	if schedule == nil {
+		return result, nil
+	}
+	result.schedule = schedule
+
+	newEnabled := !schedule.Enabled
+	if err := h.scheduleRepo.ToggleEnabled(ctx, id, newEnabled); err != nil {
+		result.errorOperation = "toggle"
+		return result, err
+	}
+	schedule.Enabled = newEnabled
+
+	if newEnabled {
+		refreshed, refreshErr := h.scheduleRepo.GetByID(ctx, id)
+		if refreshErr == nil && refreshed != nil {
+			now := time.Now()
+			if refreshed.NextRun == nil || refreshed.NextRun.Before(now) {
+				if nextRun := refreshed.ComputeNextRun(now); nextRun != nil {
+					refreshed.NextRun = nextRun
+					result.nextRunUpdateErr = h.scheduleRepo.Update(ctx, refreshed)
+				}
+			}
+		}
+	}
+
+	final, err := h.scheduleRepo.GetByID(ctx, id)
+	if err != nil || final == nil {
+		result.finalLookupFailed = true
+		return result, nil
+	}
+	result.schedule = final
+	return result, nil
+}
+
 // ToggleScheduleEnabled pauses or resumes a schedule.
 // When re-enabling a schedule whose NextRun has already passed, the next
 // future occurrence is recomputed so the scheduler picks it up correctly.
@@ -259,43 +309,25 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 	id := c.Param("id")
 	ctx := c.Request().Context()
 
-	schedule, err := h.scheduleRepo.GetByID(ctx, id)
+	result, err := h.toggleScheduleEnabled(ctx, id)
 	if err != nil {
-		applog.Infof("[handler] ToggleScheduleEnabled error getting schedule: %v", err)
+		if result.errorOperation == "lookup" {
+			applog.Infof("[handler] ToggleScheduleEnabled error getting schedule: %v", err)
+		} else {
+			applog.Infof("[handler] ToggleScheduleEnabled error toggling: %v", err)
+		}
 		return err
 	}
-	if schedule == nil {
+	if result.schedule == nil {
 		applog.Infof("[handler] ToggleScheduleEnabled schedule not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
 	}
-
-	// Capture taskID before any potential overwrite of schedule
-	taskID := schedule.TaskID
-	newEnabled := !schedule.Enabled
-
-	if err := h.scheduleRepo.ToggleEnabled(ctx, id, newEnabled); err != nil {
-		applog.Infof("[handler] ToggleScheduleEnabled error toggling: %v", err)
-		return err
+	if result.nextRunUpdateErr != nil {
+		applog.Infof("[handler] ToggleScheduleEnabled error updating NextRun: %v", result.nextRunUpdateErr)
 	}
-	applog.Infof("[handler] ToggleScheduleEnabled id=%s enabled=%v", id, newEnabled)
+	applog.Infof("[handler] ToggleScheduleEnabled id=%s enabled=%v", id, result.schedule.Enabled)
 
-	// When re-enabling, recompute NextRun if it's stale (in the past)
-	if newEnabled {
-		refreshed, err := h.scheduleRepo.GetByID(ctx, id)
-		if err == nil && refreshed != nil {
-			now := time.Now()
-			if refreshed.NextRun == nil || refreshed.NextRun.Before(now) {
-				nextRun := refreshed.ComputeNextRun(now)
-				if nextRun != nil {
-					refreshed.NextRun = nextRun
-					if updateErr := h.scheduleRepo.Update(ctx, refreshed); updateErr != nil {
-						applog.Infof("[handler] ToggleScheduleEnabled error updating NextRun: %v", updateErr)
-					}
-				}
-			}
-		}
-	}
-
+	taskID := result.schedule.TaskID
 	if isHTMX(c) {
 		task, err := h.taskSvc.GetByID(ctx, taskID)
 		if err != nil || task == nil {
@@ -327,40 +359,17 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 // @Router /api/schedules/{id}/toggle [post]
 func (h *Handler) APIToggleScheduleEnabled(c echo.Context) error {
 	id := c.Param("id")
-	ctx := c.Request().Context()
-
-	schedule, err := h.scheduleRepo.GetByID(ctx, id)
+	result, err := h.toggleScheduleEnabled(c.Request().Context(), id)
 	if err != nil {
 		return err
 	}
-	if schedule == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
-	}
-
-	newEnabled := !schedule.Enabled
-	if err := h.scheduleRepo.ToggleEnabled(ctx, id, newEnabled); err != nil {
-		return err
-	}
-
-	if newEnabled {
-		refreshed, err := h.scheduleRepo.GetByID(ctx, id)
-		if err == nil && refreshed != nil {
-			now := time.Now()
-			if refreshed.NextRun == nil || refreshed.NextRun.Before(now) {
-				nextRun := refreshed.ComputeNextRun(now)
-				if nextRun != nil {
-					refreshed.NextRun = nextRun
-					_ = h.scheduleRepo.Update(ctx, refreshed)
-				}
-			}
-		}
-	}
-
-	final, err := h.scheduleRepo.GetByID(ctx, id)
-	if err != nil || final == nil {
+	if result.finalLookupFailed {
 		return echo.NewHTTPError(http.StatusNotFound, "schedule not found after toggle")
 	}
-	return c.JSON(http.StatusOK, final)
+	if result.schedule == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
+	}
+	return c.JSON(http.StatusOK, result.schedule)
 }
 
 func (h *Handler) DeleteSchedule(c echo.Context) error {
