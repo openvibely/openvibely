@@ -591,6 +591,61 @@ func TestSend_APIKeyTerraUsesResponsesLiteWebSocket(t *testing.T) {
 	}
 }
 
+func TestSend_ResponsesLiteWebSocketAcceptsLargeEvent(t *testing.T) {
+	largeText := strings.Repeat("x", 40<<10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept websocket: %v", err)
+			return
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+		if _, _, err := conn.Read(r.Context()); err != nil {
+			t.Errorf("read request: %v", err)
+			return
+		}
+		completed, err := json.Marshal(map[string]any{
+			"type": "response.completed",
+			"response": map[string]any{
+				"status": "completed",
+				"model":  "gpt-5.6-terra",
+				"output": []any{map[string]any{
+					"type": "message",
+					"role": "assistant",
+					"content": []any{map[string]any{
+						"type": "output_text",
+						"text": largeText,
+					}},
+				}},
+			},
+		})
+		if err != nil {
+			t.Errorf("marshal completed event: %v", err)
+			return
+		}
+		if len(completed) <= 32<<10 {
+			t.Fatalf("completed event size = %d, want greater than 32 KiB", len(completed))
+		}
+		if err := conn.Write(r.Context(), websocket.MessageText, completed); err != nil {
+			t.Errorf("write completed event: %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	original := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { OpenAIAPIBaseURL = original }()
+
+	client := NewWithAPIKey("sk-test")
+	resp, err := client.Send(context.Background(), "Hello", &SendOptions{Model: "gpt-5.6-terra"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if resp.Text != largeText {
+		t.Fatalf("Text length = %d, want %d", len(resp.Text), len(largeText))
+	}
+}
+
 func TestSend_ResponsesLiteWebSocketHandshakeFallsBackToHTTPForSession(t *testing.T) {
 	var websocketAttempts atomic.Int32
 	var httpRequests atomic.Int32
