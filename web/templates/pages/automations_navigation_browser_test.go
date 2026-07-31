@@ -171,6 +171,53 @@ func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *test
 	}
 }
 
+func TestAutomationLiveActionsUseCardKebab(t *testing.T) {
+	graph := models.AutomationLiveGraph{
+		Automation: models.Automation{
+			ID:             "automation-live-actions",
+			Name:           "Card actions",
+			LifecycleState: models.AutomationActive,
+			HealthState:    models.AutomationHealthHealthy,
+		},
+	}
+
+	var out bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-actions", true).Render(context.Background(), &out); err != nil {
+		t.Fatalf("render active Automation Live: %v", err)
+	}
+	body := out.String()
+	cardStart := strings.Index(body, `data-automation-readonly-canvas`)
+	viewportStart := strings.Index(body, `role="region" aria-label="Live automation graph"`)
+	if cardStart < 0 || viewportStart < 0 || viewportStart <= cardStart {
+		t.Fatal("expected Live Automation graph card before its viewport")
+	}
+	cardHeader := body[cardStart:viewportStart]
+	for _, want := range []string{
+		`data-automation-live-status`,
+		`>active</span>`,
+		`data-automation-live-health`,
+		`>healthy</span>`,
+		`data-automation-live-actions`,
+		`aria-label="More actions for Card actions"`,
+		`data-automation-live-edit`,
+		`data-automation-live-run-now="automation-live-actions"`,
+		`data-automation-live-pause`,
+		`data-automation-live-delete`,
+	} {
+		if !strings.Contains(cardHeader, want) {
+			t.Errorf("expected Live Automation card header to contain %q", want)
+		}
+	}
+	for _, label := range []string{"Edit automation", "Run now", "Pause", "Delete"} {
+		if !strings.Contains(cardHeader, ">"+label+"</button>") {
+			t.Errorf("expected Live Automation kebab to contain %q", label)
+		}
+	}
+	if got := strings.Count(body, `data-automation-live-actions`); got != 1 {
+		t.Errorf("expected one Live Automation kebab, got %d", got)
+	}
+}
+
 func TestAutomationLiveRunNowIsActiveOnly(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{ID: "automation-live-run", Name: "Run controls", LifecycleState: models.AutomationActive},
@@ -196,8 +243,14 @@ func TestAutomationLiveRunNowIsActiveOnly(t *testing.T) {
 	if err := AutomationLiveContent(graph, "project-live-run", true).Render(context.Background(), &paused); err != nil {
 		t.Fatalf("render paused Automation Live: %v", err)
 	}
-	if strings.Contains(paused.String(), `/run-now`) || strings.Contains(paused.String(), `>Run now</button>`) {
+	pausedBody := paused.String()
+	if strings.Contains(pausedBody, `/run-now`) || strings.Contains(pausedBody, `>Run now</button>`) {
 		t.Error("paused Automation Live must not offer Run now")
+	}
+	for _, want := range []string{`data-automation-live-actions`, `data-automation-live-resume`, `>Resume</button>`} {
+		if !strings.Contains(pausedBody, want) {
+			t.Errorf("expected paused Automation Live kebab to contain %q", want)
+		}
 	}
 }
 
@@ -651,13 +704,18 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A after in-page back');
     await report('progress', 'automation-a-ready-before-edit');
 
-    click('#automation-live button[onclick*="delete-automation-modal"][onclick*="showModal"]', 'Live Automation Delete');
+    var liveCard = document.querySelector('#automation-live [data-automation-readonly-canvas]');
+    var liveActions = liveCard && liveCard.querySelector('[data-automation-live-actions]');
+    if (!liveActions || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation card is missing its status, health, or kebab menu');
+    click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Delete');
+    clickMenuRowRightEdge('#automation-live [data-automation-live-delete]', 'Live Automation Delete menu row');
     var liveDeleteModal = document.querySelector('#automation-live #delete-automation-modal');
     if (!liveDeleteModal || !liveDeleteModal.open) fail('Live Automation Delete did not open its confirmation dialog');
     click('#automation-live #delete-automation-modal button[aria-label="Close delete automation confirmation"]', 'Live Automation delete modal close button');
     if (liveDeleteModal.open) fail('Live Automation delete modal close button did not close the dialog');
 
-    click('#automation-live form[hx-post*="/builder"] button[type="submit"]', 'Edit automation');
+    click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Edit');
+    clickMenuRowRightEdge('#automation-live [data-automation-live-edit]', 'Edit automation menu row');
     await waitFor(function() { return !!document.getElementById('automation-builder'); }, 'builder after Edit automation');
     if (document.getElementById('automation-live')) fail('live Automation root remained mounted behind the editor');
     click('#automation-builder [data-delete-automation-open]', 'Edit Automation Delete');
@@ -753,7 +811,8 @@ window.addEventListener('DOMContentLoaded', function() {
 		    await waitFor(portfolioReady, 'portfolio before published Automation selection');
 	    click('[data-automation-url^="/automations/automation-visual?"]', 'published visual Automation card');
 	    await waitFor(function() { return liveID() === 'automation-visual'; }, 'published visual Automation');
-	    click('#automation-live form[hx-post*="/builder"] button[type="submit"]', 'Edit published visual Automation');
+	    click('#automation-live [data-automation-live-actions] label', 'Published visual Automation kebab');
+	    click('#automation-live [data-automation-live-edit]', 'Edit published visual Automation');
 		    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder opened from published Automation');
 		    var malformedCandidateInput = document.querySelector('#automation-builder [data-automation-draft-form] [data-candidate-json]');
 		    var malformedCandidate = JSON.parse(malformedCandidateInput.value);

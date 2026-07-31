@@ -54,7 +54,9 @@ Schedule and Task nodes link to their exact project Task when one is bound. Othe
 
 ## Run Now, Pause, Resume, or Delete
 
-- Run now immediately queues every eligible schedule-owned entry Task through the normal Automation worker. It uses each Task's saved prompt and Agent configuration without changing the schedule's next run or recurrence. Entries that are already queued, running, or reserved are skipped. Run now is available only while the Automation is active.
+The Live graph card keeps lifecycle status and health visible in its header. Open the top-right kebab menu for Edit automation, Run now, Pause or Resume, and Delete. Run now appears only while the Automation is active.
+
+- Run now immediately queues every eligible schedule-owned entry Task through the normal Automation worker. It uses each Task's saved prompt and Agent configuration without changing the schedule's next run or recurrence. Entries that are already queued, running, or reserved are skipped.
 - Pause prevents new scheduled admissions while preserving the current saved graph.
 - Resume re-enables eligible paused work.
 - Delete removes the Automation and exclusively owned schedules when no Automation-owned work prevents safe deletion. Domain Tasks are preserved.
