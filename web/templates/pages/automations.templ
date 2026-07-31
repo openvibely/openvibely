@@ -341,9 +341,11 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }
 			data-external-refresh-url={ fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", graph.Automation.ID, currentProjectID) }>
 			@layout.PageTitle(graph.Automation.Name)
-			@automationBreadcrumb(currentProjectID, graph.Automation.ID, graph.Automation.Name, "")
-			<div class="mb-5 min-w-0">
-				<p class="max-w-3xl text-sm text-base-content/65">{ graph.Automation.Description }</p>
+			<div class="mb-6 min-w-0" data-automation-live-header>
+				@automationBreadcrumb(currentProjectID, graph.Automation.ID, graph.Automation.Name, "", false)
+				if graph.Automation.Description != "" {
+					<p class="mt-1 text-sm opacity-60">{ graph.Automation.Description }</p>
+				}
 			</div>
 		if graph.ExternalState.TrackedResources > 0 {
 			<div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-box border border-base-300 bg-base-100 px-4 py-3" data-automation-external-state>
@@ -572,9 +574,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 	<div id="automation-builder" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-draft>
 		@layout.PageTitle(page.Result.Candidate.Name)
 		if page.AutomationID != "" {
-			@automationBreadcrumb(currentProjectID, page.AutomationID, page.Result.Candidate.Name, "Edit automation")
+			@automationBreadcrumb(currentProjectID, page.AutomationID, page.Result.Candidate.Name, "Edit automation", true)
 		} else {
-			@automationBreadcrumb(currentProjectID, "", "", "New Automation")
+			@automationBreadcrumb(currentProjectID, "", "", "New Automation", true)
 		}
 		<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
 			<div class="min-w-0 flex-1">
@@ -1293,8 +1295,8 @@ templ automationGraphThemeStyles() {
 	</style>
 }
 
-templ automationBreadcrumb(currentProjectID string, automationID string, automationName string, currentLabel string) {
-	<nav class="mb-6 flex min-w-0 flex-shrink-0 items-center gap-2" aria-label="Breadcrumb" data-automation-breadcrumb>
+templ automationBreadcrumb(currentProjectID string, automationID string, automationName string, currentLabel string, withBottomMargin bool) {
+	<nav class={ "flex min-w-0 flex-shrink-0 items-center gap-2", templ.KV("mb-6", withBottomMargin) } aria-label="Breadcrumb" data-automation-breadcrumb>
 		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
 		if automationName != "" {
 			<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>

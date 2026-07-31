@@ -171,6 +171,60 @@ func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *test
 	}
 }
 
+func TestAutomationLiveHeaderUsesStandardSpacingAndDescriptionStyle(t *testing.T) {
+	graph := models.AutomationLiveGraph{
+		Automation: models.Automation{
+			ID:          "automation-live-header",
+			Name:        "Header spacing",
+			Description: "A standard Automation description.",
+		},
+	}
+
+	var out bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-header", true).Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation Live header: %v", err)
+	}
+	body := out.String()
+	headerMarker := strings.Index(body, `data-automation-live-header`)
+	cardStart := strings.Index(body, `data-automation-readonly-canvas`)
+	if headerMarker < 0 || cardStart <= headerMarker {
+		t.Fatal("expected one Live header block immediately before the Automation card")
+	}
+	headerStart := strings.LastIndex(body[:headerMarker], `<div`)
+	if headerStart < 0 {
+		t.Fatal("expected Live header opening element")
+	}
+	header := body[headerStart:cardStart]
+	for _, want := range []string{
+		`class="mb-6 min-w-0"`,
+		`data-automation-breadcrumb`,
+		`class="mt-1 text-sm opacity-60"`,
+		`>A standard Automation description.</p>`,
+	} {
+		if !strings.Contains(header, want) {
+			t.Errorf("expected standard Live header to contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{`class="mb-6 flex`, `class="mb-5 min-w-0"`, `text-base-content/65`} {
+		if strings.Contains(header, forbidden) {
+			t.Errorf("expected standard Live header to omit legacy styling %q", forbidden)
+		}
+	}
+
+	graph.Automation.Description = ""
+	out.Reset()
+	if err := AutomationLiveContent(graph, "project-live-header", true).Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation Live without description: %v", err)
+	}
+	emptyHeaderEnd := strings.Index(out.String(), `data-automation-readonly-canvas`)
+	if emptyHeaderEnd < 0 {
+		t.Fatal("expected Automation card after empty-description header")
+	}
+	if strings.Contains(out.String()[:emptyHeaderEnd], `<p`) {
+		t.Error("empty Automation description must not reserve a blank header line")
+	}
+}
+
 func TestAutomationLiveActionsUseCardKebab(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{
