@@ -127,7 +127,9 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 			}
 
 			function focusCandidates(rows, activeID) {
-				var ids = rows.map(function(row) { return row.dataset.alertId || ''; });
+				var ids = rows.filter(function(row) {
+					return row.getClientRects().length > 0;
+				}).map(function(row) { return row.dataset.alertId || ''; });
 				var index = ids.indexOf(activeID);
 				if (index < 0) return [];
 				var candidates = [activeID];

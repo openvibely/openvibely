@@ -27,11 +27,15 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 	var mu sync.Mutex
 	alerts := make([]models.Alert, 30)
 	for i := range alerts {
+		message := strings.Repeat("Long alert content ", 5)
+		if i == 20 || i == 24 || i == 27 {
+			message += " filtered-focus"
+		}
 		alerts[i] = models.Alert{
 			ID:        fmt.Sprintf("item-%02d", i),
 			ProjectID: "project-alerts-browser",
 			Title:     fmt.Sprintf("Notification %02d", i),
-			Message:   strings.Repeat("Long alert content ", 5),
+			Message:   message,
 			IsRead:    i%3 == 0,
 		}
 		if i%2 == 1 {
@@ -52,6 +56,21 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 		var out bytes.Buffer
 		if err := AlertsContent(append([]models.Alert(nil), alerts...), "project-alerts-browser", unread).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Alerts content: %v", err)
+		}
+		return out.String()
+	}
+	renderAlertsPage := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		unread := 0
+		for _, alert := range alerts {
+			if !alert.IsRead {
+				unread++
+			}
+		}
+		var out bytes.Buffer
+		if err := Alerts(nil, "project-alerts-browser", append([]models.Alert(nil), alerts...), unread).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render Alerts page: %v", err)
 		}
 		return out.String()
 	}
@@ -135,6 +154,17 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 	    if (Math.abs((root.scrollHeight - root.clientHeight) - root.scrollTop) > 3) fail('deleting the last visible item did not preserve the end-of-list anchor');
 	    if (document.activeElement !== row('item-27').querySelector('[data-alert-delete]')) fail('deleting the last visible item did not focus the previous delete control');
 	    if (document.getElementById('alerts-container').scrollTop < 100) fail('deleting the last visible item reset the scrollport');
+
+	    var search = document.querySelector('input[data-card-search="alerts"]');
+	    search.value = 'filtered-focus';
+	    search.dispatchEvent(new Event('input', {bubbles:true}));
+	    await wait(50);
+	    if (getComputedStyle(row('item-25')).display !== 'none') fail('card search did not hide the adjacent non-matching row');
+	    if (getComputedStyle(row('item-27')).display === 'none') fail('card search hid the expected focus fallback row');
+	    await remove('item-24');
+	    await wait(250);
+	    if (document.activeElement !== row('item-27').querySelector('[data-alert-delete]')) fail('filtered delete did not focus the next visible delete control');
+	    if (getComputedStyle(row('item-25')).display !== 'none') fail('persisted card search was not reapplied after deletion');
 	    await report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});
@@ -153,12 +183,14 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = w.Write(htmxJS)
 		case r.URL.Path == "/alerts" && r.Method == http.MethodGet:
-			fragment := renderAlerts()
 			if r.Header.Get("HX-Request") == "true" {
-				_, _ = w.Write([]byte(fragment))
+				_, _ = w.Write([]byte(renderAlerts()))
 				return
 			}
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><script src="/htmx-2.0.4.min.js"></script>%s%s</head><body><span id="alert-badge" hx-get="/alerts/unread-count?project_id=project-alerts-browser" hx-trigger="load, alertUpdate from:body"></span>%s</body></html>`, style, runner, fragment)
+			page := renderAlertsPage()
+			page = strings.Replace(page, "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, "</head>", style+runner+"</head>", 1)
+			_, _ = w.Write([]byte(page))
 		case strings.HasPrefix(r.URL.Path, "/alerts/item-") && r.Method == http.MethodDelete:
 			deleteAlert(strings.TrimPrefix(r.URL.Path, "/alerts/"))
 			w.Header().Set("HX-Trigger", "alertUpdate")
