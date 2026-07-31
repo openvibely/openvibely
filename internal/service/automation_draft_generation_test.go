@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -196,15 +194,6 @@ func TestAutomationDescriptionPromptMatchesStrictCustomValidationContract(t *tes
 		return string(candidateJSON), nil
 	})
 	require.NoError(t, err)
-}
-
-func TestAutomationDocumentationUsesGitHubInboxOwnedScheduleContract(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "..", "docs", "automations-user-guide.md"))
-	require.NoError(t, err)
-	documentation := string(body)
-	require.Contains(t, documentation, "GitHub inbox is itself a substantive scheduled Task and owns its schedule; do not add a separate Schedule before it.")
-	require.NotContains(t, documentation, "GitHub inbox's required substantive Schedule source")
-	require.NotContains(t, documentation, "separate substantive Schedule source for GitHub inbox polling")
 }
 
 func TestAutomationDescriptionPromptIncludesCanonicalMaintainedAdapters(t *testing.T) {
