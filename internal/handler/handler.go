@@ -565,6 +565,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/automations/new", h.NewAutomationBuilder)
 	e.POST("/automations/builder", h.BuildAutomationWeb)
 	e.POST("/automations/:automationId/builder", h.EditAutomationBuilder)
+	e.POST("/automations/:automationId/run-now", h.RunAutomationNow)
 	e.POST("/automations/:automationId/pause", h.PauseAutomation)
 	e.POST("/automations/:automationId/resume", h.ResumeAutomation)
 	e.POST("/automations/:automationId/refresh-external", h.RefreshAutomationExternalState)

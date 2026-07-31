@@ -69,6 +69,147 @@ func automationNodeByKey(t *testing.T, definition *models.AutomationDefinition, 
 	return models.AutomationNode{}
 }
 
+func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	before, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
+	require.NoError(t, err)
+
+	invocations, dispatches, err := fixture.repo.ClaimManualAutomationRun(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	require.Len(t, invocations, 1)
+	require.Len(t, dispatches, 1)
+	require.Equal(t, "manual", invocations[0].TriggerResourceType)
+	require.Equal(t, fixture.schedule.ID, invocations[0].TriggerResourceID)
+	require.Nil(t, invocations[0].ScheduledFor)
+	require.Equal(t, fixture.task.ID, dispatches[0].TaskID)
+
+	after, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
+	require.NoError(t, err)
+	require.Equal(t, before.RunAt, after.RunAt)
+	require.Equal(t, before.LastRun, after.LastRun)
+	require.Equal(t, before.NextRun, after.NextRun)
+	require.Equal(t, before.RepeatType, after.RepeatType)
+	require.Equal(t, before.RepeatInterval, after.RepeatInterval)
+	require.Equal(t, before.Enabled, after.Enabled)
+
+	leased, err := fixture.repo.LeaseNextDispatch(ctx, "manual-run-test", time.Now().UTC(), time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, dispatches[0].ID, leased.ID)
+	execution, err := fixture.taskRepo.ClaimAutomationDispatch(ctx, leased.ID, "manual-run-test")
+	require.NoError(t, err)
+	require.Equal(t, fixture.task.Prompt, execution.PromptSent)
+	require.True(t, execution.StartsNewContext, "manual dispatch must preserve the owned Schedule's clear-context setting")
+	require.NoError(t, fixture.repo.MarkDispatchSubmitted(ctx, leased.ID, "manual-run-test", execution.ID))
+	_, err = fixture.repo.DB().Exec(`UPDATE executions SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, execution.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().Exec(`UPDATE tasks SET status = 'completed' WHERE id = ?`, fixture.task.ID)
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.CompleteDispatch(ctx, leased.ID, execution.ID, models.ExecCompleted, ""))
+
+	dueSchedule, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
+	require.NoError(t, err)
+	scheduledInvocation, scheduledDispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, *dueSchedule, time.Now().UTC(), dueSchedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	require.Equal(t, "schedule", scheduledInvocation.TriggerResourceType)
+	require.NotNil(t, scheduledDispatch, "the genuine due occurrence must still dispatch after a manual run")
+}
+
+func TestAutomationManualRunQueuesEveryScheduleEntryAndRejectsTamperedBinding(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	secondTask := models.Task{ProjectID: fixture.project.ID, Title: "Second manual entry", Category: models.CategoryScheduled, Priority: 3, Status: models.StatusPending, Prompt: "second persisted prompt"}
+	require.NoError(t, fixture.taskRepo.Create(ctx, &secondTask))
+	secondRunAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	secondNextRun := secondRunAt.Add(time.Hour)
+	secondSchedule := models.Schedule{TaskID: secondTask.ID, RunAt: secondRunAt, NextRun: &secondNextRun, RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, fixture.schedRepo.Create(ctx, &secondSchedule))
+	var secondNodeID string
+	require.NoError(t, fixture.repo.DB().QueryRow(`INSERT INTO automation_nodes
+		(project_id, automation_id, version_id, node_key, name, node_type, role)
+		VALUES (?, ?, ?, 'second_manual_entry', 'Second manual entry', 'agent_task', 'task') RETURNING id`,
+		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID).Scan(&secondNodeID))
+	for _, resource := range []struct{ kind, id string }{{"task", secondTask.ID}, {"schedule", secondSchedule.ID}} {
+		_, err := fixture.repo.DB().Exec(`INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES (?, ?, ?, ?, ?, ?, 'owned')`, fixture.project.ID, fixture.definition.Automation.ID,
+			fixture.definition.Version.ID, secondNodeID, resource.kind, resource.id)
+		require.NoError(t, err)
+	}
+	_, err := fixture.repo.DB().Exec(`INSERT INTO automation_trigger_owners
+		(schedule_id, project_id, automation_id, version_id, node_id, ownership_state)
+		VALUES (?, ?, ?, ?, ?, 'active')`, secondSchedule.ID, fixture.project.ID, fixture.definition.Automation.ID,
+		fixture.definition.Version.ID, secondNodeID)
+	require.NoError(t, err)
+
+	invocations, dispatches, err := fixture.repo.ClaimManualAutomationRun(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	require.Len(t, invocations, 2)
+	require.Len(t, dispatches, 2)
+	dispatchedTasks := []string{dispatches[0].TaskID, dispatches[1].TaskID}
+	require.ElementsMatch(t, []string{fixture.task.ID, secondTask.ID}, dispatchedTasks)
+	storedSecond, err := fixture.schedRepo.GetByID(ctx, secondSchedule.ID)
+	require.NoError(t, err)
+	require.Equal(t, secondRunAt, storedSecond.RunAt)
+	require.Equal(t, &secondNextRun, storedSecond.NextRun)
+	require.Nil(t, storedSecond.LastRun)
+
+	tampered := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	_, err = tampered.repo.DB().Exec(`DELETE FROM automation_definition_resources
+		WHERE version_id = ? AND resource_type = 'task' AND resource_id = ?`, tampered.definition.Version.ID, tampered.task.ID)
+	require.NoError(t, err)
+	invocations, dispatches, err = tampered.repo.ClaimManualAutomationRun(ctx, tampered.project.ID, tampered.definition.Automation.ID, time.Now().UTC())
+	require.ErrorIs(t, err, repository.ErrAutomationNoScheduleEntries)
+	require.Empty(t, invocations)
+	require.Empty(t, dispatches)
+	var invocationCount int
+	require.NoError(t, tampered.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE automation_id = ?`, tampered.definition.Automation.ID).Scan(&invocationCount))
+	require.Zero(t, invocationCount)
+}
+
+func TestAutomationManualRunSkipsBusyEntryAndRejectsInactiveLifecycle(t *testing.T) {
+	for _, status := range []models.TaskStatus{models.StatusQueued, models.StatusRunning} {
+		t.Run(string(status), func(t *testing.T) {
+			fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+			_, err := fixture.repo.DB().Exec(`UPDATE tasks SET status = ? WHERE id = ?`, status, fixture.task.ID)
+			require.NoError(t, err)
+			invocations, dispatches, err := fixture.repo.ClaimManualAutomationRun(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+			require.NoError(t, err)
+			require.Len(t, invocations, 1)
+			require.Equal(t, models.AutomationInvocationSkipped, invocations[0].Status)
+			require.Equal(t, "task_running", invocations[0].SkippedReason)
+			require.Empty(t, dispatches)
+		})
+	}
+
+	t.Run("reserved", func(t *testing.T) {
+		fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+		_, firstDispatches, err := fixture.repo.ClaimManualAutomationRun(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+		require.NoError(t, err)
+		require.Len(t, firstDispatches, 1)
+		invocations, dispatches, err := fixture.repo.ClaimManualAutomationRun(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+		require.NoError(t, err)
+		require.Len(t, invocations, 1)
+		require.Equal(t, models.AutomationInvocationSkipped, invocations[0].Status)
+		require.Equal(t, "task_reserved", invocations[0].SkippedReason)
+		require.Empty(t, dispatches)
+	})
+
+	for _, state := range []models.AutomationLifecycleState{models.AutomationPaused, models.AutomationArchived} {
+		t.Run(string(state), func(t *testing.T) {
+			fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+			require.NoError(t, fixture.repo.SetAutomationLifecycle(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, state))
+			invocations, dispatches, err := fixture.repo.ClaimManualAutomationRun(context.Background(), fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+			require.ErrorIs(t, err, repository.ErrAutomationNotActive)
+			require.Empty(t, invocations)
+			require.Empty(t, dispatches)
+			var count int
+			require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_invocations WHERE automation_id = ?`, fixture.definition.Automation.ID).Scan(&count))
+			require.Zero(t, count)
+		})
+	}
+}
+
 func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()

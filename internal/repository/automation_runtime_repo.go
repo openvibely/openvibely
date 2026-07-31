@@ -19,6 +19,8 @@ import (
 
 var (
 	ErrAutomationScheduleChanged        = errors.New("automation schedule occurrence changed")
+	ErrAutomationNotActive              = errors.New("automation must be active to run now")
+	ErrAutomationNoScheduleEntries      = errors.New("automation has no runnable schedule entries")
 	ErrAutomationDispatchLease          = errors.New("automation dispatch lease is not owned")
 	ErrAutomationTaskBusy               = errors.New("automation task is not available")
 	ErrAutomationExternalReconciliation = errors.New("automation external mutation requires reconciliation")
@@ -134,6 +136,169 @@ func (r *AutomationRepo) GetTriggerOwner(ctx context.Context, scheduleID string)
 
 func automationOccurrenceKey(scheduleID string, due time.Time) string {
 	return "schedule:" + scheduleID + ":" + due.UTC().Format(time.RFC3339Nano)
+}
+
+func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID, automationID string, now time.Time) ([]models.AutomationInvocation, []models.AutomationDispatch, error) {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+
+	var versionID, adapterKey string
+	var lifecycle models.AutomationLifecycleState
+	if err := conn.QueryRowContext(ctx, `SELECT a.published_version_id, a.lifecycle_state, v.adapter_key
+		FROM automations a JOIN automation_versions v ON v.id = a.published_version_id
+			AND v.automation_id = a.id AND v.project_id = a.project_id
+		WHERE a.project_id = ? AND a.id = ?`, projectID, automationID).Scan(&versionID, &lifecycle, &adapterKey); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, errors.New("automation not found")
+		}
+		return nil, nil, fmt.Errorf("loading Automation for manual run: %w", err)
+	}
+	if lifecycle != models.AutomationActive {
+		return nil, nil, ErrAutomationNotActive
+	}
+
+	type manualEntry struct {
+		scheduleID string
+		nodeID     string
+		taskID     string
+		status     models.TaskStatus
+		category   models.TaskCategory
+	}
+	rows, err := conn.QueryContext(ctx, `SELECT o.schedule_id, o.node_id, s.task_id, t.status, t.category
+		FROM automation_trigger_owners o
+		JOIN schedules s ON s.id = o.schedule_id AND s.enabled = 1
+		JOIN tasks t ON t.id = s.task_id AND t.project_id = o.project_id
+		JOIN automation_definition_resources sr ON sr.project_id = o.project_id
+			AND sr.automation_id = o.automation_id AND sr.version_id = o.version_id
+			AND sr.node_id = o.node_id AND sr.resource_type = 'schedule' AND sr.resource_id = o.schedule_id
+		JOIN automation_definition_resources tr ON tr.project_id = o.project_id
+			AND tr.automation_id = o.automation_id AND tr.version_id = o.version_id
+			AND tr.node_id = o.node_id AND tr.resource_type = 'task' AND tr.resource_id = s.task_id
+		WHERE o.project_id = ? AND o.automation_id = ? AND o.version_id = ? AND o.ownership_state = 'active'
+		ORDER BY o.schedule_id`, projectID, automationID, versionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("loading Automation manual run entries: %w", err)
+	}
+	var entries []manualEntry
+	for rows.Next() {
+		var entry manualEntry
+		if err := rows.Scan(&entry.scheduleID, &entry.nodeID, &entry.taskID, &entry.status, &entry.category); err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		entries = append(entries, entry)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, nil, err
+	}
+	if len(entries) == 0 {
+		return nil, nil, ErrAutomationNoScheduleEntries
+	}
+
+	invocations := make([]models.AutomationInvocation, 0, len(entries))
+	dispatches := make([]models.AutomationDispatch, 0, len(entries))
+	for _, entry := range entries {
+		occurrenceKey := "manual:" + NewID()
+		if occurrenceKey == "manual:" {
+			return nil, nil, errors.New("generating Automation manual run identity")
+		}
+		skippedReason := ""
+		if entry.status == models.StatusRunning || entry.status == models.StatusQueued {
+			skippedReason = "task_running"
+		} else {
+			var reservationCount int
+			if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE task_id = ?`, entry.taskID).Scan(&reservationCount); err != nil {
+				return nil, nil, err
+			}
+			if reservationCount > 0 {
+				skippedReason = "task_reserved"
+			}
+		}
+
+		invocation := models.AutomationInvocation{
+			ProjectID: projectID, AutomationID: automationID, VersionID: versionID,
+			TriggerNodeID: entry.nodeID, TriggerResourceType: "manual", TriggerResourceID: entry.scheduleID,
+			OccurrenceKey: occurrenceKey,
+		}
+		if skippedReason != "" {
+			invocation.Status = models.AutomationInvocationSkipped
+			invocation.SkippedReason = skippedReason
+			started := now.UTC()
+			invocation.StartedAt, invocation.CompletedAt = &started, &started
+			if err := conn.QueryRowContext(ctx, `INSERT INTO automation_invocations
+				(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
+				 occurrence_key, status, skipped_reason, started_at, completed_at)
+				VALUES (?, ?, ?, ?, 'manual', ?, ?, 'skipped', ?, ?, ?)
+				RETURNING id, created_at, updated_at`, projectID, automationID, versionID, entry.nodeID,
+				entry.scheduleID, occurrenceKey, skippedReason, started, started).
+				Scan(&invocation.ID, &invocation.CreatedAt, &invocation.UpdatedAt); err != nil {
+				return nil, nil, fmt.Errorf("creating skipped Automation manual invocation: %w", err)
+			}
+			invocations = append(invocations, invocation)
+			continue
+		}
+
+		preparedCategory := entry.category
+		if adapterKey == "custom" {
+			if preparedCategory != models.CategoryScheduled {
+				return nil, nil, ErrAutomationScheduleChanged
+			}
+		} else if preparedCategory != models.CategoryActive && preparedCategory != models.CategoryScheduled {
+			preparedCategory = models.CategoryScheduled
+		}
+		invocation.Status = models.AutomationInvocationClaimed
+		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_invocations
+			(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
+			 occurrence_key, status) VALUES (?, ?, ?, ?, 'manual', ?, ?, 'claimed')
+			RETURNING id, created_at, updated_at`, projectID, automationID, versionID, entry.nodeID,
+			entry.scheduleID, occurrenceKey).Scan(&invocation.ID, &invocation.CreatedAt, &invocation.UpdatedAt); err != nil {
+			return nil, nil, fmt.Errorf("creating Automation manual invocation: %w", err)
+		}
+		dispatch := models.AutomationDispatch{InvocationID: invocation.ID, TaskID: entry.taskID, Status: "pending"}
+		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_dispatch_outbox (invocation_id, task_id)
+			VALUES (?, ?) RETURNING id, next_attempt_at, created_at, updated_at`, invocation.ID, entry.taskID).
+			Scan(&dispatch.ID, &dispatch.NextAttemptAt, &dispatch.CreatedAt, &dispatch.UpdatedAt); err != nil {
+			return nil, nil, fmt.Errorf("creating Automation manual dispatch: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_task_run_reservations (task_id, dispatch_id, project_id)
+			VALUES (?, ?, ?)`, entry.taskID, dispatch.ID, projectID); err != nil {
+			return nil, nil, fmt.Errorf("reserving Automation manual task: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'pending', category = ?, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND project_id = ?`, preparedCategory, entry.taskID, projectID); err != nil {
+			return nil, nil, fmt.Errorf("preparing Automation manual task: %w", err)
+		}
+		invocations = append(invocations, invocation)
+		dispatches = append(dispatches, dispatch)
+	}
+
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, nil, err
+	}
+	committed = true
+	for _, invocation := range invocations {
+		automationobs.Event("automation.invocation.created",
+			automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
+			automationobs.String("version_id", versionID), automationobs.String("invocation_id", invocation.ID),
+			automationobs.String("node_id", invocation.TriggerNodeID), automationobs.String("status", string(invocation.Status)),
+			automationobs.String("trigger", "manual"))
+		r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{
+			AutomationID: automationID, VersionID: versionID, InvocationID: invocation.ID, NodeID: invocation.TriggerNodeID,
+		})
+	}
+	return invocations, dispatches, nil
 }
 
 func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule models.Schedule, now time.Time, nextRun *time.Time) (*models.AutomationInvocation, *models.AutomationDispatch, error) {

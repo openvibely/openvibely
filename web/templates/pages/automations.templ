@@ -65,6 +65,19 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 												<button
 													class="w-full"
 													type="button"
+													hx-post={ fmt.Sprintf("/automations/%s/run-now?project_id=%s", card.Automation.ID, currentProjectID) }
+													hx-include={ fmt.Sprintf("#run-now-automation-card-form-%s", card.Automation.ID) }
+													hx-target="#automations-container"
+													hx-swap="outerHTML"
+													data-automation-card-run-now={ card.Automation.ID }
+													data-automation-lifecycle-form={ fmt.Sprintf("run-now-automation-card-form-%s", card.Automation.ID) }
+													onclick="submitAutomationLifecycleFallback(this)"
+												>Run now</button>
+											</li>
+											<li>
+												<button
+													class="w-full"
+													type="button"
 													hx-post={ fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID) }
 													hx-include={ fmt.Sprintf("#pause-automation-card-form-%s", card.Automation.ID) }
 													hx-target="#automations-container"
@@ -102,6 +115,10 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 										</li>
 									</ul>
 									if card.Automation.LifecycleState == models.AutomationActive {
+										<form id={ fmt.Sprintf("run-now-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/run-now?project_id=%s", card.Automation.ID, currentProjectID)) }>
+											<input type="hidden" name="project_id" value={ currentProjectID }/>
+											<input type="hidden" name="return_to" value="portfolio"/>
+										</form>
 										<form id={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) } class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID)) }>
 											<input type="hidden" name="project_id" value={ currentProjectID }/>
 											<input type="hidden" name="return_to" value="portfolio"/>

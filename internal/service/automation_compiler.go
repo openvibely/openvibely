@@ -351,6 +351,13 @@ func NewAutomationLifecycleService(repo *repository.AutomationRepo, scheduleRepo
 	return service
 }
 
+func (s *AutomationLifecycleService) RunNow(ctx context.Context, projectID, automationID string) ([]models.AutomationInvocation, []models.AutomationDispatch, error) {
+	if s == nil || s.repo == nil {
+		return nil, nil, errors.New("automation lifecycle service is unavailable")
+	}
+	return s.repo.ClaimManualAutomationRun(ctx, projectID, automationID, time.Now().UTC())
+}
+
 func (s *AutomationLifecycleService) Pause(ctx context.Context, projectID, automationID string) error {
 	if s == nil || s.repo == nil {
 		return errors.New("automation lifecycle service is unavailable")

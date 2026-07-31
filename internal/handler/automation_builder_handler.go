@@ -551,6 +551,29 @@ func automationDraftContainsNode(nodes []models.AutomationDraftNode, key string)
 	return false
 }
 
+func (h *Handler) RunAutomationNow(c echo.Context) error {
+	if h.automationLifecycleSvc == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation lifecycle unavailable")
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return err
+	}
+	if _, _, err := h.automationLifecycleSvc.RunNow(c.Request().Context(), projectID, c.Param("automationId")); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if c.FormValue("return_to") == "portfolio" {
+		if isHTMX(c) {
+			return h.ListAutomations(c)
+		}
+		return c.Redirect(http.StatusSeeOther, "/automations?project_id="+projectID)
+	}
+	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+projectID)
+}
+
 func (h *Handler) PauseAutomation(c echo.Context) error {
 	return h.changeAutomationLifecycle(c, "pause")
 }

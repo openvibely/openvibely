@@ -70,6 +70,64 @@ func TestAutomationPortfolioCardKebabPausesAndResumesInPlace(t *testing.T) {
 	require.True(t, storedSchedule.Enabled)
 }
 
+func TestAutomationPortfolioRunNowQueuesManualDispatchWithoutChangingCadence(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Automation card run now").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
+	lifecycle := service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
+	tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, lifecycle)
+
+	task := models.Task{ProjectID: project.ID, Title: "Run now schedule", Category: models.CategoryScheduled, Priority: 2, Status: models.StatusPending, Prompt: "persisted run now prompt"}
+	require.NoError(t, tc.taskRepo.Create(context.Background(), &task))
+	runAt := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
+	nextRun := runAt.Add(24 * time.Hour)
+	schedule := models.Schedule{TaskID: task.ID, RunAt: runAt, NextRun: &nextRun, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, tc.scheduleRepo.Create(context.Background(), &schedule))
+	definition, _, err := registration.Register(context.Background(), service.AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: service.AutomationAdapterNativeSDLC, StableKey: "native-sdlc/card-run-now",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+		},
+	})
+	require.NoError(t, err)
+	before, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+	require.NoError(t, err)
+
+	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, portfolio.Code)
+	require.Contains(t, portfolio.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/run-now?project_id=%s"`, definition.Automation.ID, project.ID))
+	require.Contains(t, portfolio.Body.String(), ">Run now</button>")
+
+	response := tc.HTMX().Post(fmt.Sprintf("/automations/%s/run-now?project_id=%s", definition.Automation.ID, project.ID)).WithForm(url.Values{
+		"project_id": {project.ID}, "return_to": {"portfolio"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `id="automations-container"`)
+
+	var triggerType, triggerResourceID, prompt string
+	require.NoError(t, tc.db.QueryRow(`SELECT i.trigger_resource_type, i.trigger_resource_id, t.prompt
+		FROM automation_invocations i JOIN automation_dispatch_outbox d ON d.invocation_id = i.id
+		JOIN tasks t ON t.id = d.task_id WHERE i.automation_id = ?`, definition.Automation.ID).Scan(&triggerType, &triggerResourceID, &prompt))
+	require.Equal(t, "manual", triggerType)
+	require.Equal(t, schedule.ID, triggerResourceID)
+	require.Equal(t, task.Prompt, prompt)
+	after, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+	require.NoError(t, err)
+	require.Equal(t, before.RunAt, after.RunAt)
+	require.Equal(t, before.LastRun, after.LastRun)
+	require.Equal(t, before.NextRun, after.NextRun)
+
+	require.NoError(t, lifecycle.Pause(context.Background(), project.ID, definition.Automation.ID))
+	paused := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, paused.Code)
+	require.NotContains(t, paused.Body.String(), fmt.Sprintf(`/automations/%s/run-now`, definition.Automation.ID))
+	denied := tc.HTTP().Post(fmt.Sprintf("/automations/%s/run-now?project_id=%s", definition.Automation.ID, project.ID)).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	require.Equal(t, http.StatusBadRequest, denied.Code)
+}
+
 func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Automation Project").Build()
