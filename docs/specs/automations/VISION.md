@@ -144,11 +144,10 @@ The product earns trust through explicit intent and real resources:
 
 ### Describe From Chat
 
-1. The user describes supported automation behavior in project-aware Chat.
-2. Chat displays a validated plan without an Automation identity, graph URL, or runtime resources.
-3. The user later sends the exact Save confirmation.
-4. OpenVibely applies the graph through the same deterministic services as the web builder.
-5. Only successful Save returns the new Automation's Live URL.
+1. The user explicitly asks project-aware Orchestrate Chat to create or save supported Automation behavior.
+2. Chat makes one `save_automation` tool call to generate or load the candidate and validate it.
+3. OpenVibely atomically applies the graph through the same deterministic services as the web builder.
+4. A successful Save returns the new Automation's Live URL; a failed generation, validation, or Save creates no resources and requires no separate confirmation turn.
 
 ## Non-Goals
 
