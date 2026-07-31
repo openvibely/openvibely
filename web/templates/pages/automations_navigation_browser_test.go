@@ -538,7 +538,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (!cardDeleteModal || !cardDeleteModal.open) fail('Automation card Delete did not open its confirmation dialog');
 	    if (document.getElementById('delete-automation-card-name').textContent !== 'Automation B') fail('Automation card Delete confirmation has the wrong name');
 	    if (!cardDeleteForm || cardDeleteForm.getAttribute('action') !== '/automations/automation-b/delete?project_id=project-browser') fail('Automation card Delete confirmation has the wrong project-scoped action');
-	    cardDeleteModal.close();
+	    click('#delete-automation-card-modal button[aria-label="Close delete automation confirmation"]', 'Automation card delete modal close button');
+	    if (cardDeleteModal.open) fail('Automation card delete modal close button did not close the dialog');
 	    click(automationBSelector, 'Automation B card after Live return');
 	    await waitFor(function() { return liveID() === 'automation-b'; }, 'Automation B after Live return');
 	    await report('progress', 'automation-b-clicked');

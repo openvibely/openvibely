@@ -198,7 +198,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 		</dialog>
 		<dialog id="delete-automation-card-modal" class="modal">
 			<div class="modal-box">
-				@ModalCloseButton("delete-automation-card-modal", "Close delete automation confirmation")
+				@ModalCloseButton("document.getElementById('delete-automation-card-modal')", "Close delete automation confirmation")
 				<h3 class="pr-10 text-lg font-bold text-error">Delete automation</h3>
 				<p class="py-4">Delete <strong id="delete-automation-card-name"></strong>? This permanently deletes the saved Automation graph and Automation record.</p>
 				<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Existing tasks remain. Automation-owned trigger schedules will be deleted. This cannot be undone.</div>

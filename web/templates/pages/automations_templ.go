@@ -806,7 +806,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = ModalCloseButton("delete-automation-card-modal", "Close delete automation confirmation").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = ModalCloseButton("document.getElementById('delete-automation-card-modal')", "Close delete automation confirmation").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
