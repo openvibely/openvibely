@@ -518,6 +518,69 @@ func TestAutomationLiveControlsOverlayGraphViewport(t *testing.T) {
 	}
 }
 
+func TestAutomationLiveMatchesEditVisualScale(t *testing.T) {
+	nodes := []models.AutomationLiveNode{
+		{AutomationNode: models.AutomationNode{ID: "first", Name: "First", PositionX: 120, PositionY: -40}},
+		{AutomationNode: models.AutomationNode{ID: "second", Name: "Second", PositionX: 520, PositionY: 160}},
+	}
+	graph := models.AutomationLiveGraph{
+		Automation: models.Automation{ID: "automation-live-scale", Name: "Visual scale", LifecycleState: models.AutomationActive},
+		Nodes:      nodes,
+		Edges: []models.AutomationLiveEdge{{AutomationEdge: models.AutomationEdge{
+			SourceNodeID: "first", TargetNodeID: "second",
+		}}},
+	}
+
+	var out bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-scale", true).Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation Live: %v", err)
+	}
+	body := out.String()
+	for _, want := range []string{
+		`data-automation-live-node="first" transform="translate(120 -40)"`,
+		`x1="290" y1="12" x2="520" y2="212"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected Live graph to match Edit coordinate scale with %q", want)
+		}
+	}
+	for _, scaled := range []string{`translate(150 -46)`, `x1="320"`, `x2="650"`} {
+		if strings.Contains(body, scaled) {
+			t.Errorf("Live graph must not shrink nodes through legacy expanded coordinates %q", scaled)
+		}
+	}
+}
+
+func TestAutomationLiveCardTypographyMatchesEdit(t *testing.T) {
+	graph := models.AutomationLiveGraph{
+		Automation: models.Automation{ID: "automation-live-type", Name: "Typography", LifecycleState: models.AutomationActive},
+	}
+	var out bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-type", true).Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation Live: %v", err)
+	}
+	body := out.String()
+	headingMarker := strings.Index(body, `data-automation-live-card-heading`)
+	legendMarker := strings.Index(body, `data-automation-live-legend-row`)
+	if headingMarker < 0 || legendMarker <= headingMarker {
+		t.Fatal("expected Live card heading before legend")
+	}
+	heading := body[headingMarker:legendMarker]
+	for _, want := range []string{
+		`<h3 class="font-semibold">Node states</h3>`,
+		`<p class="mt-1 text-sm text-base-content/60">A node’s border and label show the highest-priority work state currently present.</p>`,
+	} {
+		if !strings.Contains(heading, want) {
+			t.Errorf("expected Live card typography to contain %q", want)
+		}
+	}
+	for _, compact := range []string{`<h3 class="text-sm font-semibold">`, `class="mt-1 text-xs text-base-content/55"`} {
+		if strings.Contains(heading, compact) {
+			t.Errorf("Live card must not retain compact preview typography %q", compact)
+		}
+	}
+}
+
 func TestAutomationLiveSingleNodeUsesMinimumGraphViewingArea(t *testing.T) {
 	node := models.AutomationLiveNode{AutomationNode: models.AutomationNode{PositionX: 0, PositionY: 0}}
 	viewBox := automationLiveGraphViewBox([]models.AutomationLiveNode{node})
