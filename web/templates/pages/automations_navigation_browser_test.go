@@ -245,15 +245,15 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 	}
 	body := out.String()
 	headerMarker := strings.Index(body, `data-automation-builder-header`)
-	formStart := strings.Index(body, `data-automation-name`)
-	if headerMarker < 0 || formStart <= headerMarker {
-		t.Fatal("expected one Edit Automation header block before the builder controls")
+	headerEnd := strings.Index(body, `id="delete-automation-modal"`)
+	if headerMarker < 0 || headerEnd <= headerMarker {
+		t.Fatal("expected one Edit Automation header block before the builder content")
 	}
 	headerStart := strings.LastIndex(body[:headerMarker], `<div`)
 	if headerStart < 0 {
 		t.Fatal("expected Edit Automation header opening element")
 	}
-	header := body[headerStart:formStart]
+	header := body[headerStart:headerEnd]
 	for _, want := range []string{
 		`class="mb-6 min-w-0"`,
 		`data-automation-breadcrumb`,
@@ -273,12 +273,95 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 	if err := AutomationBuilderContent(page, "project-edit-header").Render(context.Background(), &out); err != nil {
 		t.Fatalf("render Automation Edit without description: %v", err)
 	}
-	emptyHeaderEnd := strings.Index(out.String(), `data-automation-name`)
+	emptyHeaderEnd := strings.Index(out.String(), `id="delete-automation-modal"`)
 	if emptyHeaderEnd < 0 {
-		t.Fatal("expected Automation name control after empty-description Edit header")
+		t.Fatal("expected Edit Automation content after empty-description header")
 	}
 	if strings.Contains(out.String()[:emptyHeaderEnd], `<p`) {
 		t.Error("empty Edit Automation description must not reserve a blank header line")
+	}
+}
+
+func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion: 1, Name: "Edit card actions", AutomationType: "custom", AdapterKey: "custom",
+		Nodes: []models.AutomationDraftNode{{
+			Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task",
+			Position: &models.AutomationDraftPoint{X: 0, Y: 0},
+		}},
+	}
+	page := models.AutomationBuilderPage{
+		AutomationID: "automation-edit-actions",
+		Source:       "edit",
+		Result: models.AutomationDraftResult{
+			Candidate:   candidate,
+			Assumptions: []string{"Review uses the selected Agent."},
+			Warnings:    []string{"Confirm the schedule before saving."},
+		},
+	}
+
+	var out bytes.Buffer
+	if err := AutomationBuilderContent(page, "project-edit-actions").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation Edit actions: %v", err)
+	}
+	body := out.String()
+	canvasStart := strings.Index(body, `data-automation-draft-canvas`)
+	canvasEndOffset := strings.Index(body[canvasStart:], `</section>`)
+	name := strings.Index(body, `data-automation-name`)
+	assumptions := strings.Index(body, `>Assumptions</h3>`)
+	warnings := strings.Index(body, `>Warnings</h3>`)
+	settings := strings.Index(body, `>Node and connection settings</summary>`)
+	if canvasStart < 0 || canvasEndOffset < 0 || name < 0 || assumptions < 0 || warnings < 0 || settings < 0 {
+		t.Fatal("expected Edit canvas, name, assumptions, warnings, and node settings")
+	}
+	canvasEnd := canvasStart + canvasEndOffset
+	if !(canvasEnd < name && name < assumptions && assumptions < warnings && warnings < settings) {
+		t.Errorf("expected Edit order canvas → name → assumptions → warnings → settings, got canvas=%d name=%d assumptions=%d warnings=%d settings=%d", canvasEnd, name, assumptions, warnings, settings)
+	}
+	canvas := body[canvasStart:canvasEnd]
+	for _, want := range []string{
+		`data-automation-builder-actions`,
+		`class="dropdown dropdown-end"`,
+		`aria-label="More actions for Edit card actions"`,
+		`data-automation-builder-save`,
+		`type="submit" form="automation-design-form"`,
+		`>Save changes</button>`,
+		`data-delete-automation-open`,
+		`>Delete</button>`,
+	} {
+		if !strings.Contains(canvas, want) {
+			t.Errorf("expected Edit canvas card to contain %q", want)
+		}
+	}
+	if got := strings.Count(body, `>Save changes</button>`); got != 1 {
+		t.Errorf("expected saved Edit page to expose Save changes only in its kebab, got %d actions", got)
+	}
+	if got := strings.Count(body, `data-automation-builder-actions`); got != 1 {
+		t.Errorf("expected one Edit Automation kebab, got %d", got)
+	}
+	if !strings.Contains(canvas, `data-automation-builder-card-actions`) || strings.Index(canvas, `data-automation-builder-actions`) < strings.Index(canvas, `data-automation-add-node-open`) {
+		t.Error("expected Edit Automation kebab at the far right of the canvas heading action group")
+	}
+	if strings.Contains(body[:canvasStart], `>Save changes</button>`) || strings.Contains(body[:canvasStart], `data-delete-automation-open`) {
+		t.Error("saved Edit page must not retain standalone Save/Delete controls above the canvas")
+	}
+
+	page.AutomationID = ""
+	page.Source = "template"
+	out.Reset()
+	if err := AutomationBuilderContent(page, "project-edit-actions").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render new Template builder actions: %v", err)
+	}
+	newBody := out.String()
+	newCanvas := strings.Index(newBody, `data-automation-draft-canvas`)
+	if newCanvas < 0 || strings.Index(newBody, `data-automation-name`) > newCanvas {
+		t.Error("new builder must retain Automation name above the canvas")
+	}
+	if !strings.Contains(newBody[:newCanvas], `>Save changes</button>`) {
+		t.Error("new builder must retain its visible Save changes action above the canvas")
+	}
+	if strings.Contains(newBody, `data-automation-builder-actions`) {
+		t.Error("new builder must not render the saved Edit kebab")
 	}
 }
 
@@ -952,8 +1035,8 @@ window.addEventListener('DOMContentLoaded', function() {
     clickMenuRowRightEdge('#automation-live [data-automation-live-edit]', 'Edit automation menu row');
     await waitFor(function() { return !!document.getElementById('automation-builder'); }, 'builder after Edit automation');
     if (document.getElementById('automation-live')) fail('live Automation root remained mounted behind the editor');
-    click('#automation-builder [data-delete-automation-open]', 'Edit Automation Delete');
-    var editDeleteModal = document.querySelector('#automation-builder #delete-automation-modal');
+	    click('#automation-builder [data-automation-builder-actions] label', 'Edit Automation kebab before Delete');
+	    clickMenuRowRightEdge('#automation-builder [data-delete-automation-open]', 'Edit Automation Delete menu row');    var editDeleteModal = document.querySelector('#automation-builder #delete-automation-modal');
     if (!editDeleteModal || !editDeleteModal.open) fail('Edit Automation Delete did not open its confirmation dialog');
     click('#automation-builder #delete-automation-modal button[aria-label="Close delete automation confirmation"]', 'Edit Automation delete modal close button');
     if (editDeleteModal.open) fail('Edit Automation delete modal close button did not close the dialog');
@@ -1186,9 +1269,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var afterNodeDelete = JSON.parse(candidateInput.value);
 		    if (afterNodeDelete.nodes.some(function(node) { return node.key === 'result'; })) fail('node delete control did not remove the node');
 		    if (afterNodeDelete.edges.some(function(edge) { return edge.from === 'result' || edge.to === 'result'; })) fail('node deletion left connected edges behind');
-		    click('#automation-builder button[form="automation-design-form"]', 'top Save changes action');
-		    if (connectionSubmissions !== 1 || !saveSubmission) fail('visible Save changes action did not submit the design form exactly once');
-		    if (saveSubmission.get('save_changes') !== 'true') fail('visible Save changes action omitted immediate-apply intent');
+		    click('#automation-builder [data-automation-builder-actions] label', 'Edit Automation kebab before Save');
+		    clickMenuRowRightEdge('#automation-builder [data-automation-builder-save]', 'Edit Automation Save changes menu row');
+		    if (connectionSubmissions !== 1 || !saveSubmission) fail('Edit kebab Save changes action did not submit the design form exactly once');
+		    if (saveSubmission.get('save_changes') !== 'true') fail('Edit kebab Save changes action omitted immediate-apply intent');
 		    var savedCandidate = JSON.parse(String(saveSubmission.get('candidate_json') || '{}'));
 		    if (savedCandidate.name !== 'Browser Named Automation' || savedCandidate.nodes.some(function(node) { return node.key === 'result'; })) fail('visible Save changes action did not submit the latest graph state');
 		    await report('pass', '');  })().catch(function(error) { report('fail', String(error && error.stack || error)); });});
