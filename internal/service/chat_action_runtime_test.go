@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -640,6 +641,69 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	modified, err := scheduleRepo.GetByID(ctx, schedules[0].ID)
 	require.NoError(t, err)
 	require.False(t, modified.ClearContextOnStart)
+}
+
+func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule Discovery"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	other := &models.Project{Name: "Other Discovery"}
+	require.NoError(t, projectRepo.Create(ctx, other))
+
+	now := time.Now().UTC().Truncate(time.Second)
+	mkTask := func(projectID, title string) *models.Task {
+		task := &models.Task{ProjectID: projectID, Title: title, Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+		require.NoError(t, taskRepo.Create(ctx, task))
+		return task
+	}
+	mkSched := func(taskID string, repeat models.RepeatType, enabled bool, runAt time.Time) *models.Schedule {
+		s := &models.Schedule{TaskID: taskID, RunAt: runAt, RepeatType: repeat, RepeatInterval: 1, Enabled: enabled, ClearContextOnStart: true}
+		require.NoError(t, scheduleRepo.Create(ctx, s))
+		return s
+	}
+
+	alphaTask := mkTask(project.ID, "Alpha nightly")
+	betaTask := mkTask(project.ID, "Beta weekly")
+	foreignTask := mkTask(other.ID, "Foreign task")
+	alphaEnabled := mkSched(alphaTask.ID, models.RepeatDaily, true, now.Add(2*time.Hour))
+	alphaDisabled := mkSched(alphaTask.ID, models.RepeatHours, false, now.Add(time.Hour))
+	betaEnabled := mkSched(betaTask.ID, models.RepeatWeekly, true, now.Add(3*time.Hour))
+	foreignSched := mkSched(foreignTask.ID, models.RepeatDaily, true, now.Add(time.Hour))
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ScheduleRepo: scheduleRepo})
+
+	// Project isolation: only default-project schedule IDs appear.
+	allOut, err := handlers["list_schedules"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.Contains(t, allOut, `"ok":true`)
+	require.Contains(t, allOut, `"total":3`)
+	require.Contains(t, allOut, alphaEnabled.ID)
+	require.Contains(t, allOut, betaEnabled.ID)
+	require.Contains(t, allOut, "Alpha nightly")
+	require.NotContains(t, allOut, foreignSched.ID)
+
+	// Enabled filter.
+	enabledOut, err := handlers["list_schedules"](ctx, json.RawMessage(`{"enabled":true}`))
+	require.NoError(t, err)
+	require.Contains(t, enabledOut, `"total":2`)
+	require.NotContains(t, enabledOut, alphaDisabled.ID)
+
+	// Task identity filter.
+	betaOut, err := handlers["list_schedules"](ctx, json.RawMessage(`{"task_id":"`+betaTask.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, betaOut, `"total":1`)
+	require.Contains(t, betaOut, betaEnabled.ID)
+	require.NotContains(t, betaOut, alphaEnabled.ID)
+
+	// Pagination bounds the page and reports has_more.
+	pageOut, err := handlers["list_schedules"](ctx, json.RawMessage(`{"limit":2,"offset":0}`))
+	require.NoError(t, err)
+	require.Contains(t, pageOut, `"count":2`)
+	require.Contains(t, pageOut, `"has_more":true`)
 }
 
 func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *testing.T) {

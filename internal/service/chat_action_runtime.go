@@ -493,6 +493,9 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		"modify_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return runChannelModifySchedule(ctx, opts, input), nil
 		},
+		"list_schedules": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return ExecuteListSchedulesTool(ctx, opts.ScheduleRepo, opts.ProjectID, input)
+		},
 		"list_personalities": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelListPersonalitiesResult(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo), nil
 		},

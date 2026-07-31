@@ -405,6 +405,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		"get_task_goal":                    true,
 		"pause_task_goal":                  true,
 		"resume_task_goal":                 true,
+		"list_schedules":                   true,
 		"schedule_task":                    true,
 		"delete_schedule":                  true,
 		"modify_schedule":                  true,

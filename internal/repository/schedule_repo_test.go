@@ -486,3 +486,134 @@ func TestScheduleRepo_ToggleEnabled_Persistence(t *testing.T) {
 		}
 	}
 }
+
+func TestScheduleRepo_ListSchedulesForDiscovery(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	project2 := &models.Project{Name: "Schedule Discovery Project 2"}
+	if err := projectRepo.Create(ctx, project2); err != nil {
+		t.Fatalf("Create project2: %v", err)
+	}
+
+	mkTask := func(projectID, title string) *models.Task {
+		task := &models.Task{ProjectID: projectID, Title: title, Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "p"}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("Create task %q: %v", title, err)
+		}
+		return task
+	}
+	mkSched := func(taskID string, repeat models.RepeatType, enabled bool, runAt time.Time) *models.Schedule {
+		s := &models.Schedule{TaskID: taskID, RunAt: runAt, RepeatType: repeat, RepeatInterval: 1, Enabled: enabled, ClearContextOnStart: true}
+		if err := repo.Create(ctx, s); err != nil {
+			t.Fatalf("Create schedule: %v", err)
+		}
+		return s
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	alphaTask := mkTask("default", "Alpha nightly deploy")
+	betaTask := mkTask("default", "Beta weekly report")
+	foreignTask := mkTask(project2.ID, "Foreign schedule task")
+
+	alphaEnabled := mkSched(alphaTask.ID, models.RepeatDaily, true, now.Add(2*time.Hour))
+	alphaDisabled := mkSched(alphaTask.ID, models.RepeatHours, false, now.Add(1*time.Hour))
+	betaEnabled := mkSched(betaTask.ID, models.RepeatWeekly, true, now.Add(3*time.Hour))
+	// Foreign-project schedule must never appear.
+	mkSched(foreignTask.ID, models.RepeatDaily, true, now.Add(time.Hour))
+
+	// Project isolation: only the three default-project schedules appear.
+	rows, total, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery all: %v", err)
+	}
+	if total != 3 || len(rows) != 3 {
+		t.Fatalf("expected 3 default-project schedules, got total=%d len=%d", total, len(rows))
+	}
+	for _, r := range rows {
+		if r.Schedule.TaskID == foreignTask.ID {
+			t.Fatalf("cross-project schedule leaked: %s", r.Schedule.ID)
+		}
+	}
+
+	// Task title provides task identity in the projection.
+	titles := map[string]string{}
+	for _, r := range rows {
+		titles[r.Schedule.ID] = r.TaskTitle
+	}
+	if titles[alphaEnabled.ID] != "Alpha nightly deploy" {
+		t.Fatalf("expected bound task title, got %q", titles[alphaEnabled.ID])
+	}
+
+	// Enabled filter.
+	enabledTrue := true
+	enabledRows, enabledTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{Enabled: &enabledTrue})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery enabled: %v", err)
+	}
+	if enabledTotal != 2 || len(enabledRows) != 2 {
+		t.Fatalf("expected 2 enabled schedules, got total=%d len=%d", enabledTotal, len(enabledRows))
+	}
+	for _, r := range enabledRows {
+		if !r.Schedule.Enabled {
+			t.Fatalf("disabled schedule leaked into enabled filter: %s", r.Schedule.ID)
+		}
+	}
+	enabledFalse := false
+	disabledRows, disabledTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{Enabled: &enabledFalse})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery disabled: %v", err)
+	}
+	if disabledTotal != 1 || len(disabledRows) != 1 || disabledRows[0].Schedule.ID != alphaDisabled.ID {
+		t.Fatalf("expected single disabled schedule, got total=%d len=%d", disabledTotal, len(disabledRows))
+	}
+
+	// Task identity filter.
+	betaRows, betaTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{TaskID: betaTask.ID})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery task_id: %v", err)
+	}
+	if betaTotal != 1 || len(betaRows) != 1 || betaRows[0].Schedule.ID != betaEnabled.ID {
+		t.Fatalf("expected single beta schedule, got total=%d len=%d", betaTotal, len(betaRows))
+	}
+
+	// Title partial match.
+	titleRows, titleTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{Title: "alpha"})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery title: %v", err)
+	}
+	if titleTotal != 2 || len(titleRows) != 2 {
+		t.Fatalf("expected 2 alpha schedules, got total=%d len=%d", titleTotal, len(titleRows))
+	}
+
+	// Deterministic ordering: next_run ASC. alphaDisabled(+1h) < alphaEnabled(+2h) < betaEnabled(+3h).
+	if rows[0].Schedule.ID != alphaDisabled.ID || rows[1].Schedule.ID != alphaEnabled.ID || rows[2].Schedule.ID != betaEnabled.ID {
+		t.Fatalf("expected next_run ASC ordering, got %s,%s,%s", rows[0].Schedule.ID, rows[1].Schedule.ID, rows[2].Schedule.ID)
+	}
+
+	// Pagination bounds with no duplicates.
+	page1, page1Total, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{Limit: 2, Offset: 0})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery page1: %v", err)
+	}
+	if page1Total != 3 || len(page1) != 2 {
+		t.Fatalf("expected page1 total=3 len=2, got total=%d len=%d", page1Total, len(page1))
+	}
+	page2, _, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery page2: %v", err)
+	}
+	if len(page2) != 1 {
+		t.Fatalf("expected page2 len=1, got %d", len(page2))
+	}
+	seen := map[string]bool{}
+	for _, r := range append(append([]ScheduleDiscoveryRow{}, page1...), page2...) {
+		if seen[r.Schedule.ID] {
+			t.Fatalf("pagination returned duplicate schedule %s", r.Schedule.ID)
+		}
+		seen[r.Schedule.ID] = true
+	}
+}
