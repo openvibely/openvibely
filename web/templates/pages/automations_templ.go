@@ -1705,7 +1705,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 130, "</span></div></div><div class=\"automation-canvas-shell relative h-[calc(100dvh-26rem)] min-h-[20rem] md:min-h-0 max-h-[42rem] w-full flex-none overflow-hidden rounded-box border border-base-300 bg-base-200/20\" role=\"region\" aria-label=\"Live automation graph\"><div class=\"absolute right-3 top-3 z-10 flex gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur\" data-automation-live-viewport-controls><button class=\"btn btn-ghost btn-xs\" type=\"button\" data-automation-zoom-out aria-label=\"Zoom out\">−</button> <button class=\"btn btn-ghost btn-xs\" type=\"button\" data-automation-zoom-in aria-label=\"Zoom in\">+</button> <button class=\"btn btn-ghost btn-xs\" type=\"button\" data-automation-fit>Fit</button></div><svg data-automation-canvas viewBox=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 130, "</span></div></div><div class=\"automation-canvas-shell relative h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem] w-full flex-none overflow-hidden rounded-box border border-base-300 bg-base-200/20\" role=\"region\" aria-label=\"Live automation graph\"><div class=\"absolute right-3 top-3 z-10 flex gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur\" data-automation-live-viewport-controls><button class=\"btn btn-ghost btn-xs\" type=\"button\" data-automation-zoom-out aria-label=\"Zoom out\">−</button> <button class=\"btn btn-ghost btn-xs\" type=\"button\" data-automation-zoom-in aria-label=\"Zoom in\">+</button> <button class=\"btn btn-ghost btn-xs\" type=\"button\" data-automation-fit>Fit</button></div><svg data-automation-canvas viewBox=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2720,7 +2720,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var148 = []any{"automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-22rem)] min-h-[28rem] max-h-[42rem]", page.AutomationID == "" && page.Source == "blank"), templ.KV("h-[calc(100dvh-26rem)] min-h-[20rem] md:min-h-0 max-h-[42rem]", page.AutomationID != ""), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID == "" && page.Source != "blank")}
+		var templ_7745c5c3_Var148 = []any{"automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-22rem)] min-h-[28rem] max-h-[42rem]", page.AutomationID == "" && page.Source == "blank"), templ.KV("h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem]", page.AutomationID != ""), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID == "" && page.Source != "blank")}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var148...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err

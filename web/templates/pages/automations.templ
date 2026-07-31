@@ -414,7 +414,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						<span class="badge badge-ghost" data-automation-live-health>{ string(graph.Automation.HealthState) }</span>
 					</div>
 				</div>
-				<div class="automation-canvas-shell relative h-[calc(100dvh-26rem)] min-h-[20rem] md:min-h-0 max-h-[42rem] w-full flex-none overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Live automation graph">
+				<div class="automation-canvas-shell relative h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem] w-full flex-none overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Live automation graph">
 					<div class="absolute right-3 top-3 z-10 flex gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" data-automation-live-viewport-controls>
 						<button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
@@ -727,7 +727,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</div>
 					<form method="dialog" class="modal-backdrop"><button aria-label="Close add node dialog">close</button></form>
 				</dialog>
-				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-22rem)] min-h-[28rem] max-h-[42rem]", page.AutomationID == "" && page.Source == "blank"), templ.KV("h-[calc(100dvh-26rem)] min-h-[20rem] md:min-h-0 max-h-[42rem]", page.AutomationID != ""), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID == "" && page.Source != "blank") } role="region" aria-label="Automation graph builder">
+				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-22rem)] min-h-[28rem] max-h-[42rem]", page.AutomationID == "" && page.Source == "blank"), templ.KV("h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem]", page.AutomationID != ""), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID == "" && page.Source != "blank") } role="region" aria-label="Automation graph builder">
 					<div class="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" aria-label="Canvas controls" data-automation-builder-viewport-controls>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>

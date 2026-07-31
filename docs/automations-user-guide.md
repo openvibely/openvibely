@@ -48,7 +48,7 @@ There is no persisted editable Automation draft, separate Publish step, Definiti
 
 ## Use the Live Graph
 
-Open a saved Automation from `/automations` to see its full-width `Live` graph. Current waiting, running, blocked, failed, and completed state appears on the graph itself. Saved Live and Edit canvases use the same responsive viewport height, node geometry, typography, coordinates, and padded graph bounds, so matching graphs retain the same visual node scale, including one-node and small graphs. Their canvas height is bounded for large screens, while constrained screens retain normal vertical scrolling rather than clipping the graph.
+Open a saved Automation from `/automations` to see its full-width `Live` graph. Current waiting, running, blocked, failed, and completed state appears on the graph itself. Saved Live and Edit canvases use the same responsive viewport height, node geometry, typography, coordinates, and padded graph bounds, so matching graphs retain the same visual node scale, including one-node and small graphs. Their canvas height is capped at `42rem` and retains a `20rem` usability floor at every viewport width; short pages scroll vertically instead of collapsing or clipping the graph.
 
 Schedule and Task nodes link to their exact project Task when one is bound. Other node types remain visual. Editing starts a new browser-local copy of the current graph; the saved graph continues to run until a replacement Save succeeds.
 

@@ -619,7 +619,7 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 	for _, want := range []string{
 		`id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto"`,
 		`class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-col" data-automation-readonly-canvas`,
-		`class="automation-canvas-shell relative h-[calc(100dvh-26rem)] min-h-[20rem] md:min-h-0 max-h-[42rem] w-full flex-none overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
+		`class="automation-canvas-shell relative h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem] w-full flex-none overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected Automation Live viewport-filling layout to contain %q", want)
@@ -1032,9 +1032,12 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var labelColor = getComputedStyle(label).color;
 	    if (nodeFill === 'rgb(0, 0, 0)' || nodeFill === 'rgba(0, 0, 0, 0)') fail('node fill fell back to black: ' + nodeFill);
 	    if (labelColor === 'rgb(0, 0, 0)') fail('label color fell back to black: ' + labelColor);
+	    var liveCanvasShell = document.querySelector('[aria-label="Live automation graph"]');
+	    liveCanvasShell.style.height = '0px';
 	    var canvasRect = document.querySelector('[data-automation-canvas]').getBoundingClientRect();
 	    var liveRootRect = document.getElementById('automation-live').getBoundingClientRect();
-	    var liveCanvasShellRect = document.querySelector('[aria-label="Live automation graph"]').getBoundingClientRect();
+	    var liveCanvasShellRect = liveCanvasShell.getBoundingClientRect();
+	    if (liveCanvasShellRect.height < 319) fail('short-desktop Live canvas collapsed below its 20rem usability floor: ' + liveCanvasShellRect.height.toFixed(1) + 'px');
 	    if (liveCanvasShellRect.bottom > liveRootRect.bottom + 4 && getComputedStyle(document.getElementById('automation-live')).overflowY !== 'auto') fail('constrained one-node Live canvas overflows without a scroll fallback');
 	    var liveViewBox = document.querySelector('#automation-live [data-automation-canvas]').getAttribute('viewBox').split(/\s+/).map(Number);
 	    if (liveViewBox[2] !== 290 || liveViewBox[3] !== 224) fail('one-node Live graph does not use the same tight padded bounds as Edit: ' + liveViewBox.join(' '));
@@ -1132,11 +1135,14 @@ window.addEventListener('DOMContentLoaded', function() {
     if (editDeleteModal.open) fail('Edit Automation delete modal close button did not close the dialog');
 	    var editedCanvas = document.querySelector('#automation-builder [data-automation-draft-canvas]');
 	    if (!editedCanvas) fail('Edit automation did not render the custom canvas');
+	    var editParityShell = editedCanvas.querySelector('.automation-canvas-shell');
+	    editParityShell.style.height = '0px';
 	    var editParityNode = editedCanvas.querySelector('[data-node-key="first_step"] .automation-graph-node');
 	    if (!editParityNode) fail('Edit automation is missing the matching visual-parity node');
 	    var editParityNodeRect = editParityNode.getBoundingClientRect();
 	    var editParityCanvasRect = editedCanvas.querySelector('[data-automation-canvas]').getBoundingClientRect();
-	    var editParityShellRect = editedCanvas.querySelector('.automation-canvas-shell').getBoundingClientRect();
+	    var editParityShellRect = editParityShell.getBoundingClientRect();
+	    if (editParityShellRect.height < 319) fail('short-desktop Edit canvas collapsed below its 20rem usability floor: ' + editParityShellRect.height.toFixed(1) + 'px');
 	    if (Math.abs(editParityNodeRect.width - liveParityNodeWidth) > 1 || Math.abs(editParityNodeRect.height - liveParityNodeHeight) > 1) fail('Live and Edit render matching nodes at different sizes: Live=' + liveParityNodeWidth.toFixed(1) + 'x' + liveParityNodeHeight.toFixed(1) + ' in ' + canvasRect.width.toFixed(1) + 'x' + canvasRect.height.toFixed(1) + ' shell ' + liveCanvasShellRect.width.toFixed(1) + 'x' + liveCanvasShellRect.height.toFixed(1) + ' Edit=' + editParityNodeRect.width.toFixed(1) + 'x' + editParityNodeRect.height.toFixed(1) + ' in ' + editParityCanvasRect.width.toFixed(1) + 'x' + editParityCanvasRect.height.toFixed(1) + ' shell ' + editParityShellRect.width.toFixed(1) + 'x' + editParityShellRect.height.toFixed(1));
 	    click('#automation-builder [data-automation-add-node-open]', 'Add node after Edit automation');    var editedNodeDialog = document.querySelector('#automation-builder [data-automation-node-dialog]');
     if (!editedNodeDialog || !editedNodeDialog.open) fail('Add node is inoperable after the Edit automation HTMX transition');
@@ -1392,7 +1398,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		.overflow-y-auto { overflow-y: auto !important; }
 		#automation-builder, #automation-live { box-sizing: border-box; height: 900px; }
 		#automation-live .automation-canvas-shell,
-		#automation-builder:has([data-automation-builder-actions]) .automation-canvas-shell { box-sizing: border-box; flex: none; height: calc(100vh - 26rem); min-height: 0; max-height: 42rem; }
+		#automation-builder:has([data-automation-builder-actions]) .automation-canvas-shell { box-sizing: border-box; flex: none; height: calc(100vh - 26rem); min-height: 20rem; max-height: 42rem; }
 		[class~="h-[calc(100dvh-26rem)]"] { height: calc(100vh - 26rem); }
 		[class~="h-[calc(100dvh-15rem)]"] { height: calc(100vh - 15rem); }
 		[class~="min-h-[calc(100dvh-15rem)]"] { min-height: calc(100vh - 15rem); }
