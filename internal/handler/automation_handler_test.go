@@ -1035,6 +1035,7 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	body := portfolio.Body.String()
 	for _, marker := range []string{
 		`>+ New Automation</`,
+		`Create one from Template, Describe, or Custom.`,
 		`data-automation-new-menu`,
 		`data-automation-new-template`,
 		`data-automation-new-describe`,
@@ -1051,6 +1052,7 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 		require.Contains(t, body, marker)
 	}
 	require.NotContains(t, body, `value="vision_driver"`)
+	require.NotContains(t, body, `Create one from Template, Describe It, or Blank.`)
 	require.NotContains(t, body, ">Vision Driver</option>")
 	require.NotContains(t, body, "Register Existing")
 

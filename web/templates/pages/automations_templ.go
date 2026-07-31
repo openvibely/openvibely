@@ -216,7 +216,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 			return templ_7745c5c3_Err
 		}
 		if len(cards) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"rounded-box bg-base-200/60 p-8 text-center\"><h3 class=\"font-semibold\">No saved automations</h3><p class=\"mt-2 text-sm text-base-content/65\">Create one from Template, Describe It, or Blank. Maintained Native and GitHub setup can also register newly created resources. Existing tasks and schedules are never inferred or backfilled.</p></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"rounded-box bg-base-200/60 p-8 text-center\"><h3 class=\"font-semibold\">No saved automations</h3><p class=\"mt-2 text-sm text-base-content/65\">Create one from Template, Describe, or Custom. Maintained Native and GitHub setup can also register newly created resources. Existing tasks and schedules are never inferred or backfilled.</p></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
