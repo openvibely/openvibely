@@ -62,7 +62,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 										</li>
 										if card.Automation.LifecycleState == models.AutomationActive {
 											<li>
-												<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID) } hx-target="#automations-container" hx-swap="outerHTML">
+												<form class="w-full" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID) } hx-target="#automations-container" hx-swap="outerHTML">
 													<input type="hidden" name="project_id" value={ currentProjectID }/>
 													<input type="hidden" name="return_to" value="portfolio"/>
 													<button class="w-full" type="submit">Pause</button>
@@ -71,7 +71,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 										}
 										if card.Automation.LifecycleState == models.AutomationPaused {
 											<li>
-												<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID) } hx-target="#automations-container" hx-swap="outerHTML">
+												<form class="w-full" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID) } hx-target="#automations-container" hx-swap="outerHTML">
 													<input type="hidden" name="project_id" value={ currentProjectID }/>
 													<input type="hidden" name="return_to" value="portfolio"/>
 													<button class="w-full" type="submit">Resume</button>

@@ -29,6 +29,15 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 			},
 			Version: models.AutomationVersion{Version: 3, AdapterKey: "native_sdlc"},
 		},
+		{
+			Automation: models.Automation{
+				ID:             "automation-paused",
+				Name:           "Paused Delivery",
+				LifecycleState: models.AutomationPaused,
+				HealthState:    models.AutomationHealthHealthy,
+			},
+			Version: models.AutomationVersion{Version: 1, AdapterKey: "custom"},
+		},
 	}
 
 	var out bytes.Buffer
@@ -61,6 +70,8 @@ func TestAutomationPortfolioUsesSearchableSingleColumnCards(t *testing.T) {
 		`id="delete-automation-card-name"`,
 		`id="delete-automation-card-form"`,
 		`data-automation-delete-url="/automations/automation-native/delete?project_id=project-search"`,
+		`<form class="w-full" method="post" action="/automations/automation-native/pause?project_id=project-search"`,
+		`<form class="w-full" method="post" action="/automations/automation-paused/resume?project_id=project-search"`,
 		`class="pr-12 min-w-0 max-w-full"`,
 		`class="font-bold"`,
 		`class="text-sm opacity-60 mt-1 line-clamp-2"`,
