@@ -168,12 +168,11 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				state.pendingFocusID = '';
 			});
 
-			document.body.addEventListener('htmx:afterSettle', function(event) {
-				var settledTarget = event.detail && event.detail.target;
+			document.body.addEventListener('htmx:afterSwap', function(event) {
+				var swappedTarget = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
 				var saved = state.swap;
-				if (!settledTarget || settledTarget.id !== 'alerts-container' || !root || !saved) return;
-				state.swap = null;
+				if (!swappedTarget || swappedTarget.id !== 'alerts-container' || !root || !saved) return;
 
 				if (typeof window.refreshCardSearches === 'function') {
 					window.refreshCardSearches(root);
@@ -195,6 +194,14 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				} else if (Math.abs(window.scrollY - saved.windowScrollY) > 1) {
 					window.scrollTo(0, saved.windowScrollY);
 				}
+			});
+
+			document.body.addEventListener('htmx:afterSettle', function(event) {
+				var settledTarget = event.detail && event.detail.target;
+				var root = document.getElementById('alerts-container');
+				var saved = state.swap;
+				if (!settledTarget || settledTarget.id !== 'alerts-container' || !root || !saved) return;
+				state.swap = null;
 
 				var focusTarget = null;
 				for (var j = 0; j < saved.focusIDs.length; j++) {
