@@ -491,6 +491,53 @@ func TestAutomationBuilderControlsOverlayGraphViewport(t *testing.T) {
 	}
 }
 
+func TestAutomationBlankBuilderCanvasFitsNonEditPage(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion: 1, Name: "Blank Automation", AutomationType: "custom", AdapterKey: "custom",
+	}
+	render := func(source, automationID string) string {
+		t.Helper()
+		page := models.AutomationBuilderPage{
+			AutomationID: automationID,
+			Source:       source,
+			Result:       models.AutomationDraftResult{Candidate: candidate},
+		}
+		var out bytes.Buffer
+		if err := AutomationBuilderContent(page, "project-builder-height").Render(context.Background(), &out); err != nil {
+			t.Fatalf("render Automation builder: %v", err)
+		}
+		return out.String()
+	}
+
+	blank := render("blank", "")
+	for _, want := range []string{
+		`h-[calc(100dvh-22rem)]`,
+		`min-h-[28rem]`,
+		`max-h-[42rem]`,
+		`data-automation-canvas`,
+		`h-full`,
+	} {
+		if !strings.Contains(blank, want) {
+			t.Errorf("expected blank builder page-fit contract to contain %q", want)
+		}
+	}
+	if strings.Contains(blank, `min-h-[calc(100dvh-15rem)]`) || strings.Contains(blank, `min-h-[42rem]`) {
+		t.Error("new blank builder must not force the full-height Template/Edit canvas")
+	}
+
+	for label, body := range map[string]string{
+		"template": render("template", ""),
+		"edit":     render("edit", "automation-edit"),
+	} {
+		if !strings.Contains(body, `min-h-[calc(100dvh-15rem)]`) || !strings.Contains(body, `min-h-[42rem]`) {
+			t.Errorf("%s builder must retain the existing large-canvas sizing", label)
+		}
+		if strings.Contains(body, `h-[calc(100dvh-22rem)]`) {
+			t.Errorf("%s builder unexpectedly uses blank-only page-fit sizing", label)
+		}
+	}
+}
+
 func TestAutomationBuilderFixesGitHubImplementationCategoryToActive(t *testing.T) {
 	candidate := models.AutomationDraftCandidate{
 		SchemaVersion: 1, Name: "GitHub SDLC", AutomationType: "github_sdlc", AdapterKey: "github_sdlc",
@@ -687,6 +734,22 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 		var out bytes.Buffer
 		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render blank Automation builder: %v", err)
+		}
+		return out.String()
+	}
+
+	renderTemplateBuilder := func() string {
+		candidate := models.AutomationDraftCandidate{
+			SchemaVersion: 1, Name: "Native SDLC", AutomationType: "native_sdlc", AdapterKey: "native_sdlc",
+			Nodes: []models.AutomationDraftNode{
+				{Key: "schedule", Name: "Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
+				{Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task", Position: &models.AutomationDraftPoint{X: 260, Y: 0}},
+			},
+		}
+		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, Source: "template"}
+		var out bytes.Buffer
+		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render template Automation builder: %v", err)
 		}
 		return out.String()
 	}
@@ -889,10 +952,20 @@ window.addEventListener('DOMContentLoaded', function() {
 	    templateSelect.dispatchEvent(new Event('change', {bubbles:true}));
 	    if (!templateDescription || templateDescription.textContent === nativeDescription || !templateDescription.textContent.includes('GitHub')) fail('Template selection did not update its description card');
 	    if (Array.from(templateSelect.options).some(function(option, index) { return option.textContent !== templateLabels[index]; })) fail('Template selection replaced an option label with its description');
-	    click('#automation-template-modal button[aria-label="Close template selection"]', 'Template modal close button');
-	    if (templateModal.open) fail('Template modal close button did not close the dialog');
-	    click('[data-automation-new-menu] button[data-automation-new-describe]', 'Describe creation menu option');
-	    var describeModal = document.getElementById('automation-describe-modal');
+			click('#automation-template-modal button[aria-label="Close template selection"]', 'Template modal close button');
+			if (templateModal.open) fail('Template modal close button did not close the dialog');
+			click('[data-automation-new-menu] button[data-automation-new-template]', 'Template creation menu option for page-fit comparison');
+			templateModal = document.getElementById('automation-template-modal');
+			var templateForm = templateModal && templateModal.querySelector('form[hx-post]');
+			if (!templateForm) fail('Template form is missing');
+			htmx.process(templateForm);
+			templateForm.requestSubmit(templateForm.querySelector('button[type="submit"]'));
+			await waitFor(function() { return !!document.querySelector('#automation-builder [data-automation-draft-canvas]'); }, 'Template builder for page-fit comparison');
+			var templateCanvasRect = document.querySelector('#automation-builder [data-automation-draft-canvas] [data-automation-canvas]').getBoundingClientRect();
+			if (!templateCanvasRect.height) fail('Template canvas has no rendered height');
+			await window.openVibelyNavigate('/automations?project_id=project-browser');
+			await waitFor(portfolioReady, 'portfolio after Template page-fit comparison');
+			click('[data-automation-new-menu] button[data-automation-new-describe]', 'Describe creation menu option');	    var describeModal = document.getElementById('automation-describe-modal');
 	    if (!describeModal || !describeModal.open) fail('Describe option did not open its modal');
 	    var stockDescription = 'Monitor a stock for price increases or decreases so I can buy or sell depending on the result';
 	    var describeForm = describeModal.querySelector('form[hx-post]');
@@ -908,10 +981,13 @@ window.addEventListener('DOMContentLoaded', function() {
 	    await report('progress', 'describe-failure-visible');
 	    click('#automation-describe-modal button[aria-label="Close Automation description"]', 'Describe modal close button');
 	    if (describeModal.open) fail('Describe modal close button did not close the dialog');
-	    click('[data-automation-new-menu] button[data-automation-new-custom]', 'Custom creation menu option');
-	    await waitFor(function() { return !!document.querySelector('[data-automation-add-first-node]'); }, 'empty Custom Automation canvas');
-	    await report('progress', 'blank-canvas-loaded');
-	    click('[data-automation-add-first-node]', 'Add first node action');
+			click('[data-automation-new-menu] button[data-automation-new-custom]', 'Custom creation menu option');
+			await waitFor(function() { return !!document.querySelector('[data-automation-add-first-node]'); }, 'empty Custom Automation canvas');
+			var blankCanvasRect = document.querySelector('#automation-builder [data-automation-draft-canvas] [data-automation-canvas]').getBoundingClientRect();
+			if (!blankCanvasRect.height) fail('blank Custom canvas has no rendered height');
+			if (blankCanvasRect.bottom > window.innerHeight + 2) fail('blank Custom canvas extends below the page viewport by ' + Math.round(blankCanvasRect.bottom - window.innerHeight) + 'px');
+			if (blankCanvasRect.height >= templateCanvasRect.height) fail('blank Custom canvas did not use its bounded non-edit page sizing');
+			await report('progress', 'blank-canvas-loaded');	    click('[data-automation-add-first-node]', 'Add first node action');
 	    var nodeDialog = document.querySelector('[data-automation-node-dialog]');
 	    if (!nodeDialog || !nodeDialog.open) fail('Add first node did not open the node dialog');
 	    var purposes = Array.from(nodeDialog.querySelectorAll('[name="node_kind"] option')).map(function(option) { return option.value; });
@@ -926,14 +1002,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	    htmx.process(nodeForm);
 	    nodeForm.requestSubmit(nodeDialog.querySelector('[data-automation-create-node]'));
 	    await report('progress', 'add-node-submitted');
-	    await waitFor(function() { return !!document.querySelector('[data-node-key="first_step"]'); }, 'new node on blank canvas');
-	    var oneNodeSVG = document.querySelector('[data-automation-draft-canvas] [data-automation-canvas]');
-	    var oneNodeRect = oneNodeSVG.getBoundingClientRect();
-	    var oneNodeViewBox = oneNodeSVG.getAttribute('viewBox').split(/\s+/).map(Number);
-	    if (!oneNodeRect.width || !oneNodeRect.height) fail('one-node Custom canvas has no rendered size');
-	    if (Math.abs(oneNodeViewBox[2] / oneNodeViewBox[3] - oneNodeRect.width / oneNodeRect.height) > 0.02) fail('one-node Custom graph was not fitted to the canvas aspect ratio');
-	    click('#automation-builder [data-automation-add-node-open]', 'Add second node');
-	    nodeDialog = document.querySelector('[data-automation-node-dialog]');
+		    await waitFor(function() { return !!document.querySelector('[data-node-key="first_step"]'); }, 'new node on blank canvas');
+		    click('#automation-builder [data-automation-add-node-open]', 'Add second node');	    nodeDialog = document.querySelector('[data-automation-node-dialog]');
 	    nodeDialog.querySelector('[name="node_name"]').value = 'Second step';
 	    nodeDialog.querySelector('[name="node_kind"]').value = 'task';
 	    nodeForm = nodeDialog.querySelector('form[hx-post]');
@@ -1099,7 +1169,13 @@ window.addEventListener('DOMContentLoaded', function() {
 		.menu li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); }
 		.menu li > * { grid-column-start: 1; grid-row-start: 1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(auto, max-content) auto max-content; align-items: center; gap: .5rem; padding: .5rem 1rem; }
 		.w-full { width: 100%; }
-		[data-automation-draft-canvas] [data-automation-canvas] { width: 800px; height: 400px; }
+		[class~="h-[calc(100dvh-15rem)]"] { height: calc(100vh - 15rem); }
+		[class~="min-h-[calc(100dvh-15rem)]"] { min-height: calc(100vh - 15rem); }
+		[class~="min-h-[42rem]"] { min-height: 42rem; }
+		[class~="h-[calc(100dvh-22rem)]"] { height: calc(100vh - 22rem); }
+		[class~="min-h-[28rem]"] { min-height: 28rem; }
+		[class~="max-h-[42rem]"] { max-height: 42rem; }
+		.automation-canvas-shell > [data-automation-canvas].h-full { height: 100%; }
 		.dropdown-content { position: relative; }
 		</style>`
 	browserResult := make(chan string, 16)
@@ -1167,6 +1243,10 @@ window.addEventListener('DOMContentLoaded', function() {
 				_, _ = w.Write([]byte(renderDescribeFailure(r.FormValue("description"))))
 				return
 			}
+			if r.FormValue("source") == "template" {
+				_, _ = w.Write([]byte(renderTemplateBuilder()))
+				return
+			}
 			if r.FormValue("builder_action") == "create_node" {
 				blankNodeRequests++
 			}
@@ -1200,6 +1280,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--disable-background-timer-throttling",
 		"--no-first-run",
 		"--no-default-browser-check",
+		"--window-size=1200,900",
 		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-navigation-profile"),
 		server.URL+"/automations?project_id="+projectID,
 	)
