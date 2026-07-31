@@ -110,6 +110,114 @@ func TestGitHubPRFeedbackForwarderQueuesAuthorizedFeedbackOnce(t *testing.T) {
 	}
 }
 
+func TestGitHubPRFeedbackForwarderDeduplicatesPreexistingMixedCaseRepository(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
+	authRepo := repository.NewGitHubAuthRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+
+	project := &models.Project{Name: "Mixed Case Feedback", RepoPath: t.TempDir(), RepoURL: "https://github.com/Owner/Repo"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Mixed case PR", Category: models.CategoryActive, Status: models.StatusPending}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "alice", Permission: "triage", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize actor: %v", err)
+	}
+	pr := &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://github.com/Owner/Repo/pull/42", PRState: "open"}
+	if err := prRepo.Upsert(ctx, pr); err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO github_pr_feedback_forwarded (
+		task_pull_request_id, task_id, repo_full_name, pr_number, feedback_kind, github_id,
+		author_login, body, created_at
+	) VALUES (?, ?, 'Owner/Repo', 42, 'issue_comment', 'mixed-case-existing', 'alice', 'Already forwarded.', '2026-07-09T10:00:00Z')`, pr.ID, task.ID); err != nil {
+		t.Fatalf("seed mixed-case feedback: %v", err)
+	}
+
+	provider := &fakePRFeedbackProvider{items: []GitHubPullRequestFeedback{{
+		Kind: "issue_comment", ID: "mixed-case-existing", AuthorLogin: "alice", AuthorType: "User", Body: "Already forwarded.",
+	}}}
+	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo)
+	result, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, &GitHubRepoRef{Owner: "owner", Name: "repo", FullName: "owner/repo"})
+	if err != nil {
+		t.Fatalf("forward feedback: %v", err)
+	}
+	if len(result.Forwarded) != 0 || result.SkippedDuplicate != 1 {
+		t.Fatalf("result = %#v, want one mixed-case duplicate skip", result)
+	}
+	pending, err := threadInputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("mixed-case duplicate queued feedback: %#v", pending)
+	}
+}
+
+func TestGitHubPRFeedbackRepoAtomicallyDeduplicatesMixedCaseRepository(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+
+	project := &models.Project{Name: "Atomic Mixed Case Feedback", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Atomic mixed case PR", Category: models.CategoryActive, Status: models.StatusPending}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	pr := &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://github.com/Owner/Repo/pull/42", PRState: "open"}
+	if err := prRepo.Upsert(ctx, pr); err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO github_pr_feedback_forwarded (
+		task_pull_request_id, task_id, repo_full_name, pr_number, feedback_kind, github_id,
+		author_login, body, created_at
+	) VALUES (?, ?, 'Owner/Repo', 42, 'issue_comment', 'mixed-case-atomic', 'alice', 'Already recorded.', '2026-07-09T10:00:00Z')`, pr.ID, task.ID); err != nil {
+		t.Fatalf("seed mixed-case feedback: %v", err)
+	}
+
+	feedback := &models.GitHubPRFeedbackForwarded{
+		TaskPullRequestID: pr.ID,
+		TaskID:            task.ID,
+		RepoFullName:      "owner/repo",
+		PRNumber:          42,
+		FeedbackKind:      "issue_comment",
+		GitHubID:          "mixed-case-atomic",
+		AuthorLogin:       "alice",
+		Body:              "Already recorded.",
+		CreatedAt:         time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC),
+	}
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, Content: "duplicate"}
+	recorded, err := feedbackRepo.RecordForwardedAndQueue(ctx, threadInputRepo, feedback, input)
+	if err != nil {
+		t.Fatalf("record duplicate feedback: %v", err)
+	}
+	if recorded {
+		t.Fatal("mixed-case duplicate was recorded")
+	}
+	pending, err := threadInputRepo.ListPendingForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("mixed-case duplicate queued feedback: %#v", pending)
+	}
+}
+
 func TestGitHubPRFeedbackForwarderDoesNotFetchPersistedPRFromSelectedRepository(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

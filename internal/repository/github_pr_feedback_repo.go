@@ -27,7 +27,7 @@ func (r *GitHubPRFeedbackRepo) AlreadyForwarded(ctx context.Context, repoFullNam
 	}
 	var count int
 	if err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM github_pr_feedback_forwarded WHERE repo_full_name = ? AND pr_number = ? AND feedback_kind = ? AND github_id = ?`,
+		`SELECT COUNT(*) FROM github_pr_feedback_forwarded WHERE repo_full_name = ? COLLATE NOCASE AND pr_number = ? AND feedback_kind = ? AND github_id = ?`,
 		repoFullName, prNumber, feedbackKind, githubID).Scan(&count); err != nil {
 		return false, fmt.Errorf("checking github pr feedback forwarded: %w", err)
 	}
@@ -74,7 +74,7 @@ func (r *GitHubPRFeedbackRepo) recordForwardedWithExecutor(ctx context.Context, 
 	}
 	feedback.TaskPullRequestID = strings.TrimSpace(feedback.TaskPullRequestID)
 	feedback.TaskID = strings.TrimSpace(feedback.TaskID)
-	feedback.RepoFullName = strings.TrimSpace(feedback.RepoFullName)
+	feedback.RepoFullName = strings.ToLower(strings.TrimSpace(feedback.RepoFullName))
 	feedback.FeedbackKind = strings.TrimSpace(feedback.FeedbackKind)
 	feedback.GitHubID = strings.TrimSpace(feedback.GitHubID)
 	feedback.AuthorLogin = NormalizeGitHubLogin(feedback.AuthorLogin)
@@ -90,11 +90,16 @@ func (r *GitHubPRFeedbackRepo) recordForwardedWithExecutor(ctx context.Context, 
 		`INSERT INTO github_pr_feedback_forwarded (
 			 task_pull_request_id, task_id, repo_full_name, pr_number, feedback_kind, github_id,
 			 github_node_id, author_login, html_url, body, created_at, queued_thread_input_id
-		 ) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?)
+		 ) SELECT ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?, ?, ?
+		 WHERE NOT EXISTS (
+			 SELECT 1 FROM github_pr_feedback_forwarded
+			 WHERE repo_full_name = ? COLLATE NOCASE AND pr_number = ? AND feedback_kind = ? AND github_id = ?
+		 )
 		 ON CONFLICT(repo_full_name, pr_number, feedback_kind, github_id) DO NOTHING
 		 RETURNING id, forwarded_at`,
 		feedback.TaskPullRequestID, feedback.TaskID, feedback.RepoFullName, feedback.PRNumber, feedback.FeedbackKind, feedback.GitHubID,
-		strings.TrimSpace(feedback.GitHubNodeID), feedback.AuthorLogin, strings.TrimSpace(feedback.HTMLURL), feedback.Body, feedback.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), queuedID).
+		strings.TrimSpace(feedback.GitHubNodeID), feedback.AuthorLogin, strings.TrimSpace(feedback.HTMLURL), feedback.Body, feedback.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), queuedID,
+		feedback.RepoFullName, feedback.PRNumber, feedback.FeedbackKind, feedback.GitHubID).
 		Scan(&feedback.ID, &forwardedAt)
 	if err == sql.ErrNoRows {
 		return false, nil
