@@ -101,6 +101,41 @@ func TestSidebar_NavigationHeadingHiddenAndLinksPreserved(t *testing.T) {
 	}
 }
 
+func TestSidebar_AutomationsUsesRecognizableOutlineLightningBolt(t *testing.T) {
+	projects := []models.Project{{ID: "project-1", Name: "Default"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "project-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+
+	html := buf.String()
+	start := strings.Index(html, `data-nav-base="/automations"`)
+	if start < 0 {
+		t.Fatal("Automations navigation link is missing")
+	}
+	end := strings.Index(html[start:], `</a>`)
+	if end < 0 {
+		t.Fatal("Automations navigation link is incomplete")
+	}
+	automationsLink := html[start : start+end]
+	for _, marker := range []string{
+		`fill="none"`,
+		`stroke="currentColor"`,
+		`stroke-linecap="round"`,
+		`stroke-linejoin="round"`,
+		`stroke-width="2"`,
+		`d="M13 2 5 13h6l-1 9 9-13h-6V2z"`,
+	} {
+		if !strings.Contains(automationsLink, marker) {
+			t.Fatalf("Automations navigation icon is missing outline lightning-bolt marker %s", marker)
+		}
+	}
+	if strings.Contains(automationsLink, `d="M13 10V3L4 14h7v7l9-11h-7z"`) {
+		t.Fatal("Automations navigation must not use the ambiguous old zigzag icon")
+	}
+}
+
 func TestSidebar_DispatchesMixtureProgressToChatAndTaskListeners(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 

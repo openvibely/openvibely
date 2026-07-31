@@ -158,14 +158,14 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 10V3L4 14h7v7l9-11h-7z\"></path></svg> <span class=\"sidebar-text\">Automations</span></a></li><li><a data-nav-base=\"/schedule\" data-tip=\"Schedule\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 2 5 13h6l-1 9 9-13h-6V2z\"></path></svg> <span class=\"sidebar-text\">Automations</span></a></li><li><a data-nav-base=\"/schedule\" data-tip=\"Schedule\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 templ.SafeURL
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/schedule?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 455, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 453, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
@@ -178,7 +178,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/schedule?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 456, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 454, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
@@ -191,7 +191,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var12 templ.SafeURL
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/insights?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 478, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 476, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {
@@ -204,7 +204,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/insights?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 479, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 477, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
@@ -217,7 +217,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var14 templ.SafeURL
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 493, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 491, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 		if templ_7745c5c3_Err != nil {
@@ -230,7 +230,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/upcoming?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 494, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 492, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
@@ -243,7 +243,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var16 templ.SafeURL
 		templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/history?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 508, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 506, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 		if templ_7745c5c3_Err != nil {
@@ -256,7 +256,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var17 string
 		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/history?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 509, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 507, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 		if templ_7745c5c3_Err != nil {
@@ -269,7 +269,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var18 templ.SafeURL
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/analytics?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 523, Col: 85}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 521, Col: 85}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 		if templ_7745c5c3_Err != nil {
@@ -282,7 +282,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/analytics?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 524, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 522, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 		if templ_7745c5c3_Err != nil {
@@ -295,7 +295,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var20 templ.SafeURL
 		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/alerts?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 546, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 544, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 		if templ_7745c5c3_Err != nil {
@@ -308,7 +308,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 547, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 545, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
@@ -321,7 +321,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/unread-count?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 558, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 556, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -334,7 +334,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var23 templ.SafeURL
 		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/models?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 570, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 568, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 		if templ_7745c5c3_Err != nil {
@@ -347,7 +347,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var24 string
 		templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/models?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 571, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 569, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var24)
 		if templ_7745c5c3_Err != nil {
@@ -360,7 +360,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var25 templ.SafeURL
 		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/agents?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 585, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 583, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 		if templ_7745c5c3_Err != nil {
@@ -373,7 +373,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/agents?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 586, Col: 69}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 584, Col: 69}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 		if templ_7745c5c3_Err != nil {
@@ -386,7 +386,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var27 templ.SafeURL
 		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/skills?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 600, Col: 83}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 598, Col: 83}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 		if templ_7745c5c3_Err != nil {
@@ -399,7 +399,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var28 string
 		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/skills?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 601, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 599, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var28)
 		if templ_7745c5c3_Err != nil {
@@ -412,7 +412,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var29 templ.SafeURL
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/workers?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 614, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 612, Col: 108}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
@@ -425,7 +425,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var30 string
 		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/workers?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 615, Col: 70}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 613, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 		if templ_7745c5c3_Err != nil {
@@ -438,7 +438,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var31 templ.SafeURL
 		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/channels?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 630, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 628, Col: 84}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
@@ -451,7 +451,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var32 string
 		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/channels?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 631, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 629, Col: 71}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 		if templ_7745c5c3_Err != nil {
@@ -464,7 +464,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var33 templ.SafeURL
 		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(fmt.Sprintf("/personality?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 645, Col: 87}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 643, Col: 87}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 		if templ_7745c5c3_Err != nil {
@@ -477,7 +477,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		var templ_7745c5c3_Var34 string
 		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/personality?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 646, Col: 74}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/layout/sidebar.templ`, Line: 644, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 		if templ_7745c5c3_Err != nil {

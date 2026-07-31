@@ -443,13 +443,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							hx-target="#main-content"
 							hx-push-url="true"
 						>
-							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-							</svg>
-							<span class="sidebar-text">Automations</span>
+<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 2 5 13h6l-1 9 9-13h-6V2z"></path>
+								</svg>							<span class="sidebar-text">Automations</span>
 						</a>
-					</li>
-					<li>
+					</li>					<li>
 						<a
 							data-nav-base="/schedule"						data-tip="Schedule"
 						href={ templ.SafeURL(fmt.Sprintf("/schedule?project_id=%s", currentProjectID)) }
