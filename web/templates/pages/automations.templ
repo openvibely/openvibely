@@ -60,6 +60,24 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string)
 												onclick="event.stopPropagation(); openAutomationCardEdit(this)"
 											>Edit</button>
 										</li>
+										if card.Automation.LifecycleState == models.AutomationActive {
+											<li>
+												<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/pause?project_id=%s", card.Automation.ID, currentProjectID) } hx-target="#automations-container" hx-swap="outerHTML">
+													<input type="hidden" name="project_id" value={ currentProjectID }/>
+													<input type="hidden" name="return_to" value="portfolio"/>
+													<button class="w-full" type="submit">Pause</button>
+												</form>
+											</li>
+										}
+										if card.Automation.LifecycleState == models.AutomationPaused {
+											<li>
+												<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/resume?project_id=%s", card.Automation.ID, currentProjectID) } hx-target="#automations-container" hx-swap="outerHTML">
+													<input type="hidden" name="project_id" value={ currentProjectID }/>
+													<input type="hidden" name="return_to" value="portfolio"/>
+													<button class="w-full" type="submit">Resume</button>
+												</form>
+											</li>
+										}
 										<li>
 											<button
 												class="text-error"

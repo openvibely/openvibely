@@ -21,6 +21,55 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAutomationPortfolioCardKebabPausesAndResumesInPlace(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Automation card lifecycle").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
+	tc.handler.SetAutomationBuilderServices(nil, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	task := models.Task{ProjectID: project.ID, Title: "Card lifecycle schedule", Category: models.CategoryScheduled, Priority: 2, Status: models.StatusPending, Prompt: "run"}
+	require.NoError(t, tc.taskRepo.Create(context.Background(), &task))
+	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, tc.scheduleRepo.Create(context.Background(), &schedule))
+	definition, _, err := registration.Register(context.Background(), service.AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: service.AutomationAdapterNativeSDLC, StableKey: "native-sdlc/card-lifecycle",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+		},
+	})
+	require.NoError(t, err)
+
+	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, portfolio.Code)
+	require.Contains(t, portfolio.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/pause?project_id=%s"`, definition.Automation.ID, project.ID))
+	require.Contains(t, portfolio.Body.String(), ">Pause</button>")
+	require.NotContains(t, portfolio.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/resume?project_id=%s"`, definition.Automation.ID, project.ID))
+
+	paused := tc.HTMX().Post(fmt.Sprintf("/automations/%s/pause?project_id=%s", definition.Automation.ID, project.ID)).WithForm(url.Values{
+		"project_id": {project.ID}, "return_to": {"portfolio"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, paused.Code, paused.Body.String())
+	require.Contains(t, paused.Body.String(), `id="automations-container"`)
+	require.Contains(t, paused.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/resume?project_id=%s"`, definition.Automation.ID, project.ID))
+	require.Contains(t, paused.Body.String(), ">Resume</button>")
+	require.NotContains(t, paused.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/pause?project_id=%s"`, definition.Automation.ID, project.ID))
+	storedSchedule, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+	require.NoError(t, err)
+	require.False(t, storedSchedule.Enabled)
+
+	resumed := tc.HTMX().Post(fmt.Sprintf("/automations/%s/resume?project_id=%s", definition.Automation.ID, project.ID)).WithForm(url.Values{
+		"project_id": {project.ID}, "return_to": {"portfolio"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, resumed.Code, resumed.Body.String())
+	require.Contains(t, resumed.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/pause?project_id=%s"`, definition.Automation.ID, project.ID))
+	storedSchedule, err = tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+	require.NoError(t, err)
+	require.True(t, storedSchedule.Enabled)
+}
+
 func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Automation Project").Build()

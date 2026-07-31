@@ -598,6 +598,12 @@ func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if c.FormValue("return_to") == "portfolio" {
+		if isHTMX(c) {
+			return h.ListAutomations(c)
+		}
+		return c.Redirect(http.StatusSeeOther, "/automations?project_id="+projectID)
+	}
 	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+projectID)
 }
 
