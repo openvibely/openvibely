@@ -574,7 +574,12 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 	<div id="automation-builder" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-draft>
 		@layout.PageTitle(page.Result.Candidate.Name)
 		if page.AutomationID != "" {
-			@automationBreadcrumb(currentProjectID, page.AutomationID, page.Result.Candidate.Name, "Edit automation", true)
+			<div class="mb-6 min-w-0" data-automation-builder-header>
+				@automationBreadcrumb(currentProjectID, page.AutomationID, page.Result.Candidate.Name, "Edit automation", false)
+				if strings.TrimSpace(page.Result.Candidate.Description) != "" {
+					<p class="mt-1 text-sm opacity-60">{ page.Result.Candidate.Description }</p>
+				}
+			</div>
 		} else {
 			@automationBreadcrumb(currentProjectID, "", "", "New Automation", true)
 		}

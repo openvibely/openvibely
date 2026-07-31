@@ -225,6 +225,63 @@ func TestAutomationLiveHeaderUsesStandardSpacingAndDescriptionStyle(t *testing.T
 	}
 }
 
+func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion:  1,
+		Name:           "Edit header spacing",
+		Description:    "A standard editable Automation description.",
+		AutomationType: "custom",
+		AdapterKey:     "custom",
+	}
+	page := models.AutomationBuilderPage{
+		AutomationID: "automation-edit-header",
+		Source:       "edit",
+		Result:       models.AutomationDraftResult{Candidate: candidate},
+	}
+
+	var out bytes.Buffer
+	if err := AutomationBuilderContent(page, "project-edit-header").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation Edit header: %v", err)
+	}
+	body := out.String()
+	headerMarker := strings.Index(body, `data-automation-builder-header`)
+	formStart := strings.Index(body, `data-automation-name`)
+	if headerMarker < 0 || formStart <= headerMarker {
+		t.Fatal("expected one Edit Automation header block before the builder controls")
+	}
+	headerStart := strings.LastIndex(body[:headerMarker], `<div`)
+	if headerStart < 0 {
+		t.Fatal("expected Edit Automation header opening element")
+	}
+	header := body[headerStart:formStart]
+	for _, want := range []string{
+		`class="mb-6 min-w-0"`,
+		`data-automation-breadcrumb`,
+		`class="mt-1 text-sm opacity-60"`,
+		`>A standard editable Automation description.</p>`,
+	} {
+		if !strings.Contains(header, want) {
+			t.Errorf("expected standard Edit Automation header to contain %q", want)
+		}
+	}
+	if strings.Contains(header, `class="flex min-w-0 flex-shrink-0 items-center gap-2 mb-6"`) {
+		t.Error("Edit Automation breadcrumb must not add a second bottom margin inside the standard header")
+	}
+
+	page.Result.Candidate.Description = ""
+	out.Reset()
+	if err := AutomationBuilderContent(page, "project-edit-header").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation Edit without description: %v", err)
+	}
+	emptyHeaderEnd := strings.Index(out.String(), `data-automation-name`)
+	if emptyHeaderEnd < 0 {
+		t.Fatal("expected Automation name control after empty-description Edit header")
+	}
+	if strings.Contains(out.String()[:emptyHeaderEnd], `<p`) {
+		t.Error("empty Edit Automation description must not reserve a blank header line")
+	}
+}
+
 func TestAutomationLiveActionsUseCardKebab(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{
