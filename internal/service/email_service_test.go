@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/emersion/go-imap"
 	messagemail "github.com/emersion/go-message/mail"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -16,6 +17,164 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestEmailPollOnceAcknowledgesOnlySuccessfulMessagesAndRetriesFailures(t *testing.T) {
+	client := newFakeEmailIMAPClient(
+		testIMAPMessage(1, "success", "alice@example.com"),
+		testIMAPMessage(2, "retry", "alice@example.com"),
+	)
+	svc := &EmailService{}
+	attempts := map[string]int{}
+	svc.processIncomingMessageFn = func(_ context.Context, msg EmailInboundMessage) bool {
+		attempts[msg.Subject]++
+		return msg.Subject == "success" || attempts[msg.Subject] > 1
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, map[string]int{"success": 1, "retry": 1}, attempts)
+
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, map[string]int{"success": 1, "retry": 2}, attempts)
+}
+
+func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
+	client := newFakeEmailIMAPClient(testIMAPMessage(1, "malformed", ""))
+	svc := &EmailService{}
+	processed := 0
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processed++
+		return true
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
+
+	assert.Empty(t, client.seenIDs())
+	assert.Zero(t, processed)
+	assert.Equal(t, 2, client.fetchCount)
+}
+
+type fakeEmailIMAPClient struct {
+	messages   map[uint32]*imap.Message
+	seen       map[uint32]bool
+	fetchCount int
+}
+
+func newFakeEmailIMAPClient(messages ...*imap.Message) *fakeEmailIMAPClient {
+	client := &fakeEmailIMAPClient{messages: make(map[uint32]*imap.Message), seen: make(map[uint32]bool)}
+	for _, msg := range messages {
+		client.messages[msg.SeqNum] = msg
+	}
+	return client
+}
+
+func testIMAPMessage(id uint32, subject, from string) *imap.Message {
+	msg := &imap.Message{SeqNum: id, Envelope: &imap.Envelope{Subject: subject}}
+	if from != "" {
+		parts := strings.SplitN(from, "@", 2)
+		msg.Envelope.From = []*imap.Address{{MailboxName: parts[0], HostName: parts[1]}}
+	}
+	return msg
+}
+
+func (c *fakeEmailIMAPClient) Login(string, string) error { return nil }
+func (c *fakeEmailIMAPClient) Select(string, bool) (*imap.MailboxStatus, error) {
+	return &imap.MailboxStatus{}, nil
+}
+func (c *fakeEmailIMAPClient) Search(*imap.SearchCriteria) ([]uint32, error) {
+	var ids []uint32
+	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
+		if !c.seen[id] {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, _ []imap.FetchItem, ch chan *imap.Message) error {
+	c.fetchCount++
+	defer close(ch)
+	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
+		if seqset.Contains(id) {
+			ch <- c.messages[id]
+		}
+	}
+	return nil
+}
+func (c *fakeEmailIMAPClient) Store(seqset *imap.SeqSet, _ imap.StoreItem, _ interface{}, _ chan *imap.Message) error {
+	for id := range c.messages {
+		if seqset.Contains(id) {
+			c.seen[id] = true
+		}
+	}
+	return nil
+}
+func (c *fakeEmailIMAPClient) Logout() error { return nil }
+func (c *fakeEmailIMAPClient) seenIDs() []uint32 {
+	var ids []uint32
+	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
+		if c.seen[id] {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func TestChannelChatIngressReportsTaskAndQueuePersistenceFailures(t *testing.T) {
+	t.Run("task creation", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		taskRepo := repository.NewTaskRepo(db, nil)
+		execRepo := repository.NewExecutionRepo(db)
+		require.NoError(t, db.Close())
+
+		handedOff := false
+		handled, _ := runChannelChatFirstTurn(context.Background(), channelChatIngressFirstTurnOptions{
+			Platform:         "email",
+			ProjectID:        "project",
+			Message:          "hello",
+			Task:             &models.Task{Title: "email"},
+			Agent:            &models.LLMConfig{ID: "agent"},
+			TaskRepo:         taskRepo,
+			ExecRepo:         execRepo,
+			OnDurableHandoff: func() { handedOff = true },
+		})
+		assert.True(t, handled)
+		assert.False(t, handedOff)
+	})
+
+	t.Run("queue write", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		threadInputRepo := repository.NewThreadInputRepo(db)
+		require.NoError(t, db.Close())
+
+		handedOff := false
+		handled := runChannelChatQueuedInput(context.Background(), channelChatIngressQueueOptions{
+			Platform:         "email",
+			ProjectID:        "project",
+			ActiveExecID:     "execution",
+			AgentID:          "agent",
+			Message:          "hello",
+			ThreadInputRepo:  threadInputRepo,
+			OnDurableHandoff: func() { handedOff = true },
+		})
+		assert.True(t, handled)
+		assert.False(t, handedOff)
+	})
+}
+
+func TestEmailProcessIncomingAcknowledgesIntentionalIgnores(t *testing.T) {
+	svc := &EmailService{}
+	assert.True(t, svc.ProcessIncoming(context.Background(), EmailInboundMessage{FromAddress: "noreply@example.com", Body: "automated"}))
+
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	require.NoError(t, projectRepo.Create(context.Background(), &models.Project{Name: "Email"}))
+	svc = NewEmailService(nil, projectRepo, repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), &TaskService{}, &LLMService{}, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	assert.True(t, svc.ProcessIncoming(context.Background(), EmailInboundMessage{FromAddress: "unauthorized@example.com", Subject: "request", Body: "hello"}))
+}
 
 func TestNormalizeEmailPasswordForProvider(t *testing.T) {
 	assert.Equal(t, "abcdefghijklmnop", NormalizeEmailPasswordForProvider(EmailProviderGmail, " abcd efgh ijkl mnop "))

@@ -45,9 +45,10 @@ type channelChatIngressQueueOptions struct {
 	ThreadInputRepo *repository.ThreadInputRepo
 	ChatBroadcaster *events.ChatBroadcaster
 
-	NewThreadInput func() *models.ThreadInput
-	OnQueueFailure func(context.Context)
-	OnQueued       func(context.Context)
+	NewThreadInput   func() *models.ThreadInput
+	OnQueueFailure   func(context.Context)
+	OnQueued         func(context.Context)
+	OnDurableHandoff func()
 }
 
 type channelTaskThreadSendOptions struct {
@@ -128,6 +129,7 @@ type channelChatIngressFirstTurnOptions struct {
 	OnTaskCreateFailure        func(context.Context)
 	OnTaskContextFailure       func(context.Context)
 	OnExecutionCreateFailure   func(context.Context)
+	OnDurableHandoff           func()
 	OnAttachmentLinkFailure    func(context.Context, string)
 	PrepareRunner              func(context.Context, string, string) int
 	OnRunnerUnavailable        func(context.Context, string, int)
@@ -177,6 +179,7 @@ type channelChatIngressOptions struct {
 	OnActiveLookupFailed                      func(context.Context)
 	OnQueueFailure                            func(context.Context)
 	OnQueued                                  func(context.Context)
+	OnDurableHandoff                          func()
 	FirstTurn                                 channelChatIngressFirstTurnOptions
 }
 
@@ -770,6 +773,7 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 			NewThreadInput:          opts.NewQueuedInput,
 			OnQueueFailure:          opts.OnQueueFailure,
 			OnQueued:                opts.OnQueued,
+			OnDurableHandoff:        opts.OnDurableHandoff,
 		})
 	}
 
@@ -784,6 +788,7 @@ func runChannelChatIngress(ctx context.Context, opts channelChatIngressOptions) 
 	first.ImageAttachments = imageAttachments
 	first.HasAttachments = opts.HasAttachments || len(chatAttachments) > 0
 	first.Surface = opts.Surface
+	first.OnDurableHandoff = opts.OnDurableHandoff
 	first.Start = opts.Start
 	if first.Start.IsZero() {
 		first.Start = time.Now()
@@ -868,6 +873,9 @@ func runChannelChatQueuedInput(ctx context.Context, opts channelChatIngressQueue
 		}
 		return true
 	}
+	if opts.OnDurableHandoff != nil {
+		opts.OnDurableHandoff()
+	}
 	if opts.ChatBroadcaster != nil {
 		opts.ChatBroadcaster.Publish(events.ChatEvent{Type: events.ChatNewMessage, ProjectID: opts.ProjectID, ExecID: queued.ID, Message: opts.Message, Source: opts.Source, Queued: true, HasAttachments: opts.BroadcastHasAttachments || opts.AttachmentSessionID != ""})
 	}
@@ -928,6 +936,9 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 			opts.OnExecutionCreateFailure(ctx)
 		}
 		return true, nil
+	}
+	if opts.OnDurableHandoff != nil {
+		opts.OnDurableHandoff()
 	}
 
 	linkedAttachments := opts.Attachments
