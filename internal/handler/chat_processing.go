@@ -432,17 +432,6 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			}
 		}
 	}
-	if !params.IsTaskFollowup && h.automationConfirmationSvc != nil && params.TaskID != "" && params.ExecID != "" {
-		principal := automationActionPrincipal(params)
-		pending, confirmationErr := h.automationConfirmationSvc.PrepareChatConfirmation(ctx, params.ProjectID, principal, params.TaskID, params.ExecID, params.Message)
-		if confirmationErr != nil {
-			applog.Infof("[handler] processStreamingResponse exec=%s automation confirmation preparation failed: %v", params.ExecID, confirmationErr)
-		} else if pending != nil {
-			controlContext := fmt.Sprintf("Pending Automation save confirmation was marked affirmative by the Chat host. Call save_automation with confirmation_token=%q and confirming_user_input_id=%q. Do not substitute either value.",
-				pending.Token, pending.ConfirmingUserInputID)
-			params.SystemContext = combineContexts(params.SystemContext, controlContext)
-		}
-	}
 	// Lazy-load chat history, system context, and work dir for task-thread
 	// follow-ups that set DeferHistoryLoad. TaskThreadSend sets this flag so
 	// the HTTP handler can return immediately without blocking on a full
@@ -587,7 +576,7 @@ modelLoop:
 		applog.Infof("[handler] processStreamingResponse exec=%s prepared %d steering inputs for continuation", params.ExecID, pendingSteering.count())
 	}
 	durationMs := time.Since(start).Milliseconds()
-	output := actionCollector.appendAutomationPlans(result.Output)
+	output := result.Output
 	textOnlyOutput := result.TextOnlyOutput
 	tokensUsed := result.Usage.TotalTokens
 
@@ -648,7 +637,6 @@ modelLoop:
 	}
 	completionOutcome := h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 	if completionOutcome == repository.CompleteSuccessCompleted {
-		h.issueStoredAutomationPlanConfirmations(ctx, actionCollector)
 		h.recordStreamingUsage(ctx, params, result, string(models.ExecCompleted), "", durationMs)
 	}
 	if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
@@ -704,17 +692,6 @@ modelLoop:
 	}
 
 	h.finalizeStreamingTurn(params, output)
-}
-
-func (h *Handler) issueStoredAutomationPlanConfirmations(ctx context.Context, collector *chatActionSummaryCollector) {
-	if h == nil || h.automationConfirmationSvc == nil || collector == nil {
-		return
-	}
-	for _, pending := range collector.pendingAutomationPlan {
-		if _, err := h.automationConfirmationSvc.Issue(ctx, pending.Issue); err != nil {
-			applog.Infof("[handler] automation plan receipt issue failed name=%q: %v", pending.Issue.AutomationName, err)
-		}
-	}
 }
 
 type preparedSteeringBatch struct {

@@ -61,13 +61,13 @@ The supported creation paths are:
 - `Template`, using a canonical maintained graph;
 - `Describe It`, using bounded model generation and one bounded repair path;
 - `Blank`, using the full supported custom builder;
-- Chat, using `plan_automation_save` followed by later-confirmed `save_automation`.
+- Chat, using one direct `save_automation` tool call when the user asks to create or save an Automation.
 
 Template, Describe It, and Blank all load a graph into browser memory and create nothing until `Save changes`. `Use template` opens the canonical maintained graph in the same builder so the user can review or customize it before the atomic Save.
 
 Describe It receives only surfaced, project-scoped, secret-free capabilities and no mutation tools. Invalid or unsupported generated graphs remain visible as errors and create no resources.
 
-Chat preserves a separate displayed-plan and later-confirmation experience. Before Save, Chat exposes no Automation or graph identity, URL, runtime resource, or draft terminology. Private signed confirmation state retains only the exact candidate and request scope needed to verify the later command; it is not an Automation. Confirmation consumption and graph application occur in the same transaction. Only successful Save creates the Automation and returns its Live URL.
+Chat creation is available only in Orchestrate mode. The user's request to create or save an Automation authorizes one `save_automation` tool call, which generates or loads the candidate, validates it, and applies it through the same atomic Save path as the web builder. Chat does not stop at a confirmation-only plan or require a second exact command. A successful call creates the Automation and returns its Live URL; a generation, validation, or Save failure creates no partial resources.
 
 ## Runtime Model
 

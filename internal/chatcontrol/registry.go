@@ -742,24 +742,14 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"description":{"type":"string","minLength":1,"maxLength":4000}},"required":["description"],"additionalProperties":false}`),
 	},
 	{
-		Name:         "plan_automation_save",
-		Description:  "Generate, validate, and display the exact save plan for a custom or maintained-template Automation using the same surfaced capabilities as the visual builder. This creates no runtime resources and requires a later user confirmation before Save.",
+		Name:         "save_automation",
+		Description:  "Generate, validate, and atomically save a custom or maintained-template Automation from the user's request using the same capabilities and Save pipeline as the visual builder. Use this when the user asks to create or save an Automation; the successful tool result includes its Live URL. Do not ask for a separate save confirmation.",
 		Domain:       DomainAutomations,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000}},"required":["source"],"additionalProperties":false}`),
-	},
-	{
-		Name:         "save_automation",
-		Description:  "Save a previously displayed Automation plan only after a later exact user confirmation in the same thread.",
-		Domain:       DomainAutomations,
-		Access:       AccessWrite,
-		Sensitivity:  SensitivityNormal,
-		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
-		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"confirmation_token":{"type":"string"},"confirming_user_input_id":{"type":"string"}},"required":["confirmation_token","confirming_user_input_id"],"additionalProperties":false}`),
 	},
 
 	// --- Chat domain ---

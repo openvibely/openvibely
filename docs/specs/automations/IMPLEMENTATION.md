@@ -17,7 +17,7 @@ The supported creation paths are:
 - `Template`, using a canonical maintained candidate.
 - `Describe It`, using the bounded model generation and repair pipeline.
 - `Blank`, using the open custom builder.
-- Chat, using `plan_automation_save` followed by later-confirmed `save_automation`.
+- Chat, using one direct `save_automation` tool call when the user asks to create or save an Automation.
 
 Template, Describe It, Blank, and Edit all open browser-local graphs and apply them only on `Save changes`. `Use template` loads the canonical maintained candidate into the same builder without creating durable rows. All surfaces use the same candidate schema, capability validation, atomic Save service, and safety boundaries. New template creation and maintained setup registration are restricted to Native and GitHub adapters; both SDLC templates include scheduled Vision Suggestions. The internal Vision Driver adapter remains available only to preserve editing and runtime support for already-saved graphs, without migration or backfill.
 
@@ -117,11 +117,11 @@ Automation issue-creation duplicate protection never lists, searches, fetches, o
 
 ## Chat Contract
 
-`plan_automation_save` generates or accepts a candidate, validates it, and returns a user-readable plan plus the exact later confirmation command. Before Save it exposes no Automation ID, graph identity, URL, runtime resource identity, or draft terminology, and leaves zero Automation, Task, or Scheduler rows.
+`save_automation` is an Orchestrate-mode write tool that accepts the same `template`, `describe`, or `blank` creation sources as the web builder. When the user asks to create or save an Automation, the tool generates or loads the candidate, validates it, and passes it directly to the shared atomic Save service. It does not return a confirmation-only plan or require a second exact Chat command.
 
-Private signed confirmation state durably retains the exact candidate, project, principal, thread, plan message, Automation name, and expiry. It contains no Automation ID, graph ID, plan revision, hash, or resource identity. Validation does not consume it; the later exact `save <automation-name>` confirmation consumes it inside the same transaction that saves the graph. Successful Save creates one Automation and returns its real Live URL.
+A successful call creates one Automation and returns its real Live URL. Generation, validation, and transactional Save failures create no partial Automation, Task, or Scheduler resources. Plan mode remains read-only and does not expose `save_automation`.
 
-The removed `create_automation_draft`, `plan_automation_publication`, and `publish_automation_draft` actions and `/automations/drafts` route are not compatibility surfaces.
+The removed `create_automation_draft`, `plan_automation_publication`, `publish_automation_draft`, and `plan_automation_save` actions and `/automations/drafts` route are not compatibility surfaces.
 
 ## Describe It
 

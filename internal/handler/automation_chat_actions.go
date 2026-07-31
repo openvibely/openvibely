@@ -15,15 +15,10 @@ type automationPreviewActionInput struct {
 	Description string `json:"description"`
 }
 
-type automationPlanSaveActionInput struct {
+type automationSaveActionInput struct {
 	Source      string `json:"source"`
 	TemplateKey string `json:"template_key"`
 	Description string `json:"description"`
-}
-
-type automationSaveActionInput struct {
-	ConfirmationToken     string `json:"confirmation_token"`
-	ConfirmingUserInputID string `json:"confirming_user_input_id"`
 }
 
 func (h *Handler) executeAutomationPreviewAction(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
@@ -38,14 +33,11 @@ func (h *Handler) executeAutomationPreviewAction(ctx context.Context, params str
 	return marshalAutomationActionResult(map[string]any{"candidate": result.Candidate, "assumptions": result.Assumptions, "warnings": result.Warnings, "validation_errors": result.ValidationErrors, "summary": result.Summary, "persisted": false, "active": false})
 }
 
-func (h *Handler) executeAutomationPlanSaveAction(ctx context.Context, params streamingResponseParams, input json.RawMessage, collector *chatActionSummaryCollector) (string, error) {
-	if h.automationDraftSvc == nil || h.automationCompiler == nil || h.automationConfirmationSvc == nil {
-		return "", errors.New("automation save planning is unavailable")
+func (h *Handler) executeAutomationSaveAction(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	if h.automationDraftSvc == nil || h.automationCompiler == nil {
+		return "", errors.New("automation save is unavailable")
 	}
-	if strings.TrimSpace(params.TaskID) == "" || strings.TrimSpace(params.ExecID) == "" || collector == nil {
-		return "", errors.New("automation save planning requires a durable chat thread and stored plan message")
-	}
-	var request automationPlanSaveActionInput
+	var request automationSaveActionInput
 	if err := decodeChatActionInput(input, &request); err != nil {
 		return "", err
 	}
@@ -81,43 +73,11 @@ func (h *Handler) executeAutomationPlanSaveAction(ctx context.Context, params st
 		return "", err
 	}
 	if len(plan.Validation) > 0 {
-		return marshalAutomationActionResult(map[string]any{"candidate": candidate, "assumptions": candidate.Assumptions, "warnings": candidate.Warnings, "validation_errors": plan.Validation, "plan": automationSavePlanForChat(plan), "active": false, "confirmation_required": false})
+		return marshalAutomationActionResult(map[string]any{"candidate": candidate, "assumptions": candidate.Assumptions, "warnings": candidate.Warnings, "validation_errors": plan.Validation, "plan": automationSavePlanForChat(plan), "active": false})
 	}
-	principal := automationActionPrincipal(params)
-	name := candidate.Name
-	collector.addAutomationPlan(pendingAutomationPlanConfirmation{
-		Issue: service.AutomationConfirmationIssue{ProjectID: params.ProjectID, PrincipalID: principal,
-			ThreadID: params.TaskID, PlanMessageID: params.ExecID, AutomationName: name, Source: source,
-			Candidate: candidate},
-		Plan: *plan, Name: name,
+	saved, err := h.automationCompiler.Save(ctx, service.AutomationSaveRequest{
+		ProjectID: params.ProjectID, Source: source, CreatedVia: "chat", Candidate: candidate,
 	})
-	return marshalAutomationActionResult(map[string]any{"candidate": candidate, "assumptions": candidate.Assumptions, "warnings": candidate.Warnings, "validation_errors": plan.Validation, "summary": "Ready to save " + name, "plan": automationSavePlanForChat(plan), "confirmation_required": true, "confirmation_command": "save " + name, "active": false, "message": "Review this save plan. Nothing has been created or activated yet. The Chat host will enable Save only after this plan message is durably stored."})
-}
-
-func (h *Handler) executeAutomationSaveAction(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
-	if h.automationConfirmationSvc == nil || h.automationCompiler == nil {
-		return "", errors.New("automation save is unavailable")
-	}
-	var request automationSaveActionInput
-	if err := decodeChatActionInput(input, &request); err != nil {
-		return "", err
-	}
-	principal := automationActionPrincipal(params)
-	pending, err := h.automationConfirmationSvc.ResolveChatConfirmation(ctx, request.ConfirmationToken, params.ProjectID, principal, params.TaskID)
-	if err != nil {
-		return "", err
-	}
-	tokenID, err := h.automationConfirmationSvc.ValidateChatConfirmation(ctx, service.AutomationChatConfirmation{
-		Token: request.ConfirmationToken, ProjectID: params.ProjectID, PrincipalID: principal, ThreadID: params.TaskID,
-		ConfirmingUserInputID: request.ConfirmingUserInputID, AutomationName: pending.AutomationName,
-	})
-	if err != nil {
-		return "", err
-	}
-	saved, err := h.automationCompiler.Save(ctx, service.AutomationSaveRequest{ProjectID: params.ProjectID,
-		Source: pending.Source, CreatedVia: "chat", Candidate: pending.Candidate, ConfirmationTokenID: tokenID,
-		ConfirmationPrincipal: principal, ConfirmationThreadID: params.TaskID,
-		ConfirmingUserInputID: request.ConfirmingUserInputID})
 	if err != nil {
 		return "", err
 	}

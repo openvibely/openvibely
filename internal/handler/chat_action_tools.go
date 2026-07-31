@@ -26,16 +26,9 @@ func (h *Handler) supportsChatActionTools(ctx context.Context, agent models.LLMC
 	return service.SupportsRuntimeChatActionTools(ctx, h.llmConfigRepo, agent)
 }
 
-type pendingAutomationPlanConfirmation struct {
-	Issue service.AutomationConfirmationIssue
-	Plan  models.AutomationSavePlan
-	Name  string
-}
-
 type chatActionSummaryCollector struct {
-	createdLines          []string
-	editedLines           []string
-	pendingAutomationPlan []pendingAutomationPlanConfirmation
+	createdLines []string
+	editedLines  []string
 }
 
 func newChatActionSummaryCollector() *chatActionSummaryCollector {
@@ -43,33 +36,6 @@ func newChatActionSummaryCollector() *chatActionSummaryCollector {
 		createdLines: []string{},
 		editedLines:  []string{},
 	}
-}
-
-func (c *chatActionSummaryCollector) addAutomationPlan(pending pendingAutomationPlanConfirmation) {
-	if c == nil {
-		return
-	}
-	c.pendingAutomationPlan = append(c.pendingAutomationPlan, pending)
-}
-
-func (c *chatActionSummaryCollector) appendAutomationPlans(output string) string {
-	if c == nil || len(c.pendingAutomationPlan) == 0 {
-		return output
-	}
-	var blocks []string
-	for _, pending := range c.pendingAutomationPlan {
-		var lines []string
-		for _, effect := range pending.Plan.Effects {
-			lines = append(lines, fmt.Sprintf("- %s %s: %s", effect.Operation, effect.ResourceType, effect.Name))
-		}
-		blocks = append(blocks, fmt.Sprintf("Automation save plan for %s:\n%s\nNothing has been created or activated. To save after reviewing this stored plan, reply exactly: save %s",
-			pending.Name, strings.Join(lines, "\n"), pending.Name))
-	}
-	summary := "\n\n---\n" + strings.Join(blocks, "\n\n")
-	if strings.Contains(output, summary) {
-		return output
-	}
-	return output + summary
 }
 
 func (c *chatActionSummaryCollector) addCreated(summary string) {
@@ -236,9 +202,6 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"preview_automation_description": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeAutomationPreviewAction(ctx, params, input)
-		},
-		"plan_automation_save": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return h.executeAutomationPlanSaveAction(ctx, params, input, collector)
 		},
 		"save_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeAutomationSaveAction(ctx, params, input)

@@ -1104,28 +1104,69 @@ func TestAutomationBrowserSaveRejectsMalformedConnectorPorts(t *testing.T) {
 	}
 }
 
-func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) {
+func TestAutomationChatExplicitSavePersistsInSingleToolCall(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
-	project := tc.CreateProject().WithName("Automation pending save contract").Build()
+	project := tc.CreateProject().WithName("Automation direct Chat save").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
-	candidates := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationSaveValidator(registry, candidates)
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
-	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("pending-save-contract-secret-32-bytes"))
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(candidates, capabilities, planner, compiler, confirmation, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+	tc.handler.SetAutomationBuilderServices(drafts, capabilities, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
-	for _, removed := range []string{"create_automation_draft", "plan_automation_publication", "publish_automation_draft"} {
+	candidate := automationChatCustomApprovalCandidate(t, drafts)
+	candidateJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	model := models.LLMConfig{Name: "Direct save generator", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, tc.llmConfigRepo.Create(ctx, &model))
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = string(candidateJSON)
+	tc.handler.llmSvc.SetLLMCaller(mock)
+
+	chatTask := models.Task{ProjectID: project.ID, Title: "Automation creation chat", Prompt: "chat", Category: models.CategoryChat, Priority: 2, Status: models.StatusRunning}
+	require.NoError(t, tc.taskRepo.Create(ctx, &chatTask))
+	execution := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "Create an automation that reviews vision daily"}
+	require.NoError(t, tc.execRepo.Create(ctx, &execution))
+	params := streamingResponseParams{ProjectID: project.ID, TaskID: chatTask.ID, ExecID: execution.ID, PrincipalID: "alice"}
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+	output, handled, isError, err := runtime.Executor(ctx, "save_automation", json.RawMessage(`{"source":"describe","description":"Review vision daily and request approval"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isError, output)
+	require.Contains(t, output, `"active":true`)
+	require.Contains(t, output, `"url":"/automations/`)
+	require.NotContains(t, output, "confirmation")
+	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
+	require.Equal(t, 3, tableCountHandler(t, tc, "tasks"), "Save creates two runtime tasks beside the Chat thread")
+	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
+	require.Nil(t, chatcontrol.Get("plan_automation_save"))
+	require.NotNil(t, chatcontrol.Get("save_automation"))
+	for _, def := range chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true) {
+		require.NotEqual(t, "save_automation", def.Name)
+	}
+}
+
+func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Automation save surfaces").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	for _, removed := range []string{"create_automation_draft", "plan_automation_publication", "publish_automation_draft", "plan_automation_save"} {
 		require.Nil(t, chatcontrol.Get(removed), "%s must not remain a Chat capability", removed)
 	}
-	planDef := chatcontrol.Get("plan_automation_save")
-	require.NotNil(t, planDef)
 	saveDef := chatcontrol.Get("save_automation")
 	require.NotNil(t, saveDef)
-	for _, encoded := range []string{planDef.Description, string(planDef.Parameters), saveDef.Description, string(saveDef.Parameters)} {
+	require.NotContains(t, strings.ToLower(string(saveDef.Parameters)), "confirmation")
+	for _, encoded := range []string{saveDef.Description, string(saveDef.Parameters)} {
 		require.NotContains(t, strings.ToLower(encoded), "draft")
 		require.NotContains(t, encoded, "version_id")
 		require.NotContains(t, encoded, "automation_id")
@@ -1136,45 +1177,9 @@ func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) 
 	builder := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}, "source": {"blank"}}).Execute()
 	require.Equal(t, http.StatusOK, builder.Code)
 	require.Zero(t, tableCountHandler(t, tc, "automations"), "opening the browser-local builder must not persist an Automation")
-
-	candidate := automationChatCustomApprovalCandidate(t, candidates)
-	candidateJSON, err := json.Marshal(candidate)
-	require.NoError(t, err)
-	model := models.LLMConfig{Name: "Pending save generator", Provider: models.ProviderTest, Model: "test", IsDefault: true}
-	require.NoError(t, tc.llmConfigRepo.Create(ctx, &model))
-	mock := testutil.NewMockLLMCaller()
-	mock.Response = string(candidateJSON)
-	tc.handler.llmSvc.SetLLMCaller(mock)
-	chatTask := models.Task{ProjectID: project.ID, Title: "Automation plan", Prompt: "chat", Category: models.CategoryChat, Priority: 2, Status: models.StatusRunning}
-	require.NoError(t, tc.taskRepo.Create(ctx, &chatTask))
-	planExecution := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "plan automation"}
-	require.NoError(t, tc.execRepo.Create(ctx, &planExecution))
-	params := streamingResponseParams{ProjectID: project.ID, TaskID: chatTask.ID, ExecID: planExecution.ID, PrincipalID: "alice"}
-	collector := newChatActionSummaryCollector()
-	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, collector, chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
-	output, handled, isError, err := runtime.Executor(ctx, "plan_automation_save", json.RawMessage(`{"source":"describe","description":"Review vision daily and request approval"}`))
-	require.NoError(t, err)
-	require.True(t, handled)
-	require.False(t, isError, output)
-	require.NotContains(t, output, `"url"`)
-	require.NotContains(t, output, `"automation_id"`)
-	require.NotContains(t, output, `"version_id"`)
-	require.NotContains(t, strings.ToLower(output), "draft")
-	require.Contains(t, output, `"confirmation_required":true`)
-	require.Len(t, collector.pendingAutomationPlan, 1)
-	require.Zero(t, tableCountHandler(t, tc, "automations"), "planning must not create an Automation before Save")
-	require.Zero(t, tableCountHandler(t, tc, "tasks")-1, "planning must not create Automation runtime tasks")
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
-
-	_, handled, _, err = runtime.Executor(ctx, "plan_automation_save", json.RawMessage(`{"source":"template","template_key":"vision_driver"}`))
-	require.ErrorContains(t, err, `unsupported automation template "vision_driver"`)
-	require.True(t, handled)
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "tasks")-1)
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 }
 
-func TestAutomationChatSavePlanRejectsCandidateIdentity(t *testing.T) {
+func TestAutomationChatSaveRejectsCandidateIdentity(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation Chat Identity").Build()
@@ -1194,8 +1199,8 @@ func TestAutomationChatSavePlanRejectsCandidateIdentity(t *testing.T) {
 	planExecution := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "plan it"}
 	require.NoError(t, tc.execRepo.Create(ctx, &planExecution))
 
-	_, err = tc.handler.executeAutomationPlanSaveAction(ctx, streamingResponseParams{ProjectID: project.ID, TaskID: chatTask.ID, ExecID: planExecution.ID},
-		json.RawMessage(fmt.Sprintf(`{"source":"candidate","candidate":%s}`, raw)), newChatActionSummaryCollector())
+	_, err = tc.handler.executeAutomationSaveAction(ctx, streamingResponseParams{ProjectID: project.ID, TaskID: chatTask.ID, ExecID: planExecution.ID},
+		json.RawMessage(fmt.Sprintf(`{"source":"candidate","candidate":%s}`, raw)))
 	require.ErrorContains(t, err, "template, describe, or blank")
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 }
@@ -1231,83 +1236,7 @@ func TestAutomationDescribeFailureIsVisibleAndPreservesInput(t *testing.T) {
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 }
 
-func TestAutomationChatActionsUseCanonicalPipelineAndDeferConfirmationReceipt(t *testing.T) {
-	tc := NewTestContext(t)
-	ctx := context.Background()
-	project := tc.CreateProject().WithName("Automation Chat").Build()
-	automationRepo := repository.NewAutomationRepo(tc.db)
-	registry := service.NewAutomationAdapterRegistry()
-	candidates := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationSaveValidator(registry, candidates)
-	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
-	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("chat-confirmation-secret-32-bytes"))
-	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
-	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(candidates, capabilities, planner, compiler, confirmation, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
-
-	candidate := automationChatCustomApprovalCandidate(t, candidates)
-	candidateJSON, err := json.Marshal(candidate)
-	require.NoError(t, err)
-	model := models.LLMConfig{Name: "Automation parity generator", Provider: models.ProviderTest, Model: "test", IsDefault: true}
-	require.NoError(t, tc.llmConfigRepo.Create(ctx, &model))
-	mock := testutil.NewMockLLMCaller()
-	mock.Response = string(candidateJSON)
-	tc.handler.llmSvc.SetLLMCaller(mock)
-	webCreated := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "source": {"describe"}, "description": {"Review a proposed change and ask for approval"},
-	}).Execute()
-	require.Equal(t, 200, webCreated.Code, webCreated.Body.String())
-	require.Contains(t, webCreated.Body.String(), "This generated design is browser-local")
-	require.Contains(t, webCreated.Body.String(), "Save changes")
-	webCandidate := automationCandidateFromResponse(t, webCreated)
-	webCandidateJSON, err := json.Marshal(webCandidate)
-	require.NoError(t, err)
-	require.Zero(t, tableCountHandler(t, tc, "automations"), "web Describe It remains browser-local until Save")
-
-	chatTask := models.Task{ProjectID: project.ID, Title: "Automation planning chat", Prompt: "chat", Category: models.CategoryChat, Priority: 2, Status: models.StatusRunning}
-	require.NoError(t, tc.taskRepo.Create(ctx, &chatTask))
-	planExecution := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "plan it"}
-	require.NoError(t, tc.execRepo.Create(ctx, &planExecution))
-	collector := newChatActionSummaryCollector()
-	plannedJSON, err := tc.handler.executeAutomationPlanSaveAction(ctx, streamingResponseParams{ProjectID: project.ID, TaskID: chatTask.ID, ExecID: planExecution.ID, PrincipalID: "alice"},
-		json.RawMessage(`{"source":"describe","description":"Review vision daily"}`), collector)
-	require.NoError(t, err)
-	var planned struct {
-		Candidate models.AutomationDraftCandidate `json:"candidate"`
-		Active    bool                            `json:"active"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(plannedJSON), &planned))
-	actualCandidateJSON, err := json.Marshal(planned.Candidate)
-	require.NoError(t, err)
-	require.JSONEq(t, string(candidateJSON), string(actualCandidateJSON), "page and Chat fixed custom candidates must normalize identically")
-	require.JSONEq(t, string(candidateJSON), string(webCandidateJSON), "Describe It on the page and Chat must use the same expanded custom contract")
-	require.Equal(t, service.AutomationAdapterCustom, planned.Candidate.AdapterKey)
-	require.Equal(t, 2, mock.CallCount())
-	require.False(t, planned.Active)
-	require.NotContains(t, plannedJSON, "confirmation_token")
-	require.NotContains(t, plannedJSON, "automation_id")
-	require.NotContains(t, plannedJSON, "version_id")
-	require.Equal(t, 1, tableCountHandler(t, tc, "tasks"), "planning must not create runtime tasks beyond the Chat thread")
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
-	require.Len(t, collector.pendingAutomationPlan, 1)
-	require.Zero(t, tableCountHandler(t, tc, "automations"), "Chat planning must not create an Automation before Save")
-	require.Zero(t, tableCountHandler(t, tc, "automation_chat_confirmation_receipts"), "receipt cannot precede durable assistant plan completion")
-	storedOutput := collector.appendAutomationPlans("Plan ready.")
-	require.Contains(t, storedOutput, "Automation save plan")
-	require.Contains(t, storedOutput, "Nothing has been created or activated")
-	require.NoError(t, tc.execRepo.Complete(ctx, planExecution.ID, models.ExecCompleted, storedOutput, "", 0, 1))
-	tc.handler.issueStoredAutomationPlanConfirmations(ctx, collector)
-	require.Equal(t, 1, tableCountHandler(t, tc, "automation_chat_confirmation_receipts"))
-	require.Zero(t, tableCountHandler(t, tc, "automations"), "durable confirmation state must not create an Automation before Save")
-
-	threadDefs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, false)
-	for _, def := range threadDefs {
-		require.NotEqual(t, "plan_automation_save", def.Name)
-		require.NotEqual(t, "save_automation", def.Name)
-	}
-}
-
-func TestAutomationCanonicalChatRuntimeExecutesPreviewPlanAndConfirmedSave(t *testing.T) {
+func TestAutomationCanonicalChatRuntimeExecutesPreviewAndDirectSave(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	project := tc.CreateProject().WithName("Automation runtime actions").Build()
@@ -1315,11 +1244,10 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewPlanAndConfirmedSave(t *te
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
-	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("runtime-confirmation-secret-32-bytes"))
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, capabilities, planner, compiler, confirmation, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+	tc.handler.SetAutomationBuilderServices(drafts, capabilities, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
 	candidate := automationChatCustomApprovalCandidate(t, drafts)
 	candidateJSON, err := json.Marshal(candidate)
@@ -1365,31 +1293,14 @@ func TestAutomationCanonicalChatRuntimeExecutesPreviewPlanAndConfirmedSave(t *te
 	require.Contains(t, failedDescribe.Body.String(), "Generating and validating design")
 	mock.Response = string(candidateJSON)
 
-	planOutput := execute("plan_automation_save", json.RawMessage(`{"source":"describe","description":"Review vision daily and request approval"}`))
-	require.Contains(t, planOutput, `"confirmation_required":true`)
-	require.NotContains(t, planOutput, `"url"`)
-	require.NotContains(t, planOutput, `"automation_id"`)
-	require.NotContains(t, planOutput, `"version_id"`)
-	require.NotContains(t, strings.ToLower(planOutput), "draft")
-	require.Len(t, collector.pendingAutomationPlan, 1)
-	require.Equal(t, 1, tableCountHandler(t, tc, "tasks"), "planning must not add a runtime task beyond the existing Chat thread")
-	require.Zero(t, tableCountHandler(t, tc, "schedules"))
-	storedPlan := collector.appendAutomationPlans("Plan ready.")
-	require.NoError(t, tc.execRepo.Complete(ctx, planExecution.ID, models.ExecCompleted, storedPlan, "", 0, 1))
-	tc.handler.issueStoredAutomationPlanConfirmations(ctx, collector)
-
-	confirming := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "save " + candidate.Name}
-	require.NoError(t, tc.execRepo.Create(ctx, &confirming))
-	prepared, err := confirmation.PrepareChatConfirmation(ctx, project.ID, "alice", chatTask.ID, confirming.ID, confirming.PromptSent)
-	require.NoError(t, err)
-	require.NotNil(t, prepared)
-	savedOutput := execute("save_automation", json.RawMessage(fmt.Sprintf(`{"confirmation_token":%q,"confirming_user_input_id":%q}`,
-		prepared.Token, prepared.ConfirmingUserInputID)))
+	savedOutput := execute("save_automation", json.RawMessage(`{"source":"describe","description":"Review vision daily and request approval"}`))
 	require.Contains(t, savedOutput, `"active":true`)
 	require.NotContains(t, savedOutput, `"version_id"`)
+	require.NotContains(t, strings.ToLower(savedOutput), "confirmation")
 	require.Contains(t, savedOutput, `"url":"/automations/`)
 	require.Equal(t, 3, tableCountHandler(t, tc, "tasks"), "Save creates the Schedule-owned task and its explicit downstream Task beside the Chat thread")
 	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
+	require.Zero(t, tableCountHandler(t, tc, "automation_chat_confirmation_receipts"))
 }
 
 func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
