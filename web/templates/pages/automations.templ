@@ -167,7 +167,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 		}
 		<dialog id="automation-template-modal" class="modal">
 			<div class="modal-box">
-				@ModalCloseButton("automation-template-modal", "Close template selection")
+				@ModalCloseButton("document.getElementById('automation-template-modal')", "Close template selection")
 				<h3 class="pr-10 text-lg font-bold">Create from template</h3>
 				<p class="mt-2 text-sm text-base-content/65">Choose a maintained Automation design to load into the browser-local builder.</p>
 				<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID)) } hx-post={ fmt.Sprintf("/automations/builder?project_id=%s", currentProjectID) } hx-target="#main-content" class="mt-4 space-y-4">
@@ -191,7 +191,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 		</dialog>
 		<dialog id="automation-describe-modal" class="modal" open?={ errorMessage != "" }>
 			<div id="automation-describe-modal-content" class="modal-box">
-				@ModalCloseButton("automation-describe-modal", "Close Automation description")
+				@ModalCloseButton("document.getElementById('automation-describe-modal')", "Close Automation description")
 				@automationDescribeModalFields(currentProjectID, description, errorMessage)
 			</div>
 			<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
@@ -296,7 +296,7 @@ templ AutomationDescribeModalContent(currentProjectID string, description string
 
 templ automationDescribeModalContent(currentProjectID string, description string, errorMessage string) {
 	<div id="automation-describe-modal-content" class="modal-box">
-		@ModalCloseButton("automation-describe-modal", "Close Automation description")
+		@ModalCloseButton("document.getElementById('automation-describe-modal')", "Close Automation description")
 		@automationDescribeModalFields(currentProjectID, description, errorMessage)
 	</div>
 }

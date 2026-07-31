@@ -737,7 +737,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = ModalCloseButton("automation-template-modal", "Close template selection").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = ModalCloseButton("document.getElementById('automation-template-modal')", "Close template selection").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -794,7 +794,7 @@ func automationsContent(cards []models.AutomationCard, currentProjectID string, 
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = ModalCloseButton("automation-describe-modal", "Close Automation description").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = ModalCloseButton("document.getElementById('automation-describe-modal')", "Close Automation description").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -885,7 +885,7 @@ func automationDescribeModalContent(currentProjectID string, description string,
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = ModalCloseButton("automation-describe-modal", "Close Automation description").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = ModalCloseButton("document.getElementById('automation-describe-modal')", "Close Automation description").Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
