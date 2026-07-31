@@ -158,7 +158,7 @@ func Sidebar(projects []models.Project, currentProjectID string) templ.Component
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 2 5 13h6l-1 9 9-13h-6V2z\"></path></svg> <span class=\"sidebar-text\">Automations</span></a></li><li><a data-nav-base=\"/schedule\" data-tip=\"Schedule\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" hx-target=\"#main-content\" hx-push-url=\"true\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4 shrink-0\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M13 2 3 14h9l-1 8 10-12h-9l1-8z\"></path></svg> <span class=\"sidebar-text\">Automations</span></a></li><li><a data-nav-base=\"/schedule\" data-tip=\"Schedule\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

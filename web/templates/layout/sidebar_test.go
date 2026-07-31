@@ -125,7 +125,7 @@ func TestSidebar_AutomationsUsesRecognizableOutlineLightningBolt(t *testing.T) {
 		`stroke-linecap="round"`,
 		`stroke-linejoin="round"`,
 		`stroke-width="2"`,
-		`d="M13 2 5 13h6l-1 9 9-13h-6V2z"`,
+		`d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"`,
 	} {
 		if !strings.Contains(automationsLink, marker) {
 			t.Fatalf("Automations navigation icon is missing outline lightning-bolt marker %s", marker)
