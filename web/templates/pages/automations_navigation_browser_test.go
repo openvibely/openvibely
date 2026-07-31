@@ -620,7 +620,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	    click('[data-automation-new-menu] button[data-automation-new-custom]', 'Custom creation menu option');
 	    await waitFor(function() { return !!document.querySelector('[data-automation-add-first-node]'); }, 'empty Custom Automation canvas');
 	    await report('progress', 'blank-canvas-loaded');
-	    click('[data-automation-add-first-node]', 'Add first node action');	    var nodeDialog = document.querySelector('[data-automation-node-dialog]');
+	    click('[data-automation-add-first-node]', 'Add first node action');
+	    var nodeDialog = document.querySelector('[data-automation-node-dialog]');
 	    if (!nodeDialog || !nodeDialog.open) fail('Add first node did not open the node dialog');
 	    var purposes = Array.from(nodeDialog.querySelectorAll('[name="node_kind"] option')).map(function(option) { return option.value; });
 	    ['schedule', 'task', 'create_notification', 'human_approval', 'create_github_issue', 'human_assignment', 'github_inbox', 'open_pull_request', 'human_review', 'outcome'].forEach(function(purpose) {
