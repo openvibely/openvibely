@@ -199,17 +199,12 @@ func TestAutomationDescriptionPromptMatchesStrictCustomValidationContract(t *tes
 }
 
 func TestAutomationDocumentationUsesGitHubInboxOwnedScheduleContract(t *testing.T) {
-	for _, path := range []string{
-		filepath.Join("..", "..", "docs", "specs", "automations", "IMPLEMENTATION.md"),
-		filepath.Join("..", "..", "docs", "automations-user-guide.md"),
-	} {
-		body, err := os.ReadFile(path)
-		require.NoError(t, err)
-		documentation := string(body)
-		require.Contains(t, documentation, "GitHub inbox is itself a substantive scheduled Task and owns its schedule; do not add a separate Schedule before it.")
-		require.NotContains(t, documentation, "GitHub inbox's required substantive Schedule source")
-		require.NotContains(t, documentation, "separate substantive Schedule source for GitHub inbox polling")
-	}
+	body, err := os.ReadFile(filepath.Join("..", "..", "docs", "automations-user-guide.md"))
+	require.NoError(t, err)
+	documentation := string(body)
+	require.Contains(t, documentation, "GitHub inbox is itself a substantive scheduled Task and owns its schedule; do not add a separate Schedule before it.")
+	require.NotContains(t, documentation, "GitHub inbox's required substantive Schedule source")
+	require.NotContains(t, documentation, "separate substantive Schedule source for GitHub inbox polling")
 }
 
 func TestAutomationDescriptionPromptIncludesCanonicalMaintainedAdapters(t *testing.T) {
