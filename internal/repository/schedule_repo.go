@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -86,6 +87,95 @@ func (r *ScheduleRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (map
 		result[s.TaskID] = append(result[s.TaskID], s)
 	}
 	return result, rows.Err()
+}
+
+// ScheduleDiscoveryFilter bounds a read-only, current-project schedule discovery query.
+type ScheduleDiscoveryFilter struct {
+	// TaskID optionally restricts results to schedules bound to a single task.
+	TaskID string
+	// Title is an optional partial (case-insensitive substring) task title match.
+	Title string
+	// Enabled optionally restricts results to enabled (true) or disabled (false)
+	// schedules. Nil returns both.
+	Enabled *bool
+	// Limit caps the number of returned rows. Callers should clamp before use.
+	Limit int
+	// Offset skips the first N rows for pagination.
+	Offset int
+}
+
+// ScheduleDiscoveryRow is a schedule paired with its bound task's title for
+// read-only discovery projections.
+type ScheduleDiscoveryRow struct {
+	Schedule  models.Schedule
+	TaskTitle string
+}
+
+// ListSchedulesForDiscovery returns a bounded, deterministic page of schedules for
+// a single project, plus the total number of matching rows for pagination. It never
+// crosses project boundaries: the join on tasks.project_id enforces isolation.
+//
+// Ordering is deterministic: schedules with a pending next_run come first ordered by
+// next_run ASC, then schedules without a next_run, all tie-broken by created_at DESC
+// then id ASC.
+func (r *ScheduleRepo) ListSchedulesForDiscovery(ctx context.Context, projectID string, filter ScheduleDiscoveryFilter) ([]ScheduleDiscoveryRow, int, error) {
+	where := `t.project_id = ?`
+	args := []any{projectID}
+
+	if taskID := strings.TrimSpace(filter.TaskID); taskID != "" {
+		where += ` AND s.task_id = ?`
+		args = append(args, taskID)
+	}
+	if title := strings.TrimSpace(filter.Title); title != "" {
+		where += ` AND t.title LIKE ?`
+		args = append(args, "%"+title+"%")
+	}
+	if filter.Enabled != nil {
+		where += ` AND s.enabled = ?`
+		args = append(args, *filter.Enabled)
+	}
+
+	var total int
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE `+where, args...).
+		Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("counting schedules for discovery: %w", err)
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	selectArgs := append([]any{}, args...)
+	selectArgs = append(selectArgs, limit, offset)
+
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start,
+		 s.next_run, s.last_run, s.created_at, s.updated_at, t.title
+		 FROM schedules s JOIN tasks t ON t.id = s.task_id
+		 WHERE `+where+`
+		 ORDER BY (s.next_run IS NULL), s.next_run ASC, s.created_at DESC, s.id ASC
+		 LIMIT ? OFFSET ?`, selectArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("listing schedules for discovery: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ScheduleDiscoveryRow
+	for rows.Next() {
+		var row ScheduleDiscoveryRow
+		s := &row.Schedule
+		if err := rows.Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval,
+			&s.Enabled, &s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt, &row.TaskTitle); err != nil {
+			return nil, 0, fmt.Errorf("scanning schedule for discovery: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, total, rows.Err()
 }
 
 func (r *ScheduleRepo) GetByID(ctx context.Context, id string) (*models.Schedule, error) {

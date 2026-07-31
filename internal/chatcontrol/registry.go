@@ -16,6 +16,7 @@
 //
 // Chat read-only (plan + orchestrate):
 //   - tasks: list_tasks, view_task_thread
+//   - schedules: list_schedules
 //   - projects: list_projects, project_info, get_current_project
 //   - models: list_models, get_model
 //   - agents: list_agents
@@ -443,6 +444,16 @@ var registry = []ActionDef{
 		Surfaces:     webAPISurfaces(),
 		Parameters:   json.RawMessage(githubForwardPRFeedbackParams),
 	}, // --- Schedules domain (RW in orchestrate) ---
+	{
+		Name:         "list_schedules",
+		Description:  "Discover schedules in the current project. Returns compact summaries (schedule ID, bound task ID/title, enabled state, recurrence type/interval/days, next run, clear-context-on-start) with deterministic ordering and explicit limit/offset pagination. Read-only; never crosses projects. Optional filters: task_id, title (partial task title), enabled. Use the returned schedule IDs with modify_schedule or delete_schedule.",
+		Domain:       DomainSchedules,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string","description":"Optional: restrict to schedules bound to this task ID."},"title":{"type":"string","description":"Optional partial (case-insensitive substring) task title match."},"enabled":{"type":"boolean","description":"Optional: filter by enabled (true) or disabled (false) schedules."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Max results to return (default 20, capped at 50)."},"offset":{"type":"integer","minimum":0,"description":"Number of results to skip for pagination."}},"additionalProperties":false}`),
+	},
 	{
 		Name:         "schedule_task",
 		Description:  "Create a schedule for a task.",

@@ -240,8 +240,36 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",
 		"list_personalities", "view_settings", "project_info",
 		"get_chat_mode", "list_capabilities", "get_alert", "get_model",
-		"get_personality", "get_current_project", "memory_view", "view_task_thread", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
+		"get_personality", "get_current_project", "memory_view", "view_task_thread", "list_schedules", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
 }
+
+func TestListSchedulesRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
+	// list_schedules is a read-only discovery action available in Plan and
+	// Orchestrate modes across every supported chat surface.
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range AllSurfaces {
+			defs := ToolDefsForContext(mode, surface, false)
+			names := toolDefNames(defs)
+			mustContain(t, names, "list_schedules")
+		}
+	}
+
+	def := Get("list_schedules")
+	if def == nil {
+		t.Fatal("expected list_schedules to be registered")
+	}
+	if def.Access != AccessRead {
+		t.Fatalf("expected list_schedules to be read-only, got %q", def.Access)
+	}
+	if def.Domain != DomainSchedules {
+		t.Fatalf("expected list_schedules in schedules domain, got %q", def.Domain)
+	}
+	// Read-only actions must remain allowed in Plan mode on web.
+	if err := IsAllowed("list_schedules", models.ChatModePlan, SurfaceWeb); err != nil {
+		t.Fatalf("expected list_schedules allowed in plan mode: %v", err)
+	}
+}
+
 func TestToolDefsForContext_Telegram(t *testing.T) {
 	defs := ToolDefsForContext(models.ChatModeOrchestrate, SurfaceTelegram, true)
 	names := toolDefNames(defs)

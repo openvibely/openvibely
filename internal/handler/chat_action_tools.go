@@ -370,6 +370,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			}
 			return strings.TrimSpace(h.executeChatModifyScheduleRequests(ctx, params.ProjectID, []service.ModifyScheduleRequest{req})), nil
 		},
+		"list_schedules": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return service.ExecuteListSchedulesTool(ctx, h.scheduleRepo, params.ProjectID, input)
+		},
 		"list_personalities": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListPersonalities(ctx)), nil
 		},
@@ -1367,6 +1370,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"create_task":                          true,
 		"execute_tasks":                        true,
 		"create_swarm_task":                    true,
+		"list_schedules":                       true,
 		"schedule_task":                        true,
 		"delete_schedule":                      true,
 		"modify_schedule":                      true,
