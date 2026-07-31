@@ -1864,7 +1864,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = ModalCloseButton("delete-automation-modal", "Close delete automation confirmation").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ModalCloseButton("document.getElementById('delete-automation-modal')", "Close delete automation confirmation").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2141,7 +2141,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = ModalCloseButton("delete-automation-modal", "Close delete automation confirmation").Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ModalCloseButton("document.getElementById('delete-automation-modal')", "Close delete automation confirmation").Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

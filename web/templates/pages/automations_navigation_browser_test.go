@@ -405,7 +405,7 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 		return out.String()
 	}
 
-	renderBlankBuilder := func(withNode bool) string {
+	renderBlankBuilder := func(withNode bool, automationID string) string {
 		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Blank Automation", AutomationType: "custom", AdapterKey: "custom"}
 		if withNode {
 			candidate.Nodes = []models.AutomationDraftNode{
@@ -414,7 +414,7 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 				{Key: "third_step", Name: "Third step", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 520, Y: 0}},
 			}
 		}
-		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}}
+		page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, AutomationID: automationID}
 		var out bytes.Buffer
 		if err := AutomationBuilderContent(page, projectID).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render blank Automation builder: %v", err)
@@ -576,9 +576,20 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A after in-page back');
     await report('progress', 'automation-a-ready-before-edit');
 
+    click('#automation-live button[onclick*="delete-automation-modal"][onclick*="showModal"]', 'Live Automation Delete');
+    var liveDeleteModal = document.querySelector('#automation-live #delete-automation-modal');
+    if (!liveDeleteModal || !liveDeleteModal.open) fail('Live Automation Delete did not open its confirmation dialog');
+    click('#automation-live #delete-automation-modal button[aria-label="Close delete automation confirmation"]', 'Live Automation delete modal close button');
+    if (liveDeleteModal.open) fail('Live Automation delete modal close button did not close the dialog');
+
     click('#automation-live form[hx-post*="/builder"] button[type="submit"]', 'Edit automation');
     await waitFor(function() { return !!document.getElementById('automation-builder'); }, 'builder after Edit automation');
     if (document.getElementById('automation-live')) fail('live Automation root remained mounted behind the editor');
+    click('#automation-builder [data-delete-automation-open]', 'Edit Automation Delete');
+    var editDeleteModal = document.querySelector('#automation-builder #delete-automation-modal');
+    if (!editDeleteModal || !editDeleteModal.open) fail('Edit Automation Delete did not open its confirmation dialog');
+    click('#automation-builder #delete-automation-modal button[aria-label="Close delete automation confirmation"]', 'Edit Automation delete modal close button');
+    if (editDeleteModal.open) fail('Edit Automation delete modal close button did not close the dialog');
 	    var editedCanvas = document.querySelector('#automation-builder [data-automation-draft-canvas]');
 	    if (!editedCanvas) fail('Edit automation did not render the custom canvas');
 	    click('#automation-builder [data-automation-add-node-open]', 'Add node after Edit automation');    var editedNodeDialog = document.querySelector('#automation-builder [data-automation-node-dialog]');
@@ -844,7 +855,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			close(releaseOlderLive)
 			w.WriteHeader(http.StatusNoContent)
 		case "/automations/automation-a/builder":
-			_, _ = w.Write([]byte(renderBlankBuilder(true)))
+			_, _ = w.Write([]byte(renderBlankBuilder(true, "automation-a")))
 		case "/automations/automation-a/pause":
 			setAutomationLifecycle("automation-a", models.AutomationPaused)
 			_, _ = w.Write([]byte(renderPortfolio()))
@@ -861,7 +872,7 @@ window.addEventListener('DOMContentLoaded', function() {
 				_, _ = w.Write([]byte(renderDescribeFailure(r.FormValue("description"))))
 				return
 			}
-			_, _ = w.Write([]byte(renderBlankBuilder(r.FormValue("builder_action") == "create_node")))
+			_, _ = w.Write([]byte(renderBlankBuilder(r.FormValue("builder_action") == "create_node", "")))
 		case "/automations/automation-visual":
 			_, _ = w.Write([]byte(renderLive("automation-visual", "Visual Automation")))
 		case "/automations/automation-visual/builder":

@@ -422,7 +422,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 			if deleteAvailable {
 				<dialog id="delete-automation-modal" class="modal">
 					<div class="modal-box">
-						@ModalCloseButton("delete-automation-modal", "Close delete automation confirmation")
+						@ModalCloseButton("document.getElementById('delete-automation-modal')", "Close delete automation confirmation")
 						<h3 class="pr-10 text-lg font-bold text-error">Delete automation</h3>
 						<p class="py-4">Delete <strong>{ graph.Automation.Name }</strong>? This permanently deletes the saved Automation graph and Automation record.</p>
 						<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Existing tasks remain. Automation-owned trigger schedules will be deleted. This cannot be undone.</div>
@@ -574,7 +574,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 		if page.AutomationID != "" {
 			<dialog id="delete-automation-modal" class="modal">
 				<div class="modal-box">
-					@ModalCloseButton("delete-automation-modal", "Close delete automation confirmation")
+					@ModalCloseButton("document.getElementById('delete-automation-modal')", "Close delete automation confirmation")
 					<h3 class="pr-10 text-lg font-bold text-error">Delete automation</h3>
 					<p class="py-4">Delete <strong>{ page.Result.Candidate.Name }</strong>? This permanently deletes this Automation graph and its saved design.</p>
 					<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Existing tasks remain. Any Automation-owned trigger schedules will be deleted. This cannot be undone.</div>
