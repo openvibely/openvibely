@@ -49,6 +49,18 @@ func TestAlertsContent_DeleteActionsDoNotDependOnHxConfirm(t *testing.T) {
 	if !strings.Contains(html, `function deleteAlerts(url, target)`) {
 		t.Fatal("expected direct delete helper in alerts template")
 	}
+	for _, want := range []string{
+		`data-alert-scroll-anchor`,
+		`data-alert-delete`,
+		`aria-label="Delete alert Disk full"`,
+		`htmx:beforeSwap`,
+		`htmx:afterSettle`,
+		`focus({preventScroll: true})`,
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected single-alert delete flow to preserve viewport and focus with %q", want)
+		}
+	}
 }
 
 func TestAlertsContent_CardsConformToNarrowViewport(t *testing.T) {

@@ -110,8 +110,92 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 		function deleteAlertsFromDataset(el) {
 			if (!el || !el.dataset) return false;
 			var url = el.dataset.deleteUrl || '';
+			var row = el.closest('[data-alert-scroll-anchor]');
+			if (row && window.openVibelyAlertsViewport) {
+				window.openVibelyAlertsViewport.pendingFocusID = row.dataset.alertId || '';
+			}
 			return deleteAlerts(url, '#alerts-container');
 		}
+
+		(function installAlertsViewportPreservation() {
+			var state = window.openVibelyAlertsViewport || (window.openVibelyAlertsViewport = {});
+			if (state.installed) return;
+			state.installed = true;
+
+			function alertRows(root) {
+				return Array.prototype.slice.call(root.querySelectorAll('[data-alert-scroll-anchor]'));
+			}
+
+			function focusCandidates(rows, activeID) {
+				var ids = rows.map(function(row) { return row.dataset.alertId || ''; });
+				var index = ids.indexOf(activeID);
+				if (index < 0) return [];
+				var candidates = [activeID];
+				for (var distance = 1; distance < ids.length; distance++) {
+					if (index + distance < ids.length) candidates.push(ids[index + distance]);
+					if (index - distance >= 0) candidates.push(ids[index - distance]);
+				}
+				return candidates;
+			}
+
+			document.body.addEventListener('htmx:beforeSwap', function(event) {
+				var root = event.detail && event.detail.target;
+				if (!root || root.id !== 'alerts-container') return;
+
+				var rows = alertRows(root);
+				var rootRect = root.getBoundingClientRect();
+				var anchors = rows.map(function(row) {
+					return {id: row.dataset.alertId || '', top: row.getBoundingClientRect().top};
+				}).sort(function(a, b) {
+					return Math.abs(a.top - rootRect.top) - Math.abs(b.top - rootRect.top);
+				});
+				var activeDelete = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-alert-delete]');
+				var activeRow = activeDelete && activeDelete.closest('[data-alert-scroll-anchor]');
+				var focusID = state.pendingFocusID || (activeRow && activeRow.dataset.alertId) || '';
+
+				state.swap = {
+					anchors: anchors,
+					rootScrollTop: root.scrollTop,
+					windowScrollY: window.scrollY,
+					focusIDs: focusCandidates(rows, focusID)
+				};
+				state.pendingFocusID = '';
+			});
+
+			document.body.addEventListener('htmx:afterSettle', function(event) {
+				var settledTarget = event.detail && event.detail.target;
+				var root = document.getElementById('alerts-container');
+				var saved = state.swap;
+				if (!settledTarget || settledTarget.id !== 'alerts-container' || !root || !saved) return;
+				state.swap = null;
+
+				root.scrollTop = saved.rootScrollTop;
+				var anchor = null;
+				var savedAnchor = null;
+				for (var i = 0; i < saved.anchors.length; i++) {
+					anchor = root.querySelector('[data-alert-scroll-anchor="' + CSS.escape(saved.anchors[i].id) + '"]');
+					if (anchor) {
+						savedAnchor = saved.anchors[i];
+						break;
+					}
+				}
+				if (anchor && savedAnchor) {
+					var delta = anchor.getBoundingClientRect().top - savedAnchor.top;
+					if (root.scrollHeight > root.clientHeight) root.scrollTop += delta;
+					else window.scrollBy(0, delta);
+				} else if (Math.abs(window.scrollY - saved.windowScrollY) > 1) {
+					window.scrollTo(0, saved.windowScrollY);
+				}
+
+				var focusTarget = null;
+				for (var j = 0; j < saved.focusIDs.length; j++) {
+					focusTarget = root.querySelector('[data-alert-scroll-anchor="' + CSS.escape(saved.focusIDs[j]) + '"] [data-alert-delete]');
+					if (focusTarget) break;
+				}
+				if (!focusTarget && saved.focusIDs.length) focusTarget = root.querySelector('[data-card-search]');
+				if (focusTarget) focusTarget.focus({preventScroll: true});
+			});
+		})();
 	</script>
 }
 
@@ -131,6 +215,7 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 	<div
 		id={ "alert-" + alert.ID }
 		data-alert-id={ alert.ID }
+		data-alert-scroll-anchor={ alert.ID }
 		class={ "card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all w-full min-w-0 max-w-full", templ.KV("opacity-60", alert.IsRead), templ.KV("cursor-pointer", alert.TaskID != nil) }
 		data-search-card
 		data-search-text={ alertSearchText(alert) }
@@ -223,6 +308,8 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 					}
 					<button
 						class="btn btn-ghost btn-xs text-error"
+						data-alert-delete
+						aria-label={ "Delete alert " + alert.Title }
 						data-delete-url={ fmt.Sprintf("/alerts/%s?project_id=%s", alert.ID, currentProjectID) }
 						onclick="event.preventDefault(); event.stopPropagation(); return deleteAlertsFromDataset(this)"
 					>
