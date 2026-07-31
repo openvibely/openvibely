@@ -112,18 +112,21 @@ func responsesLiteTools(tools any) []any {
 	return filtered
 }
 
-func stripResponsesLiteImageDetails(value any) {
+func filterResponsesLiteImageDetails(value any, model string) {
+	supportsAutoDetail := isResponsesLiteWebsocketModel(model)
 	switch current := value.(type) {
 	case map[string]any:
 		if strings.EqualFold(strings.TrimSpace(stringFromAny(current["type"])), "input_image") {
-			delete(current, "detail")
+			if !supportsAutoDetail || stringFromAny(current["detail"]) != "auto" {
+				delete(current, "detail")
+			}
 		}
 		for _, nested := range current {
-			stripResponsesLiteImageDetails(nested)
+			filterResponsesLiteImageDetails(nested, model)
 		}
 	case []any:
 		for _, nested := range current {
-			stripResponsesLiteImageDetails(nested)
+			filterResponsesLiteImageDetails(nested, model)
 		}
 	}
 }
@@ -160,7 +163,7 @@ func buildResponsesLiteWebsocketPayload(payload map[string]any, system, sessionI
 	}
 
 	input, _ := request["input"].([]any)
-	stripResponsesLiteImageDetails(input)
+	filterResponsesLiteImageDetails(input, stringFromAny(request["model"]))
 	prefix := make([]any, 0, 2)
 	prefix = append(prefix, map[string]any{
 		"type":  "additional_tools",
