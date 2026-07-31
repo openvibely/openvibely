@@ -386,6 +386,49 @@ func TestHandler_CreateTask_FromSchedulePage_RejectsOversizedInterval(t *testing
 	}
 }
 
+func TestHandler_CreateTask_FromSchedulePage_InvalidDateCreatesTaskWithoutSchedule(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	form := url.Values{
+		"title":           {"Invalid date scheduled task"},
+		"prompt":          {"Create the task without a schedule"},
+		"category":        {"scheduled"},
+		"priority":        {"2"},
+		"run_at":          {"not-a-date"},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tasks?project_id=default&from=schedule", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
+	}
+	tasks, err := h.taskSvc.ListByProject(ctx, "default", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *models.Task
+	for i := range tasks {
+		if tasks[i].Title == "Invalid date scheduled task" {
+			found = &tasks[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected scheduled task to be created")
+	}
+	schedules, err := h.scheduleRepo.ListByTask(ctx, found.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 0 {
+		t.Fatalf("expected no schedule for invalid date, got %d", len(schedules))
+	}
+}
+
 func TestHandler_CreateTask_FromSchedulePage_DefaultsRepeatTypeToDailyWhenMissing(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
