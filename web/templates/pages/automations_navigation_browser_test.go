@@ -347,21 +347,28 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 	}
 
 	page.AutomationID = ""
-	page.Source = "template"
-	out.Reset()
-	if err := AutomationBuilderContent(page, "project-edit-actions").Render(context.Background(), &out); err != nil {
-		t.Fatalf("render new Template builder actions: %v", err)
-	}
-	newBody := out.String()
-	newCanvas := strings.Index(newBody, `data-automation-draft-canvas`)
-	if newCanvas < 0 || strings.Index(newBody, `data-automation-name`) > newCanvas {
-		t.Error("new builder must retain Automation name above the canvas")
-	}
-	if !strings.Contains(newBody[:newCanvas], `>Save changes</button>`) {
-		t.Error("new builder must retain its visible Save changes action above the canvas")
-	}
-	if strings.Contains(newBody, `data-automation-builder-actions`) {
-		t.Error("new builder must not render the saved Edit kebab")
+	for _, source := range []string{"template", "describe"} {
+		page.Source = source
+		out.Reset()
+		if err := AutomationBuilderContent(page, "project-edit-actions").Render(context.Background(), &out); err != nil {
+			t.Fatalf("render new %s builder actions: %v", source, err)
+		}
+		newBody := out.String()
+		newCanvas := strings.Index(newBody, `data-automation-draft-canvas`)
+		newAssumptions := strings.Index(newBody, `>Assumptions</h3>`)
+		newWarnings := strings.Index(newBody, `>Warnings</h3>`)
+		if newCanvas < 0 || strings.Index(newBody, `data-automation-name`) > newCanvas {
+			t.Errorf("new %s builder must retain Automation name above the canvas", source)
+		}
+		if newAssumptions < 0 || newWarnings < 0 || !(newAssumptions < newWarnings && newWarnings < newCanvas) {
+			t.Errorf("new %s builder must retain assumptions and warnings above the canvas, got assumptions=%d warnings=%d canvas=%d", source, newAssumptions, newWarnings, newCanvas)
+		}
+		if !strings.Contains(newBody[:newCanvas], `>Save changes</button>`) {
+			t.Errorf("new %s builder must retain its visible Save changes action above the canvas", source)
+		}
+		if strings.Contains(newBody, `data-automation-builder-actions`) {
+			t.Errorf("new %s builder must not render the saved Edit kebab", source)
+		}
 	}
 }
 

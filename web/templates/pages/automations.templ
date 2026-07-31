@@ -642,6 +642,20 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 		if page.Error != "" {
 			<div class="alert alert-error mb-4" role="alert">{ page.Error }</div>
 		}
+		if page.AutomationID == "" && (len(page.Result.Assumptions) > 0 || len(page.Result.Warnings) > 0) {
+			<div class="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2" data-automation-builder-insights>
+				<div class="rounded-box bg-base-200/60 p-4"><h3 class="font-semibold">Assumptions</h3><ul class="mt-2 list-disc pl-5 text-sm">
+					for _, item := range page.Result.Assumptions {
+						<li>{ item }</li>
+					}
+				</ul></div>
+				<div class="rounded-box bg-base-200/60 p-4"><h3 class="font-semibold">Warnings</h3><ul class="mt-2 list-disc pl-5 text-sm">
+					for _, item := range page.Result.Warnings {
+						<li>{ item }</li>
+					}
+				</ul></div>
+			</div>
+		}
 			if len(page.Result.ValidationErrors) > 0 {
 				<details class="mb-3 rounded-box border border-base-300 bg-base-200/40 px-4 py-3" data-automation-validation-summary open?={ page.Error != "" }>
 					<summary class="cursor-pointer text-sm font-medium">{ fmt.Sprintf("%d setup items before this design can run", len(automationValidationMessages(page.Result.ValidationErrors, page.NodePalette))) }</summary>
@@ -783,7 +797,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<p class="mt-2 text-sm text-base-content/65">Saving validates and applies this Automation immediately.</p>
 				</div>
 			}
-			if len(page.Result.Assumptions) > 0 || len(page.Result.Warnings) > 0 {
+			if page.AutomationID != "" && (len(page.Result.Assumptions) > 0 || len(page.Result.Warnings) > 0) {
 				<div class="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-2" data-automation-builder-insights>
 					<div class="rounded-box bg-base-200/60 p-4"><h3 class="font-semibold">Assumptions</h3><ul class="mt-2 list-disc pl-5 text-sm">
 						for _, item := range page.Result.Assumptions {
