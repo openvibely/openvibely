@@ -1334,15 +1334,11 @@ func (s *GitHubService) CreateIssue(ctx context.Context, repo *GitHubRepoRef, cr
 	if assignees := cleanGitHubStringList(createReq.Assignees); len(assignees) > 0 {
 		payload["assignees"] = assignees
 	}
-	body, _ := json.Marshal(payload)
-
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := s.newGitHubJSONRequest(ctx, http.MethodPost, endpoint, token, payload)
 	if err != nil {
 		return nil, err
 	}
-	s.applyGitHubHeaders(req, token)
-	req.Header.Set("Content-Type", "application/json")
 
 	var raw githubIssueAPI
 	if err := s.doGitHubJSON(req, &raw); err != nil {
@@ -1366,11 +1362,10 @@ func (s *GitHubService) GetIssue(ctx context.Context, repo *GitHubRepoRef, issue
 	}
 
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), issueNumber)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := s.newGitHubJSONRequest(ctx, http.MethodGet, endpoint, token, nil)
 	if err != nil {
 		return nil, err
 	}
-	s.applyGitHubHeaders(req, token)
 
 	var raw githubIssueAPI
 	if err := s.doGitHubJSON(req, &raw); err != nil {
@@ -1397,14 +1392,11 @@ func (s *GitHubService) CommentOnIssue(ctx context.Context, repo *GitHubRepoRef,
 		return err
 	}
 
-	payload, _ := json.Marshal(map[string]string{"body": bodyText})
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/comments", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), issueNumber)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	req, err := s.newGitHubJSONRequest(ctx, http.MethodPost, endpoint, token, map[string]string{"body": bodyText})
 	if err != nil {
 		return err
 	}
-	s.applyGitHubHeaders(req, token)
-	req.Header.Set("Content-Type", "application/json")
 	return s.doGitHubJSON(req, nil)
 }
 
@@ -1527,14 +1519,11 @@ func (s *GitHubService) AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRe
 		return err
 	}
 
-	payload, _ := json.Marshal(map[string][]string{"labels": cleaned})
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/labels", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), issueNumber)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	req, err := s.newGitHubJSONRequest(ctx, http.MethodPost, endpoint, token, map[string][]string{"labels": cleaned})
 	if err != nil {
 		return err
 	}
-	s.applyGitHubHeaders(req, token)
-	req.Header.Set("Content-Type", "application/json")
 	return s.doGitHubJSON(req, nil)
 }
 
@@ -2264,6 +2253,27 @@ func nextGitHubPageURL(linkHeader string, base *url.URL) (string, error) {
 		return resolved.String(), nil
 	}
 	return "", nil
+}
+
+func (s *GitHubService) newGitHubJSONRequest(ctx context.Context, method, endpoint, bearerToken string, body any) (*http.Request, error) {
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reader = bytes.NewReader(encoded)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, bearerToken)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
 }
 
 func (s *GitHubService) applyGitHubHeaders(req *http.Request, bearerToken string) {
