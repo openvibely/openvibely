@@ -16,6 +16,16 @@ import (
 
 // ---- CreateSchedule ----
 
+func assertSchedulesTaskDetailFragment(t *testing.T, body string) {
+	t.Helper()
+	if !strings.Contains(body, `id="task-detail-content"`) {
+		t.Fatal("expected task-detail-content in HTMX response")
+	}
+	if !strings.Contains(body, `class="tab tab-active" data-tab="schedules"`) {
+		t.Fatal("expected schedules tab to be active in HTMX response")
+	}
+}
+
 func TestCreateSchedule_InvalidDate(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
@@ -75,6 +85,7 @@ func TestCreateSchedule_HTMX_Success(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for HTMX create, got %d body=%s", rec.Code, rec.Body.String())
 	}
+	assertSchedulesTaskDetailFragment(t, rec.Body.String())
 }
 
 func TestCreateSchedule_DefaultRepeatType(t *testing.T) {
@@ -437,6 +448,7 @@ func TestUpdateSchedule_HTMX_Success(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for HTMX update, got %d body=%s", rec.Code, rec.Body.String())
 	}
+	assertSchedulesTaskDetailFragment(t, rec.Body.String())
 }
 
 func TestUpdateSchedule_WithoutAgentFieldPreservesExistingAssignment(t *testing.T) {
@@ -897,6 +909,7 @@ func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 HTMX response, got %d", rec.Code)
 	}
+	assertSchedulesTaskDetailFragment(t, rec.Body.String())
 }
 
 func TestToggleScheduleEnabled_NonHTMX_RedirectContainsTaskID(t *testing.T) {

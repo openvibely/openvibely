@@ -36,6 +36,32 @@ func (h *Handler) scheduleAgentAssignmentFromForm(c echo.Context, taskID string)
 	return true, agentDefinitionID, nil
 }
 
+func (h *Handler) renderScheduleTaskDetail(c echo.Context, taskID string, taskLookupErrorsAsNotFound bool) error {
+	ctx := c.Request().Context()
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil {
+		if taskLookupErrorsAsNotFound {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	executions, _ := h.execRepo.ListByTask(ctx, taskID)
+	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
+	agents, _ := h.llmConfigRepo.List(ctx)
+	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
+	adefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
+	var reviewComments []models.ReviewComment
+	if h.reviewCommentRepo != nil {
+		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
+	}
+
+	return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(ctx, taskID), executions, schedules, agents, adefs, attachments, "schedules", reviewComments))
+}
+
 func (h *Handler) CreateSchedule(c echo.Context) error {
 	taskID := c.Param("taskId")
 	isHTMX := isHTMX(c)
@@ -97,26 +123,7 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 
 	// For HTMX requests, return the updated task detail content
 	if isHTMX {
-		task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-		if err != nil {
-			applog.Infof("[handler] CreateSchedule error fetching task: %v", err)
-			return err
-		}
-		if task == nil {
-			return echo.NewHTTPError(http.StatusNotFound, "task not found")
-		}
-
-		executions, _ := h.execRepo.ListByTask(c.Request().Context(), taskID)
-		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-		var rc []models.ReviewComment
-		if h.reviewCommentRepo != nil {
-			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-		}
-
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "schedules", rc))
+		return h.renderScheduleTaskDetail(c, taskID, false)
 	}
 
 	projectID := c.QueryParam("project_id")
@@ -217,26 +224,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 
 	// For HTMX requests, return the updated task detail content
 	if isHTMX {
-		task, err := h.taskSvc.GetByID(c.Request().Context(), schedule.TaskID)
-		if err != nil {
-			applog.Infof("[handler] UpdateSchedule error fetching task: %v", err)
-			return err
-		}
-		if task == nil {
-			return echo.NewHTTPError(http.StatusNotFound, "task not found")
-		}
-
-		executions, _ := h.execRepo.ListByTask(c.Request().Context(), schedule.TaskID)
-		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), schedule.TaskID)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), schedule.TaskID)
-		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-		var rc []models.ReviewComment
-		if h.reviewCommentRepo != nil {
-			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), schedule.TaskID)
-		}
-
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), schedule.TaskID), executions, schedules, agents, adefs, attachments, "schedules", rc))
+		return h.renderScheduleTaskDetail(c, schedule.TaskID, false)
 	}
 
 	projectID := c.QueryParam("project_id")
@@ -329,20 +317,7 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 
 	taskID := result.schedule.TaskID
 	if isHTMX(c) {
-		task, err := h.taskSvc.GetByID(ctx, taskID)
-		if err != nil || task == nil {
-			return echo.NewHTTPError(http.StatusNotFound, "task not found")
-		}
-		executions, _ := h.execRepo.ListByTask(ctx, taskID)
-		schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
-		agents, _ := h.llmConfigRepo.List(ctx)
-		attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
-		adefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
-		var rc []models.ReviewComment
-		if h.reviewCommentRepo != nil {
-			rc, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
-		}
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(ctx, taskID), executions, schedules, agents, adefs, attachments, "schedules", rc))
+		return h.renderScheduleTaskDetail(c, taskID, true)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
