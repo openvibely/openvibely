@@ -581,20 +581,27 @@ func TestAutomationLiveCardTypographyMatchesEdit(t *testing.T) {
 	}
 }
 
-func TestAutomationLiveSingleNodeUsesMinimumGraphViewingArea(t *testing.T) {
-	node := models.AutomationLiveNode{AutomationNode: models.AutomationNode{PositionX: 0, PositionY: 0}}
-	viewBox := automationLiveGraphViewBox([]models.AutomationLiveNode{node})
-	var x, y, width, height float64
-	if _, err := fmt.Sscanf(viewBox, "%f %f %f %f", &x, &y, &width, &height); err != nil {
-		t.Fatalf("parse one-node Live viewBox %q: %v", viewBox, err)
-	}
-	if width < 900 || height < 540 {
-		t.Fatalf("one-node Live graph must retain a usable viewing area, got %s", viewBox)
-	}
-	nodeLeft := automationGraphLayoutX(node.PositionX)
-	nodeTop := automationGraphLayoutY(node.PositionY)
-	if nodeLeft < x || nodeTop < y || nodeLeft+automationGraphNodeWidth > x+width || nodeTop+automationGraphNodeHeight > y+height {
-		t.Fatalf("one-node Live graph is not centered within its viewing area, got %s", viewBox)
+func TestAutomationLiveSmallGraphViewBoxMatchesEdit(t *testing.T) {
+	for name, liveNodes := range map[string][]models.AutomationLiveNode{
+		"one node": {
+			{AutomationNode: models.AutomationNode{PositionX: 0, PositionY: 0}},
+		},
+		"small graph": {
+			{AutomationNode: models.AutomationNode{PositionX: 0, PositionY: 0}},
+			{AutomationNode: models.AutomationNode{PositionX: 260, PositionY: 0}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			draftNodes := make([]models.AutomationDraftNode, 0, len(liveNodes))
+			for _, node := range liveNodes {
+				draftNodes = append(draftNodes, models.AutomationDraftNode{Position: &models.AutomationDraftPoint{X: node.PositionX, Y: node.PositionY}})
+			}
+			liveViewBox := automationLiveGraphViewBox(liveNodes)
+			editViewBox := automationDraftGraphViewBox(draftNodes)
+			if liveViewBox != editViewBox {
+				t.Fatalf("Live and Edit must use identical graph bounds for visual-scale parity: Live=%s Edit=%s", liveViewBox, editViewBox)
+			}
+		})
 	}
 }
 
@@ -875,11 +882,18 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 		return out.String()
 	}
 	renderLive := func(id, name string) string {
-		node := models.AutomationNode{ID: id + "-node", Name: "A very long automation node name that must wrap safely", NodeType: models.AutomationNodeAgentTask, PositionX: 20, PositionY: -90}
+		nodes := []models.AutomationLiveNode{{AutomationNode: models.AutomationNode{ID: id + "-node", Name: "A very long automation node name that must wrap safely", NodeType: models.AutomationNodeAgentTask, PositionX: 20, PositionY: -90}, DisplayState: "idle"}}
+		if id == "automation-a" {
+			nodes = []models.AutomationLiveNode{
+				{AutomationNode: models.AutomationNode{ID: "first_step", Name: "First step", NodeType: models.AutomationNodeAgentTask, PositionX: 0, PositionY: 0}, DisplayState: "idle"},
+				{AutomationNode: models.AutomationNode{ID: "second_step", Name: "Second step", NodeType: models.AutomationNodeAgentTask, PositionX: 260, PositionY: 0}, DisplayState: "idle"},
+				{AutomationNode: models.AutomationNode{ID: "third_step", Name: "Third step", NodeType: models.AutomationNodeOutcome, PositionX: 520, PositionY: 0}, DisplayState: "idle"},
+			}
+		}
 		graph := models.AutomationLiveGraph{
 			Automation:   models.Automation{ID: id, Name: name, Description: "Theme and navigation fixture", LifecycleState: models.AutomationActive},
 			Version:      models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"},
-			Nodes:        []models.AutomationLiveNode{{AutomationNode: node, DisplayState: "idle"}},
+			Nodes:        nodes,
 			RecentCutoff: time.Unix(1, 0),
 		}
 		var out bytes.Buffer
@@ -1019,10 +1033,12 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var liveCanvasShellRect = document.querySelector('[aria-label="Live automation graph"]').getBoundingClientRect();
 	    if (liveCanvasShellRect.bottom > liveRootRect.bottom + 4) fail('single-node Live canvas extends below the page viewport');
 	    var liveViewBox = document.querySelector('#automation-live [data-automation-canvas]').getAttribute('viewBox').split(/\s+/).map(Number);
-	    if (liveViewBox[2] < 900 || liveViewBox[3] < 540) fail('single-node Live graph uses an undersized viewBox: ' + liveViewBox.join(' '));
+	    if (liveViewBox[2] !== 810 || liveViewBox[3] !== 224) fail('Live graph does not use the same tight padded bounds as Edit: ' + liveViewBox.join(' '));
 	    var nodeRect = node.getBoundingClientRect();
-	    if (nodeRect.width > canvasRect.width * 0.35 || nodeRect.height > canvasRect.height * 0.35) fail('single Live node is magnified instead of fitted within the canvas');
-	    if (nodeRect.top < canvasRect.top - 1 || nodeRect.bottom > canvasRect.bottom + 1) fail('negative-position node is clipped by graph viewport');
+	    var liveParityNodeWidth = nodeRect.width;
+	    var liveParityNodeHeight = nodeRect.height;
+	    if (!liveParityNodeWidth || !liveParityNodeHeight) fail('Live parity node has no rendered dimensions');
+	    if (nodeRect.left < canvasRect.left - 1 || nodeRect.right > canvasRect.right + 1 || nodeRect.top < canvasRect.top - 1 || nodeRect.bottom > canvasRect.bottom + 1) fail('Live node is clipped by graph viewport');
 	    var labelRect = label.getBoundingClientRect();
 	    if (labelRect.left < nodeRect.left - 1 || labelRect.right > nodeRect.right + 1 || labelRect.top < nodeRect.top - 1 || labelRect.bottom > nodeRect.bottom + 1) fail('node label escapes its node bounds');
 	    if (getComputedStyle(label).overflow !== 'hidden') fail('long node label is not visibly bounded');
@@ -1112,6 +1128,10 @@ window.addEventListener('DOMContentLoaded', function() {
     if (editDeleteModal.open) fail('Edit Automation delete modal close button did not close the dialog');
 	    var editedCanvas = document.querySelector('#automation-builder [data-automation-draft-canvas]');
 	    if (!editedCanvas) fail('Edit automation did not render the custom canvas');
+	    var editParityNode = editedCanvas.querySelector('[data-node-key="first_step"] .automation-graph-node');
+	    if (!editParityNode) fail('Edit automation is missing the matching visual-parity node');
+	    var editParityNodeRect = editParityNode.getBoundingClientRect();
+	    if (Math.abs(editParityNodeRect.width - liveParityNodeWidth) > 1 || Math.abs(editParityNodeRect.height - liveParityNodeHeight) > 1) fail('Live and Edit render matching nodes at different sizes: Live=' + liveParityNodeWidth.toFixed(1) + 'x' + liveParityNodeHeight.toFixed(1) + ' Edit=' + editParityNodeRect.width.toFixed(1) + 'x' + editParityNodeRect.height.toFixed(1));
 	    click('#automation-builder [data-automation-add-node-open]', 'Add node after Edit automation');    var editedNodeDialog = document.querySelector('#automation-builder [data-automation-node-dialog]');
     if (!editedNodeDialog || !editedNodeDialog.open) fail('Add node is inoperable after the Edit automation HTMX transition');
     editedNodeDialog.close();

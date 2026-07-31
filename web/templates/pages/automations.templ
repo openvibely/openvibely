@@ -570,17 +570,7 @@ func automationLiveGraphViewBox(nodes []models.AutomationLiveNode) string {
 		if x+automationGraphNodeWidth > maxX { maxX = x+automationGraphNodeWidth }
 		if y+automationGraphNodeHeight > maxY { maxY = y+automationGraphNodeHeight }
 	}
-	x, y := minX-automationGraphPadding, minY-automationGraphPadding
-	width, height := maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding
-	if width < 900 {
-		x -= (900 - width) / 2
-		width = 900
-	}
-	if height < 540 {
-		y -= (540 - height) / 2
-		height = 540
-	}
-	return fmt.Sprintf("%.0f %.0f %.0f %.0f", x, y, width, height)
+	return fmt.Sprintf("%.0f %.0f %.0f %.0f", minX-automationGraphPadding, minY-automationGraphPadding, maxX-minX+2*automationGraphPadding, maxY-minY+2*automationGraphPadding)
 }
 func automationLiveEdgeNodes(nodes []models.AutomationLiveNode, edge models.AutomationEdge) (models.AutomationLiveNode, models.AutomationLiveNode, bool) { var source, target models.AutomationLiveNode; var foundSource, foundTarget bool; for _, n := range nodes { if n.ID == edge.SourceNodeID { source, foundSource = n, true }; if n.ID == edge.TargetNodeID { target, foundTarget = n, true } }; return source, target, foundSource && foundTarget }
 func automationLiveNodeClass(state string) string { base := "automation-graph-node automation-graph-node--idle"; switch state { case "failed": return "automation-graph-node automation-graph-node--failed"; case "blocked": return "automation-graph-node automation-graph-node--blocked"; case "waiting_human": return "automation-graph-node automation-graph-node--waiting"; case "running": return "automation-graph-node automation-graph-node--running"; case "recently_completed": return "automation-graph-node automation-graph-node--completed" }; return base }
