@@ -1045,6 +1045,11 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var liveParityNodeWidth = nodeRect.width;
 	    var liveParityNodeHeight = nodeRect.height;
 	    if (!liveParityNodeWidth || !liveParityNodeHeight) fail('Live parity node has no rendered dimensions');
+	    click('#automation-live [data-automation-fit]', 'Live Fit control for visual parity');
+	    var liveFitNodeRect = node.getBoundingClientRect();
+	    var liveFitNodeWidth = liveFitNodeRect.width;
+	    var liveFitNodeHeight = liveFitNodeRect.height;
+	    if (!liveFitNodeWidth || !liveFitNodeHeight) fail('Live fitted parity node has no rendered dimensions');
 	    if (nodeRect.left < canvasRect.left - 1 || nodeRect.right > canvasRect.right + 1 || nodeRect.top < canvasRect.top - 1 || nodeRect.bottom > canvasRect.bottom + 1) fail('Live node is clipped by graph viewport');
 	    var labelRect = label.getBoundingClientRect();
 	    if (labelRect.left < nodeRect.left - 1 || labelRect.right > nodeRect.right + 1 || labelRect.top < nodeRect.top - 1 || labelRect.bottom > nodeRect.bottom + 1) fail('node label escapes its node bounds');
@@ -1144,6 +1149,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var editParityShellRect = editParityShell.getBoundingClientRect();
 	    if (editParityShellRect.height < 319) fail('short-desktop Edit canvas collapsed below its 20rem usability floor: ' + editParityShellRect.height.toFixed(1) + 'px');
 	    if (Math.abs(editParityNodeRect.width - liveParityNodeWidth) > 1 || Math.abs(editParityNodeRect.height - liveParityNodeHeight) > 1) fail('Live and Edit render matching nodes at different sizes: Live=' + liveParityNodeWidth.toFixed(1) + 'x' + liveParityNodeHeight.toFixed(1) + ' in ' + canvasRect.width.toFixed(1) + 'x' + canvasRect.height.toFixed(1) + ' shell ' + liveCanvasShellRect.width.toFixed(1) + 'x' + liveCanvasShellRect.height.toFixed(1) + ' Edit=' + editParityNodeRect.width.toFixed(1) + 'x' + editParityNodeRect.height.toFixed(1) + ' in ' + editParityCanvasRect.width.toFixed(1) + 'x' + editParityCanvasRect.height.toFixed(1) + ' shell ' + editParityShellRect.width.toFixed(1) + 'x' + editParityShellRect.height.toFixed(1));
+	    click('#automation-builder [data-automation-fit]', 'Edit Fit control for visual parity');
+	    var editFitNodeRect = editParityNode.getBoundingClientRect();
+	    if (Math.abs(editFitNodeRect.width - liveFitNodeWidth) > 1 || Math.abs(editFitNodeRect.height - liveFitNodeHeight) > 1) fail('Live and Edit Fit render matching nodes at different sizes: Live=' + liveFitNodeWidth.toFixed(1) + 'x' + liveFitNodeHeight.toFixed(1) + ' Edit=' + editFitNodeRect.width.toFixed(1) + 'x' + editFitNodeRect.height.toFixed(1));
 	    click('#automation-builder [data-automation-add-node-open]', 'Add node after Edit automation');    var editedNodeDialog = document.querySelector('#automation-builder [data-automation-node-dialog]');
     if (!editedNodeDialog || !editedNodeDialog.open) fail('Add node is inoperable after the Edit automation HTMX transition');
     editedNodeDialog.close();

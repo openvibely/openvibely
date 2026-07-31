@@ -1188,8 +1188,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					var xs = groups.map(function(group) { return Number(group.dataset.nodeX); });
 					var ys = groups.map(function(group) { return Number(group.dataset.nodeY); });
 					var minX = Math.min.apply(null, xs) - 60, minY = Math.min.apply(null, ys) - 60;
-					var maxX = Math.max.apply(null, xs) + 250, maxY = Math.max.apply(null, ys) + 164;
-					viewBox = [minX, minY, Math.max(360, maxX - minX), Math.max(240, maxY - minY)]; applyViewBox();
+					var maxX = Math.max.apply(null, xs) + 230, maxY = Math.max.apply(null, ys) + 164;
+					viewBox = [minX, minY, maxX - minX, maxY - minY]; applyViewBox();
 				});
 				root.querySelector('[data-automation-reset]').addEventListener('click', function() {
 					svg.querySelectorAll('.automation-draft-node').forEach(function(group) { renderNode(group, Number(group.dataset.defaultX), Number(group.dataset.defaultY)); });
