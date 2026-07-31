@@ -1938,16 +1938,28 @@ func TestGitHubIssueAPIMethods(t *testing.T) {
 	var sawCreate, sawGet, sawComment, sawLabels bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_test" {
+			t.Fatalf("unexpected authorization header for %s %s: %q", r.Method, r.URL.Path, got)
+		}
+		if got := r.Header.Get("Accept"); got != githubAPIAcceptHeaderValue {
+			t.Fatalf("unexpected accept header for %s %s: %q", r.Method, r.URL.Path, got)
+		}
+		if got := r.Header.Get("X-GitHub-Api-Version"); got != githubAPIVersionHeaderValue {
+			t.Fatalf("unexpected API version header for %s %s: %q", r.Method, r.URL.Path, got)
+		}
+		if r.Method == http.MethodGet {
+			if got := r.Header.Get("Content-Type"); got != "" {
+				t.Fatalf("GET request must not have a content type, got %q", got)
+			}
+		} else if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("unexpected content type for %s %s: %q", r.Method, r.URL.Path, got)
+		}
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/issues":
 			sawCreate = true
 			body, _ := io.ReadAll(r.Body)
-			text := string(body)
-			if strings.Contains(text, "openvibely:") {
-				t.Fatalf("issue creation must not send prefixed labels: %s", text)
-			}
-			if !strings.Contains(text, `"labels":["bug","approved"]`) || !strings.Contains(text, `"assignees":["dev-bot"]`) {
-				t.Fatalf("unexpected create issue payload: %s", text)
+			if got, want := string(body), `{"assignees":["dev-bot"],"body":"Fix it","labels":["bug","approved"],"title":"Bug"}`; got != want {
+				t.Fatalf("unexpected create issue payload: %s", got)
 			}
 			_, _ = w.Write([]byte(`{"number":7,"html_url":"https://github.com/openvibely/openvibely/issues/7","title":"Bug","body":"Fix it","state":"open","user":{"login":"alice"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"},{"name":"approved"}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/issues/7":
@@ -1956,8 +1968,8 @@ func TestGitHubIssueAPIMethods(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/issues/7/comments":
 			sawComment = true
 			body, _ := io.ReadAll(r.Body)
-			if !strings.Contains(string(body), `"body":"working on it"`) {
-				t.Fatalf("unexpected comment payload: %s", string(body))
+			if got := string(body); got != `{"body":"working on it"}` {
+				t.Fatalf("unexpected comment payload: %s", got)
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":1}`))
