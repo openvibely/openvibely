@@ -573,7 +573,7 @@ templ AutomationBuilder(projects []models.Project, currentProjectID string, page
 }
 
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
-	<div id="automation-builder" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-draft>
+	<div id="automation-builder" class={ "h-full min-w-0 max-w-full", templ.KV("flex flex-col overflow-y-hidden", page.AutomationID == "" && page.Source == "blank"), templ.KV("overflow-y-auto", page.AutomationID != "" || page.Source != "blank") } data-automation-draft>
 		@layout.PageTitle(page.Result.Candidate.Name)
 		if page.AutomationID != "" {
 			<div class="mb-6 min-w-0" data-automation-builder-header>
@@ -645,7 +645,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</ul>
 				</details>
 			}
-			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
+			<section class={ "mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4", templ.KV("flex min-h-0 flex-1 flex-col", page.AutomationID == "" && page.Source == "blank") } data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 				<div class="flex flex-wrap items-start justify-between gap-3">
 					<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">{ automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect steps:</span> Drag from a node's right handle to another node's left handle. Select a line, then use its × control to delete it or drag an endpoint to reconnect it.</p></div>
 					<div data-automation-node-tool>
@@ -703,14 +703,14 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</div>
 					<form method="dialog" class="modal-backdrop"><button aria-label="Close add node dialog">close</button></form>
 				</dialog>
-				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-22rem)] min-h-[28rem] max-h-[42rem]", page.AutomationID == "" && page.Source == "blank"), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID != "" || page.Source != "blank") } role="region" aria-label="Automation graph builder">
+				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("min-h-0 flex-1", page.AutomationID == "" && page.Source == "blank"), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID != "" || page.Source != "blank") } role="region" aria-label="Automation graph builder">
 					<div class="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" aria-label="Canvas controls" data-automation-builder-viewport-controls>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button>
 					</div>
-					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class={ "w-full touch-none select-none", templ.KV("h-full", page.AutomationID == "" && page.Source == "blank"), templ.KV("h-[calc(100dvh-15rem)] min-h-[42rem]", page.AutomationID != "" || page.Source != "blank") } role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
+					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class={ "block w-full touch-none select-none", templ.KV("h-full", page.AutomationID == "" && page.Source == "blank"), templ.KV("h-[calc(100dvh-15rem)] min-h-[42rem]", page.AutomationID != "" || page.Source != "blank") } role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
 						@automationGraphThemeStyles()
 						<defs>
 							<marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow automation-edge-foreground-arrow"></path></marker>
@@ -757,7 +757,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					}
 				</div>
 			</section>
-			<details class="mb-5 rounded-box border border-base-300 bg-base-100 p-4">
+			<details class="mb-5 rounded-box border border-base-300 bg-base-100 p-4" data-automation-node-settings>
 				<summary class="cursor-pointer font-semibold">Node and connection settings</summary>
 				<form id="automation-design-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="mt-4 space-y-4" data-automation-draft-form>
 					<input type="hidden" name="project_id" value={ currentProjectID }/>
@@ -1153,6 +1153,14 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					builder.addEventListener('htmx:beforeCleanupElement', function(event) {
 						if (event.target === builder) clearActiveConnection();
 					});
+					var nodeSettings = builder.querySelector('[data-automation-node-settings]');
+					if (nodeSettings && builder.classList.contains('overflow-y-hidden')) {
+						nodeSettings.addEventListener('toggle', function() {
+							builder.classList.toggle('overflow-y-hidden', !nodeSettings.open);
+							builder.classList.toggle('overflow-y-auto', nodeSettings.open);
+							if (!nodeSettings.open) builder.scrollTop = 0;
+						});
+					}
 					var automationName = builder.querySelector('[data-automation-name]');
 					if (automationName) automationName.addEventListener('input', syncCandidate);
 					builder.addEventListener('submit', syncCandidate);

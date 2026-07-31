@@ -511,18 +511,22 @@ func TestAutomationBlankBuilderCanvasFitsNonEditPage(t *testing.T) {
 
 	blank := render("blank", "")
 	for _, want := range []string{
-		`h-[calc(100dvh-22rem)]`,
-		`min-h-[28rem]`,
-		`max-h-[42rem]`,
+		`flex flex-col overflow-y-hidden`,
+		`flex min-h-0 flex-1 flex-col`,
+		`min-h-0 flex-1`,
 		`data-automation-canvas`,
 		`h-full`,
+		`data-automation-node-settings`,
+		`builder.classList.toggle('overflow-y-auto', nodeSettings.open)`,
 	} {
 		if !strings.Contains(blank, want) {
 			t.Errorf("expected blank builder page-fit contract to contain %q", want)
 		}
 	}
-	if strings.Contains(blank, `min-h-[calc(100dvh-15rem)]`) || strings.Contains(blank, `min-h-[42rem]`) {
-		t.Error("new blank builder must not force the full-height Template/Edit canvas")
+	for _, forbidden := range []string{`h-[calc(100dvh-22rem)]`, `min-h-[28rem]`, `max-h-[42rem]`, `min-h-[calc(100dvh-15rem)]`, `min-h-[42rem]`} {
+		if strings.Contains(blank, forbidden) {
+			t.Errorf("new blank builder must not force fixed canvas sizing %q", forbidden)
+		}
 	}
 
 	for label, body := range map[string]string{
@@ -532,7 +536,7 @@ func TestAutomationBlankBuilderCanvasFitsNonEditPage(t *testing.T) {
 		if !strings.Contains(body, `min-h-[calc(100dvh-15rem)]`) || !strings.Contains(body, `min-h-[42rem]`) {
 			t.Errorf("%s builder must retain the existing large-canvas sizing", label)
 		}
-		if strings.Contains(body, `h-[calc(100dvh-22rem)]`) {
+		if strings.Contains(body, `flex min-h-0 flex-1 flex-col`) || strings.Contains(body, `min-h-0 flex-1`) {
 			t.Errorf("%s builder unexpectedly uses blank-only page-fit sizing", label)
 		}
 	}
@@ -985,7 +989,8 @@ window.addEventListener('DOMContentLoaded', function() {
 			await waitFor(function() { return !!document.querySelector('[data-automation-add-first-node]'); }, 'empty Custom Automation canvas');
 			var blankCanvasRect = document.querySelector('#automation-builder [data-automation-draft-canvas] [data-automation-canvas]').getBoundingClientRect();
 			if (!blankCanvasRect.height) fail('blank Custom canvas has no rendered height');
-			if (blankCanvasRect.bottom > window.innerHeight + 2) fail('blank Custom canvas extends below the page viewport by ' + Math.round(blankCanvasRect.bottom - window.innerHeight) + 'px');
+			var blankBuilderRect = document.getElementById('automation-builder').getBoundingClientRect();
+			if (blankCanvasRect.bottom > blankBuilderRect.bottom + 4) fail('blank Custom canvas extends below the builder viewport by ' + Math.round(blankCanvasRect.bottom - blankBuilderRect.bottom) + 'px');
 			if (blankCanvasRect.height >= templateCanvasRect.height) fail('blank Custom canvas did not use its bounded non-edit page sizing');
 			await report('progress', 'blank-canvas-loaded');	    click('[data-automation-add-first-node]', 'Add first node action');
 	    var nodeDialog = document.querySelector('[data-automation-node-dialog]');
@@ -1002,8 +1007,22 @@ window.addEventListener('DOMContentLoaded', function() {
 	    htmx.process(nodeForm);
 	    nodeForm.requestSubmit(nodeDialog.querySelector('[data-automation-create-node]'));
 	    await report('progress', 'add-node-submitted');
-		    await waitFor(function() { return !!document.querySelector('[data-node-key="first_step"]'); }, 'new node on blank canvas');
-		    click('#automation-builder [data-automation-add-node-open]', 'Add second node');	    nodeDialog = document.querySelector('[data-automation-node-dialog]');
+	    await waitFor(function() { return !!document.querySelector('[data-node-key="first_step"]'); }, 'new node on blank canvas');
+	    var oneNodeBuilder = document.getElementById('automation-builder');
+	    var oneNodeCanvasSection = oneNodeBuilder.querySelector('[data-automation-draft-canvas]');
+	    var oneNodeCanvasShell = oneNodeCanvasSection.querySelector('.automation-canvas-shell');
+	    var oneNodeCanvas = oneNodeCanvasSection.querySelector('[data-automation-canvas]');
+	    var oneNodeCanvasRect = oneNodeCanvas.getBoundingClientRect();
+	    if (getComputedStyle(oneNodeBuilder).display !== 'flex' || getComputedStyle(oneNodeBuilder).flexDirection !== 'column') fail('one-node Custom builder is not using the page-fit flex layout');
+	    if (getComputedStyle(oneNodeCanvasSection).flexGrow !== '1' || getComputedStyle(oneNodeCanvasShell).flexGrow !== '1') fail('one-node Custom canvas does not consume only the remaining builder height');
+	    if (getComputedStyle(oneNodeBuilder).overflowY !== 'hidden') fail('one-node Custom builder still allows page scrolling while settings are collapsed');
+	    if (oneNodeCanvasRect.bottom > oneNodeBuilder.getBoundingClientRect().bottom + 4) fail('one-node Custom canvas extends below the builder viewport');
+	    var oneNodeSettings = oneNodeBuilder.querySelector('[data-automation-node-settings]');
+	    oneNodeSettings.open = true;
+	    await waitFor(function() { return getComputedStyle(oneNodeBuilder).overflowY === 'auto'; }, 'one-node settings scrolling when expanded');
+	    oneNodeSettings.open = false;
+	    await waitFor(function() { return getComputedStyle(oneNodeBuilder).overflowY === 'hidden'; }, 'one-node page fit after settings collapse');
+	    click('#automation-builder [data-automation-add-node-open]', 'Add second node');	    nodeDialog = document.querySelector('[data-automation-node-dialog]');
 	    nodeDialog.querySelector('[name="node_name"]').value = 'Second step';
 	    nodeDialog.querySelector('[name="node_kind"]').value = 'task';
 	    nodeForm = nodeDialog.querySelector('form[hx-post]');
@@ -1169,6 +1188,15 @@ window.addEventListener('DOMContentLoaded', function() {
 		.menu li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); }
 		.menu li > * { grid-column-start: 1; grid-row-start: 1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(auto, max-content) auto max-content; align-items: center; gap: .5rem; padding: .5rem 1rem; }
 		.w-full { width: 100%; }
+		.flex { display: flex; }
+		.flex-col { flex-direction: column; }
+		.flex-1 { flex: 1 1 0%; }
+		.min-h-0 { min-height: 0; }
+		.h-full { height: 100%; }
+		.block { display: block; }
+		.overflow-y-hidden { overflow-y: hidden !important; }
+		.overflow-y-auto { overflow-y: auto !important; }
+		#automation-builder { box-sizing: border-box; height: 900px; }
 		[class~="h-[calc(100dvh-15rem)]"] { height: calc(100vh - 15rem); }
 		[class~="min-h-[calc(100dvh-15rem)]"] { min-height: calc(100vh - 15rem); }
 		[class~="min-h-[42rem]"] { min-height: 42rem; }
