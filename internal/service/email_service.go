@@ -181,6 +181,7 @@ type emailIMAPClient interface {
 type emailInboundReceiptStore interface {
 	Exists(ctx context.Context, mailboxAddress, messageKey string) (bool, error)
 	Record(ctx context.Context, mailboxAddress, messageKey string) error
+	WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(repository.SQLExecutor) error) (bool, error)
 }
 
 type EmailService struct {
@@ -493,7 +494,13 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 				continue
 			}
 		}
-		if !s.ProcessIncoming(ctx, fetched.Message) {
+		handled := false
+		if s.processIncomingMessageFn != nil {
+			handled = s.ProcessIncoming(ctx, fetched.Message)
+		} else {
+			handled = s.processIncomingMessage(ctx, fetched.Message, mailboxIdentity, messageKey)
+		}
+		if !handled {
 			continue
 		}
 		if s.emailInboundReceiptStore != nil {
@@ -724,10 +731,10 @@ func (s *EmailService) ProcessIncoming(ctx context.Context, msg EmailInboundMess
 	if s.processIncomingMessageFn != nil {
 		return s.processIncomingMessageFn(ctx, msg)
 	}
-	return s.processIncomingMessage(ctx, msg)
+	return s.processIncomingMessage(ctx, msg, "", "")
 }
 
-func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInboundMessage) bool {
+func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey string) bool {
 	if isIgnoredEmail(msg, s.getConfiguredAddress(ctx)) ||
 		(strings.TrimSpace(msg.Body) == "" && len(msg.Attachments) == 0) {
 		return true
@@ -785,6 +792,17 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 		NewQueuedInput: func() *models.ThreadInput {
 			return &models.ThreadInput{EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey}
 		},
+		CreateQueuedInput: func(ctx context.Context, input *models.ThreadInput) (bool, error) {
+			if s.threadInputRepo == nil {
+				return false, fmt.Errorf("thread input repository is not configured")
+			}
+			if s.emailInboundReceiptStore == nil || mailboxIdentity == "" || messageKey == "" {
+				return false, s.threadInputRepo.CreateQueued(ctx, input)
+			}
+			return s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(exec repository.SQLExecutor) error {
+				return s.threadInputRepo.CreateQueuedWithExecutor(ctx, exec, input)
+			})
+		},
 		OnAttachmentDownloadFailed: func(context.Context, string) { applog.Infof("[email] attachment processing failed") },
 		OnAttachmentStoreFailed:    func(context.Context, string) { applog.Infof("[email] attachment staging failed") },
 		OnModelSelectionFailed:     func(context.Context, error) { applog.Infof("[email] model selection failed") },
@@ -794,8 +812,16 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 			Task:              &models.Task{Title: fmt.Sprintf("Email %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Subject, 47)), CreatedVia: models.TaskOriginEmail},
 			ReplyContext:      ChannelReplyContext{Source: models.TaskOriginEmail, EmailFrom: msg.FromAddress, EmailMessageID: msg.MessageID, EmailReferences: msg.References, EmailSubject: msg.Subject, EmailSessionKey: sessionKey},
 			ChannelChatRunner: s.channelChatRunner,
-			RuntimeTools:      s.buildEmailActionToolRuntime(projectID, msg.FromAddress),
-			LinkAttachments:   s.linkAttachmentsToExecution,
+			CreateExecution: func(ctx context.Context, execution *models.Execution) (bool, error) {
+				if s.emailInboundReceiptStore == nil || mailboxIdentity == "" || messageKey == "" {
+					return false, s.execRepo.Create(ctx, execution)
+				}
+				return s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(exec repository.SQLExecutor) error {
+					return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+				})
+			},
+			RuntimeTools:    s.buildEmailActionToolRuntime(projectID, msg.FromAddress),
+			LinkAttachments: s.linkAttachmentsToExecution,
 			AttachmentContextAndImages: func(atts []models.ChatAttachment) (string, []models.Attachment) {
 				return channelChatAttachmentContextAndImages(atts, emailMaxTextFileSize)
 			},
