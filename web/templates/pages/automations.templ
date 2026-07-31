@@ -237,6 +237,10 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						<button class="btn btn-outline btn-sm" type="submit">Edit automation</button>
 					</form>
 					if graph.Automation.LifecycleState == models.AutomationActive {
+						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/run-now?project_id=%s", graph.Automation.ID, currentProjectID)) }>
+							<input type="hidden" name="project_id" value={ currentProjectID }/>
+							<button class="btn btn-outline btn-sm" type="submit" data-automation-live-run-now={ graph.Automation.ID }>Run now</button>
+						</form>
 						<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/><button class="btn btn-ghost btn-sm" type="submit">Pause</button></form>
 					}
 					if graph.Automation.LifecycleState == models.AutomationPaused {

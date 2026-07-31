@@ -171,6 +171,36 @@ func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *test
 	}
 }
 
+func TestAutomationLiveRunNowIsActiveOnly(t *testing.T) {
+	graph := models.AutomationLiveGraph{
+		Automation: models.Automation{ID: "automation-live-run", Name: "Run controls", LifecycleState: models.AutomationActive},
+	}
+
+	var active bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-run", true).Render(context.Background(), &active); err != nil {
+		t.Fatalf("render active Automation Live: %v", err)
+	}
+	activeBody := active.String()
+	for _, want := range []string{
+		`action="/automations/automation-live-run/run-now?project_id=project-live-run"`,
+		`data-automation-live-run-now="automation-live-run"`,
+		`>Run now</button>`,
+	} {
+		if !strings.Contains(activeBody, want) {
+			t.Errorf("expected active Automation Live actions to contain %q", want)
+		}
+	}
+
+	graph.Automation.LifecycleState = models.AutomationPaused
+	var paused bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-run", true).Render(context.Background(), &paused); err != nil {
+		t.Fatalf("render paused Automation Live: %v", err)
+	}
+	if strings.Contains(paused.String(), `/run-now`) || strings.Contains(paused.String(), `>Run now</button>`) {
+		t.Error("paused Automation Live must not offer Run now")
+	}
+}
+
 func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{ID: "automation-live-height", Name: "Full height", LifecycleState: models.AutomationActive},
