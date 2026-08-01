@@ -7,55 +7,59 @@ import (
 	"testing"
 )
 
-// drainSubscriber continuously empties a subscriber channel until stop is
-// closed so that Publish observes drained channels during steady-state
-// benchmarks, isolating snapshot/delivery cost from slow-consumer drops.
-func drainSubscriber(sub ExecutionStreamSubscriber, stop <-chan struct{}, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for {
-		select {
-		case <-stop:
-			for {
-				select {
-				case <-sub:
-				default:
-					return
-				}
-			}
-		case <-sub:
-		}
-	}
-}
+const executionStreamPublishBatchSize = 64
 
-// benchmarkExecutionStreamPublish measures steady-state Publish fan-out with
-// every subscriber channel continuously drained by a dedicated goroutine so
-// Publish never observes a full channel. The reported ns/op, B/op, and
-// allocs/op reflect snapshot and delivery cost, excluding subscriber churn.
+// benchmarkExecutionStreamPublish measures steady-state Publish fan-out while
+// deterministically keeping every subscriber channel drained. Each timed batch
+// is smaller than the subscriber channel capacity. After the batch, timing is
+// stopped and every expected delivery is synchronously consumed before the
+// next batch starts. A dropped delivery therefore fails the benchmark instead
+// of silently producing a faster result.
 func benchmarkExecutionStreamPublish(b *testing.B, subscribers int) {
 	hub := NewExecutionStreamHub()
-	stop := make(chan struct{})
-	var wg sync.WaitGroup
+	subs := make([]ExecutionStreamSubscriber, 0, subscribers)
 	unsubs := make([]func(), 0, subscribers)
 	for i := 0; i < subscribers; i++ {
 		sub, unsub, err := hub.Subscribe("exec")
 		if err != nil {
 			b.Fatalf("subscribe %d: %v", i, err)
 		}
+		subs = append(subs, sub)
 		unsubs = append(unsubs, unsub)
-		wg.Add(1)
-		go drainSubscriber(sub, stop, &wg)
 	}
 	event := ExecutionStreamEvent{ExecID: "exec", Type: ExecutionStreamDelta, Delta: "token", Offset: 1}
 
+	// Build the lazy snapshot before measurement and restore drained channels.
+	hub.Publish(event)
+	for _, sub := range subs {
+		<-sub
+	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		hub.Publish(event)
-	}
-	b.StopTimer()
+	published := 0
+	for published < b.N {
+		batchSize := min(executionStreamPublishBatchSize, b.N-published)
+		for i := 0; i < batchSize; i++ {
+			hub.Publish(event)
+		}
+		published += batchSize
 
-	close(stop)
-	wg.Wait()
+		b.StopTimer()
+		for subscriber, sub := range subs {
+			for i := 0; i < batchSize; i++ {
+				select {
+				case <-sub:
+				default:
+					b.Fatalf("subscriber %d received %d/%d deliveries; Publish entered the drop path", subscriber, i, batchSize)
+				}
+			}
+		}
+		if published < b.N {
+			b.StartTimer()
+		}
+	}
+
 	for _, unsub := range unsubs {
 		unsub()
 	}
