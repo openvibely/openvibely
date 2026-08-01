@@ -323,6 +323,7 @@ func TestHandler_ChatSend(t *testing.T) {
 }
 
 func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeTool(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	h, e, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -354,6 +355,7 @@ func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeToo
 		Name: "HTTP Compatible Aggregator", Provider: models.ProviderOpenAICompatible,
 		Model: "provider/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key",
 		BaseURL: providerServer.URL + "/v1/", Transport: "chat_completions",
+		PresetSlug: "vllm",
 	}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{

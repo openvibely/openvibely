@@ -3,10 +3,79 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestLLMConfigRepoCustomOAuthConnectionAndRefreshLease(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	cfg := &models.LLMConfig{
+		Name: "Custom OAuth", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth, Model: "model",
+	}
+	if err := repo.Create(ctx, cfg); err != nil {
+		t.Fatal(err)
+	}
+	firstRevision, advanced, err := repo.AdvanceCustomOAuthRevision(ctx, cfg.ID)
+	if err != nil || !advanced || firstRevision != 1 {
+		t.Fatalf("first OAuth generation = %d, %v, %v", firstRevision, advanced, err)
+	}
+	secondRevision, advanced, err := repo.AdvanceCustomOAuthRevision(ctx, cfg.ID)
+	if err != nil || !advanced || secondRevision != 2 {
+		t.Fatalf("second OAuth generation = %d, %v, %v", secondRevision, advanced, err)
+	}
+	if err := repo.UpdateCustomOAuthConnection(ctx, cfg.ID, "access", "refresh", 1234, `{"instance_id":"instance"}`); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.GetByID(ctx, cfg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.OAuthAccessToken != "access" || stored.OAuthRefreshToken != "refresh" ||
+		stored.OAuthExpiresAt != 1234 || stored.CustomAuthStateJSON != `{"instance_id":"instance"}` {
+		t.Fatalf("custom OAuth connection not persisted atomically: %#v", stored)
+	}
+	revision := stored.OAuthConfigRevision
+	stored.Name = "Changed during OAuth"
+	if err := repo.Update(ctx, stored); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repo.UpdateCustomOAuthConnectionIfRevision(
+		ctx, stored.ID, revision, "stale-access", "stale-refresh", 5678, `{"instance_id":"stale"}`,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated {
+		t.Fatal("stale OAuth callback updated a newer model configuration")
+	}
+	updated, err = repo.UpdateCustomOAuthTokensIfRevision(
+		ctx, stored.ID, stored.OAuthConfigRevision, "fresh-access", "fresh-refresh", 9012,
+	)
+	if err != nil || !updated {
+		t.Fatalf("current-revision token update = %v, %v", updated, err)
+	}
+
+	now := time.Now()
+	acquired, err := repo.TryAcquireOAuthRefreshLease(ctx, cfg.ID, "owner-1", now, time.Minute)
+	if err != nil || !acquired {
+		t.Fatalf("first lease acquire = %v, %v", acquired, err)
+	}
+	acquired, err = repo.TryAcquireOAuthRefreshLease(ctx, cfg.ID, "owner-2", now, time.Minute)
+	if err != nil || acquired {
+		t.Fatalf("competing lease acquire = %v, %v; want busy", acquired, err)
+	}
+	if err := repo.ReleaseOAuthRefreshLease(ctx, cfg.ID, "owner-1"); err != nil {
+		t.Fatal(err)
+	}
+	acquired, err = repo.TryAcquireOAuthRefreshLease(ctx, cfg.ID, "owner-2", now, time.Minute)
+	if err != nil || !acquired {
+		t.Fatalf("lease acquire after release = %v, %v", acquired, err)
+	}
+}
 
 func TestLLMConfigRepo_MixtureConfigJSONPersists(t *testing.T) {
 	db := testutil.NewTestDB(t)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -240,7 +241,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 							data-model-preset-slug={ agent.PresetSlug }
 							data-model-models-url={ agent.ModelsURL }
 							data-model-auth-header-name={ agent.AuthHeaderName }
-							data-model-auth-header-value-prefix={ agent.AuthHeaderValuePrefix }
+						data-model-auth-header-value-prefix={ agent.AuthHeaderValuePrefix }
+							data-model-custom-auth-config={ llmcustomauth.RedactedConfigJSON(agent.CustomAuthConfigJSON) }
 								data-model-auto-start-tasks={ fmt.Sprintf("%t", agent.AutoStartTasks) }
 								data-model-mixture-config-json={ mixtureConfigAttr(agent) }						onclick="editModelFromData(this)"					>
 						<div class="card-body relative">
@@ -601,7 +603,75 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 								</div>
 									<div class="form-control mb-3">
 										<label class="label"><span id="openai_compatible_discovery_status" class="label-text-alt opacity-70">OpenAI-compatible presets auto-load available models when selected; Custom stays manual.</span></label>
-									</div>						</div>
+										<button type="button" class="btn btn-sm btn-outline self-start" onclick="discoverOpenAICompatibleModels()">Discover Models</button>
+									</div>
+								<div id="custom_provider_auth_fields">
+									<div class="form-control mb-3">
+										<label class="label"><span class="label-text">Authentication</span></label>
+										<select id="model_custom_auth_method" name="custom_auth_method" class="select select-bordered" onchange="toggleCustomProviderAuthFields()">
+											<option value="api_key">API Key / None</option>
+											<option value="oauth">OAuth + signed requests</option>
+										</select>
+									</div>
+									<div id="custom_provider_request_fields" class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+										<div class="form-control md:col-span-2"><label class="label"><span class="label-text">Models URL</span></label><input id="model_custom_models_url" name="models_url" class="input input-bordered" placeholder="https://…/models" oninput="scheduleAutoDiscoverOpenAICompatibleModels()"/><label class="label"><span class="label-text-alt opacity-70">Optional dedicated endpoint used by Discover Models.</span></label></div>
+										<div class="form-control"><label class="label"><span class="label-text">Models array path</span></label><input id="model_custom_models_array_path" name="custom_models_array_path" class="input input-bordered" value="data"/></div>
+										<div class="form-control"><label class="label"><span class="label-text">Model ID field</span></label><input id="model_custom_model_id_field" name="custom_model_id_field" class="input input-bordered" value="id"/></div>
+										<div class="form-control"><label class="label"><span class="label-text">API key header</span></label><input id="model_compatible_auth_header_name" name="auth_header_name" class="input input-bordered" value="Authorization" placeholder="Authorization"/></div>
+										<div class="form-control"><label class="label"><span class="label-text">API key value prefix</span></label><input id="model_compatible_auth_header_prefix" name="auth_header_value_prefix" class="input input-bordered" value="Bearer " placeholder="Leave empty for a raw API key"/><label class="label"><span class="label-text-alt opacity-70">Use an empty value for headers such as X-API-Key.</span></label></div>
+										<div class="form-control"><label class="label"><span class="label-text">Additional inference headers (JSON)</span></label><textarea id="model_compatible_extra_headers" name="extra_headers_json" class="textarea textarea-bordered" placeholder='{"X-Required-Header":"value"}'></textarea><label class="label"><span class="label-text-alt opacity-70">When editing, leave blank to keep saved headers.</span></label><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="clear_extra_headers" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved inference headers</span></label></div>
+										<div class="form-control"><label class="label"><span class="label-text">Additional request body (JSON)</span></label><textarea id="model_compatible_extra_body" name="extra_body_json" class="textarea textarea-bordered" placeholder='{"provider_option":true}'></textarea><label class="label"><span class="label-text-alt opacity-70">When editing, leave blank to keep the saved object.</span></label><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="clear_extra_body" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved request body</span></label></div>
+									</div>
+									<div id="custom_provider_oauth_fields" class="hidden">
+										<input type="hidden" name="custom_auth_enabled" value="on"/>
+											<div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+												<div class="form-control"><label class="label"><span class="label-text">Authorize URL</span></label><input id="model_custom_authorize_url" name="oauth_authorize_url" class="input input-bordered" placeholder="https://…/login"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">Token URL</span></label><input id="model_custom_token_url" name="oauth_token_url" class="input input-bordered" placeholder="https://…/token"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">Refresh URL</span></label><input id="model_custom_refresh_url" name="custom_refresh_url" class="input input-bordered" placeholder="https://…/refresh"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">Profile URL</span></label><input id="model_custom_profile_url" name="custom_profile_url" class="input input-bordered" placeholder="https://…/profile"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">Required User-Agent</span></label><input id="model_custom_user_agent" name="custom_user_agent" class="input input-bordered" placeholder="client/version"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">OAuth client ID</span></label><input id="model_custom_oauth_client_id" name="oauth_client_id" class="input input-bordered" autocomplete="off"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">OAuth client secret</span></label><input id="model_custom_oauth_client_secret" name="oauth_client_secret" type="password" autocomplete="new-password" class="input input-bordered" placeholder="Leave blank to keep saved secret"/><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="clear_oauth_client_secret" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved client secret</span></label></div>
+												<div class="form-control"><label class="label"><span class="label-text">OAuth scopes</span></label><input id="model_custom_oauth_scopes" name="oauth_scopes" class="input input-bordered" placeholder="openid profile"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">Callback query parameter</span></label><input id="model_custom_callback_parameter" name="custom_callback_parameter" class="input input-bordered" value="callback_uri"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">Signing secret</span></label><input id="model_custom_signing_secret" name="custom_signing_secret" type="password" autocomplete="off" class="input input-bordered" placeholder="Leave blank to keep saved secret"/><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_signing_secret" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved signing secret</span></label></div>
+												<div class="form-control"><label class="label"><span class="label-text">Authorization mode</span></label><select id="model_custom_authorization_mode" name="custom_authorization_mode" class="select select-bordered"><option value="auto">Automatic Bearer/Apikey</option><option value="bearer">Bearer</option><option value="apikey">Apikey</option><option value="raw">Raw token</option></select></div>
+												<div class="form-control"><label class="label"><span class="label-text">OAuth token header</span></label><input id="model_custom_access_token_header" name="custom_access_token_header" class="input input-bordered" value="Authorization" placeholder="Authorization"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">Custom token value prefix</span></label><input id="model_custom_access_token_prefix" name="custom_access_token_prefix" class="input input-bordered" placeholder="Optional, for example Token "/></div>
+											</div>
+											<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+												<div class="form-control"><label class="label"><span class="label-text">Additional request headers (JSON)</span></label><textarea id="model_custom_static_headers_json" name="custom_static_headers_json" class="textarea textarea-bordered" placeholder='{"X-Required-Header":"value"}'></textarea><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_static_headers" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved additional headers</span></label></div>
+												<div class="form-control"><label class="label"><span class="label-text">Authorization parameters (JSON)</span></label><textarea id="model_custom_authorization_parameters_json" name="custom_authorization_parameters_json" class="textarea textarea-bordered" placeholder='{"audience":"example"}'></textarea><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_authorization_parameters" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved authorization parameters</span></label></div>
+												<div class="form-control"><label class="label"><span class="label-text">Token endpoint headers (JSON)</span></label><textarea id="model_custom_token_headers_json" name="custom_token_headers_json" class="textarea textarea-bordered" placeholder='{"X-Token-Header":"value"}'></textarea><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_token_headers" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved token headers</span></label></div>
+												<div class="form-control"><label class="label"><span class="label-text">Refresh endpoint headers (JSON)</span></label><textarea id="model_custom_refresh_headers_json" name="custom_refresh_headers_json" class="textarea textarea-bordered" placeholder='{"X-Refresh-Header":"value"}'></textarea><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_refresh_headers" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved refresh headers</span></label></div>
+												<div class="form-control"><label class="label"><span class="label-text">Refresh parameters (JSON)</span></label><textarea id="model_custom_refresh_parameters_json" name="custom_refresh_parameters_json" class="textarea textarea-bordered" placeholder='{"audience":"example"}'></textarea><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_refresh_parameters" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved refresh parameters</span></label></div>
+											</div>
+											<div class="flex flex-wrap gap-5 mt-3">
+												<label class="label cursor-pointer justify-start gap-2"><input id="model_custom_standard_token_fields" name="custom_standard_token_fields" type="checkbox" class="checkbox checkbox-sm"/><span class="label-text">Include standard token fields</span></label>
+												<label class="label cursor-pointer justify-start gap-2"><input id="model_custom_oauth_pkce" name="custom_oauth_pkce" type="checkbox" class="checkbox checkbox-sm"/><span class="label-text">Use PKCE</span></label>
+												<label class="label cursor-pointer justify-start gap-2"><input id="model_custom_refresh_include_grant_type" name="custom_refresh_include_grant_type" type="checkbox" class="checkbox checkbox-sm"/><span class="label-text">Include refresh grant_type</span></label>
+												<label class="label cursor-pointer justify-start gap-2"><input id="model_custom_refresh_include_client" name="custom_refresh_include_client" type="checkbox" class="checkbox checkbox-sm"/><span class="label-text">Include client credentials on refresh</span></label>
+											</div>
+										<div class="grid grid-cols-2 gap-3 mt-3">
+											<div class="form-control"><label class="label"><span class="label-text">Instance JSON path</span></label><input id="model_custom_instance_path" name="custom_profile_instance_path" class="input input-bordered" value="instances.0.instance_id"/></div>
+											<div class="form-control"><label class="label"><span class="label-text">Team JSON path</span></label><input id="model_custom_team_path" name="custom_profile_team_path" class="input input-bordered" value="instances.0.teams.0.id"/></div>
+											<div class="form-control"><label class="label"><span class="label-text">Instance header</span></label><input id="model_custom_instance_header" name="custom_instance_header" class="input input-bordered" value="x-instance-id"/></div>
+											<div class="form-control"><label class="label"><span class="label-text">Team header</span></label><input id="model_custom_team_header" name="custom_team_header" class="input input-bordered" value="x-team-id"/></div>
+											<div class="form-control"><label class="label"><span class="label-text">Timestamp header</span></label><input id="model_custom_timestamp_header" name="custom_timestamp_header" class="input input-bordered" value="x-request-timestamp"/></div>
+											<div class="form-control"><label class="label"><span class="label-text">Signature header</span></label><input id="model_custom_signature_header" name="custom_signature_header" class="input input-bordered" value="x-request-signature"/></div>
+										</div>
+											<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+												<div class="form-control"><label class="label"><span class="label-text">Token request format</span></label><select id="model_custom_token_request_format" name="custom_token_request_format" class="select select-bordered"><option value="json">JSON</option><option value="form">Form</option></select></div>
+												<div class="form-control"><label class="label"><span class="label-text">Refresh request format</span></label><select id="model_custom_refresh_request_format" name="custom_refresh_request_format" class="select select-bordered"><option value="json">JSON</option><option value="form">Form</option></select></div>
+												<div class="form-control"><label class="label"><span class="label-text">Access token field</span></label><input id="model_custom_access_token_field" name="custom_access_token_field" class="input input-bordered" value="token"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">Refresh token field</span></label><input id="model_custom_refresh_token_field" name="custom_refresh_token_field" class="input input-bordered" value="refresh_token"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">Expires-in field</span></label><input id="model_custom_expires_in_field" name="custom_expires_in_field" class="input input-bordered" value="expires_in"/></div>
+											</div>
+											<p class="text-xs opacity-70 mt-3">HMAC-SHA256 signs METHOD, request path, ISO timestamp, and the SHA-256 hash of the exact request body.</p>
+									</div>
+									<label class="label cursor-pointer justify-start gap-2"><input id="model_custom_allow_private_endpoints" name="custom_allow_private_endpoints" type="checkbox" class="checkbox checkbox-sm"/><span class="label-text">Allow private/local endpoint access for this model (requires server policy)</span></label>
+								</div>
+							</div>
 						<div id="ollama_fields" class="hidden">
 							<div class="form-control mb-3">							<label class="label"><span class="label-text">Base URL</span></label>
 							<input type="text" id="model_ollama_base_url" name="ollama_base_url" class="input input-bordered" placeholder="http://localhost:11434" value="http://localhost:11434"/>
@@ -1225,7 +1295,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 
 							function isDiscoverableOpenAICompatiblePreset() {
 								var preset = document.getElementById('model_openai_compatible_preset').value || 'custom';
-								return preset !== 'custom' && !!openAICompatiblePresetDefaults[preset];
+								return (preset !== 'custom' && !!openAICompatiblePresetDefaults[preset]) ||
+									(preset === 'custom' && !!document.getElementById('model_custom_models_url').value.trim());
 							}
 
 						var openAICompatibleDiscoveryTimer = null;
@@ -1263,7 +1334,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 							if (isDiscoverableOpenAICompatiblePreset()) {
 									runAutoDiscoverOpenAICompatibleModels();
 								} else if (status) {								status.textContent = 'Enter the model ID manually for local or custom endpoints.';
-								}						}
+								}
+							toggleCustomProviderAuthFields();
+						}
 						function readMixtureModelOptions() {
 							var el = document.getElementById('mixture_fields');
 							if (!el) return [];
@@ -1492,9 +1565,35 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 							}
 							status.textContent = 'Discovering models...';
 							var params = new URLSearchParams({base_url: baseURL});
+							var configID = document.getElementById('model_config_id').value.trim();
+							var modelsURL = document.getElementById('model_custom_models_url').value.trim();
+							var form = document.getElementById('model_form');
+							if (configID && form &&
+								(baseURL !== (form.dataset.originalBaseUrl || '') ||
+								 modelsURL !== (form.dataset.originalModelsUrl || ''))) {
+								status.textContent = 'Save endpoint changes and reconnect before discovering models.';
+								return;
+							}
+							if (configID) params.set('config_id', configID);
+							if (modelsURL || configID) params.set('models_url', modelsURL);
+							var preset = document.getElementById('model_openai_compatible_preset').value || 'custom';
+							var allowPrivate = document.getElementById('model_custom_allow_private_endpoints').checked ||
+								['vllm', 'lm_studio', 'sglang', 'litellm', 'inferrs', 'ds4'].indexOf(preset) !== -1;
+							if (allowPrivate) params.set('allow_private', '1');
 							var apiKey = document.getElementById('model_api_key').value.trim();
 							var headers = {'Accept': 'application/json'};
 							if (apiKey) headers['X-OpenAI-Compatible-API-Key'] = apiKey;
+							var customAuthMethod = document.getElementById('model_custom_auth_method').value;
+							if (preset === 'custom' && (!configID || customAuthMethod === 'api_key')) {
+								var liveExtraHeaders = document.getElementById('model_compatible_extra_headers').value.trim();
+								var clearExtraHeaders = form && form.querySelector('[name="clear_extra_headers"]');
+								if (!liveExtraHeaders && clearExtraHeaders && clearExtraHeaders.checked) liveExtraHeaders = '{}';
+								headers['X-OpenAI-Compatible-Auth-Header-Name'] = document.getElementById('model_compatible_auth_header_name').value.trim();
+								headers['X-OpenAI-Compatible-Auth-Header-Prefix'] = document.getElementById('model_compatible_auth_header_prefix').value;
+								headers['X-OpenAI-Compatible-Extra-Headers'] = liveExtraHeaders;
+								headers['X-OpenAI-Compatible-Models-Array-Path'] = document.getElementById('model_custom_models_array_path').value.trim();
+								headers['X-OpenAI-Compatible-Model-ID-Field'] = document.getElementById('model_custom_model_id_field').value.trim();
+							}
 							fetch('/models/openai-compatible/available?' + params.toString(), {headers: headers})
 								.then(function(resp) {								return resp.json().then(function(data) {
 									if (!resp.ok) throw new Error(data.error || 'Model discovery failed');
@@ -1502,7 +1601,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 								});
 							})
 								.then(function(data) {
-									if (document.getElementById('model_provider').value !== provider || document.getElementById('model_base_url').value.trim() !== baseURL || !isDiscoverableOpenAICompatiblePreset()) return;
+									if (document.getElementById('model_provider').value !== provider ||
+										document.getElementById('model_base_url').value.trim() !== baseURL ||
+										document.getElementById('model_custom_models_url').value.trim() !== modelsURL ||
+										!isDiscoverableOpenAICompatiblePreset()) return;
 									var models = data.models || [];								for (var i = 0; i < models.length; i++) {
 									if (models[i].id) setOpenAICompatibleModelValue(models[i].id, models[i].id, false);
 								}
@@ -1510,7 +1612,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 								status.textContent = models.length ? ('Discovered ' + models.length + ' model' + (models.length === 1 ? ' and selected it.' : 's. Choose one or enter the model ID manually.')) : 'No models returned; enter the model ID manually.';
 							})
 								.catch(function(err) {
-									if (document.getElementById('model_provider').value !== provider || document.getElementById('model_base_url').value.trim() !== baseURL || !isDiscoverableOpenAICompatiblePreset()) return;
+									if (document.getElementById('model_provider').value !== provider ||
+										document.getElementById('model_base_url').value.trim() !== baseURL ||
+										document.getElementById('model_custom_models_url').value.trim() !== modelsURL ||
+										!isDiscoverableOpenAICompatiblePreset()) return;
 									status.textContent = err.message || 'Model discovery failed; enter the model ID manually.';
 								});					}
 
@@ -1627,6 +1732,11 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					var modelsUrl = button.dataset.modelModelsUrl || '';
 					var authHeaderName = button.dataset.modelAuthHeaderName || '';
 					var authHeaderValuePrefix = button.dataset.modelAuthHeaderValuePrefix || '';
+					var customAuthConfigJSON = button.dataset.modelCustomAuthConfig || '';
+					var oauthAuthorizeUrl = button.dataset.modelOauthAuthorizeUrl || '';
+					var oauthTokenUrl = button.dataset.modelOauthTokenUrl || '';
+					var oauthClientId = button.dataset.modelOauthClientId || '';
+					var oauthScopes = button.dataset.modelOauthScopes || '';
 						var autoStartTasks = button.dataset.modelAutoStartTasks === 'true';
 						var mixtureConfigJSON = button.dataset.modelMixtureConfigJson || '';
 
@@ -1666,6 +1776,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					form.method = 'post';
 					form.dataset.mode = 'edit';
 					form.dataset.originalApiKey = apiKey;
+					form.dataset.originalBaseUrl = baseUrl;
+					form.dataset.originalModelsUrl = modelsUrl;
 					document.getElementById('model_config_id').value = id;					document.getElementById('model_name').value = name;				document.getElementById('model_provider').value = uiProvider;
 				document.getElementById('model_anthropic_auth_type').value = anthropicAuthType;
 				document.getElementById('model_openai_auth_type').value = openaiAuthType;
@@ -1683,6 +1795,19 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					document.getElementById('model_base_url').value = baseUrl;
 					document.getElementById('model_openai_compatible_transport').value = transport || 'chat_completions';
 					document.getElementById('model_openai_compatible_preset').value = presetSlug || 'custom';
+					document.getElementById('model_custom_auth_method').value = dbProvider === 'openai_compatible' && authMethod === 'oauth' ? 'oauth' : 'api_key';
+					document.getElementById('model_compatible_auth_header_name').value = authHeaderName || 'Authorization';
+					document.getElementById('model_compatible_auth_header_prefix').value = (authHeaderName || authHeaderValuePrefix) ? authHeaderValuePrefix : 'Bearer ';
+					document.getElementById('model_compatible_extra_headers').value = '';
+					document.getElementById('model_compatible_extra_body').value = '';
+					document.getElementById('model_custom_authorize_url').value = oauthAuthorizeUrl;
+					document.getElementById('model_custom_token_url').value = oauthTokenUrl;
+					document.getElementById('model_custom_oauth_client_id').value = oauthClientId;
+					document.getElementById('model_custom_oauth_client_secret').value = '';
+					document.getElementById('model_custom_oauth_scopes').value = oauthScopes;
+					document.getElementById('model_custom_models_url').value = modelsUrl;
+					form.querySelectorAll('[name^="custom_clear_"], [name^="clear_extra_"], [name="clear_oauth_client_secret"]').forEach(function(el) { el.checked = false; });
+					applyCustomAuthConfig(customAuthConfigJSON);
 						document.getElementById('model_openai_compatible_custom_model').value = dbProvider === 'openai_compatible' ? model : '';
 						document.getElementById('model_auto_start_tasks').checked = autoStartTasks;				document.getElementById('model_submit_btn').textContent = 'Save';
 				toggleProviderFields(model, reasoningEffort);
@@ -1731,7 +1856,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 							document.getElementById('openai_compatible_fields').classList.remove('hidden');
 							document.getElementById('model_auth_method').disabled = true;
 							document.getElementById('model_openai_connection_method').disabled = true;
-								applyOpenAICompatiblePreset(forcePresetDefaults);							document.getElementById('model_openai_compatible_custom_model').value = activeModel || '';					} else if (provider === 'mixture') {
+								applyOpenAICompatiblePreset(forcePresetDefaults);
+								toggleCustomProviderAuthFields();
+								document.getElementById('model_openai_compatible_custom_model').value = activeModel || '';
+						} else if (provider === 'mixture') {
 							anthropicAuthTypeField.classList.add('hidden');
 							openaiAuthTypeField.classList.add('hidden');
 							openaiConnectionMethodField.classList.add('hidden');
@@ -1791,6 +1919,72 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					document.getElementById('subscription_info_oauth').classList.remove('hidden');
 				}
 			}
+
+				function setCustomAuthField(id, value) {
+					var el = document.getElementById(id);
+					if (el && value !== undefined && value !== null) el.value = value;
+				}
+
+				function applyCustomAuthConfig(raw) {
+					var cfg = {};
+					try { cfg = raw ? JSON.parse(raw) : {}; } catch(e) {}
+					setCustomAuthField('model_custom_refresh_url', cfg.refresh_url || '');
+					setCustomAuthField('model_custom_profile_url', cfg.profile_url || '');
+					setCustomAuthField('model_custom_user_agent', cfg.user_agent || '');
+					setCustomAuthField('model_custom_authorization_mode', cfg.authorization_mode || 'auto');
+					setCustomAuthField('model_custom_access_token_header', cfg.access_token_header || 'Authorization');
+					setCustomAuthField('model_custom_access_token_prefix', cfg.access_token_prefix || '');
+					setCustomAuthField('model_custom_instance_path', cfg.profile_instance_path || 'instances.0.instance_id');
+					setCustomAuthField('model_custom_team_path', cfg.profile_team_path || 'instances.0.teams.0.id');
+					setCustomAuthField('model_custom_instance_header', cfg.instance_header || 'x-instance-id');
+					setCustomAuthField('model_custom_team_header', cfg.team_header || 'x-team-id');
+					setCustomAuthField('model_custom_timestamp_header', cfg.timestamp_header || 'x-request-timestamp');
+					setCustomAuthField('model_custom_signature_header', cfg.signature_header || 'x-request-signature');
+					setCustomAuthField('model_custom_models_array_path', cfg.models_array_path || 'data');
+					setCustomAuthField('model_custom_model_id_field', cfg.model_id_field || 'id');
+					setCustomAuthField('model_custom_token_request_format', cfg.token_request_format || 'json');
+					setCustomAuthField('model_custom_refresh_request_format', cfg.refresh_request_format || cfg.token_request_format || 'json');
+					setCustomAuthField('model_custom_access_token_field', cfg.access_token_field || 'token');
+					setCustomAuthField('model_custom_refresh_token_field', cfg.refresh_token_field || 'refresh_token');
+					setCustomAuthField('model_custom_expires_in_field', cfg.expires_in_field || 'expires_in');
+					setCustomAuthField('model_custom_callback_parameter', cfg.callback_parameter || 'callback_uri');
+					setCustomAuthField('model_custom_authorization_parameters_json', cfg.authorization_parameters ? JSON.stringify(cfg.authorization_parameters, null, 2) : '');
+					setCustomAuthField('model_custom_refresh_parameters_json', cfg.refresh_parameters ? JSON.stringify(cfg.refresh_parameters, null, 2) : '');
+					var standardFields = document.getElementById('model_custom_standard_token_fields');
+					if (standardFields) standardFields.checked = cfg.standard_token_fields === true;
+					var pkce = document.getElementById('model_custom_oauth_pkce');
+					if (pkce) pkce.checked = cfg.pkce === true;
+					var allowPrivate = document.getElementById('model_custom_allow_private_endpoints');
+					if (allowPrivate) allowPrivate.checked = cfg.allow_private_endpoints === true;
+					var refreshGrant = document.getElementById('model_custom_refresh_include_grant_type');
+					if (refreshGrant) refreshGrant.checked = cfg.refresh_include_grant_type === true;
+					var refreshClient = document.getElementById('model_custom_refresh_include_client');
+					if (refreshClient) refreshClient.checked = cfg.refresh_include_client === true;
+					setCustomAuthField('model_custom_static_headers_json', '');
+					setCustomAuthField('model_custom_token_headers_json', '');
+					setCustomAuthField('model_custom_refresh_headers_json', '');
+					setCustomAuthField('model_custom_signing_secret', '');
+					toggleCustomProviderAuthFields();
+				}
+
+				function toggleCustomProviderAuthFields() {
+					var provider = document.getElementById('model_provider').value;
+					var preset = openAICompatiblePresetForProvider(provider);
+					var root = document.getElementById('custom_provider_auth_fields');
+					var oauthFields = document.getElementById('custom_provider_oauth_fields');
+					var methodInput = document.getElementById('model_custom_auth_method');
+					var showCustom = canonicalProvider(provider) === 'openai_compatible' && preset === 'custom';
+					if (!showCustom) methodInput.value = 'api_key';
+					var method = methodInput.value;
+					if (root) root.classList.toggle('hidden', !showCustom);
+					if (oauthFields) oauthFields.classList.toggle('hidden', !showCustom || method !== 'oauth');
+					if (root) root.querySelectorAll('input, select, textarea').forEach(function(el) { el.disabled = !showCustom; });
+					if (oauthFields) oauthFields.querySelectorAll('input, select, textarea').forEach(function(el) { el.disabled = !showCustom || method !== 'oauth'; });
+					var apiKeyField = document.getElementById('api_key_field');
+					if (apiKeyField && canonicalProvider(provider) === 'openai_compatible') {
+						apiKeyField.classList.toggle('hidden', showCustom && method === 'oauth');
+					}
+				}
 
 			function toggleSubscriptionMethodFields() {
 				var method = document.getElementById('model_auth_method').value;
@@ -1860,6 +2054,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					form.method = 'post';
 					form.dataset.mode = 'create';
 					form.dataset.originalApiKey = '';
+					form.dataset.originalBaseUrl = '';
+					form.dataset.originalModelsUrl = '';
 					document.getElementById('model_config_id').value = '';
 					document.getElementById('model_name').value = '';				document.getElementById('model_provider').value = 'anthropic';
 				document.getElementById('model_anthropic_auth_type').value = 'api_key';
@@ -1880,6 +2076,19 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					document.getElementById('model_openai_compatible_preset').value = 'openrouter';
 					document.getElementById('model_openai_compatible_transport').value = 'chat_completions';
 					document.getElementById('model_base_url').value = '';
+					document.getElementById('model_custom_auth_method').value = 'api_key';
+					document.getElementById('model_compatible_auth_header_name').value = 'Authorization';
+					document.getElementById('model_compatible_auth_header_prefix').value = 'Bearer ';
+					document.getElementById('model_compatible_extra_headers').value = '';
+					document.getElementById('model_compatible_extra_body').value = '';
+						document.getElementById('model_custom_authorize_url').value = '';
+						document.getElementById('model_custom_token_url').value = '';
+						document.getElementById('model_custom_oauth_client_id').value = '';
+						document.getElementById('model_custom_oauth_client_secret').value = '';
+						document.getElementById('model_custom_oauth_scopes').value = '';
+						document.getElementById('model_custom_models_url').value = '';
+						form.querySelectorAll('[name^="custom_clear_"], [name^="clear_extra_"], [name="clear_oauth_client_secret"]').forEach(function(el) { el.checked = false; });
+						applyCustomAuthConfig('');
 						document.getElementById('model_openai_compatible_custom_model').value = '';
 						applyMixtureConfig('');
 						document.getElementById('model_auto_start_tasks').checked = false;				document.getElementById('model_submit_btn').textContent = 'Create';

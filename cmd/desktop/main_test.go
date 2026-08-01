@@ -154,21 +154,29 @@ func TestLoadDesktopConfigFile(t *testing.T) {
 func TestSetDesktopOAuthDefaults(t *testing.T) {
 	t.Run("defaults oauth redirect mode to auto when unset", func(t *testing.T) {
 		unsetEnv(t, "OAUTH_REDIRECT_MODE")
+		unsetEnv(t, "OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS")
 
 		setDesktopOAuthDefaults()
 
 		if got := os.Getenv("OAUTH_REDIRECT_MODE"); got != "auto" {
 			t.Fatalf("expected OAUTH_REDIRECT_MODE=auto, got %q", got)
 		}
+		if got := os.Getenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS"); got != "true" {
+			t.Fatalf("expected desktop private model endpoints to be enabled, got %q", got)
+		}
 	})
 
 	t.Run("does not override explicitly configured oauth redirect mode", func(t *testing.T) {
 		t.Setenv("OAUTH_REDIRECT_MODE", "hosted")
+		t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "false")
 
 		setDesktopOAuthDefaults()
 
 		if got := os.Getenv("OAUTH_REDIRECT_MODE"); got != "hosted" {
 			t.Fatalf("expected OAUTH_REDIRECT_MODE to stay hosted, got %q", got)
+		}
+		if got := os.Getenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS"); got != "false" {
+			t.Fatalf("expected explicit private endpoint policy to remain false, got %q", got)
 		}
 	})
 }

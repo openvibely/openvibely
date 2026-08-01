@@ -78,6 +78,7 @@ func TestHandlerSupportsChatActionToolsResolvesMixtureAggregator(t *testing.T) {
 		{name: "anthropic api key", provider: models.ProviderAnthropic, authMethod: models.AuthMethodAPIKey, want: true},
 		{name: "anthropic oauth", provider: models.ProviderAnthropic, authMethod: models.AuthMethodOAuth, want: true},
 		{name: "openai compatible api key", provider: models.ProviderOpenAICompatible, authMethod: models.AuthMethodAPIKey, want: true},
+		{name: "openai compatible oauth", provider: models.ProviderOpenAICompatible, authMethod: models.AuthMethodOAuth, want: true},
 		{name: "openai cli", provider: models.ProviderOpenAI, authMethod: models.AuthMethodCLI, want: false},
 		{name: "anthropic cli", provider: models.ProviderAnthropic, authMethod: models.AuthMethodCLI, want: false},
 		{name: "ollama", provider: models.ProviderOllama, authMethod: models.AuthMethodAPIKey, want: false},

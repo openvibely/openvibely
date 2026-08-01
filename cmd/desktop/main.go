@@ -51,6 +51,9 @@ func setDesktopOAuthDefaults() {
 	if strings.TrimSpace(os.Getenv("OAUTH_REDIRECT_MODE")) == "" {
 		_ = os.Setenv("OAUTH_REDIRECT_MODE", "auto")
 	}
+	if strings.TrimSpace(os.Getenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS")) == "" {
+		_ = os.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	}
 }
 
 func loadDesktopConfigFile() {

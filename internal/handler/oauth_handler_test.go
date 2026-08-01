@@ -14,9 +14,272 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/stretchr/testify/require"
 )
+
+func TestExchangeCustomOAuthRejectsMissingRequiredProfileMetadata(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/token":
+			_, _ = w.Write([]byte(`{"token":"opaque-token"}`))
+		case "/profile":
+			_, _ = w.Write([]byte(`{"instances":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	h, _, repo := setupTestHandler(t)
+	cfg := llmcustomauth.Config{
+		Enabled:               true,
+		AccessTokenField:      "token",
+		ProfileURL:            server.URL + "/profile",
+		ProfileInstancePath:   "instances.0.instance_id",
+		AllowPrivateEndpoints: true,
+	}
+	model := &models.LLMConfig{
+		Name:                 "Missing profile metadata",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "premium",
+		BaseURL:              server.URL,
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+	}
+	require.NoError(t, repo.Create(context.Background(), model))
+
+	flow := &oauthPendingFlow{
+		ConfigID:     model.ID,
+		Provider:     models.ProviderOpenAICompatible,
+		TokenURL:     server.URL + "/token",
+		CustomConfig: model.CustomAuthConfigJSON,
+	}
+	_, err := h.exchangeCustomOAuthCodeAndSaveTokens(flow, "code-1")
+	require.ErrorContains(t, err, "required instance metadata")
+
+	stored, loadErr := repo.GetByID(context.Background(), model.ID)
+	require.NoError(t, loadErr)
+	require.Empty(t, stored.OAuthAccessToken, "tokens must not be persisted when required profile metadata is missing")
+}
+
+func TestExchangeCustomOAuthRejectsMissingRequiredTeamMetadata(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/token":
+			_, _ = w.Write([]byte(`{"token":"opaque-token"}`))
+		case "/profile":
+			_, _ = w.Write([]byte(`{"instances":[{"instance_id":"instance-1","teams":[]}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	h, _, repo := setupTestHandler(t)
+	cfg := llmcustomauth.Config{
+		Enabled:               true,
+		AccessTokenField:      "token",
+		ProfileURL:            server.URL + "/profile",
+		ProfileInstancePath:   "instances.0.instance_id",
+		ProfileTeamPath:       "instances.0.teams.0.id",
+		AllowPrivateEndpoints: true,
+	}
+	model := &models.LLMConfig{
+		Name:                 "Missing team metadata",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "premium",
+		BaseURL:              server.URL,
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+	}
+	require.NoError(t, repo.Create(context.Background(), model))
+
+	flow := &oauthPendingFlow{
+		ConfigID:     model.ID,
+		Provider:     models.ProviderOpenAICompatible,
+		TokenURL:     server.URL + "/token",
+		CustomConfig: model.CustomAuthConfigJSON,
+	}
+	_, err := h.exchangeCustomOAuthCodeAndSaveTokens(flow, "code-1")
+	require.ErrorContains(t, err, "required team metadata")
+
+	stored, loadErr := repo.GetByID(context.Background(), model.ID)
+	require.NoError(t, loadErr)
+	require.Empty(t, stored.OAuthAccessToken, "tokens must not be persisted when required team metadata is missing")
+}
+
+func TestExchangeCustomOAuthRejectsInvalidProfileHeaderMetadataBeforePersistence(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/token":
+			_, _ = w.Write([]byte(`{"token":"opaque-token"}`))
+		case "/profile":
+			_, _ = w.Write([]byte(`{"instance_id":"instance-1","team_id":"team-1\u000aX-Injected: true"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	h, _, repo := setupTestHandler(t)
+	cfg := llmcustomauth.Config{
+		Enabled:               true,
+		AccessTokenField:      "token",
+		ProfileURL:            server.URL + "/profile",
+		ProfileInstancePath:   "instance_id",
+		ProfileTeamPath:       "team_id",
+		AllowPrivateEndpoints: true,
+	}
+	model := &models.LLMConfig{
+		Name:                 "Invalid profile metadata",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "premium",
+		BaseURL:              server.URL,
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+	}
+	require.NoError(t, repo.Create(context.Background(), model))
+
+	flow := &oauthPendingFlow{
+		ConfigID:     model.ID,
+		Provider:     models.ProviderOpenAICompatible,
+		TokenURL:     server.URL + "/token",
+		CustomConfig: model.CustomAuthConfigJSON,
+	}
+	_, err := h.exchangeCustomOAuthCodeAndSaveTokens(flow, "code-1")
+	require.ErrorContains(t, err, "team ID contains invalid HTTP header characters")
+
+	stored, loadErr := repo.GetByID(context.Background(), model.ID)
+	require.NoError(t, loadErr)
+	require.Empty(t, stored.OAuthAccessToken, "tokens must not be persisted when profile header metadata is invalid")
+	require.Empty(t, stored.CustomAuthStateJSON, "invalid profile metadata must not be persisted")
+}
+
+func TestExchangeCustomOAuthRechecksRevisionBeforeProfileRequest(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	invalidated := make(chan error, 1)
+	profileRequests := make(chan struct{}, 1)
+	invalidate := func() {}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/token":
+			invalidate()
+			_, _ = w.Write([]byte(`{"token":"new-access-token"}`))
+		case "/profile":
+			profileRequests <- struct{}{}
+			_, _ = w.Write([]byte(`{"instance_id":"instance-1"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	h, _, repo := setupTestHandler(t)
+	cfg := llmcustomauth.Config{
+		Enabled:               true,
+		AccessTokenField:      "token",
+		ProfileURL:            server.URL + "/profile",
+		ProfileInstancePath:   "instance_id",
+		AllowPrivateEndpoints: true,
+	}
+	model := &models.LLMConfig{
+		Name:                 "Profile revision guard",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "premium",
+		BaseURL:              server.URL,
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+	}
+	require.NoError(t, repo.Create(context.Background(), model))
+	invalidate = func() {
+		edited := *model
+		edited.Name = "Edited during token exchange"
+		invalidated <- repo.Update(context.Background(), &edited)
+	}
+
+	flow := &oauthPendingFlow{
+		ConfigID:       model.ID,
+		Provider:       models.ProviderOpenAICompatible,
+		TokenURL:       server.URL + "/token",
+		CustomConfig:   model.CustomAuthConfigJSON,
+		ConfigRevision: model.OAuthConfigRevision,
+	}
+	_, err := h.exchangeCustomOAuthCodeAndSaveTokens(flow, "code-1")
+	require.NoError(t, <-invalidated)
+	require.ErrorContains(t, err, "configuration changed")
+	select {
+	case <-profileRequests:
+		t.Fatal("stale OAuth flow sent the new access token to the superseded profile endpoint")
+	default:
+	}
+}
+
+func TestExchangeCustomOAuthRejectsStaleGenerationBeforeNetworkRequest(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	requested := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requested = true
+	}))
+	defer server.Close()
+
+	h, _, repo := setupTestHandler(t)
+	cfg := llmcustomauth.Config{Enabled: true, AllowPrivateEndpoints: true}
+	model := &models.LLMConfig{
+		Name:                 "Stale custom OAuth",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "model",
+		BaseURL:              server.URL,
+		OAuthTokenURL:        server.URL + "/token",
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+	}
+	require.NoError(t, repo.Create(context.Background(), model))
+	flow := &oauthPendingFlow{
+		ConfigID:       model.ID,
+		Provider:       models.ProviderOpenAICompatible,
+		TokenURL:       model.OAuthTokenURL,
+		CustomConfig:   model.CustomAuthConfigJSON,
+		ConfigRevision: model.OAuthConfigRevision,
+	}
+	_, advanced, err := repo.AdvanceCustomOAuthRevision(context.Background(), model.ID)
+	require.NoError(t, err)
+	require.True(t, advanced)
+
+	_, err = h.exchangeCustomOAuthCodeAndSaveTokens(flow, "stale-code")
+	require.ErrorContains(t, err, "configuration changed")
+	require.False(t, requested, "stale flow made an outbound token request")
+}
+
+func TestTakeOAuthFlowRejectsExpiredFlow(t *testing.T) {
+	expiredState := fmt.Sprintf("expired-%d", time.Now().UnixNano())
+	recentState := fmt.Sprintf("recent-%d", time.Now().UnixNano())
+	oauthFlowsMu.Lock()
+	oauthFlows[expiredState] = &oauthPendingFlow{State: expiredState, CreatedAt: time.Now().Add(-oauthFlowLifetime - time.Second)}
+	oauthFlows[recentState] = &oauthPendingFlow{State: recentState, CreatedAt: time.Now()}
+	oauthFlowsMu.Unlock()
+	t.Cleanup(func() {
+		oauthFlowsMu.Lock()
+		delete(oauthFlows, expiredState)
+		delete(oauthFlows, recentState)
+		oauthFlowsMu.Unlock()
+	})
+
+	_, ok := takeOAuthFlow(expiredState, time.Now())
+	require.False(t, ok)
+	flow, ok := takeOAuthFlow(recentState, time.Now())
+	require.True(t, ok)
+	require.Equal(t, recentState, flow.State)
+}
 
 // waitForTCPPort polls until the given port is accepting connections or the
 // timeout elapses. Used instead of time.Sleep to wait for test servers to start.
@@ -46,6 +309,80 @@ func stopOpenAIOAuthCallbackServerForTest(t *testing.T) {
 
 func TestHandler_OAuthInitiate(t *testing.T) {
 	t.Setenv("APP_BASE_URL", "")
+
+	t.Run("custom oauth includes standard authorization fields without pkce", func(t *testing.T) {
+		t.Setenv("APP_BASE_URL", "https://openvibely.example")
+		h, e, llmConfigRepo := setupTestHandler(t)
+		cfg := llmcustomauth.Config{
+			Enabled:             true,
+			StandardTokenFields: true,
+			CallbackParameter:   "redirect_uri",
+		}
+		model := &models.LLMConfig{
+			Name:                 "Custom OAuth",
+			Provider:             models.ProviderOpenAICompatible,
+			AuthMethod:           models.AuthMethodOAuth,
+			Model:                "custom-model",
+			BaseURL:              "https://api.example.test/v1",
+			OAuthClientID:        "custom-client",
+			OAuthAuthorizeURL:    "https://identity.example.test/authorize",
+			OAuthTokenURL:        "https://identity.example.test/token",
+			CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+		}
+		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
+
+		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(model.ID)
+
+		require.NoError(t, h.OAuthInitiate(c))
+		require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+		location := rec.Header().Get("Location")
+		require.Contains(t, location, "response_type=code")
+		require.Contains(t, location, "client_id=custom-client")
+		require.Contains(t, location, "redirect_uri=https%3A%2F%2Fopenvibely.example%2Fcallback")
+		require.NotContains(t, location, "code_challenge=")
+	})
+
+	t.Run("new custom oauth attempt invalidates the previous generation", func(t *testing.T) {
+		t.Setenv("APP_BASE_URL", "https://openvibely.example")
+		h, e, repo := setupTestHandler(t)
+		model := &models.LLMConfig{
+			Name:                 "Custom OAuth generations",
+			Provider:             models.ProviderOpenAICompatible,
+			AuthMethod:           models.AuthMethodOAuth,
+			Model:                "custom-model",
+			BaseURL:              "https://api.example.test/v1",
+			OAuthAuthorizeURL:    "https://identity.example.test/authorize",
+			OAuthTokenURL:        "https://identity.example.test/token",
+			CustomAuthConfigJSON: llmcustomauth.MarshalConfig(llmcustomauth.Config{Enabled: true}),
+		}
+		require.NoError(t, repo.Create(context.Background(), model))
+
+		initiate := func() string {
+			req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(model.ID)
+			require.NoError(t, h.OAuthInitiate(c))
+			location, err := url.Parse(rec.Header().Get("Location"))
+			require.NoError(t, err)
+			return location.Query().Get("state")
+		}
+
+		firstState := initiate()
+		secondState := initiate()
+		require.NotEmpty(t, firstState)
+		require.NotEmpty(t, secondState)
+		_, firstValid := takeOAuthFlow(firstState, time.Now())
+		require.False(t, firstValid)
+		secondFlow, secondValid := takeOAuthFlow(secondState, time.Now())
+		require.True(t, secondValid)
+		require.Equal(t, int64(2), secondFlow.ConfigRevision)
+	})
 
 	t.Run("starts oauth flow for claude max", func(t *testing.T) {
 		h, e, llmConfigRepo := setupTestHandler(t)
@@ -518,6 +855,36 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		require.Contains(t, location, "redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback")
 		require.NotContains(t, location, "redirect_uri=https%3A%2F%2Fdubee.org%2Fauth%2Fcallback")
 	})
+}
+
+func TestOAuthCallbackEscapesProviderErrorDescription(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	state := fmt.Sprintf("escaped-error-%d", time.Now().UnixNano())
+
+	oauthFlowsMu.Lock()
+	oauthFlows[state] = &oauthPendingFlow{
+		State:     state,
+		CreatedAt: time.Now(),
+		Provider:  models.ProviderOpenAICompatible,
+	}
+	oauthFlowsMu.Unlock()
+	t.Cleanup(func() {
+		oauthFlowsMu.Lock()
+		delete(oauthFlows, state)
+		oauthFlowsMu.Unlock()
+	})
+
+	description := `<script>alert("oauth")</script>`
+	callbackURL := "/auth/callback?state=" + url.QueryEscape(state) +
+		"&error=access_denied&error_description=" + url.QueryEscape(description)
+	req := httptest.NewRequest(http.MethodGet, callbackURL, nil)
+	rec := httptest.NewRecorder()
+
+	h.handleOAuthCallbackResponse(rec, req, "/models", nil)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotContains(t, rec.Body.String(), "<script>")
+	require.Contains(t, rec.Body.String(), "&lt;script&gt;")
 }
 
 func TestHandler_OAuthManualComplete(t *testing.T) {
@@ -994,14 +1361,13 @@ func TestHandler_startOAuthCallbackServer(t *testing.T) {
 		require.NoError(t, err)
 		defer resp.Body.Close()
 
-		// Should return error page
+		// Provider errors without a valid state must not reflect provider text.
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 		body := make([]byte, 1024)
 		n, _ := resp.Body.Read(body)
 		bodyStr := string(body[:n])
-		require.Contains(t, bodyStr, "OAuth Failed")
-		require.Contains(t, bodyStr, "User denied access")
-		require.Contains(t, bodyStr, "Return to Models")
+		require.Contains(t, bodyStr, "Session Expired")
+		require.NotContains(t, bodyStr, "User denied access")
 
 		// Wait for server to shut down
 		select {

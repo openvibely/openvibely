@@ -20,7 +20,7 @@ func supportsRuntimeChatActionTools(agent models.LLMConfig) bool {
 	case models.ProviderOpenAI:
 		return agent.IsOpenAIAPIKey() || agent.IsOpenAIOAuth()
 	case models.ProviderOpenAICompatible:
-		return agent.IsOpenAICompatibleAPIKey()
+		return agent.IsOpenAICompatibleAPIKey() || agent.IsOAuth()
 	case models.ProviderAnthropic:
 		return agent.IsAnthropicAPIKey() || agent.IsOAuth()
 	default:

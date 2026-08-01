@@ -66,6 +66,34 @@ func TestModelsContent_NewModelVersionsInSelector(t *testing.T) {
 	if strings.Contains(out, "Max Output Tokens / Request") || strings.Contains(out, "model_max_tokens") {
 		t.Error("expected model dialog not to expose internal output-token cap")
 	}
+	if !strings.Contains(out, "Save endpoint changes and reconnect before discovering models.") {
+		t.Error("expected edit-mode discovery to explain that endpoint changes must be saved first")
+	}
+	if !strings.Contains(out, `name="custom_access_token_header"`) ||
+		!strings.Contains(out, `name="custom_access_token_prefix"`) ||
+		!strings.Contains(out, `<option value="raw">Raw token</option>`) {
+		t.Error("expected custom OAuth token header, prefix, and raw-token controls")
+	}
+	for _, control := range []string{
+		`name="auth_header_name"`,
+		`name="auth_header_value_prefix"`,
+		`name="extra_headers_json"`,
+		`name="extra_body_json"`,
+		`name="models_url"`,
+	} {
+		if !strings.Contains(out, control) {
+			t.Errorf("expected custom API-key request control %s", control)
+		}
+	}
+	if !strings.Contains(out, "if (!showCustom) methodInput.value = 'api_key';") {
+		t.Error("expected provider changes to reset the hidden custom OAuth selector")
+	}
+	if !strings.Contains(out, "apiKeyField.classList.toggle('hidden', showCustom && method === 'oauth');") {
+		t.Error("expected switching from OAuth to API key to restore the API-key field")
+	}
+	if !strings.Contains(out, "el.disabled = !showCustom || method !== 'oauth';") {
+		t.Error("expected hidden OAuth controls to be disabled outside custom OAuth mode")
+	}
 	if !strings.Contains(out, "Claude Effort") {
 		t.Error("expected Claude effort label in model dialog")
 	}
@@ -759,21 +787,49 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		"/models/openai-compatible/available?",
 		"new URLSearchParams({base_url: baseURL})",
 		"X-OpenAI-Compatible-API-Key",
+		"X-OpenAI-Compatible-Auth-Header-Name",
+		"X-OpenAI-Compatible-Auth-Header-Prefix",
+		"X-OpenAI-Compatible-Extra-Headers",
+		"X-OpenAI-Compatible-Models-Array-Path",
+		"X-OpenAI-Compatible-Model-ID-Field",
+		"(!configID || customAuthMethod === 'api_key')",
+		"clearExtraHeaders.checked",
+		"cfg.model_id_field || 'id'",
 		"data.resolved_id",
 		"setOpenAICompatibleModelValue(models[i].id, models[i].id, false)",
 		"setOpenAICompatibleModelValue(data.resolved_id, data.resolved_id, true)",
 		"if (!isDiscoverableOpenAICompatiblePreset())",
 		"document.getElementById('model_provider').value !== provider",
+		"Discover Models",
+		`onclick="discoverOpenAICompatibleModels()"`,
+		`name="custom_static_headers_json"`,
+		`name="custom_authorization_parameters_json"`,
+		`name="custom_oauth_pkce"`,
+		`name="custom_allow_private_endpoints"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected OpenAI-compatible discovery UI to contain %q", want)
 		}
 	}
+	modelsPathIndex := strings.Index(out, `name="custom_models_array_path"`)
+	oauthFieldsIndex := strings.Index(out, `id="custom_provider_oauth_fields"`)
+	if modelsPathIndex < 0 || oauthFieldsIndex < 0 || modelsPathIndex > oauthFieldsIndex {
+		t.Fatal("expected model discovery schema controls to be available outside the OAuth-only fields")
+	}
+	modelIDFieldIndex := strings.Index(out, `id="model_custom_model_id_field"`)
+	if modelIDFieldIndex < 0 {
+		t.Fatal("expected custom model ID field")
+	}
+	modelIDFieldMarkup := out[modelIDFieldIndex:]
+	if end := strings.Index(modelIDFieldMarkup, `>`); end >= 0 {
+		modelIDFieldMarkup = modelIDFieldMarkup[:end]
+	}
+	if !strings.Contains(modelIDFieldMarkup, `value="id"`) {
+		t.Fatalf("expected custom model ID field to default to id: %s", modelIDFieldMarkup)
+	}
 	for _, forbidden := range []string{
 		`<select id="model_openai_compatible_preset"`,
 		`onchange="applyOpenAICompatiblePreset()"`,
-		"Discover Models",
-		`onclick="discoverOpenAICompatibleModels()"`,
 		"api_key: apiKey",
 		"api_key=",
 		"openai_compatible_api_key",

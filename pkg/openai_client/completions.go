@@ -37,6 +37,9 @@ type CompletionsOptions struct {
 	// ExtraHeaders are sent with each Chat Completions request. Values may contain
 	// provider secrets and must not be logged by callers.
 	ExtraHeaders map[string]string
+	// FinalizeRequest runs after the exact JSON body and ordinary headers have
+	// been applied. Custom providers use it for body-dependent request signing.
+	FinalizeRequest func(*http.Request, []byte) error
 	// ExtraBody is merged into each Chat Completions request after OpenVibely-owned
 	// fields are set. Protected fields are ignored.
 	ExtraBody map[string]interface{}
@@ -405,6 +408,11 @@ func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []complet
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
 		httpReq.Header.Set("Accept", "text/event-stream")
+		if opts.FinalizeRequest != nil {
+			if err := opts.FinalizeRequest(httpReq, body); err != nil {
+				return nil, err
+			}
+		}
 		return httpReq, nil
 	}
 

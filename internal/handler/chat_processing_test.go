@@ -6439,6 +6439,7 @@ func TestFormatThreadTranscript_LargeMessageTruncation(t *testing.T) {
 }
 
 func TestProcessStreamingResponse_MixtureSupportedAggregatorInjectsCreateTask(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
 	ctx := context.Background()
@@ -6460,7 +6461,7 @@ func TestProcessStreamingResponse_MixtureSupportedAggregatorInjectsCreateTask(t 
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"Task created.\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
 	}))
 	defer server.Close()
-	aggregator := &models.LLMConfig{Name: "Compatible Aggregator", Provider: models.ProviderOpenAICompatible, Model: "provider/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", BaseURL: server.URL + "/v1/", Transport: "chat_completions"}
+	aggregator := &models.LLMConfig{Name: "Compatible Aggregator", Provider: models.ProviderOpenAICompatible, Model: "provider/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", BaseURL: server.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions"}
 	require.NoError(t, llmConfigRepo.Create(ctx, aggregator))
 	mixture := &models.LLMConfig{
 		Name:              "Tool-capable Mixture",

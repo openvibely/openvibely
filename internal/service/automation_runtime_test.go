@@ -2159,8 +2159,8 @@ func TestAutomationLiveTaskRetryReplacesEarlierFailedDispatchState(t *testing.T)
 	const (
 		failedActivityID    = "ffffffffffffffffffffffffffffffff"
 		completedActivityID = "00000000000000000000000000000000"
-		sameStartedAt       = "2026-07-30 12:34:56"
 	)
+	sameStartedAt := time.Now().UTC().Add(-time.Hour).Format("2006-01-02 15:04:05")
 	_, err := fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_activities
 		(id, project_id, automation_id, version_id, node_id, invocation_id, activity_key, activity_type, status, started_at, completed_at)
 		VALUES (?, ?, ?, ?, ?, ?, 'retry:failed', 'task_execution', 'failed', ?, ?)`, failedActivityID,

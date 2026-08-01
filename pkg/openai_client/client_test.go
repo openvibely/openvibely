@@ -1440,6 +1440,18 @@ func TestSend_OAuthSuppressToolMarkersStripsFunctionCallMarkers(t *testing.T) {
 	}
 }
 
+func TestApplyAuthHeadersSupportsRawCustomAPIKey(t *testing.T) {
+	client := NewWithCompatibleAPIKey("secret-key", "https://example.test/v1", "X-API-Key", "")
+	req, err := http.NewRequest(http.MethodGet, "https://example.test/v1/models", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.applyAuthHeaders(req, false)
+	if got := req.Header.Get("X-API-Key"); got != "secret-key" {
+		t.Fatalf("X-API-Key = %q, want raw API key", got)
+	}
+}
+
 func testOAuthJWT(accountID string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_account_id":"` + accountID + `"}}`))

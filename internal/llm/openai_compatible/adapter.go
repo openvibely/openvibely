@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	llmattachment "github.com/openvibely/openvibely/internal/llm/attachment"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
@@ -23,12 +25,17 @@ const defaultOutputBudget = 16384
 var errMaxTokens = fmt.Errorf("response truncated: max output tokens limit reached (output budget exhausted before task completed)")
 
 type Adapter struct {
-	execRepo  *repository.ExecutionRepo
-	streamHub llmstream.ExecutionStreamPublisher
+	configRepo *repository.LLMConfigRepo
+	execRepo   *repository.ExecutionRepo
+	streamHub  llmstream.ExecutionStreamPublisher
 }
 
 func New(execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
-	return &Adapter{execRepo: execRepo, streamHub: streamHub}
+	return NewWithConfigRepo(nil, execRepo, streamHub)
+}
+
+func NewWithConfigRepo(configRepo *repository.LLMConfigRepo, execRepo *repository.ExecutionRepo, streamHub llmstream.ExecutionStreamPublisher) *Adapter {
+	return &Adapter{configRepo: configRepo, execRepo: execRepo, streamHub: streamHub}
 }
 
 func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (llmcontracts.AgentResult, error) {
@@ -58,15 +65,200 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 	}
 }
 
-func (a *Adapter) client(agent models.LLMConfig) (*openaiclient.Client, error) {
-	if agent.AuthMethod != models.AuthMethodAPIKey {
-		return nil, fmt.Errorf("OpenAI-compatible model %q is configured with auth_method=%q; expected api_key", agent.Name, agent.AuthMethod)
+func (a *Adapter) client(ctx context.Context, agent models.LLMConfig) (*openaiclient.Client, func(*http.Request, []byte) error, error) {
+	if agent.AuthMethod == models.AuthMethodOAuth {
+		current, err := a.currentOAuthAgent(ctx, agent)
+		if err != nil {
+			return nil, nil, err
+		}
+		agent = current
 	}
-	return openaiclient.NewWithCompatibleAPIKey(strings.TrimSpace(agent.APIKey), agent.BaseURL, agent.GetAuthHeaderName(), agent.GetAuthHeaderValuePrefix()), nil
+	cfg, err := llmcustomauth.ParseConfig(agent.CustomAuthConfigJSON)
+	if err != nil {
+		return nil, nil, err
+	}
+	state, err := llmcustomauth.ParseState(agent.CustomAuthStateJSON)
+	if err != nil {
+		return nil, nil, err
+	}
+	var client *openaiclient.Client
+	switch agent.AuthMethod {
+	case models.AuthMethodAPIKey:
+		client = openaiclient.NewWithCompatibleAPIKey(strings.TrimSpace(agent.APIKey), agent.BaseURL, agent.GetAuthHeaderName(), agent.GetAuthHeaderValuePrefix())
+	case models.AuthMethodOAuth:
+		agent, err = a.ensureFreshOAuth(ctx, agent, false, "")
+		if err != nil {
+			return nil, nil, err
+		}
+		client = openaiclient.NewWithCompatibleOAuthToken(agent.OAuthAccessToken, agent.OAuthRefreshToken, agent.OAuthExpiresAt, agent.BaseURL)
+		client.SetAuthHeader(cfg.AccessTokenHeader, "Bearer ")
+		client.SetOAuthUnauthorizedHandler(func(refreshCtx context.Context, tokenUsed string) (openaiclient.OAuthTokens, bool, error) {
+			refreshed, refreshErr := a.ensureFreshOAuth(refreshCtx, agent, true, tokenUsed)
+			if refreshErr != nil {
+				return openaiclient.OAuthTokens{}, false, refreshErr
+			}
+			return openaiclient.OAuthTokens{
+				AccessToken: refreshed.OAuthAccessToken, RefreshToken: refreshed.OAuthRefreshToken, ExpiresAt: refreshed.OAuthExpiresAt,
+			}, true, nil
+		})
+	default:
+		return nil, nil, fmt.Errorf("OpenAI-compatible model %q uses unsupported auth_method=%q", agent.Name, agent.AuthMethod)
+	}
+	requestPrivate := cfg.AllowPrivateEndpoints || presetUsesPrivateEndpoints(agent.PresetSlug)
+	if _, err := llmcustomauth.ValidateEndpoint(agent.BaseURL, requestPrivate); err != nil {
+		return nil, nil, fmt.Errorf("invalid custom provider base URL: %w", err)
+	}
+	client.SetHTTPClient(llmcustomauth.NewHTTPClient(10*time.Minute, requestPrivate))
+	finalize := func(req *http.Request, body []byte) error {
+		if agent.AuthMethod == models.AuthMethodOAuth {
+			if err := a.verifyOAuthRevision(req.Context(), agent); err != nil {
+				return err
+			}
+		}
+		if !cfg.Enabled {
+			return nil
+		}
+		auth := client.CurrentAuth()
+		token := auth.Token
+		if token == "" {
+			token = auth.APIKey
+		}
+		return llmcustomauth.PrepareRequest(req, body, cfg, state, token)
+	}
+	return client, finalize, nil
+}
+
+func (a *Adapter) currentOAuthAgent(ctx context.Context, snapshot models.LLMConfig) (models.LLMConfig, error) {
+	if a.configRepo == nil {
+		return snapshot, fmt.Errorf("custom OAuth persistence is not configured")
+	}
+	current, err := a.configRepo.GetByID(ctx, snapshot.ID)
+	if err != nil {
+		return snapshot, err
+	}
+	if current == nil || current.Provider != models.ProviderOpenAICompatible || current.AuthMethod != models.AuthMethodOAuth {
+		return snapshot, fmt.Errorf("custom OAuth model %q is no longer available", snapshot.Name)
+	}
+	if current.OAuthConfigRevision != snapshot.OAuthConfigRevision {
+		return snapshot, fmt.Errorf("custom OAuth configuration changed; reload the model before sending requests")
+	}
+	return *current, nil
+}
+
+func (a *Adapter) verifyOAuthRevision(ctx context.Context, expected models.LLMConfig) error {
+	current, err := a.currentOAuthAgent(ctx, expected)
+	if err != nil {
+		return err
+	}
+	if current.BaseURL != expected.BaseURL || current.CustomAuthConfigJSON != expected.CustomAuthConfigJSON ||
+		current.CustomAuthStateJSON != expected.CustomAuthStateJSON {
+		return fmt.Errorf("custom OAuth configuration changed; reload the model before sending requests")
+	}
+	return nil
+}
+
+func presetUsesPrivateEndpoints(preset string) bool {
+	switch strings.ToLower(strings.TrimSpace(preset)) {
+	case "vllm", "lm_studio", "sglang", "litellm", "inferrs", "ds4":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Adapter) ensureFreshOAuth(ctx context.Context, agent models.LLMConfig, force bool, tokenUsed string) (models.LLMConfig, error) {
+	if a.configRepo == nil {
+		return agent, fmt.Errorf("custom OAuth persistence is not configured")
+	}
+	if !force && agent.OAuthAccessToken != "" &&
+		(agent.OAuthExpiresAt == 0 || agent.OAuthExpiresAt > time.Now().Add(5*time.Minute).UnixMilli()) {
+		return agent, nil
+	}
+	tokens, err := llmcustomauth.CoordinatedRefreshDistributed(
+		ctx,
+		string(agent.Provider)+":"+agent.ID,
+		a.configRepo,
+		agent.ID,
+		func() (llmcustomauth.TokenSet, bool, error) {
+			current, loadErr := a.configRepo.GetByID(ctx, agent.ID)
+			if loadErr != nil {
+				return llmcustomauth.TokenSet{}, false, loadErr
+			}
+			if current == nil {
+				return llmcustomauth.TokenSet{}, false, fmt.Errorf("custom OAuth model %q no longer exists", agent.Name)
+			}
+			if tokenUsed != "" && current.OAuthAccessToken != "" && current.OAuthAccessToken != tokenUsed {
+				return customTokenSet(*current), true, nil
+			}
+			if !force && current.OAuthAccessToken != "" &&
+				(current.OAuthExpiresAt == 0 || current.OAuthExpiresAt > time.Now().Add(5*time.Minute).UnixMilli()) {
+				return customTokenSet(*current), true, nil
+			}
+			return llmcustomauth.TokenSet{}, false, nil
+		},
+		func() (llmcustomauth.TokenSet, error) {
+			current, loadErr := a.configRepo.GetByID(ctx, agent.ID)
+			if loadErr != nil {
+				return llmcustomauth.TokenSet{}, loadErr
+			}
+			if current == nil {
+				return llmcustomauth.TokenSet{}, fmt.Errorf("custom OAuth model %q no longer exists", agent.Name)
+			}
+			agent = *current
+			if tokenUsed != "" && agent.OAuthAccessToken != "" && agent.OAuthAccessToken != tokenUsed {
+				return customTokenSet(agent), nil
+			}
+			if !force && agent.OAuthAccessToken != "" &&
+				(agent.OAuthExpiresAt == 0 || agent.OAuthExpiresAt > time.Now().Add(5*time.Minute).UnixMilli()) {
+				return customTokenSet(agent), nil
+			}
+			if agent.OAuthRefreshToken == "" {
+				if agent.OAuthAccessToken == "" {
+					return llmcustomauth.TokenSet{}, fmt.Errorf("custom OAuth model %q is not connected", agent.Name)
+				}
+				return llmcustomauth.TokenSet{}, fmt.Errorf("custom OAuth token for model %q cannot be refreshed; reconnect the model", agent.Name)
+			}
+			cfg, parseErr := llmcustomauth.ParseConfig(agent.CustomAuthConfigJSON)
+			if parseErr != nil {
+				return llmcustomauth.TokenSet{}, parseErr
+			}
+			refreshClient := llmcustomauth.NewHTTPClient(30*time.Second, cfg.AllowPrivateEndpoints)
+			refreshed, refreshErr := llmcustomauth.Refresh(ctx, refreshClient, cfg, agent.OAuthRefreshToken, llmcustomauth.RefreshOptions{
+				ClientID: agent.OAuthClientID, ClientSecret: agent.OAuthClientSecret,
+			})
+			if refreshErr != nil {
+				return llmcustomauth.TokenSet{}, refreshErr
+			}
+			updated, persistErr := a.configRepo.UpdateCustomOAuthTokensIfRevision(
+				ctx, agent.ID, agent.OAuthConfigRevision,
+				refreshed.AccessToken, refreshed.RefreshToken, refreshed.ExpiresAt,
+			)
+			if persistErr != nil {
+				return llmcustomauth.TokenSet{}, persistErr
+			}
+			if !updated {
+				return llmcustomauth.TokenSet{}, fmt.Errorf("custom OAuth configuration changed during token refresh")
+			}
+			return refreshed, nil
+		},
+	)
+	if err != nil {
+		return agent, err
+	}
+	agent.OAuthAccessToken = tokens.AccessToken
+	agent.OAuthRefreshToken = tokens.RefreshToken
+	agent.OAuthExpiresAt = tokens.ExpiresAt
+	return agent, nil
+}
+
+func customTokenSet(agent models.LLMConfig) llmcustomauth.TokenSet {
+	return llmcustomauth.TokenSet{
+		AccessToken: agent.OAuthAccessToken, RefreshToken: agent.OAuthRefreshToken, ExpiresAt: agent.OAuthExpiresAt,
+	}
 }
 
 func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (string, llmcontracts.Usage, error) {
-	client, err := a.client(req.Agent)
+	client, finalizeRequest, err := a.client(ctx, req.Agent)
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
@@ -94,6 +286,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
+		FinalizeRequest:  finalizeRequest,
 		ExtraBody:        extraBody,
 		ToolExecutor:     toolExecutor(ctx, workDir),
 		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate),
@@ -106,7 +299,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 }
 
 func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (string, string, llmcontracts.Usage, error) {
-	client, err := a.client(req.Agent)
+	client, finalizeRequest, err := a.client(ctx, req.Agent)
 	if err != nil {
 		return "", "", llmusage.FromTotal(0), err
 	}
@@ -147,6 +340,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
+		FinalizeRequest:  finalizeRequest,
 		ExtraBody:        extraBody,
 		ToolExecutor:     toolExecutor(ctx, workDir),
 		ToolFilter:       toolFilter(ctx, true, models.ChatModeOrchestrate),
@@ -164,7 +358,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 }
 
 func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentRequest, workDir string) (string, llmcontracts.Usage, error) {
-	client, err := a.client(req.Agent)
+	client, finalizeRequest, err := a.client(ctx, req.Agent)
 	if err != nil {
 		return "", llmusage.FromTotal(0), err
 	}
@@ -204,6 +398,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
+		FinalizeRequest:  finalizeRequest,
 		ExtraBody:        extraBody,
 		ToolExecutor:     toolExecutor(ctx, workDir),
 		ToolFilter:       toolFilter(ctx, req.Followup, req.ChatMode),

@@ -238,6 +238,18 @@ func NewWithCompatibleAPIKey(apiKey, baseURL, authHeaderName, authHeaderValuePre
 	return client
 }
 
+// NewWithCompatibleOAuthToken creates an OAuth client for an OpenAI-compatible
+// Chat Completions endpoint.
+func NewWithCompatibleOAuthToken(token, refreshToken string, expiresAt int64, baseURL string) *Client {
+	client := newClient(&StoredAuth{
+		Token:        token,
+		RefreshToken: refreshToken,
+		ExpiresAt:    expiresAt,
+	})
+	client.apiBaseURL = strings.TrimSpace(baseURL)
+	return client
+}
+
 // NewWithOAuthToken creates a client using an OAuth access token.
 func NewWithOAuthToken(token, refreshToken string, expiresAt int64, accountID string) *Client {
 	return newClient(&StoredAuth{
@@ -290,6 +302,24 @@ func (c *Client) CurrentAuth() StoredAuth {
 func (c *Client) SetOAuthUnauthorizedHandler(handler OAuthUnauthorizedHandler) {
 	c.oauthUnauthorizedHandler = handler
 	c.oauthRefreshExternallyManaged = handler != nil
+}
+
+// SetHTTPClient overrides the transport used for provider requests.
+func (c *Client) SetHTTPClient(client *http.Client) {
+	if client != nil {
+		c.httpClient = client
+	}
+}
+
+// SetAuthHeader controls where the client's primary API key or OAuth token is
+// placed. Request finalizers may still replace the value for provider-specific
+// authorization modes.
+func (c *Client) SetAuthHeader(name, prefix string) {
+	if c.auth == nil {
+		return
+	}
+	c.auth.AuthHeaderName = strings.TrimSpace(name)
+	c.auth.AuthHeaderValuePrefix = prefix
 }
 
 func (c *Client) ensureValidToken() error {
@@ -687,7 +717,7 @@ func (c *Client) applyAuthHeaders(req *http.Request, isChatGPTOAuth bool) {
 			headerName = "Authorization"
 		}
 		prefix := c.auth.AuthHeaderValuePrefix
-		if prefix == "" {
+		if prefix == "" && strings.TrimSpace(c.auth.AuthHeaderName) == "" {
 			prefix = "Bearer "
 		}
 		req.Header.Set(headerName, prefix+token)
