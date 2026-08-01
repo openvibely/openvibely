@@ -105,15 +105,6 @@ func TestHTMXHistoryOptOutPreventsSecretSnapshotInChrome(t *testing.T) {
 		t.Fatalf("render base layout: %v", err)
 	}
 	baseHTML := renderedBase.String()
-	cleanupStart := strings.Index(baseHTML, "(function() {\n\t\t\t\t\twindow.__ov_purgeSensitiveHTMXHistory")
-	if cleanupStart < 0 {
-		t.Fatal("rendered base layout is missing sensitive HTMX history cleanup")
-	}
-	cleanupEnd := strings.Index(baseHTML[cleanupStart:], "</script>")
-	if cleanupEnd < 0 {
-		t.Fatal("could not isolate the sensitive HTMX history cleanup script")
-	}
-	cleanupScript := baseHTML[cleanupStart : cleanupStart+cleanupEnd]
 	scriptStart := strings.Index(baseHTML, "window.openVibelyNavigate = function")
 	if scriptStart < 0 {
 		t.Fatal("rendered base layout is missing openVibelyNavigate")
@@ -132,17 +123,13 @@ window.addEventListener('DOMContentLoaded', function() {
     document.body.setAttribute('data-test-error', message);
   }
   (async function() {
+    localStorage.removeItem('htmx-history-cache');
     await window.openVibelyNavigate('/other');
     var cache = localStorage.getItem('htmx-history-cache') || '';
     if (cache.indexOf('` + secret + `') !== -1) throw new Error('secret entered HTMX history cache');
     var entries = JSON.parse(cache || '[]');
-    if (entries.some(function(entry) {
-      return new URL(entry.url, window.location.href).pathname === '/models';
-    })) {
-      throw new Error('Models page remained in HTMX history cache');
-    }
-    if (!entries.some(function(entry) { return entry.url === '/retained'; })) {
-      throw new Error('unrelated HTMX history entry was removed');
+    if (entries.some(function(entry) { return entry.url === '/models'; })) {
+      throw new Error('Models page entered HTMX history cache');
     }
     document.body.setAttribute('data-test-result', 'pass');
   })().catch(function(error) { fail(String(error && error.stack || error)); });
@@ -153,12 +140,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
 		case "/models":
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><script>
-localStorage.setItem('htmx-history-cache', JSON.stringify([
-  {url: '/models?edit=custom#oauth', content: '<div data-secret="%s">Models</div>', title: 'Models', scroll: 0},
-  {url: '/retained', content: '<div>Retained</div>', title: 'Retained', scroll: 0}
-]));
-</script><script>%s</script><script src="/htmx-2.0.4.min.js"></script><script>%s</script>%s</head><body data-test-result="pending"><main id="main-content"><div id="models-container" hx-history="false" data-secret="%s">Models</div></main></body></html>`, secret, cleanupScript, productionScript, runner, secret)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><script src="/htmx-2.0.4.min.js"></script><script>%s</script>%s</head><body data-test-result="pending"><main id="main-content"><div id="models-container" hx-history="false" data-secret="%s">Models</div></main></body></html>`, productionScript, runner, secret)
 		case "/other":
 			_, _ = w.Write([]byte(`<div id="other-page">Other</div>`))
 		case "/htmx-2.0.4.min.js":

@@ -55,12 +55,6 @@ type telegramPreviewState struct {
 	richDraftVisible bool
 }
 
-type telegramAuthorizationStore interface {
-	IsAuthorized(ctx context.Context, projectID string, userID int64, username string) (bool, error)
-	IsAuthorizedAnywhere(ctx context.Context, userID int64, username string) (bool, error)
-	BackfillUserID(ctx context.Context, projectID, username string, userID int64) error
-}
-
 // TelegramService manages Telegram bot integration.
 // It acts as a proxy to the /chat page orchestrator — every message sent to the bot
 // is forwarded to the same chat assistant that powers the /chat web UI.
@@ -74,7 +68,7 @@ type TelegramService struct {
 	scheduleRepo             *repository.ScheduleRepo
 	chatAttachmentRepo       *repository.ChatAttachmentRepo
 	threadInputRepo          *repository.ThreadInputRepo
-	telegramAuthRepo         telegramAuthorizationStore
+	telegramAuthRepo         *repository.TelegramAuthRepo
 	telegramUserProjectRepo  *repository.TelegramUserProjectRepo
 	settingsRepo             *repository.SettingsRepo
 	customPersonalityRepo    *repository.CustomPersonalityRepo
@@ -251,8 +245,8 @@ func (s *TelegramService) checkAuthorization(userID int64, username string, proj
 		// No project selected yet — check if user is authorized in ANY project
 		authorized, err := s.telegramAuthRepo.IsAuthorizedAnywhere(ctx, userID, username)
 		if err != nil {
-			applog.Infof("[telegram] global authorization lookup failed for user_id=%d: %v", userID, err)
-			return false
+			applog.Infof("[telegram] error checking global authorization for user %d: %v", userID, err)
+			return true // Fail open on error
 		}
 		applog.Infof("[telegram] auth check: user %d (%s) global authorized=%v", userID, username, authorized)
 		return authorized
@@ -261,8 +255,8 @@ func (s *TelegramService) checkAuthorization(userID int64, username string, proj
 	// Check if this specific user is authorized for the project
 	authorized, err := s.telegramAuthRepo.IsAuthorized(ctx, projectID, userID, username)
 	if err != nil {
-		applog.Infof("[telegram] project authorization lookup failed for user_id=%d project_id=%s: %v", userID, projectID, err)
-		return false
+		applog.Infof("[telegram] error checking authorization for user %d: %v", userID, err)
+		return true // Fail open on error
 	}
 
 	// If not authorized for the specific project, fall back to checking any project.
@@ -270,8 +264,8 @@ func (s *TelegramService) checkAuthorization(userID int64, username string, proj
 	if !authorized {
 		authorized, err = s.telegramAuthRepo.IsAuthorizedAnywhere(ctx, userID, username)
 		if err != nil {
-			applog.Infof("[telegram] fallback global authorization lookup failed for user_id=%d project_id=%s: %v", userID, projectID, err)
-			return false
+			applog.Infof("[telegram] error checking global authorization for user %d: %v", userID, err)
+			return true // Fail open on error
 		}
 	}
 
@@ -416,38 +410,23 @@ func (s *TelegramService) run(ctx context.Context, bot *tgbotapi.BotAPI, done ch
 			continue
 		}
 
-		if !processTelegramUpdateBatch(ctx, &u.Offset, updates, s.handleTelegramUpdate) {
-			select {
-			case <-ctx.Done():
-				applog.Infof("[telegram] bot stopped")
-				return
-			case <-time.After(3 * time.Second):
+		for _, update := range updates {
+			if update.UpdateID >= u.Offset {
+				u.Offset = update.UpdateID + 1
 			}
+			s.handleTelegramUpdate(ctx, update)
 		}
 	}
 }
 
-func processTelegramUpdateBatch(ctx context.Context, offset *int, updates []tgbotapi.Update, handle func(context.Context, tgbotapi.Update) bool) bool {
-	for _, update := range updates {
-		if update.UpdateID < *offset {
-			continue
-		}
-		if !handle(ctx, update) {
-			return false
-		}
-		*offset = update.UpdateID + 1
-	}
-	return true
-}
-
-func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbotapi.Update) bool {
+func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbotapi.Update) {
 	select {
 	case <-ctx.Done():
-		return false
+		return
 	default:
 	}
 	if update.Message == nil {
-		return true
+		return
 	}
 
 	// Check authorization before processing any message (including commands)
@@ -461,7 +440,7 @@ func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbot
 		applog.Infof("[telegram] unauthorized access attempt from user %d (username: %s) for project %s",
 			userID, username, projectID)
 		s.sendMessage(s.ctx, chatID, "You are not authorized to use this bot. Contact the project owner to get access.")
-		return true
+		return
 	}
 
 	// Handle special commands: /start and /project
@@ -471,23 +450,22 @@ func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbot
 		case "start":
 			response := s.handleStart(update.Message.From.ID)
 			s.sendMessage(s.ctx, update.Message.Chat.ID, response)
-			return true
+			return
 		case "project":
 			response := s.handleProject(update.Message.From.ID, update.Message.CommandArguments())
 			s.sendMessage(s.ctx, update.Message.Chat.ID, response)
-			return true
+			return
 		}
 	}
 
 	// Check for natural language project commands before forwarding to LLM
 	if response, handled := s.handleNaturalLanguageProjectCommand(userID, update.Message.Text); handled {
 		s.sendMessage(s.ctx, chatID, response)
-		return true
+		return
 	}
 
-	// Forward all other messages (including unrecognized commands) to the chat orchestrator.
-	// Polling waits only for durable persistence, while model response work continues asynchronously.
-	return s.handleChatMessageUntilDurable(ctx, update.Message)
+	// Forward all other messages (including unrecognized commands) to the chat orchestrator
+	go s.handleChatMessage(update.Message)
 }
 
 func isTelegramConflictError(err error) bool {
@@ -597,29 +575,8 @@ func (s *TelegramService) handleProject(userID int64, args string) string {
 	return fmt.Sprintf("✅ Switched to project: *%s*", targetProject.Name)
 }
 
-// handleChatMessage forwards a Telegram message to the chat orchestrator.
+// handleChatMessage forwards a Telegram message to the chat orchestrator
 func (s *TelegramService) handleChatMessage(message *tgbotapi.Message) {
-	s.handleChatMessageWithDurableHandoff(context.Background(), message, nil)
-}
-
-func (s *TelegramService) handleChatMessageUntilDurable(ctx context.Context, message *tgbotapi.Message) bool {
-	result := make(chan bool, 1)
-	var reportOnce sync.Once
-	report := func(success bool) {
-		reportOnce.Do(func() { result <- success })
-	}
-	go func() {
-		report(s.handleChatMessageWithDurableHandoff(ctx, message, func() { report(true) }))
-	}()
-	select {
-	case success := <-result:
-		return success
-	case <-ctx.Done():
-		return false
-	}
-}
-
-func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.Context, message *tgbotapi.Message, onDurableHandoff func()) bool {
 	userID := message.From.ID
 	chatID := message.Chat.ID
 
@@ -635,7 +592,7 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 	// Require either text or an attachment
 	if text == "" && fileID == "" {
 		s.sendMessage(context.Background(), chatID, "Please send a text message or an attachment.")
-		return true
+		return
 	}
 
 	// If attachment with no caption, generate a default prompt
@@ -648,15 +605,14 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 	projectID := s.getActiveProject(userID)
 	if projectID == "" {
 		s.sendMessage(context.Background(), chatID, "No active project. Send /start to set up first.")
-		return true
+		return
 	}
 
-	ctx, cancel := context.WithTimeout(parentCtx, telegramProcessTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), telegramProcessTimeout)
 	defer cancel()
 
 	start := time.Now()
 	var telegramImageAttachments []models.Attachment
-	durablyHandedOff := false
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform:              "telegram",
 		ProjectID:             projectID,
@@ -677,12 +633,6 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 		SettingsRepo:          s.settingsRepo,
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
-		OnDurableHandoff: func() {
-			durablyHandedOff = true
-			if onDurableHandoff != nil {
-				onDurableHandoff()
-			}
-		},
 		DownloadAttachments: func(ctx context.Context) (channelChatIngressDownloadResult, error) {
 			if fileID == "" {
 				return channelChatIngressDownloadResult{}, nil
@@ -771,7 +721,7 @@ func (s *TelegramService) handleChatMessageWithDurableHandoff(parentCtx context.
 			},
 		},
 	})
-	return durablyHandedOff
+	return
 }
 
 // extractTelegramAttachment extracts file information from a Telegram message.

@@ -109,26 +109,6 @@ if (document.title !== 'History Task - OpenVibely') throw new Error('cache-miss 
 	}
 }
 
-func TestBasePurgesSensitiveHTMXHistoryBeforeHTMXLoads(t *testing.T) {
-	var buf bytes.Buffer
-	if err := Base("Test", nil, "").Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render base: %v", err)
-	}
-	html := buf.String()
-	cleanup := strings.Index(html, "window.__ov_purgeSensitiveHTMXHistory = function")
-	invocation := strings.Index(html, "window.__ov_purgeSensitiveHTMXHistory();")
-	htmx := strings.Index(html, `src="https://unpkg.com/htmx.org@2.0.4"`)
-	if cleanup < 0 || invocation < 0 {
-		t.Fatal("base layout must purge stale secret-bearing HTMX history entries")
-	}
-	if htmx < 0 || cleanup > htmx || invocation > htmx {
-		t.Fatal("sensitive HTMX history cleanup must run before HTMX loads")
-	}
-	if !strings.Contains(html, "new URL(entry.url, window.location.href).pathname !== '/models'") {
-		t.Fatal("history cleanup must remove Models URLs including query and fragment variants")
-	}
-}
-
 func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {

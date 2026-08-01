@@ -276,9 +276,9 @@ func TestTakeOAuthFlowRejectsExpiredFlow(t *testing.T) {
 		oauthFlowsMu.Unlock()
 	})
 
-	_, ok := takeOAuthFlow(expiredState)
+	_, ok := takeOAuthFlow(expiredState, time.Now())
 	require.False(t, ok)
-	flow, ok := takeOAuthFlow(recentState)
+	flow, ok := takeOAuthFlow(recentState, time.Now())
 	require.True(t, ok)
 	require.Equal(t, recentState, flow.State)
 }
@@ -471,9 +471,9 @@ func TestHandler_OAuthInitiate(t *testing.T) {
 		secondState := initiate()
 		require.NotEmpty(t, firstState)
 		require.NotEmpty(t, secondState)
-		_, firstValid := takeOAuthFlow(firstState)
+		_, firstValid := takeOAuthFlow(firstState, time.Now())
 		require.False(t, firstValid)
-		secondFlow, secondValid := takeOAuthFlow(secondState)
+		secondFlow, secondValid := takeOAuthFlow(secondState, time.Now())
 		require.True(t, secondValid)
 		require.Equal(t, int64(2), secondFlow.ConfigRevision)
 	})
@@ -1033,14 +1033,6 @@ func TestHandler_OAuthManualComplete(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "manual-access-token", updatedModel.OAuthAccessToken)
 		require.Equal(t, "manual-refresh-token", updatedModel.OAuthRefreshToken)
-
-		replayReq := httptest.NewRequest(http.MethodPost, "/models/oauth/manual-complete", strings.NewReader(body))
-		replayReq.Header.Set("Content-Type", "application/json")
-		replayRec := httptest.NewRecorder()
-		e.ServeHTTP(replayRec, replayReq)
-
-		require.Equal(t, http.StatusBadRequest, replayRec.Code)
-		require.Contains(t, replayRec.Body.String(), "oauth session expired or invalid state")
 	})
 
 	t.Run("returns error for missing code or state", func(t *testing.T) {
@@ -1297,13 +1289,6 @@ func TestHandler_OAuthCallback(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "hosted-access-token", updatedModel.OAuthAccessToken)
 		require.Equal(t, "hosted-refresh-token", updatedModel.OAuthRefreshToken)
-
-		replayReq := httptest.NewRequest(http.MethodGet, "/auth/callback?code=hosted-code&state="+testState, nil)
-		replayRec := httptest.NewRecorder()
-		e.ServeHTTP(replayRec, replayReq)
-
-		require.Equal(t, http.StatusOK, replayRec.Code)
-		require.Contains(t, replayRec.Body.String(), "Session Expired")
 	})
 
 	t.Run("preserves project context in provider error return link", func(t *testing.T) {

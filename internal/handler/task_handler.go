@@ -235,7 +235,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 		if projectID == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "project_id required")
 		}
-		tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		if err != nil {
 			applog.Infof("[handler] ListTasks error: %v", err)
 			return err
@@ -252,7 +252,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 		projectID = projects[0].ID
 	}
 
-	tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+	tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 	if err != nil {
 		applog.Infof("[handler] ListTasks error: %v", err)
 		return err
@@ -481,7 +481,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 
 	// Return the full kanban board
 	sortPrefs := getSortPreferences(c)
-	tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+	tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 	agents, _ := h.llmConfigRepo.List(c.Request().Context())
 	return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 }
@@ -1354,7 +1354,7 @@ func (h *Handler) DeleteTask(c echo.Context) error {
 	// Return the full kanban board for HTMX requests (consistent with other task operations)
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		if err != nil {
 			applog.Infof("[handler] DeleteTask error listing tasks: %v", err)
 			return err
@@ -1458,7 +1458,7 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	// Return the full kanban board for HTMX requests
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		if err != nil {
 			applog.Infof("[handler] CancelTask error listing tasks: %v", err)
 			return err
@@ -1516,7 +1516,7 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 	// Return the full kanban board
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, task.ProjectID, sortPrefs, agents)
 	}
@@ -1537,7 +1537,7 @@ func (h *Handler) MoveCompletedActiveToCompleted(c echo.Context) error {
 	// Return the full kanban board
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 	}
@@ -1565,7 +1565,7 @@ func (h *Handler) UpdateTaskStatus(c echo.Context) error {
 	// Return the full kanban board
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, task.ProjectID, sortPrefs, agents)
 	}
@@ -1622,7 +1622,7 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 	}
@@ -1643,7 +1643,7 @@ func (h *Handler) DeleteAllCompletedTasks(c echo.Context) error {
 	// Return the full kanban board
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 	}
@@ -1665,7 +1665,7 @@ func (h *Handler) DeleteAllBacklogTasks(c echo.Context) error {
 	// Return the full kanban board
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 	}
@@ -1687,7 +1687,7 @@ func (h *Handler) ActivateAllBacklogTasks(c echo.Context) error {
 	// Return the full kanban board
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 	}
@@ -1719,7 +1719,7 @@ func (h *Handler) ReorderTask(c echo.Context) error {
 	// Return the full kanban board
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, task.ProjectID, sortPrefs, agents)
 	}
@@ -1749,7 +1749,7 @@ func (h *Handler) ExecuteBacklogTasks(c echo.Context) error {
 	// Return the full kanban board
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
-		allTasks, _ := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		allTasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, allTasks, projectID, sortPrefs, agents)
 	}
@@ -1787,7 +1787,7 @@ func (h *Handler) SetBacklogSort(c echo.Context) error {
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
 		sortPrefs.Backlog = sortBy
-		tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		if err != nil {
 			applog.Infof("[handler] SetBacklogSort error: %v", err)
 			return err
@@ -1815,7 +1815,7 @@ func (h *Handler) SetCompletedSort(c echo.Context) error {
 	if isHTMX(c) {
 		sortPrefs := getSortPreferences(c)
 		sortPrefs.Completed = sortBy
-		tasks, err := h.taskSvc.ListByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
 		if err != nil {
 			applog.Infof("[handler] SetCompletedSort error: %v", err)
 			return err

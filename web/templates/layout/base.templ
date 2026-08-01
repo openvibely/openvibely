@@ -48,38 +48,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					window.__ov_applyRuntimeMode();
 				})();
 			</script>
-			<script>
-				(function() {
-					window.__ov_purgeSensitiveHTMXHistory = function() {
-						var cacheKey = 'htmx-history-cache';
-						try {
-							var raw = localStorage.getItem(cacheKey);
-							if (!raw) return;
-							var entries = JSON.parse(raw);
-							if (!Array.isArray(entries)) {
-								localStorage.removeItem(cacheKey);
-								return;
-							}
-							var retained = entries.filter(function(entry) {
-								if (!entry || typeof entry.url !== 'string') return true;
-								try {
-									return new URL(entry.url, window.location.href).pathname !== '/models';
-								} catch (_) {
-									return entry.url.split(/[?#]/, 1)[0] !== '/models';
-								}
-							});
-							if (retained.length === entries.length) return;
-							if (retained.length === 0) localStorage.removeItem(cacheKey);
-							else localStorage.setItem(cacheKey, JSON.stringify(retained));
-						} catch (_) {
-							try {
-								localStorage.removeItem(cacheKey);
-							} catch (_) {}
-						}
-					};
-					window.__ov_purgeSensitiveHTMXHistory();
-				})();
-			</script>
 			<link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css"/>
 			<script src="https://cdn.tailwindcss.com"></script>
 			<script src="https://unpkg.com/htmx.org@2.0.4"></script>

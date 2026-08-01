@@ -494,7 +494,7 @@ func (h *Handler) OAuthManualComplete(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": errDesc})
 	}
 
-	flow, ok := takeOAuthFlow(state)
+	flow, ok := takeOAuthFlow(state, time.Now())
 	if !ok {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "oauth session expired or invalid state"})
 	}
@@ -521,7 +521,7 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 	var flow *oauthPendingFlow
 	ok := false
 	if state != "" {
-		flow, ok = takeOAuthFlow(state)
+		flow, ok = takeOAuthFlow(state, time.Now())
 		if ok {
 			modelsURL = modelsReturnURLFromRequest(r, flow.ProjectID, modelsURL)
 		}
@@ -861,14 +861,14 @@ func (h *Handler) ensureCustomOAuthFlowCurrent(ctx context.Context, flow *oauthP
 	return nil
 }
 
-func takeOAuthFlow(state string) (*oauthPendingFlow, bool) {
+func takeOAuthFlow(state string, now time.Time) (*oauthPendingFlow, bool) {
 	oauthFlowsMu.Lock()
 	defer oauthFlowsMu.Unlock()
 	flow, ok := oauthFlows[state]
 	if ok {
 		delete(oauthFlows, state)
 	}
-	if !ok || oauthFlowExpired(flow, time.Now()) {
+	if !ok || oauthFlowExpired(flow, now) {
 		return nil, false
 	}
 	return flow, true

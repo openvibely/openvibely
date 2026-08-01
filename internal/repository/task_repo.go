@@ -21,6 +21,12 @@ const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.pr
 			EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 			t.created_at, t.updated_at, t.completed_at`
 
+const BoardPromptPreviewCodePoints = 300
+
+var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
+			EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
+			t.created_at, t.updated_at, t.completed_at`, BoardPromptPreviewCodePoints)
+
 type TaskRepo struct {
 	db          *sql.DB
 	broadcaster *events.Broadcaster
@@ -64,10 +70,19 @@ func (r *TaskRepo) ListByProjectWithSort(ctx context.Context, projectID string, 
 }
 
 func (r *TaskRepo) ListByProjectWithCategorySorts(ctx context.Context, projectID string, category string, backlogSort string, completedSort string) ([]models.Task, error) {
-	query := `SELECT ` + taskSelectColumnsWithGoal + `
-			 FROM tasks t WHERE t.project_id = ?`
-	args := []any{projectID}
+	return r.listByProjectWithCategorySorts(ctx, taskSelectColumnsWithGoal, projectID, category, backlogSort, completedSort)
+}
 
+// ListBoardByProjectWithCategorySorts returns the complete task metadata needed by
+// Kanban cards while projecting Prompt to a bounded Unicode-safe preview.
+func (r *TaskRepo) ListBoardByProjectWithCategorySorts(ctx context.Context, projectID string, category string, backlogSort string, completedSort string) ([]models.Task, error) {
+	return r.listByProjectWithCategorySorts(ctx, taskBoardSelectColumnsWithGoal, projectID, category, backlogSort, completedSort)
+}
+
+func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectColumns string, projectID string, category string, backlogSort string, completedSort string) ([]models.Task, error) {
+	query := `SELECT ` + selectColumns + `
+				 FROM tasks t WHERE t.project_id = ?`
+	args := []any{projectID}
 	if category != "" {
 		query += ` AND category = ?`
 		args = append(args, category)
