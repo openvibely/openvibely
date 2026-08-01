@@ -1453,7 +1453,7 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "<div class=\"rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-col\" data-automation-readonly-canvas><div class=\"mb-3 flex items-start justify-between gap-3\" data-automation-live-card-heading><div class=\"min-w-0 pr-2\"><h3 class=\"font-semibold\">Node states</h3><p class=\"mt-1 text-sm text-base-content/60\">A node’s border and label show the highest-priority work state currently present.</p></div><div class=\"shrink-0\" data-automation-live-actions><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" title=\"More actions\" aria-label=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 105, "<div class=\"rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-col\" data-automation-readonly-canvas><div class=\"mb-3 flex items-start justify-between gap-3\" data-automation-live-card-heading><div class=\"min-w-0 pr-2\"><h3 class=\"font-semibold\">Node states</h3><p class=\"mt-1 text-xs text-base-content/60\">A node’s border and label show the highest-priority work state currently present.</p></div><div class=\"shrink-0\" data-automation-live-actions><div class=\"dropdown dropdown-end\"><label tabindex=\"0\" class=\"btn btn-ghost btn-sm\" title=\"More actions\" aria-label=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

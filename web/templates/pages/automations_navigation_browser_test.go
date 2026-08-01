@@ -555,29 +555,59 @@ func TestAutomationLiveCardTypographyMatchesEdit(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{ID: "automation-live-type", Name: "Typography", LifecycleState: models.AutomationActive},
 	}
-	var out bytes.Buffer
-	if err := AutomationLiveContent(graph, "project-live-type", true).Render(context.Background(), &out); err != nil {
+	var liveOut bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-type", true).Render(context.Background(), &liveOut); err != nil {
 		t.Fatalf("render Automation Live: %v", err)
 	}
-	body := out.String()
-	headingMarker := strings.Index(body, `data-automation-live-card-heading`)
-	legendMarker := strings.Index(body, `data-automation-live-legend-row`)
-	if headingMarker < 0 || legendMarker <= headingMarker {
+	liveBody := liveOut.String()
+	liveHeadingMarker := strings.Index(liveBody, `data-automation-live-card-heading`)
+	liveLegendMarker := strings.Index(liveBody, `data-automation-live-legend-row`)
+	if liveHeadingMarker < 0 || liveLegendMarker <= liveHeadingMarker {
 		t.Fatal("expected Live card heading before legend")
 	}
-	heading := body[headingMarker:legendMarker]
-	for _, want := range []string{
-		`<h3 class="font-semibold">Node states</h3>`,
-		`<p class="mt-1 text-sm text-base-content/60">A node’s border and label show the highest-priority work state currently present.</p>`,
-	} {
-		if !strings.Contains(heading, want) {
-			t.Errorf("expected Live card typography to contain %q", want)
-		}
+	liveHeading := liveBody[liveHeadingMarker:liveLegendMarker]
+
+	page := models.AutomationBuilderPage{
+		AutomationID: "automation-live-type",
+		Source:       "edit",
+		Result: models.AutomationDraftResult{Candidate: models.AutomationDraftCandidate{
+			SchemaVersion: 1, Name: "Typography", AutomationType: "custom", AdapterKey: "custom",
+		}},
 	}
-	for _, compact := range []string{`<h3 class="text-sm font-semibold">`, `class="mt-1 text-xs text-base-content/55"`} {
-		if strings.Contains(heading, compact) {
-			t.Errorf("Live card must not retain compact preview typography %q", compact)
+	var editOut bytes.Buffer
+	if err := AutomationBuilderContent(page, "project-live-type").Render(context.Background(), &editOut); err != nil {
+		t.Fatalf("render Automation Edit: %v", err)
+	}
+	editBody := editOut.String()
+
+	paragraphClass := func(body, text string) string {
+		t.Helper()
+		textAt := strings.Index(body, text)
+		if textAt < 0 {
+			t.Fatalf("expected helper description %q", text)
 		}
+		paragraphAt := strings.LastIndex(body[:textAt], `<p class="`)
+		if paragraphAt < 0 {
+			t.Fatalf("expected classed helper paragraph before %q", text)
+		}
+		classStart := paragraphAt + len(`<p class="`)
+		classEnd := strings.Index(body[classStart:textAt], `"`)
+		if classEnd < 0 {
+			t.Fatalf("expected helper paragraph class before %q", text)
+		}
+		return body[classStart : classStart+classEnd]
+	}
+
+	if !strings.Contains(liveHeading, `<h3 class="font-semibold">Node states</h3>`) {
+		t.Error("expected Live card heading to match Edit heading typography")
+	}
+	liveDescriptionClass := paragraphClass(liveHeading, `A node’s border and label show the highest-priority work state currently present.`)
+	editDescriptionClass := paragraphClass(editBody, `Drag nodes to arrange them and empty space to pan.`)
+	if editDescriptionClass != `mt-1 text-xs text-base-content/60` {
+		t.Fatalf("unexpected Edit helper typography source of truth: %q", editDescriptionClass)
+	}
+	if liveDescriptionClass != editDescriptionClass {
+		t.Errorf("Live and Edit helper descriptions must use identical typography: Live=%q Edit=%q", liveDescriptionClass, editDescriptionClass)
 	}
 }
 
