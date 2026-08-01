@@ -97,6 +97,64 @@ func TestHTMXHistoryNavigationAndTitlesInChrome(t *testing.T) {
 	}
 }
 
+func TestHTMXHistoryOptOutPreventsSecretSnapshotInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+
+	var renderedBase bytes.Buffer
+	if err := layout.Base("Models history fixture", nil, "").Render(context.Background(), &renderedBase); err != nil {
+		t.Fatalf("render base layout: %v", err)
+	}
+	baseHTML := renderedBase.String()
+	scriptStart := strings.Index(baseHTML, "window.openVibelyNavigate = function")
+	if scriptStart < 0 {
+		t.Fatal("rendered base layout is missing openVibelyNavigate")
+	}
+	scriptEnd := strings.Index(baseHTML[scriptStart:], "// Scroll position restoration for drop zones")
+	if scriptEnd < 0 {
+		t.Fatal("could not isolate the production HTMX navigation script")
+	}
+	productionScript := baseHTML[scriptStart : scriptStart+scriptEnd]
+
+	const secret = "custom-oauth-secret-must-not-enter-history"
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function fail(message) {
+    document.body.setAttribute('data-test-result', 'fail');
+    document.body.setAttribute('data-test-error', message);
+  }
+  (async function() {
+    localStorage.removeItem('htmx-history-cache');
+    await window.openVibelyNavigate('/other');
+    var cache = localStorage.getItem('htmx-history-cache') || '';
+    if (cache.indexOf('` + secret + `') !== -1) throw new Error('secret entered HTMX history cache');
+    var entries = JSON.parse(cache || '[]');
+    if (entries.some(function(entry) { return entry.url === '/models'; })) {
+      throw new Error('Models page entered HTMX history cache');
+    }
+    document.body.setAttribute('data-test-result', 'pass');
+  })().catch(function(error) { fail(String(error && error.stack || error)); });
+});
+</script>`
+
+	fixtureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/models":
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><script src="/htmx-2.0.4.min.js"></script><script>%s</script>%s</head><body data-test-result="pending"><main id="main-content"><div id="models-container" hx-history="false" data-secret="%s">Models</div></main></body></html>`, productionScript, runner, secret)
+		case "/other":
+			_, _ = w.Write([]byte(`<div id="other-page">Other</div>`))
+		case "/htmx-2.0.4.min.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write(htmx204)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fixtureServer.Close()
+
+	runHeadlessChromeFixture(t, chrome, fixtureServer.URL+"/models", "Models HTMX history opt-out", 5000, 20*time.Second)
+}
+
 func TestSidebarHostedIdentityPayloadIsInertInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 

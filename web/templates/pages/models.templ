@@ -203,7 +203,7 @@ templ providerIcon(provider models.LLMProvider) {
 }
 
 templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, desktopMode bool) {
-	<div id="models-container" data-search-container>
+	<div id="models-container" data-search-container hx-history="false">
 		@layout.PageTitle("Models")
 	<div class="flex items-center justify-between mb-6">
 			<h2 class="text-2xl font-bold">Models</h2>

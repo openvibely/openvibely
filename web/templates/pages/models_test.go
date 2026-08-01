@@ -1072,6 +1072,9 @@ func TestModelsContent_CustomOAuthEditLoadsRevealableSecretsAndHeaders(t *testin
 	}
 	out := html.UnescapeString(buf.String())
 
+	if !strings.Contains(out, `id="models-container" data-search-container hx-history="false"`) {
+		t.Fatal("expected the secret-bearing Models fragment to opt out of HTMX history snapshots")
+	}
 	for _, value := range []string{
 		"saved-client-secret",
 		"saved-signing-secret",
