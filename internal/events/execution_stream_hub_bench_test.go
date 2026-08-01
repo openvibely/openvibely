@@ -73,36 +73,95 @@ func BenchmarkExecutionStreamPublish50Subscribers(b *testing.B) {
 	benchmarkExecutionStreamPublish(b, 50)
 }
 
-// BenchmarkExecutionStreamSubscribeUnsubscribeChurn measures the connect/
-// disconnect path so that the copy-on-write snapshot optimization does not
-// merely shift unbounded cost onto SSE connection churn.
+// BenchmarkExecutionStreamSubscribeUnsubscribeChurn measures concurrent connect/
+// disconnect contention so that the copy-on-write snapshot optimization does
+// not merely shift unbounded cost onto SSE connection churn. Each operation
+// publishes after subscribing, forcing the dirty snapshot to rebuild, and
+// drains every expected delivery before unsubscribing.
 func BenchmarkExecutionStreamSubscribeUnsubscribeChurn(b *testing.B) {
+	const (
+		workers              = 4
+		baselinePerExecution = 5
+	)
+	type churnWorker struct {
+		execID     string
+		baseSubs   []ExecutionStreamSubscriber
+		baseUnsubs []func()
+		operations int
+	}
+
 	hub := NewExecutionStreamHub()
-	// Hold a steady baseline of subscribers so each churned subscribe/unsubscribe
-	// rebuilds a non-trivial snapshot, matching a busy execution.
-	const baseline = 10
-	baseUnsubs := make([]func(), 0, baseline)
-	for i := 0; i < baseline; i++ {
-		_, unsub, err := hub.Subscribe("exec")
-		if err != nil {
-			b.Fatalf("baseline subscribe %d: %v", i, err)
+	fixtures := make([]churnWorker, workers)
+	for worker := range fixtures {
+		fixture := &fixtures[worker]
+		fixture.execID = fmt.Sprintf("exec-%d", worker)
+		fixture.operations = b.N / workers
+		if worker < b.N%workers {
+			fixture.operations++
 		}
-		baseUnsubs = append(baseUnsubs, unsub)
+		for subscriber := 0; subscriber < baselinePerExecution; subscriber++ {
+			sub, unsub, err := hub.Subscribe(fixture.execID)
+			if err != nil {
+				b.Fatalf("worker %d baseline subscribe %d: %v", worker, subscriber, err)
+			}
+			fixture.baseSubs = append(fixture.baseSubs, sub)
+			fixture.baseUnsubs = append(fixture.baseUnsubs, unsub)
+		}
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for worker := range fixtures {
+		fixture := &fixtures[worker]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			event := ExecutionStreamEvent{ExecID: fixture.execID, Type: ExecutionStreamDelta, Delta: "token", Offset: 1}
+			for operation := 0; operation < fixture.operations; operation++ {
+				sub, unsub, err := hub.Subscribe(fixture.execID)
+				if err != nil {
+					errs <- fmt.Errorf("%s churn subscribe: %w", fixture.execID, err)
+					return
+				}
+
+				hub.Publish(event)
+				for subscriber, baseSub := range fixture.baseSubs {
+					select {
+					case <-baseSub:
+					default:
+						unsub()
+						errs <- fmt.Errorf("%s baseline subscriber %d missed delivery", fixture.execID, subscriber)
+						return
+					}
+				}
+				select {
+				case <-sub:
+				default:
+					unsub()
+					errs <- fmt.Errorf("%s churn subscriber missed delivery", fixture.execID)
+					return
+				}
+				unsub()
+			}
+		}()
 	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, unsub, err := hub.Subscribe("exec")
-		if err != nil {
-			b.Fatalf("churn subscribe: %v", err)
-		}
-		unsub()
-	}
+	close(start)
+	wg.Wait()
 	b.StopTimer()
 
-	for _, unsub := range baseUnsubs {
-		unsub()
+	close(errs)
+	for err := range errs {
+		b.Error(err)
+	}
+	for _, fixture := range fixtures {
+		for _, unsub := range fixture.baseUnsubs {
+			unsub()
+		}
 	}
 }
 
