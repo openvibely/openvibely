@@ -991,19 +991,9 @@ func decodeChatActionInput(input json.RawMessage, dst any) error {
 // definitions and the shared executor. Used by processStreamingResponse which
 // computes defs from the registry before calling this.
 func (h *Handler) buildChatActionToolRuntimeFromDefs(params streamingResponseParams, collector *chatActionSummaryCollector, defs []llmcontracts.RuntimeToolDefinition, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
-	genericExecutor := h.chatActionExecutor(params, collector, mode, surface)
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
-		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
-			if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
-				if hardened := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs); hardened != nil {
-					if output, handled, isError, err := hardened.Executor(ctx, name, input); handled {
-						return output, true, isError, err
-					}
-				}
-			}
-			return genericExecutor(ctx, name, input)
-		},
+		Executor:    h.chatActionExecutor(params, collector, mode, surface),
 	}
 }
 

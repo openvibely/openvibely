@@ -6857,3 +6857,117 @@ func TestCancelThreadInputBroadcastsChatCancellation(t *testing.T) {
 		t.Fatal("timed out waiting for chat thread input cancellation event")
 	}
 }
+
+func newHardenedRuntimeDispatchFixture(constructions *int) *llmcontracts.RuntimeTools {
+	(*constructions)++
+	handlers := make(map[string]func() string, 12)
+	for i := 0; i < 12; i++ {
+		name := fmt.Sprintf("github_fixture_%d", i)
+		output := name
+		handlers[name] = func() string { return output }
+	}
+	return &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "github_write"}},
+		Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+			handler, ok := handlers[name]
+			if !ok {
+				return "", false, false, nil
+			}
+			return handler(), true, false, nil
+		},
+	}
+}
+
+func TestTaskFollowupRuntimeReusesHardenedGitHubRuntimeFor50Dispatches(t *testing.T) {
+	constructions := 0
+	hardened := newHardenedRuntimeDispatchFixture(&constructions)
+	channelCalls := 0
+	channel := &llmcontracts.RuntimeTools{Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+		if name == "channel_tool" || name == "shared_non_github" {
+			channelCalls++
+			return "channel", true, false, nil
+		}
+		return "", false, false, nil
+	}}
+	genericCalls := 0
+	generic := &llmcontracts.RuntimeTools{Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+		if name == "generic_tool" || name == "shared_non_github" {
+			genericCalls++
+			return "generic", true, false, nil
+		}
+		return "", false, false, nil
+	}}
+	runtime := llmcontracts.CompositeRuntimeTools(hardened, channel, generic)
+
+	for i := 0; i < 50; i++ {
+		output, handled, isError, err := runtime.Executor(context.Background(), "generic_tool", nil)
+		require.NoError(t, err)
+		require.True(t, handled)
+		require.False(t, isError)
+		require.Equal(t, "generic", output)
+	}
+	require.Equal(t, 1, constructions, "the hardened runtime must be constructed once per streaming response, not once per dispatch")
+	require.Equal(t, 50, genericCalls)
+
+	output, handled, isError, err := runtime.Executor(context.Background(), "github_fixture_0", nil)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isError)
+	require.Equal(t, "github_fixture_0", output, "hardened GitHub handlers must retain first priority")
+
+	output, handled, isError, err = runtime.Executor(context.Background(), "shared_non_github", nil)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isError)
+	require.Equal(t, "channel", output, "channel handlers must retain priority over generic handlers for non-GitHub tools")
+	require.Equal(t, 1, channelCalls)
+	require.Equal(t, 50, genericCalls)
+
+	output, handled, isError, err = runtime.Executor(context.Background(), "unknown_tool", nil)
+	require.NoError(t, err)
+	require.False(t, handled)
+	require.False(t, isError)
+	require.Empty(t, output, "unknown tools must continue to fall through")
+}
+
+var taskFollowupDispatchBenchmarkOutput string
+
+func BenchmarkTaskFollowupHardenedGitHubRuntime50Dispatches(b *testing.B) {
+	generic := &llmcontracts.RuntimeTools{Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+		if name == "generic_tool" {
+			return "generic", true, false, nil
+		}
+		return "", false, false, nil
+	}}
+	ctx := context.Background()
+
+	b.Run("legacy_reconstruct", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			constructions := 0
+			initial := newHardenedRuntimeDispatchFixture(&constructions)
+			legacyGeneric := &llmcontracts.RuntimeTools{Executor: func(callCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+				hardened := newHardenedRuntimeDispatchFixture(&constructions)
+				if output, handled, isError, err := hardened.Executor(callCtx, name, input); handled {
+					return output, true, isError, err
+				}
+				return generic.Executor(callCtx, name, input)
+			}}
+			runtime := llmcontracts.CompositeRuntimeTools(initial, legacyGeneric)
+			for call := 0; call < 50; call++ {
+				output, _, _, _ := runtime.Executor(ctx, "generic_tool", nil)
+				taskFollowupDispatchBenchmarkOutput = output
+			}
+		}
+	})
+	b.Run("reused", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			constructions := 0
+			hardened := newHardenedRuntimeDispatchFixture(&constructions)
+			runtime := llmcontracts.CompositeRuntimeTools(hardened, generic)
+			for call := 0; call < 50; call++ {
+				output, _, _, _ := runtime.Executor(ctx, "generic_tool", nil)
+				taskFollowupDispatchBenchmarkOutput = output
+			}
+		}
+	})
+}
