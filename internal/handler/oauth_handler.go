@@ -693,10 +693,11 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		detail := customOAuthErrorDetail(resp.Body)
+		fieldNames := customOAuthFieldNames(fields)
 		if detail != "" {
-			return 0, fmt.Errorf("custom OAuth token exchange returned %d %s: %s", resp.StatusCode, http.StatusText(resp.StatusCode), detail)
+			return 0, fmt.Errorf("custom OAuth token exchange returned %d %s: %s (request fields: %s)", resp.StatusCode, http.StatusText(resp.StatusCode), detail, fieldNames)
 		}
-		return 0, fmt.Errorf("custom OAuth token exchange returned %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
+		return 0, fmt.Errorf("custom OAuth token exchange returned %d %s (request fields: %s)", resp.StatusCode, http.StatusText(resp.StatusCode), fieldNames)
 	}
 	tokens, err := llmcustomauth.DecodeTokenResponse(resp.Body, cfg, "")
 	if err != nil {
@@ -768,6 +769,9 @@ func customOAuthErrorDetail(body io.Reader) string {
 			return sanitizeCustomOAuthErrorDetail(value)
 		}
 	}
+	if detail := customOAuthValidationErrors(payload["errors"]); detail != "" {
+		return detail
+	}
 	switch detail := payload["detail"].(type) {
 	case string:
 		return sanitizeCustomOAuthErrorDetail(detail)
@@ -785,6 +789,40 @@ func customOAuthErrorDetail(body io.Reader) string {
 		return sanitizeCustomOAuthErrorDetail(strings.Join(messages, "; "))
 	}
 	return ""
+}
+
+func customOAuthValidationErrors(raw any) string {
+	entries, ok := raw.([]any)
+	if !ok {
+		return ""
+	}
+	messages := make([]string, 0, len(entries))
+	for _, item := range entries {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		message, _ := entry["message"].(string)
+		location, _ := entry["location"].(string)
+		if message == "" {
+			continue
+		}
+		if location != "" {
+			message = location + ": " + message
+		}
+		messages = append(messages, message)
+	}
+	return sanitizeCustomOAuthErrorDetail(strings.Join(messages, "; "))
+}
+
+func customOAuthFieldNames(fields map[string]string) string {
+	names := make([]string, 0, 6)
+	for _, name := range []string{"code", "grant_type", "redirect_uri", "client_id", "client_secret", "code_verifier"} {
+		if _, ok := fields[name]; ok {
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 func sanitizeCustomOAuthErrorDetail(value string) string {

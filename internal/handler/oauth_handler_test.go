@@ -310,13 +310,18 @@ func TestNormalizeCustomOAuthLocalCallback(t *testing.T) {
 }
 
 func TestCustomOAuthErrorDetail(t *testing.T) {
-	require.Equal(t, "authorization code is invalid", customOAuthErrorDetail(strings.NewReader(
-		`{"detail":[{"loc":["body","code"],"msg":"authorization code is invalid","input":"secret-code"}]}`,
+	require.Equal(t, "body.grant_type: unexpected property; body.redirect_uri: unexpected property", customOAuthErrorDetail(strings.NewReader(
+		`{"detail":"validation failed","errors":[{"message":"unexpected property","location":"body.grant_type","value":{"code":"secret-code"}},{"message":"unexpected property","location":"body.redirect_uri","value":{"code":"secret-code"}}]}`,
 	)))
 	require.Equal(t, "invalid grant", customOAuthErrorDetail(strings.NewReader(
 		`{"error":"invalid grant","token":"must-not-be-returned"}`,
 	)))
 	require.Empty(t, customOAuthErrorDetail(strings.NewReader(`not json`)))
+	require.Equal(t, "code, grant_type, redirect_uri", customOAuthFieldNames(map[string]string{
+		"redirect_uri": "http://localhost/callback",
+		"code":         "secret-code",
+		"grant_type":   "authorization_code",
+	}))
 	require.Equal(t,
 		"custom OAuth token exchange returned 422 Unprocessable Entity: authorization code is invalid",
 		publicOAuthExchangeError(fmt.Errorf("custom OAuth token exchange returned 422 Unprocessable Entity: authorization code is invalid")),
