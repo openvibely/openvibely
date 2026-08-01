@@ -3601,11 +3601,10 @@ func TestTelegramService_StreamRichDraftFallbackUsesEditLoop(t *testing.T) {
 	require.NoError(t, taskRepo.Create(ctx, task))
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "hi"}
 	require.NoError(t, execRepo.Create(ctx, exec))
-	require.NoError(t, execRepo.UpdateOutput(ctx, exec.ID, "partial output"))
+	require.NoError(t, execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "partial output", "", 0, 0))
 
 	var richDraftCalled bool
 	var edited []string
-	editObserved := make(chan struct{})
 	svc := &TelegramService{
 		execRepo: execRepo,
 		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
@@ -3615,23 +3614,14 @@ func TestTelegramService_StreamRichDraftFallbackUsesEditLoop(t *testing.T) {
 		},
 		editMessageFunc: func(chatID int64, messageID int, text string) {
 			edited = append(edited, text)
-			select {
-			case editObserved <- struct{}{}:
-			default:
-			}
 		},
 	}
 	done := svc.beginTelegramPreview(42, 99)
 	oldInterval := telegramStreamInterval
 	telegramStreamInterval = time.Millisecond
 	t.Cleanup(func() { telegramStreamInterval = oldInterval })
-	go svc.streamUpdatesToTelegram(ctx, 42, 99, exec.ID, done)
-	select {
-	case <-editObserved:
-		svc.finishTelegramPreview(42, 99)
-	case <-time.After(time.Second):
-		t.Fatal("expected rich draft fallback edit")
-	}
+	svc.streamUpdatesToTelegram(ctx, 42, 99, exec.ID, done)
+	svc.finishTelegramPreview(42, 99)
 
 	require.True(t, richDraftCalled)
 	require.NotEmpty(t, edited)
