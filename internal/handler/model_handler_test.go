@@ -2101,6 +2101,81 @@ func TestUpdateModel_SwitchCustomOAuthToAPIKeyClearsOAuthSecrets(t *testing.T) {
 	}
 }
 
+func TestUpdateModel_CustomOAuthEmptyDisplayedValuesClearSavedSecrets(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	cfg := llmcustomauth.Config{
+		Enabled:           true,
+		SigningSecret:     "signing-secret",
+		StaticHeaders:     map[string]string{"X-Required": "static-secret"},
+		TokenHeaders:      map[string]string{"X-Token": "token-secret"},
+		RefreshHeaders:    map[string]string{"X-Refresh": "refresh-secret"},
+		RefreshParameters: map[string]string{"audience": "saved-audience"},
+	}
+	agent := &models.LLMConfig{
+		Name:                 "Custom OAuth",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "custom-model",
+		BaseURL:              "https://api.example.test/v1",
+		PresetSlug:           "custom",
+		OAuthClientID:        "client-id",
+		OAuthClientSecret:    "client-secret",
+		OAuthAuthorizeURL:    "https://login.example.test/authorize",
+		OAuthTokenURL:        "https://login.example.test/token",
+		CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+	}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+
+	form := url.Values{
+		"name":                                 {"Custom OAuth"},
+		"provider":                             {"openai_compatible"},
+		"custom_auth_method":                   {"oauth"},
+		"model":                                {"custom-model"},
+		"base_url":                             {"https://api.example.test/v1"},
+		"preset_slug":                          {"custom"},
+		"transport":                            {"chat_completions"},
+		"oauth_authorize_url":                  {"https://login.example.test/authorize"},
+		"oauth_token_url":                      {"https://login.example.test/token"},
+		"oauth_client_id":                      {"client-id"},
+		"oauth_client_secret":                  {""},
+		"custom_signing_secret":                {""},
+		"custom_static_headers_json":           {""},
+		"custom_token_headers_json":            {""},
+		"custom_refresh_headers_json":          {""},
+		"custom_refresh_parameters_json":       {""},
+		"custom_authorization_parameters_json": {""},
+		"temperature":                          {"0"},
+	}
+	req := httptest.NewRequest(http.MethodPut, "/models/"+agent.ID, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.OAuthClientSecret != "" {
+		t.Fatalf("empty displayed client secret did not clear saved value: %q", updated.OAuthClientSecret)
+	}
+	updatedCfg, err := llmcustomauth.ParseConfig(updated.CustomAuthConfigJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedCfg.SigningSecret != "" || len(updatedCfg.StaticHeaders) != 0 ||
+		len(updatedCfg.TokenHeaders) != 0 || len(updatedCfg.RefreshHeaders) != 0 ||
+		len(updatedCfg.RefreshParameters) != 0 {
+		t.Fatalf("empty displayed custom OAuth values did not clear saved values: %#v", updatedCfg)
+	}
+}
+
 func TestUpdateModel_SwitchProviderWithoutAPIKeyFieldClearsStaleCredential(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	_, e, llmConfigRepo := setupTestHandler(t)

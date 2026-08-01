@@ -34,6 +34,7 @@ const (
 )
 
 func (h *Handler) ListModels(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "no-store")
 	isHTMX := isHTMX(c)
 	// applog.Debugf("[handler] ListModels requested htmx=%v", isHTMX)
 	agents, err := h.llmConfigRepo.List(c.Request().Context())
@@ -218,13 +219,13 @@ func applyOpenAICompatibleForm(c echo.Context, agent *models.LLMConfig) error {
 	agent.ModelsURL = strings.TrimSpace(c.FormValue("models_url"))
 	agent.AuthHeaderName = strings.TrimSpace(c.FormValue("auth_header_name"))
 	agent.AuthHeaderValuePrefix = c.FormValue("auth_header_value_prefix")
-	if raw := strings.TrimSpace(c.FormValue("extra_headers_json")); raw != "" {
-		agent.ExtraHeadersJSON = raw
+	if raw, present := formValueIfPresent(c, "extra_headers_json"); present {
+		agent.ExtraHeadersJSON = strings.TrimSpace(raw)
 	} else if c.FormValue("clear_extra_headers") == "on" {
 		agent.ExtraHeadersJSON = ""
 	}
-	if raw := strings.TrimSpace(c.FormValue("extra_body_json")); raw != "" {
-		agent.ExtraBodyJSON = raw
+	if raw, present := formValueIfPresent(c, "extra_body_json"); present {
+		agent.ExtraBodyJSON = strings.TrimSpace(raw)
 	} else if c.FormValue("clear_extra_body") == "on" {
 		agent.ExtraBodyJSON = ""
 	}
@@ -257,7 +258,7 @@ func applyOpenAICompatibleForm(c echo.Context, agent *models.LLMConfig) error {
 	cfg.ProfileTeamPath = strings.TrimSpace(c.FormValue("custom_profile_team_path"))
 	cfg.InstanceHeader = strings.TrimSpace(c.FormValue("custom_instance_header"))
 	cfg.TeamHeader = strings.TrimSpace(c.FormValue("custom_team_header"))
-	if secret, present := formValueIfPresent(c, "custom_signing_secret"); present && strings.TrimSpace(secret) != "" {
+	if secret, present := formValueIfPresent(c, "custom_signing_secret"); present {
 		cfg.SigningSecret = secret
 	} else if c.FormValue("custom_clear_signing_secret") == "on" {
 		cfg.SigningSecret = ""
@@ -282,17 +283,19 @@ func applyOpenAICompatibleForm(c echo.Context, agent *models.LLMConfig) error {
 	cfg.RefreshRequestFormat = strings.TrimSpace(c.FormValue("custom_refresh_request_format"))
 	cfg.RefreshIncludeGrantType = c.FormValue("custom_refresh_include_grant_type") == "on"
 	cfg.RefreshIncludeClient = c.FormValue("custom_refresh_include_client") == "on"
-	staticHeadersRaw := strings.TrimSpace(c.FormValue("custom_static_headers_json"))
-	if staticHeadersRaw != "" {
-		if err := decodeStringMap(staticHeadersRaw, &cfg.StaticHeaders); err != nil {
+	if staticHeadersRaw, present := formValueIfPresent(c, "custom_static_headers_json"); present {
+		if staticHeadersRaw = strings.TrimSpace(staticHeadersRaw); staticHeadersRaw == "" {
+			cfg.StaticHeaders = nil
+		} else if err := decodeStringMap(staticHeadersRaw, &cfg.StaticHeaders); err != nil {
 			return fmt.Errorf("additional headers must be a JSON object of string values: %w", err)
 		}
 	} else if c.FormValue("custom_clear_static_headers") == "on" {
 		cfg.StaticHeaders = nil
 	}
-	authorizationParametersRaw := strings.TrimSpace(c.FormValue("custom_authorization_parameters_json"))
-	if authorizationParametersRaw != "" {
-		if err := decodeStringMap(authorizationParametersRaw, &cfg.AuthorizationParameters); err != nil {
+	if authorizationParametersRaw, present := formValueIfPresent(c, "custom_authorization_parameters_json"); present {
+		if authorizationParametersRaw = strings.TrimSpace(authorizationParametersRaw); authorizationParametersRaw == "" {
+			cfg.AuthorizationParameters = nil
+		} else if err := decodeStringMap(authorizationParametersRaw, &cfg.AuthorizationParameters); err != nil {
 			return fmt.Errorf("authorization parameters must be a JSON object of string values: %w", err)
 		}
 	} else if c.FormValue("custom_clear_authorization_parameters") == "on" {
@@ -301,9 +304,10 @@ func applyOpenAICompatibleForm(c echo.Context, agent *models.LLMConfig) error {
 	if err := applyOptionalSecretHeaderMap(c, "custom_token_headers_json", "custom_clear_token_headers", &cfg.TokenHeaders, "token endpoint headers"); err != nil {
 		return err
 	}
-	refreshParametersRaw := strings.TrimSpace(c.FormValue("custom_refresh_parameters_json"))
-	if refreshParametersRaw != "" {
-		if err := decodeStringMap(refreshParametersRaw, &cfg.RefreshParameters); err != nil {
+	if refreshParametersRaw, present := formValueIfPresent(c, "custom_refresh_parameters_json"); present {
+		if refreshParametersRaw = strings.TrimSpace(refreshParametersRaw); refreshParametersRaw == "" {
+			cfg.RefreshParameters = nil
+		} else if err := decodeStringMap(refreshParametersRaw, &cfg.RefreshParameters); err != nil {
 			return fmt.Errorf("refresh parameters must be a JSON object of string values: %w", err)
 		}
 	} else if c.FormValue("custom_clear_refresh_parameters") == "on" {
@@ -374,9 +378,11 @@ func openAICompatiblePresetUsesPrivateEndpoints(preset string) bool {
 }
 
 func applyOptionalSecretHeaderMap(c echo.Context, valueField, clearField string, target *map[string]string, label string) error {
-	raw := strings.TrimSpace(c.FormValue(valueField))
-	if raw != "" {
-		if err := decodeStringMap(raw, target); err != nil {
+	raw, present := formValueIfPresent(c, valueField)
+	if present {
+		if raw = strings.TrimSpace(raw); raw == "" {
+			*target = nil
+		} else if err := decodeStringMap(raw, target); err != nil {
 			return fmt.Errorf("%s must be a JSON object of string values: %w", label, err)
 		}
 	} else if c.FormValue(clearField) == "on" {
@@ -791,7 +797,7 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 		if v, ok := formValueIfPresent(c, "oauth_client_id"); ok {
 			agent.OAuthClientID = v
 		}
-		if v, ok := formValueIfPresent(c, "oauth_client_secret"); ok && strings.TrimSpace(v) != "" {
+		if v, ok := formValueIfPresent(c, "oauth_client_secret"); ok {
 			agent.OAuthClientSecret = v
 		} else if c.FormValue("clear_oauth_client_secret") == "on" {
 			agent.OAuthClientSecret = ""

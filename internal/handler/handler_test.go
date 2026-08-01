@@ -904,8 +904,18 @@ func TestHandler_DeleteModel_WithTaskReferences(t *testing.T) {
 
 func TestHandler_ListModels(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
-	rec := htmxGet(e, "/models")
-	assertCode(t, rec, http.StatusOK)
+	for _, htmx := range []bool{false, true} {
+		req := httptest.NewRequest(http.MethodGet, "/models", nil)
+		if htmx {
+			req.Header.Set("HX-Request", "true")
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		assertCode(t, rec, http.StatusOK)
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("htmx=%t Cache-Control=%q, want no-store", htmx, got)
+		}
+	}
 }
 
 func TestHandler_ListModels_RendersAuthoritativeDesktopOAuthMode(t *testing.T) {

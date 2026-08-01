@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
@@ -148,9 +147,31 @@ func mixtureReferenceCount(agent models.LLMConfig) int {
 	return len(cfg.ReferenceModels)
 }
 
-func maskedSecret(secret string) string {
-	if secret != "" {
-		return "***"
+func isCustomOpenAICompatibleModel(agent models.LLMConfig) bool {
+	if agent.Provider != models.ProviderOpenAICompatible {
+		return false
+	}
+	preset := strings.TrimSpace(agent.PresetSlug)
+	return preset == "" || strings.EqualFold(preset, "custom")
+}
+
+func customOAuthClientSecretAttr(agent models.LLMConfig) string {
+	if isCustomOpenAICompatibleModel(agent) && agent.AuthMethod == models.AuthMethodOAuth {
+		return agent.OAuthClientSecret
+	}
+	return ""
+}
+
+func customOAuthConfigAttr(agent models.LLMConfig) string {
+	if isCustomOpenAICompatibleModel(agent) && agent.AuthMethod == models.AuthMethodOAuth {
+		return agent.CustomAuthConfigJSON
+	}
+	return ""
+}
+
+func customRequestExtraAttr(agent models.LLMConfig, value string) string {
+	if isCustomOpenAICompatibleModel(agent) {
+		return value
 	}
 	return ""
 }
@@ -231,7 +252,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 								data-model-has-api-key={ fmt.Sprintf("%t", agent.APIKey != "") }
 								data-model-max-workers={ fmt.Sprintf("%d", agent.MaxWorkers) }						data-model-worker-timeout={ fmt.Sprintf("%d", agent.WorkerTimeout) }
 						data-model-oauth-client-id={ agent.OAuthClientID }
-						data-model-oauth-client-secret={ maskedSecret(agent.OAuthClientSecret) }
+						data-model-oauth-client-secret={ customOAuthClientSecretAttr(agent) }
 						data-model-oauth-authorize-url={ agent.OAuthAuthorizeURL }
 						data-model-oauth-token-url={ agent.OAuthTokenURL }
 						data-model-oauth-scopes={ agent.OAuthScopes }
@@ -242,7 +263,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 							data-model-models-url={ agent.ModelsURL }
 							data-model-auth-header-name={ agent.AuthHeaderName }
 						data-model-auth-header-value-prefix={ agent.AuthHeaderValuePrefix }
-							data-model-custom-auth-config={ llmcustomauth.RedactedConfigJSON(agent.CustomAuthConfigJSON) }
+							data-model-extra-headers-json={ customRequestExtraAttr(agent, agent.ExtraHeadersJSON) }
+							data-model-extra-body-json={ customRequestExtraAttr(agent, agent.ExtraBodyJSON) }
+							data-model-custom-auth-config={ customOAuthConfigAttr(agent) }
 								data-model-auto-start-tasks={ fmt.Sprintf("%t", agent.AutoStartTasks) }
 								data-model-mixture-config-json={ mixtureConfigAttr(agent) }						onclick="editModelFromData(this)"					>
 						<div class="card-body relative">
@@ -622,8 +645,19 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 										<div class="form-control"><label class="label"><span class="label-text">Model ID field</span></label><input id="model_custom_model_id_field" name="custom_model_id_field" class="input input-bordered" value="id"/></div>
 										<div class="form-control"><label class="label"><span class="label-text">API key header</span></label><input id="model_compatible_auth_header_name" name="auth_header_name" class="input input-bordered" value="Authorization" placeholder="Authorization"/></div>
 										<div class="form-control"><label class="label"><span class="label-text">API key value prefix</span></label><input id="model_compatible_auth_header_prefix" name="auth_header_value_prefix" class="input input-bordered" value="Bearer " placeholder="Leave empty for a raw API key"/><label class="label"><span class="label-text-alt opacity-70">Use an empty value for headers such as X-API-Key.</span></label></div>
-										<div class="form-control"><label class="label"><span class="label-text">Additional inference headers (JSON)</span></label><textarea id="model_compatible_extra_headers" name="extra_headers_json" class="textarea textarea-bordered" placeholder='{"X-Required-Header":"value"}'></textarea><label class="label"><span class="label-text-alt opacity-70">When editing, leave blank to keep saved headers.</span></label><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="clear_extra_headers" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved inference headers</span></label></div>
-										<div class="form-control"><label class="label"><span class="label-text">Additional request body (JSON)</span></label><textarea id="model_compatible_extra_body" name="extra_body_json" class="textarea textarea-bordered" placeholder='{"provider_option":true}'></textarea><label class="label"><span class="label-text-alt opacity-70">When editing, leave blank to keep the saved object.</span></label><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="clear_extra_body" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved request body</span></label></div>
+										<div class="form-control">
+											<label class="label"><span class="label-text">Additional inference headers (JSON)</span></label>
+											@components.SecretInput(components.SecretInputConfig{
+												ID:           "model_compatible_extra_headers",
+												Name:         "extra_headers_json",
+												Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+												Placeholder:  `{"X-Required-Header":"value"}`,
+												AutoComplete: "off",
+												AriaLabel:    "Toggle additional inference headers visibility",
+											})
+											<label class="label"><span class="label-text-alt opacity-70">Saved headers are hidden by default. Click the eye to reveal or edit them; remove the JSON to clear them.</span></label>
+										</div>
+										<div class="form-control"><label class="label"><span class="label-text">Additional request body (JSON)</span></label><textarea id="model_compatible_extra_body" name="extra_body_json" class="textarea textarea-bordered" placeholder='{"provider_option":true}'></textarea><label class="label"><span class="label-text-alt opacity-70">The saved object is loaded here. Remove the JSON to clear it.</span></label></div>
 									</div>
 									<div id="custom_provider_oauth_fields" class="hidden">
 										<input type="hidden" name="custom_auth_enabled" value="on"/>
@@ -634,22 +668,82 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 												<div class="form-control"><label class="label"><span class="label-text">Profile URL</span></label><input id="model_custom_profile_url" name="custom_profile_url" class="input input-bordered" placeholder="https://…/profile"/></div>
 												<div class="form-control"><label class="label"><span class="label-text">Required User-Agent</span></label><input id="model_custom_user_agent" name="custom_user_agent" class="input input-bordered" placeholder="client/version"/></div>
 												<div class="form-control"><label class="label"><span class="label-text">OAuth client ID</span></label><input id="model_custom_oauth_client_id" name="oauth_client_id" class="input input-bordered" autocomplete="off"/></div>
-												<div class="form-control"><label class="label"><span class="label-text">OAuth client secret</span></label><input id="model_custom_oauth_client_secret" name="oauth_client_secret" type="password" autocomplete="new-password" class="input input-bordered" placeholder="Leave blank to keep saved secret"/><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="clear_oauth_client_secret" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved client secret</span></label></div>
+												<div class="form-control">
+													<label class="label"><span class="label-text">OAuth client secret</span></label>
+													@components.SecretInput(components.SecretInputConfig{
+														ID:           "model_custom_oauth_client_secret",
+														Name:         "oauth_client_secret",
+														Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+														AutoComplete: "off",
+														AriaLabel:    "Toggle OAuth client secret visibility",
+													})
+													<label class="label"><span class="label-text-alt opacity-70">The saved secret is hidden by default. Click the eye to reveal or edit it; remove it to clear it.</span></label>
+												</div>
 												<div class="form-control"><label class="label"><span class="label-text">OAuth scopes</span></label><input id="model_custom_oauth_scopes" name="oauth_scopes" class="input input-bordered" placeholder="openid profile"/></div>
 												<div class="form-control"><label class="label"><span class="label-text">Callback query parameter</span></label><input id="model_custom_callback_parameter" name="custom_callback_parameter" class="input input-bordered" value="callback_uri"/></div>
 												<div class="form-control"><label class="label"><span class="label-text">Local callback host</span></label><select id="model_custom_local_callback_host" name="custom_local_callback_host" class="select select-bordered"><option value="localhost">localhost</option><option value="127.0.0.1">127.0.0.1</option></select><label class="label"><span class="label-text-alt opacity-70">The callback port is always selected automatically.</span></label></div>
 												<div class="form-control"><label class="label"><span class="label-text">Local callback path</span></label><input id="model_custom_local_callback_path" name="custom_local_callback_path" class="input input-bordered" value="/callback" placeholder="/callback"/></div>
-												<div class="form-control"><label class="label"><span class="label-text">Signing secret</span></label><input id="model_custom_signing_secret" name="custom_signing_secret" type="password" autocomplete="off" class="input input-bordered" placeholder="Leave blank to keep saved secret"/><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_signing_secret" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved signing secret</span></label></div>
+												<div class="form-control">
+													<label class="label"><span class="label-text">Signing secret</span></label>
+													@components.SecretInput(components.SecretInputConfig{
+														ID:           "model_custom_signing_secret",
+														Name:         "custom_signing_secret",
+														Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+														AutoComplete: "off",
+														AriaLabel:    "Toggle signing secret visibility",
+													})
+													<label class="label"><span class="label-text-alt opacity-70">The saved secret is hidden by default. Click the eye to reveal or edit it; remove it to clear it.</span></label>
+												</div>
 												<div class="form-control"><label class="label"><span class="label-text">Authorization mode</span></label><select id="model_custom_authorization_mode" name="custom_authorization_mode" class="select select-bordered"><option value="auto">Automatic Bearer/Apikey</option><option value="bearer">Bearer</option><option value="apikey">Apikey</option><option value="raw">Raw token</option></select></div>
 												<div class="form-control"><label class="label"><span class="label-text">OAuth token header</span></label><input id="model_custom_access_token_header" name="custom_access_token_header" class="input input-bordered" value="Authorization" placeholder="Authorization"/></div>
 												<div class="form-control"><label class="label"><span class="label-text">Custom token value prefix</span></label><input id="model_custom_access_token_prefix" name="custom_access_token_prefix" class="input input-bordered" placeholder="Optional, for example Token "/></div>
 											</div>
 											<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-												<div class="form-control"><label class="label"><span class="label-text">Additional request headers (JSON)</span></label><textarea id="model_custom_static_headers_json" name="custom_static_headers_json" class="textarea textarea-bordered" placeholder='{"X-Required-Header":"value"}'></textarea><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_static_headers" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved additional headers</span></label></div>
-												<div class="form-control"><label class="label"><span class="label-text">Authorization parameters (JSON)</span></label><textarea id="model_custom_authorization_parameters_json" name="custom_authorization_parameters_json" class="textarea textarea-bordered" placeholder='{"audience":"example"}'></textarea><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_authorization_parameters" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved authorization parameters</span></label></div>
-												<div class="form-control"><label class="label"><span class="label-text">Token endpoint headers (JSON)</span></label><textarea id="model_custom_token_headers_json" name="custom_token_headers_json" class="textarea textarea-bordered" placeholder='{"X-Token-Header":"value"}'></textarea><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_token_headers" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved token headers</span></label></div>
-												<div class="form-control"><label class="label"><span class="label-text">Refresh endpoint headers (JSON)</span></label><textarea id="model_custom_refresh_headers_json" name="custom_refresh_headers_json" class="textarea textarea-bordered" placeholder='{"X-Refresh-Header":"value"}'></textarea><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_refresh_headers" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved refresh headers</span></label></div>
-												<div class="form-control"><label class="label"><span class="label-text">Refresh parameters (JSON)</span></label><textarea id="model_custom_refresh_parameters_json" name="custom_refresh_parameters_json" class="textarea textarea-bordered" placeholder='{"audience":"example"}'></textarea><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_refresh_parameters" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved refresh parameters</span></label></div>
+												<div class="form-control">
+													<label class="label"><span class="label-text">Additional request headers (JSON)</span></label>
+													@components.SecretInput(components.SecretInputConfig{
+														ID:           "model_custom_static_headers_json",
+														Name:         "custom_static_headers_json",
+														Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+														Placeholder:  `{"X-Required-Header":"value"}`,
+														AutoComplete: "off",
+														AriaLabel:    "Toggle additional request headers visibility",
+													})
+												</div>
+												<div class="form-control"><label class="label"><span class="label-text">Authorization parameters (JSON)</span></label><textarea id="model_custom_authorization_parameters_json" name="custom_authorization_parameters_json" class="textarea textarea-bordered" placeholder='{"audience":"example"}'></textarea></div>
+												<div class="form-control">
+													<label class="label"><span class="label-text">Token endpoint headers (JSON)</span></label>
+													@components.SecretInput(components.SecretInputConfig{
+														ID:           "model_custom_token_headers_json",
+														Name:         "custom_token_headers_json",
+														Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+														Placeholder:  `{"X-Token-Header":"value"}`,
+														AutoComplete: "off",
+														AriaLabel:    "Toggle token endpoint headers visibility",
+													})
+												</div>
+												<div class="form-control">
+													<label class="label"><span class="label-text">Refresh endpoint headers (JSON)</span></label>
+													@components.SecretInput(components.SecretInputConfig{
+														ID:           "model_custom_refresh_headers_json",
+														Name:         "custom_refresh_headers_json",
+														Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+														Placeholder:  `{"X-Refresh-Header":"value"}`,
+														AutoComplete: "off",
+														AriaLabel:    "Toggle refresh endpoint headers visibility",
+													})
+												</div>
+												<div class="form-control">
+													<label class="label"><span class="label-text">Refresh parameters (JSON)</span></label>
+													@components.SecretInput(components.SecretInputConfig{
+														ID:           "model_custom_refresh_parameters_json",
+														Name:         "custom_refresh_parameters_json",
+														Class:        "input input-bordered w-full pr-10 font-mono text-xs",
+														Placeholder:  `{"audience":"example"}`,
+														AutoComplete: "off",
+														AriaLabel:    "Toggle refresh parameters visibility",
+													})
+												</div>
 											</div>
 											<div class="flex flex-wrap gap-5 mt-3">
 												<label class="label cursor-pointer justify-start gap-2"><input id="model_custom_standard_token_fields" name="custom_standard_token_fields" type="checkbox" class="checkbox checkbox-sm"/><span class="label-text">Include standard token fields</span></label>
@@ -1737,10 +1831,13 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					var modelsUrl = button.dataset.modelModelsUrl || '';
 					var authHeaderName = button.dataset.modelAuthHeaderName || '';
 					var authHeaderValuePrefix = button.dataset.modelAuthHeaderValuePrefix || '';
+					var extraHeadersJSON = button.dataset.modelExtraHeadersJson || '';
+					var extraBodyJSON = button.dataset.modelExtraBodyJson || '';
 					var customAuthConfigJSON = button.dataset.modelCustomAuthConfig || '';
 					var oauthAuthorizeUrl = button.dataset.modelOauthAuthorizeUrl || '';
 					var oauthTokenUrl = button.dataset.modelOauthTokenUrl || '';
 					var oauthClientId = button.dataset.modelOauthClientId || '';
+					var oauthClientSecret = button.dataset.modelOauthClientSecret || '';
 					var oauthScopes = button.dataset.modelOauthScopes || '';
 						var autoStartTasks = button.dataset.modelAutoStartTasks === 'true';
 						var mixtureConfigJSON = button.dataset.modelMixtureConfigJson || '';
@@ -1804,21 +1901,27 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					document.getElementById('model_custom_auth_method').value = dbProvider === 'openai_compatible' && authMethod === 'oauth' ? 'oauth' : 'api_key';
 					document.getElementById('model_compatible_auth_header_name').value = authHeaderName || 'Authorization';
 					document.getElementById('model_compatible_auth_header_prefix').value = (authHeaderName || authHeaderValuePrefix) ? authHeaderValuePrefix : 'Bearer ';
-					document.getElementById('model_compatible_extra_headers').value = '';
-					document.getElementById('model_compatible_extra_body').value = '';
+					document.getElementById('model_compatible_extra_headers').value = extraHeadersJSON;
+					document.getElementById('model_compatible_extra_body').value = extraBodyJSON;
 					document.getElementById('model_custom_authorize_url').value = oauthAuthorizeUrl;
 					document.getElementById('model_custom_token_url').value = oauthTokenUrl;
 					document.getElementById('model_custom_oauth_client_id').value = oauthClientId;
-					document.getElementById('model_custom_oauth_client_secret').value = '';
+					document.getElementById('model_custom_oauth_client_secret').value = oauthClientSecret;
 					document.getElementById('model_custom_oauth_scopes').value = oauthScopes;
 					document.getElementById('model_custom_models_url').value = modelsUrl;
-					form.querySelectorAll('[name^="custom_clear_"], [name^="clear_extra_"], [name="clear_oauth_client_secret"]').forEach(function(el) { el.checked = false; });
 					applyCustomAuthConfig(customAuthConfigJSON);
 						document.getElementById('model_openai_compatible_custom_model').value = dbProvider === 'openai_compatible' ? model : '';
 						document.getElementById('model_auto_start_tasks').checked = autoStartTasks;				document.getElementById('model_submit_btn').textContent = 'Save';
 				toggleProviderFields(model, reasoningEffort);
 				applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '');
 				resetSecretInputVisibility('model_api_key');
+				resetSecretInputVisibility('model_custom_oauth_client_secret');
+				resetSecretInputVisibility('model_custom_signing_secret');
+				resetSecretInputVisibility('model_compatible_extra_headers');
+				resetSecretInputVisibility('model_custom_static_headers_json');
+				resetSecretInputVisibility('model_custom_token_headers_json');
+				resetSecretInputVisibility('model_custom_refresh_headers_json');
+				resetSecretInputVisibility('model_custom_refresh_parameters_json');
 				new_model_modal.showModal();
 			}
 
@@ -1957,7 +2060,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					setCustomAuthField('model_custom_local_callback_host', cfg.local_callback_host || 'localhost');
 					setCustomAuthField('model_custom_local_callback_path', cfg.local_callback_path || '/callback');
 					setCustomAuthField('model_custom_authorization_parameters_json', cfg.authorization_parameters ? JSON.stringify(cfg.authorization_parameters, null, 2) : '');
-					setCustomAuthField('model_custom_refresh_parameters_json', cfg.refresh_parameters ? JSON.stringify(cfg.refresh_parameters, null, 2) : '');
+					setCustomAuthField('model_custom_refresh_parameters_json', cfg.refresh_parameters ? JSON.stringify(cfg.refresh_parameters) : '');
 					var standardFields = document.getElementById('model_custom_standard_token_fields');
 					if (standardFields) standardFields.checked = cfg.standard_token_fields === true;
 					var pkce = document.getElementById('model_custom_oauth_pkce');
@@ -1968,10 +2071,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					if (refreshGrant) refreshGrant.checked = cfg.refresh_include_grant_type === true;
 					var refreshClient = document.getElementById('model_custom_refresh_include_client');
 					if (refreshClient) refreshClient.checked = cfg.refresh_include_client === true;
-					setCustomAuthField('model_custom_static_headers_json', '');
-					setCustomAuthField('model_custom_token_headers_json', '');
-					setCustomAuthField('model_custom_refresh_headers_json', '');
-					setCustomAuthField('model_custom_signing_secret', '');
+					setCustomAuthField('model_custom_static_headers_json', cfg.static_headers ? JSON.stringify(cfg.static_headers) : '');
+					setCustomAuthField('model_custom_token_headers_json', cfg.token_headers ? JSON.stringify(cfg.token_headers) : '');
+					setCustomAuthField('model_custom_refresh_headers_json', cfg.refresh_headers ? JSON.stringify(cfg.refresh_headers) : '');
+					setCustomAuthField('model_custom_signing_secret', cfg.signing_secret || '');
 					toggleCustomProviderAuthFields();
 				}
 
@@ -2124,13 +2227,19 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 						document.getElementById('model_custom_oauth_client_secret').value = '';
 						document.getElementById('model_custom_oauth_scopes').value = '';
 						document.getElementById('model_custom_models_url').value = '';
-						form.querySelectorAll('[name^="custom_clear_"], [name^="clear_extra_"], [name="clear_oauth_client_secret"]').forEach(function(el) { el.checked = false; });
 						applyCustomAuthConfig('');
 						document.getElementById('model_openai_compatible_custom_model').value = '';
 						applyMixtureConfig('');
 						document.getElementById('model_auto_start_tasks').checked = false;				document.getElementById('model_submit_btn').textContent = 'Create';
 				toggleProviderFields('', '');
 				resetSecretInputVisibility('model_api_key');
+				resetSecretInputVisibility('model_custom_oauth_client_secret');
+				resetSecretInputVisibility('model_custom_signing_secret');
+				resetSecretInputVisibility('model_compatible_extra_headers');
+				resetSecretInputVisibility('model_custom_static_headers_json');
+				resetSecretInputVisibility('model_custom_token_headers_json');
+				resetSecretInputVisibility('model_custom_refresh_headers_json');
+				resetSecretInputVisibility('model_custom_refresh_parameters_json');
 				new_model_modal.showModal();
 			}
 		</script>

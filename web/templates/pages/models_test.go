@@ -1039,3 +1039,96 @@ func TestModelsContent_OAuthLinksUseRuntimeSpecificLaunch(t *testing.T) {
 		t.Fatal("expected desktop OAuth links to request external browser launch")
 	}
 }
+
+func TestModelsContent_CustomOAuthEditLoadsRevealableSecretsAndHeaders(t *testing.T) {
+	agents := []models.LLMConfig{{
+		ID:                "custom-oauth",
+		Name:              "Custom OAuth",
+		Provider:          models.ProviderOpenAICompatible,
+		AuthMethod:        models.AuthMethodOAuth,
+		Model:             "custom-model",
+		PresetSlug:        "custom",
+		OAuthClientSecret: "saved-client-secret",
+		ExtraHeadersJSON:  `{"X-Inference-Secret":"saved-inference-secret"}`,
+		ExtraBodyJSON:     `{"saved_option":true}`,
+		CustomAuthConfigJSON: `{"enabled":true,"signing_secret":"saved-signing-secret",` +
+			`"static_headers":{"X-Required":"saved-static-header"},` +
+			`"token_headers":{"X-Token":"saved-token-header"},` +
+			`"refresh_headers":{"X-Refresh":"saved-refresh-header"},` +
+			`"refresh_parameters":{"refresh_secret":"saved-refresh-parameter"}}`,
+	}, {
+		ID:                   "builtin-oauth",
+		Name:                 "Built-in OAuth",
+		Provider:             models.ProviderOpenAI,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "gpt-5.4",
+		OAuthClientSecret:    "builtin-client-secret-must-not-render",
+		CustomAuthConfigJSON: `{"signing_secret":"builtin-signing-secret-must-not-render"}`,
+	}}
+
+	var buf bytes.Buffer
+	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render models content: %v", err)
+	}
+	out := html.UnescapeString(buf.String())
+
+	for _, value := range []string{
+		"saved-client-secret",
+		"saved-signing-secret",
+		"saved-inference-secret",
+		"saved-static-header",
+		"saved-token-header",
+		"saved-refresh-header",
+		"saved-refresh-parameter",
+	} {
+		if !strings.Contains(out, value) {
+			t.Errorf("expected saved edit value %q in rendered model data", value)
+		}
+	}
+	for _, inputID := range []string{
+		"model_custom_oauth_client_secret",
+		"model_custom_signing_secret",
+		"model_compatible_extra_headers",
+		"model_custom_static_headers_json",
+		"model_custom_token_headers_json",
+		"model_custom_refresh_headers_json",
+		"model_custom_refresh_parameters_json",
+	} {
+		if !strings.Contains(out, `togglePasswordVisibility('`+inputID+`', this)`) {
+			t.Errorf("expected reveal control for %s", inputID)
+		}
+		if !strings.Contains(out, `resetSecretInputVisibility('`+inputID+`')`) {
+			t.Errorf("expected %s to reset to hidden whenever the modal opens", inputID)
+		}
+	}
+	for _, secret := range []string{
+		"builtin-client-secret-must-not-render",
+		"builtin-signing-secret-must-not-render",
+	} {
+		if strings.Contains(out, secret) {
+			t.Errorf("built-in provider secret %q leaked into model page", secret)
+		}
+	}
+	for _, inputID := range []string{
+		"model_compatible_extra_headers",
+		"model_custom_static_headers_json",
+		"model_custom_token_headers_json",
+		"model_custom_refresh_headers_json",
+		"model_custom_refresh_parameters_json",
+	} {
+		if strings.Contains(out, `<textarea id="`+inputID+`"`) {
+			t.Errorf("sensitive JSON field %s rendered as a plaintext textarea", inputID)
+		}
+	}
+	if strings.Contains(out, "Leave blank to keep saved secret") ||
+		strings.Contains(out, `name="clear_oauth_client_secret"`) ||
+		strings.Contains(out, `name="custom_clear_signing_secret"`) {
+		t.Fatal("expected custom OAuth edit controls not to use blank-preserve or separate-clear behavior")
+	}
+	if !strings.Contains(out, "button.dataset.modelOauthClientSecret") ||
+		!strings.Contains(out, "button.dataset.modelExtraHeadersJson") ||
+		!strings.Contains(out, "cfg.signing_secret || ''") ||
+		!strings.Contains(out, "cfg.static_headers ? JSON.stringify") {
+		t.Fatal("expected edit script to populate all saved custom OAuth secret and header values")
+	}
+}
