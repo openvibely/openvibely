@@ -59,24 +59,6 @@ type githubCreateIssueRuntimeInput struct {
 	RepoURL   string   `json:"repo_url"`
 }
 
-type githubIssueRuntimeInput struct {
-	IssueNumber           int      `json:"issue_number"`
-	IssueURL              string   `json:"issue_url"`
-	RepoURL               string   `json:"repo_url"`
-	Assignee              string   `json:"assignee"`
-	GitHubLogin           string   `json:"github_login"`
-	Body                  string   `json:"body"`
-	Labels                []string `json:"labels"`
-	TaskID                string   `json:"task_id"`
-	Title                 string   `json:"title"`
-	PRTitle               string   `json:"pr_title"`
-	PRBody                string   `json:"pr_body"`
-	Base                  string   `json:"base"`
-	Draft                 bool     `json:"draft"`
-	ExpectedHeadSHA       string   `json:"expected_head_sha"`
-	ConfirmHistoryRewrite bool     `json:"confirm_history_rewrite"`
-}
-
 func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.RuntimeTools {
 	if opts.GitHub == nil || opts.ProjectRepo == nil || strings.TrimSpace(opts.ProjectID) == "" {
 		return nil
@@ -115,6 +97,20 @@ func runtimeToolDefinitionSet(defs []llmcontracts.RuntimeToolDefinition) map[str
 }
 
 func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]chatcontrol.RuntimeActionHandler {
+	core := NewGitHubIssueActionCore(opts.GitHub, opts.GitHubAuthRepo, opts.ProjectID, decodeRuntimeToolInput,
+		func(ctx context.Context, repoURL string) (*GitHubRepoRef, error) {
+			return resolveGitHubRepoForRuntimeToolURL(ctx, opts, repoURL)
+		})
+	postprocessAssigned := func(ctx context.Context, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
+		filtered, err := filterGitHubAssignedIssuesForAutomationInbox(ctx, opts, repo, issues)
+		if err != nil {
+			return nil, err
+		}
+		if err := recordGitHubAssignedIssues(ctx, opts, repo, filtered); err != nil {
+			return nil, err
+		}
+		return filtered, nil
+	}
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"github_create_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req githubCreateIssueRuntimeInput
@@ -243,153 +239,18 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			}
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue})
 		},
-		"github_get_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
-			if err != nil {
-				return "", err
-			}
-			issue, err := opts.GitHub.GetIssue(ctx, repo, req.IssueNumber)
-			if err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue": issue})
-		},
-		"github_get_project_inbox": func(ctx context.Context, _ json.RawMessage) (string, error) {
-			if opts.GitHubAuthRepo == nil {
-				return "", fmt.Errorf("github auth repository unavailable")
-			}
-			actors, err := opts.GitHubAuthRepo.ListAuthorizedInboxAssignees(ctx)
-			if err != nil {
-				return "", err
-			}
-			assignees := make([]string, 0, len(actors))
-			for _, actor := range actors {
-				if login := repository.NormalizeGitHubLogin(actor.GitHubLogin); login != "" {
-					assignees = append(assignees, login)
-				}
-			}
-			legacyInbox, err := opts.GitHubAuthRepo.GetEnabledProjectInbox(ctx, opts.ProjectID)
-			if err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "configured": len(assignees) > 0, "assignees": assignees, "authorized_users": actors, "legacy_inbox": legacyInbox})
-		},
-		"github_is_actor_authorized": func(ctx context.Context, input json.RawMessage) (string, error) {
-			if opts.GitHubAuthRepo == nil {
-				return "", fmt.Errorf("github auth repository unavailable")
-			}
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			login := strings.TrimSpace(req.GitHubLogin)
-			if login == "" {
-				return "", fmt.Errorf("github_login is required")
-			}
-			authorized, err := opts.GitHubAuthRepo.IsActorAuthorized(ctx, login)
-			if err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
-		},
+		"github_get_issue":           core.ExecuteGetIssue,
+		"github_get_project_inbox":   core.ExecuteGetProjectInbox,
+		"github_is_actor_authorized": core.ExecuteIsActorAuthorized,
 		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
-			if err != nil {
-				return "", err
-			}
-			user, issues, err := opts.GitHub.ListAuthenticatedAssignedIssues(ctx, repo)
-			if err != nil {
-				return "", err
-			}
-			issues, err = filterGitHubAssignedIssuesForAutomationInbox(ctx, opts, repo, issues)
-			if err != nil {
-				return "", err
-			}
-			if err := recordGitHubAssignedIssues(ctx, opts, repo, issues); err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "account": user, "issues": issues})
+			return core.ExecuteListMyAssignedIssues(ctx, input, postprocessAssigned)
 		},
 		"github_list_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			assignee := strings.TrimSpace(req.Assignee)
-			if assignee == "" {
-				return "", fmt.Errorf("assignee is required")
-			}
-			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
-			if err != nil {
-				return "", err
-			}
-			issues, err := opts.GitHub.ListAssignedIssues(ctx, repo, assignee)
-			if err != nil {
-				return "", err
-			}
-			issues, err = filterGitHubAssignedIssuesForAutomationInbox(ctx, opts, repo, issues)
-			if err != nil {
-				return "", err
-			}
-			if err := recordGitHubAssignedIssues(ctx, opts, repo, issues); err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": issues})
+			return core.ExecuteListAssignedIssues(ctx, input, postprocessAssigned)
 		},
-		"github_list_assigned_issues_with_prs": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			if strings.TrimSpace(req.Assignee) == "" {
-				return "", fmt.Errorf("assignee is required")
-			}
-			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
-			if err != nil {
-				return "", err
-			}
-			items, err := opts.GitHub.ListAssignedIssuesWithPullRequests(ctx, repo, req.Assignee)
-			if err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "items": items, "skipped_without_pr": "Assigned issues without an associated pull request are skipped."})
-		},
-		"github_comment_on_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
-			if err != nil {
-				return "", err
-			}
-			if err := opts.GitHub.CommentOnIssue(ctx, repo, req.IssueNumber, req.Body); err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber})
-		},
-		"github_add_issue_labels": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req githubIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
-			if err != nil {
-				return "", err
-			}
-			if err := opts.GitHub.AddLabelsToIssue(ctx, repo, req.IssueNumber, req.Labels); err != nil {
-				return "", err
-			}
-			return githubIssueRuntimeJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "labels": req.Labels})
-		},
+		"github_list_assigned_issues_with_prs": core.ExecuteListAssignedIssuesWithPRs,
+		"github_comment_on_issue":              core.ExecuteCommentOnIssue,
+		"github_add_issue_labels":              core.ExecuteAddIssueLabels,
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			if opts.TaskPullRequestRepo == nil {
 				return "", fmt.Errorf("task pull request repository unavailable")
@@ -397,7 +258,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if opts.TaskRepo == nil {
 				return "", fmt.Errorf("task repository unavailable")
 			}
-			var req githubIssueRuntimeInput
+			var req GitHubIssueActionRequest
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
@@ -452,7 +313,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if opts.TaskRepo == nil {
 				return "", fmt.Errorf("task repository unavailable")
 			}
-			var req githubIssueRuntimeInput
+			var req GitHubIssueActionRequest
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
@@ -493,7 +354,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if opts.TaskPullRequestRepo == nil || opts.GitHubPRFeedbackRepo == nil || opts.GitHubAuthRepo == nil || opts.ThreadInputRepo == nil {
 				return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
 			}
-			var req githubIssueRuntimeInput
+			var req GitHubIssueActionRequest
 			if err := decodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
@@ -584,7 +445,7 @@ func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIss
 	return true, nil
 }
 
-func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task, req *githubIssueRuntimeInput) (bool, error) {
+func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task, req *GitHubIssueActionRequest) (bool, error) {
 	automationContext, automationBound := AutomationContextFromContext(ctx)
 	if !automationBound || automationContext.ProjectID != opts.ProjectID {
 		return false, nil
@@ -918,7 +779,7 @@ func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOpti
 	return nil
 }
 
-func recordGitHubPullRequestOpened(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, task *models.Task, req githubIssueRuntimeInput, result *OpenTaskPullRequestResult) error {
+func recordGitHubPullRequestOpened(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, task *models.Task, req GitHubIssueActionRequest, result *OpenTaskPullRequestResult) error {
 	if opts.AutomationRepo == nil || task == nil || result == nil || result.PullRequest == nil {
 		return nil
 	}
