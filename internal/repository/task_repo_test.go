@@ -2,8 +2,11 @@ package repository
 
 import (
 	"context"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -2035,6 +2038,125 @@ func TestTaskRepo_ListByProjectWithSort_BacklogCategoryFilter(t *testing.T) {
 		}
 		if task.Category != models.CategoryBacklog {
 			t.Errorf("expected only backlog tasks, got %s", task.Category)
+		}
+	}
+}
+
+func TestTaskRepo_ListBoardByProjectWithCategorySorts_ProjectsUnicodePromptPreview(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	fullPrompt := strings.Repeat("a", 299) + "界" + "🙂full prompt tail"
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Unicode preview",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+		Prompt:    fullPrompt,
+		Priority:  2,
+	}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	boardTasks, err := repo.ListBoardByProjectWithCategorySorts(ctx, "default", "", "", "")
+	if err != nil {
+		t.Fatalf("ListBoardByProjectWithCategorySorts: %v", err)
+	}
+	if len(boardTasks) != 1 {
+		t.Fatalf("expected 1 board task, got %d", len(boardTasks))
+	}
+	wantPreview := strings.Repeat("a", 299) + "界"
+	if boardTasks[0].Prompt != wantPreview {
+		t.Fatalf("board prompt = %q, want 300-code-point preview %q", boardTasks[0].Prompt, wantPreview)
+	}
+	if got := utf8.RuneCountInString(boardTasks[0].Prompt); got != BoardPromptPreviewCodePoints {
+		t.Fatalf("board prompt has %d code points, want %d", got, BoardPromptPreviewCodePoints)
+	}
+
+	fullTasks, err := repo.ListByProjectWithCategorySorts(ctx, "default", "", "", "")
+	if err != nil {
+		t.Fatalf("ListByProjectWithCategorySorts: %v", err)
+	}
+	if len(fullTasks) != 1 || fullTasks[0].Prompt != fullPrompt {
+		t.Fatalf("ordinary list did not retain full prompt")
+	}
+	got, err := repo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Prompt != fullPrompt {
+		t.Fatalf("GetByID prompt was truncated")
+	}
+}
+
+func TestTaskRepo_ListBoardByProjectWithCategorySorts_PreservesOrderingAndMetadata(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	tasks := []*models.Task{
+		{
+			ProjectID:         "default",
+			Title:             "Zulu backlog",
+			Category:          models.CategoryBacklog,
+			Status:            models.StatusPending,
+			Prompt:            strings.Repeat("z", BoardPromptPreviewCodePoints+50),
+			Priority:          4,
+			Tag:               models.TagBug,
+			ChainConfig:       `{"enabled":true,"trigger":"on_completion"}`,
+			SwarmRole:         models.SwarmRoleParent,
+			SwarmStatus:       "planning",
+			SwarmConfig:       `{"mode":"autonomous","max_workers":2}`,
+			SwarmSequence:     3,
+			WorktreePath:      "/tmp/worktree",
+			WorktreeBranch:    "task/branch",
+			AutoMerge:         true,
+			MergeTargetBranch: "main",
+			MergeStatus:       models.MergeStatusPending,
+			BaseBranch:        "main",
+			BaseCommitSHA:     strings.Repeat("a", 40),
+			LineageDepth:      2,
+			CreatedVia:        models.TaskOriginSlack,
+			TelegramChatID:    42,
+		},
+		{ProjectID: "default", Title: "Alpha backlog", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "short backlog", Priority: 1},
+		{ProjectID: "default", Title: "Zulu completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "short completed", Priority: 2},
+		{ProjectID: "default", Title: "Alpha completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "another completed", Priority: 3},
+	}
+	for i, task := range tasks {
+		if i == 0 {
+			goal := &models.TaskGoal{Objective: "preserve goal badge"}
+			if err := repo.CreateWithGoal(ctx, task, goal); err != nil {
+				t.Fatalf("CreateWithGoal: %v", err)
+			}
+			continue
+		}
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create task %d: %v", i, err)
+		}
+	}
+
+	fullTasks, err := repo.ListByProjectWithCategorySorts(ctx, "default", "", "title_desc", "title_asc")
+	if err != nil {
+		t.Fatalf("ListByProjectWithCategorySorts: %v", err)
+	}
+	boardTasks, err := repo.ListBoardByProjectWithCategorySorts(ctx, "default", "", "title_desc", "title_asc")
+	if err != nil {
+		t.Fatalf("ListBoardByProjectWithCategorySorts: %v", err)
+	}
+	if len(boardTasks) != len(fullTasks) {
+		t.Fatalf("board task count = %d, want %d", len(boardTasks), len(fullTasks))
+	}
+	for i := range fullTasks {
+		if boardTasks[i].ID != fullTasks[i].ID {
+			t.Fatalf("board task %d ID = %q, want ordered ID %q", i, boardTasks[i].ID, fullTasks[i].ID)
+		}
+		projected := boardTasks[i]
+		projected.Prompt = fullTasks[i].Prompt
+		if !reflect.DeepEqual(projected, fullTasks[i]) {
+			t.Fatalf("board task %q metadata differs from full list\nboard: %#v\nfull: %#v", boardTasks[i].ID, projected, fullTasks[i])
 		}
 	}
 }

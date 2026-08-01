@@ -1496,7 +1496,9 @@ func TestHandler_UpdateProjectWorkerLimit(t *testing.T) {
 
 func TestHandler_ListTasks_KanbanBoard(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
-	createTask(t, h, "default", "Active Task", func(tk *models.Task) { tk.Prompt = "Do something" })
+	promptTail := "FULL_PROMPT_DETAIL_TAIL"
+	fullPrompt := strings.Repeat("a", 299) + "界" + promptTail
+	activeTask := createTask(t, h, "default", "Active Task", func(tk *models.Task) { tk.Prompt = fullPrompt })
 	createTask(t, h, "default", "Backlog Task", func(tk *models.Task) {
 		tk.Category = models.CategoryBacklog
 		tk.Prompt = "Do something later"
@@ -1510,6 +1512,14 @@ func TestHandler_ListTasks_KanbanBoard(t *testing.T) {
 	assertContains(t, rec, "Active Task")
 	assertContains(t, rec, "Backlog Task")
 	assertContains(t, rec, "kanban-board")
+	assertContains(t, rec, strings.Repeat("a", 299)+"界")
+	assert.NotContains(t, rec.Body.String(), promptTail, "Kanban response must not materialize the full prompt")
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/tasks/"+activeTask.ID, nil)
+	detailRec := httptest.NewRecorder()
+	e.ServeHTTP(detailRec, detailReq)
+	assertCode(t, detailRec, http.StatusOK)
+	assertContains(t, detailRec, promptTail)
 }
 
 func TestHandler_ListTasks_AttachesSwarmChildrenWhenIncludeChildrenRequested(t *testing.T) {

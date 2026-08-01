@@ -118,6 +118,28 @@ func (s *TaskService) ListByProjectWithCategorySorts(ctx context.Context, projec
 	return tasks, nil
 }
 
+func (s *TaskService) ListBoardByProjectWithCategorySorts(ctx context.Context, projectID, category string, backlogSort string, completedSort string) ([]models.Task, error) {
+	applog.Infof("[task-svc] ListBoardByProjectWithCategorySorts project=%s category=%q backlog_sort=%s completed_sort=%s",
+		projectID, category, backlogSort, completedSort)
+	tasks, err := s.repo.ListBoardByProjectWithCategorySorts(ctx, projectID, category, backlogSort, completedSort)
+	if err != nil {
+		applog.Infof("[task-svc] ListBoardByProjectWithCategorySorts error: %v", err)
+		return nil, err
+	}
+	if moved, moveErr := s.normalizeActiveTerminalTasks(ctx, tasks); moveErr != nil {
+		applog.Infof("[task-svc] ListBoardByProjectWithCategorySorts error normalizing active terminal tasks: %v", moveErr)
+		return nil, moveErr
+	} else if moved > 0 {
+		tasks, err = s.repo.ListBoardByProjectWithCategorySorts(ctx, projectID, category, backlogSort, completedSort)
+		if err != nil {
+			applog.Infof("[task-svc] ListBoardByProjectWithCategorySorts error reloading after normalization: %v", err)
+			return nil, err
+		}
+	}
+	applog.Infof("[task-svc] ListBoardByProjectWithCategorySorts returned %d tasks", len(tasks))
+	return tasks, nil
+}
+
 func (s *TaskService) normalizeActiveTerminalTasks(ctx context.Context, tasks []models.Task) (int, error) {
 	moved := 0
 	for _, task := range tasks {
