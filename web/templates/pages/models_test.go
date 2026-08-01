@@ -254,6 +254,20 @@ func TestModelsContent_ModelFormUsesHTMXSubmit(t *testing.T) {
 	if !strings.Contains(out, `id="model_config_id" name="model_config_id" value=""`) {
 		t.Fatal("expected model form to include hidden model config ID")
 	}
+	if !strings.Contains(out, `id="model_form_error"`) ||
+		!strings.Contains(out, `aria-live="assertive"`) {
+		t.Fatal("expected model form to include an accessible save-error banner")
+	}
+	if !strings.Contains(out, `showModelFormError(modelSaveErrorMessage(event.detail.xhr));`) {
+		t.Fatal("expected model save failures to display in the model form")
+	}
+	if !strings.Contains(out, `payload.message || payload.error || fallback`) {
+		t.Fatal("expected model save error responses to be parsed for a useful message")
+	}
+	if !strings.Contains(out, `addEventListener('invalid'`) ||
+		!strings.Contains(out, `Complete the required field:`) {
+		t.Fatal("expected invalid model fields to display a visible validation error")
+	}
 	// JS dynamically updates HTMX method and action to include project_id for create/edit paths.
 	if !strings.Contains(out, "form.removeAttribute('hx-put');") || !strings.Contains(out, "form.setAttribute('hx-post', _createUrl);") {
 		t.Fatal("expected create flow to use hx-post and clear edit hx-put")
@@ -761,7 +775,7 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		`<input type="hidden" id="model_provider_value" name="provider" value="anthropic"`,
 		`<select id="model_provider"`,
 		`oninput="syncModelAPIKeySubmitValue(); scheduleAutoDiscoverOpenAICompatibleModels()"`,
-		`onsubmit="return normalizeModelFormBeforeSubmit()"`,
+		`onsubmit="clearModelFormError(); return normalizeModelFormBeforeSubmit()"`,
 		`<input type="hidden" id="model_openai_compatible_preset" name="preset_slug" value="custom"`,
 		"OpenAI-compatible presets auto-load available models when selected; Custom stays manual.",
 		"openai_compatible_openrouter: [",
@@ -806,6 +820,11 @@ func TestModelsContent_OpenAICompatibleDiscoveryUI(t *testing.T) {
 		`name="custom_authorization_parameters_json"`,
 		`name="custom_oauth_pkce"`,
 		`name="custom_allow_private_endpoints"`,
+		`name="custom_local_callback_host"`,
+		`name="custom_local_callback_path"`,
+		"The callback port is always selected automatically.",
+		`cfg.local_callback_host || 'localhost'`,
+		`cfg.local_callback_path || '/callback'`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected OpenAI-compatible discovery UI to contain %q", want)

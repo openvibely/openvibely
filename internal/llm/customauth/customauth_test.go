@@ -379,6 +379,7 @@ func TestRefreshSupportsGenericClientParametersAndHeaders(t *testing.T) {
 	cfg := Config{
 		RefreshURL:              server.URL,
 		AllowPrivateEndpoints:   true,
+		UserAgent:               "custom-client/1.0",
 		RefreshRequestFormat:    "json",
 		RefreshIncludeGrantType: true,
 		RefreshIncludeClient:    true,
@@ -408,6 +409,9 @@ func TestRefreshSupportsGenericClientParametersAndHeaders(t *testing.T) {
 	}
 	if gotHeaders.Get("X-Token-Header") != "token-value" || gotHeaders.Get("X-Refresh-Header") != "refresh-value" {
 		t.Fatalf("refresh headers missing: %#v", gotHeaders)
+	}
+	if gotHeaders.Get("User-Agent") != "custom-client/1.0" {
+		t.Fatalf("refresh request missing configured user agent: %#v", gotHeaders)
 	}
 }
 

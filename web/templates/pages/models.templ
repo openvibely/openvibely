@@ -419,7 +419,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 					<h3 id="model_modal_title" class="font-bold text-lg mb-4 pr-10">New Model Configuration</h3>
-						<form id="model_form" method="post" action="/models" hx-post="/models" hx-target="#models-container" hx-swap="outerHTML" onsubmit="return normalizeModelFormBeforeSubmit()">					<input type="hidden" id="model_config_id" name="model_config_id" value=""/>
+						<form id="model_form" method="post" action="/models" hx-post="/models" hx-target="#models-container" hx-swap="outerHTML" onsubmit="clearModelFormError(); return normalizeModelFormBeforeSubmit()">					<input type="hidden" id="model_config_id" name="model_config_id" value=""/>
+					<div id="model_form_error" class="alert alert-error hidden mb-4" role="alert" aria-live="assertive" tabindex="-1">
+						<span id="model_form_error_message">Could not save model.</span>
+					</div>
 					<div class="form-control mb-3">						<label class="label"><span class="label-text">Name</span></label>
 							<input type="text" id="model_name" name="name" class="input input-bordered" required placeholder="My Model"/>
 					</div>
@@ -634,6 +637,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 												<div class="form-control"><label class="label"><span class="label-text">OAuth client secret</span></label><input id="model_custom_oauth_client_secret" name="oauth_client_secret" type="password" autocomplete="new-password" class="input input-bordered" placeholder="Leave blank to keep saved secret"/><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="clear_oauth_client_secret" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved client secret</span></label></div>
 												<div class="form-control"><label class="label"><span class="label-text">OAuth scopes</span></label><input id="model_custom_oauth_scopes" name="oauth_scopes" class="input input-bordered" placeholder="openid profile"/></div>
 												<div class="form-control"><label class="label"><span class="label-text">Callback query parameter</span></label><input id="model_custom_callback_parameter" name="custom_callback_parameter" class="input input-bordered" value="callback_uri"/></div>
+												<div class="form-control"><label class="label"><span class="label-text">Local callback host</span></label><select id="model_custom_local_callback_host" name="custom_local_callback_host" class="select select-bordered"><option value="localhost">localhost</option><option value="127.0.0.1">127.0.0.1</option></select><label class="label"><span class="label-text-alt opacity-70">The callback port is always selected automatically.</span></label></div>
+												<div class="form-control"><label class="label"><span class="label-text">Local callback path</span></label><input id="model_custom_local_callback_path" name="custom_local_callback_path" class="input input-bordered" value="/callback" placeholder="/callback"/></div>
 												<div class="form-control"><label class="label"><span class="label-text">Signing secret</span></label><input id="model_custom_signing_secret" name="custom_signing_secret" type="password" autocomplete="off" class="input input-bordered" placeholder="Leave blank to keep saved secret"/><label class="label cursor-pointer justify-start gap-2"><input type="checkbox" name="custom_clear_signing_secret" class="checkbox checkbox-xs"/><span class="label-text-alt">Clear saved signing secret</span></label></div>
 												<div class="form-control"><label class="label"><span class="label-text">Authorization mode</span></label><select id="model_custom_authorization_mode" name="custom_authorization_mode" class="select select-bordered"><option value="auto">Automatic Bearer/Apikey</option><option value="bearer">Bearer</option><option value="apikey">Apikey</option><option value="raw">Raw token</option></select></div>
 												<div class="form-control"><label class="label"><span class="label-text">OAuth token header</span></label><input id="model_custom_access_token_header" name="custom_access_token_header" class="input input-bordered" value="Authorization" placeholder="Authorization"/></div>
@@ -1768,6 +1773,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 				}
 
 					var form = document.getElementById('model_form');
+					clearModelFormError();
 					document.getElementById('model_modal_title').textContent = 'Edit Model Configuration';
 					var _editUrl = modelMutationURL('/models/' + id);
 					form.action = _editUrl;
@@ -1948,6 +1954,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					setCustomAuthField('model_custom_refresh_token_field', cfg.refresh_token_field || 'refresh_token');
 					setCustomAuthField('model_custom_expires_in_field', cfg.expires_in_field || 'expires_in');
 					setCustomAuthField('model_custom_callback_parameter', cfg.callback_parameter || 'callback_uri');
+					setCustomAuthField('model_custom_local_callback_host', cfg.local_callback_host || 'localhost');
+					setCustomAuthField('model_custom_local_callback_path', cfg.local_callback_path || '/callback');
 					setCustomAuthField('model_custom_authorization_parameters_json', cfg.authorization_parameters ? JSON.stringify(cfg.authorization_parameters, null, 2) : '');
 					setCustomAuthField('model_custom_refresh_parameters_json', cfg.refresh_parameters ? JSON.stringify(cfg.refresh_parameters, null, 2) : '');
 					var standardFields = document.getElementById('model_custom_standard_token_fields');
@@ -2044,8 +2052,37 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					new_model_modal.close();
 				}
 
+				function clearModelFormError() {
+					var errorBox = document.getElementById('model_form_error');
+					var errorMessage = document.getElementById('model_form_error_message');
+					if (errorMessage) errorMessage.textContent = '';
+					if (errorBox) errorBox.classList.add('hidden');
+				}
+
+				function showModelFormError(message) {
+					var errorBox = document.getElementById('model_form_error');
+					var errorMessage = document.getElementById('model_form_error_message');
+					if (!errorBox || !errorMessage) return;
+					errorMessage.textContent = message || 'Could not save model.';
+					errorBox.classList.remove('hidden');
+					errorBox.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+					errorBox.focus({preventScroll: true});
+				}
+
+				function modelSaveErrorMessage(xhr) {
+					var fallback = 'Could not save model.';
+					if (!xhr || !xhr.responseText) return fallback;
+					try {
+						var payload = JSON.parse(xhr.responseText);
+						return payload.message || payload.error || fallback;
+					} catch (e) {
+						return xhr.responseText.trim() || fallback;
+					}
+				}
+
 				function openNewModelModal() {
 					var form = document.getElementById('model_form');
+					clearModelFormError();
 					document.getElementById('model_modal_title').textContent = 'New Model Configuration';
 					var _createUrl = modelMutationURL('/models');
 					form.action = _createUrl;
@@ -2110,9 +2147,15 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 				document.body.addEventListener('htmx:responseError', function(event) {
 					var form = document.getElementById('model_form');
 					if (!form || !event.detail || event.detail.elt !== form) return;
-					var message = 'Could not save model.';
-					if (event.detail.xhr && event.detail.xhr.responseText) message = event.detail.xhr.responseText;
-					if (typeof setMixtureValidationError === 'function') setMixtureValidationError(message);
-				});		</script>
+					showModelFormError(modelSaveErrorMessage(event.detail.xhr));
+				});
+				document.getElementById('model_form').addEventListener('invalid', function(event) {
+					var field = event.target;
+					var control = field && field.closest ? field.closest('.form-control') : null;
+					var label = field && field.id ? document.querySelector('label[for="' + field.id + '"]') : null;
+					if (!label && control) label = control.querySelector('.label-text');
+					var fieldName = label ? label.textContent.trim() : ((field && field.name) || 'a required field');
+					showModelFormError('Complete the required field: ' + fieldName + '.');
+				}, true);		</script>
 	</div>
 }

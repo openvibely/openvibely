@@ -48,6 +48,8 @@ type Config struct {
 	AuthorizationParameters map[string]string `json:"authorization_parameters,omitempty"`
 	StandardTokenFields     bool              `json:"standard_token_fields"`
 	CallbackParameter       string            `json:"callback_parameter,omitempty"`
+	LocalCallbackHost       string            `json:"local_callback_host,omitempty"`
+	LocalCallbackPath       string            `json:"local_callback_path,omitempty"`
 	AllowPrivateEndpoints   bool              `json:"allow_private_endpoints"`
 	TokenHeaders            map[string]string `json:"token_headers,omitempty"`
 	RefreshRequestFormat    string            `json:"refresh_request_format,omitempty"`
@@ -289,6 +291,12 @@ func (cfg *Config) applyDefaults() {
 	}
 	if cfg.CallbackParameter == "" {
 		cfg.CallbackParameter = "callback_uri"
+	}
+	if cfg.LocalCallbackHost == "" {
+		cfg.LocalCallbackHost = "localhost"
+	}
+	if cfg.LocalCallbackPath == "" {
+		cfg.LocalCallbackPath = "/callback"
 	}
 	if cfg.RefreshRequestFormat == "" {
 		cfg.RefreshRequestFormat = cfg.TokenRequestFormat
@@ -660,6 +668,9 @@ func Refresh(ctx context.Context, client *http.Client, cfg Config, refreshToken 
 		return TokenSet{}, err
 	}
 	req.Header.Set("Content-Type", contentType)
+	if cfg.UserAgent != "" {
+		req.Header.Set("User-Agent", cfg.UserAgent)
+	}
 	for name, value := range cfg.TokenHeaders {
 		if strings.TrimSpace(name) != "" {
 			req.Header.Set(name, value)

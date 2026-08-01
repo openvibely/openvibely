@@ -26,6 +26,7 @@ func TestExchangeCustomOAuthRejectsMissingRequiredProfileMetadata(t *testing.T) 
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/token":
+			require.Equal(t, "custom-client/1.0", r.Header.Get("User-Agent"))
 			_, _ = w.Write([]byte(`{"token":"opaque-token"}`))
 		case "/profile":
 			_, _ = w.Write([]byte(`{"instances":[]}`))
@@ -39,6 +40,7 @@ func TestExchangeCustomOAuthRejectsMissingRequiredProfileMetadata(t *testing.T) 
 	cfg := llmcustomauth.Config{
 		Enabled:               true,
 		AccessTokenField:      "token",
+		UserAgent:             "custom-client/1.0",
 		ProfileURL:            server.URL + "/profile",
 		ProfileInstancePath:   "instances.0.instance_id",
 		AllowPrivateEndpoints: true,
@@ -281,6 +283,47 @@ func TestTakeOAuthFlowRejectsExpiredFlow(t *testing.T) {
 	require.Equal(t, recentState, flow.State)
 }
 
+func TestNormalizeCustomOAuthLocalCallback(t *testing.T) {
+	host, path, err := normalizeCustomOAuthLocalCallback(llmcustomauth.Config{})
+	require.NoError(t, err)
+	require.Equal(t, "localhost", host)
+	require.Equal(t, "/callback", path)
+
+	host, path, err = normalizeCustomOAuthLocalCallback(llmcustomauth.Config{
+		LocalCallbackHost: "127.0.0.1",
+		LocalCallbackPath: "/provider-callback",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "127.0.0.1", host)
+	require.Equal(t, "/provider-callback", path)
+
+	for _, cfg := range []llmcustomauth.Config{
+		{LocalCallbackHost: "example.com"},
+		{LocalCallbackPath: "callback"},
+		{LocalCallbackPath: "/callback?next=unsafe"},
+		{LocalCallbackPath: "//example.com/callback"},
+		{LocalCallbackPath: "/callback/{state}"},
+	} {
+		_, _, err := normalizeCustomOAuthLocalCallback(cfg)
+		require.Error(t, err)
+	}
+}
+
+func TestCustomOAuthErrorDetail(t *testing.T) {
+	require.Equal(t, "authorization code is invalid", customOAuthErrorDetail(strings.NewReader(
+		`{"detail":[{"loc":["body","code"],"msg":"authorization code is invalid","input":"secret-code"}]}`,
+	)))
+	require.Equal(t, "invalid grant", customOAuthErrorDetail(strings.NewReader(
+		`{"error":"invalid grant","token":"must-not-be-returned"}`,
+	)))
+	require.Empty(t, customOAuthErrorDetail(strings.NewReader(`not json`)))
+	require.Equal(t,
+		"custom OAuth token exchange returned 422 Unprocessable Entity: authorization code is invalid",
+		publicOAuthExchangeError(fmt.Errorf("custom OAuth token exchange returned 422 Unprocessable Entity: authorization code is invalid")),
+	)
+	require.Equal(t, "Could not complete OAuth exchange.", publicOAuthExchangeError(fmt.Errorf("database unavailable")))
+}
+
 // waitForTCPPort polls until the given port is accepting connections or the
 // timeout elapses. Used instead of time.Sleep to wait for test servers to start.
 func waitForTCPPort(t *testing.T, port int, timeout time.Duration) {
@@ -309,6 +352,52 @@ func stopOpenAIOAuthCallbackServerForTest(t *testing.T) {
 
 func TestHandler_OAuthInitiate(t *testing.T) {
 	t.Setenv("APP_BASE_URL", "")
+
+	t.Run("custom oauth uses configured loopback host and path with an automatic port", func(t *testing.T) {
+		t.Setenv("APP_BASE_URL", "")
+		h, e, llmConfigRepo := setupTestHandler(t)
+		cfg := llmcustomauth.Config{
+			Enabled:           true,
+			CallbackParameter: "callback_uri",
+			LocalCallbackHost: "127.0.0.1",
+			LocalCallbackPath: "/provider-callback",
+		}
+		model := &models.LLMConfig{
+			Name:                 "Custom loopback callback",
+			Provider:             models.ProviderOpenAICompatible,
+			AuthMethod:           models.AuthMethodOAuth,
+			Model:                "custom-model",
+			BaseURL:              "https://api.example.test/v1",
+			OAuthAuthorizeURL:    "https://identity.example.test/authorize",
+			OAuthTokenURL:        "https://identity.example.test/token",
+			CustomAuthConfigJSON: llmcustomauth.MarshalConfig(cfg),
+		}
+		require.NoError(t, llmConfigRepo.Create(context.Background(), model))
+
+		req := httptest.NewRequest(http.MethodGet, "/models/"+model.ID+"/oauth/initiate", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(model.ID)
+
+		require.NoError(t, h.OAuthInitiate(c))
+		require.Equal(t, http.StatusTemporaryRedirect, rec.Code)
+		location, err := url.Parse(rec.Header().Get("Location"))
+		require.NoError(t, err)
+		callback, err := url.Parse(location.Query().Get("callback_uri"))
+		require.NoError(t, err)
+		require.Equal(t, "127.0.0.1", callback.Hostname())
+		require.NotEmpty(t, callback.Port())
+		require.Equal(t, "/provider-callback", callback.Path)
+
+		callbackQuery := callback.Query()
+		callbackQuery.Set("state", location.Query().Get("state"))
+		callbackQuery.Set("error", "access_denied")
+		callback.RawQuery = callbackQuery.Encode()
+		resp, err := (&http.Client{Timeout: 2 * time.Second}).Get(callback.String())
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+	})
 
 	t.Run("custom oauth includes standard authorization fields without pkce", func(t *testing.T) {
 		t.Setenv("APP_BASE_URL", "https://openvibely.example")
@@ -1299,14 +1388,14 @@ func TestHandler_startOAuthCallbackServer(t *testing.T) {
 		defer cancel()
 		done := make(chan bool)
 		go func() {
-			h.startOAuthCallbackServer(ctx, cancel, listener, "http://example.com/models", modelID)
+			h.startOAuthCallbackServer(ctx, cancel, listener, "http://example.com/models", modelID, "/provider-callback")
 			done <- true
 		}()
 
 		waitForTCPPort(t, port, 2*time.Second)
 
 		// Make a callback request without following redirects.
-		callbackURL := fmt.Sprintf("http://localhost:%d/callback?code=test-code&state=%s", port, testState)
+		callbackURL := fmt.Sprintf("http://localhost:%d/provider-callback?code=test-code&state=%s", port, testState)
 		httpClient := &http.Client{
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse

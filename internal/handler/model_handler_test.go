@@ -1022,6 +1022,8 @@ func TestCreateModel_CustomOpenAICompatibleOAuthPersistsAdvancedAuthentication(t
 	form.Set("custom_refresh_token_field", "refresh_token")
 	form.Set("custom_token_request_format", "json")
 	form.Set("custom_callback_parameter", "redirect_uri")
+	form.Set("custom_local_callback_host", "127.0.0.1")
+	form.Set("custom_local_callback_path", "/provider-callback")
 	form.Set("custom_standard_token_fields", "on")
 	form.Set("custom_oauth_pkce", "on")
 	form.Set("custom_static_headers_json", `{"X-Required-Header":"required-value"}`)
@@ -1061,6 +1063,7 @@ func TestCreateModel_CustomOpenAICompatibleOAuthPersistsAdvancedAuthentication(t
 		t.Fatalf("unexpected custom auth config: %#v", cfg)
 	}
 	if !cfg.PKCE || !cfg.StandardTokenFields || cfg.CallbackParameter != "redirect_uri" ||
+		cfg.LocalCallbackHost != "127.0.0.1" || cfg.LocalCallbackPath != "/provider-callback" ||
 		cfg.StaticHeaders["X-Required-Header"] != "required-value" || cfg.AuthorizationParameters["audience"] != "custom-api" {
 		t.Fatalf("generic OAuth fields not saved: %#v", cfg)
 	}

@@ -268,6 +268,8 @@ func applyOpenAICompatibleForm(c echo.Context, agent *models.LLMConfig) error {
 	cfg.ModelIDField = strings.TrimSpace(c.FormValue("custom_model_id_field"))
 	cfg.StandardTokenFields = c.FormValue("custom_standard_token_fields") == "on"
 	cfg.CallbackParameter = strings.TrimSpace(c.FormValue("custom_callback_parameter"))
+	cfg.LocalCallbackHost = strings.TrimSpace(c.FormValue("custom_local_callback_host"))
+	cfg.LocalCallbackPath = strings.TrimSpace(c.FormValue("custom_local_callback_path"))
 	privateEndpointsRequested := c.FormValue("custom_allow_private_endpoints") == "on" ||
 		openAICompatiblePresetUsesPrivateEndpoints(agent.PresetSlug)
 	if privateEndpointsRequested && !llmcustomauth.PrivateEndpointPolicyEnabled() {
@@ -312,6 +314,9 @@ func applyOpenAICompatibleForm(c echo.Context, agent *models.LLMConfig) error {
 	}
 	if agent.AuthMethod == models.AuthMethodOAuth {
 		if err := validateCustomOAuthEndpoints(agent, cfg); err != nil {
+			return err
+		}
+		if _, _, err := normalizeCustomOAuthLocalCallback(cfg); err != nil {
 			return err
 		}
 	}

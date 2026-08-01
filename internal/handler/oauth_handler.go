@@ -146,6 +146,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 
 	// Resolve OAuth endpoints and credentials based on provider + callback mode.
 	var authURL, clientID, clientSecret, tokenEndpoint, scope string
+	var customOAuthConfig llmcustomauth.Config
 	if agent.Provider == models.ProviderOpenAICompatible {
 		cfg, cfgErr := llmcustomauth.ParseConfig(agent.CustomAuthConfigJSON)
 		if cfgErr != nil {
@@ -162,6 +163,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 		clientID = strings.TrimSpace(agent.OAuthClientID)
 		clientSecret = strings.TrimSpace(agent.OAuthClientSecret)
 		scope = strings.TrimSpace(agent.OAuthScopes)
+		customOAuthConfig = cfg
 		if authURL == "" || tokenEndpoint == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "custom OAuth authorize and token URLs are required")
 		}
@@ -244,12 +246,21 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 	if agent.Provider == models.ProviderOpenAI {
 		redirectPath = "/auth/callback"
 	}
+	localCallbackHost := "localhost"
+	localCallbackPath := redirectPath
+	if agent.Provider == models.ProviderOpenAICompatible {
+		var callbackErr error
+		localCallbackHost, localCallbackPath, callbackErr = normalizeCustomOAuthLocalCallback(customOAuthConfig)
+		if callbackErr != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, callbackErr.Error())
+		}
+	}
 
 	redirectURI := ""
 	if usePublicCallback {
 		redirectURI = strings.TrimRight(publicBaseURL, "/") + redirectPath
 	} else {
-		localPath := "/callback"
+		localPath := localCallbackPath
 		if agent.Provider == models.ProviderOpenAI {
 			localPath = "/auth/callback"
 		}
@@ -259,7 +270,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 			if agent.Provider == models.ProviderOpenAI {
 				port = openAIOAuthPort
 			}
-			redirectURI = fmt.Sprintf("http://localhost:%d%s", port, localPath)
+			redirectURI = fmt.Sprintf("http://%s:%d%s", localCallbackHost, port, localPath)
 		} else {
 			// Start local callback listener.
 			// Anthropic supports dynamic localhost ports; OpenAI/Codex uses fixed localhost:1455.
@@ -272,7 +283,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 				return echo.NewHTTPError(http.StatusInternalServerError, "failed to start callback listener")
 			}
 			port := listener.Addr().(*net.TCPAddr).Port
-			redirectURI = fmt.Sprintf("http://localhost:%d%s", port, localPath)
+			redirectURI = fmt.Sprintf("http://%s:%d%s", localCallbackHost, port, localPath)
 
 			// Start temporary callback server in background with timeout context.
 			// The server auto-shuts down after handling one request, on timeout, or
@@ -283,7 +294,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 			oauthServers[id] = &oauthRunningServer{ConfigID: id, ServerID: serverID, Cancel: serverCancel}
 			oauthServersMu.Unlock()
 			go func() {
-				h.startOAuthCallbackServer(serverCtx, serverCancel, listener, modelsURL, id)
+				h.startOAuthCallbackServer(serverCtx, serverCancel, listener, modelsURL, id, localPath)
 				// Clean up tracking after the server exits.
 				untrackOAuthServer(id, serverID)
 			}()
@@ -392,7 +403,7 @@ func (h *Handler) OAuthInitiate(c echo.Context) error {
 // startOAuthCallbackServer runs a temporary HTTP server that handles the OAuth callback
 // on a localhost port. It shuts down after handling one request, when the context expires
 // (timeout or cancellation from a new flow for the same config), or on /cancel.
-func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.CancelFunc, listener net.Listener, modelsURL string, configID string) {
+func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.CancelFunc, listener net.Listener, modelsURL string, configID string, callbackPaths ...string) {
 	mux := http.NewServeMux()
 	srv := &http.Server{Handler: mux}
 
@@ -416,6 +427,11 @@ func (h *Handler) startOAuthCallbackServer(ctx context.Context, cancel context.C
 	mux.HandleFunc("/callback", handleCallback)
 	// OpenAI/Codex flow uses this callback path.
 	mux.HandleFunc("/auth/callback", handleCallback)
+	for _, callbackPath := range callbackPaths {
+		if callbackPath != "" && callbackPath != "/callback" && callbackPath != "/auth/callback" {
+			mux.HandleFunc(callbackPath, handleCallback)
+		}
+	}
 	// Allow replacing an existing pending flow on localhost:1455 (Codex-style reauth).
 	mux.HandleFunc("/cancel", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -486,7 +502,7 @@ func (h *Handler) OAuthManualComplete(c echo.Context) error {
 	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
 	if err != nil {
 		applog.Infof("[handler] OAuthManualComplete exchange/save error: %v", err)
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "token exchange failed"})
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": publicOAuthExchangeError(err)})
 	}
 	applog.Infof("[handler] OAuthManualComplete success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
 	return c.JSON(http.StatusOK, map[string]string{"status": "connected"})
@@ -559,9 +575,9 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		applog.Infof("[handler] OAuthCallback exchange/save error: %v", err)
 		fmt.Fprintf(w, `<html><body>
 			<h2>Token Exchange Failed</h2>
-			<p>Could not complete OAuth exchange.</p>
+			<p>%s</p>
 			<p><a href="%s">Return to Models</a></p>
-		</body></html>`, htmltemplate.HTMLEscapeString(modelsURL))
+		</body></html>`, htmltemplate.HTMLEscapeString(publicOAuthExchangeError(err)), htmltemplate.HTMLEscapeString(modelsURL))
 		return
 	}
 
@@ -658,6 +674,9 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 		return 0, err
 	}
 	req.Header.Set("Content-Type", contentType)
+	if cfg.UserAgent != "" {
+		req.Header.Set("User-Agent", cfg.UserAgent)
+	}
 	for name, value := range cfg.TokenHeaders {
 		if strings.TrimSpace(name) != "" {
 			req.Header.Set(name, value)
@@ -673,7 +692,10 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		detail := customOAuthErrorDetail(resp.Body)
+		if detail != "" {
+			return 0, fmt.Errorf("custom OAuth token exchange returned %d %s: %s", resp.StatusCode, http.StatusText(resp.StatusCode), detail)
+		}
 		return 0, fmt.Errorf("custom OAuth token exchange returned %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
 	tokens, err := llmcustomauth.DecodeTokenResponse(resp.Body, cfg, "")
@@ -730,6 +752,59 @@ func (h *Handler) exchangeCustomOAuthCodeAndSaveTokens(flow *oauthPendingFlow, c
 		return 0, fmt.Errorf("custom OAuth configuration changed while authorization was in progress; reconnect using the current configuration")
 	}
 	return tokens.ExpiresAt, nil
+}
+
+func customOAuthErrorDetail(body io.Reader) string {
+	data, err := io.ReadAll(io.LimitReader(body, 64<<10))
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if json.Unmarshal(data, &payload) != nil {
+		return ""
+	}
+	for _, key := range []string{"error_description", "message", "error"} {
+		if value, ok := payload[key].(string); ok {
+			return sanitizeCustomOAuthErrorDetail(value)
+		}
+	}
+	switch detail := payload["detail"].(type) {
+	case string:
+		return sanitizeCustomOAuthErrorDetail(detail)
+	case []any:
+		messages := make([]string, 0, len(detail))
+		for _, item := range detail {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			if message, ok := entry["msg"].(string); ok {
+				messages = append(messages, message)
+			}
+		}
+		return sanitizeCustomOAuthErrorDetail(strings.Join(messages, "; "))
+	}
+	return ""
+}
+
+func sanitizeCustomOAuthErrorDetail(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	const maxLength = 512
+	if len(value) > maxLength {
+		value = value[:maxLength] + "…"
+	}
+	return value
+}
+
+func publicOAuthExchangeError(err error) string {
+	if err == nil {
+		return "Could not complete OAuth exchange."
+	}
+	message := err.Error()
+	if strings.HasPrefix(message, "custom OAuth token exchange returned ") {
+		return message
+	}
+	return "Could not complete OAuth exchange."
 }
 
 func (h *Handler) ensureCustomOAuthFlowCurrent(ctx context.Context, flow *oauthPendingFlow) error {
@@ -870,6 +945,37 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeCustomOAuthLocalCallback(cfg llmcustomauth.Config) (string, string, error) {
+	host := strings.ToLower(strings.TrimSpace(cfg.LocalCallbackHost))
+	if host == "" {
+		host = "localhost"
+	}
+	if host != "localhost" && host != "127.0.0.1" {
+		return "", "", fmt.Errorf("local callback host must be localhost or 127.0.0.1")
+	}
+
+	path := strings.TrimSpace(cfg.LocalCallbackPath)
+	if path == "" {
+		path = "/callback"
+	}
+	parsed, err := url.Parse(path)
+	if err != nil || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") ||
+		parsed.IsAbs() || parsed.Host != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", "", fmt.Errorf("local callback path must be an absolute path without a query or fragment")
+	}
+	if path == "/" {
+		return "", "", fmt.Errorf("local callback path must not be the server root")
+	}
+	for _, char := range path {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || strings.ContainsRune("/-._~", char) {
+			continue
+		}
+		return "", "", fmt.Errorf("local callback path contains unsupported characters")
+	}
+	return host, path, nil
 }
 
 func resolveOAuthRedirectMode() string {
