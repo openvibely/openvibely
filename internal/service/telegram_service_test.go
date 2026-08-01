@@ -409,6 +409,109 @@ func TestTelegramServiceGetUpdatesConflictDoesNotUseLibraryRetryLoop(t *testing.
 	assert.True(t, svc.IsRunning())
 }
 
+func TestTelegramPollingBatchStopsAtFirstFailedHandoff(t *testing.T) {
+	offset := 0
+	updates := []tgbotapi.Update{{UpdateID: 100}, {UpdateID: 101}, {UpdateID: 102}}
+	attempts := make([]int, 0, len(updates))
+
+	completed := processTelegramUpdateBatch(context.Background(), &offset, updates, func(_ context.Context, update tgbotapi.Update) bool {
+		attempts = append(attempts, update.UpdateID)
+		return update.UpdateID != 101
+	})
+
+	assert.False(t, completed)
+	assert.Equal(t, 101, offset, "offset must acknowledge only the contiguous successful prefix")
+	assert.Equal(t, []int{100, 101}, attempts, "later updates must not be handled past an earlier failure")
+}
+
+func TestTelegramPollingBatchRetryDoesNotDuplicateSuccessfulPrefix(t *testing.T) {
+	offset := 0
+	updates := []tgbotapi.Update{{UpdateID: 100}, {UpdateID: 101}, {UpdateID: 102}}
+	attempts := map[int]int{}
+	handler := func(_ context.Context, update tgbotapi.Update) bool {
+		attempts[update.UpdateID]++
+		return update.UpdateID != 101 || attempts[update.UpdateID] > 1
+	}
+
+	assert.False(t, processTelegramUpdateBatch(context.Background(), &offset, updates, handler))
+	assert.Equal(t, 101, offset)
+	assert.True(t, processTelegramUpdateBatch(context.Background(), &offset, updates, handler))
+	assert.Equal(t, 103, offset)
+	assert.Equal(t, map[int]int{100: 1, 101: 2, 102: 1}, attempts)
+}
+
+func TestTelegramChatHandoffDoesNotWaitForModelCompletion(t *testing.T) {
+	svc, projectRepo, _ := newTestTelegramService(t)
+	project := &models.Project{Name: "Telegram durable handoff", IsDefault: true}
+	require.NoError(t, projectRepo.Create(context.Background(), project))
+	svc.userProjects[7] = project.ID
+	svc.sendMessageFunc = func(int64, string) {}
+	runnerStarted := make(chan struct{})
+	releaseRunner := make(chan struct{})
+	svc.channelChatRunner = func(context.Context, ChannelChatRunRequest) {
+		close(runnerStarted)
+		<-releaseRunner
+	}
+	t.Cleanup(func() { close(releaseRunner) })
+	message := &tgbotapi.Message{From: &tgbotapi.User{ID: 7}, Chat: &tgbotapi.Chat{ID: 8}, Text: "persist me"}
+
+	result := make(chan bool, 1)
+	go func() { result <- svc.handleChatMessageUntilDurable(context.Background(), message) }()
+	select {
+	case success := <-result:
+		assert.True(t, success)
+	case <-time.After(time.Second):
+		t.Fatal("durable handoff waited for model completion")
+	}
+	select {
+	case <-runnerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("model runner did not start after durable handoff")
+	}
+}
+
+func TestTelegramChatHandoffReportsTaskPersistenceFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Telegram task failure", IsDefault: true}
+	require.NoError(t, projectRepo.Create(context.Background(), project))
+
+	svc := &TelegramService{
+		projectRepo:     projectRepo,
+		llmConfigRepo:   repository.NewLLMConfigRepo(db),
+		taskRepo:        repository.NewTaskRepo(closedTestDB(t), nil),
+		execRepo:        repository.NewExecutionRepo(db),
+		threadInputRepo: repository.NewThreadInputRepo(db),
+		userProjects:    map[int64]string{7: project.ID},
+		sendMessageFunc: func(int64, string) {},
+	}
+	message := &tgbotapi.Message{From: &tgbotapi.User{ID: 7}, Chat: &tgbotapi.Chat{ID: 8}, Text: "persist me"}
+
+	assert.False(t, svc.handleChatMessageUntilDurable(context.Background(), message))
+}
+
+func TestTelegramChatHandoffReportsExecutionPersistenceFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Telegram execution failure", IsDefault: true}
+	require.NoError(t, projectRepo.Create(context.Background(), project))
+	_, err := db.Exec(`CREATE TRIGGER fail_telegram_execution BEFORE INSERT ON executions BEGIN SELECT RAISE(FAIL, 'injected execution failure'); END`)
+	require.NoError(t, err)
+
+	svc := &TelegramService{
+		projectRepo:     projectRepo,
+		llmConfigRepo:   repository.NewLLMConfigRepo(db),
+		taskRepo:        repository.NewTaskRepo(db, nil),
+		execRepo:        repository.NewExecutionRepo(db),
+		threadInputRepo: repository.NewThreadInputRepo(db),
+		userProjects:    map[int64]string{7: project.ID},
+		sendMessageFunc: func(int64, string) {},
+	}
+	message := &tgbotapi.Message{From: &tgbotapi.User{ID: 7}, Chat: &tgbotapi.Chat{ID: 8}, Text: "persist me"}
+
+	assert.False(t, svc.handleChatMessageUntilDurable(context.Background(), message))
+}
+
 func TestTelegramServiceConcurrentUpdateTokenIsSerialized(t *testing.T) {
 	var globalActiveUpdates int32
 	var globalMaxActiveUpdates int32
