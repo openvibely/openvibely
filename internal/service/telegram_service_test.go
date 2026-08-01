@@ -1883,6 +1883,101 @@ func TestTelegramService_BuildTelegramTaskChatContext(t *testing.T) {
 	assert.Contains(t, ctx, "starting work")
 }
 
+type telegramAuthorizationStoreStub struct {
+	isAuthorized         func(context.Context, string, int64, string) (bool, error)
+	isAuthorizedAnywhere func(context.Context, int64, string) (bool, error)
+}
+
+func (s telegramAuthorizationStoreStub) IsAuthorized(ctx context.Context, projectID string, userID int64, username string) (bool, error) {
+	return s.isAuthorized(ctx, projectID, userID, username)
+}
+
+func (s telegramAuthorizationStoreStub) IsAuthorizedAnywhere(ctx context.Context, userID int64, username string) (bool, error) {
+	return s.isAuthorizedAnywhere(ctx, userID, username)
+}
+
+func (telegramAuthorizationStoreStub) BackfillUserID(context.Context, string, string, int64) error {
+	return nil
+}
+
+func TestTelegramService_CheckAuthorizationRepositoryErrorsDeny(t *testing.T) {
+	lookupErr := fmt.Errorf("authorization storage unavailable")
+
+	tests := []struct {
+		name      string
+		projectID string
+		store     telegramAuthorizationStoreStub
+	}{
+		{
+			name:      "project-specific lookup",
+			projectID: "project-1",
+			store: telegramAuthorizationStoreStub{
+				isAuthorized: func(context.Context, string, int64, string) (bool, error) {
+					return false, lookupErr
+				},
+			},
+		},
+		{
+			name:      "no-project global lookup",
+			projectID: "",
+			store: telegramAuthorizationStoreStub{
+				isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
+					return false, lookupErr
+				},
+			},
+		},
+		{
+			name:      "cross-project fallback lookup",
+			projectID: "project-2",
+			store: telegramAuthorizationStoreStub{
+				isAuthorized: func(context.Context, string, int64, string) (bool, error) {
+					return false, nil
+				},
+				isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
+					return false, lookupErr
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &TelegramService{telegramAuthRepo: tt.store}
+			assert.False(t, svc.checkAuthorization(999, "unknown", tt.projectID))
+		})
+	}
+}
+
+func TestTelegramService_HandleUpdateAuthorizationStorageFailureStopsCommandProcessing(t *testing.T) {
+	const (
+		userID    = int64(999)
+		chatID    = int64(1234)
+		projectID = "project-1"
+	)
+	var sent []string
+	svc := &TelegramService{
+		telegramAuthRepo: telegramAuthorizationStoreStub{
+			isAuthorized: func(context.Context, string, int64, string) (bool, error) {
+				return false, fmt.Errorf("database closed")
+			},
+		},
+		userProjects: map[int64]string{userID: projectID},
+		sendMessageFunc: func(_ int64, text string) {
+			sent = append(sent, text)
+		},
+	}
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		Text:     "/start",
+		From:     &tgbotapi.User{ID: userID, UserName: "unknown"},
+		Chat:     &tgbotapi.Chat{ID: chatID},
+		Entities: []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: 6}},
+	}}
+
+	svc.handleTelegramUpdate(context.Background(), update)
+
+	require.Equal(t, []string{"You are not authorized to use this bot. Contact the project owner to get access."}, sent)
+}
+
 func TestTelegramService_CheckAuthorization(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)
