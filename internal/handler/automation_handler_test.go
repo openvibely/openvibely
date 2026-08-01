@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -1512,7 +1513,9 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 			require.NotEmpty(t, params.AutomationContext.Bindings)
 			preparedCtx := service.WithAutomationContext(ctx, *params.AutomationContext)
 			preparedCtx = service.WithAutomationExecution(preparedCtx, task.ID, params.ExecID)
-			runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+			hardened := tc.handler.llmSvc.AutomationGitHubRuntimeTools(preparedCtx, *params.Task, defs)
+			generic := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+			runtime := llmcontracts.CompositeRuntimeTools(hardened, generic)
 			_, handled, isError, runtimeErr := runtime.Executor(preparedCtx, "github_create_issue", json.RawMessage(`{"title":"Safe follow-up issue","assignees":["bot"]}`))
 			require.True(t, handled)
 			require.True(t, isError)
@@ -1522,7 +1525,9 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 	require.Zero(t, createCalls, "every real task-thread entry shape must use the Automation human gate")
 
 	params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, ExecID: execution.ID, IsTaskFollowup: true, Task: &task}
-	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	hardened := tc.handler.llmSvc.AutomationGitHubRuntimeTools(causalCtx, task, defs)
+	generic := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	runtime := llmcontracts.CompositeRuntimeTools(hardened, generic)
 
 	_, handled, isError, err := runtime.Executor(causalCtx, "github_create_issue", json.RawMessage(`{"title":"Safe follow-up issue","assignees":["bot"]}`))
 	require.True(t, handled)
@@ -1672,24 +1677,26 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 	staleQueuedCtx := service.WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{oldBinding}})
 	staleQueuedCtx = service.WithAutomationExecution(staleQueuedCtx, originalTask.ID, params.ExecID)
 	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, false)
-	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 	for _, runtimeContext := range []struct {
 		name string
 		ctx  context.Context
 	}{{name: "reconstructed origin", ctx: preparedCtx}, {name: "already prepared stale queued binding", ctx: staleQueuedCtx}} {
-		for _, call := range []struct {
-			name  string
-			input string
-		}{
-			{name: "github_create_issue", input: `{"title":"Must remain blocked"}`},
-			{name: "github_open_pull_request", input: fmt.Sprintf(`{"task_id":%q,"issue_number":1}`, originalTask.ID)},
-			{name: "github_replace_pull_request_branch", input: fmt.Sprintf(`{"task_id":%q,"confirm_history_rewrite":true,"expected_head_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, originalTask.ID)},
-		} {
-			_, handled, isError, callErr := runtime.Executor(runtimeContext.ctx, call.name, json.RawMessage(call.input))
-			require.True(t, handled, runtimeContext.name+": "+call.name)
-			require.True(t, isError, runtimeContext.name+": "+call.name)
-			require.ErrorContains(t, callErr, "not authorized", runtimeContext.name+": "+call.name)
+		hardened := tc.handler.llmSvc.AutomationGitHubRuntimeTools(runtimeContext.ctx, *params.Task, defs)
+		require.NotNil(t, hardened)
+		generic := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+		runtime := llmcontracts.CompositeRuntimeTools(hardened, generic)
+		writeCount := 0
+		for _, def := range hardened.Definitions {
+			if def.Access != llmcontracts.RuntimeToolAccessWrite {
+				continue
+			}
+			writeCount++
+			_, handled, isError, callErr := runtime.Executor(runtimeContext.ctx, def.Name, json.RawMessage(`{}`))
+			require.True(t, handled, runtimeContext.name+": "+def.Name)
+			require.True(t, isError, runtimeContext.name+": "+def.Name)
+			require.ErrorContains(t, callErr, "not authorized", runtimeContext.name+": "+def.Name)
 		}
+		require.Greater(t, writeCount, 0, "fixture must cover every exposed hardened GitHub write")
 	}
 	require.Zero(t, issueCalls)
 	require.Zero(t, pullRequestCalls)
