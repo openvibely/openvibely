@@ -183,6 +183,25 @@ func (h *Handler) prepareAutomationTaskFollowup(ctx context.Context, params *str
 	return nil
 }
 
+func (h *Handler) automationGitHubRuntimeTools(ctx context.Context, task models.Task, defs []llmcontracts.RuntimeToolDefinition) *llmcontracts.RuntimeTools {
+	if h.githubRuntimeHook != nil {
+		h.githubRuntimeHook()
+	}
+	return h.llmSvc.AutomationGitHubRuntimeTools(ctx, task, defs)
+}
+
+// buildStreamingResponseActionRuntime assembles the request-scoped runtime used
+// by processStreamingResponse. The hardened Automation GitHub runtime is built
+// once here and remains first in the dispatch chain for the whole model turn.
+func (h *Handler) buildStreamingResponseActionRuntime(ctx context.Context, params streamingResponseParams, collector *chatActionSummaryCollector, defs []llmcontracts.RuntimeToolDefinition, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
+	var hardenedAutomationGitHubRT *llmcontracts.RuntimeTools
+	if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
+		hardenedAutomationGitHubRT = h.automationGitHubRuntimeTools(ctx, *params.Task, defs)
+	}
+	genericRT := h.buildChatActionToolRuntimeFromDefs(params, collector, defs, mode, surface)
+	return llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, genericRT)
+}
+
 func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	// Memory recall is injected for task-thread followups through the full task
 	// lifecycle path below. Interactive chat uses a recall-only lifecycle path so
@@ -406,22 +425,17 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 				defs = filterAssignedAgentRuntimeToolDefs(defs, agentDef)
 			}
 		}
-		var hardenedAutomationGitHubRT *llmcontracts.RuntimeTools
-		if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
-			hardenedAutomationGitHubRT = h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs)
-		}
 		if params.RuntimeTools != nil && len(params.RuntimeTools.Definitions) > 0 {
 			// Automation-specific GitHub handlers take priority over channel and
 			// generic handlers. Channel-specific handlers retain priority for all
 			// other tools and generic handlers remain the final fallback.
-			genericRT := h.buildChatActionToolRuntimeFromDefs(params, actionCollector, defs, chatMode, surface)
-			merged := llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, genericRT)
+			merged := h.buildStreamingResponseActionRuntime(ctx, params, actionCollector, defs, chatMode, surface)
 			ctx = llmcontracts.WithRuntimeTools(ctx, merged)
 			applog.Infof("[handler] processStreamingResponse exec=%s injected channel+generic runtime action tools surface=%s followup=%v channel_defs=%d generic_defs=%d",
 				params.ExecID, surface, params.IsTaskFollowup, len(params.RuntimeTools.Definitions), len(defs))
 		} else if len(defs) > 0 {
-			rt := h.buildChatActionToolRuntimeFromDefs(params, actionCollector, defs, chatMode, surface)
-			ctx = llmcontracts.WithRuntimeTools(ctx, llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), rt))
+			rt := h.buildStreamingResponseActionRuntime(ctx, params, actionCollector, defs, chatMode, surface)
+			ctx = llmcontracts.WithRuntimeTools(ctx, rt)
 			applog.Infof("[handler] processStreamingResponse exec=%s injected %d runtime action tools mode=%s surface=%s followup=%v",
 				params.ExecID, len(defs), chatMode, surface, params.IsTaskFollowup)
 		}

@@ -6858,114 +6858,160 @@ func TestCancelThreadInputBroadcastsChatCancellation(t *testing.T) {
 	}
 }
 
-func newHardenedRuntimeDispatchFixture(constructions *int) *llmcontracts.RuntimeTools {
-	(*constructions)++
-	handlers := make(map[string]func() string, 12)
-	for i := 0; i < 12; i++ {
-		name := fmt.Sprintf("github_fixture_%d", i)
-		output := name
-		handlers[name] = func() string { return output }
-	}
-	return &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "github_write"}},
-		Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
-			handler, ok := handlers[name]
-			if !ok {
-				return "", false, false, nil
+func TestProcessStreamingResponseConstructsRealHardenedGitHubRuntimeOnceFor50ToolCalls(t *testing.T) {
+	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	project := createProject(t, h, "Real hardened runtime construction project")
+
+	providerCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		providerCalls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if providerCalls == 1 {
+			toolCalls := make([]map[string]any, 50)
+			for i := range toolCalls {
+				toolCalls[i] = map[string]any{
+					"index": i,
+					"id":    fmt.Sprintf("call_%d", i),
+					"type":  "function",
+					"function": map[string]any{
+						"name":      "list_capabilities",
+						"arguments": `{}`,
+					},
+				}
 			}
-			return handler(), true, false, nil
-		},
-	}
+			payload, err := json.Marshal(map[string]any{"choices": []any{map[string]any{
+				"delta": map[string]any{"tool_calls": toolCalls}, "finish_reason": "tool_calls",
+			}}})
+			require.NoError(t, err)
+			_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", payload)
+			return
+		}
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"complete\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	agent := models.LLMConfig{Name: "Runtime fixture model", Provider: models.ProviderOpenAICompatible, Model: "fixture/model", AuthMethod: models.AuthMethodAPIKey, APIKey: "test-key", BaseURL: server.URL + "/v1/", PresetSlug: "vllm", Transport: "chat_completions"}
+	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
+	task := createTask(t, h, project.ID, "Runtime fixture task", func(task *models.Task) {
+		task.Category = models.CategoryActive
+		task.Status = models.StatusRunning
+		task.AgentID = &agent.ID
+	})
+	execution := createExec(t, h, task.ID, agent.ID, func(execution *models.Execution) {
+		execution.Status = models.ExecRunning
+		execution.PromptSent = "Run fifty tools"
+		execution.IsFollowup = true
+	})
+
+	automationRepo := repository.NewAutomationRepo(db)
+	h.llmSvc.SetAutomationRepo(automationRepo)
+	h.llmSvc.SetGitHubIssueRuntimeProvider(&fakeGitHubService{})
+	constructions := 0
+	h.githubRuntimeHook = func() { constructions++ }
+	automationContext := models.AutomationContext{ProjectID: project.ID, OriginTask: true}
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID: execution.ID, TaskID: task.ID, Message: execution.PromptSent, Agent: agent,
+		ProjectID: project.ID, IsTaskFollowup: true, Task: task, AutomationContext: &automationContext,
+	})
+
+	require.Equal(t, 2, providerCalls, "the provider should execute one 50-tool round and one final response round")
+	require.Equal(t, 1, constructions, "processStreamingResponse must construct the real hardened runtime once for all 50 tool calls")
 }
 
-func TestTaskFollowupRuntimeReusesHardenedGitHubRuntimeFor50Dispatches(t *testing.T) {
+func newProductionHardenedRuntimeDispatchFixture() (*Handler, context.Context, streamingResponseParams, []llmcontracts.RuntimeToolDefinition) {
+	llmSvc := service.NewLLMService(nil, nil, nil, repository.NewProjectRepo(nil), nil, nil)
+	llmSvc.SetAutomationRepo(repository.NewAutomationRepo(nil))
+	llmSvc.SetGitHubIssueRuntimeProvider(&fakeGitHubService{})
+	h := &Handler{llmSvc: llmSvc}
+	task := models.Task{ID: "runtime-fixture-task", ProjectID: "runtime-fixture-project", Category: models.CategoryScheduled}
+	ctx := service.WithAutomationContext(context.Background(), models.AutomationContext{ProjectID: task.ProjectID, OriginTask: true})
+	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, true)
+	params := streamingResponseParams{
+		ProjectID:      task.ProjectID,
+		TaskID:         task.ID,
+		ExecID:         "runtime-fixture-execution",
+		IsTaskFollowup: true,
+		Task:           &task,
+	}
+	return h, ctx, params, defs
+}
+
+func TestTaskFollowupRuntimeReusesRealHardenedGitHubRuntimeFor50Dispatches(t *testing.T) {
+	h, ctx, params, defs := newProductionHardenedRuntimeDispatchFixture()
 	constructions := 0
-	hardened := newHardenedRuntimeDispatchFixture(&constructions)
+	h.githubRuntimeHook = func() { constructions++ }
 	channelCalls := 0
-	channel := &llmcontracts.RuntimeTools{Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
-		if name == "channel_tool" || name == "shared_non_github" {
+	params.RuntimeTools = &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "channel_tool"}},
+		Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+			if name != "channel_tool" {
+				return "", false, false, nil
+			}
 			channelCalls++
 			return "channel", true, false, nil
-		}
-		return "", false, false, nil
-	}}
-	genericCalls := 0
-	generic := &llmcontracts.RuntimeTools{Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
-		if name == "generic_tool" || name == "shared_non_github" {
-			genericCalls++
-			return "generic", true, false, nil
-		}
-		return "", false, false, nil
-	}}
-	runtime := llmcontracts.CompositeRuntimeTools(hardened, channel, generic)
+		},
+	}
+	hardened := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs)
+	require.NotNil(t, hardened, "fixture must construct the real hardened Automation GitHub runtime")
+	runtime := h.buildStreamingResponseActionRuntime(ctx, params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 
 	for i := 0; i < 50; i++ {
-		output, handled, isError, err := runtime.Executor(context.Background(), "generic_tool", nil)
+		output, handled, isError, err := runtime.Executor(ctx, "memory_view", nil)
 		require.NoError(t, err)
 		require.True(t, handled)
 		require.False(t, isError)
-		require.Equal(t, "generic", output)
+		require.Contains(t, output, "memory_view")
 	}
-	require.Equal(t, 1, constructions, "the hardened runtime must be constructed once per streaming response, not once per dispatch")
-	require.Equal(t, 50, genericCalls)
+	require.Equal(t, 1, constructions, "processStreamingResponse runtime assembly must construct the real hardened runtime once, not once per dispatch")
 
-	output, handled, isError, err := runtime.Executor(context.Background(), "github_fixture_0", nil)
+	_, handled, isError, err := runtime.Executor(ctx, "github_create_issue", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "not authorized")
+	require.Equal(t, 1, constructions, "GitHub dispatch must reuse the request-scoped hardened runtime")
+
+	output, handled, isError, err := runtime.Executor(ctx, "channel_tool", nil)
 	require.NoError(t, err)
 	require.True(t, handled)
 	require.False(t, isError)
-	require.Equal(t, "github_fixture_0", output, "hardened GitHub handlers must retain first priority")
+	require.Equal(t, "channel", output)
+	require.Equal(t, 1, channelCalls, "channel runtime must retain priority for its non-GitHub tool")
 
-	output, handled, isError, err = runtime.Executor(context.Background(), "shared_non_github", nil)
-	require.NoError(t, err)
-	require.True(t, handled)
-	require.False(t, isError)
-	require.Equal(t, "channel", output, "channel handlers must retain priority over generic handlers for non-GitHub tools")
-	require.Equal(t, 1, channelCalls)
-	require.Equal(t, 50, genericCalls)
-
-	output, handled, isError, err = runtime.Executor(context.Background(), "unknown_tool", nil)
+	output, handled, isError, err = runtime.Executor(ctx, "unknown_tool", nil)
 	require.NoError(t, err)
 	require.False(t, handled)
 	require.False(t, isError)
-	require.Empty(t, output, "unknown tools must continue to fall through")
+	require.Empty(t, output)
+	require.Equal(t, 1, constructions)
 }
 
 var taskFollowupDispatchBenchmarkOutput string
 
 func BenchmarkTaskFollowupHardenedGitHubRuntime50Dispatches(b *testing.B) {
-	generic := &llmcontracts.RuntimeTools{Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
-		if name == "generic_tool" {
-			return "generic", true, false, nil
-		}
-		return "", false, false, nil
-	}}
-	ctx := context.Background()
+	h, ctx, params, defs := newProductionHardenedRuntimeDispatchFixture()
 
 	b.Run("legacy_reconstruct", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			constructions := 0
-			initial := newHardenedRuntimeDispatchFixture(&constructions)
-			legacyGeneric := &llmcontracts.RuntimeTools{Executor: func(callCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
-				hardened := newHardenedRuntimeDispatchFixture(&constructions)
-				if output, handled, isError, err := hardened.Executor(callCtx, name, input); handled {
-					return output, true, isError, err
-				}
-				return generic.Executor(callCtx, name, input)
-			}}
-			runtime := llmcontracts.CompositeRuntimeTools(initial, legacyGeneric)
+			initial := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs)
 			for call := 0; call < 50; call++ {
-				output, _, _, _ := runtime.Executor(ctx, "generic_tool", nil)
+				output, handled, _, _ := initial.Executor(ctx, "memory_view", nil)
+				if !handled {
+					fallback := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs)
+					output, _, _, _ = fallback.Executor(ctx, "memory_view", nil)
+				}
 				taskFollowupDispatchBenchmarkOutput = output
 			}
 		}
 	})
 	b.Run("reused", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			constructions := 0
-			hardened := newHardenedRuntimeDispatchFixture(&constructions)
-			runtime := llmcontracts.CompositeRuntimeTools(hardened, generic)
+			runtime := h.llmSvc.AutomationGitHubRuntimeTools(ctx, *params.Task, defs)
 			for call := 0; call < 50; call++ {
-				output, _, _, _ := runtime.Executor(ctx, "generic_tool", nil)
+				output, _, _, _ := runtime.Executor(ctx, "memory_view", nil)
 				taskFollowupDispatchBenchmarkOutput = output
 			}
 		}

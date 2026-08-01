@@ -99,6 +99,7 @@ type Handler struct {
 	desktopMode                bool
 	pendingRemovalHook         func(string)
 	pendingPublicationHook     func(string)
+	githubRuntimeHook          func()
 
 	loginFailuresMu   sync.Mutex
 	loginFailureTimes []time.Time
