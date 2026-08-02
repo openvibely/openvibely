@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	htmlstd "html"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -24,16 +25,17 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestHandler(t *testing.T) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
+func setupTestHandler(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
 	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
 	return h, e, llmConfigRepo
 }
 
-func setupTestHandlerWithDB(t *testing.T) (*Handler, *echo.Echo, *repository.LLMConfigRepo, *sql.DB) {
+func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfigRepo, *sql.DB) {
 	t.Helper()
 	oldUploadsDir := uploadsDir
 	uploadsDir = t.TempDir()
@@ -1002,7 +1004,7 @@ func TestHandler_ListModels_MixtureUI(t *testing.T) {
 		`Mixture of Models / default`,
 		`Aggregator: Aggregator`,
 		`References: 1`,
-		`data-model-mixture-config-json=`,
+		`/edit-details`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected models UI to contain %q", want)
@@ -1084,7 +1086,7 @@ func TestHandler_ListModels_IncludesToastModalStackingHooks(t *testing.T) {
 	}
 }
 
-func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
+func TestHandler_ListModels_LazyLoadsAPIKeyForEdit(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	cfg := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
 		a.Name = "Saved Key Agent"
@@ -1093,58 +1095,103 @@ func TestHandler_ListModels_APIKeyUsesSecretInputPattern(t *testing.T) {
 		a.APIKey = "test-secret-api-key"
 		a.IsDefault = false
 	})
-	req := httptest.NewRequest(http.MethodGet, "/models", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
 
-	assertCode(t, rec, http.StatusOK)
-	body := rec.Body.String()
-
+	page := htmxGet(e, "/models")
+	assertCode(t, page, http.StatusOK)
+	body := page.Body.String()
 	for _, want := range []string{
 		`id="model_api_key"`,
 		`type="password"`,
 		`id="model_api_key_submit" name="api_key" value=""`,
-		`autocomplete="off"`,
-		`class="input input-bordered w-full pr-10 font-mono text-xs"`,
 		`onclick="togglePasswordVisibility('model_api_key', this)"`,
-		`aria-label="Toggle API key visibility"`,
-		`aria-pressed="false"`,
-		`id="model_api_key_help"`,
-		`data-model-api-key="test-secret-api-key"`,
-		`data-model-has-api-key="true"`,
-		`var apiKey = button.dataset.modelApiKey || '';`,
-		`var hasAPIKey = apiKey !== '';`,
-		`form.dataset.originalApiKey = apiKey;`,
-		`document.getElementById('model_api_key').value = apiKey;`,
-		`syncModelAPIKeySubmitValue();`,
+		`function editModelFromData(button)`,
+		`/edit-details`,
+		`generation !== window._modelEditRequestGeneration`,
+		`window._modelEditRequestedID !== id`,
+		`details.id !== id`,
+		`function populateModelEditForm(button)`,
 		`setModelAPIKeyEditHelp(hasAPIKey);`,
-		`Saved API key is hidden by default. Click the eye to reveal or edit it.`,
-		`No API key is currently saved for this model. Type a key to save one, or leave empty to keep it blank.`,
-		`input.placeholder = hasAPIKey ? 'Saved API key' : 'Type an API key to save for this model'`,
-		`function syncModelAPIKeySubmitValue()`,
-		`if (form.dataset.mode === 'edit' && input.value === original)`,
-		`submit.value = '';`,
-		`submit.value = input.value;`,
-		`button.setAttribute('aria-pressed', willReveal ? 'true' : 'false')`,
-		`function resetSecretInputVisibility(inputId)`,
 		`resetSecretInputVisibility('model_api_key')`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("expected models API key secret input markup/script to contain %q", want)
+			t.Fatalf("expected lazy model edit markup/script to contain %q", want)
 		}
 	}
-	if strings.Contains(body, `id="model_api_key" name="api_key" class="input input-bordered"`) {
-		t.Fatal("expected models API key field to stop rendering as a plain text-style input")
+	if strings.Contains(body, cfg.APIKey) || strings.Contains(body, `data-model-api-key=`) {
+		t.Fatal("initial Models response exposed the saved API key")
 	}
-	if strings.Contains(body, `onclick="togglePasswordVisibility('model_api_key', this)" tabindex="-1"`) {
-		t.Fatal("expected API key reveal toggle to remain keyboard reachable")
+
+	details := htmxGet(e, "/models/"+cfg.ID+"/edit-details")
+	assertCode(t, details, http.StatusOK)
+	var payload modelEditDetails
+	if err := json.Unmarshal(details.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(body, `data-model-id="`+cfg.ID+`"`) || !strings.Contains(body, `data-model-api-key="`+cfg.APIKey+`"`) {
-		t.Fatal("expected model cards to expose the saved API key for masked edit-dialog reveal parity with channel secrets")
+	if payload.ID != cfg.ID || payload.APIKey != cfg.APIKey || payload.Name != cfg.Name || payload.AuthMethod != cfg.AuthMethod {
+		t.Fatalf("edit details lost provider fields: %#v", payload)
 	}
-	if strings.Contains(body, `value="`+cfg.APIKey+`"`) {
-		t.Fatal("expected saved model API key to be loaded into the edit dialog by script, not prefilled in the create/edit input on initial render")
+	if got := details.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("edit details Cache-Control = %q", got)
 	}
+}
+
+func TestHandler_GetModelEditDetails_PreservesProviderSpecificFields(t *testing.T) {
+	_, e, repo := setupTestHandler(t)
+	cfg := &models.LLMConfig{
+		Name: "Custom OAuth", Provider: models.ProviderOpenAICompatible, Model: "custom-model",
+		ReasoningEffort: "high", Temperature: 0.25, AuthMethod: models.AuthMethodOAuth,
+		APIKey: "api-secret", MaxWorkers: 7, WorkerTimeout: 45,
+		OAuthClientID: "client-id", OAuthClientSecret: "client-secret",
+		OAuthAuthorizeURL: "https://example.com/authorize", OAuthTokenURL: "https://example.com/token",
+		OAuthScopes: "models profile", BaseURL: "https://example.com/v1", Transport: "chat_completions",
+		PresetSlug: "custom", ModelsURL: "https://example.com/models", AuthHeaderName: "X-Key",
+		AuthHeaderValuePrefix: "Token ", ExtraHeadersJSON: `{"X-Extra":"value"}`,
+		ExtraBodyJSON: `{"routing":{"tier":"fast"}}`, CustomAuthConfigJSON: `{"pkce":true}`,
+		MixtureConfigJSON: `{"unused":true}`, AutoStartTasks: true,
+	}
+	if err := repo.Create(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := htmxGet(e, "/models/"+cfg.ID+"/edit-details")
+	assertCode(t, rec, http.StatusOK)
+	var got modelEditDetails
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != cfg.ID || got.Provider != cfg.Provider || got.Model != cfg.Model ||
+		got.ReasoningEffort != cfg.ReasoningEffort || got.Temperature != cfg.Temperature ||
+		got.APIKey != cfg.APIKey || got.AuthMethod != cfg.AuthMethod || got.MaxWorkers != cfg.MaxWorkers ||
+		got.WorkerTimeout != cfg.WorkerTimeout || got.OAuthClientID != cfg.OAuthClientID ||
+		got.OAuthClientSecret != cfg.OAuthClientSecret || got.OAuthAuthorizeURL != cfg.OAuthAuthorizeURL ||
+		got.OAuthTokenURL != cfg.OAuthTokenURL || got.OAuthScopes != cfg.OAuthScopes ||
+		got.BaseURL != cfg.BaseURL || got.Transport != cfg.Transport || got.PresetSlug != cfg.PresetSlug ||
+		got.ModelsURL != cfg.ModelsURL || got.AuthHeaderName != cfg.AuthHeaderName ||
+		got.AuthHeaderValuePrefix != cfg.AuthHeaderValuePrefix || got.ExtraHeadersJSON != cfg.ExtraHeadersJSON ||
+		got.ExtraBodyJSON != cfg.ExtraBodyJSON || got.CustomAuthConfigJSON != cfg.CustomAuthConfigJSON ||
+		got.AutoStartTasks != cfg.AutoStartTasks {
+		t.Fatalf("edit details differ from stored provider fields:\n got: %#v\nwant: %#v", got, cfg)
+	}
+
+	if got.MixtureConfigJSON != "" {
+		t.Fatalf("non-mixture edit details exposed mixture config: %q", got.MixtureConfigJSON)
+	}
+	builtIn := &models.LLMConfig{
+		Name: "Built-in OAuth", Provider: models.ProviderOpenAI, Model: "gpt-5.4",
+		AuthMethod: models.AuthMethodOAuth, OAuthClientSecret: "must-not-return",
+		CustomAuthConfigJSON: `{"signing_secret":"must-not-return"}`,
+	}
+	if err := repo.Create(context.Background(), builtIn); err != nil {
+		t.Fatal(err)
+	}
+	builtInRec := htmxGet(e, "/models/"+builtIn.ID+"/edit-details")
+	assertCode(t, builtInRec, http.StatusOK)
+	if strings.Contains(builtInRec.Body.String(), "must-not-return") {
+		t.Fatal("built-in provider secret leaked through edit details")
+	}
+
+	notFound := htmxGet(e, "/models/missing/edit-details")
+	assertCode(t, notFound, http.StatusNotFound)
 }
 
 func TestHandler_SetDefaultModel(t *testing.T) {
@@ -3744,16 +3791,16 @@ func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testi
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Swarm Parent Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        3,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      3,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 
@@ -3791,25 +3838,25 @@ func TestHandler_SwarmFollowupChildCreatesTaskThreadExecution(t *testing.T) {
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "API Swarm Child Followup Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3854,25 +3901,25 @@ func TestHandler_SwarmFollowupChildQueuesWhenActive(t *testing.T) {
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "API Swarm Child Queue Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3910,25 +3957,25 @@ func TestHandler_SubmitReview_SwarmChildQueuesBehindActiveExecutionWithoutRoutin
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Review Swarm Child Queue Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -3980,25 +4027,25 @@ func TestHandler_SubmitReview_SwarmChildDirectStartAppliesRouting(t *testing.T) 
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Review Swarm Child Direct Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4042,25 +4089,25 @@ func TestHandler_TaskThreadSend_SwarmChildQueuedFollowupDefersRoutingUntilPromot
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Swarm Child Queue Timing Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4108,25 +4155,25 @@ func TestHandler_StartQueuedTaskThreadInput_AppliesSwarmChildFollowupOnPromotion
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Swarm Child Promotion Timing Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4183,16 +4230,16 @@ func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *tes
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Thread Swarm Child Completion Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        3,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      3,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
@@ -4202,8 +4249,8 @@ func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *tes
 		Workers: []service.PlannerWorker{
 			{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true},
 		},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, output))
 	children, err := h.taskRepo.ListSwarmChildren(ctx, parent.ID)
@@ -4245,25 +4292,25 @@ func TestHandler_CancelTask_NotifiesSwarmChildCancellation(t *testing.T) {
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Swarm Child Cancel Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4290,25 +4337,25 @@ func TestHandler_UpdateTask_NotifiesPendingSwarmChildCancellation(t *testing.T) 
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Swarm Child Edit Cancel Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent edit",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent edit",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4344,25 +4391,25 @@ func TestHandler_UpdateTaskCategory_NotifiesSwarmChildCancellation(t *testing.T)
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Swarm Child Drop Cancel Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4398,25 +4445,25 @@ func TestHandler_CompleteWithCancellation_NotifiesSwarmChildCancellation(t *test
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Swarm Child Streaming Cancel Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
@@ -4821,16 +4868,16 @@ func TestHandler_RunTask_StartsPlannerForDeferredSwarmParent(t *testing.T) {
 	project := createProject(t, h, "Deferred Swarm Run Project")
 	startImmediately := false
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Deferred swarm",
-		Prompt:            "Split this deferred swarm into workers",
-		Category:          models.CategoryBacklog,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        2,
-		ReviewerEnabled:   true,
-		MergerEnabled:     true,
-		StartImmediately:  &startImmediately,
+		ProjectID:        project.ID,
+		Title:            "Deferred swarm",
+		Prompt:           "Split this deferred swarm into workers",
+		Category:         models.CategoryBacklog,
+		Priority:         2,
+		AgentID:          &agent.ID,
+		MaxWorkers:       2,
+		ReviewerEnabled:  true,
+		MergerEnabled:    true,
+		StartImmediately: &startImmediately,
 	})
 	require.NoError(t, err)
 
@@ -6092,25 +6139,25 @@ func TestHandler_RerunSwarmReviewerRejectsActiveRoleExecution(t *testing.T) {
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "API Swarm Rerun Active Project")
 	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:         project.ID,
-		Title:             "Swarm parent",
-		Prompt:            "Build the swarm result",
-		Category:          models.CategoryActive,
-		Priority:          2,
-		AgentID:           &agent.ID,
-		MaxWorkers:        1,
-		WorkerIsolation:   "worktree",
-		ReviewerEnabled:   true,
-		MergerEnabled: true,
+		ProjectID:       project.ID,
+		Title:           "Swarm parent",
+		Prompt:          "Build the swarm result",
+		Category:        models.CategoryActive,
+		Priority:        2,
+		AgentID:         &agent.ID,
+		MaxWorkers:      1,
+		WorkerIsolation: "worktree",
+		ReviewerEnabled: true,
+		MergerEnabled:   true,
 	})
 	require.NoError(t, err)
 	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.NotNil(t, planner)
 	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers:          []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", Required: true}},
-		ReviewerPrompt:   "Review the worker",
-		MergerPrompt: "Integrate the worker",
+		Workers:        []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", Required: true}},
+		ReviewerPrompt: "Review the worker",
+		MergerPrompt:   "Integrate the worker",
 	}))
 	reviewer, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleReviewer)
 	require.NoError(t, err)
@@ -6124,4 +6171,79 @@ func TestHandler_RerunSwarmReviewerRejectsActiveRoleExecution(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 	assert.Contains(t, rec.Body.String(), "already running")
+}
+
+func BenchmarkHandlerListModelsHTMXLargeEditConfig(b *testing.B) {
+	h, e, repo, db := setupTestHandlerWithDB(b)
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		b.Fatal(err)
+	}
+	extraBody := `{"padding":"` + strings.Repeat("x", 1024*1024-len(`{"padding":""}`)) + `"}`
+	for i := 0; i < 50; i++ {
+		_, err := db.Exec(`INSERT INTO agent_configs (
+			id, name, provider, model, api_key, temperature, is_default, auth_method,
+			base_url, transport, preset_slug, extra_body_json
+		) VALUES (?, ?, 'openai_compatible', 'custom-model', 'secret', 0.2, ?, 'api_key',
+			'https://example.com/v1', 'chat_completions', 'custom', ?)`,
+			fmt.Sprintf("large-%02d", i), fmt.Sprintf("Large Custom %02d", i), i == 0, extraBody)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.Run("baseline_full_projection", func(b *testing.B) {
+		b.ReportAllocs()
+		var responseBytes int64
+		for i := 0; i < b.N; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/models", nil)
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			ctx := e.NewContext(req, rec)
+			b.StartTimer()
+			agents, err := repo.List(req.Context())
+			if err == nil {
+				stats := make(map[string]int, len(agents))
+				for _, agent := range agents {
+					stats[agent.ID] = h.workerSvc.ModelRunning(agent.ID)
+				}
+				err = render(ctx, http.StatusOK, pages.ModelsContent(agents, stats, h.desktopMode))
+				if err == nil {
+					// Reproduce the historical eager card payload removed by this change.
+					for _, agent := range agents {
+						rec.Body.WriteString(`<div data-model-api-key="`)
+						rec.Body.WriteString(htmlstd.EscapeString(agent.APIKey))
+						rec.Body.WriteString(`" data-model-extra-headers-json="`)
+						rec.Body.WriteString(htmlstd.EscapeString(agent.ExtraHeadersJSON))
+						rec.Body.WriteString(`" data-model-extra-body-json="`)
+						rec.Body.WriteString(htmlstd.EscapeString(agent.ExtraBodyJSON))
+						rec.Body.WriteString(`"></div>`)
+					}
+				}
+			}
+			b.StopTimer()
+			if err != nil {
+				b.Fatal(err)
+			}
+			responseBytes += int64(rec.Body.Len())
+		}
+		b.ReportMetric(float64(responseBytes)/float64(b.N), "response_bytes")
+	})
+
+	b.Run("candidate_lazy_edit_details", func(b *testing.B) {
+		b.ReportAllocs()
+		var responseBytes int64
+		for i := 0; i < b.N; i++ {
+			req := httptest.NewRequest(http.MethodGet, "/models", nil)
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			b.StartTimer()
+			e.ServeHTTP(rec, req)
+			b.StopTimer()
+			if rec.Code != http.StatusOK {
+				b.Fatalf("status = %d", rec.Code)
+			}
+			responseBytes += int64(rec.Body.Len())
+		}
+		b.ReportMetric(float64(responseBytes)/float64(b.N), "response_bytes")
+	})
 }

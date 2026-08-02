@@ -76,6 +76,11 @@ type LLMConfig struct {
 	OAuthConfigRevision   int64  `json:"-"`
 	MixtureConfigJSON     string `json:"mixture_config_json,omitempty"`
 
+	// Bounded Models-page summary fields populated by the compact card query.
+	MixtureAggregatorID    string `json:"-"`
+	MixtureAggregatorLabel string `json:"-"`
+	MixtureReferenceCount  int    `json:"-"`
+
 	// Auto-start configuration
 	AutoStartTasks bool `json:"auto_start_tasks"` // When enabled, tasks created with this model start immediately
 }

@@ -37,7 +37,7 @@ func (h *Handler) ListModels(c echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	isHTMX := isHTMX(c)
 	// applog.Debugf("[handler] ListModels requested htmx=%v", isHTMX)
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
+	agents, err := h.llmConfigRepo.ListCards(c.Request().Context())
 	if err != nil {
 		applog.Infof("[handler] ListModels error: %v", err)
 		return err
@@ -59,6 +59,73 @@ func (h *Handler) ListModels(c echo.Context) error {
 	projects, _ := h.projectSvc.List(c.Request().Context())
 
 	return render(c, http.StatusOK, pages.Models(projects, currentProjectID, agents, modelWorkerStats, h.desktopMode))
+}
+
+type modelEditDetails struct {
+	ID                    string             `json:"id"`
+	Name                  string             `json:"name"`
+	Provider              models.LLMProvider `json:"provider"`
+	Model                 string             `json:"model"`
+	ReasoningEffort       string             `json:"reasoning_effort"`
+	Temperature           float64            `json:"temperature"`
+	IsDefault             bool               `json:"is_default"`
+	APIKey                string             `json:"api_key"`
+	AuthMethod            models.AuthMethod  `json:"auth_method"`
+	MaxWorkers            int                `json:"max_workers"`
+	WorkerTimeout         int                `json:"worker_timeout"`
+	OAuthClientID         string             `json:"oauth_client_id"`
+	OAuthClientSecret     string             `json:"oauth_client_secret"`
+	OAuthAuthorizeURL     string             `json:"oauth_authorize_url"`
+	OAuthTokenURL         string             `json:"oauth_token_url"`
+	OAuthScopes           string             `json:"oauth_scopes"`
+	OllamaBaseURL         string             `json:"ollama_base_url"`
+	BaseURL               string             `json:"base_url"`
+	Transport             string             `json:"transport"`
+	PresetSlug            string             `json:"preset_slug"`
+	ModelsURL             string             `json:"models_url"`
+	AuthHeaderName        string             `json:"auth_header_name"`
+	AuthHeaderValuePrefix string             `json:"auth_header_value_prefix"`
+	ExtraHeadersJSON      string             `json:"extra_headers_json"`
+	ExtraBodyJSON         string             `json:"extra_body_json"`
+	CustomAuthConfigJSON  string             `json:"custom_auth_config_json"`
+	MixtureConfigJSON     string             `json:"mixture_config_json"`
+	AutoStartTasks        bool               `json:"auto_start_tasks"`
+}
+
+func (h *Handler) GetModelEditDetails(c echo.Context) error {
+	c.Response().Header().Set("Cache-Control", "no-store")
+	config, err := h.llmConfigRepo.GetByID(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if config == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "model configuration not found")
+	}
+	details := modelEditDetails{
+		ID: config.ID, Name: config.Name, Provider: config.Provider, Model: config.Model,
+		ReasoningEffort: config.ReasoningEffort, Temperature: config.Temperature,
+		IsDefault: config.IsDefault, APIKey: config.APIKey, AuthMethod: config.AuthMethod,
+		MaxWorkers: config.MaxWorkers, WorkerTimeout: config.WorkerTimeout,
+		OAuthClientID: config.OAuthClientID, OAuthAuthorizeURL: config.OAuthAuthorizeURL,
+		OAuthTokenURL: config.OAuthTokenURL, OAuthScopes: config.OAuthScopes,
+		OllamaBaseURL: config.OllamaBaseURL, BaseURL: config.BaseURL,
+		Transport: config.Transport, PresetSlug: config.PresetSlug, ModelsURL: config.ModelsURL,
+		AuthHeaderName: config.AuthHeaderName, AuthHeaderValuePrefix: config.AuthHeaderValuePrefix,
+		AutoStartTasks: config.AutoStartTasks,
+	}
+	if config.Provider == models.ProviderOpenAICompatible &&
+		(strings.TrimSpace(config.PresetSlug) == "" || strings.EqualFold(config.PresetSlug, "custom")) {
+		details.ExtraHeadersJSON = config.ExtraHeadersJSON
+		details.ExtraBodyJSON = config.ExtraBodyJSON
+		if config.AuthMethod == models.AuthMethodOAuth {
+			details.OAuthClientSecret = config.OAuthClientSecret
+			details.CustomAuthConfigJSON = config.CustomAuthConfigJSON
+		}
+	}
+	if config.Provider == models.ProviderMixture {
+		details.MixtureConfigJSON = config.MixtureConfigJSON
+	}
+	return c.JSON(http.StatusOK, details)
 }
 
 // resolveProviderAndAuth maps UI form values to DB provider and auth_method.

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
@@ -15,7 +14,18 @@ func (h *Handler) ListSlackAuthorizedUsers(c echo.Context) error {
 	if h.slackAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Slack auth not configured")
 	}
-	return h.slackAuthorizedUserCRUD().listUsers(c, c.QueryParam("project_id"))
+
+	projectID := c.QueryParam("project_id")
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	}
+
+	users, err := h.slackAuthRepo.ListByProject(c.Request().Context(), projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized users")
+	}
+
+	return render(c, http.StatusOK, components.SlackAuthorizedUsersList(users, projectID))
 }
 
 // AddSlackAuthorizedUser adds a new authorized Slack user.
@@ -25,24 +35,37 @@ func (h *Handler) AddSlackAuthorizedUser(c echo.Context) error {
 	}
 
 	projectID := c.FormValue("project_id")
-	return h.slackAuthorizedUserCRUD().createUser(c, projectID, func(ctx context.Context) error {
-		slackUserID := strings.TrimSpace(c.FormValue("slack_user_id"))
-		displayName := strings.TrimSpace(c.FormValue("display_name"))
-		if slackUserID == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Slack user ID is required")
-		}
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	}
 
-		user := &models.SlackAuthorizedUser{
-			ProjectID:   projectID,
-			SlackUserID: slackUserID,
-			DisplayName: displayName,
-			AddedBy:     "web",
-		}
-		if user.DisplayName == "" {
-			user.DisplayName = slackUserID
-		}
-		return h.slackAuthRepo.Create(ctx, user)
-	})
+	slackUserID := strings.TrimSpace(c.FormValue("slack_user_id"))
+	displayName := strings.TrimSpace(c.FormValue("display_name"))
+
+	if slackUserID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Slack user ID is required")
+	}
+
+	user := &models.SlackAuthorizedUser{
+		ProjectID:   projectID,
+		SlackUserID: slackUserID,
+		DisplayName: displayName,
+		AddedBy:     "web",
+	}
+	if user.DisplayName == "" {
+		user.DisplayName = slackUserID
+	}
+
+	if err := h.slackAuthRepo.Create(c.Request().Context(), user); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to add authorized user: "+err.Error())
+	}
+
+	users, err := h.slackAuthRepo.ListByProject(c.Request().Context(), projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized users")
+	}
+
+	return render(c, http.StatusOK, components.SlackAuthorizedUsersList(users, projectID))
 }
 
 // RemoveSlackAuthorizedUser removes an authorized Slack user.
@@ -50,24 +73,30 @@ func (h *Handler) RemoveSlackAuthorizedUser(c echo.Context) error {
 	if h.slackAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Slack auth not configured")
 	}
-	return h.slackAuthorizedUserCRUD().deleteUser(
-		c,
-		c.Param("id"),
-		c.QueryParam("project_id"),
-		func(ctx context.Context, id string) (string, bool, error) {
-			user, err := h.slackAuthRepo.GetByID(ctx, id)
-			if err != nil || user == nil {
-				return "", user != nil, err
-			}
-			return user.ProjectID, true, nil
-		},
-		h.slackAuthRepo.Delete,
-	)
-}
 
-func (h *Handler) slackAuthorizedUserCRUD() authorizedUserCRUD[models.SlackAuthorizedUser] {
-	return authorizedUserCRUD[models.SlackAuthorizedUser]{
-		list:   h.slackAuthRepo.ListByProject,
-		render: components.SlackAuthorizedUsersList,
+	id := c.Param("id")
+	projectID := c.QueryParam("project_id")
+
+	user, err := h.slackAuthRepo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to find user")
 	}
+	if user == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "User not found")
+	}
+
+	if projectID == "" {
+		projectID = user.ProjectID
+	}
+
+	if err := h.slackAuthRepo.Delete(c.Request().Context(), id); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to remove user: "+err.Error())
+	}
+
+	users, err := h.slackAuthRepo.ListByProject(c.Request().Context(), projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized users")
+	}
+
+	return render(c, http.StatusOK, components.SlackAuthorizedUsersList(users, projectID))
 }

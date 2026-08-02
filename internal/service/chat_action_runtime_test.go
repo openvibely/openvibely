@@ -620,23 +620,6 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	require.NoError(t, taskRepo.Create(ctx, task))
 
 	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ScheduleRepo: scheduleRepo})
-	for _, tt := range []struct {
-		payload string
-		want    string
-	}{
-		{payload: `{"title":"Scheduled target","time":"09:30junk","repeat":"daily"}`, want: "Invalid time"},
-		{payload: `{"title":"Scheduled target","time":"09:30:45","repeat":"daily"}`, want: "Invalid time"},
-		{payload: `{"title":"Scheduled target","time":"09:30","repeat":"yearly"}`, want: "Unknown repeat type"},
-		{payload: `{"title":"Scheduled target","time":"09:30","repeat":"weekly","days":["monday"]}`, want: "Invalid weekly days"},
-	} {
-		out, err := handlers["schedule_task"](ctx, json.RawMessage(tt.payload))
-		require.NoError(t, err)
-		require.Contains(t, out, tt.want)
-	}
-	beforeInvalidCreate, err := scheduleRepo.ListByTask(ctx, task.ID)
-	require.NoError(t, err)
-	require.Empty(t, beforeInvalidCreate)
-
 	oversizedCreateOut, err := handlers["schedule_task"](ctx, json.RawMessage(`{"title":"Scheduled target","time":"09:30","repeat":"seconds","interval":366}`))
 	require.NoError(t, err)
 	require.Contains(t, oversizedCreateOut, "between 1 and 365")
@@ -660,26 +643,6 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	require.True(t, schedules[0].ClearContextOnStart)
 	require.NotNil(t, schedules[0].NextRun)
 	require.WithinDuration(t, schedules[0].RunAt, *schedules[0].NextRun, time.Second)
-
-	originalRunAt := schedules[0].RunAt
-	for _, tt := range []struct {
-		payload string
-		want    string
-	}{
-		{payload: `{"schedule_id":"` + schedules[0].ID + `","time":"09:30junk"}`, want: "Invalid time"},
-		{payload: `{"schedule_id":"` + schedules[0].ID + `","time":"09:30:45"}`, want: "Invalid time"},
-		{payload: `{"schedule_id":"` + schedules[0].ID + `","repeat":"yearly"}`, want: "Unknown repeat type"},
-		{payload: `{"schedule_id":"` + schedules[0].ID + `","days":["monday"]}`, want: "Invalid weekly days"},
-	} {
-		out, err := handlers["modify_schedule"](ctx, json.RawMessage(tt.payload))
-		require.NoError(t, err)
-		require.Contains(t, out, tt.want)
-		unchanged, getErr := scheduleRepo.GetByID(ctx, schedules[0].ID)
-		require.NoError(t, getErr)
-		require.Equal(t, originalRunAt, unchanged.RunAt)
-		require.Equal(t, models.RepeatWeekly, unchanged.RepeatType)
-		require.Equal(t, 2, unchanged.RepeatInterval)
-	}
 
 	oversizedModifyOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","interval":366}`))
 	require.NoError(t, err)

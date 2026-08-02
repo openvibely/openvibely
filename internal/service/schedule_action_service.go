@@ -17,7 +17,6 @@ const (
 	ScheduleActionReferenceError ScheduleActionErrorKind = "reference"
 	ScheduleActionTimeError      ScheduleActionErrorKind = "time"
 	ScheduleActionRepeatError    ScheduleActionErrorKind = "repeat"
-	ScheduleActionDaysError      ScheduleActionErrorKind = "days"
 	ScheduleActionIntervalError  ScheduleActionErrorKind = "interval"
 	ScheduleActionPersistError   ScheduleActionErrorKind = "persist"
 )
@@ -38,10 +37,11 @@ func (e *ScheduleActionError) Error() string {
 
 // ScheduleActionResult is the shared mutation outcome formatted by each chat surface.
 type ScheduleActionResult struct {
-	Task     *models.Task
-	Schedule *models.Schedule
-	Changes  []string
-	Warnings []error
+	Task          *models.Task
+	Schedule      *models.Schedule
+	Changes       []string
+	UnknownRepeat bool
+	Warnings      []error
 }
 
 // ScheduleActionService owns schedule runtime-tool mutation semantics.
@@ -65,14 +65,6 @@ func (s *ScheduleActionService) Create(ctx context.Context, projectID string, re
 		return result, actionError(ScheduleActionTimeError, req.Time, err)
 	}
 	repeatType, known := scheduleActionRepeatType(req.Repeat, true)
-	if !known {
-		return result, actionError(ScheduleActionRepeatError, req.Repeat, fmt.Errorf("unknown repeat type %q", req.Repeat))
-	}
-	if repeatType == models.RepeatWeekly && len(req.Days) > 0 {
-		if err := validateScheduleActionWeekdays(req.Days); err != nil {
-			return result, actionError(ScheduleActionDaysError, strings.Join(req.Days, ","), err)
-		}
-	}
 	interval := 1
 	if req.Interval > 0 {
 		interval = req.Interval
@@ -97,6 +89,7 @@ func (s *ScheduleActionService) Create(ctx context.Context, projectID string, re
 		return result, actionError(ScheduleActionPersistError, "", err)
 	}
 	result.Schedule = schedule
+	result.UnknownRepeat = !known
 	if task.Category != models.CategoryScheduled {
 		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
 			result.Warnings = append(result.Warnings, err)
@@ -118,44 +111,29 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 	result := &ScheduleActionResult{Task: task, Schedule: schedule}
 	changes := make([]string, 0, 6)
 	timeChanged := false
-	var hour, minute int
 	if req.Time != "" {
-		hour, minute, err = parseScheduleActionTime(req.Time)
+		hour, minute, err := parseScheduleActionTime(req.Time)
 		if err != nil {
 			return result, actionError(ScheduleActionTimeError, req.Time, err)
 		}
-	}
-	repeatType := schedule.RepeatType
-	if req.Repeat != "" {
-		var known bool
-		repeatType, known = scheduleActionRepeatType(req.Repeat, false)
-		if !known {
-			return result, actionError(ScheduleActionRepeatError, req.Repeat, fmt.Errorf("unknown repeat type %q", req.Repeat))
-		}
-	}
-	if req.Interval != nil {
-		if err := models.ValidateScheduleRepeatInterval(*req.Interval); err != nil {
-			return result, actionError(ScheduleActionIntervalError, fmt.Sprintf("%d", *req.Interval), err)
-		}
-	}
-	if len(req.Days) > 0 && repeatType == models.RepeatWeekly {
-		if err := validateScheduleActionWeekdays(req.Days); err != nil {
-			return result, actionError(ScheduleActionDaysError, strings.Join(req.Days, ","), err)
-		}
-	}
-
-	if req.Time != "" {
 		oldLocal := schedule.RunAt.Local()
 		schedule.RunAt = time.Date(oldLocal.Year(), oldLocal.Month(), oldLocal.Day(), hour, minute, 0, 0, time.Local).UTC()
 		changes = append(changes, fmt.Sprintf("time→%s", req.Time))
 		timeChanged = true
 	}
 	if req.Repeat != "" {
+		repeatType, known := scheduleActionRepeatType(req.Repeat, false)
+		if !known {
+			return result, actionError(ScheduleActionRepeatError, req.Repeat, fmt.Errorf("unknown repeat type %q", req.Repeat))
+		}
 		schedule.RepeatType = repeatType
 		changes = append(changes, fmt.Sprintf("repeat→%s", req.Repeat))
 		timeChanged = true
 	}
 	if req.Interval != nil {
+		if err := models.ValidateScheduleRepeatInterval(*req.Interval); err != nil {
+			return result, actionError(ScheduleActionIntervalError, fmt.Sprintf("%d", *req.Interval), err)
+		}
 		schedule.RepeatInterval = *req.Interval
 		changes = append(changes, fmt.Sprintf("interval→%d", *req.Interval))
 		timeChanged = true
@@ -164,7 +142,9 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 		now := time.Now().Local()
 		runAt := schedule.RunAt.Local()
 		base := time.Date(now.Year(), now.Month(), now.Day(), runAt.Hour(), runAt.Minute(), 0, 0, time.Local)
-		schedule.RunAt = nextScheduleActionWeekday(base, now, req.Days).UTC()
+		if next := nextScheduleActionWeekday(base, now, req.Days); !next.IsZero() {
+			schedule.RunAt = next.UTC()
+		}
 		changes = append(changes, fmt.Sprintf("days→%s", strings.Join(req.Days, ",")))
 		timeChanged = true
 	}
@@ -285,13 +265,9 @@ func (s *ScheduleActionService) resolveSchedule(ctx context.Context, projectID, 
 }
 
 func parseScheduleActionTime(raw string) (int, int, error) {
-	if len(raw) != 5 || raw[2] != ':' || raw[0] < '0' || raw[0] > '9' || raw[1] < '0' || raw[1] > '9' || raw[3] < '0' || raw[3] > '9' || raw[4] < '0' || raw[4] > '9' {
-		return 0, 0, fmt.Errorf("invalid time %q: expected HH:MM (00:00-23:59)", raw)
-	}
-	hour := int(raw[0]-'0')*10 + int(raw[1]-'0')
-	minute := int(raw[3]-'0')*10 + int(raw[4]-'0')
-	if hour > 23 || minute > 59 {
-		return 0, 0, fmt.Errorf("invalid time %q: expected HH:MM (00:00-23:59)", raw)
+	var hour, minute int
+	if _, err := fmt.Sscanf(raw, "%d:%d", &hour, &minute); err != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, fmt.Errorf("invalid time")
 	}
 	return hour, minute, nil
 }
@@ -319,36 +295,6 @@ func scheduleActionRepeatType(raw string, defaultDaily bool) (models.RepeatType,
 	}
 }
 
-func validateScheduleActionWeekdays(days []string) error {
-	for _, day := range days {
-		if _, ok := scheduleActionWeekday(day); !ok {
-			return fmt.Errorf("unknown weekly day %q: expected sun, mon, tue, wed, thu, fri, or sat", day)
-		}
-	}
-	return nil
-}
-
-func scheduleActionWeekday(day string) (time.Weekday, bool) {
-	switch strings.ToLower(strings.TrimSpace(day)) {
-	case "sun":
-		return time.Sunday, true
-	case "mon":
-		return time.Monday, true
-	case "tue":
-		return time.Tuesday, true
-	case "wed":
-		return time.Wednesday, true
-	case "thu":
-		return time.Thursday, true
-	case "fri":
-		return time.Friday, true
-	case "sat":
-		return time.Saturday, true
-	default:
-		return 0, false
-	}
-}
-
 func scheduleActionRunAt(now time.Time, hour, minute int, repeatType models.RepeatType, days []string) time.Time {
 	runAt := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, time.Local)
 	if repeatType == models.RepeatWeekly && len(days) > 0 {
@@ -360,9 +306,13 @@ func scheduleActionRunAt(now time.Time, hour, minute int, repeatType models.Repe
 }
 
 func nextScheduleActionWeekday(base, now time.Time, days []string) time.Time {
+	dayMap := map[string]time.Weekday{
+		"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday, "wed": time.Wednesday,
+		"thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday,
+	}
 	bestOffset := 8
 	for _, day := range days {
-		target, ok := scheduleActionWeekday(day)
+		target, ok := dayMap[strings.ToLower(strings.TrimSpace(day))]
 		if !ok {
 			continue
 		}

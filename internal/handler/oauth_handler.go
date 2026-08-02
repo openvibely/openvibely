@@ -66,21 +66,6 @@ type oauthPendingFlow struct {
 	ConfigRevision int64
 }
 
-type oauthCompletionOutcome int
-
-const (
-	oauthCompletionSucceeded oauthCompletionOutcome = iota
-	oauthCompletionInvalidState
-	oauthCompletionExchangeFailed
-)
-
-type oauthCompletionResult struct {
-	Outcome   oauthCompletionOutcome
-	Flow      *oauthPendingFlow
-	ExpiresAt int64
-	Err       error
-}
-
 // oauthFlows tracks pending OAuth authorization flows (keyed by state).
 var (
 	oauthFlows   = make(map[string]*oauthPendingFlow)
@@ -509,15 +494,17 @@ func (h *Handler) OAuthManualComplete(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": errDesc})
 	}
 
-	result := h.completeOAuthFlow(state, code)
-	if result.Outcome == oauthCompletionInvalidState {
+	flow, ok := takeOAuthFlow(state)
+	if !ok {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "oauth session expired or invalid state"})
 	}
-	if result.Outcome == oauthCompletionExchangeFailed {
-		applog.Infof("[handler] OAuthManualComplete exchange/save error: %v", result.Err)
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": publicOAuthExchangeError(result.Err)})
+
+	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
+	if err != nil {
+		applog.Infof("[handler] OAuthManualComplete exchange/save error: %v", err)
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": publicOAuthExchangeError(err)})
 	}
-	applog.Infof("[handler] OAuthManualComplete success config=%s provider=%s expires=%s", result.Flow.ConfigID, result.Flow.Provider, time.UnixMilli(result.ExpiresAt).Format(time.RFC3339))
+	applog.Infof("[handler] OAuthManualComplete success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
 	return c.JSON(http.StatusOK, map[string]string{"status": "connected"})
 }
 
@@ -533,7 +520,7 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 
 	var flow *oauthPendingFlow
 	ok := false
-	if state != "" && (r.URL.Query().Get("error") != "" || code == "") {
+	if state != "" {
 		flow, ok = takeOAuthFlow(state)
 		if ok {
 			modelsURL = modelsReturnURLFromRequest(r, flow.ProjectID, modelsURL)
@@ -573,11 +560,7 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	result := h.completeOAuthFlow(state, code)
-	if result.Flow != nil {
-		modelsURL = modelsReturnURLFromRequest(r, result.Flow.ProjectID, modelsURL)
-	}
-	if result.Outcome == oauthCompletionInvalidState {
+	if !ok {
 		applog.Infof("[handler] OAuthCallback state not found or expired")
 		fmt.Fprintf(w, `<html><body>
 			<h2>Session Expired</h2>
@@ -586,40 +569,20 @@ func (h *Handler) handleOAuthCallbackResponse(w http.ResponseWriter, r *http.Req
 		</body></html>`, htmltemplate.HTMLEscapeString(modelsURL))
 		return
 	}
-	if result.Outcome == oauthCompletionExchangeFailed {
-		applog.Infof("[handler] OAuthCallback exchange/save error: %v", result.Err)
+
+	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
+	if err != nil {
+		applog.Infof("[handler] OAuthCallback exchange/save error: %v", err)
 		fmt.Fprintf(w, `<html><body>
 			<h2>Token Exchange Failed</h2>
 			<p>%s</p>
 			<p><a href="%s">Return to Models</a></p>
-		</body></html>`, htmltemplate.HTMLEscapeString(publicOAuthExchangeError(result.Err)), htmltemplate.HTMLEscapeString(modelsURL))
+		</body></html>`, htmltemplate.HTMLEscapeString(publicOAuthExchangeError(err)), htmltemplate.HTMLEscapeString(modelsURL))
 		return
 	}
 
-	applog.Infof("[handler] OAuthCallback success config=%s provider=%s expires=%s", result.Flow.ConfigID, result.Flow.Provider, time.UnixMilli(result.ExpiresAt).Format(time.RFC3339))
+	applog.Infof("[handler] OAuthCallback success config=%s provider=%s expires=%s", flow.ConfigID, flow.Provider, time.UnixMilli(expiresAt).Format(time.RFC3339))
 	http.Redirect(w, r, modelsURL, http.StatusTemporaryRedirect)
-}
-
-func (h *Handler) completeOAuthFlow(state, code string) oauthCompletionResult {
-	flow, ok := takeOAuthFlow(state)
-	if !ok {
-		return oauthCompletionResult{Outcome: oauthCompletionInvalidState}
-	}
-
-	expiresAt, err := h.exchangeOAuthCodeAndSaveTokens(flow, code, state)
-	if err != nil {
-		return oauthCompletionResult{
-			Outcome: oauthCompletionExchangeFailed,
-			Flow:    flow,
-			Err:     err,
-		}
-	}
-
-	return oauthCompletionResult{
-		Outcome:   oauthCompletionSucceeded,
-		Flow:      flow,
-		ExpiresAt: expiresAt,
-	}
 }
 
 func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, state string) (int64, error) {

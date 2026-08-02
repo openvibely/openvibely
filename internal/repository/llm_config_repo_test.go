@@ -2,12 +2,69 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestLLMConfigRepo_ListCardsUsesBoundedProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	largeBody := strings.Repeat("x", 1024*1024)
+	aggregator := &models.LLMConfig{Name: "Aggregator", Provider: models.ProviderTest, Model: "agg"}
+	if err := repo.Create(ctx, aggregator); err != nil {
+		t.Fatal(err)
+	}
+	config := &models.LLMConfig{
+		Name: "Large Custom", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "custom-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, config); err != nil {
+		t.Fatal(err)
+	}
+	mixture := &models.LLMConfig{
+		Name: "Summary Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"aggregator":{"agent_config_id":"` + aggregator.ID + `","label":"Aggregator label"},"reference_models":[{"agent_config_id":"a"},{"agent_config_id":"b"}],"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, mixture); err != nil {
+		t.Fatal(err)
+	}
+
+	cards, err := repo.ListCards(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[string]models.LLMConfig, len(cards))
+	for _, card := range cards {
+		byID[card.ID] = card
+	}
+	custom := byID[config.ID]
+	if custom.APIKey != "present" || custom.OAuthAccessToken != "present" {
+		t.Fatalf("credential-presence summaries not preserved: %#v", custom)
+	}
+	if custom.ExtraBodyJSON != "" || custom.ExtraHeadersJSON != "" || custom.OAuthRefreshToken != "" ||
+		custom.OAuthClientSecret != "" || custom.CustomAuthConfigJSON != "" || custom.CustomAuthStateJSON != "" || custom.MixtureConfigJSON != "" {
+		t.Fatalf("edit-only data materialized by card query: %#v", custom)
+	}
+	summary := byID[mixture.ID]
+	if summary.MixtureAggregatorID != aggregator.ID || summary.MixtureAggregatorLabel != "Aggregator label" || summary.MixtureReferenceCount != 2 {
+		t.Fatalf("mixture summary = %#v", summary)
+	}
+	for _, forbidden := range []string{"oauth_refresh_token", "oauth_client_secret", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json"} {
+		if strings.Contains(llmConfigCardColumns, forbidden) {
+			t.Fatalf("card projection contains edit-only column %q", forbidden)
+		}
+	}
+}
 
 func TestLLMConfigRepoCustomOAuthConnectionAndRefreshLease(t *testing.T) {
 	db := testutil.NewTestDB(t)

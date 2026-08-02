@@ -626,10 +626,6 @@ func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandle
 			return fmt.Sprintf("Could not find task: %v", err)
 		case actionErr != nil && actionErr.Kind == ScheduleActionTimeError:
 			return fmt.Sprintf("Invalid time %q (expected HH:MM).", req.Time)
-		case actionErr != nil && actionErr.Kind == ScheduleActionRepeatError:
-			return fmt.Sprintf("Unknown repeat type %q.", req.Repeat)
-		case actionErr != nil && actionErr.Kind == ScheduleActionDaysError:
-			return fmt.Sprintf("Invalid weekly days: %v.", err)
 		case actionErr != nil && actionErr.Kind == ScheduleActionIntervalError:
 			return fmt.Sprintf("Invalid interval %d: %v.", req.Interval, err)
 		default:
@@ -694,8 +690,6 @@ func runChannelModifySchedule(ctx context.Context, opts channelUtilityActionHand
 			return fmt.Sprintf("Invalid time %q.", req.Time)
 		case actionErr != nil && actionErr.Kind == ScheduleActionRepeatError:
 			return fmt.Sprintf("Unknown repeat type %q.", req.Repeat)
-		case actionErr != nil && actionErr.Kind == ScheduleActionDaysError:
-			return fmt.Sprintf("Invalid weekly days: %v.", err)
 		case actionErr != nil && actionErr.Kind == ScheduleActionIntervalError:
 			return fmt.Sprintf("Invalid interval %d: %v.", *req.Interval, err)
 		default:

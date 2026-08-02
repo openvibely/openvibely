@@ -673,6 +673,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	e.GET("/models", h.ListModels)
 	e.POST("/models", h.CreateModel)
+	e.GET("/models/:id/edit-details", h.GetModelEditDetails)
 	e.GET("/models/openai-compatible/available", h.ListOpenAICompatibleAvailableModels)
 	e.GET("/models/ollama/available", h.ListOllamaAvailableModels)
 	e.POST("/models/:id", h.UpdateModel)
