@@ -6173,12 +6173,83 @@ func TestHandler_RerunSwarmReviewerRejectsActiveRoleExecution(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "already running")
 }
 
+func newHistoricalModelsBenchmarkEcho(h *Handler, repo *repository.LLMConfigRepo) *echo.Echo {
+	e := echo.New()
+	e.GET("/models", func(c echo.Context) error {
+		c.Response().Header().Set("Cache-Control", "no-store")
+		agents, err := repo.List(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		stats := make(map[string]int, len(agents))
+		for _, agent := range agents {
+			stats[agent.ID] = h.workerSvc.ModelRunning(agent.ID)
+		}
+		if err := render(c, http.StatusOK, pages.ModelsContent(agents, stats, h.desktopMode)); err != nil {
+			return err
+		}
+		// Reproduce the historical eager edit attributes inside the complete
+		// handler path. extra_body_json dominates the acceptance fixture, while
+		// these fields also retain the former secret and request-JSON payload.
+		for _, agent := range agents {
+			_, err := fmt.Fprintf(c.Response(), `<div data-model-api-key="%s" data-model-extra-headers-json="%s" data-model-extra-body-json="%s"></div>`,
+				htmlstd.EscapeString(agent.APIKey),
+				htmlstd.EscapeString(agent.ExtraHeadersJSON),
+				htmlstd.EscapeString(agent.ExtraBodyJSON),
+			)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return e
+}
+
+func TestModelsBenchmarkHandlersUseCompleteHTMXRoutes(t *testing.T) {
+	h, candidate, repo := setupTestHandler(t)
+	cfg := &models.LLMConfig{
+		Name: "Historical Eager Config", Provider: models.ProviderOpenAICompatible,
+		Model: "custom-model", PresetSlug: "custom", ExtraBodyJSON: `{"eager":"payload"}`,
+	}
+	if err := repo.Create(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	baseline := newHistoricalModelsBenchmarkEcho(h, repo)
+
+	for name, server := range map[string]*echo.Echo{"baseline": baseline, "candidate": candidate} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/models", nil)
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			server.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET /models status = %d", rec.Code)
+			}
+			if !strings.Contains(rec.Body.String(), "Historical Eager Config") {
+				t.Fatal("GET /models did not render the configured model")
+			}
+			if name == "baseline" && !strings.Contains(rec.Body.String(), htmlstd.EscapeString(cfg.ExtraBodyJSON)) {
+				t.Fatal("historical GET /models did not eagerly serialize extra_body_json")
+			}
+			if name == "candidate" && strings.Contains(rec.Body.String(), cfg.ExtraBodyJSON) {
+				t.Fatal("candidate GET /models eagerly serialized extra_body_json")
+			}
+		})
+	}
+}
+
 func BenchmarkHandlerListModelsHTMXLargeEditConfig(b *testing.B) {
-	h, e, repo, db := setupTestHandlerWithDB(b)
+	h, candidate, _, db := setupTestHandlerWithDB(b)
+	baselineRepo := repository.NewLLMConfigRepo(db)
+	baseline := newHistoricalModelsBenchmarkEcho(h, baselineRepo)
 	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
 		b.Fatal(err)
 	}
 	extraBody := `{"padding":"` + strings.Repeat("x", 1024*1024-len(`{"padding":""}`)) + `"}`
+	if len(extraBody) != 1024*1024 {
+		b.Fatalf("extra_body_json fixture size = %d, want %d", len(extraBody), 1024*1024)
+	}
 	for i := 0; i < 50; i++ {
 		_, err := db.Exec(`INSERT INTO agent_configs (
 			id, name, provider, model, api_key, temperature, is_default, auth_method,
@@ -6198,31 +6269,11 @@ func BenchmarkHandlerListModelsHTMXLargeEditConfig(b *testing.B) {
 			req := httptest.NewRequest(http.MethodGet, "/models", nil)
 			req.Header.Set("HX-Request", "true")
 			rec := httptest.NewRecorder()
-			ctx := e.NewContext(req, rec)
 			b.StartTimer()
-			agents, err := repo.List(req.Context())
-			if err == nil {
-				stats := make(map[string]int, len(agents))
-				for _, agent := range agents {
-					stats[agent.ID] = h.workerSvc.ModelRunning(agent.ID)
-				}
-				err = render(ctx, http.StatusOK, pages.ModelsContent(agents, stats, h.desktopMode))
-				if err == nil {
-					// Reproduce the historical eager card payload removed by this change.
-					for _, agent := range agents {
-						rec.Body.WriteString(`<div data-model-api-key="`)
-						rec.Body.WriteString(htmlstd.EscapeString(agent.APIKey))
-						rec.Body.WriteString(`" data-model-extra-headers-json="`)
-						rec.Body.WriteString(htmlstd.EscapeString(agent.ExtraHeadersJSON))
-						rec.Body.WriteString(`" data-model-extra-body-json="`)
-						rec.Body.WriteString(htmlstd.EscapeString(agent.ExtraBodyJSON))
-						rec.Body.WriteString(`"></div>`)
-					}
-				}
-			}
+			baseline.ServeHTTP(rec, req)
 			b.StopTimer()
-			if err != nil {
-				b.Fatal(err)
+			if rec.Code != http.StatusOK {
+				b.Fatalf("status = %d", rec.Code)
 			}
 			responseBytes += int64(rec.Body.Len())
 		}
@@ -6237,7 +6288,7 @@ func BenchmarkHandlerListModelsHTMXLargeEditConfig(b *testing.B) {
 			req.Header.Set("HX-Request", "true")
 			rec := httptest.NewRecorder()
 			b.StartTimer()
-			e.ServeHTTP(rec, req)
+			candidate.ServeHTTP(rec, req)
 			b.StopTimer()
 			if rec.Code != http.StatusOK {
 				b.Fatalf("status = %d", rec.Code)
