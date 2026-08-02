@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-07-31
-source: consolidation
-source_id: memory_consolidation_2026_07_31
+updated: 2026-08-02
+source: task_completion
+source_id: 3647481dc91d880c99ea5bb7458c771f
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -121,6 +121,8 @@ Task execution and scheduling facts:
 - Browser/HTMX and JSON API schedule toggles intentionally share one handler-level transition operation that owns schedule lookup, enabled-state inversion, persistence, stale `next_run` recomputation on re-enable, and final schedule retrieval. HTTP status mapping, logging, HTMX rendering/redirects, and JSON serialization remain transport-specific; parity coverage locks the disable/re-enable semantics across both endpoints.
 - Dynamic task-loop wakeups are schedule rows with wakeup metadata and replacement semantics. When due, the scheduler enqueues normal task-thread follow-ups through durable `thread_inputs`; wakeups are blocked for stopped goal states and failures should be visible on the task timeline/event stream.
 - Chat control-plane schedule modification supports `enabled: bool` and must stay consistent with HTTP/API toggling semantics.
+- Web/API Chat and channel Chat schedule mutations (`schedule_task`, `modify_schedule`, and `delete_schedule`) share one service-level implementation. That core owns time parsing, recurrence mapping, interval validation, weekly-day calculation, `NextRun`, persistence, project ownership, and linked task category/status transitions; wrappers retain surface-specific batching, response formatting, and logging. Cross-project task/schedule references are rejected on both surfaces, and deleting a task's final schedule recategorizes it consistently. Implemented in issue #153 / PR #165.
+- Known runtime schedule-mutation validation bug tracked in `openvibely/openvibely#169`: `schedule_task`/the shared service can report success while silently changing malformed input, because unsupported recurrence strings default to `daily`, `fmt.Sscanf` accepts time strings with trailing content, and wholly invalid weekly day lists are ignored. Regression coverage should prove create and modify reject these values without persistence.
 - `list_schedules` is the canonical bounded, read-only current-project schedule discovery action. It is available in Plan and Orchestrate modes across web/API Chat, supported channel runtimes, task-thread follow-ups, and generic initial/scheduled task runs. Its result contract includes schedule and task IDs, task title, enabled state, recurrence type/interval/days, next run, and clear-context-on-start state; every result always includes `days` (an empty string when inapplicable) and `next_run` (`null` when absent). It supports optional task ID, partial title, and enabled filters; defaults to 20 results with a maximum of 50; and provides offset pagination with a total and `has_more`. Repository lookup joins schedules to tasks under the requested project, preventing cross-project IDs, and orders deterministically by non-null `next_run` ascending, then `created_at` descending and schedule ID ascending. Returned schedule IDs are accepted by the existing modify/delete schedule actions without changing scheduler or recurrence semantics.
 - Known schedule-discovery evidence gap tracked in `openvibely/openvibely#131`: schedule records carry `LastRun`, but `list_schedules` exposes only the next run, so Chat cannot distinguish never-run automation from schedules with execution history.
 - Monthly recurrence uses consistent anchor-aware month clamping in backend scheduling and schedule-calendar projection. Advancement preserves the original `RunAt` day, clamps only when a target month lacks that day, and recovers the anchor in later months, so January 31 advances to February 28/29 and then March 31 without skipping the configured interval. Calendar rewind uses the same anchor and clamped arithmetic.

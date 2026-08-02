@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-07-31
+updated: 2026-08-02
 source: consolidation
-source_id: memory_consolidation_2026_07_29
+source_id: memory_consolidation_2026_08_02
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -65,6 +65,12 @@ OAuth and hosted deployment facts:
 - Process-local pending SSO state requires exactly one application replica per hosted workspace until shared pending storage exists. Rollout requires publishing the client in the workspace image and deliberately recreating/upgrading containers while retaining `/data`; exact `CONTROL_BASE_URL`, stored workspace `AppBaseURL`, and public hostname must agree.
 - Hosted control-plane image tags, environment overrides, and deployed image contents are operational state. Verify the live Compose configuration before rollout rather than assuming an override documented in `.env.example` is active.
 - Hosted deployments use Docker Compose projects under `/docker/<project>/docker-compose.yml` and route app/docs containers through Traefik with persistent `/data` storage. Exact host inventory is operational state and must be verified live before acting on it.
+
+Docker image direction:
+- OpenVibely publishes one server-and-coding-agent image because the server executes coding agents; there is no separate remote-executor architecture that justifies a minimal server-only image. `Dockerfile-dev` remains separate for developing OpenVibely with Air and rootless Podman.
+- The runtime image includes common Go, Node.js, Python, Rust, Java, Ruby, and C/C++ toolchains and intentionally excludes Podman and Buildah. Fedora's shorter support cycle requires regular base-version upgrades.
+- The final OCI user is `10001:10001`; entrypoint override remains non-root and mounted `/data` must already be writable by that UID/GID. Runtime ownership mutation and legacy-volume migration guidance are intentionally excluded.
+- The image removes `sudo` and setuid/setgid bits after package installation. Non-root execution is defense in depth, not a complete sandbox: secure deployments still require restricted mounts, capabilities, network, secrets, and resources.
 
 Live DB inspection facts:
 - For read-only diagnosis against the live app DB (`$HOME/.openvibely/openvibely.db`), inspect schema with `PRAGMA table_info(<table>)` before writing diagnostic SQL rather than guessing column names. The `tasks` table uses `created_at`, not `started_at`; execution timing belongs to `executions.started_at`/`executions.completed_at`. The `tasks` table also has no `role` column; swarm role/state live in `swarm_role`, `swarm_status`, `swarm_config`, `swarm_sequence` (plus `parent_task_id`, `category`, `status`, `worktree_path`, `worktree_branch`, `merge_status`). The `executions` table has no `created_at`/`diff` columns; use `error_message`/`diff_output` for failure text/diff.

@@ -214,3 +214,7 @@ always_use:
 ## user_approval_gate_workflow
 
 [User Approval Gate Workflow](user_approval_gate_workflow/SKILL.md) — Preserve explicit plan-first and approval-before-editing gates during coding tasks.
+
+## openvibely_docker_image_workflow
+
+[OpenVibely Docker Image Workflow](openvibely_docker_image_workflow/SKILL.md) — Safely change OpenVibely production and coding-agent images while keeping consumers, release publishing, documentation, runtime validation, and sandbox boundaries aligned.

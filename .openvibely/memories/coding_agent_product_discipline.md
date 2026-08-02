@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-07-29
-source: consolidation
-source_id: memory_consolidation_2026_07_29
+updated: 2026-08-02
+source: task_turn
+source_id: 36bb8adce55d398c6e715f4cfb58abff
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -45,7 +45,7 @@ Documentation, logging, and validation preferences:
 - Preserve useful README content and commented multi-line command examples unless there is a specific reason to trim them.
 - Preserve liked README/docs structure while folding in stronger positioning/selling points.
 - Keep root `docs/` in sync with README/docs-site positioning when overlapping product concepts change. When syncing with `/Users/dubee/go/src/github.com/openvibely/openvibely-docs`, audit recent docs-site content and propagate overlapping product-concept updates beyond a narrow README/environment pass.
-- Root README should stay succinct and high-level, point to `https://docs.openvibely.ai` plus the docs source repo, and keep detailed environment-variable reference in `docs/environment.md`.
+- Root README should stay succinct and high-level, point to `https://docs.openvibely.ai` plus the docs source repo, and keep detailed environment-variable reference in `docs/environment.md`. Keep Docker storage guidance to the essential requirement that mounted `/data` be writable by UID/GID `10001:10001`; do not add legacy-volume ownership migration prose, commands, tests, or compatibility guidance unless the user explicitly reverses this decision.
 - Published docs links in README/project-facing docs should use new-tab HTML anchors where supported; local relative links stay normal Markdown.
 - Very high-frequency or low-value debug traces should be commented `applog.Debugf` examples instead of active gated calls when method-call overhead could accumulate, especially per LLM chunk, SSE delta, HTMX poll, diff broadcast tick, or action-routing check.
 - Full validation should prefer project Makefile targets or `go test ./... -count=1 -timeout 120s`; detailed test-state and timeout caveats live in `testing_coverage_and_performance.md`.

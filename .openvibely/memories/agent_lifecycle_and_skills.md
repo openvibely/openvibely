@@ -54,7 +54,7 @@ Lifecycle facts:
 - Ordinary tasks may intentionally have no assigned primary agent. Explicit assigned primary agents skip standalone skill routing and use that agent's curated/default or manual skill selection.
 - Maintenance/system agents are excluded from auto-routing via `selectable_as_primary=false`.
 - Lifecycle visibility renders structured selected-skill and selected-memory route decisions as compact prompt-safe badges/pills; text summaries remain useful for non-route hook rows.
-- Known lifecycle-evidence gaps include prompt-safe lifecycle trace events being available through the API but not exposed from task-detail lifecycle activity rows, and selected-memory activity being reduced to filenames even though richer prompt-safe context is available. Any fix should remain a bounded visibility improvement rather than changing lifecycle behavior.
+- Known lifecycle-evidence gaps include prompt-safe lifecycle trace events and durable applied/blocked skill-mutation audit rows being persisted by the backend but not exposed from the task-detail Lifecycle tab, which currently renders execution summary cards. Selected-memory activity is also reduced to filenames even though richer prompt-safe context is available. Issues `#161` and `#168` propose bounded, on-demand prompt-safe lifecycle evidence views without changing lifecycle behavior; `#168` specifically covers trace and mutation evidence.
 - Lifecycle output contracts constrain final stored/validated results, not the agent's working notes or tool use.
 - Lifecycle hook and task-mode terminal execution status writes must use a fresh short-timeout finalization context after hook/model work returns so LLM deadlines or cancellations do not leave rows `running`.
 
