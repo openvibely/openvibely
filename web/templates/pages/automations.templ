@@ -540,14 +540,48 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					var original = svg.getAttribute('viewBox').split(/\s+/).map(Number);
 					var box = original.slice();
 					var pan = null;
+					var panFrame = 0;
+					var suppressNodeClick = false;
 					function apply() { svg.setAttribute('viewBox', box.join(' ')); }
-					function point(event) { var value = svg.createSVGPoint(); value.x = event.clientX; value.y = event.clientY; return value.matrixTransform(svg.getScreenCTM().inverse()); }
+					function applyPan() {
+						panFrame = 0;
+						if (!pan || !pan.pending) return;
+						box[0] = pan.box[0] - (pan.pending.x - pan.clientX) * pan.unitsX;
+						box[1] = pan.box[1] - (pan.pending.y - pan.clientY) * pan.unitsY;
+						apply();
+					}
+					function queuePan(event) {
+						if (!pan || event.pointerId !== pan.pointerId) return;
+						pan.pending = {x:event.clientX, y:event.clientY};
+						if (Math.hypot(event.clientX-pan.clientX, event.clientY-pan.clientY) > 4) { pan.dragged = true; if (pan.nodeLink) suppressNodeClick = true; }
+						if (!panFrame) panFrame = requestAnimationFrame(applyPan);
+					}
+					function finishPan(event) {
+						if (!pan || event.pointerId !== pan.pointerId) return;
+						pan.pending = {x:event.clientX, y:event.clientY};
+						if (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; }
+						applyPan();
+						var dragged = pan.dragged;
+						pan = null;
+						if (dragged) setTimeout(function() { suppressNodeClick = false; }, 500);
+					}
 					function zoom(factor) { var cx=box[0]+box[2]/2, cy=box[1]+box[3]/2; box[2]=Math.max(300,Math.min(4000,box[2]*factor)); box[3]=Math.max(200,Math.min(2500,box[3]*factor)); box[0]=cx-box[2]/2; box[1]=cy-box[3]/2; apply(); }
 					svg.addEventListener('wheel', function(event) { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : .88); }, {passive:false});
-					svg.addEventListener('pointerdown', function(event) { if (event.target !== svg || event.button !== 0) return; var p=point(event); pan={x:p.x,y:p.y,box:box.slice()}; svg.setPointerCapture(event.pointerId); });
-					svg.addEventListener('pointermove', function(event) { if (!pan) return; var p=point(event); box[0]=pan.box[0]+pan.x-p.x; box[1]=pan.box[1]+pan.y-p.y; apply(); });
-					svg.addEventListener('pointerup', function(){pan=null;});
-					svg.addEventListener('pointercancel', function(){pan=null;});
+					svg.addEventListener('pointerdown', function(event) {
+						if (event.button !== 0) return;
+						var rect = svg.getBoundingClientRect();
+						if (!rect.width || !rect.height) return;
+						pan = {pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-task-link]')};
+						suppressNodeClick = false;
+						try { svg.setPointerCapture(event.pointerId); } catch (_) {}
+					});
+					svg.addEventListener('pointermove', queuePan);
+					svg.addEventListener('pointerup', finishPan);
+					svg.addEventListener('pointercancel', finishPan);
+					svg.addEventListener('click', function(event) {
+						if (!suppressNodeClick || !event.target.closest('[data-automation-task-link]')) return;
+						event.preventDefault(); event.stopImmediatePropagation(); suppressNodeClick = false;
+					}, true);
 					canvasRoot.querySelector('[data-automation-zoom-in]').addEventListener('click', function(){zoom(.82);});
 					canvasRoot.querySelector('[data-automation-zoom-out]').addEventListener('click', function(){zoom(1.22);});
 					canvasRoot.querySelector('[data-automation-fit]').addEventListener('click', function(){box=original.slice();apply();});
@@ -1145,7 +1179,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						remove.addEventListener('keydown', function(event) { if (event.key === 'Enter' || event.key === ' ') deleteCurrent(event); });
 						group.addEventListener('pointerdown', function(event) {
 							if (event.button !== 0 || event.target.closest('[data-connect-port], [data-delete-node]')) return;
-							event.preventDefault(); event.stopPropagation(); group.setPointerCapture(event.pointerId);
+							event.preventDefault(); event.stopPropagation(); try { group.setPointerCapture(event.pointerId); } catch (_) {}
 						var start = graphPoint(event), originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);
 						function move(moveEvent) {
 							var point = graphPoint(moveEvent);
@@ -1163,18 +1197,36 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						event.preventDefault(); renderNode(group, Number(group.dataset.nodeX) + dx, Number(group.dataset.nodeY) + dy); renderEdges(); syncCandidate();
 					});
 				});
-				var pan = null;
-				svg.addEventListener('pointerdown', function(event) {
-					if (event.target !== svg || event.button !== 0) return;
-					var point = graphPoint(event); pan = {x: point.x, y: point.y, view: viewBox.slice()}; svg.setPointerCapture(event.pointerId);
-				});
-				svg.addEventListener('pointermove', function(event) {
-					if (!pan) return;
-					var point = graphPoint(event); viewBox[0] = pan.view[0] + pan.x - point.x; viewBox[1] = pan.view[1] + pan.y - point.y; applyViewBox();
-				});
-				svg.addEventListener('pointerup', function() { pan = null; });
-				svg.addEventListener('pointercancel', function() { pan = null; });
-				function zoom(factor) {
+					var pan = null;
+					var panFrame = 0;
+					function applyBuilderPan() {
+						panFrame = 0;
+						if (!pan || !pan.pending) return;
+						viewBox[0] = pan.view[0] - (pan.pending.x - pan.clientX) * pan.unitsX;
+						viewBox[1] = pan.view[1] - (pan.pending.y - pan.clientY) * pan.unitsY;
+						applyViewBox();
+					}
+					svg.addEventListener('pointerdown', function(event) {
+						if (event.target !== svg || event.button !== 0) return;
+						var rect = svg.getBoundingClientRect();
+						if (!rect.width || !rect.height) return;
+						pan = {pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, view:viewBox.slice(), unitsX:viewBox[2]/rect.width, unitsY:viewBox[3]/rect.height, pending:null};
+						try { svg.setPointerCapture(event.pointerId); } catch (_) {}
+					});
+					svg.addEventListener('pointermove', function(event) {
+						if (!pan || event.pointerId !== pan.pointerId) return;
+						pan.pending = {x:event.clientX, y:event.clientY};
+						if (!panFrame) panFrame = requestAnimationFrame(applyBuilderPan);
+					});
+					function finishBuilderPan(event) {
+						if (!pan || event.pointerId !== pan.pointerId) return;
+						pan.pending = {x:event.clientX, y:event.clientY};
+						if (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; }
+						applyBuilderPan(); pan = null;
+					}
+					svg.addEventListener('pointerup', finishBuilderPan);
+					svg.addEventListener('pointercancel', finishBuilderPan);
+					function zoom(factor) {
 					var cx = viewBox[0] + viewBox[2] / 2, cy = viewBox[1] + viewBox[3] / 2;
 					viewBox[2] = Math.max(240, Math.min(3000, viewBox[2] * factor)); viewBox[3] = Math.max(160, Math.min(2000, viewBox[3] * factor));
 					viewBox[0] = cx - viewBox[2] / 2; viewBox[1] = cy - viewBox[3] / 2; applyViewBox();

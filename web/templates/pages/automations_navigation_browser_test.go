@@ -153,7 +153,7 @@ func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *test
 			t.Errorf("expected simplified Automation Live to contain %q", want)
 		}
 	}
-	if got := strings.Count(body, `data-automation-task-link`); got != 2 {
+	if got := strings.Count(body, `<a class="automation-graph-link"`); got != 2 {
 		t.Errorf("expected exactly two task-backed node links, got %d", got)
 	}
 	for _, forbidden := range []string{
@@ -1109,10 +1109,28 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (labelRect.left < nodeRect.left - 1 || labelRect.right > nodeRect.right + 1 || labelRect.top < nodeRect.top - 1 || labelRect.bottom > nodeRect.bottom + 1) fail('node label escapes its node bounds');
 	    if (getComputedStyle(label).overflow !== 'hidden') fail('long node label is not visibly bounded');
 	    if (!document.body.textContent.includes('No active work')) fail('zero counters did not collapse to a readable summary');
-	    if (document.querySelector('[data-automation-view]')) fail('Live still exposes redundant Automation tabs');
-	    if (document.getElementById('automation-node-resources')) fail('Live still exposes the node resources sidebar');
-	    click('#automation-live [data-automation-task-link]', 'Automation-backed Task node');
-	    await waitFor(function() { return !!document.getElementById('task-detail-content'); }, 'Automation-backed Task detail');
+		    if (document.querySelector('[data-automation-view]')) fail('Live still exposes redundant Automation tabs');
+		    if (document.getElementById('automation-node-resources')) fail('Live still exposes the node resources sidebar');
+		    var liveSVG = document.querySelector('#automation-live [data-automation-canvas]');
+		    var liveTaskLink = document.querySelector('#automation-live [data-automation-task-link]');
+		    var livePanStart = liveSVG.getAttribute('viewBox').split(/\s+/).map(Number);
+		    var livePanRect = liveSVG.getBoundingClientRect();
+		    var liveLinkRect = liveTaskLink.getBoundingClientRect();
+		    var livePanX = liveLinkRect.left + liveLinkRect.width / 2;
+		    var livePanY = liveLinkRect.top + liveLinkRect.height / 2;
+		    liveTaskLink.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX, clientY:livePanY}));
+		    liveTaskLink.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+120, clientY:livePanY+60}));
+		    liveTaskLink.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+120, clientY:livePanY+60}));
+		    await wait(50);
+		    var livePanFinish = liveSVG.getAttribute('viewBox').split(/\s+/).map(Number);
+		    var expectedLivePanX = livePanStart[0] - 120 * livePanStart[2] / livePanRect.width;
+		    var expectedLivePanY = livePanStart[1] - 60 * livePanStart[3] / livePanRect.height;
+		    if (Math.abs(livePanFinish[0] - expectedLivePanX) > 0.05 || Math.abs(livePanFinish[1] - expectedLivePanY) > 0.05) fail('rapid Live node pan did not use stable screen-space deltas: ' + livePanFinish.join(' '));
+		    liveTaskLink.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, button:0}));
+		    await wait(50);
+		    if (liveID() !== 'automation-a') fail('dragging a Live node activated its Task link');
+		    click('#automation-live [data-automation-task-link]', 'Automation-backed Task node');
+		    await waitFor(function() { return !!document.getElementById('task-detail-content'); }, 'Automation-backed Task detail');
 		    var automationTaskBack = document.getElementById('task-back-btn');
 		    var automationsTaskBack = document.getElementById('task-automations-back-btn');
 		    if (!automationsTaskBack || automationsTaskBack.hidden || automationsTaskBack.textContent.trim() !== 'Automations') fail('Automation-backed Task breadcrumb does not include the Automations portfolio');
@@ -1226,9 +1244,30 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (Math.abs(editParityNodeRect.width - liveParityNodeWidth) > 1 || Math.abs(editParityNodeRect.height - liveParityNodeHeight) > 1) fail('Live and Edit render matching nodes at different sizes: Live=' + liveParityNodeWidth.toFixed(1) + 'x' + liveParityNodeHeight.toFixed(1) + ' in ' + canvasRect.width.toFixed(1) + 'x' + canvasRect.height.toFixed(1) + ' shell ' + liveCanvasShellRect.width.toFixed(1) + 'x' + liveCanvasShellRect.height.toFixed(1) + ' Edit=' + editParityNodeRect.width.toFixed(1) + 'x' + editParityNodeRect.height.toFixed(1) + ' in ' + editParityCanvasRect.width.toFixed(1) + 'x' + editParityCanvasRect.height.toFixed(1) + ' shell ' + editParityShellRect.width.toFixed(1) + 'x' + editParityShellRect.height.toFixed(1));
 	    click('#automation-builder [data-automation-fit]', 'Edit Fit control for visual parity');
 	    var editFitNodeRect = editParityNode.getBoundingClientRect();
-	    if (Math.abs(editFitNodeRect.width - liveFitNodeWidth) > 1 || Math.abs(editFitNodeRect.height - liveFitNodeHeight) > 1) fail('Live and Edit Fit render matching nodes at different sizes: Live=' + liveFitNodeWidth.toFixed(1) + 'x' + liveFitNodeHeight.toFixed(1) + ' Edit=' + editFitNodeRect.width.toFixed(1) + 'x' + editFitNodeRect.height.toFixed(1));
-	    click('#automation-builder [data-automation-add-node-open]', 'Add node after Edit automation');    var editedNodeDialog = document.querySelector('#automation-builder [data-automation-node-dialog]');
-    if (!editedNodeDialog || !editedNodeDialog.open) fail('Add node is inoperable after the Edit automation HTMX transition');
+		    if (Math.abs(editFitNodeRect.width - liveFitNodeWidth) > 1 || Math.abs(editFitNodeRect.height - liveFitNodeHeight) > 1) fail('Live and Edit Fit render matching nodes at different sizes: Live=' + liveFitNodeWidth.toFixed(1) + 'x' + liveFitNodeHeight.toFixed(1) + ' Edit=' + editFitNodeRect.width.toFixed(1) + 'x' + editFitNodeRect.height.toFixed(1));
+		    var editSVG = editedCanvas.querySelector('[data-automation-canvas]');
+		    var editPanStart = editSVG.getAttribute('viewBox').split(/\s+/).map(Number);
+		    var editPanRect = editSVG.getBoundingClientRect();
+		    editSVG.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:42, clientX:editPanRect.left+30, clientY:editPanRect.top+30}));
+		    editSVG.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:42, clientX:editPanRect.left+150, clientY:editPanRect.top+90}));
+		    editSVG.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:42, clientX:editPanRect.left+150, clientY:editPanRect.top+90}));
+		    await wait(50);
+		    var editPanFinish = editSVG.getAttribute('viewBox').split(/\s+/).map(Number);
+		    var expectedEditPanX = editPanStart[0] - 120 * editPanStart[2] / editPanRect.width;
+		    var expectedEditPanY = editPanStart[1] - 60 * editPanStart[3] / editPanRect.height;
+		    if (Math.abs(editPanFinish[0] - expectedEditPanX) > 0.05 || Math.abs(editPanFinish[1] - expectedEditPanY) > 0.05) fail('rapid Edit background pan did not use stable screen-space deltas: ' + editPanFinish.join(' '));
+		    var editNodeGroup = editedCanvas.querySelector('[data-node-key="first_step"]');
+		    var editNodeTransform = editNodeGroup.getAttribute('transform');
+		    var editNodeRect = editNodeGroup.getBoundingClientRect();
+		    var editViewBeforeNodeDrag = editSVG.getAttribute('viewBox');
+		    editNodeGroup.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:43, clientX:editNodeRect.left+30, clientY:editNodeRect.top+30}));
+		    editNodeGroup.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:43, clientX:editNodeRect.left+70, clientY:editNodeRect.top+50}));
+		    editNodeGroup.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:43, clientX:editNodeRect.left+70, clientY:editNodeRect.top+50}));
+		    if (editNodeGroup.getAttribute('transform') === editNodeTransform) fail('dragging an Edit node did not move the node');
+		    if (editSVG.getAttribute('viewBox') !== editViewBeforeNodeDrag) fail('dragging an Edit node panned the canvas');
+		    click('#automation-builder [data-automation-add-node-open]', 'Add node after Edit automation');
+		    var editedNodeDialog = document.querySelector('#automation-builder [data-automation-node-dialog]');
+		    if (!editedNodeDialog || !editedNodeDialog.open) fail('Add node is inoperable after the Edit automation HTMX transition');
     editedNodeDialog.close();
     await report('progress', 'edit-automation-builder-operable');
 
