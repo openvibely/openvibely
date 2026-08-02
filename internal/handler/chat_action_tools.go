@@ -594,6 +594,31 @@ func (h *Handler) executeGitHubForwardPRFeedbackToTasksTool(ctx context.Context,
 	return githubToolJSON(map[string]any{"ok": true, "result": result})
 }
 
+func (h *Handler) resolveGitHubPRTaskForTool(ctx context.Context, params streamingResponseParams, taskID, title string) (*models.Task, *models.Project, error) {
+	resolvedTaskID, err := h.resolveTaskIDForTool(ctx, params, taskID, title)
+	if err != nil {
+		return nil, nil, err
+	}
+	task, err := h.taskRepo.GetByID(ctx, resolvedTaskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if task == nil || task.ProjectID != params.ProjectID {
+		return nil, nil, fmt.Errorf("task not found in current project")
+	}
+	project, err := h.projectRepo.GetByID(ctx, params.ProjectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if project == nil {
+		return nil, nil, fmt.Errorf("current project not found")
+	}
+	if err := requireAutomationGitHubRepo(ctx, params.ProjectID, project); err != nil {
+		return nil, nil, err
+	}
+	return task, project, nil
+}
+
 func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
 	if h.taskPullRequestRepo == nil {
 		return "", fmt.Errorf("task pull request repository unavailable")
@@ -602,25 +627,8 @@ func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params s
 	if err := json.Unmarshal(input, &req); err != nil {
 		return "", err
 	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	task, project, err := h.resolveGitHubPRTaskForTool(ctx, params, req.TaskID, req.Title)
 	if err != nil {
-		return "", err
-	}
-	task, err := h.taskRepo.GetByID(ctx, taskID)
-	if err != nil {
-		return "", err
-	}
-	if task == nil || task.ProjectID != params.ProjectID {
-		return "", fmt.Errorf("task not found in current project")
-	}
-	project, err := h.projectRepo.GetByID(ctx, params.ProjectID)
-	if err != nil {
-		return "", err
-	}
-	if project == nil {
-		return "", fmt.Errorf("current project not found")
-	}
-	if err := requireAutomationGitHubRepo(ctx, params.ProjectID, project); err != nil {
 		return "", err
 	}
 	var issueNumber *int
@@ -652,25 +660,8 @@ func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context,
 	if !req.ConfirmHistoryRewrite {
 		return "", fmt.Errorf("confirm_history_rewrite must be true to replace pull request branch history")
 	}
-	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	task, project, err := h.resolveGitHubPRTaskForTool(ctx, params, req.TaskID, req.Title)
 	if err != nil {
-		return "", err
-	}
-	task, err := h.taskRepo.GetByID(ctx, taskID)
-	if err != nil {
-		return "", err
-	}
-	if task == nil || task.ProjectID != params.ProjectID {
-		return "", fmt.Errorf("task not found in current project")
-	}
-	project, err := h.projectRepo.GetByID(ctx, params.ProjectID)
-	if err != nil {
-		return "", err
-	}
-	if project == nil {
-		return "", fmt.Errorf("current project not found")
-	}
-	if err := requireAutomationGitHubRepo(ctx, params.ProjectID, project); err != nil {
 		return "", err
 	}
 	record, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
