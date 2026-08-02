@@ -63,6 +63,78 @@ func TestAgentLibraryMaintenanceService_ProjectDeclarationsRetainPrecedenceAcros
 	}
 }
 
+func TestAgentLibraryMaintenanceService_ProjectDeclarationRemovalRestoresGlobalPrecedence(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	globalRoot := t.TempDir()
+	projectRoot := t.TempDir()
+	writeAgentRootDeclaration(t, globalRoot, "shared", "Global", "global", "")
+	writeAgentRootDeclaration(t, projectRoot, "shared", "Project", "project", project.ID)
+
+	svc := &AgentLibraryMaintenanceService{agentRepo: agentRepo, agentsRootPath: globalRoot}
+	if err := svc.SyncRootDeclarations(ctx, projectRoot); err != nil {
+		t.Fatalf("cold sync: %v", err)
+	}
+	cold := svc.DeclarationSyncMetrics()
+	if err := os.RemoveAll(filepath.Join(projectRoot, "agents")); err != nil {
+		t.Fatalf("remove project agents directory: %v", err)
+	}
+	if err := svc.SyncRootDeclarations(ctx, projectRoot); err != nil {
+		t.Fatalf("sync after project declaration removal: %v", err)
+	}
+	if got := svc.DeclarationSyncMetrics(); got != cold {
+		t.Fatalf("removal reread unchanged global declaration: before=%#v after=%#v", cold, got)
+	}
+	assertAgentDeclarationState(t, ctx, agentRepo, "shared", "Global", models.AgentScopeGlobal, "")
+}
+
+func TestAgentLibraryMaintenanceService_ProjectDeclarationRekeyRestoresGlobalPrecedence(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	globalRoot := t.TempDir()
+	projectRoot := t.TempDir()
+	writeAgentRootDeclaration(t, globalRoot, "shared", "Global", "global", "")
+	writeAgentRootDeclaration(t, projectRoot, "shared", "Project", "project", project.ID)
+
+	svc := &AgentLibraryMaintenanceService{agentRepo: agentRepo, agentsRootPath: globalRoot}
+	if err := svc.SyncRootDeclarations(ctx, projectRoot); err != nil {
+		t.Fatalf("cold sync: %v", err)
+	}
+	cold := svc.DeclarationSyncMetrics()
+	writeAgentRootDeclarationAt(t, projectRoot, "shared", "project_other", "Project Other", "project", project.ID)
+	if err := svc.SyncRootDeclarations(ctx, projectRoot); err != nil {
+		t.Fatalf("sync after project declaration re-key: %v", err)
+	}
+	if got := svc.DeclarationSyncMetrics(); got.ContentReads != cold.ContentReads+1 || got.Parses != cold.Parses+1 {
+		t.Fatalf("re-key should read/parse only the changed project declaration: before=%#v after=%#v", cold, got)
+	}
+	assertAgentDeclarationState(t, ctx, agentRepo, "shared", "Global", models.AgentScopeGlobal, "")
+	assertAgentDeclarationState(t, ctx, agentRepo, "project_other", "Project Other", models.AgentScopeProject, project.ID)
+}
+
+func assertAgentDeclarationState(t *testing.T, ctx context.Context, agentRepo *repository.AgentRepo, key, name string, scope models.AgentScope, projectID string) {
+	t.Helper()
+	agent, err := agentRepo.GetByKey(ctx, key)
+	if err != nil || agent == nil {
+		t.Fatalf("get agent %s: err=%v agent=%#v", key, err, agent)
+	}
+	if agent.Name != name || agent.Scope != scope || agent.ProjectID != projectID {
+		t.Fatalf("agent %s state: got name=%q scope=%q project_id=%q, want name=%q scope=%q project_id=%q", key, agent.Name, agent.Scope, agent.ProjectID, name, scope, projectID)
+	}
+}
+
 func TestAgentLibraryMaintenanceService_ProtectedRepairUsesCachedDeclarations(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -103,11 +175,16 @@ func TestAgentLibraryMaintenanceService_ProtectedRepairUsesCachedDeclarations(t 
 
 func writeAgentRootDeclaration(t *testing.T, root, key, name, scope, projectID string) {
 	t.Helper()
-	dir := filepath.Join(root, "agents", key)
+	writeAgentRootDeclarationAt(t, root, key, key, name, scope, projectID)
+}
+
+func writeAgentRootDeclarationAt(t *testing.T, root, directoryKey, declarationKey, name, scope, projectID string) {
+	t.Helper()
+	dir := filepath.Join(root, "agents", directoryKey)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir declaration: %v", err)
 	}
-	content := "---\nkind: openvibely.agent_skill\nversion: 1\nagent:\n  key: " + key + "\n  name: " + name + "\n  scope: " + scope + "\n  project_id: " + projectID + "\n  selectable_as_primary: true\n---\n# " + name + "\n"
+	content := "---\nkind: openvibely.agent_skill\nversion: 1\nagent:\n  key: " + declarationKey + "\n  name: " + name + "\n  scope: " + scope + "\n  project_id: " + projectID + "\n  selectable_as_primary: true\n---\n# " + name + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "SKILLS.md"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write declaration: %v", err)
 	}

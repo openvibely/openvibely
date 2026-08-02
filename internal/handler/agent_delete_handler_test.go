@@ -611,6 +611,65 @@ func TestHandler_DeleteAgent_ProjectScopedRemovesCorrectProjectDirectory(t *test
 	}
 }
 
+func TestHandler_ListAgents_RemovedProjectOverrideDoesNotRematerializeStaleState(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	globalRoot := t.TempDir()
+	writeAgentRootSKILLSmd(t, globalRoot, "shared", "Global Shared", "global declaration")
+
+	projectRepoDir := t.TempDir()
+	project := &models.Project{Name: "Project", RepoPath: projectRepoDir}
+	if err := h.projectSvc.Create(t.Context(), project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	projectRoot := filepath.Join(projectRepoDir, ".openvibely")
+	projectDir := filepath.Join(projectRoot, "agents", "shared")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project declaration: %v", err)
+	}
+	projectDeclaration := "---\nkind: openvibely.agent_skill\nversion: 1\nagent:\n  key: shared\n  name: Project Shared\n  scope: project\n  project_id: " + project.ID + "\n  selectable_as_primary: true\n---\n# Project Shared\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "SKILLS.md"), []byte(projectDeclaration), 0o644); err != nil {
+		t.Fatalf("write project declaration: %v", err)
+	}
+
+	maintenanceSvc := service.NewAgentLibraryMaintenanceService(nil, nil, agentRepo)
+	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	maintenanceSvc.SetAgentsRootPath(globalRoot)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(globalRoot)
+	h.SetAgentLibraryMaintenanceService(maintenanceSvc)
+
+	list := func() *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/agents?project_id="+project.ID, nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /agents status %d: %s", rec.Code, rec.Body.String())
+		}
+		return rec
+	}
+	if body := list().Body.String(); !strings.Contains(body, `data-agent-name="Project Shared"`) {
+		t.Fatalf("project declaration was not initially rendered: %s", truncateBody(body, 1000))
+	}
+	if err := os.RemoveAll(projectDir); err != nil {
+		t.Fatalf("remove project declaration: %v", err)
+	}
+	if body := list().Body.String(); !strings.Contains(body, `data-agent-name="Global Shared"`) || strings.Contains(body, `data-agent-name="Project Shared"`) {
+		t.Fatalf("removed project override did not restore rendered global state: %s", truncateBody(body, 1000))
+	}
+	agent, err := agentRepo.GetByKey(t.Context(), "shared")
+	if err != nil || agent == nil || agent.Scope != models.AgentScopeGlobal || agent.ProjectID != "" {
+		t.Fatalf("removed project override left stale database state: err=%v agent=%#v", err, agent)
+	}
+	if _, err := os.Stat(projectDir); !os.IsNotExist(err) {
+		t.Fatalf("ListAgents rematerialized removed project declaration: stat err=%v", err)
+	}
+}
+
 // TestHandler_DeleteAgent_ProjectScopedUsesAgentProjectID verifies that when a
 // project-scoped agent has ProjectID set, deleting it without supplying a
 // ?project_id query string still removes the agent directory from the correct

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,12 @@ type declarationFingerprint struct {
 type declarationCacheEntry struct {
 	fingerprint declarationFingerprint
 	declaration *agentlibrary.SkillDeclaration
+}
+
+type declarationRootSyncResult struct {
+	changed   bool
+	active    map[string]struct{}
+	displaced map[string]struct{}
 }
 
 type AgentLibraryMaintenanceService struct {
@@ -112,35 +119,46 @@ func (s *AgentLibraryMaintenanceService) syncRootDeclarations(ctx context.Contex
 	}
 	applier := agentlibrary.NewRepoApplier(s.agentRepo, hookStore)
 	projectChanged := !s.activeProjectRootKnown || s.activeProjectRoot != projectRoot
-	changed, err := s.syncRootDeclarationsFromRoot(ctx, s.agentsRootPath, applier, projectChanged)
+	globalResult, err := s.syncRootDeclarationsFromRoot(ctx, s.agentsRootPath, applier, projectChanged)
 	if err != nil {
-		return changed, err
+		return globalResult.changed, err
 	}
+	changed := globalResult.changed
 	if projectRoot != "" {
-		rootChanged, syncErr := s.syncRootDeclarationsFromRoot(ctx, projectRoot, applier, projectChanged || changed)
+		projectResult, syncErr := s.syncRootDeclarationsFromRoot(ctx, projectRoot, applier, projectChanged || changed)
 		if syncErr != nil {
 			return changed, syncErr
 		}
-		changed = changed || rootChanged
+		changed = changed || projectResult.changed
+		for key := range projectResult.active {
+			delete(projectResult.displaced, key)
+		}
+		restored, restoreErr := s.applyCachedGlobalDeclarations(ctx, applier, projectResult.displaced)
+		if restoreErr != nil {
+			return changed, restoreErr
+		}
+		changed = changed || restored
 	}
 	s.activeProjectRoot = projectRoot
 	s.activeProjectRootKnown = true
 	return changed, nil
 }
 
-func (s *AgentLibraryMaintenanceService) syncRootDeclarationsFromRoot(ctx context.Context, root string, applier *agentlibrary.RepoApplier, forceCached bool) (bool, error) {
+func (s *AgentLibraryMaintenanceService) syncRootDeclarationsFromRoot(ctx context.Context, root string, applier *agentlibrary.RepoApplier, forceCached bool) (declarationRootSyncResult, error) {
+	result := declarationRootSyncResult{active: map[string]struct{}{}, displaced: map[string]struct{}{}}
 	if root == "" || applier == nil {
-		return false, nil
+		return result, nil
 	}
 	agentsDir := filepath.Join(root, "agents")
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, nil
+			s.pruneMissingDeclarationPaths(agentsDir, nil, result.displaced)
+			return result, nil
 		}
-		return false, fmt.Errorf("read agents root %s: %w", agentsDir, err)
+		return result, fmt.Errorf("read agents root %s: %w", agentsDir, err)
 	}
-	changed := false
+	currentPaths := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -149,54 +167,99 @@ func (s *AgentLibraryMaintenanceService) syncRootDeclarationsFromRoot(ctx contex
 		info, err := os.Stat(path)
 		if err != nil {
 			if os.IsNotExist(err) {
-				delete(s.declarationCache, path)
 				continue
 			}
-			return changed, fmt.Errorf("stat agent root declaration %s: %w", path, err)
+			return result, fmt.Errorf("stat agent root declaration %s: %w", path, err)
 		}
+		currentPaths[path] = struct{}{}
 		fingerprint := fingerprintDeclaration(info)
-		if cached, ok := s.declarationCache[path]; ok && cached.fingerprint == fingerprint {
+		cached, cachedOK := s.declarationCache[path]
+		if cachedOK && cached.fingerprint == fingerprint {
+			if cached.declaration != nil {
+				result.active[cached.declaration.Agent.Key] = struct{}{}
+			}
 			if !forceCached || cached.declaration == nil {
 				continue
 			}
 			applied, applyErr := applyCachedRootDeclaration(ctx, applier, cached.declaration, path)
 			if applyErr != nil {
-				return changed, applyErr
+				return result, applyErr
 			}
-			changed = changed || applied
+			result.changed = result.changed || applied
 			continue
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
-				delete(s.declarationCache, path)
 				continue
 			}
-			return changed, fmt.Errorf("read agent root declaration %s: %w", path, err)
+			return result, fmt.Errorf("read agent root declaration %s: %w", path, err)
 		}
 		s.declarationReads.Add(1)
 		decl, body, err := agentlibrary.ParseDeclaration(string(data))
 		s.declarationParses.Add(1)
-		if err != nil {
-			s.declarationCache[path] = declarationCacheEntry{fingerprint: fingerprint}
-			continue
-		}
-		if !decl.IsAgentRootDeclaration() || decl.Agent.Key == "" {
-			s.declarationCache[path] = declarationCacheEntry{fingerprint: fingerprint}
-			continue
-		}
-		if decl.Agent.Key == "skill_curator" || decl.Agent.Key == "memory_curator" || decl.Agent.Key == "goal" {
+		if err != nil || !decl.IsAgentRootDeclaration() || decl.Agent.Key == "" || decl.Agent.Key == "skill_curator" || decl.Agent.Key == "memory_curator" || decl.Agent.Key == "goal" {
+			if cachedOK && cached.declaration != nil {
+				result.displaced[cached.declaration.Agent.Key] = struct{}{}
+			}
 			s.declarationCache[path] = declarationCacheEntry{fingerprint: fingerprint}
 			continue
 		}
 		if decl.Agent.SystemPrompt == "" {
 			decl.Agent.SystemPrompt = strings.TrimSpace(body)
 		}
+		if cachedOK && cached.declaration != nil && cached.declaration.Agent.Key != decl.Agent.Key {
+			result.displaced[cached.declaration.Agent.Key] = struct{}{}
+		}
+		result.active[decl.Agent.Key] = struct{}{}
 		applied, applyErr := applyCachedRootDeclaration(ctx, applier, decl, path)
 		if applyErr != nil {
-			return changed, applyErr
+			return result, applyErr
 		}
 		s.declarationCache[path] = declarationCacheEntry{fingerprint: fingerprint, declaration: decl}
+		result.changed = result.changed || applied
+	}
+	s.pruneMissingDeclarationPaths(agentsDir, currentPaths, result.displaced)
+	return result, nil
+}
+
+func (s *AgentLibraryMaintenanceService) pruneMissingDeclarationPaths(agentsDir string, currentPaths map[string]struct{}, displaced map[string]struct{}) {
+	prefix := filepath.Clean(agentsDir) + string(os.PathSeparator)
+	for path, cached := range s.declarationCache {
+		if !strings.HasPrefix(filepath.Clean(path), prefix) {
+			continue
+		}
+		if _, exists := currentPaths[path]; exists {
+			continue
+		}
+		if cached.declaration != nil {
+			displaced[cached.declaration.Agent.Key] = struct{}{}
+		}
+		delete(s.declarationCache, path)
+	}
+}
+
+func (s *AgentLibraryMaintenanceService) applyCachedGlobalDeclarations(ctx context.Context, applier *agentlibrary.RepoApplier, keys map[string]struct{}) (bool, error) {
+	if len(keys) == 0 || s.agentsRootPath == "" {
+		return false, nil
+	}
+	prefix := filepath.Clean(filepath.Join(s.agentsRootPath, "agents")) + string(os.PathSeparator)
+	paths := make([]string, 0)
+	for path, cached := range s.declarationCache {
+		if cached.declaration == nil || !strings.HasPrefix(filepath.Clean(path), prefix) {
+			continue
+		}
+		if _, wanted := keys[cached.declaration.Agent.Key]; wanted {
+			paths = append(paths, path)
+		}
+	}
+	slices.Sort(paths)
+	changed := false
+	for _, path := range paths {
+		applied, err := applyCachedRootDeclaration(ctx, applier, s.declarationCache[path].declaration, path)
+		if err != nil {
+			return changed, err
+		}
 		changed = changed || applied
 	}
 	return changed, nil
