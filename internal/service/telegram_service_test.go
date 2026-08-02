@@ -440,6 +440,77 @@ func TestTelegramPollingBatchRetryDoesNotDuplicateSuccessfulPrefix(t *testing.T)
 	assert.Equal(t, map[int]int{100: 1, 101: 2, 102: 1}, attempts)
 }
 
+func TestTelegramServiceSenderChatUpdateIsTerminallyIgnored(t *testing.T) {
+	authorizationChecked := false
+	svc := &TelegramService{
+		telegramAuthRepo: telegramAuthorizationStoreStub{
+			isAuthorized: func(context.Context, string, int64, string) (bool, error) {
+				authorizationChecked = true
+				return true, nil
+			},
+			isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
+				authorizationChecked = true
+				return true, nil
+			},
+		},
+		userProjects: make(map[int64]string),
+	}
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		From:       nil,
+		SenderChat: &tgbotapi.Chat{ID: -100123, Type: "channel", Title: "Announcements"},
+		Chat:       &tgbotapi.Chat{ID: -100123, Type: "channel", Title: "Announcements"},
+		Text:       "posted as the channel",
+	}}
+
+	var acknowledged bool
+	require.NotPanics(t, func() {
+		acknowledged = svc.handleTelegramUpdate(context.Background(), update)
+	})
+	assert.True(t, acknowledged, "unsupported sender-chat updates should be terminally acknowledged")
+	assert.False(t, authorizationChecked, "sender-chat identity must not be treated as an authorized user")
+}
+
+func TestTelegramPollerContinuesAfterSenderChatUpdate(t *testing.T) {
+	svc, projectRepo, _ := newTestTelegramService(t)
+	project := &models.Project{Name: "Telegram sender-chat poller", IsDefault: true}
+	require.NoError(t, projectRepo.Create(context.Background(), project))
+
+	client := &telegramStubClient{
+		blockUpdates:   make(chan struct{}),
+		releaseUpdates: make(chan struct{}),
+		getUpdatesResponse: `{"ok":true,"result":[` +
+			`{"update_id":100,"message":{"message_id":1,"sender_chat":{"id":-100123,"type":"channel","title":"Announcements"},"chat":{"id":-100123,"type":"channel","title":"Announcements"},"date":1,"text":"posted as the channel"}},` +
+			`{"update_id":101,"message":{"message_id":2,"from":{"id":7,"is_bot":false,"first_name":"User","username":"allowed"},"chat":{"id":7,"type":"private"},"date":1,"text":"/start","entities":[{"type":"bot_command","offset":0,"length":6}]}}]}`,
+	}
+	bot, err := tgbotapi.NewBotAPIWithClient("test-token", tgbotapi.APIEndpoint, client)
+	require.NoError(t, err)
+	svc.bot = bot
+	sent := make(chan string, 1)
+	svc.sendMessageFunc = func(_ int64, text string) { sent <- text }
+	t.Cleanup(func() {
+		client.unblock()
+		svc.lifecycleOpMu.Lock()
+		require.True(t, svc.stopLocked(true))
+		svc.lifecycleOpMu.Unlock()
+	})
+
+	svc.Start()
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&client.activeUpdates) == 1
+	}, time.Second, 10*time.Millisecond)
+	client.releaseOne()
+
+	select {
+	case response := <-sent:
+		assert.Contains(t, response, "Welcome to *OpenVibely*!", "the ordinary user update after the sender-chat update must be processed")
+	case <-time.After(time.Second):
+		t.Fatal("ordinary user update was not processed after sender-chat update")
+	}
+	require.Eventually(t, func() bool {
+		return svc.IsRunning() && atomic.LoadInt32(&client.activeUpdates) == 1
+	}, time.Second, 10*time.Millisecond, "poller should continue into the next getUpdates call")
+}
+
 func TestTelegramChatHandoffDoesNotWaitForModelCompletion(t *testing.T) {
 	svc, projectRepo, _ := newTestTelegramService(t)
 	project := &models.Project{Name: "Telegram durable handoff", IsDefault: true}

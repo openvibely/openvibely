@@ -449,6 +449,14 @@ func (s *TelegramService) handleTelegramUpdate(ctx context.Context, update tgbot
 	if update.Message == nil {
 		return true
 	}
+	if update.Message.From == nil {
+		if update.Message.SenderChat != nil {
+			applog.Debugf("[telegram] ignoring sender-chat update update_id=%d sender_chat_id=%d", update.UpdateID, update.Message.SenderChat.ID)
+		} else {
+			applog.Debugf("[telegram] ignoring senderless update update_id=%d", update.UpdateID)
+		}
+		return true
+	}
 
 	// Check authorization before processing any message (including commands)
 	userID := update.Message.From.ID
