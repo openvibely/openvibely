@@ -86,9 +86,10 @@ docker-build-runtime:
 docker-build-agent:
 	$(DOCKER) build -t $(AGENT_IMAGE) -f Dockerfile-ext .
 
-# Verify the coding toolchain through the image's normal non-root entrypoint.
+# Verify the image is configured non-root and its coding toolchain works as that user.
 docker-check-agent-tools:
-	$(DOCKER) run --rm $(AGENT_IMAGE) bash -lc 'set -euo pipefail; go version; node --version; npm --version; corepack --version; tsc --version; python3 --version; python3 -m pip --version; venv="$$(mktemp -d)"; python3 -m venv "$$venv"; "$$venv/bin/python" --version; rm -rf "$$venv"; rustc --version; cargo --version; java -version; javac -version; ruby --version; git --version; rg --version | head -n 1; make --version | head -n 1; gcc --version | head -n 1; g++ --version | head -n 1; pkg-config --version'
+	@test "$$($(DOCKER) image inspect --format '{{.Config.User}}' $(AGENT_IMAGE))" = "10001:10001"
+	$(DOCKER) run --rm $(AGENT_IMAGE) bash -lc 'set -euo pipefail; test "$$(id -u)" = 10001; test "$$(id -g)" = 10001; test -w /data; go version; node --version; npm --version; corepack --version; tsc --version; python3 --version; python3 -m pip --version; venv="$$(mktemp -d)"; python3 -m venv "$$venv"; "$$venv/bin/python" --version; rm -rf "$$venv"; rustc --version; cargo --version; java -version; javac -version; ruby --version; git --version; rg --version | head -n 1; make --version | head -n 1; gcc --version | head -n 1; g++ --version | head -n 1; pkg-config --version'
 
 # Clean build artifacts
 clean:

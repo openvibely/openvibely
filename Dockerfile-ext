@@ -112,15 +112,12 @@ RUN printf '%s\n' \
       '#!/usr/bin/env bash' \
       'set -euo pipefail' \
       '' \
-      'mkdir -p /data /tmp/openvibely-runtime /home/openvibely/go' \
-      'chown -R openvibely:openvibely /tmp/openvibely-runtime /home/openvibely' \
-      'chmod 700 /tmp/openvibely-runtime' \
-      '' \
-      'if [ "$(stat -c "%u:%g" /data)" != "10001:10001" ]; then' \
-      '  chown -R openvibely:openvibely /data' \
+      'if [ ! -w /data ]; then' \
+      '  echo "error: /data must be writable by UID/GID 10001:10001; fix the mounted directory ownership on the host" >&2' \
+      '  exit 1' \
       'fi' \
       '' \
-      'exec setpriv --reuid=10001 --regid=10001 --init-groups "$@"' \
+      'exec "$@"' \
       > /usr/local/bin/openvibely-entrypoint \
  && chmod +x /usr/local/bin/openvibely-entrypoint
 
@@ -143,6 +140,8 @@ EXPOSE 3001
 VOLUME ["/data"]
 
 WORKDIR /data
+
+USER 10001:10001
 
 ENTRYPOINT ["/usr/local/bin/openvibely-entrypoint"]
 CMD ["/openvibely"]

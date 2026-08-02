@@ -203,7 +203,7 @@ make docker-build-agent
 make docker-check-agent-tools
 ```
 
-The coding image runs OpenVibely as the non-root `openvibely` user and uses `/data` for persistent application state, just like the production image. For persistent runtime state, deploy with a durable data volume and configure runtime paths through environment variables. See [`docs/environment.md`](./docs/environment.md) and <a href="https://docs.openvibely.ai/deployment" target="_blank" rel="noopener noreferrer">Deployment</a>.
+The coding image is configured to run entirely as UID/GID `10001:10001`; it does not start as root or change mounted-file ownership at startup. `/data` stores persistent application state and must be writable by that user. Fresh Docker named volumes inherit the image's prepared ownership. Before using a host bind mount, prepare it explicitly, for example `sudo chown -R 10001:10001 /host/openvibely-data`; startup fails with a clear error if the mount is not writable. Configure runtime paths through environment variables. See [`docs/environment.md`](./docs/environment.md) and <a href="https://docs.openvibely.ai/deployment" target="_blank" rel="noopener noreferrer">Deployment</a>.
 
 ## OAuth by Mode
 
