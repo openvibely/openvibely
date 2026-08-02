@@ -189,20 +189,18 @@ See **Assets** below for the complete file list and [SHA256SUMS](${REPO_URL}/rel
 
 ## Docker
 
+If upgrading a volume created by an older scratch-based image, back it up and run the ownership migration before startup:
+
 \`\`\`bash
 docker pull openvibely/openvibely:${VERSION}
-docker run -d -p 3001:3001 -v openvibely_data:/data openvibely/openvibely:${VERSION}
-\`\`\`
-
-Persistent data (database, repos, uploads) is stored in the \`/data\` volume. Mount a host path or named volume to preserve it across upgrades.
-
-The image runs as UID/GID \`10001:10001\`. When upgrading a volume created by an older scratch-based image, back it up and migrate ownership once before startup:
-
-\`\`\`bash
+# Only for an existing volume from an older scratch-based release:
 docker run --rm --user 0 --entrypoint chown \\
   -v openvibely_data:/data openvibely/openvibely:${VERSION} \\
   -R 10001:10001 /data
+docker run -d -p 3001:3001 -v openvibely_data:/data openvibely/openvibely:${VERSION}
 \`\`\`
+
+Persistent data (database, repos, uploads) is stored in the \`/data\` volume. The image runs as UID/GID \`10001:10001\`; prepare bind mounts for that user. The ownership command is only needed for an existing volume created by an older scratch-based image.
 
 ## Known Limitations
 

@@ -202,17 +202,7 @@ make docker-build
 make docker-check-tools
 ```
 
-The image runs entirely as UID/GID `10001:10001`; it does not start as root or change mounted-file ownership at startup. `/data` stores persistent application state and must be writable by that user. Fresh Docker named volumes inherit the image's prepared ownership. Before using a host bind mount, prepare it explicitly, for example `sudo chown -R 10001:10001 /host/openvibely-data`; startup fails with a clear error if the mount is not writable.
-
-Older scratch-based releases ran as root. Before attaching an existing named volume from one of those releases, back it up and migrate its ownership once with the new image:
-
-```bash
-docker run --rm --user 0 --entrypoint chown \
-  -v openvibely_data:/data openvibely/openvibely:<version> \
-  -R 10001:10001 /data
-```
-
-Replace `openvibely_data` and `<version>` with the volume name and image version used by the deployment. Configure runtime paths through environment variables. See [`docs/environment.md`](./docs/environment.md) and <a href="https://docs.openvibely.ai/deployment" target="_blank" rel="noopener noreferrer">Deployment</a>.
+The image runs as UID/GID `10001:10001`, so mounted `/data` storage must be writable by that user. See <a href="https://docs.openvibely.ai/deployment" target="_blank" rel="noopener noreferrer">Deployment</a> for storage setup and upgrade guidance, and [`docs/environment.md`](./docs/environment.md) for runtime configuration.
 
 ## OAuth by Mode
 
