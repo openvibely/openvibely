@@ -252,7 +252,6 @@ func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 	form := url.Values{}
 	form.Set("project_id", project.ID)
 	form.Set("discord_user_id", "12345")
-	form.Set("display_name", "Alice")
 	req := httptest.NewRequest(http.MethodPost, "/channels/discord/authorized-users", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -261,8 +260,8 @@ func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected add status 200, got %d %q", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "Alice") || !strings.Contains(rec.Body.String(), "12345") {
-		t.Fatalf("expected added user in response: %q", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), ">12345<") || !strings.Contains(rec.Body.String(), "ID: 12345") {
+		t.Fatalf("expected numeric ID display-name default in response: %q", rec.Body.String())
 	}
 
 	invalidForm := url.Values{}
