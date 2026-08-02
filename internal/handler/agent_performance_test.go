@@ -100,48 +100,77 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 		b.Fatalf("warm ListAgents executed %d SQLite writes, want 0; statements: %q", warmWrites, warmStatements)
 	}
 
-	b.Run("baseline", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			c, _ := request()
-			uncached := service.NewAgentLibraryMaintenanceService(nil, nil, agentRepo)
-			uncached.SetLifecycleRepo(lifecycleRepo)
-			uncached.SetAgentsRootPath(globalRoot)
-			if err := uncached.SyncRootDeclarations(c.Request().Context(), projectRoot); err != nil {
-				b.Fatal(err)
-			}
-			agents, err := agentRepo.List(c.Request().Context())
-			if err != nil {
-				b.Fatal(err)
-			}
-			for j := range agents {
-				if agents[j].GeneratedStatus != models.AgentStatusProtected {
-					if err := agentRepo.Update(c.Request().Context(), &agents[j]); err != nil {
-						b.Fatal(err)
-					}
-					hooks, err := lifecycleRepo.HooksByAgent(c.Request().Context(), agents[j].ID)
-					if err != nil {
-						b.Fatal(err)
-					}
-					for k := range hooks {
-						if err := lifecycleRepo.UpdateHook(c.Request().Context(), &hooks[k]); err != nil {
-							b.Fatal(err)
-						}
-					}
+	baselineRefresh := func(c echo.Context) error {
+		// The historical reconciliation performed one hook lookup per declaration
+		// and unconditionally rewrote ordinary agent and hook rows. Keep lifecycle
+		// reconciliation disabled in the current service so the frozen legacy
+		// writes below do not add a second hook lookup.
+		uncached := service.NewAgentLibraryMaintenanceService(nil, nil, agentRepo)
+		uncached.SetAgentsRootPath(globalRoot)
+		if err := uncached.SyncRootDeclarations(c.Request().Context(), projectRoot); err != nil {
+			return err
+		}
+		agents, err := agentRepo.List(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		for j := range agents {
+			protected := agents[j].GeneratedStatus == models.AgentStatusProtected
+			if !protected {
+				if err := agentRepo.Update(c.Request().Context(), &agents[j]); err != nil {
+					return err
 				}
 			}
-			if _, err := h.materializeDBAgentsToDisk(c, agents); err != nil {
-				b.Fatal(err)
-			}
-			agents, err = agentRepo.List(c.Request().Context())
+			hooks, err := lifecycleRepo.HooksByAgent(c.Request().Context(), agents[j].ID)
 			if err != nil {
-				b.Fatal(err)
+				return err
 			}
-			configs, err := llmConfigRepo.List(c.Request().Context())
-			if err != nil {
-				b.Fatal(err)
+			if protected {
+				continue
 			}
-			if err := render(c, http.StatusOK, pages.AgentsContent(agents, buildAgentModelOptions(configs))); err != nil {
+			for k := range hooks {
+				if err := lifecycleRepo.UpdateHook(c.Request().Context(), &hooks[k]); err != nil {
+					return err
+				}
+			}
+		}
+		if _, err := h.materializeDBAgentsToDisk(c, agents); err != nil {
+			return err
+		}
+		agents, err = agentRepo.List(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		configs, err := llmConfigRepo.List(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		return render(c, http.StatusOK, pages.AgentsContent(agents, buildAgentModelOptions(configs)))
+	}
+
+	statementCounter.Reset()
+	statementCounter.SetEnabled(true)
+	baselineContext, _ := request()
+	if err := baselineRefresh(baselineContext); err != nil {
+		b.Fatal(err)
+	}
+	statementCounter.SetEnabled(false)
+	baselineStatements := statementCounter.Statements()
+	baselineHookLookups := countSQLStatements(baselineStatements, "SELECT ", "FROM agent_lifecycle_hooks")
+	baselineAgents, err := agentRepo.List(context.Background())
+	if err != nil {
+		b.Fatal(err)
+	}
+	if baselineHookLookups != len(baselineAgents) {
+		b.Fatalf("baseline executed %d lifecycle-hook lookups for %d agents, want exactly one per agent; statements: %q", baselineHookLookups, len(baselineAgents), baselineStatements)
+	}
+
+	b.Run("baseline", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ReportMetric(float64(baselineHookLookups), "hook-lookups/op")
+		for i := 0; i < b.N; i++ {
+			c, _ := request()
+			if err := baselineRefresh(c); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -171,44 +200,7 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 				if kind == "candidate" {
 					return h.ListAgents(c)
 				}
-				uncached := service.NewAgentLibraryMaintenanceService(nil, nil, agentRepo)
-				uncached.SetLifecycleRepo(lifecycleRepo)
-				uncached.SetAgentsRootPath(globalRoot)
-				if err := uncached.SyncRootDeclarations(c.Request().Context(), projectRoot); err != nil {
-					return err
-				}
-				agents, err := agentRepo.List(c.Request().Context())
-				if err != nil {
-					return err
-				}
-				for j := range agents {
-					if agents[j].GeneratedStatus != models.AgentStatusProtected {
-						if err := agentRepo.Update(c.Request().Context(), &agents[j]); err != nil {
-							return err
-						}
-						hooks, err := lifecycleRepo.HooksByAgent(c.Request().Context(), agents[j].ID)
-						if err != nil {
-							return err
-						}
-						for k := range hooks {
-							if err := lifecycleRepo.UpdateHook(c.Request().Context(), &hooks[k]); err != nil {
-								return err
-							}
-						}
-					}
-				}
-				if _, err := h.materializeDBAgentsToDisk(c, agents); err != nil {
-					return err
-				}
-				agents, err = agentRepo.List(c.Request().Context())
-				if err != nil {
-					return err
-				}
-				configs, err := llmConfigRepo.List(c.Request().Context())
-				if err != nil {
-					return err
-				}
-				return render(c, http.StatusOK, pages.AgentsContent(agents, buildAgentModelOptions(configs)))
+				return baselineRefresh(c)
 			}
 
 			const refreshWorkers = 10

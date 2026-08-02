@@ -113,6 +113,43 @@ func writeAgentRootDeclaration(t *testing.T, root, key, name, scope, projectID s
 	}
 }
 
+func TestAgentLibraryMaintenanceService_SyncRootDeclarationsWithoutLifecycleRepo(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	root := t.TempDir()
+	dir := filepath.Join(root, "agents", "hooked")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir declaration: %v", err)
+	}
+	declaration := `---
+kind: openvibely.agent_skill
+version: 1
+agent:
+  key: hooked
+  name: Hooked
+  scope: global
+  selectable_as_primary: true
+lifecycle_hooks:
+  after_complete:
+    skill: validate_change
+---
+# Hooked
+`
+	if err := os.WriteFile(filepath.Join(dir, "SKILLS.md"), []byte(declaration), 0o644); err != nil {
+		t.Fatalf("write declaration: %v", err)
+	}
+
+	svc := &AgentLibraryMaintenanceService{agentRepo: agentRepo, agentsRootPath: root}
+	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
+		t.Fatalf("sync without lifecycle repo: %v", err)
+	}
+	agent, err := agentRepo.GetByKey(ctx, "hooked")
+	if err != nil || agent == nil {
+		t.Fatalf("declaration was not applied without lifecycle repo: err=%v agent=%#v", err, agent)
+	}
+}
+
 func TestAgentLibraryMaintenanceService_WarmSyncSkipsUnchangedDeclarationContent(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

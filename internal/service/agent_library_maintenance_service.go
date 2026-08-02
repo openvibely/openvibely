@@ -106,7 +106,11 @@ func (s *AgentLibraryMaintenanceService) syncRootDeclarations(ctx context.Contex
 	if s.declarationCache == nil {
 		s.declarationCache = make(map[string]declarationCacheEntry)
 	}
-	applier := agentlibrary.NewRepoApplier(s.agentRepo, s.lifecycleRepo)
+	var hookStore agentlibrary.HookStore
+	if s.lifecycleRepo != nil {
+		hookStore = s.lifecycleRepo
+	}
+	applier := agentlibrary.NewRepoApplier(s.agentRepo, hookStore)
 	projectChanged := !s.activeProjectRootKnown || s.activeProjectRoot != projectRoot
 	changed, err := s.syncRootDeclarationsFromRoot(ctx, s.agentsRootPath, applier, projectChanged)
 	if err != nil {
