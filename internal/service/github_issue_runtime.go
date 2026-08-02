@@ -191,7 +191,16 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					return "", err
 				}
 				if dedupClaim.IssueNumber > 0 {
-					issue, projectionErr := repairAutomationGitHubIssueProjection(opts, repo, req.Title, dedupClaim)
+					issue := githubIssueFromCanonicalResource(githubIssueResourceID(repo, dedupClaim.IssueNumber))
+					if len(requiredLabels) > 0 {
+						issue, err = ensureReusedGitHubIssueLabels(ctx, opts.GitHub, repo, dedupClaim.IssueNumber, requiredLabels)
+						if err != nil {
+							_ = releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey)
+							return "", fmt.Errorf("%w: verifying reused GitHub issue #%d labels: %v",
+								repository.ErrAutomationExternalReconciliation, dedupClaim.IssueNumber, err)
+						}
+					}
+					_, projectionErr := repairAutomationGitHubIssueProjection(opts, repo, req.Title, dedupClaim)
 					if projectionErr != nil {
 						_ = releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey)
 						return "", fmt.Errorf("%w: repairing created GitHub issue #%d projection: %v", repository.ErrAutomationExternalReconciliation, dedupClaim.IssueNumber, projectionErr)
@@ -412,6 +421,34 @@ func missingGitHubIssueLabels(required, actual []string) []string {
 		}
 	}
 	return missing
+}
+
+func ensureReusedGitHubIssueLabels(ctx context.Context, provider GitHubIssueRuntimeProvider, repo *GitHubRepoRef, issueNumber int, requiredLabels []string) (*GitHubIssue, error) {
+	issue, err := provider.GetIssue(ctx, repo, issueNumber)
+	if err != nil {
+		return nil, fmt.Errorf("reading reused GitHub issue: %w", err)
+	}
+	if issue == nil || issue.Number != issueNumber {
+		return nil, errors.New("reused GitHub issue could not be confirmed")
+	}
+	missing := missingGitHubIssueLabels(requiredLabels, issue.Labels)
+	if len(missing) == 0 {
+		return issue, nil
+	}
+	if err := provider.AddLabelsToIssue(ctx, repo, issueNumber, missing); err != nil {
+		return nil, fmt.Errorf("restoring required category labels: %w", err)
+	}
+	issue, err = provider.GetIssue(ctx, repo, issueNumber)
+	if err != nil {
+		return nil, fmt.Errorf("confirming reused GitHub issue labels: %w", err)
+	}
+	if issue == nil || issue.Number != issueNumber {
+		return nil, errors.New("reused GitHub issue could not be confirmed after label repair")
+	}
+	if missing = missingGitHubIssueLabels(requiredLabels, issue.Labels); len(missing) > 0 {
+		return nil, fmt.Errorf("reused GitHub issue is missing required category labels after repair: %s", strings.Join(missing, ", "))
+	}
+	return issue, nil
 }
 
 func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, req *githubCreateIssueRuntimeInput) (bool, error) {

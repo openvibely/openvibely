@@ -3777,6 +3777,8 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 }
 
 type fakeGitHubIssueRuntimeProvider struct {
+	issueMu              sync.Mutex
+	issues               map[int]GitHubIssue
 	resolveRepoFn        func(context.Context, string, string) (*GitHubRepoRef, error)
 	createIssueFn        func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
 	ensureIssueLabelsFn  func(context.Context, *GitHubRepoRef, []string) error
@@ -3849,21 +3851,42 @@ func (f *fakeGitHubIssueRuntimeProvider) EnsureIssueLabels(ctx context.Context, 
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) CreateIssue(ctx context.Context, repo *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+	var issue *GitHubIssue
+	var err error
 	if f.createIssueFn != nil {
-		issue, err := f.createIssueFn(ctx, repo, req)
+		issue, err = f.createIssueFn(ctx, repo, req)
 		if issue != nil && issue.Labels == nil {
 			issue.Labels = append([]string(nil), req.Labels...)
 		}
-		return issue, err
+	} else {
+		issue = &GitHubIssue{Number: 1, URL: "https://github.com/openvibely/openvibely/issues/1", Title: req.Title, Labels: req.Labels}
 	}
-	return &GitHubIssue{Number: 1, URL: "https://github.com/openvibely/openvibely/issues/1", Title: req.Title, Labels: req.Labels}, nil
+	if issue != nil && err == nil {
+		f.issueMu.Lock()
+		if f.issues == nil {
+			f.issues = make(map[int]GitHubIssue)
+		}
+		f.issues[issue.Number] = *issue
+		f.issueMu.Unlock()
+	}
+	return issue, err
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {
 	if f.getIssueFn != nil {
 		return f.getIssueFn(ctx, repo, issueNumber)
 	}
-	return &GitHubIssue{Number: issueNumber, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/issues/%d", issueNumber), Title: "Issue"}, nil
+	f.issueMu.Lock()
+	issue, ok := f.issues[issueNumber]
+	if !ok {
+		issue = GitHubIssue{Number: issueNumber, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/issues/%d", issueNumber), Title: "Issue"}
+		if f.issues == nil {
+			f.issues = make(map[int]GitHubIssue)
+		}
+		f.issues[issueNumber] = issue
+	}
+	f.issueMu.Unlock()
+	return &issue, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error) {
@@ -3921,6 +3944,13 @@ func (f *fakeGitHubIssueRuntimeProvider) AddLabelsToIssue(ctx context.Context, r
 			return fmt.Errorf("github issue labels must not use openvibely: prefix: %s", strings.TrimSpace(label))
 		}
 	}
+	f.issueMu.Lock()
+	issue, ok := f.issues[issueNumber]
+	if ok {
+		issue.Labels = normalizeDraftReferences(append(issue.Labels, labels...))
+		f.issues[issueNumber] = issue
+	}
+	f.issueMu.Unlock()
 	return nil
 }
 

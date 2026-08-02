@@ -2198,7 +2198,8 @@ func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *te
 
 	createStarted := make(chan struct{})
 	releaseCreate := make(chan struct{})
-	var createCalls atomic.Int32
+	var createCalls, getIssueCalls, addLabelCalls atomic.Int32
+	var issueHasBugLabel, denyLabelRepair, omitRepairedLabel atomic.Bool
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
 			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
@@ -2208,7 +2209,29 @@ func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *te
 				close(createStarted)
 			}
 			<-releaseCreate
-			return &GitHubIssue{Number: 88, URL: "https://github.com/example/runtime/issues/88", Title: req.Title, State: "open"}, nil
+			issueHasBugLabel.Store(true)
+			return &GitHubIssue{Number: 88, URL: "https://github.com/example/runtime/issues/88", Title: req.Title, State: "open", Labels: req.Labels}, nil
+		},
+		getIssueFn: func(_ context.Context, _ *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {
+			getIssueCalls.Add(1)
+			require.Equal(t, 88, issueNumber)
+			labels := []string{}
+			if issueHasBugLabel.Load() {
+				labels = []string{"bug"}
+			}
+			return &GitHubIssue{Number: 88, URL: "https://github.com/example/runtime/issues/88", Title: "Concurrent duplicate", State: "open", Labels: labels}, nil
+		},
+		addLabelsFn: func(_ context.Context, _ *GitHubRepoRef, issueNumber int, labels []string) error {
+			addLabelCalls.Add(1)
+			require.Equal(t, 88, issueNumber)
+			require.Equal(t, []string{"bug"}, labels)
+			if denyLabelRepair.Load() {
+				return errors.New("label repair denied")
+			}
+			if !omitRepairedLabel.Load() {
+				issueHasBugLabel.Store(true)
+			}
+			return nil
 		},
 	}
 	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
@@ -2238,12 +2261,34 @@ func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *te
 	require.Contains(t, first.output, `"Number":88`)
 	require.Equal(t, int32(1), createCalls.Load(), "concurrent Automation runs must create one canonical issue")
 
+	issueHasBugLabel.Store(false) // Simulate the category label being removed after the first successful creation.
 	duplicateOutput, duplicateErr := handlers["github_create_issue"](secondCtx, json.RawMessage(`{"title":"CONCURRENT DUPLICATE","body":"retry body"}`))
 	require.NoError(t, duplicateErr)
 	require.Contains(t, duplicateOutput, `"Number":88`)
 	require.Contains(t, duplicateOutput, `"URL":"https://github.com/example/runtime/issues/88"`)
+	require.Contains(t, duplicateOutput, `"Labels":["bug"]`)
 	require.Contains(t, duplicateOutput, `"reused":true`)
-	require.Equal(t, int32(1), createCalls.Load(), "local deduplication must reuse later equivalent runs without reading GitHub")
+	require.Equal(t, int32(1), createCalls.Load(), "local deduplication must reuse the canonical issue instead of creating another")
+	require.Equal(t, int32(1), addLabelCalls.Load(), "reuse must restore a missing required category label")
+	require.Equal(t, int32(2), getIssueCalls.Load(), "reuse must read before repair and refetch to confirm the label")
+
+	issueHasBugLabel.Store(false)
+	denyLabelRepair.Store(true)
+	failedOutput, failedErr := handlers["github_create_issue"](newCausalContext("failed-label-repair"), input)
+	require.ErrorContains(t, failedErr, "label repair denied")
+	require.Empty(t, failedOutput, "unconfirmed labels must not report successful issue reuse")
+	require.Equal(t, int32(1), createCalls.Load(), "failed label repair must not create another issue")
+	require.Equal(t, int32(2), addLabelCalls.Load())
+	require.Equal(t, int32(3), getIssueCalls.Load(), "failed repair stops before a confirmation fetch")
+
+	denyLabelRepair.Store(false)
+	omitRepairedLabel.Store(true)
+	unconfirmedOutput, unconfirmedErr := handlers["github_create_issue"](newCausalContext("unconfirmed-label-repair"), input)
+	require.ErrorContains(t, unconfirmedErr, "missing required category labels after repair")
+	require.Empty(t, unconfirmedOutput, "a successful label API call is insufficient without confirmed issue labels")
+	require.Equal(t, int32(1), createCalls.Load(), "unconfirmed label repair must not create another issue")
+	require.Equal(t, int32(3), addLabelCalls.Load())
+	require.Equal(t, int32(5), getIssueCalls.Load(), "unconfirmed repair must perform the post-mutation confirmation fetch")
 }
 
 func TestAutomationObservabilityRecordsSafeLifecycleAndGraphMetrics(t *testing.T) {
