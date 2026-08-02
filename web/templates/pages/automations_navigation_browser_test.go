@@ -348,6 +348,34 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 	}
 
 	page.AutomationID = ""
+	page.Source = "blank"
+	out.Reset()
+	if err := AutomationBuilderContent(page, "project-edit-actions").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render new Custom builder actions: %v", err)
+	}
+	customBody := out.String()
+	customCanvas := strings.Index(customBody, `data-automation-draft-canvas`)
+	customName := strings.Index(customBody, `data-automation-name`)
+	if customCanvas < 0 || customName < 0 || customName < customCanvas {
+		t.Errorf("new Custom builder must match Edit order with the canvas before Automation name, got canvas=%d name=%d", customCanvas, customName)
+	}
+	if got := strings.Count(customBody, `>Save changes</button>`); got != 1 {
+		t.Errorf("new Custom builder must expose Save changes once in its canvas kebab, got %d actions", got)
+	}
+	customCanvasEndOffset := strings.Index(customBody[customCanvas:], `</section>`)
+	if customCanvasEndOffset < 0 {
+		t.Fatal("expected new Custom canvas section")
+	}
+	customCanvasMarkup := customBody[customCanvas : customCanvas+customCanvasEndOffset]
+	for _, want := range []string{`data-automation-builder-card-actions`, `data-automation-builder-actions`, `data-automation-builder-save`} {
+		if !strings.Contains(customCanvasMarkup, want) {
+			t.Errorf("new Custom canvas must match Edit actions and contain %q", want)
+		}
+	}
+	if strings.Contains(customBody, `data-delete-automation-open`) {
+		t.Error("unsaved Custom builder must not expose Delete")
+	}
+
 	for _, source := range []string{"template", "describe"} {
 		page.Source = source
 		out.Reset()
@@ -699,9 +727,9 @@ func TestAutomationBuilderControlsOverlayGraphViewport(t *testing.T) {
 	}
 }
 
-func TestAutomationBlankBuilderCanvasFitsNonEditPage(t *testing.T) {
+func TestAutomationCustomBuilderCanvasMatchesEditLayout(t *testing.T) {
 	candidate := models.AutomationDraftCandidate{
-		SchemaVersion: 1, Name: "Blank Automation", AutomationType: "custom", AdapterKey: "custom",
+		SchemaVersion: 1, Name: "Custom Automation", AutomationType: "custom", AdapterKey: "custom",
 	}
 	render := func(source, automationID string) string {
 		t.Helper()
@@ -717,40 +745,25 @@ func TestAutomationBlankBuilderCanvasFitsNonEditPage(t *testing.T) {
 		return out.String()
 	}
 
-	blank := render("blank", "")
-	for _, want := range []string{
-		`h-[calc(100dvh-22rem)]`,
-		`min-h-[28rem]`,
-		`max-h-[42rem]`,
-		`data-automation-canvas`,
-		`h-full`,
-	} {
-		if !strings.Contains(blank, want) {
-			t.Errorf("expected blank builder page-fit contract to contain %q", want)
+	custom := render("blank", "")
+	edit := render("edit", "automation-edit")
+	for _, want := range []string{`h-[calc(100dvh-26rem)]`, `min-h-[20rem]`, `max-h-[42rem]`, `h-full`} {
+		if !strings.Contains(custom, want) {
+			t.Errorf("new Custom builder must use Edit viewport sizing %q", want)
+		}
+		if !strings.Contains(edit, want) {
+			t.Errorf("saved Edit builder must use shared viewport sizing %q", want)
 		}
 	}
-	for _, forbidden := range []string{`overflow-y-hidden`, `flex min-h-0 flex-1 flex-col`, `min-h-[calc(100dvh-15rem)]`, `min-h-[42rem]`} {
-		if strings.Contains(blank, forbidden) {
-			t.Errorf("new blank builder must remain scroll-safe and omit %q", forbidden)
+	for _, forbidden := range []string{`h-[calc(100dvh-22rem)]`, `min-h-[28rem]`, `min-h-[calc(100dvh-15rem)]`, `min-h-[42rem]`} {
+		if strings.Contains(custom, forbidden) {
+			t.Errorf("new Custom builder must not retain its mismatched layout class %q", forbidden)
 		}
 	}
 
 	template := render("template", "")
 	if !strings.Contains(template, `min-h-[calc(100dvh-15rem)]`) || !strings.Contains(template, `min-h-[42rem]`) {
 		t.Error("template builder must retain the existing large-canvas sizing")
-	}
-	if strings.Contains(template, `h-[calc(100dvh-26rem)]`) {
-		t.Error("template builder unexpectedly uses saved Live/Edit viewport sizing")
-	}
-
-	edit := render("edit", "automation-edit")
-	for _, want := range []string{`h-[calc(100dvh-26rem)]`, `min-h-[20rem]`, `max-h-[42rem]`, `h-full`} {
-		if !strings.Contains(edit, want) {
-			t.Errorf("saved Edit builder must use shared Live/Edit viewport sizing %q", want)
-		}
-	}
-	if strings.Contains(edit, `min-h-[calc(100dvh-15rem)]`) || strings.Contains(edit, `min-h-[42rem]`) {
-		t.Error("saved Edit builder must not retain the mismatched template viewport sizing")
 	}
 }
 
@@ -1263,11 +1276,18 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (describeModal.open) fail('Describe modal close button did not close the dialog');
 			click('[data-automation-new-menu] button[data-automation-new-custom]', 'Custom creation menu option');
 			await waitFor(function() { return !!document.querySelector('[data-automation-add-first-node]'); }, 'empty Custom Automation canvas');
-			var blankCanvasRect = document.querySelector('#automation-builder [data-automation-draft-canvas] [data-automation-canvas]').getBoundingClientRect();
+			var customBuilder = document.getElementById('automation-builder');
+			var customCanvasSection = customBuilder.querySelector('[data-automation-draft-canvas]');
+			var customNameBlock = customBuilder.querySelector('[data-automation-builder-name]');
+			var customActions = customCanvasSection && customCanvasSection.querySelector('[data-automation-builder-actions]');
+			if (!customActions || !customActions.querySelector('[data-automation-builder-save]')) fail('unsaved Custom builder does not use the Edit canvas action menu');
+			if (customBuilder.querySelector('[data-delete-automation-open]')) fail('unsaved Custom builder exposes the saved Automation Delete action');
+			if (!customNameBlock || !(customCanvasSection.compareDocumentPosition(customNameBlock) & Node.DOCUMENT_POSITION_FOLLOWING)) fail('unsaved Custom Automation name does not follow the canvas like Edit');
+			var blankCanvasRect = customCanvasSection.querySelector('[data-automation-canvas]').getBoundingClientRect();
 			if (!blankCanvasRect.height) fail('blank Custom canvas has no rendered height');
 			var blankBuilderRect = document.getElementById('automation-builder').getBoundingClientRect();
 			if (blankCanvasRect.bottom > blankBuilderRect.bottom + 4) fail('blank Custom canvas extends below the builder viewport by ' + Math.round(blankCanvasRect.bottom - blankBuilderRect.bottom) + 'px');
-			if (blankCanvasRect.height >= templateCanvasRect.height) fail('blank Custom canvas did not use its bounded non-edit page sizing');
+			if (blankCanvasRect.height >= templateCanvasRect.height) fail('blank Custom canvas did not use Edit page sizing');
 			await report('progress', 'blank-canvas-loaded');	    click('[data-automation-add-first-node]', 'Add first node action');
 	    var nodeDialog = document.querySelector('[data-automation-node-dialog]');
 	    if (!nodeDialog || !nodeDialog.open) fail('Add first node did not open the node dialog');
@@ -1288,7 +1308,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var oneNodeCanvas = oneNodeBuilder.querySelector('[data-automation-draft-canvas] [data-automation-canvas]');
 	    var oneNodeCanvasRect = oneNodeCanvas.getBoundingClientRect();
 	    if (getComputedStyle(oneNodeBuilder).overflowY !== 'auto') fail('one-node Custom builder does not preserve vertical scrolling on constrained pages');
-	    if (!oneNodeCanvasRect.height || oneNodeCanvasRect.height >= templateCanvasRect.height) fail('one-node Custom canvas lost its bounded non-edit sizing');
+	    if (!oneNodeCanvasRect.height || oneNodeCanvasRect.height >= templateCanvasRect.height) fail('one-node Custom canvas lost Edit page sizing');
 	    click('#automation-builder [data-automation-add-node-open]', 'Add second node');	    nodeDialog = document.querySelector('[data-automation-node-dialog]');
 	    nodeDialog.querySelector('[name="node_name"]').value = 'Second step';
 	    nodeDialog.querySelector('[name="node_kind"]').value = 'task';

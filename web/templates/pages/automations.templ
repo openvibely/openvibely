@@ -600,7 +600,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 		} else {
 			@automationBreadcrumb(currentProjectID, "", "", "New Automation", true)
 		}
-		if page.AutomationID == "" {
+		if page.AutomationID == "" && page.Source != "blank" {
 			<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
 				<div class="min-w-0 flex-1">
 					<label class="form-control max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
@@ -662,7 +662,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">{ automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect steps:</span> Drag from a node's right handle to another node's left handle. Select a line, then use its × control to delete it or drag an endpoint to reconnect it.</p></div>
 					<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-node-tool data-automation-builder-card-actions>
 						<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
-						if page.AutomationID != "" {
+						if page.AutomationID != "" || page.Source == "blank" {
 							<div class="dropdown dropdown-end" data-automation-builder-actions>
 								<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + page.Result.Candidate.Name } onclick="handleDropdownToggle(event)">
 									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -671,7 +671,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								</label>
 								<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
 									<li><button type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button></li>
-									<li><button class="text-error" type="button" data-delete-automation-open onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button></li>
+									if page.AutomationID != "" {
+										<li><button class="text-error" type="button" data-delete-automation-open onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button></li>
+									}
 								</ul>
 							</div>
 						}
@@ -728,7 +730,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</div>
 					<form method="dialog" class="modal-backdrop"><button aria-label="Close add node dialog">close</button></form>
 				</dialog>
-				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-22rem)] min-h-[28rem] max-h-[42rem]", page.AutomationID == "" && page.Source == "blank"), templ.KV("h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem]", page.AutomationID != ""), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID == "" && page.Source != "blank") } role="region" aria-label="Automation graph builder">
+				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem]", page.AutomationID != "" || page.Source == "blank"), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID == "" && page.Source != "blank") } role="region" aria-label="Automation graph builder">
 					<div class="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" aria-label="Canvas controls" data-automation-builder-viewport-controls>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
@@ -782,7 +784,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					}
 				</div>
 			</section>
-			if page.AutomationID != "" {
+			if page.AutomationID != "" || page.Source == "blank" {
 				<div class="mb-4 min-w-0" data-automation-builder-name>
 					<label class="form-control max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
 					<p class="mt-2 text-sm text-base-content/65">Saving validates and applies this Automation immediately.</p>
@@ -890,7 +892,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							}
 						</div>				}
 			</div></div>
-					if page.AutomationID == "" {
+					if page.AutomationID == "" && page.Source != "blank" {
 						<div class="flex flex-wrap gap-3"><button class="btn btn-primary" type="submit">Save changes</button></div>
 					}				</form>			</details>
 			<script>
